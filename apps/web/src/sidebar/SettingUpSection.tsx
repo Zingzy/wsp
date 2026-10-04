@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The sidebar's Setting up section, under the thread list: one card per
-// computer whose setup is running, waits on the person or stopped. Each card
-// is the computer's glyph and name with the steps done of all at the right,
-// the step under way as one line, and a thin bar of how far it got; a stopped
-// one says so in the failed ink, and one that waits on the person in its ink
-// with its mark. The bar moves by a width transition when a step ends and
-// nothing animates at rest. A card opens Add a computer on its running steps.
+// The sidebar's Setting up section, pinned to its foot above the corner's
+// icons while the threads scroll above it, and gone when nothing is set up:
+// one card per computer whose setup is running, waits on the person or
+// stopped. Each card is the computer's glyph and name with the steps done of
+// all at the right, the step under way as one line, and a thin bar of how far
+// it got; a stopped one says so in the failed ink, and one that waits on the
+// person in its ink with its mark. The bar moves by a width transition when a
+// step ends and nothing animates at rest. A card opens Add a computer on its
+// running steps.
 import { SETUP_WORDS, placeWord, setupWord, type PlaceView } from "@wsp/protocol";
 import { StateMark } from "../components/status/StateMark.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
@@ -76,15 +78,18 @@ export function SettingUpSection({ collapsed, onToggle }: { collapsed: boolean; 
   const cards = settingUp(usePlaces());
   if (cards.length === 0) return null;
   return (
-    <li data-section="setting-up" className="mt-3 min-w-0">
-      <SectionRow label="Setting up" count={cards.length} collapsed={collapsed} onToggle={onToggle} rowId="section:setting-up" head="setting-up" />
-      {collapsed ? null : (
-        <ul className="flex min-w-0 flex-col gap-0.5">
-          {cards.map(card => (
-            <SetupCard key={card.place.id} {...card} />
-          ))}
-        </ul>
-      )}
-    </li>
+    <ul data-sidebar-foot-setup className="flex w-full min-w-0 flex-col">
+      <li data-section="setting-up" className="min-w-0">
+        <SectionRow label="Setting up" count={cards.length} collapsed={collapsed} onToggle={onToggle} rowId="section:setting-up" head="setting-up" />
+        {/* Three 64 px cards and their gaps: past three the list scrolls under a hard edge, so the threads keep room. */}
+        {collapsed ? null : (
+          <ul data-k="setup-cards" className="flex max-h-49 min-w-0 flex-col gap-0.5 overflow-y-auto">
+            {cards.map(card => (
+              <SetupCard key={card.place.id} {...card} />
+            ))}
+          </ul>
+        )}
+      </li>
+    </ul>
   );
 }

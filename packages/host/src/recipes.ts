@@ -13,6 +13,7 @@ import { writeOwn } from "@wsp/own-file";
 import { issuesLine, noSuchRecipeRefusal, RECIPE_NAME_REFUSAL, RecipeFile, recipeCanon, recipeSlug, toolRowId, type RecipeOptions, type ResolvedRecipe } from "@wsp/protocol";
 import type { RecipeShelf } from "@wsp/runtime";
 import { CONFIG_PATHS, configDigest, configTexts, type ConfigFiles } from "./recipe-configs.js";
+import { historyCache } from "./recipe-file.js";
 import { folderOptions, readRecipeOptions } from "./recipe-options.js";
 import { folderFiles } from "./folder-files.js";
 import { tokenShaped } from "./token-shapes.js";
@@ -231,6 +232,39 @@ export function keptTools(read: () => Promise<Manifest["entries"]> = toolsHere, 
   return { tools: () => (held !== undefined && now() - held.at < TOOLS_KEPT_MS ? held.entries : refresh()), refresh };
 }
 
+type Folders = readonly { name: string; path: string }[] | undefined;
+
+/** The options read kept and answered at once, with a fresh read started behind the answer for the next ask: the read
+ * walks the collector, every skill folder and every project folder's size, half a minute on a full Mac. A read for
+ * other folders, or the first one, is waited on; one already out is shared rather than started twice. */
+export function keptOptions(read: (folders: Folders) => Promise<RecipeOptions>): (folders?: Folders) => Promise<RecipeOptions> {
+  let held: { key: string; options: RecipeOptions } | undefined;
+  let out: { key: string; options: Promise<RecipeOptions> } | undefined;
+  const fresh = (key: string, folders: Folders): Promise<RecipeOptions> => {
+    // The read starts on the next turn of the loop, so an answer already held goes out before its first sync walk.
+    const options = new Promise(start => setImmediate(start)).then(() => read(folders));
+    const mine = { key, options };
+    out = mine;
+    options.then(
+      answer => {
+        held = { key, options: answer };
+      },
+      () => undefined,
+    ).finally(() => {
+      if (out === mine) out = undefined;
+    });
+    return options;
+  };
+  return async folders => {
+    const key = JSON.stringify(folders ?? []);
+    if (held?.key === key) {
+      if (out?.key !== key) fresh(key, folders).catch(() => undefined);
+      return held.options;
+    }
+    return out?.key === key ? out.options : fresh(key, folders);
+  };
+}
+
 /** The host's shelf of recipes, as the runtime serves it: the files beside the state, and the options read off this
  * computer when the modal or a recipe opens. */
 export function recipeShelf(o: { statePath: string; home: string; options?: () => Promise<RecipeOptions>; tools?: () => Promise<Manifest["entries"]> }): RecipeShelf {
@@ -244,10 +278,10 @@ export function recipeShelf(o: { statePath: string; home: string; options?: () =
     },
     save: file => writeRecipe(o.statePath, file),
     remove: word => deleteRecipe(o.statePath, word),
-    options: async folders => {
-      const read = await (o.options ?? (() => readRecipeOptions(nodeHost())))();
+    options: keptOptions(async folders => {
+      const read = await (o.options ?? (() => readRecipeOptions(nodeHost(), historyCache(o.statePath))))();
       return folders === undefined || folders.length === 0 ? read : { ...read, folders: await folderOptions(folders) };
-    },
+    }),
     resolve: async slug => {
       const held = await readRecipe(o.statePath, slug);
       const resolved = await resolveRecipe(held.file, reading);

@@ -4,7 +4,7 @@
 // sessions moved under _cleared_sessions. An assistant line's tool_use blocks
 // are the calls; Bash carries the shell line.
 import type { Host } from "../host.js";
-import { type Call, type HistoryReader, isRecord, jsonlFiles, stem, tryJson } from "./reader.js";
+import { type Call, type HistoryReader, isRecord, jsonlFiles, stem, timeOf, tryJson } from "./reader.js";
 
 const CLEARED = "_cleared_sessions";
 
@@ -17,15 +17,16 @@ export function claudeSession(rel: string): string | undefined {
   return second.endsWith(".jsonl") ? stem(second) : second;
 }
 
-export function claudeCall(session: string, name: string, input: unknown, folder?: string): Call {
+export function claudeCall(session: string, name: string, input: unknown, folder?: string, at?: number): Call {
   const arg = isRecord(input) ? input : {};
-  const where = folder !== undefined ? { folder } : {};
+  const where = { ...(folder !== undefined ? { folder } : {}), ...(at !== undefined ? { at } : {}) };
   if (name === "Bash" && typeof arg["command"] === "string") return { session, ...where, kind: "shell", line: arg["command"] };
   return { session, ...where, kind: "other", name };
 }
 
 export const claudeReader: HistoryReader = {
   files: (host, root) => jsonlFiles(host, root, file => claudeSession(file.slice(root.length + 1))),
+  holder: (root, file) => file.slice(root.length + 1).split("/")[0]!,
   async *read(host: Host, root: string, file: string): AsyncIterable<Call> {
     const session = claudeSession(file.slice(root.length + 1));
     if (session === undefined) return;
@@ -38,9 +39,10 @@ export const claudeReader: HistoryReader = {
       if (!Array.isArray(content)) continue;
       // Every line of a transcript carries the folder the session ran in, this one included.
       const folder = typeof row["cwd"] === "string" ? row["cwd"] : undefined;
+      const at = timeOf(row["timestamp"]);
       for (const block of content) {
         if (!isRecord(block) || block["type"] !== "tool_use" || typeof block["name"] !== "string") continue;
-        yield claudeCall(session, block["name"], block["input"], folder);
+        yield claudeCall(session, block["name"], block["input"], folder, at);
       }
     }
   },

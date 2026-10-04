@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One row of a list of steps, before and while they run: the state mark, the
-// name with its quiet note, and the time it took in the mono at the right. A
-// row that needs the person opens under itself, inside the card, with what
-// happened and the acts, in the refusal slot's two inks. An item under a step
-// (one sign-in, one skill that did not land) steps in by the mark's width.
+// One row of a list of steps, before and while they run: the state mark (a
+// muted empty circle for a step not started), the name with its quiet note,
+// and the time it took in the mono at the right. A row that needs the person
+// opens under itself, inside the card, with what happened and the acts, in the
+// refusal slot's two inks; a step that ran opens on a click to its last lines
+// of output, its chevron turning. An item under a step (one sign-in, one skill
+// that did not land) steps in by the mark's width.
+import { ChevronRightIcon, CircleIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { StateMark } from "../../components/status/StateMark.js";
 import { Button } from "../../components/ui/button.js";
@@ -23,22 +26,42 @@ export function fmtStepMs(ms: number, ticking = false): string {
 /** Where a row's words start: the mark and its gap. */
 const TEXT_EDGE = "pl-[calc(var(--settings-inset,20px)+28px)]";
 
-export function StepRow({ row, why, acts, children }: { row: StepLine; why?: string; acts?: ReactNode; children?: ReactNode }) {
+/** A row that opens on its output: whether it is open, and the click that turns it, absent on a row in the same list
+ * that has none, which keeps the chevron's room so every time stands on one edge. */
+export interface StepToggle {
+  open: boolean;
+  onToggle?: () => void;
+}
+
+export function StepRow({ row, why, acts, toggle, children }: { row: StepLine; why?: string; acts?: ReactNode; toggle?: StepToggle; children?: ReactNode }) {
   const quiet = row.state === "waiting";
-  return (
-    <div data-step-row={row.id} data-state={row.state} className="flex flex-col">
-      <div className={cn("grid grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-x-3 py-3", CARD_INSET, LINE_FLOOR, row.sub === true && "pl-[calc(var(--settings-inset,20px)+28px)]")}>
-        <span className="flex size-4 items-center justify-center">
-          <StateMark state={row.state} {...(why === undefined ? {} : { why })} />
-        </span>
-        <span data-step-words className="flex min-w-0 flex-col" {...(row.output === undefined ? {} : { title: row.output })}>
-          <span className={cn(SETTING_TITLE, "min-w-0 break-words", quiet && "font-normal text-muted-foreground")}>{row.name}</span>
-          {row.note === undefined ? null : <span className={NOTE}>{row.note}</span>}
-        </span>
+  const line = (
+    <>
+      <span className="flex size-4 items-center justify-center">
+        {quiet ? <CircleIcon data-state-mark="waiting" role="img" aria-label="Not started" className="size-3.5 text-muted-foreground/60" /> : <StateMark state={row.state} {...(why === undefined ? {} : { why })} />}
+      </span>
+      <span data-step-words className="flex min-w-0 flex-col">
+        <span className={cn(SETTING_TITLE, "min-w-0 break-words", quiet && "font-normal text-muted-foreground")}>{row.name}</span>
+        {row.note === undefined ? null : <span className={NOTE}>{row.note}</span>}
+      </span>
+      <span className="flex min-w-0 items-center justify-end gap-2">
         <span data-step-time className={cn(FACT, "min-w-0 text-right")}>
           {row.ms === undefined ? "" : fmtStepMs(row.ms, row.ticking === true)}
         </span>
-      </div>
+        {toggle === undefined ? null : toggle.onToggle === undefined ? <span aria-hidden className="size-3.5 shrink-0" /> : <ChevronRightIcon aria-hidden className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-150", toggle.open && "rotate-90")} />}
+      </span>
+    </>
+  );
+  const grid = cn("grid grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-x-3 py-3", CARD_INSET, LINE_FLOOR, row.sub === true && "pl-[calc(var(--settings-inset,20px)+28px)]");
+  return (
+    <div data-step-row={row.id} data-state={row.state} {...(toggle?.onToggle === undefined ? {} : { "data-open": toggle.open })} className="flex flex-col">
+      {toggle?.onToggle === undefined ? (
+        <div className={grid}>{line}</div>
+      ) : (
+        <button type="button" data-k="step-toggle" aria-expanded={toggle.open} onClick={toggle.onToggle} className={cn(grid, "w-full cursor-pointer text-left transition-colors duration-150 hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset")}>
+          {line}
+        </button>
+      )}
       {row.said === undefined && children === undefined && acts === undefined ? null : (
         <div className={cn("flex flex-col gap-3 pb-4 pr-(--settings-inset,20px)", TEXT_EDGE, row.sub === true && "pl-[calc(var(--settings-inset,20px)+56px)]")}>
           {row.said === undefined || row.said === "" ? null : (
@@ -64,10 +87,12 @@ export function RetryActs({ onRetry, busy = false }: { onRetry: () => void; busy
   );
 }
 
-/** Skip on a row that waits on the person or did not land: the host sets it aside and Settings finishes it later. */
-export function SkipAct({ word, onSkip, busy = false }: { word: string; onSkip: () => void; busy?: boolean }) {
+/** Skip on a row that waits on the person or did not land: the host sets it aside and Settings finishes it later.
+ * `bare` is the text alone, its box its text's edge and only its ink stepping on hover, for a line that wraps: where
+ * it drops under the code it stands on the code's left edge. */
+export function SkipAct({ word, onSkip, busy = false, bare = false }: { word: string; onSkip: () => void; busy?: boolean; bare?: boolean }) {
   return (
-    <Button size="xs" variant="ghost" data-k="skip" held={busy} onClick={onSkip}>
+    <Button size="xs" variant="ghost" data-k="skip" held={busy} onClick={onSkip} {...(bare ? { className: "px-0 [:hover,[data-pressed]]:bg-transparent" } : {})}>
       {word}
     </Button>
   );
