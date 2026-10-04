@@ -1,0 +1,94 @@
+{
+  "cloudOff": {
+    "name": "slate_write",
+    "description": "Writes this thread's slate, a panel the person sees: a <slate> or a patch.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "a thread in your tree; absent is yours"
+        },
+        "text": {
+          "type": "string",
+          "description": "the JSX-like text"
+        },
+        "document": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "check": {
+          "type": "boolean"
+        },
+        "if_version": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  "cloudOn": {
+    "name": "slate_write",
+    "description": "Writes this thread's slate, a panel the person sees: a <slate> or a patch.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "a thread in your tree; absent is yours"
+        },
+        "text": {
+          "type": "string",
+          "description": "the JSX-like text"
+        },
+        "document": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "check": {
+          "type": "boolean"
+        },
+        "if_version": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  }
+}

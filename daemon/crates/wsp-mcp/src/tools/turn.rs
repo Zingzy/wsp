@@ -852,7 +852,7 @@ async fn nap_after_dead_launch(client: &Client, woken: &Woken, turn: Option<&Tur
 /// The same failure with one more line under it, its kind kept.
 fn with_line(failure: Failure, line: Option<String>) -> Failure {
     match line {
-        Some(line) => Failure { message: format!("{}\n{line}", failure.message), kind: failure.kind },
+        Some(line) => Failure { message: format!("{}\n{line}", failure.message), ..failure },
         None => failure,
     }
 }

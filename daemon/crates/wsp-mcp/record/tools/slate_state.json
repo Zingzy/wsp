@@ -1,0 +1,86 @@
+{
+  "cloudOff": {
+    "name": "slate_state",
+    "description": "Sets values on this thread's slate, like {\"$steps[2].done\": true}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "a thread in your tree; absent is yours"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "if_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "values"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  "cloudOn": {
+    "name": "slate_state",
+    "description": "Sets values on this thread's slate, like {\"$steps[2].done\": true}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "a thread in your tree; absent is yours"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "if_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "values"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  }
+}
