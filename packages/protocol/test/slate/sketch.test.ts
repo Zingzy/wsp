@@ -184,4 +184,28 @@ describe("the sketch of the sessions' writes", () => {
     expect(s).toContain("1 problem");
     expect(s).toContain('R905 number-1.icon: icon "rocket-ship" is not in the kit, so it draws none');
   });
+
+  it("names a plotted value that is not a number as a problem, with the binding, what it read and a fix", () => {
+    const rows = [{ at: "2026-10-04T19:46:00Z", n: 690 }, { at: "2026-10-04T19:47:00Z", n: 747 }];
+    const decls = `  <value name="rows" start={[]} />\n  <value name="m" start={0} />`;
+    const text = wrap(`<chart label="Traffic" items={$rows} x={item.at} value={item} />
+    <number label="Now" value={$m} trend={$rows} />
+    <bars label="Zones" items={$rows} name={item.at} value={item.at} />
+    <meter label="Load" value={$m} />
+    <sparkline label="Line" values={pluck($rows, 'at')} />`, decls);
+    // Before the data comes there is nothing to read wrong.
+    expect(sketch(text)).toContain("0 problems");
+    const s = sketch(text, { rows, m: "12" });
+    expect(s).toContain("5 problems");
+    expect(s).toContain('R905 chart-1.value: value={item} read an object on 2 of 2 rows, like {"at":"2026-10-04T19:46:00Z","n":690}, so it draws no point for them; a plotted value is a number, like value={item.n}');
+    expect(s).toContain('R905 number-1.trend: trend={$rows} holds an object in 2 of 2 places, like {"at":"2026-10-04T19:46:00Z","n":690}, so it draws no point for them; a plotted list holds numbers, like trend={pluck($rows, \'n\')}');
+    expect(s).toContain('R905 bars-1.value: value={item.at} read a string on 2 of 2 rows, like "2026-10-04T19:46:00Z", so it draws no point for them; a plotted value is a number');
+    expect(s).toContain('R905 meter-1.value: value={$m} read a string, "12", so it draws nothing; a plotted value is a number, like value={num($m)}');
+    expect(s).toContain("R905 sparkline-1.values: values={pluck($rows, 'at')} holds a string in 2 of 2 places");
+    // Numbers draw, and a null is a gap in the line, not a broken binding.
+    expect(sketch(text, { rows: [{ at: "a", n: 1 }], m: 3 })).toContain("4 problems");
+    const fine = wrap(`<chart label="Traffic" items={$rows} x={item.at} value={item.n} />
+    <number label="Now" value={$m} trend={pluck($rows, 'n')} />`, decls);
+    expect(sketch(fine, { rows: [...rows, { at: "2026-10-04T19:48:00Z", n: null }], m: 3 })).toContain("0 problems");
+  });
 });

@@ -35,6 +35,8 @@ export interface SlatePropSpec {
   about?: string;
   /** A two-way prop that also takes a literal: the state it starts in, which the person then changes. */
   literal?: true;
+  /** A list the piece plots, whose every entry is a number. */
+  of?: "number";
 }
 
 export interface SlateItemSpec {
@@ -235,7 +237,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   number: {
     type: "number", level: "core", purpose: "A figure with a label.", holdsChildren: false,
-    props: { label: str(req), value: { type: "text", binds: "yes", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), note: str(), size: enm(["normal", "large"]), icon: icon(), trend: { type: "list", binds: "yes" } },
+    props: { label: str(req), value: { type: "text", binds: "yes", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), note: str(), size: enm(["normal", "large"]), icon: icon(), trend: { type: "list", binds: "yes", of: "number" } },
     items: {}, events: [],
     sketch: v => {
       const value = v.prop("value");
@@ -296,7 +298,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   sparkline: {
     type: "sparkline", level: "core", purpose: "A small line beside text; number's trend draws one beside a figure.", holdsChildren: false,
-    props: { label: str(req), values: { type: "list", binds: "yes", required: true }, tone: tone() }, items: {}, events: [],
+    props: { label: str(req), values: { type: "list", binds: "yes", required: true, of: "number" }, tone: tone() }, items: {}, events: [],
     sketch: v => trend(shown(v.prop("label")), numbers(v.prop("values"))),
     fallback: "text", example: `<sparkline label="Load" values={pluck($hist, 'v')} />`,
   },

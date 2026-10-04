@@ -594,6 +594,31 @@ describe("the slate v2 host, round 4", () => {
     }, { timeout: 5_000 });
   }, 30_000);
 
+  it("a plotted value that is not a number is a problem in a read once a run fills it, and in the answer to a write over it", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-plot-");
+    const wrote = await rt.slates.write({ text: `<slate title="Feed">
+  <value name="go" start={0} />
+  <run name="feed" cmd='printf %s "$J"' env={{ J: '[{"at":"10:01","n":7}]' }} timeout={20} />
+  <when change={$go} do={start($feed)} />
+  <column><chart id="fed" label="Fed" items={$feed.json} x={item.at} value={item} /></column>
+</slate>` }, asThread);
+    // No data yet, so nothing read wrong yet.
+    expect(wrote.text).not.toContain("R905");
+    await rt.slates.state({ threadId, values: { $go: 1 } });
+    await rt.slates.approve({ threadId, key: (await rt.slates.get(threadId))!.asks[0]!.key, scope: "thread" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["feed"]).toMatchObject({ state: "done" });
+    }, { timeout: 10_000 });
+    const broken = `R905 fed.value: value={item} read an object on 1 of 1 rows, like {"at":"10:01","n":7}, so it draws no point for them; a plotted value is a number, like value={item.n}`;
+    expect((await rt.slates.read({}, asThread)).text).toContain(broken);
+    expect((await rt.slates.state({ values: { $go: 1 } }, asThread)).text).toContain(broken);
+    const fixed = await rt.slates.write({ text: `<props id="fed" value={item.n} />` }, asThread);
+    expect(fixed.text).not.toContain("R905");
+    expect(fixed.text).toContain("over 1 point");
+    expect((await rt.slates.write({ text: `<props id="fed" value={item} />` }, asThread)).text).toContain(broken);
+  }, 30_000);
+
   it("the agent starts a run the person said always to, and an unapproved or ask-every-time run answers held without starting", async () => {
     const { rt, threadId, asThread, prompts } = await threadOn("wsp-slates-agent-start-");
     await rt.slates.write({ text: PROBE }, asThread);
