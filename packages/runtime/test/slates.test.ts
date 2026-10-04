@@ -261,4 +261,140 @@ describe("the slate v2 host", () => {
     expect(before.empty).toBe("rewound-before");
     expect(Object.values(before.approvals).map(a => a.state)).toEqual(["allowed"]);
   }, 60_000);
+
+  it("a timer fires at once when shown, its ticks move no version, a write at the version read passes mid-run, and the clock fills the sketch", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-timer-");
+    const wrote = await rt.slates.write({ text: TICKER }, asThread);
+    expect(wrote.version).toBe(1);
+    const release = rt.slates.subscribe({ threadId, sources: [] });
+    // The first start comes at once, not a period later, and asks the person first.
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["tick"]).toMatchObject({ state: "held" });
+    }, { timeout: 2_000 });
+    const asked = (await rt.slates.get(threadId))!;
+    expect(asked.asks.map(a => a.run)).toEqual(["tick"]);
+    await rt.slates.approve({ threadId, key: asked.asks[0]!.key, scope: "thread" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["tick"]).toMatchObject({ state: "running" });
+    }, { timeout: 5_000 });
+
+    // While it runs, the agent's write at the version it read passes: the run moved data, not the document.
+    const mid = (await rt.slates.get(threadId))!;
+    expect(mid.version).toBe(1);
+    const patched = await rt.slates.write({ text: `<props id="since" tone="good" />`, ifVersion: 1 }, asThread);
+    expect(patched.version).toBe(2);
+
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["ticks"]).toBe(1);
+    }, { timeout: 10_000 });
+    const after = (await rt.slates.get(threadId))!;
+    expect(after.version).toBe(2);
+    expect(after.revision).toBeGreaterThan(mid.revision);
+    // A run's result is the host's to write: no A607, no problem at all.
+    expect(after.problems).toEqual([]);
+    const pushes = events.filter((e): e is Extract<EventUnion, { type: "slate.values" }> => e.type === "slate.values" && e.threadId === threadId);
+    expect(new Set(pushes.map(e => e.version))).toEqual(new Set([1, 2]));
+    const revisions = pushes.map(e => e.revision);
+    expect(revisions).toEqual([...revisions].sort((a, b) => a - b));
+
+    // The clock is filled in the sketch, and a function that reads it raises no missing data.
+    const read = await rt.slates.read({}, asThread);
+    expect(read.text).toMatch(/clock \d{13}/);
+    expect(read.text).toMatch(/since \d+d /);
+    expect(read.problems).toEqual([]);
+    release();
+  }, 30_000);
+
+  it("changing how often a command runs, or letting it run hidden, asks again", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-key-");
+    await rt.slates.write({ text: TICKER }, asThread);
+    const release = rt.slates.subscribe({ threadId, sources: [] });
+    const held = async (): Promise<string> => {
+      let key = "";
+      await vi.waitFor(async () => {
+        await rt.slates.settled();
+        const v = (await rt.slates.get(threadId))!;
+        expect(v.values["tick"]).toMatchObject({ state: "held" });
+        key = v.asks[0]!.key;
+      }, { timeout: 5_000 });
+      return key;
+    };
+    const ran = async (n: number): Promise<void> => {
+      await vi.waitFor(async () => {
+        await rt.slates.settled();
+        expect((await rt.slates.get(threadId))!.values["ticks"]).toBe(n);
+      }, { timeout: 10_000 });
+    };
+    const first = await held();
+    await rt.slates.approve({ threadId, key: first, scope: "thread" });
+    await ran(1);
+
+    // The same declaration written again keeps its timer and its approval: no start, no sheet.
+    await rt.slates.write({ text: TICKER }, asThread);
+    await rt.slates.settled();
+    expect((await rt.slates.get(threadId))!.asks).toEqual([]);
+
+    await rt.slates.write({ text: TICKER.replace("every={60}", "every={120}") }, asThread);
+    const slower = await held();
+    expect(slower).not.toBe(first);
+    await rt.slates.approve({ threadId, key: slower, scope: "thread" });
+    await ran(2);
+
+    await rt.slates.write({ text: TICKER.replace("every={60}", "every={120} always") }, asThread);
+    const hidden = await held();
+    expect([first, slower]).not.toContain(hidden);
+    release();
+  }, 30_000);
+
+  it("a read answers the JSX-like form by default and the JSON document only when asked", async () => {
+    const { rt, asThread } = await threadOn("wsp-slates-read-");
+    await rt.slates.write({ text: TICKER }, asThread);
+    const plain = await rt.slates.read({}, asThread);
+    expect(plain.text).toMatch(/^slate v1/);
+    expect(plain.text).toContain(`<slate title="Ticker">`);
+    expect(plain.text).toContain(`<run name="tick"`);
+    expect(plain.document).toBeUndefined();
+    const json = await rt.slates.read({ document: true, text: false }, asThread);
+    expect(json.document).toMatchObject({ schema: 2, title: "Ticker" });
+    expect(json.text).not.toContain("<slate");
+
+    // A slate that reads the clock only through ago() has it all the same.
+    await rt.slates.write({ text: `<slate><value name="at" start={0} /><text id="since">since {ago($at)}</text></slate>` }, asThread);
+    const aged = await rt.slates.read({}, asThread);
+    expect(aged.text).toMatch(/since \d+d /);
+    expect(aged.problems).toEqual([]);
+  });
 });
+
+const TICKER = `<slate title="Ticker">
+  <value name="ticks" start={0} />
+  <value name="at" start={0} />
+  <run name="tick" cmd="sleep 1; echo tick" every={60} timeout={20} />
+  <when done={$tick} do={set($ticks, $ticks + 1)} />
+  <column>
+    <text id="clock">clock {time.now}</text>
+    <text id="since">since {ago($at)}</text>
+  </column>
+</slate>`;
+
+const events: EventUnion[] = [];
+
+/** A host over a temp root with one finished thread on a plain folder, and that thread as a caller. */
+async function threadOn(prefix: string): Promise<{ rt: Runtime; threadId: string; asThread: Caller }> {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  roots.push(root);
+  const folder = join(root, "plain");
+  mkdirSync(folder);
+  events.length = 0;
+  const rt = host(root, memoryStore(), [], events);
+  const project = await rt.projects.add({ source: folder });
+  const { workspace } = await rt.workspaces.folderFor({ project: project.id });
+  const first = await rt.sessions.start(workspace.id, { prompt: "one" });
+  await first.finished;
+  const threadId = first.view().threadId!;
+  return { rt, threadId, asThread: { origin: "here", by: { kind: "thread", threadId, workspaceId: workspace.id, rootThreadId: threadId } } };
+}
+

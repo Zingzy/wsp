@@ -139,7 +139,7 @@ export interface SlateSecrets {
 
 export interface SlateRuns {
   /** The approval key: kind, text, env names and the expressions filling them, args and stdin expressions, on,
-   * cwd, stream. A changed value is the same key; a changed declaration is a new one. */
+   * cwd, stream, every and always. A changed value is the same key; a changed declaration is a new one. */
   key(decl: CmdRunDecl): string;
   start(req: RunStart): RunStartAnswer;
   /** The person's answer to a held run: "Run once" or "Always in this thread" starts it now. */
@@ -390,7 +390,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     const env = Object.entries(decl.env ?? {})
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([name, expr]) => [name, stableJson(expr)]);
-    const what = [decl.kind, decl.cmd, env, (decl.args ?? []).map(stableJson), decl.stdin === undefined ? null : stableJson(decl.stdin), decl.on ?? "thread", decl.cwd ?? "", decl.stream === true];
+    const what = [decl.kind, decl.cmd, env, (decl.args ?? []).map(stableJson), decl.stdin === undefined ? null : stableJson(decl.stdin), decl.on ?? "thread", decl.cwd ?? "", decl.stream === true, decl.every ?? null, decl.always === true];
     return createHash("sha256").update(JSON.stringify(what)).digest("hex").slice(0, 32);
   };
 
@@ -652,8 +652,11 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     },
     timers(threadId, list) {
       const t = thread(threadId);
-      clearTimers(t);
-      for (const timer of list) t.timers.set(timer.run, { every: timer.every, always: timer.always === true });
+      // A timer the new list declares the same keeps ticking on its period; only a new or changed one fires at once.
+      const kept = new Map([...t.timers].filter(([run, was]) => list.some(n => n.run === run && n.every === was.every && (n.always === true) === was.always)));
+      for (const [run, timer] of t.timers) if (!kept.has(run) && timer.handle !== undefined) clearInterval(timer.handle);
+      t.timers = kept;
+      for (const timer of list) if (!kept.has(timer.run)) t.timers.set(timer.run, { every: timer.every, always: timer.always === true });
       tick(threadId);
     },
     shown(threadId, on) {

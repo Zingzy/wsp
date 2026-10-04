@@ -62,7 +62,11 @@ export type SlateApprovalView = z.infer<typeof SlateApprovalView>;
 export const SlateView = z.object({
   threadId: z.string(),
   workspaceId: z.string(),
+  /** The document's version: moves only when the document does (a write, a patch, an undo, a clear, a rewind). */
   version: z.number().int().nonnegative(),
+  /** The data revision the values were read at: rises with every batch of values or run results, and with every
+   * version, so a window drops a push older than what it holds. No write checks it. */
+  revision: z.number().int().nonnegative(),
   document: SlateWireDocument.nullable(),
   values: SlateWireValues,
   /** Set while document is null, saying which empty state the tab draws. */
@@ -98,7 +102,15 @@ export const SlatesWriteParams = z.object({
   ifVersion: z.number().int().optional(),
 });
 export const SlatesStateParams = z.object({ ...threadParams, values: SlateWireValues, ifVersion: z.number().int().optional() });
-export const SlatesReadParams = z.object({ ...threadParams, values: z.array(z.string()).optional(), text: z.boolean().optional(), sketch: z.boolean().optional() });
+export const SlatesReadParams = z.object({
+  ...threadParams,
+  values: z.array(z.string()).optional(),
+  /** The document printed in the JSX-like form after the sketch; on unless false. */
+  text: z.boolean().optional(),
+  sketch: z.boolean().optional(),
+  /** The stored JSON document too. */
+  document: z.boolean().optional(),
+});
 export const SlatesCatalogParams = z.object({ name: z.string().optional() });
 export const SlatesEventParams = z.object({
   threadId: z.string(),
@@ -150,9 +162,10 @@ export type SlateStateAnswer = z.infer<typeof SlateStateAnswer>;
 /** 10, "Read back": the record, each derived value and run, the paths asked for, and the sketch as text. */
 export const SlateReadAnswer = z.object({
   version: z.number().int(),
-  /** The sketch, and with `text: true` the document printed in the JSX-like form after a blank line. */
+  /** The sketch, and unless `text: false` the document printed in the JSX-like form after a blank line. */
   text: z.string(),
-  document: SlateWireDocument.nullable(),
+  /** With `document: true` only. */
+  document: SlateWireDocument.nullable().optional(),
   /** The paths named in the read's `values`, resolved now (10, worked transcript 3). */
   values: SlateWireValues,
   /** The live values by name, secrets as handles. */
@@ -208,7 +221,7 @@ export type SessionSlateEvent = z.infer<typeof SessionSlateEvent>;
 
 /** Values that moved in a batch, pushed to windows and never recorded: the person's typing would walk the
  * transcript's cap. Secrets as handles. */
-export const SlateValuesEvent = z.object({ type: z.literal("slate.values"), workspaceId: z.string(), threadId: z.string(), version: z.number().int(), values: SlateWireValues });
+export const SlateValuesEvent = z.object({ type: z.literal("slate.values"), workspaceId: z.string(), threadId: z.string(), version: z.number().int(), revision: z.number().int(), values: SlateWireValues });
 export type SlateValuesEvent = z.infer<typeof SlateValuesEvent>;
 
 /** New lines of a streaming run, scrubbed, pushed and never recorded. */

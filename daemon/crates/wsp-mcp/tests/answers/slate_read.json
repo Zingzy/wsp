@@ -8,7 +8,8 @@
           "$env.state",
           "usage.week.percent"
         ],
-        "text": true
+        "text": true,
+        "document": true
       },
       "env": {
         "WSP_TURN": "turn-token-1"
@@ -25,7 +26,8 @@
             "$env.state",
             "usage.week.percent"
           ],
-          "text": true
+          "text": true,
+          "document": true
         }
       ]
     },
