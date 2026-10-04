@@ -48,6 +48,44 @@
       ]
     },
     {
+      "case": "a rehearsal of values and a press",
+      "arguments": {
+        "check": true,
+        "values": {
+          "i": 2,
+          "$picked": [
+            1
+          ]
+        },
+        "press": "next",
+        "row": 0
+      },
+      "env": {
+        "WSP_TURN": "turn-token-1"
+      },
+      "replies": {
+        "slates.write": "{\"id\":1,\"ok\":true,\"version\":4,\"text\":\"slate v4, 2 pieces, 1 bound, 0 problems\\nwould start $grade (a press on next)\",\"warnings\":[],\"problems\":[]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"slate v4, 2 pieces, 1 bound, 0 problems\\nwould start $grade (a press on next)\"}],\"structuredContent\":{\"version\":4,\"text\":\"slate v4, 2 pieces, 1 bound, 0 problems\\nwould start $grade (a press on next)\",\"warnings\":[],\"problems\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "slates.write",
+          "turnToken": "turn-token-1",
+          "check": true,
+          "values": {
+            "i": 2,
+            "$picked": [
+              1
+            ]
+          },
+          "press": {
+            "piece": "next",
+            "index": 0
+          }
+        }
+      ]
+    },
+    {
       "case": "the stored form",
       "arguments": {
         "document": {

@@ -18,6 +18,19 @@
         "check": {
           "type": "boolean"
         },
+        "values": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "press": {
+          "type": "string"
+        },
+        "row": {
+          "type": "integer"
+        },
+        "action": {
+          "type": "integer"
+        },
         "if_version": {
           "type": "integer"
         }
@@ -66,6 +79,19 @@
         },
         "check": {
           "type": "boolean"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "press": {
+          "type": "string"
+        },
+        "row": {
+          "type": "integer"
+        },
+        "action": {
+          "type": "integer"
         },
         "if_version": {
           "type": "integer"

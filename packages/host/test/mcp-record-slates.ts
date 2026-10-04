@@ -34,6 +34,7 @@ export const SLATE_ANSWERED: Record<string, Case[]> = {
       replies: { "slates.write": reply({ version: 3, text: SKETCH, warnings: [{ code: "W004", name: "copy-style", message: "a long dash in a literal" }], took: 0.30000000000000004 }) },
     },
     { case: "a check on a named thread", arguments: { thread: "t-child", text: "<props id=\"week\" tone=\"warning\" />", check: true, if_version: 2 }, replies: { "sessions.list": SESSIONS, "slates.write": reply({ version: 2, text: "slate v2, 1 piece, 1 bound, 0 problems" }) } },
+    { case: "a rehearsal of values and a press", arguments: { check: true, values: { i: 2, "$picked": [1] }, press: "next", row: 0 }, env: TURN, replies: { "slates.write": reply({ version: 4, text: "slate v4, 2 pieces, 1 bound, 0 problems\nwould start $grade (a press on next)", warnings: [], problems: [] }) } },
     { case: "the stored form", arguments: { document: { schema: 2, root: "r", pieces: { r: { type: "text" } } } }, replies: { "slates.write": reply({ version: 1, text: "slate v1, 1 piece, 0 bound, 0 problems" }) } },
     {
       case: "refused with every error",

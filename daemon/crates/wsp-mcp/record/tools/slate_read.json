@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "slate_read",
-    "description": "Reads this thread's slate: sketch, JSX-like form, values, runs.",
+    "description": "Reads this thread's slate: values, runs, sketch.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -58,7 +58,7 @@
   },
   "cloudOn": {
     "name": "slate_read",
-    "description": "Reads this thread's slate: sketch, JSX-like form, values, runs.",
+    "description": "Reads this thread's slate: values, runs, sketch.",
     "inputSchema": {
       "type": "object",
       "properties": {

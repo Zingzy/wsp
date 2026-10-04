@@ -48,6 +48,14 @@ pub struct WriteIn {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub values: Option<Map<String, Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub press: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub if_version: Option<i64>,
 }
 
@@ -155,12 +163,24 @@ async fn catalog(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 }
 
 async fn write(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let WriteIn { thread, text, document, check, if_version } = input("slate_write", arguments)?;
+    let WriteIn { thread, text, document, check, values, press, row, action, if_version } = input("slate_write", arguments)?;
     let client = host.client().await?;
     let mut asked = target(&host, &client, thread).await?;
     put(&mut asked, "text", text);
     put(&mut asked, "document", document);
     put(&mut asked, "check", check);
+    put(&mut asked, "values", values);
+    put(
+        &mut asked,
+        "press",
+        press.map(|piece| {
+            let mut pressed = Map::new();
+            pressed.insert("piece".to_owned(), Value::String(piece));
+            put(&mut pressed, "index", row);
+            put(&mut pressed, "action", action);
+            Value::Object(pressed)
+        }),
+    );
     put(&mut asked, "ifVersion", if_version);
     answered(&client, "slates.write", asked).await
 }
@@ -239,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn the_four_entries_fit_the_budget_of_2500_characters() {
+    fn the_four_entries_fit_the_budget_of_2700_characters() {
         for cloud in [false, true] {
             let total: usize = TOOLS
                 .iter()
@@ -247,7 +267,7 @@ mod tests {
                 .filter_map(|t| entry_in(t.listed, cloud))
                 .map(|e| serde_json::to_string(&serde_json::from_str::<Value>(e).unwrap()).unwrap().chars().count())
                 .sum();
-            assert!(total < 2500, "the slate tools list {total} characters with the cloud {}", if cloud { "on" } else { "off" });
+            assert!(total < 2700, "the slate tools list {total} characters with the cloud {}", if cloud { "on" } else { "off" });
         }
     }
 
