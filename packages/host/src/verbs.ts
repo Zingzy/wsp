@@ -3742,8 +3742,8 @@ const AGENTS_READ_WORDS = "Read as the login the computer was added with, off ea
 
 // --- the slate: a live panel per thread the agent builds and the person reads, presses and fills in (spec 10) ---
 
-const SlateThreadIn = z.string().optional();
-const SlateIfVersionIn = z.number().int().optional();
+const SlateThreadIn = z.string().optional().describe("another thread's id");
+const SlateIfVersionIn = z.number().int().optional().describe("only at this version");
 /** What every slate tool answers: the version and the sketch as text, the rest an open record the text already says. */
 const slateOut = <K extends string>(...rest: K[]) => ({ version: z.number().int(), text: z.string(), ...(Object.fromEntries(rest.map(k => [k, z.unknown()])) as Record<K, z.ZodUnknown>) });
 
@@ -3829,7 +3829,7 @@ const SLATE_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description: "What a slate can hold: pieces for a live dashboard, metrics, logs, progress, diagrams, forms or checklists, and the runs that keep it fresh. Read it before slate_write whenever the person wants to see, watch or monitor something here.",
-      input: { name: z.string().optional() },
+      input: { name: z.string().optional().describe("an entry, like runs") },
       output: { text: z.string() },
       call: async ({ name }, deps) => {
         const client = await deps.client();
@@ -3870,13 +3870,13 @@ const SLATE_VERBS: readonly Verb[] = [
       description: "Writes this thread's slate, the live panel shown here beside the chat. Use it to show the person anything they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), or a dashboard, a form to fill in or a checklist. A run with every= refreshes itself on a timer with no turns, so nothing streams into the chat and nothing polls in a loop.",
       input: {
         thread: SlateThreadIn,
-        text: z.string().optional(),
-        document: z.record(z.string(), z.unknown()).optional(),
-        check: z.boolean().optional(),
-        values: z.record(z.string(), z.unknown()).optional(),
-        press: z.string().optional(),
-        row: z.number().int().optional(),
-        action: z.number().int().optional(),
+        text: z.string().optional().describe("a <slate>, or a patch"),
+        document: z.record(z.string(), z.unknown()).optional().describe("stored JSON, not text"),
+        check: z.boolean().optional().describe("store nothing"),
+        values: z.record(z.string(), z.unknown()).optional().describe("with check: $path: value"),
+        press: z.string().optional().describe("with check: piece id to press"),
+        row: z.number().int().optional().describe("pressed row, from 0"),
+        action: z.number().int().optional().describe("row action, from 0"),
         if_version: SlateIfVersionIn,
       },
       output: slateOut("warnings", "problems"),
@@ -3913,7 +3913,7 @@ const SLATE_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description: "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire. start runs ones the person approved always.",
-      input: { thread: SlateThreadIn, values: z.record(z.string(), z.unknown()).optional(), start: z.array(z.string()).optional(), if_version: SlateIfVersionIn },
+      input: { thread: SlateThreadIn, values: z.record(z.string(), z.unknown()).optional().describe("$path: new value"), start: z.array(z.string()).optional().describe("runs allowed always"), if_version: SlateIfVersionIn },
       output: slateOut("problems"),
       stream: ["text"],
       call: async ({ thread, values, start, if_version }, deps) => {
@@ -3939,7 +3939,7 @@ const SLATE_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description: "Reads this thread's slate: what the person filled in or pressed, the live values, each run's output and logs, and the sketch of what they see.",
-      input: { thread: SlateThreadIn, values: z.array(z.string()).optional(), text: z.boolean().optional(), sketch: z.boolean().optional(), document: z.boolean().optional() },
+      input: { thread: SlateThreadIn, values: z.array(z.string()).optional().describe("$run.json, $value, source path, or *"), text: z.boolean().optional().describe("false: no JSX-like form"), sketch: z.boolean().optional().describe("false: no sketch"), document: z.boolean().optional().describe("true: add stored JSON") },
       output: slateOut("document", "values", "derived", "runs", "state", "problems", "comments", "approvals"),
       stream: ["text"],
       call: async ({ thread, values, text, sketch, document }, deps) => {

@@ -6,20 +6,24 @@
       "type": "object",
       "properties": {
         "thread": {
-          "type": "string"
+          "type": "string",
+          "description": "another thread's id"
         },
         "values": {
           "type": "object",
-          "additionalProperties": {}
+          "additionalProperties": {},
+          "description": "$path: new value"
         },
         "start": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "runs allowed always"
         },
         "if_version": {
-          "type": "integer"
+          "type": "integer",
+          "description": "only at this version"
         }
       },
       "additionalProperties": false,
@@ -54,20 +58,24 @@
       "type": "object",
       "properties": {
         "thread": {
-          "type": "string"
+          "type": "string",
+          "description": "another thread's id"
         },
         "values": {
           "type": "object",
-          "additionalProperties": {}
+          "additionalProperties": {},
+          "description": "$path: new value"
         },
         "start": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "runs allowed always"
         },
         "if_version": {
-          "type": "integer"
+          "type": "integer",
+          "description": "only at this version"
         }
       },
       "additionalProperties": false,

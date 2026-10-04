@@ -6,22 +6,27 @@
       "type": "object",
       "properties": {
         "thread": {
-          "type": "string"
+          "type": "string",
+          "description": "another thread's id"
         },
         "values": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "$run.json, $value, source path, or *"
         },
         "text": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "false: no JSX-like form"
         },
         "sketch": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "false: no sketch"
         },
         "document": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "true: add stored JSON"
         }
       },
       "additionalProperties": false,
@@ -63,22 +68,27 @@
       "type": "object",
       "properties": {
         "thread": {
-          "type": "string"
+          "type": "string",
+          "description": "another thread's id"
         },
         "values": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "$run.json, $value, source path, or *"
         },
         "text": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "false: no JSX-like form"
         },
         "sketch": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "false: no sketch"
         },
         "document": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "true: add stored JSON"
         }
       },
       "additionalProperties": false,

@@ -6,33 +6,42 @@
       "type": "object",
       "properties": {
         "thread": {
-          "type": "string"
+          "type": "string",
+          "description": "another thread's id"
         },
         "text": {
-          "type": "string"
+          "type": "string",
+          "description": "a <slate>, or a patch"
         },
         "document": {
           "type": "object",
-          "additionalProperties": {}
+          "additionalProperties": {},
+          "description": "stored JSON, not text"
         },
         "check": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "store nothing"
         },
         "values": {
           "type": "object",
-          "additionalProperties": {}
+          "additionalProperties": {},
+          "description": "with check: $path: value"
         },
         "press": {
-          "type": "string"
+          "type": "string",
+          "description": "with check: piece id to press"
         },
         "row": {
-          "type": "integer"
+          "type": "integer",
+          "description": "pressed row, from 0"
         },
         "action": {
-          "type": "integer"
+          "type": "integer",
+          "description": "row action, from 0"
         },
         "if_version": {
-          "type": "integer"
+          "type": "integer",
+          "description": "only at this version"
         }
       },
       "additionalProperties": false,
@@ -68,33 +77,42 @@
       "type": "object",
       "properties": {
         "thread": {
-          "type": "string"
+          "type": "string",
+          "description": "another thread's id"
         },
         "text": {
-          "type": "string"
+          "type": "string",
+          "description": "a <slate>, or a patch"
         },
         "document": {
           "type": "object",
-          "additionalProperties": {}
+          "additionalProperties": {},
+          "description": "stored JSON, not text"
         },
         "check": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "store nothing"
         },
         "values": {
           "type": "object",
-          "additionalProperties": {}
+          "additionalProperties": {},
+          "description": "with check: $path: value"
         },
         "press": {
-          "type": "string"
+          "type": "string",
+          "description": "with check: piece id to press"
         },
         "row": {
-          "type": "integer"
+          "type": "integer",
+          "description": "pressed row, from 0"
         },
         "action": {
-          "type": "integer"
+          "type": "integer",
+          "description": "row action, from 0"
         },
         "if_version": {
-          "type": "integer"
+          "type": "integer",
+          "description": "only at this version"
         }
       },
       "additionalProperties": false,
