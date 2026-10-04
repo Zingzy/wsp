@@ -3,15 +3,14 @@
 // sheet naming the server, the call and the tools it lists, and the destructive confirm with the arguments as sent.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseSlate, slateStartValues, type SessionView, type SlateDoc, type SlateJson } from "@wsp/protocol";
-import type { Api } from "../protocol/client";
+import { parseSlate, slateFieldWords, slateResultShape, slateStartValues, type SessionView, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import type { Api, ProtocolEvent } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { useRightPanelStore } from "../rightPanelStore";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { ServerConsentSheet, ToolConfirmSheet, type SlateServerAsk, type SlateToolAsk } from "./mcp";
 import { SLATE_VIEWS } from "./pieces";
-import { columnsOf, wordsOf } from "./shape";
 import { SlateSurface } from "./SlateSurface";
 import { SlateView } from "./SlateView";
 import { useSlateStore } from "./store";
@@ -45,14 +44,15 @@ const EMAILS = [
 
 describe("a tool run's result by its shape", () => {
   it("names a field in the words people say", () => {
-    expect(wordsOf("receivedTime")).toBe("Received time");
-    expect(wordsOf("from_address")).toBe("From address");
-    expect(wordsOf("id")).toBe("Id");
+    expect(slateFieldWords("receivedTime")).toBe("Received time");
+    expect(slateFieldWords("from_address")).toBe("From address");
+    expect(slateFieldWords("id")).toBe("Id");
   });
 
   it("takes the fields that hold a plain value as columns, in the order rows name them", () => {
-    expect(columnsOf(EMAILS)).toEqual(["messageId", "fromAddress", "subject", "receivedTime"]);
-    expect(columnsOf([{ a: null, "b-c": 1 }, { a: 2 }])).toEqual(["a"]);
+    const keys = (value: SlateJson) => { const shape = slateResultShape(value); return shape.kind === "table" ? shape.columns.map(c => c.key) : shape.kind; };
+    expect(keys(EMAILS)).toEqual(["messageId", "fromAddress", "subject", "receivedTime"]);
+    expect(keys([{ a: null, "b-c": 1 }, { a: 2 }])).toEqual(["a"]);
   });
 
   it("draws a list of records as a table under the run's state", () => {
@@ -237,6 +237,18 @@ describe("in the Slate tab", () => {
     await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Always in this thread" })));
     expect(slates.approve).toHaveBeenCalledWith(row.threadId, "mcp:zoho-mail", "thread");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("reads the record again on an empty values push, so tools that arrive late fill the open sheet", async () => {
+    next();
+    const held = { inbox: { state: "held", why: "needs your approval", runs: 0 } };
+    const slates = open(record(INBOX, held, { asks: [{ ...SERVER_ASK, tools: [] }] }));
+    const sheet = await screen.findByRole("dialog", { name: "Let this slate use zoho-mail?" });
+    expect(sheet.querySelector("[data-slate-consent-lists]")).toBeNull();
+    vi.mocked(slates.get).mockResolvedValue({ record: record(INBOX, held, { asks: [SERVER_ASK] }) });
+    act(() => useStore.getState().applyEvent({ type: "slate.values", workspaceId: "ws", threadId: row.threadId, version: 1, revision: 2, values: {} } as unknown as ProtocolEvent));
+    await waitFor(() => expect(sheet.querySelectorAll("[data-slate-consent-lists]")).toHaveLength(3));
+    expect(slates.get).toHaveBeenCalledTimes(2);
   });
 
   it("opens the destructive confirm when a press brings back a tool's ask", async () => {

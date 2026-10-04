@@ -4,7 +4,8 @@
 // their own, so adding a piece is one entry here and one view in the web app.
 import { fmtBytes, fmtCost, fmtTokens } from "../format.js";
 import { slateAxisWord, slateChartAxis } from "./chart.js";
-import { isSlateSecretHandle, type SlateEventName, type SlateJson, type SlatePropValue, type SlateRunRecord } from "./types.js";
+import { slateResultShape, sketchSlateResult } from "./shape.js";
+import { isSlateSecretHandle, type SlateEventName, type SlateJson, type SlatePropValue, type SlateRunDecl, type SlateRunRecord } from "./types.js";
 
 export const SLATE_TONES = ["default", "muted", "good", "warning", "bad", "info", "accent"] as const;
 const EMPHASIS = ["normal", "strong", "quiet"] as const;
@@ -59,6 +60,8 @@ export interface SlateSketchView {
   test(expr: string, item: SlateJson, index: number): boolean;
   /** An own path's live value: a run's record for output. */
   read(path: string): SlateJson | undefined;
+  /** What a declared run calls: a command, a tool or a resource. */
+  runKind(path: string): SlateRunDecl["kind"] | undefined;
   /** A check with no thread: bound props read as their formula in braces. */
   unbound: boolean;
 }
@@ -363,6 +366,11 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
       const r = rec(v.read(name)) as Partial<SlateRunRecord>;
       if (v.unbound || r.state === undefined || r.state === "idle") return `output ${name}: not run yet`;
       const lines = Array.isArray(r.lines) && r.lines.length > 0 ? r.lines : [r.out, r.err].filter((s): s is string => typeof s === "string" && s !== "").join("\n").split("\n").filter(l => l !== "");
+      const kind = v.runKind(name);
+      if (kind !== undefined && kind !== "cmd" && r.state !== "failed") {
+        const shape = sketchSlateResult(slateResultShape(r.json ?? r.out));
+        return shape.length === 0 ? `output ${name}: ${r.state}` : [`output ${name}: ${r.state}, ${shape[0]}`, ...shape.slice(1, 4).map(l => `  ${l}`)];
+      }
       return [`output ${name}: ${r.state}, ${lines.length} line${lines.length === 1 ? "" : "s"}${r.why !== undefined ? ` (${r.why})` : ""}`, ...lines.slice(-3).map(l => `  ${l}`)];
     },
     fallback: "text with the run's state", example: `<output run={$tests} lines={12} />`,
