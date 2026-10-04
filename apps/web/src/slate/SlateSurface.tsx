@@ -12,9 +12,11 @@ import { useSelectedThreadId, useStore } from "../protocol/store.js";
 import { requestComposerFocus } from "../shell/shellRequests.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { cadenceOf, ConsentSheet, HeldRuns } from "./consent.js";
-import { DOC } from "./engine.js";
-import { isRunRecord, type SlateAsk } from "./model.js";
+import { DOC, RUNS } from "./engine.js";
+import { ServerConsentSheet, ToolConfirmSheet } from "./mcp.js";
+import { isRunRecord, type SlateApproval, type SlateAsk } from "./model.js";
 import { SLATE_VIEWS } from "./pieces/index.js";
+import { Refreshing } from "./pieces/refreshing.js";
 import { bindSources } from "./sources/binder.js";
 import { SlateView, usePieceVersion } from "./SlateView.js";
 import { askConsent, loadSlate, markSeen, slateBundle, slateLink, useSlateStore, type SlateEntry } from "./store.js";
@@ -98,7 +100,10 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   const bundle = slateBundle(threadId);
   const { engine } = bundle;
   usePieceVersion(engine, DOC);
+  usePieceVersion(engine, RUNS);
   const api = useStore(s => s.api?.slates ?? null);
+  const root = engine.document?.root;
+  const refreshing = root !== undefined && engine.piece(root)?.type !== "section" && engine.refreshingUnder(root);
   const title = engine.document?.title ?? "Slate";
   const copy = () => void api?.sketch(threadId).then(text => navigator.clipboard?.writeText(text));
   const runs = Object.keys(engine.document?.runs ?? {});
@@ -112,6 +117,7 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   return (
     <div className="flex h-7 shrink-0 items-center gap-2 px-3 pt-1" title={engine.document?.title}>
       <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{title}</span>
+      {refreshing ? <Refreshing /> : null}
       <span data-slate-version className="font-mono text-[11px] tabular-nums text-muted-foreground">v{engine.version}</span>
       <Menu>
         <MenuTrigger render={<Button variant="ghost" size="icon" aria-label={SLATE_WORDS.menu} />}>
@@ -154,16 +160,11 @@ function Consent({ threadId }: { threadId: string }) {
     markSeen(threadId, ask.key);
     askConsent(threadId, undefined);
   };
-  return (
-    <ConsentSheet
-      key={ask.key}
-      ask={ask}
-      cadence={cadenceOf(slateBundle(threadId).engine.document, ask.run)}
-      more={unseen.filter(a => a.key !== ask.key).length}
-      answer={scope => slateLink(threadId).approve(ask.key, scope).then(() => void loadSlate(threadId))}
-      onClose={close}
-    />
-  );
+  const cadence = cadenceOf(slateBundle(threadId).engine.document, ask.run);
+  const answer = (scope: SlateApproval) => slateLink(threadId).approve(ask.key, scope).then(() => void loadSlate(threadId));
+  if (ask.kind === "server") return <ServerConsentSheet key={ask.key} ask={ask} cadence={cadence} answer={answer} onClose={close} />;
+  if (ask.kind === "tool") return <ToolConfirmSheet key={ask.key} ask={ask} answer={answer} onClose={close} />;
+  return <ConsentSheet key={ask.key} ask={ask} cadence={cadence} more={unseen.filter(a => a.key !== ask.key).length} answer={answer} onClose={close} />;
 }
 
 /** No slate yet, cleared, rewound to before it, or newer than this build: the panel's own empty state. */

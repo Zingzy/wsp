@@ -177,7 +177,9 @@ export function slateEvent(
       // A run newly held is a sheet the record does not carry yet: the header row and Review read it from there.
       const asks = useSlateStore.getState().byThread[e.threadId]?.record?.asks ?? [];
       const held = Object.entries(values).some(([path, value]) => /^\$[a-zA-Z_]\w*$/.test(path) && isRunRecord(value) && value.state === "held" && !asks.some(ask => `$${ask.run}` === path));
-      if (held) void loadSlate(e.threadId);
+      // An empty push is the host saying the asks changed: a server's tools arrived, or a call held for its confirm.
+      const asked = Object.keys(values).length === 0 && useSlateStore.getState().byThread[e.threadId] !== undefined;
+      if (held || asked) void loadSlate(e.threadId);
       return;
     }
     case "slate.run":

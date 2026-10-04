@@ -122,6 +122,7 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
         return Object.fromEntries(Object.entries(spec).filter(([k]) => k !== "on" && k !== "when").map(([k, v]) => [k, unbound ? braces(v) : resolveSlateProp(v, rowCtx(item, index))]));
       },
       test: (expr, item, index) => unbound || slateTruthy(evaluateSlateExpression(expr, rowCtx(item, index))),
+      runKind: path => { const p = parseSlateOwnPath(path); return p === undefined || p.segs.length > 0 ? undefined : doc.runs[p.name]?.kind; },
       read: path => { const p = parseSlateOwnPath(path); return p === undefined ? undefined : p.segs.reduce<SlateJson | undefined>((v, s) => slateStep(v, s), values[p.name]); },
     };
   };

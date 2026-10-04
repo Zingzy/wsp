@@ -8,9 +8,11 @@ import { Crab } from "../../components/status/Crab.js";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
 import { isRunRecord, type SlateRunState } from "../model.js";
+import { ResultByShape } from "../shape.js";
 import type { PieceView } from "../SlateView.js";
 import { str } from "./look.js";
 import { Quiet } from "./quiet.js";
+import { Refreshing } from "./refreshing.js";
 
 /** A run state as the status mark's grammar says it. */
 export const RUN_WORDS: Record<SlateRunState, string> = {
@@ -45,28 +47,33 @@ const runName = (value: unknown): string | undefined => (typeof value === "strin
 export const output: PieceView = {
   type: "output",
   rowScoped: ["run"],
-  component: function OutputPiece({ piece, props, slate, cancel }) {
+  component: function OutputPiece({ id, piece, props, slate, raise, cancel, sender }) {
     const run = runName(piece.props?.["run"]);
     const record = run === undefined ? undefined : slate.values[run];
     const box = useRef<HTMLDivElement>(null);
     const rows = typeof props["lines"] === "number" ? Math.max(3, Math.min(40, Math.floor(props["lines"]))) : 8;
     const state: SlateRunState = isRunRecord(record) && record.state in RUN_WORDS ? record.state : "idle";
     const lines = run === undefined ? [] : (slate.lines(run) ?? (isRunRecord(record) ? recordLines(record) : []));
-    const running = state === "running";
+    // A refresh draws the last result with a quiet mark, never the running row's crab and Cancel.
+    const refreshing = run !== undefined && slate.refreshing(run);
+    const running = state === "running" && !refreshing;
     const stale = isRunRecord(record) && record.stale === true && !running;
     useEffect(() => {
-      if (running && box.current !== null) box.current.scrollTop = box.current.scrollHeight;
-    }, [running, lines.length]);
+      if (state === "running" && box.current !== null) box.current.scrollTop = box.current.scrollHeight;
+    }, [state, lines.length]);
     if (run === undefined) return <Quiet>{RUN_WORDS.idle}</Quiet>;
     const why = isRunRecord(record) && (state === "held" || state === "failed") ? record.why : undefined;
+    // A tool or resource run's result draws by its shape; its failure and a command's output stay lines.
+    const kind = slate.document?.runs?.[run]?.kind;
+    const result = kind !== undefined && kind !== "cmd" && isRunRecord(record) && state !== "failed" ? (record.json ?? record.out) : undefined;
     const label = str(props["label"]);
     return (
       <div data-slate-output={run} className="flex min-w-0 flex-col gap-1.5">
         <div className="flex h-6 min-w-0 items-center gap-2">
           {label === undefined ? null : <span className="min-w-0 truncate text-[13px] text-foreground">{label}</span>}
-          <span data-slate-run-state={state} className={cn("inline-flex items-center gap-1.5 text-[13px]", RUN_INK[state])}>
+          <span data-slate-run-state={state} className={cn("inline-flex items-center gap-1.5 text-[13px]", refreshing ? "text-muted-foreground" : RUN_INK[state])}>
             {running ? <Crab className="text-status-working" /> : null}
-            {RUN_WORDS[state]}
+            {refreshing ? <Refreshing /> : RUN_WORDS[state]}
           </span>
           {stale ? (
             <span data-slate-stale className="min-w-0 truncate text-[13px] text-muted-foreground">
@@ -79,7 +86,11 @@ export const output: PieceView = {
             </Button>
           ) : null}
         </div>
-        {lines.length === 0 && state === "idle" ? null : (
+        {result !== undefined ? (
+          <div data-slate-result={run} className="min-w-0">
+            <ResultByShape value={result} shared={{ id, slate, raise, cancel, sender }} />
+          </div>
+        ) : lines.length === 0 && state === "idle" ? null : (
           <div
             ref={box}
             role="log"

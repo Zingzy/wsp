@@ -135,6 +135,8 @@ export interface SlateSecrets {
   forget(threadId: string, name?: string): void;
   /** Every filled secret of the thread replaced by `[secret:name]`, exact, base64 and URL-encoded. */
   scrub(threadId: string, text: string): string;
+  /** The plaintext, for a tool run's arguments at the moment of the call and nowhere else. */
+  plaintext(threadId: string, name: string): string | undefined;
 }
 
 export interface SlateRuns {
@@ -290,7 +292,7 @@ class DefaultApprovals implements RunApprovals {
   }
 }
 
-function createSecrets(file: string | undefined, now: () => number): SlateSecrets & { plaintext(threadId: string, name: string): string | undefined } {
+function createSecrets(file: string | undefined, now: () => number): SlateSecrets {
   const held = new Map<string, Map<string, Kept>>();
   if (file !== undefined && existsSync(file)) {
     try {
@@ -674,6 +676,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
       handle: secrets.handle,
       forget: secrets.forget,
       scrub: secrets.scrub,
+      plaintext: secrets.plaintext,
     },
     drop(threadId) {
       const t = threads.get(threadId);

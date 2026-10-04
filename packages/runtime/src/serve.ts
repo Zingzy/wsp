@@ -1697,9 +1697,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id, ok: true, ...(await rt.slates.read(params, origin)) });
               return;
             }
-            case "slates.catalog":
-              send({ id: msg.id, ok: true, ...rt.slates.catalog(msg.name !== undefined ? { name: msg.name } : {}) });
+            case "slates.catalog": {
+              const { id, op: _op, origin: _sent, ...params } = msg;
+              send({ id, ok: true, ...(await rt.slates.catalog(params, origin)) });
               return;
+            }
             case "slates.shown":
               await rt.slates.shown(msg.threadId);
               send({ id: msg.id, ok: true });

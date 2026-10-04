@@ -109,13 +109,23 @@ export function readsOf(expressions: readonly string[]): string[] {
   return [...out];
 }
 
+/** The when an item written out in a list prop carries: a formula as text. */
+export function whenOf(item: SlatePropValue | undefined): string | undefined {
+  if (item === null || typeof item !== "object" || Array.isArray(item)) return undefined;
+  const when = (item as Readonly<Record<string, SlatePropValue>>)["when"];
+  return typeof when === "string" ? when : undefined;
+}
+
 /** What a piece's `when` reads, and what its props read; a hidden piece subscribes to the first alone. A literal
  * "$name" prop names a value the piece reads whole (an output's run). */
 export function pieceReads(piece: SlatePiece): { when: string[]; props: string[] } {
-  const named = Object.values(piece.props ?? {}).filter((v): v is string => typeof v === "string" && /^\$[a-zA-Z_][a-zA-Z0-9_]*$/.test(v));
+  const values = Object.values(piece.props ?? {});
+  const named = values.filter((v): v is string => typeof v === "string" && /^\$[a-zA-Z_][a-zA-Z0-9_]*$/.test(v));
+  // A fact, a column, an option or a row action written out carries its own when, a formula as text.
+  const whens = values.flatMap(v => (Array.isArray(v) ? v.flatMap(item => whenOf(item) ?? []) : []));
   return {
     when: piece.when === undefined ? [] : readsOf([piece.when]),
-    props: [...new Set([...readsOf(Object.values(piece.props ?? {}).flatMap(expressionsIn)), ...named])],
+    props: [...new Set([...readsOf([...values.flatMap(expressionsIn), ...whens]), ...named])],
   };
 }
 

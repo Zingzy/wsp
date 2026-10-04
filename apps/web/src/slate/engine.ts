@@ -78,8 +78,11 @@ export class SlateEngine {
   #readsListeners = new Set<() => void>();
   #readsDirty = false;
   #loud = new Map<Loud, string>();
+  #parents = new Map<string, string>();
   /** Lines streamed by each run since it last started, ahead of the record's own. */
   #lines = new Map<string, string[]>();
+  /** Runs refreshing whose streamed lines are still the last result's. */
+  #fresh = new Set<string>();
   /** Section folds that name no value, kept for the window's life by piece id. */
   readonly folds = new Map<string, boolean>();
   #read: SourceReader;
@@ -127,13 +130,20 @@ export class SlateEngine {
       this.#reads.delete(id);
       this.#revisions.set(id, (this.#revisions.get(id) ?? 0) + 1);
     }
+    this.#parents = parentsOf(doc);
+    // A piece draws by its place too (a text in a header row, a table beside others): a group that changed redraws
+    // its children, and a table reads what the tables beside it read.
+    const placed = new Set(changed);
+    for (const id of changed) for (const child of doc?.pieces[id]?.children ?? []) placed.add(child);
+    for (const id of placed) if (doc?.pieces[id]?.type === "table") for (const other of this.tablesBeside(id)) placed.add(other);
+    for (const id of placed) this.#reads.delete(id);
     if (before?.root !== doc?.root || before?.title !== doc?.title || (before === null) !== (doc === null)) changed.add(DOC);
     this.#loud = loudOf(doc);
     if (!stale) this.#revision = revision;
     // Pushes arrive in order, so the window's own copy is newer for every key it holds; the record adds only the
     // values its document declared since.
     const moved = this.#replaceRemote(stale ? { ...values, ...this.#remote } : values).map(key => `$${key}`);
-    for (const id of changed) if (this.#mounted.has(id)) this.#dirty.add(id);
+    for (const id of placed) if (this.#mounted.has(id)) this.#dirty.add(id);
     this.#markReading(moved);
     this.#runsMoved(moved);
     if (changed.size > 0) this.#readsChanged();
@@ -177,7 +187,15 @@ export class SlateEngine {
   #restarted(path: string, value: SlateJson | undefined): void {
     const name = ownPath(path)?.name;
     if (name === undefined || path !== `$${name}` || this.#doc?.runs?.[name] === undefined) return;
-    if (walk(value, ["state"]) === "running" && walk(this.#remote[name], ["state"]) !== "running") this.#lines.delete(name);
+    if (walk(value, ["state"]) !== "running") {
+      // A refresh that streamed nothing ends on its record's own lines.
+      if (this.#fresh.delete(name)) this.#lines.delete(name);
+      return;
+    }
+    if (walk(this.#remote[name], ["state"]) === "running") return;
+    // A refresh keeps the last lines drawn until its own first line arrives.
+    if (walk(value, ["refreshing"]) === true) this.#fresh.add(name);
+    else this.#lines.delete(name);
   }
 
   #runsMoved(paths: readonly string[]): void {
@@ -187,7 +205,8 @@ export class SlateEngine {
 
   /** New lines of a streaming run, as slate.run carried them. */
   appendLines(run: string, lines: readonly string[]): void {
-    const kept = [...(this.#lines.get(run) ?? []), ...lines].slice(-LINES_KEPT);
+    const before = this.#fresh.delete(run) ? [] : (this.#lines.get(run) ?? []);
+    const kept = [...before, ...lines].slice(-LINES_KEPT);
     this.#lines.set(run, kept);
     this.invalidate([`$${run}.lines`]);
   }
@@ -195,6 +214,33 @@ export class SlateEngine {
   /** The run's lines as the window has them: what streamed here, else the record's own. */
   lines(run: string): readonly string[] | undefined {
     return this.#lines.get(run);
+  }
+
+  /** Whether a run is refreshing: started again, its last result still in its record until the new one lands. */
+  refreshing(run: string): boolean {
+    const record = this.#remote[run];
+    return this.#doc?.runs?.[run] !== undefined && walk(record, ["state"]) === "running" && walk(record, ["refreshing"]) === true;
+  }
+
+  /** Whether a piece under this one reads a refreshing run, short of a nested section and of the run's own output,
+   * which each say it themselves. */
+  refreshingUnder(id: string): boolean {
+    const runs = Object.keys(this.#doc?.runs ?? {}).filter(run => this.refreshing(run));
+    if (runs.length === 0) return false;
+    const reads = (path: string) => runs.some(run => touches(path, `$${run}`));
+    const seen = new Set<string>();
+    const visit = (child: string): boolean => {
+      if (seen.has(child)) return false;
+      seen.add(child);
+      const piece = this.piece(child);
+      if (piece === undefined || piece.type === "section" || piece.type === "output") return false;
+      const own = this.#readsOf(child);
+      return own.when.some(reads) || own.props.some(reads) || (piece.children ?? []).some(visit);
+    };
+    const piece = this.piece(id);
+    if (piece === undefined) return false;
+    const own = this.#readsOf(id);
+    return own.when.some(reads) || own.props.some(reads) || (piece.children ?? []).some(visit);
   }
 
   /** A secret's path: the person types it, the host keeps it, the window holds only its handle (08). */
@@ -365,12 +411,39 @@ export class SlateEngine {
     this.#readsChanged();
   }
 
+  /** The group a piece is drawn in. */
+  parent(id: string): SlatePiece | undefined {
+    const parent = this.#parents.get(id);
+    return parent === undefined ? undefined : this.piece(parent);
+  }
+
+  /** The tables drawn in the same section as this one (the slate's root where there is none), itself included,
+   * so stacked tables can share their column widths. */
+  tablesBeside(id: string): string[] {
+    let group = this.#parents.get(id);
+    while (group !== undefined && this.piece(group)?.type !== "section" && this.#parents.has(group)) group = this.#parents.get(group);
+    if (group === undefined) return [id];
+    const out: string[] = [];
+    const visit = (at: string) => {
+      const piece = this.piece(at);
+      if (piece === undefined) return;
+      if (piece.type === "table") out.push(at);
+      if (at === group || piece.type !== "section") for (const child of piece.children ?? []) visit(child);
+    };
+    visit(group);
+    return out;
+  }
+
   #readsOf(id: string): { when: string[]; props: string[] } {
     let reads = this.#reads.get(id);
     if (reads === undefined) {
       const piece = this.piece(id);
       const derived = this.#doc?.derived ?? {};
-      const own = piece === undefined ? { when: [], props: [] } : pieceReads(piece);
+      let own = piece === undefined ? { when: [], props: [] } : pieceReads(piece);
+      if (piece?.type === "table") {
+        const beside = this.tablesBeside(id).flatMap(other => (other === id ? [] : pieceReads(this.piece(other)!).props));
+        own = { when: own.when, props: [...new Set([...own.props, ...beside])] };
+      }
       reads = { when: expandDerived(own.when, derived), props: expandDerived(own.props, derived) };
       this.#reads.set(id, reads);
     }
@@ -483,6 +556,12 @@ function walkFrom(item: SlateJson, rest: string): SlateJson | undefined {
     }
   }
   return at;
+}
+
+function parentsOf(doc: SlateDoc | null): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [id, piece] of Object.entries(doc?.pieces ?? {})) for (const child of piece.children ?? []) if (!out.has(child)) out.set(child, id);
+  return out;
 }
 
 /** The first piece in display order to ask for each loud thing with a literal. */

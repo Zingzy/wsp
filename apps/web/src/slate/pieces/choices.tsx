@@ -5,7 +5,7 @@ import type { SlateJson } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { getOwn } from "../paths.js";
-import { heldBy, str } from "./look.js";
+import { heldBy, present, str } from "./look.js";
 import { twoWayPath } from "./press.js";
 
 interface Choice { value: SlateJson; label: string; note: string | undefined }
@@ -34,7 +34,7 @@ export const choices: PieceView = {
     return (
       <div role="radiogroup" aria-label={label} className="flex min-w-0 flex-col gap-2">
         <span className="text-sm leading-5 text-foreground">{label}</span>
-        {choicesOf(props["options"]).map((choice, at) => {
+        {choicesOf(Array.isArray(props["options"]) ? present(slate, piece.props?.["options"], props["options"]) : undefined).map((choice, at) => {
           const chosen = same(choice.value, picked);
           const right = known && same(choice.value, answer);
           const wrong = known && chosen && !right;
