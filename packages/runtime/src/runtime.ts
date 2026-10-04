@@ -3846,7 +3846,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (entry !== undefined) pollPullRequest(entry);
     },
     runEnv: () => local?.env() ?? (process.env as Record<string, string>),
-    ...(opts.statePath !== undefined ? { secretsFile: join(stateFolder(), "slates.secrets.json") } : {}),
+    ...(opts.statePath !== undefined ? { secretsFile: join(stateFolder(), "slates.secrets.json"), slatesDir: join(stateFolder(), "slates") } : {}),
   });
   // A run that was running when the host stopped is failed and its done fires once, at start (02, "Host restart").
   void slates.ready().catch((e: unknown) => console.warn(`the slates were not loaded: ${e instanceof Error ? e.message : String(e)}`));

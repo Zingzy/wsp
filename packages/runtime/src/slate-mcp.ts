@@ -12,7 +12,8 @@ import { runOutputTail } from "@wsp/protocol";
 import type { SlateAsk, SlateJson, SlateRunDecl } from "@wsp/protocol";
 import type { Reshape, RunApprovals, RunBy, RunRecord, RunStartAnswer } from "./slate-runs.js";
 
-export type McpRunDecl = Extract<SlateRunDecl, { kind: "tool" | "resource" }>;
+/** `files` is the text of each slate file its then reads, as on a command. */
+export type McpRunDecl = Extract<SlateRunDecl, { kind: "tool" | "resource" }> & { files?: Record<string, string> };
 
 /** A server as the thread's agent would start it there: references read, its own variables in `env`. `secrets` are
  * the values handed to it, hidden from whatever it says back. */
@@ -93,9 +94,12 @@ export interface SlateMcp {
 
 export const serverKey = (server: string): string => `mcp:${server}`;
 
-/** A run's consent: its server's, and with a `then` that command's too, so a new reshape asks again. */
+/** A run's consent: its server's, and with a `then` that command's and the files it reads too, so a new reshape asks
+ * again. */
 export const consentKey = (decl: McpRunDecl): string =>
-  decl.then === undefined ? serverKey(decl.server) : `${serverKey(decl.server)}#then:${createHash("sha256").update(decl.then).digest("hex").slice(0, 16)}`;
+  decl.then === undefined
+    ? serverKey(decl.server)
+    : `${serverKey(decl.server)}#then:${createHash("sha256").update(decl.files === undefined ? decl.then : JSON.stringify([decl.then, Object.entries(decl.files).sort()])).digest("hex").slice(0, 16)}`;
 
 const SECRET_MARK = "\u0000wsp-secret:";
 /** Where a secret stands in a tool's evaluated arguments: replaced by its plaintext at the call, by dots on a sheet. */
@@ -530,7 +534,7 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
         ...(tool.annotations?.readOnlyHint !== undefined ? { readOnly: tool.annotations.readOnlyHint } : {}),
         ...(tool.annotations !== undefined ? { destructive: isDestructive(tool) } : {}),
       }));
-      return { key: consentKey(d), run, kind: "server", server: d.server, computer, why: HELD_APPROVAL, tools, tool: d.kind === "tool" ? d.tool : d.uri, ...(args !== undefined ? { args } : {}), ...(d.then !== undefined ? { then: d.then } : {}) };
+      return { key: consentKey(d), run, kind: "server", server: d.server, computer, why: HELD_APPROVAL, tools, tool: d.kind === "tool" ? d.tool : d.uri, ...(args !== undefined ? { args } : {}), ...(d.then !== undefined ? { then: d.then } : {}), ...(d.files !== undefined ? { files: d.files } : {}) };
     }
     const tool = d as Extract<McpRunDecl, { kind: "tool" }>;
     return { key: toolKey(d), run, kind: "tool", server: d.server, tool: tool.tool, computer, why: HELD_CONFIRM, args: args ?? {}, ...(typeof tool.confirm === "string" ? { confirm: tool.confirm } : {}), ...(tool.then !== undefined ? { then: tool.then } : {}) };
