@@ -32,7 +32,7 @@ import { NOTE, ROW_FIELD } from "../layout.js";
 import { placeName } from "../places.js";
 import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
-import { CopyRow, RefusalSlot } from "../sheetParts.js";
+import { CopyRow, DeviceCode, RefusalSlot } from "../sheetParts.js";
 import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
 import { everything, folderKey, githubPick, noPicks } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
@@ -248,11 +248,7 @@ function WaitBlock({ row, onRetry, onSkip, busy }: { row: StepLine; onRetry: () 
   return (
     <>
       <div data-sign-in-line className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-2">
-        {wait.code === undefined ? null : (
-          <span data-k="sign-in-code" className="font-mono text-xl text-foreground tabular-nums">
-            {wait.code}
-          </span>
-        )}
+        {wait.code === undefined ? null : <DeviceCode code={wait.code} />}
         {wait.url === undefined ? null : (
           <Button size="xs" variant="outline" data-k="open-tab" onClick={() => void window.open(wait.url, "_blank", "noopener,noreferrer")}>
             <ExternalLinkIcon aria-hidden className="size-3.5" />

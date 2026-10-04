@@ -12,7 +12,7 @@ import { useState } from "react";
 import { Button } from "../ui/button.js";
 import { Input } from "../ui/input.js";
 import { Spinner } from "../ui/spinner.js";
-import { CopyRow, RefusalSlot } from "../../settings/sheetParts.js";
+import { CopyRow, DeviceCode, RefusalSlot } from "../../settings/sheetParts.js";
 import { SignInCode } from "../../settings/recipe/SignInCode.js";
 import { AGENTS_LIST_WORDS, type FlowView } from "./agentsRows.js";
 
@@ -95,11 +95,7 @@ export function SignInFlowView({ view, label }: { view: FlowView; label: string 
           flow.state === "running" ? <Spinner className="size-3.5 text-muted-foreground" /> : null
         ) : (
           <>
-            {flow.code === undefined ? null : (
-              <span data-k="sign-in-code" className="font-mono text-xl tabular-nums text-foreground">
-                {flow.code}
-              </span>
-            )}
+            {flow.code === undefined ? null : <DeviceCode code={flow.code} />}
             {openPage(AGENTS_LIST_WORDS.open)}
           </>
         )}

@@ -6,7 +6,7 @@
 // recipe saved, the running steps with a sign-in's wait and Retry, the ready
 // page, and closing mid-setup said as a notice.
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PLACE_HOST_KEY_KIND, RecipeFile, type AgentRow, type AgentsReport, type PlaceAddJob, type PlaceAddStep, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
 import { RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useNotices } from "../src/notices/store.js";
@@ -458,6 +458,11 @@ describe("Add a computer while the setup runs", () => {
     expect(signIn.dataset["state"]).toBe("needs-you");
     expect(signIn.querySelector("[data-k=sign-in-code]")?.textContent).toBe("4F2K-9QJM");
     expect(signIn.querySelector("[data-k=open-tab]")?.textContent).toBe("Open the tab again");
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    await press(signIn.querySelector("[data-k=copy-code]"));
+    expect(writeText).toHaveBeenCalledWith("4F2K-9QJM");
+    expect(signIn.querySelector("[data-k=copy-code]")?.textContent).toBe("Copy");
     expect(dialog()!.querySelector("[data-step-row='mcp']")?.getAttribute("data-state")).toBe("waiting");
   });
 
