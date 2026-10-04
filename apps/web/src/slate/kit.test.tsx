@@ -56,9 +56,7 @@ describe("the richer kit in the renderer", () => {
     for (const name of ["gauge", "zap", "arrow-down", "arrow-up", "activity", "clock"]) expect(c.querySelector(`[data-slate-icon="${name}"]`), name).toBeNull();
     expect(c.querySelector("[data-slate-strip]")).not.toBeNull();
     const section = c.querySelector<HTMLElement>("[data-slate-section]")!;
-    // A status, a tag and a ring are words, not rows a person acts on: they stand bare on hairlines.
-    expect(section.querySelector("[data-slate-bare]")!.className).toContain("border-y");
-    expect(section.querySelector("[data-slate-card]")).toBeNull();
+    expect(section.querySelector("[data-slate-card]")!.className).toContain("bg-card/40");
     expect(c.querySelector("[data-slate-status=good]")!.textContent).toBe("Live");
     expect(c.querySelector("[data-slate-chip]")!.textContent).toBe("every minute");
     expect(screen.getByRole("meter", { name: "Last hour" }).getAttribute("aria-valuenow")).toBe("3");
@@ -167,13 +165,13 @@ describe("the richer kit in the renderer", () => {
   it("lines a group up only when align says so, and pads and insets on request", () => {
     const doc = compiled(`<slate><column><section id="s" title="A" align="center" pad="loose"><text>x</text></section><section id="plain" title="B"><text>y</text></section><column id="inset" surface="inset"><text>z</text></column><grid id="g" columns={2} align="end"><text>1</text><text>2</text></grid></column></slate>`);
     const c = draw(doc).view.container;
-    const inner = (id: string) => piece(c, id).querySelector<HTMLElement>("[data-slate-card], [data-slate-bare], [data-slate-grid] > div")!;
-    // A section's rows stand by the one rule whatever align, pad or surface it names: text is a bare row on hairlines.
-    expect(inner("s").className).toContain("border-y");
-    expect(inner("s").className).not.toMatch(/items-center|px-5|bg-card/);
-    expect(inner("plain").className).toContain("[--settings-inset:0px]");
-    // A column standing among the groups takes no surface of its own: its text is a row like any other.
-    expect(piece(c, "inset").querySelector("[data-slate-bare]")).not.toBeNull();
+    const inner = (id: string) => piece(c, id).querySelector<HTMLElement>("[data-slate-card], [data-slate-grid] > div")!;
+    // A section's rows are a settings card whatever align, pad or surface it names: its rows take the card's inset.
+    expect(inner("s").className).toContain("[&>:not([data-slate-rows])]:px-(--settings-inset,20px)");
+    expect(inner("s").className).not.toMatch(/items-center|px-5/);
+    expect(inner("plain").className).toContain("bg-card/40");
+    // A column standing among the cards takes no surface of its own: its text is a row of a card like any other.
+    expect(piece(c, "inset").querySelector("[data-slate-card]")).not.toBeNull();
     expect(inner("g").className).toContain("justify-items-end");
     expect(c.querySelector("[data-slate-piece=s]")!.textContent).toContain("A");
   });

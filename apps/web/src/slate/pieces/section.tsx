@@ -16,8 +16,8 @@ import { twoWayPath } from "./press.js";
 import { Runs } from "./runs.js";
 
 const HEAD = cn(SECTION_HEAD, "min-w-0 gap-3");
-/** A chart's foot line sits 10 px under it, as the Usage chart's own. */
-const AFTER_CHART = "[&>[data-slate-type=chart]+[data-slate-type=text]]:-mt-1.5";
+/** A chart's foot line sits 10 px under it, as the Usage chart's own; a table after other pieces stands 16 px clear. */
+const AFTER_CHART = "[&>[data-slate-type=chart]+[data-slate-type=text]]:-mt-0.5 [&>:not(:first-child)[data-slate-type=table]]:mt-1";
 
 export const section: PieceView = {
   type: "section",
@@ -47,15 +47,14 @@ export const section: PieceView = {
         ) : null}
       </>
     );
-    // The owner's airier spacing (2026-10-05): head to content 12 px, pieces inside a section 16.
     const body = (
-      <div className={cn("flex min-w-0 flex-col gap-4 [&>:empty]:!hidden", AFTER_CHART)}>
+      <div className={cn("flex min-w-0 flex-col gap-3 [&>:empty]:!hidden", AFTER_CHART)}>
         <Runs slate={slate} ids={piece.children ?? []} />
       </div>
     );
     if (!folds) {
       return (
-        <section data-slate-section className="flex min-w-0 flex-col gap-3">
+        <section data-slate-section className="flex min-w-0 flex-col gap-2.5">
           <div className={HEAD}>{head}</div>
           {body}
         </section>
@@ -76,7 +75,7 @@ export const section: PieceView = {
           <ChevronRight aria-hidden className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 motion-reduce:transition-none", open && "rotate-90")} />
         </CollapsibleTrigger>
         <CollapsiblePanel>
-          <div className="mt-3">{body}</div>
+          <div className="mt-2.5">{body}</div>
         </CollapsiblePanel>
       </Collapsible>
     );

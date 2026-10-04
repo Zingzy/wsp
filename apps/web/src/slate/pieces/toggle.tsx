@@ -8,7 +8,7 @@ import type { SlateEngine } from "../engine.js";
 import type { PieceView } from "../SlateView.js";
 import { truthy } from "../actions.js";
 import { getOwn } from "../paths.js";
-import { heldBy, SEGMENT, SEGMENTED, str } from "./look.js";
+import { str, heldBy } from "./look.js";
 import { twoWayPath } from "./press.js";
 import { isToolbar } from "./runs.js";
 
@@ -43,8 +43,8 @@ export const toggle: PieceView = {
           value={on ? "on" : "off"}
           segments={[{ value: "off", label: ALL }, { value: "on", label }]}
           onChange={next => set(next === "on")}
-          className={SEGMENTED}
-          segmentClassName={SEGMENT}
+          className="h-8 gap-0.5 rounded-[10px] border-input bg-input-fill shadow-[inset_0_1px_0_var(--keycap-top)]"
+          segmentClassName="h-[26px] rounded-lg px-2.5"
         />
       );
     }
