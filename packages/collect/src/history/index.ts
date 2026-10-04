@@ -11,7 +11,7 @@ import { codexReader } from "./codex.js";
 import type { HistoryCache } from "./cache.js";
 import { hermesReader } from "./hermes.js";
 import type { HistoryReader } from "./reader.js";
-import { type HistoryBucket, type Usage, reduceCalls, usageOf } from "./tally.js";
+import { type HistoryBucket, type Usage, oneHolder, reduceCalls, usageOf } from "./tally.js";
 
 export const HISTORY_READERS: Readonly<Record<HistoryFormat, HistoryReader>> = {
   "claude-jsonl": claudeReader,
@@ -38,17 +38,17 @@ export interface StoreOptions {
  * not changed, or read; the folders are weighed after the merge, so one cache serves a run for any project. */
 export async function readStore(host: Host, reader: HistoryReader, root: string, opts: StoreOptions = {}): Promise<Usage> {
   const files = await reader.files(host, root);
-  const buckets: HistoryBucket[] = [];
+  const held: { holder: string; buckets: readonly HistoryBucket[] }[] = [];
   for (const [i, f] of files.entries()) {
-    const kept = opts.cache?.get(f.path, f.stamp);
-    if (kept === undefined) {
-      const read = await reduceCalls(reader.read(host, root, f.path));
-      opts.cache?.set(f.path, f.stamp, read);
-      buckets.push(...read);
-    } else buckets.push(...kept);
+    let buckets = opts.cache?.get(f.path, f.stamp);
+    if (buckets === undefined) {
+      buckets = await reduceCalls(reader.read(host, root, f.path));
+      opts.cache?.set(f.path, f.stamp, buckets);
+    }
+    held.push({ holder: reader.holder(root, f.path), buckets });
     opts.onFile?.(i + 1, files.length);
   }
-  return usageOf(buckets, opts.folders);
+  return usageOf(oneHolder(held), opts.folders);
 }
 
 /** How far through one agent's session files a read is. */
@@ -101,7 +101,7 @@ export async function readHistories(host: Host, agents: readonly AgentEntry[] = 
 export { type Call, type HistoryFile, type HistoryReader, PARSE_VERSION } from "./reader.js";
 export { type HistoryCache, fileHistoryCache } from "./cache.js";
 export { commandNames, commandWords, installNames, installsIn, splitCommands, withoutHeredocs, type Install } from "./commands.js";
-export { type Count, type HistoryBucket, type Usage, HEAVY_BYTES, HEAVY_USED_FLOOR, USED_FLOOR, inFolders, installKey, installedName, isHeavy, meetsUsedFloor, reduceCalls, usageOf } from "./tally.js";
+export { type Count, type HistoryBucket, type Usage, HEAVY_BYTES, HEAVY_USED_FLOOR, USED_FLOOR, inFolders, installKey, installedName, isHeavy, meetsUsedFloor, oneHolder, reduceCalls, usageOf } from "./tally.js";
 export { claudeCall, claudeReader, claudeSession } from "./claude.js";
 export { codexCall, codexReader } from "./codex.js";
 export { hermesCall, hermesCalls, hermesReader } from "./hermes.js";

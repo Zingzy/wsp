@@ -7,7 +7,7 @@
 // where the picks hold it.
 import { GitCommitHorizontalIcon, GithubIcon, PlugIcon, PuzzleIcon, ScrollTextIcon, SquareTerminalIcon, TerminalIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { HERE_PLACE_ID, fmtBytes, hereName, sizeTone, type GitHubSignIn, type ProjectHue, type ProjectIcon, type RecipeFile, type RecipeOptions, type RecipeSignIn } from "@wsp/protocol";
+import { HERE_PLACE_ID, fmtBytes, fmtCalls, hereName, sizeTone, type GitHubSignIn, type ProjectHue, type ProjectIcon, type RecipeFile, type RecipeOptions, type RecipeSignIn } from "@wsp/protocol";
 import { AgentMarks } from "../../components/agents/agentsParts.js";
 import { useAgentsReport } from "../../components/agents/useAgentsReport.js";
 import { HarnessMark } from "../../components/chat/HarnessMark.js";
@@ -139,24 +139,40 @@ export function ServersPicks({ picks, options, onChange, box, onlyTicked = false
   );
 }
 
+/** The CLIs, the ones the agents ran most first, each with how many times they ran it; one never run says nothing. */
 export function ClisPicks({ picks, options, onChange, onlyTicked = false }: PickProps) {
+  const rows = options.clis.filter(cli => !onlyTicked || picks.clis[cli.name] !== undefined).sort((a, b) => (b.calls ?? 0) - (a.calls ?? 0));
   return (
     <Grid id="clis">
-      {options.clis
-        .filter(cli => !onlyTicked || picks.clis[cli.name] !== undefined)
-        .map(cli => (
-          <PickRow
-            key={cli.name}
-            id={cli.name}
-            checked={picks.clis[cli.name] !== undefined}
-            onCheckedChange={next => onChange(tick(picks, "clis", cli.name, next, options))}
-            glyph={<TerminalIcon aria-hidden className={GLYPH} />}
-            name={cli.name}
-            {...(cli.version === undefined ? {} : { tag: cli.version })}
-            note={cli.needs === undefined ? cli.via : `${cli.via}. Needs ${cli.needs.join(", ")}.`}
-            {...(cli.bytes === undefined ? {} : { slot: <Size bytes={cli.bytes} /> })}
-          />
-        ))}
+      {rows.map(cli => (
+        <PickRow
+          key={cli.name}
+          id={cli.name}
+          checked={picks.clis[cli.name] !== undefined}
+          onCheckedChange={next => onChange(tick(picks, "clis", cli.name, next, options))}
+          glyph={<TerminalIcon aria-hidden className={GLYPH} />}
+          name={cli.name}
+          {...(cli.version === undefined ? {} : { tag: cli.version })}
+          note={cli.needs === undefined ? cli.via : `${cli.via}. Needs ${cli.needs.join(", ")}.`}
+          {...(cli.calls === undefined && cli.bytes === undefined
+            ? {}
+            : {
+                slot: (
+                  <>
+                    {cli.calls === undefined ? null : (
+                      <span data-k="cli-calls" className={FACT}>
+                        {fmtCalls(cli.calls)}
+                      </span>
+                    )}
+                    {/* The sizes run from "1 MB" to "517 MB": a column as wide as the widest keeps every count on one edge. */}
+                    <span className="sm:min-w-14 sm:text-right">
+                      <Size bytes={cli.bytes} />
+                    </span>
+                  </>
+                ),
+              })}
+        />
+      ))}
     </Grid>
   );
 }
