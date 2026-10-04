@@ -4,7 +4,7 @@
 // per frame, the pending adds kept off their own events, and the record drawn
 // as the rows every list of steps shows.
 import { afterEach, describe, expect, it } from "vitest";
-import { RecipeFile, type EventUnion, type PendingComputer, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceView } from "@wsp/protocol";
+import { RecipeFile, type EventUnion, type PendingComputer, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceSetupStep, type PlaceView } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { checkRows, foldSetup, setupCount, setupRows, setupStanding } from "../src/settings/add/setup.js";
@@ -88,7 +88,7 @@ describe("a setup as rows", () => {
       ["Projects", "waiting", false],
       ["Other config", "waiting", false],
     ]);
-    expect(rows.find(r => r.id === "skills")?.note).toBe("unslop.");
+    expect(rows.find(r => r.id === "skills")?.note).toBe("1 skill");
     expect(rows.find(r => r.id === "skills/taste")).toMatchObject({ said: "a link inside points at a folder", fix: "Replace the link with a copy here and retry." });
     expect(rows.find(r => r.id === "signins/codex")?.wait?.code).toBe("4F2K");
     expect(setupCount(rows)).toEqual({ done: 4, of: 10 });
@@ -107,11 +107,17 @@ describe("a setup as rows", () => {
     expect([install.name, install.state, install.note]).toEqual(["Install wsp", "done", "Dialled back."]);
   });
 
-  it("names up to three of what a step put there, else the first two and how many more", () => {
-    const row = (n: number) => ({ id: `clis/${n}`, label: `cli${n}`, outcome: "installed" as const, step: "clis" as const });
-    const note = (n: number) => setupRows({ setup: { ...RUNNING, steps: [{ step: "clis", state: "done" }] }, applied: { hash: "h", at: "x", rows: Array.from({ length: n }, (_, i) => row(i + 1)) } }).find(r => r.id === "clis")?.note;
-    expect(note(3)).toBe("cli1, cli2, cli3.");
-    expect(note(9)).toBe("cli1, cli2 and 7 more.");
+  it("counts what a step put there, never naming its rows, whose labels may be paths on the box", () => {
+    const rows = (step: PlaceSetupStep, labels: readonly string[], id = (i: number) => `${step}/${i}`) => labels.map((label, i) => ({ id: id(i), label, outcome: "installed" as const, step }));
+    const note = (step: PlaceSetupStep, applied: PlaceProvisionRow[]) => setupRows({ setup: { ...RUNNING, steps: [{ step, state: "done" }] }, applied: { hash: "h", at: "x", rows: applied } }).find(r => r.id === step)?.note;
+    expect(note("skills", rows("skills", Array.from({ length: 332 }, (_, i) => `skill-${i}`)))).toBe("332 skills");
+    expect(note("clis", rows("clis", ["gh"]))).toBe("1 CLI");
+    const files = rows("mcp", ["Claude Code /root/.claude-cfg/CLAUDE.md", "Codex /root/.codex/AGENTS.md"]);
+    const servers = rows("mcp", ["context7", "linear", "playwright"], i => `agents/mcp/claude/${i}`);
+    expect(note("mcp", [...servers, ...files])).toBe("3 MCP servers, 2 agent files");
+    expect(note("mcp", servers)).toBe("3 MCP servers");
+    expect(note("mcp", files)).toBe("2 agent files");
+    expect(note("mcp", [...servers, ...files])).not.toContain("/root");
   });
 
   it("says why on the step a setup stopped at, with no items under it", () => {

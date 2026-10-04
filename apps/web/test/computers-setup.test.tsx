@@ -57,6 +57,20 @@ describe("a computer's page after a setup", () => {
     expect([...document.querySelectorAll("[data-settings-card='setup'] [data-step-row]")].map(r => r.getAttribute("data-step-row")).slice(0, 4)).toEqual(["wsp", "floor", "agents", "mcp"]);
   });
 
+  it("opens a step of the setup on its last lines of output, and stands a failed one open", async () => {
+    const failed = { ...running, state: "failed" as const, said: "apt-get exited 100", steps: [{ step: "floor" as const, state: "done" as const }, { step: "agents" as const, state: "failed" as const }] };
+    const studio = box("p_studio", "studio", { setup: failed, picks: RecipeFile.parse({ name: "studio" }) });
+    useStore.setState({ places: [here, studio] });
+    const log = ["2026-10-04T10:00:00Z [floor] apt-get install -y curl", "2026-10-04T10:00:01Z [agents] npm ERR! code E404"];
+    mountSettings({ api: settingsApi({ initGet: async () => null, placesSetupLog: async () => log } as unknown as Partial<Api>).api, at: { kind: "computer", id: "p_studio" } });
+    await settle();
+    const row = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-settings-card='setup'] [data-step-row='${id}']`)!;
+    await waitFor(() => expect(row("agents").querySelector("[data-k=step-log]")?.textContent).toBe("npm ERR! code E404"));
+    expect(row("floor").querySelector("[data-k=step-log]")).toBeNull();
+    fireEvent.click(row("floor").querySelector("[data-k=step-toggle]")!);
+    await waitFor(() => expect(row("floor").querySelector("[data-k=step-log]")?.textContent).toBe("apt-get install -y curl"));
+  });
+
   it("moves the computer onto another recipe through the host, the answer standing on its row", async () => {
     const builders: RecipeView = { name: "Builders", slug: "builders", summary: "1 agent", machines: ["studio"], file: RecipeFile.parse({ name: "Builders" }) };
     const minimal: RecipeView = { name: "Minimal", slug: "minimal", summary: "1 CLI", machines: [], file: RecipeFile.parse({ name: "Minimal" }) };

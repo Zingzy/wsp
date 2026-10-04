@@ -8,7 +8,7 @@ import { addFix } from "../adds.js";
 import { ADD_COMPUTER_WORDS } from "../format.js";
 import { githubPick } from "./choices.js";
 import { agentName } from "@wsp/catalog";
-import { SETUP_STEP_WORDS, type RecipeFile, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceSetupEvent, type PlaceSetupStep, type PlaceView, type PlaceWait } from "@wsp/protocol";
+import { MCP_ID_PREFIX, SETUP_STEP_WORDS, plural, type RecipeFile, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceSetupEvent, type PlaceSetupStep, type PlaceView, type PlaceWait } from "@wsp/protocol";
 
 /** A row's state as the marks draw it. */
 export type StepState = "waiting" | "working" | "done" | "needs-you" | "failed";
@@ -27,8 +27,6 @@ export interface StepLine {
   readonly sub?: true;
   /** A running step's time so far, which climbs, rather than the time an ended step took. */
   readonly ticking?: true;
-  /** The last line a running step wrote on the box, behind its row on hover. */
-  readonly output?: string;
 }
 
 /** A setup frame onto the setup the record held: a step's line where it stands, every step the frame names running
@@ -127,9 +125,17 @@ function doingLine(doing: Doing, picks: RecipeFile, rows: readonly PlaceProvisio
 
 const INSTALL = "Install wsp";
 
-/** What a step put there, by name: up to three, else the first two and how many more. */
-const nameList = (rows: readonly PlaceProvisionRow[]): string | undefined =>
-  rows.length === 0 ? undefined : rows.length <= 3 ? `${rows.map(r => r.label).join(", ")}.` : `${rows.slice(0, 2).map(r => r.label).join(", ")} and ${rows.length - 2} more.`;
+/** What each step puts on, as its count is read. */
+const COUNTED: Partial<Record<PlaceSetupStep, string>> = { floor: "package", agents: "agent", clis: "CLI", skills: "skill", plugins: "plugin", folders: "project", configs: "file" };
+
+/** What a step put there, counted, never named: a row's label may be a path on the box. The MCP step counts its
+ * servers apart from the agents' own files it copies with them. */
+function countLine(step: PlaceSetupStep, rows: readonly PlaceProvisionRow[]): string | undefined {
+  if (rows.length === 0) return undefined;
+  if (step !== "mcp") return plural(rows.length, COUNTED[step] ?? "item");
+  const servers = rows.filter(r => r.id.startsWith(MCP_ID_PREFIX)).length;
+  return [servers === 0 ? undefined : plural(servers, "MCP server"), servers === rows.length ? undefined : plural(rows.length - servers, "agent file")].filter(Boolean).join(", ");
+}
 
 /** The setup on a computer as rows: Install wsp, then each step with the items of it that did not land under it,
  * the sign-ins under Agents. A step not started reads waiting; a running one says what it is putting on; a sign-in
@@ -153,7 +159,7 @@ export function setupRows(place: Pick<PlaceView, "setup" | "applied" | "picks">,
         ? doing === undefined || place.picks === undefined
           ? undefined
           : doingLine(doing, place.picks, mine)
-        : (ended?.(mine, place.picks, box) ?? nameList(landed) ?? line?.note);
+        : (ended?.(mine, place.picks, box) ?? countLine(step, landed) ?? line?.note);
     out.push({ id: step, name, state, ...(note === undefined ? {} : { note }), ...(line?.ms === undefined ? {} : { ms: line.ms }), ...(stopped && setup?.said !== undefined ? { said: setup.said } : {}) });
     if (step === "agents") out.push(...signInRows(setup, rows));
     if (!stopped) for (const r of mine) if (r.outcome === "failed") out.push({ id: r.id, name: r.label, state: "failed", sub: true, ...(r.note === undefined ? {} : { said: r.note }), ...(r.fix === undefined ? {} : { fix: r.fix }) });
@@ -222,23 +228,29 @@ export function checkRows(job: PlaceAddJob | undefined): StepLine[] {
   });
 }
 
-/** How much of one line of a step's output a row's note takes: a long command is cut at its end. */
-const OUTPUT_CHARS = 120;
+/** How many of a step's last lines of output its row opens on, and how much of one line it keeps. */
+const LOG_LINES = 12;
+const LOG_CHARS = 300;
 
 /** A line of the box's setup log: its stamp, the step it was written under, and what was said. */
 const LOG_LINE = /^\S+ \[([a-z]+)\] (.*)$/;
 
-/** The last line of output each step wrote, off the end of the box's setup log. The line that marks a step running
- * or done is the step's own state, which its row already says, and is passed over. */
-export function stepOutput(lines: readonly string[]): Partial<Record<PlaceSetupStep, string>> {
-  const out: Partial<Record<PlaceSetupStep, string>> = {};
+/** Whether a row opens on its step's output: a step of the setup, not an item under one, that has started. */
+export const opensLog = (row: StepLine): boolean => row.sub !== true && row.state !== "waiting" && row.id in SETUP_STEP_WORDS;
+
+/** The last lines of output each step wrote, off the end of the box's setup log, oldest first. The line that marks a
+ * step running or done is the step's own state, which its row already says, and is passed over. */
+export function stepLogs(lines: readonly string[]): Partial<Record<PlaceSetupStep, string[]>> {
+  const out: Partial<Record<PlaceSetupStep, string[]>> = {};
   for (const line of lines) {
     const read = LOG_LINE.exec(line);
     if (read === null || !(read[1]! in SETUP_STEP_WORDS)) continue;
     const step = read[1] as PlaceSetupStep;
     const said = read[2]!.trim();
     if (said === "" || said.startsWith(`${SETUP_STEP_WORDS[step]}: `)) continue;
-    out[step] = said.length > OUTPUT_CHARS ? `${said.slice(0, OUTPUT_CHARS - 1)}…` : said;
+    const held = (out[step] ??= []);
+    held.push(said.length > LOG_CHARS ? `${said.slice(0, LOG_CHARS - 1)}…` : said);
+    if (held.length > LOG_LINES) held.shift();
   }
   return out;
 }

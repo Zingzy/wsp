@@ -31,6 +31,7 @@ export function hermesCalls(session: string, toolCalls: unknown, folder?: string
 
 export const hermesReader: HistoryReader = {
   // One database is one file: it is read whole or not at all, so its own stamp says whether any session in it moved.
+  holder: (_root, file) => file,
   async files(host, root) {
     const stamped = await stampOf(host, root);
     return stamped === undefined ? [] : [stamped];

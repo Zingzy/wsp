@@ -128,7 +128,6 @@ export const ADD_COMPUTER_WORDS = {
   /** The dialog's sentences, each said once where the rows do not say it. */
   where: "A Linux box you have root on.",
   saved: "Saved, you can finish later",
-  canClose: "You can close this. Setup keeps going.",
   restDone: "Everything else is done.",
   keepsGoing: "Setup keeps going. wsp pings you when it needs you.",
   signInLater: "You can sign in later in Settings.",

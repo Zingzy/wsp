@@ -147,7 +147,8 @@ export interface RecipeOptions {
   agents: { id: string; name: string; signins: RecipeSignIn[]; kind?: string; bytes?: number }[];
   /** `kind` is how the server signs in, as the collector read its definition. */
   mcp: { name: string; agents: string[]; kind?: ServerSignIn }[];
-  clis: { name: string; via: string; version?: string; needs?: string[]; bytes?: number }[];
+  /** `calls` is how many times the person's agents ran the CLI, off their session histories; never run, it is left off. */
+  clis: { name: string; via: string; version?: string; needs?: string[]; bytes?: number; calls?: number }[];
   skills: { name: string; from: string; linked: boolean }[];
   plugins: { name: string }[];
   /** The GitHub row carries the sign-in words it can take here: the vault only where this computer holds a gh login,

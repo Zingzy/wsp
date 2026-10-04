@@ -8,14 +8,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { collect, type Host } from "@wsp/collect";
-import { NO_RECIPE, RecipeFile, type PlaceReport } from "@wsp/protocol";
+import { NO_RECIPE, RecipeFile, type PlaceReport, type RecipeOptions } from "@wsp/protocol";
 import { createRuntime, memoryStore, newPlaceKeyPair, serveRuntime, type Runtime, type RuntimeServer } from "@wsp/runtime";
 import { WsClient } from "../../runtime/test/ws-client.js";
 import { gitCut, configTexts } from "../src/recipe-configs.js";
-import { folderOptions, githubHere, recipeOptions } from "../src/recipe-options.js";
+import { commandCalls, folderOptions, githubHere, recipeOptions } from "../src/recipe-options.js";
 import { catalogEntry, sizeBytes } from "@wsp/catalog";
 import { execFileSync } from "node:child_process";
-import { keptTools, readRecipe, readRecipes, recipeHash, recipeShelf, recipesDir, resolveRecipe, TOOLS_KEPT_MS, writeRecipe, type RecipeReading } from "../src/recipes.js";
+import { keptOptions, keptTools, readRecipe, readRecipes, recipeHash, recipeShelf, recipesDir, resolveRecipe, TOOLS_KEPT_MS, writeRecipe, type RecipeReading } from "../src/recipes.js";
 import { stubBackend } from "./stub-backend.js";
 
 let dir: string;
@@ -185,6 +185,40 @@ describe("a resolved recipe", () => {
     expect(reads).toBe(3);
   });
 
+  it("answers the options it read at once and reads them again behind the answer, one read out at a time", async () => {
+    const reads: { folders: unknown; done: (o: RecipeOptions) => void }[] = [];
+    const ask = keptOptions(folders => new Promise(done => reads.push({ folders, done })));
+    const options = (n: number): RecipeOptions => ({ agents: [], mcp: [], clis: [{ name: `cli-${n}`, via: "brew" }], skills: [], plugins: [], configs: [] });
+    const here = [{ name: "wsp", path: "/Users/dev/wsp" }];
+    const turn = () => new Promise(done => setImmediate(done));
+
+    const first = ask(here);
+    const together = ask(here);
+    await turn();
+    expect(reads).toHaveLength(1);
+    reads[0]!.done(options(1));
+    expect(await first).toEqual(options(1));
+    expect(await together).toEqual(options(1));
+
+    // Held: the answer is the last read, and a fresh read is out for the next ask.
+    expect(await ask(here)).toEqual(options(1));
+    await turn();
+    expect(reads).toHaveLength(2);
+    expect(await ask(here)).toEqual(options(1));
+    await turn();
+    expect(reads).toHaveLength(2);
+    reads[1]!.done(options(2));
+    await turn();
+    expect(await ask(here)).toEqual(options(2));
+
+    // Other folders are another read, waited on.
+    const other = ask([]);
+    await turn();
+    expect(reads.at(-1)!.folders).toEqual([]);
+    reads.at(-1)!.done(options(3));
+    expect(await other).toEqual(options(3));
+  });
+
   it("asks no manager anything when the recipe picks no CLI", async () => {
     let asked = 0;
     await resolveRecipe({ ...LAPTOP, clis: {} }, { home, tools: async () => (asked++, []) });
@@ -298,6 +332,26 @@ describe("what a recipe picks from", () => {
     ]);
     expect(JSON.stringify(options)).not.toContain("iterm2");
     expect(JSON.stringify(options)).not.toContain("afsctool");
+  });
+
+  it("says how many times the agents ran each CLI, by the tool a command stands for or by its own name, and nothing for one never run", () => {
+    const tool = (id: string) => ({ rung: "tools" as const, id, label: id.split("/")[2]!, paths: [], bytes: 0, default: "bring" as const });
+    const usage = (commands: Record<string, number>) => ({ usage: { commands: new Map(Object.entries(commands).map(([name, calls]) => [name, { sessions: 1, calls }])) } });
+    const calls = commandCalls([usage({ gh: 8, pnpm: 900, a2ps: 3 }), usage({ gh: 4, pnpm: 208 })]);
+    const options = recipeOptions({ entries: [tool("tools/npm/pnpm"), tool("tools/brew/gh"), tool("tools/brew/a2ps"), tool("tools/brew/cowsay")] }, { skills: [], plugins: [], configs: [], github: false, calls });
+    expect(options.clis.map(c => [c.name, c.calls])).toEqual([
+      ["pnpm", 1_108],
+      ["gh", 12],
+      ["a2ps", 3],
+      ["cowsay", undefined],
+    ]);
+  });
+
+  it("leaves out of the CLIs every row the base packages put on each box, however often the agents ran it", () => {
+    const tool = (id: string) => ({ rung: "tools" as const, id, label: id.split("/")[2]!, paths: [], bytes: 0, default: "bring" as const });
+    const calls = commandCalls([{ usage: { commands: new Map([["rg", { sessions: 3, calls: 1_108 }], ["jq", { sessions: 1, calls: 40 }]]) } }]);
+    const options = recipeOptions({ entries: [tool("tools/brew/ripgrep"), tool("tools/brew/jq"), tool("tools/brew/fd"), tool("tools/brew/python@3.12"), tool("tools/brew/gh")] }, { skills: [], plugins: [], configs: [], github: false, calls });
+    expect(options.clis.map(c => c.name)).toEqual(["gh"]);
   });
 
   it("offers a person's own skills and leaves a plugin's to its plugin", () => {
