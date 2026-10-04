@@ -8,7 +8,8 @@ import type { SlateEngine } from "../engine.js";
 import { PieceHost, type PieceView } from "../SlateView.js";
 import { figure, str } from "./look.js";
 import { isStrip, stripCells } from "./riders.js";
-import { placeOf } from "./runs.js";
+import { BarSwitch } from "./barswitch.js";
+import { isBarHolder, placeOf } from "./runs.js";
 
 /** Columns from 360 px of the grid's own width; under it, one column. Whole class names, so Tailwind finds them. */
 const COLUMNS: Record<number, string> = { 2: "@min-[360px]:grid-cols-2", 3: "@min-[360px]:grid-cols-3", 4: "@min-[360px]:grid-cols-4" };
@@ -77,7 +78,9 @@ export const grid: PieceView = {
   type: "grid",
   fills: isStrip,
   component: ({ id, props, slate, children }) =>
-    isStrip(slate, id) ? (
+    isBarHolder(slate, id) ? (
+      <BarSwitch slate={slate} ids={slate.piece(id)?.children ?? []} />
+    ) : isStrip(slate, id) ? (
       <Strip id={id} slate={slate} />
     ) : (
       <div data-slate-grid className="@container min-w-0">

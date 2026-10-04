@@ -38,8 +38,8 @@ export function toneOf(value: SlateJson | undefined, slate: SlateEngine, id: str
   return value as Tone;
 }
 
-/** The steps a layout's children stand apart: 4, 8 and 12, nothing else. */
-export const GAP: Record<string, string> = { tight: "gap-1", normal: "gap-2", loose: "gap-3" };
+/** The steps a layout's children stand apart: 4, 12 (pieces, the owner's spacing of 2026-10-05) and 16. */
+export const GAP: Record<string, string> = { tight: "gap-1", normal: "gap-3", loose: "gap-4" };
 export const gapOf = (value: SlateJson | undefined): string => GAP[typeof value === "string" ? value : "normal"] ?? GAP["normal"]!;
 
 export const str = (value: SlateJson | undefined): string | undefined =>
@@ -99,3 +99,7 @@ export function present<T>(slate: SlateEngine, raw: SlatePropValue | undefined, 
     return when === undefined || truthy(slate.evaluate(when));
   });
 }
+
+/** The segmented control as the toolbar and the bar lists' switch draw it: the keycap's edge and fill, 26 px segments. */
+export const SEGMENTED = "h-8 gap-0.5 rounded-[10px] border-input bg-input-fill shadow-[inset_0_1px_0_var(--keycap-top)]";
+export const SEGMENT = "h-[26px] rounded-lg px-2.5";

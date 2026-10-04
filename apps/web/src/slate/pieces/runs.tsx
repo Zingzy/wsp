@@ -9,6 +9,7 @@ import type { SlateEngine } from "../engine.js";
 import { PieceHost } from "../SlateView.js";
 import { isNoteText } from "./look.js";
 import { isStrip, riddenBy } from "./riders.js";
+import { BarSwitch } from "./barswitch.js";
 
 /** Pieces a person acts with, which make a row of their own a toolbar when it holds nothing else. */
 const CONTROLS: ReadonlySet<string> = new Set(["button", "select", "toggle", "input"]);
@@ -63,6 +64,24 @@ export function placeOf(slate: SlateEngine, id: string): Place {
   return "inside";
 }
 
+/** A grid or row holding bar lists and nothing else. */
+export function isBarHolder(slate: SlateEngine, id: string): boolean {
+  const piece = slate.piece(id);
+  const children = piece?.children ?? [];
+  return (piece?.type === "grid" || piece?.type === "row") && children.length > 0 && children.every(child => slate.piece(child)?.type === "bars");
+}
+
+/** Bar lists switched in one card under a segmented control (the owner's pick C, 2026-10-05): two or more written one
+ * after another, or any held in a grid or row of nothing else. */
+export function inBarSwitch(slate: SlateEngine, id: string): boolean {
+  if (slate.piece(id)?.type !== "bars") return false;
+  const parent = slate.parentId(id);
+  if (parent !== undefined && isBarHolder(slate, parent)) return true;
+  const siblings = parent === undefined ? [] : (slate.piece(parent)?.children ?? []);
+  const at = siblings.indexOf(id);
+  return [siblings[at - 1], siblings[at + 1]].some(other => other !== undefined && slate.piece(other)?.type === "bars");
+}
+
 /** A card of rows: each row at the card's inset, 12 px above and below, unless it draws its own rows edge to edge. */
 const CARD = cn(
   CARD_SURFACE,
@@ -73,11 +92,17 @@ const CARD = cn(
 
 /** A group's children, the rows among them gathered into cards and the rest bare between. */
 export function Runs({ slate, ids }: { slate: SlateEngine; ids: readonly string[] }) {
-  const runs: { key: string; card?: string[] }[] = [];
+  const runs: { key: string; card?: string[]; lists?: string[] }[] = [];
   for (const id of ids) {
     const last = runs.at(-1);
+    // Bar lists, and grids or rows of nothing else, one after another share one switch.
+    if (inBarSwitch(slate, id) || isBarHolder(slate, id)) {
+      const lists = isBarHolder(slate, id) ? (slate.piece(id)?.children ?? []) : [id];
+      if (last?.lists !== undefined) last.lists.push(...lists);
+      else runs.push({ key: id, lists: [...lists] });
+    }
     // A status and its text riding a number's note draw nothing, so they join the number's card, where they take no row.
-    if (riddenBy(slate, id) !== undefined && last?.card !== undefined) last.card.push(id);
+    else if (riddenBy(slate, id) !== undefined && last?.card !== undefined) last.card.push(id);
     // A meta line among rows is a row of their card; after a chart or a list it stands bare as its foot.
     else if (isNoteText(slate, id) && last?.card !== undefined) last.card.push(id);
     else if (!isCardRow(slate, id)) runs.push({ key: id });
@@ -87,7 +112,9 @@ export function Runs({ slate, ids }: { slate: SlateEngine; ids: readonly string[
   return (
     <>
       {runs.map(run =>
-        run.card === undefined ? (
+        run.lists !== undefined ? (
+          <BarSwitch key={run.key} slate={slate} ids={run.lists} />
+        ) : run.card === undefined ? (
           <PieceHost key={run.key} id={run.key} />
         ) : (
           <div key={run.key} data-slate-card className={CARD}>

@@ -6,7 +6,7 @@ import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
 import { SECTION_HEAD } from "../../settings/layout.js";
 import { figure, num, str, TONE_FILL, toneOf } from "./look.js";
-import { placeOf } from "./runs.js";
+import { inBarSwitch, placeOf } from "./runs.js";
 
 export const bars: PieceView = {
   type: "bars",
@@ -21,11 +21,13 @@ export const bars: PieceView = {
     const max = num(props["max"]) ?? Math.max(0, ...rows.map(r => r.value ?? 0));
     const format = props["format"] ?? "value";
     const place = placeOf(slate, id);
-    const inset = place === "inside" ? "" : "px-(--settings-inset,20px)";
+    // In the switch the segment names the list and the switch's card holds it, so the list is its rows alone.
+    const switched = inBarSwitch(slate, id);
+    const inset = place === "inside" && !switched ? "" : "px-(--settings-inset,20px)";
     return (
       <div className="flex min-w-0 flex-col gap-2.5">
-        <span className={SECTION_HEAD}>{str(props["label"])}</span>
-        <div className={cn("flex min-w-0 flex-col [&>*+*]:border-t [&>*+*]:border-border/50", place !== "inside" && CARD_SURFACE)}>
+        {switched ? null : <span className={SECTION_HEAD}>{str(props["label"])}</span>}
+        <div className={cn("flex min-w-0 flex-col [&>*+*]:border-t [&>*+*]:border-border/50", place !== "inside" && !switched && CARD_SURFACE)}>
           {rows.length === 0 ? <span className={cn("flex min-h-11 items-center py-3 text-[13px] leading-5 text-muted-foreground", inset)}>Nothing here</span> : null}
           {rows.map((row, at) => {
             const share = row.value === undefined || max <= 0 ? 0 : Math.max(0, Math.min(1, row.value / max));
