@@ -61,7 +61,7 @@ beforeEach(() => {
   // Each test its own thread id, so the window-lifetime engines of one test never meet the next's.
   thread += 1;
   ROW.threadId = `t${thread}`;
-  useSlateStore.setState({ byThread: {}, asking: {}, lastTurn: {} });
+  useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {} });
   useRightPanelStore.setState({ byWorkspaceId: {} });
 });
 afterEach(cleanup);
@@ -126,9 +126,14 @@ describe("schema 2 in the Slate tab", () => {
     expect(row.dataset["slateHeld"]).toBe("check");
     expect(within(row).getByText(CHECK_ASK.cmd)).toBeTruthy();
     expect(screen.getByText("Approve the check to go on")).toBeTruthy();
+    // The sheet opens on its own the first time the tab shows the held run; closed unanswered, it waits on Review.
+    fireEvent.keyDown(await screen.findByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(slates.approve).not.toHaveBeenCalled();
     fireEvent.click(within(row).getByRole("button", { name: "Review" }));
     const sheet = await screen.findByRole("dialog");
     expect(within(sheet).getByText("Run this command?")).toBeTruthy();
+    expect(sheet.querySelector("[data-slate-consent-cadence]")?.textContent).toBe("Runs each time $project changes");
     expect(sheet.querySelector("[data-slate-consent-cmd]")?.textContent).toBe(CHECK_ASK.cmd);
     expect(sheet.querySelector('[data-slate-consent-env="PROJECT"]')?.textContent).toContain("wsp-landing");
     const secret = sheet.querySelector('[data-slate-consent-env="VERCEL_TOKEN"]')?.textContent ?? "";
@@ -211,5 +216,107 @@ describe("schema 2 in the Slate tab", () => {
     expect(document.body.innerHTML).not.toContain(TOKEN);
     // The handle unlocks the step, as the host's push would.
     expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+  });
+});
+
+describe("round 2: held runs ask on their own, held buttons say why, submit is Enter", () => {
+  const TIMERS = slate({
+    root: "root",
+    runs: {
+      spot: { kind: "cmd", cmd: "curl -s https://api.example.com/spot", every: 60, always: true },
+      disk: { kind: "cmd", cmd: "df -h .", every: 30 },
+    },
+    pieces: { root: { type: "column", children: ["t"] }, t: { type: "text", props: { text: "Prices" } } },
+  });
+  const spotAsk: SlateAsk = { ...CHECK_ASK, key: "k-spot", run: "spot", cmd: "curl -s https://api.example.com/spot", env: {} };
+  const diskAsk: SlateAsk = { ...CHECK_ASK, key: "k-disk", run: "disk", cmd: "df -h .", env: {} };
+  const held = { state: "held", why: "needs your approval", runs: 0 };
+
+  it("opens the sheet for a timer's held run when the tab shows it, one command at a time, saying how often and whether hidden", async () => {
+    const slates = host(record(TIMERS, { spot: held, disk: held }, { asks: [spotAsk, diskAsk] }));
+    openThread(slates);
+    const first = await screen.findByRole("dialog");
+    expect(first.querySelector("[data-slate-consent]")?.getAttribute("data-slate-consent")).toBe("spot");
+    expect(first.querySelector("[data-slate-consent-cadence]")?.textContent).toBe("Runs every 60 s, also while this slate is not on screen");
+    expect(first.querySelector("[data-slate-consent-more]")?.textContent).toBe("1 more command waits after this one");
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    await act(async () => fireEvent.click(within(first).getByRole("button", { name: "Run once" })));
+    expect(slates.approve).toHaveBeenCalledWith(tid(), "k-spot", "once");
+    const second = await waitFor(() => {
+      const sheet = screen.getByRole("dialog");
+      expect(sheet.querySelector("[data-slate-consent]")?.getAttribute("data-slate-consent")).toBe("disk");
+      return sheet;
+    });
+    expect(second.querySelector("[data-slate-consent-cadence]")?.textContent).toBe("Runs every 30 s, only while this slate is on screen");
+    expect(second.querySelector("[data-slate-consent-more]")).toBeNull();
+    await act(async () => fireEvent.click(within(second).getByRole("button", { name: "Always in this thread" })));
+    expect(slates.approve).toHaveBeenCalledWith(tid(), "k-disk", "thread");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("opens the sheet when a reaction holds a run after the tab is already showing", async () => {
+    const first = record(APPENDIX_C, { step: 2, vercelToken: HANDLE });
+    const get = vi.fn(async () => ({ record: first }));
+    const slates = host(first, { get });
+    openThread(slates);
+    await screen.findByText("Step 2 of 4");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The host's reaction held $check; the push names it held and the record read after carries its sheet.
+    get.mockResolvedValue({ record: record(APPENDIX_C, { step: 2, vercelToken: HANDLE, project: "wsp-landing", check: held }, { asks: [CHECK_ASK] }) });
+    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 1, revision: 5, values: { $project: "wsp-landing", $check: held } });
+    const sheet = await screen.findByRole("dialog");
+    expect(sheet.querySelector("[data-slate-consent-cmd]")?.textContent).toBe(CHECK_ASK.cmd);
+    expect(sheet.querySelector("[data-slate-consent-cadence]")?.textContent).toBe("Runs each time $project changes");
+  });
+
+  it("draws a held button disabled with its sentence on hover, and lets null or false go", async () => {
+    const doc = slate({
+      root: "root",
+      values: { ok: { start: false } },
+      pieces: {
+        root: { type: "column", children: ["next", "free", "off"] },
+        next: { type: "button", props: { label: "Next", held: "Check the project first" }, on: { press: { do: "set", path: "$ok", value: true } } },
+        free: { type: "button", props: { label: "Free", held: null }, on: { press: { do: "set", path: "$ok", value: true } } },
+        off: { type: "button", props: { label: "Off", held: { bind: "$ok" } }, on: { press: { do: "set", path: "$ok", value: true } } },
+      },
+    });
+    openThread(host(record(doc)));
+    const next = (await screen.findByRole("button", { name: "Next" })) as HTMLButtonElement;
+    expect(next.disabled).toBe(true);
+    const wrap = next.closest("[data-slate-held-button]") as HTMLElement;
+    expect(wrap.dataset["slateHeldButton"]).toBe("Check the project first");
+    fireEvent.pointerEnter(wrap, { pointerType: "mouse" });
+    fireEvent.mouseEnter(wrap);
+    fireEvent.mouseMove(wrap);
+    expect(await screen.findByText("Check the project first", {}, { timeout: 2_000 })).toBeTruthy();
+    for (const name of ["Free", "Off"]) {
+      const button = screen.getByRole("button", { name }) as HTMLButtonElement;
+      expect(button.disabled).toBe(false);
+      expect(button.closest("[data-slate-held-button]")).toBeNull();
+    }
+  });
+
+  it("shows an input's submit label as the Enter hint, with no second button, and Enter submits", async () => {
+    const doc = slate({
+      root: "root",
+      values: { q: { start: "" } },
+      pieces: {
+        root: { type: "column", children: ["ask", "note"] },
+        ask: { type: "input", props: { label: "Issue", value: { bind: "$q" }, submit: "Look up" }, on: { submit: { do: "send", text: "Look this up" } } },
+        note: { type: "input", props: { label: "Note", value: { bind: "$q" }, lines: 3, submit: "Save" }, on: { submit: { do: "send", text: "Saved" } } },
+      },
+    });
+    const slates = host(record(doc), { event: vi.fn(async () => ({ outcome: "started" as const, said: "" })) });
+    openThread(slates);
+    const field = (await screen.findByLabelText("Issue")) as HTMLInputElement;
+    expect(screen.queryByRole("button", { name: "Look up" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    const hints = [...document.querySelectorAll("[data-slate-submit-hint]")].map(hint => hint.textContent);
+    expect(hints[0]).toBe("↵Look up");
+    expect(hints[1]).toMatch(/^(⌘|Ctrl) ↵Save$/);
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: "WSP-12" } });
+    await act(async () => fireEvent.keyDown(field, { key: "Enter" }));
+    await waitFor(() => expect(slates.event).toHaveBeenCalledWith(tid(), expect.objectContaining({ piece: "ask", event: "submit" })));
   });
 });

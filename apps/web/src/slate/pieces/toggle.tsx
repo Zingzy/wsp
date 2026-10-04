@@ -5,7 +5,7 @@ import { Switch } from "../../components/ui/switch.js";
 import type { PieceView } from "../SlateView.js";
 import { truthy } from "../actions.js";
 import { getOwn } from "../paths.js";
-import { str } from "./look.js";
+import { str, heldBy } from "./look.js";
 import { twoWayPath } from "./press.js";
 
 export const toggle: PieceView = {
@@ -15,7 +15,7 @@ export const toggle: PieceView = {
     const path = twoWayPath(piece.props?.["value"]);
     const on = truthy(path === undefined ? props["value"] : getOwn(slate.values, path));
     const note = str(props["note"]);
-    const held = str(props["held"]);
+    const held = heldBy(props["held"]);
     return (
       <div className="flex min-w-0 items-center gap-3">
         <label htmlFor={fieldId} className="flex min-w-0 flex-1 flex-col">

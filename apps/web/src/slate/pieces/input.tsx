@@ -6,12 +6,13 @@ import type { SlateJson } from "@wsp/protocol";
 import { useId, useState, type KeyboardEvent } from "react";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
+import { Kbd } from "../../components/ui/kbd.js";
 import { Textarea } from "../../components/ui/textarea.js";
-import { cn } from "../../lib/utils.js";
+import { cn, isMacPlatform } from "../../lib/utils.js";
 import type { Held } from "../engine.js";
 import type { PieceView, PieceViewProps } from "../SlateView.js";
 import { isSecretHandle } from "../model.js";
-import { str } from "./look.js";
+import { str, heldBy } from "./look.js";
 import { Outcome } from "./outcome.js";
 import { twoWayPath, usePress } from "./press.js";
 import { getOwn } from "../paths.js";
@@ -28,7 +29,7 @@ function SecretInput({ path, label, props, slate, sender }: { path: string; labe
   const handle = getOwn(slate.values, path);
   const filled = isSecretHandle(handle) && handle.set;
   const dots = filled ? "•".repeat(Math.min(24, Math.max(4, typeof handle.len === "number" ? handle.len : 8))) : undefined;
-  const held = str(props["held"]);
+  const held = heldBy(props["held"]);
   const send = () => {
     if (!touched || (draft === "" && !filled)) return;
     const text = draft;
@@ -87,7 +88,7 @@ function TextInput({ piece, props, slate, sender, raise, path }: PieceViewProps 
   const numeric = props["kind"] === "number";
   const lines = typeof props["lines"] === "number" ? Math.max(1, Math.min(20, Math.floor(props["lines"]))) : 1;
   const label = str(props["label"]) ?? "";
-  const held = str(props["held"]);
+  const held = heldBy(props["held"]);
   // While the person types, the field draws its own text; the slate's copy follows a frame behind.
   const [draft, setDraft] = useState<string | null>(null);
   const [conflict, setConflict] = useState<Held | undefined>(undefined);
@@ -131,21 +132,17 @@ function TextInput({ piece, props, slate, sender, raise, path }: PieceViewProps 
   };
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <label htmlFor={fieldId} className="text-[13px] leading-5 text-foreground">
-        {label}
-      </label>
-      <div className="flex min-w-0 items-start gap-2">
-        {lines > 1 ? (
-          <Textarea {...field} rows={lines} onChange={event => write(event.target.value)} />
-        ) : (
-          <Input {...field} nativeInput type={numeric ? "number" : props["kind"] === "password" ? "password" : "text"} onChange={event => write(event.target.value)} />
-        )}
-        {piece.on?.submit !== undefined ? (
-          <Button variant="outline" disabled={submit.busy || held !== undefined} onClick={submit.press}>
-            {str(props["submit"]) ?? "Send"}
-          </Button>
-        ) : null}
+      <div className="flex min-w-0 items-baseline gap-2">
+        <label htmlFor={fieldId} className="min-w-0 flex-1 text-[13px] leading-5 text-foreground">
+          {label}
+        </label>
+        {piece.on?.submit !== undefined && held === undefined ? <SubmitHint label={str(props["submit"]) ?? "Send"} withMod={lines > 1} busy={submit.busy} /> : null}
       </div>
+      {lines > 1 ? (
+        <Textarea {...field} rows={lines} onChange={event => write(event.target.value)} />
+      ) : (
+        <Input {...field} nativeInput type={numeric ? "number" : props["kind"] === "password" ? "password" : "text"} onChange={event => write(event.target.value)} />
+      )}
       {conflict !== undefined && path !== undefined ? (
         <div data-slate-conflict className="flex flex-wrap items-center gap-2 text-xs leading-4 text-muted-foreground">
           <span>The agent changed this while you were typing</span>
@@ -174,5 +171,16 @@ function TextInput({ piece, props, slate, sender, raise, path }: PieceViewProps 
       ) : null}
       <Outcome said={submit.said} refused={submit.refused} />
     </div>
+  );
+}
+
+/** What Enter does in the field, on the label's line: the submit label after its key, never a second button. */
+function SubmitHint({ label, withMod, busy }: { label: string; withMod: boolean; busy: boolean }) {
+  const mod = typeof navigator !== "undefined" && isMacPlatform(navigator.platform) ? "⌘" : "Ctrl";
+  return (
+    <span data-slate-submit-hint className={cn("flex shrink-0 items-center gap-1 text-xs leading-4 text-muted-foreground", busy && "opacity-64")}>
+      <Kbd>{withMod ? `${mod} ↵` : "↵"}</Kbd>
+      {label}
+    </span>
   );
 }

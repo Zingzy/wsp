@@ -25,14 +25,25 @@ export interface SlateAsking {
 interface SlateStoreState {
   byThread: Record<string, SlateEntry | undefined>;
   asking: Record<string, SlateAsking | undefined>;
+  /** The approval keys whose sheet this window already showed, by thread: a held run opens its sheet on its own once,
+   * then waits on its row's Review. */
+  seen: Record<string, readonly string[] | undefined>;
   /** Each thread's latest ended turn as session.done carried it, for thread.context, thread.lastTurn and tokens. */
   lastTurn: Record<string, TurnResult | undefined>;
 }
 
-export const useSlateStore = create<SlateStoreState>(() => ({ byThread: {}, asking: {}, lastTurn: {} }));
+export const useSlateStore = create<SlateStoreState>(() => ({ byThread: {}, asking: {}, seen: {}, lastTurn: {} }));
 
 export function askConsent(threadId: string, asking: SlateAsking | undefined): void {
   useSlateStore.setState(s => ({ asking: { ...s.asking, [threadId]: asking } }));
+}
+
+/** The sheet for this key was shown and closed, answered or not: it does not open on its own again here. */
+export function markSeen(threadId: string, key: string): void {
+  useSlateStore.setState(s => {
+    const seen = s.seen[threadId] ?? [];
+    return seen.includes(key) ? s : { seen: { ...s.seen, [threadId]: [...seen, key] } };
+  });
 }
 
 /** Where the window's slate roads lead: the api once bound, and the thread the centre shows with its panel's key. */

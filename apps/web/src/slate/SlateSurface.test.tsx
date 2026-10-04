@@ -62,7 +62,7 @@ function select(slates: SlateApi, threadId: string | null) {
 const event = (e: Record<string, unknown>) => act(() => useStore.getState().applyEvent(e as unknown as ProtocolEvent));
 
 beforeEach(() => {
-  useSlateStore.setState({ byThread: {}, asking: {}, lastTurn: {} });
+  useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {} });
   useRightPanelStore.setState({ byWorkspaceId: {} });
 });
 afterEach(cleanup);

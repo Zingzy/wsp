@@ -11,13 +11,13 @@ import { ScrollArea } from "../components/ui/scroll-area.js";
 import { useSelectedThreadId, useStore } from "../protocol/store.js";
 import { requestComposerFocus } from "../shell/shellRequests.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
-import { ConsentSheet, HeldRuns } from "./consent.js";
+import { cadenceOf, ConsentSheet, HeldRuns } from "./consent.js";
 import { DOC } from "./engine.js";
-import { isRunRecord } from "./model.js";
+import { isRunRecord, type SlateAsk } from "./model.js";
 import { SLATE_VIEWS } from "./pieces/index.js";
 import { bindSources } from "./sources/binder.js";
 import { SlateView, usePieceVersion } from "./SlateView.js";
-import { askConsent, loadSlate, slateBundle, slateLink, useSlateStore, type SlateEntry } from "./store.js";
+import { askConsent, loadSlate, markSeen, slateBundle, slateLink, useSlateStore, type SlateEntry } from "./store.js";
 import { threadWorkspace } from "./SlateHost.js";
 
 /** The hold a drawn slate keeps on the host while the tab shows it (07, "A timer"). */
@@ -83,7 +83,7 @@ function ThreadSlate({ threadId }: { threadId: string }) {
   return (
     <div data-slate-surface={threadId} className="flex min-h-0 flex-1 flex-col">
       <SlateHeader threadId={threadId} entry={entry} />
-      <HeldRuns engine={bundle.engine} asks={entry.record?.asks ?? []} review={run => askConsent(threadId, { run })} refuse={ask => void slateLink(threadId).approve(ask.key, "refuse")} />
+      <HeldRuns engine={bundle.engine} asks={entry.record?.asks ?? []} review={run => askConsent(threadId, { run })} refuse={ask => refuse(threadId, ask)} />
       <Consent threadId={threadId} />
       <ScrollArea className="min-h-0 flex-1">
         <div className="px-3 pb-3 pt-1">
@@ -131,17 +131,39 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   );
 }
 
-/** The consent sheet over the tab, while a press held a run or the person pressed Review: the host's ask, off the
- * press's answer or the record; a held run the record has no ask for yet is fetched again. */
+/** Don't on a held run's row: its sheet does not open on its own after, and the record is read again. */
+function refuse(threadId: string, ask: SlateAsk): void {
+  markSeen(threadId, ask.key);
+  void slateLink(threadId).approve(ask.key, "refuse").then(() => loadSlate(threadId), () => undefined);
+}
+
+/** The consent sheet over the tab, one command at a time: the one a press held or Review named, else the first held
+ * run whose sheet this window has not shown yet, so a run a timer or a reaction wants asks as soon as the tab shows
+ * it. A sheet closed, answered or not, does not open on its own again; its row's Review opens it. */
 function Consent({ threadId }: { threadId: string }) {
   const asking = useSlateStore(s => s.asking[threadId]);
   const asks = useSlateStore(s => s.byThread[threadId]?.record?.asks);
-  const ask = asking?.ask ?? asks?.find(a => a.run === asking?.run);
+  const seen = useSlateStore(s => s.seen[threadId]);
+  const unseen = (asks ?? []).filter(a => !(seen ?? []).includes(a.key));
+  const ask = asking === undefined ? unseen[0] : (asking.ask ?? asks?.find(a => a.run === asking.run));
   useEffect(() => {
     if (asking !== undefined && ask === undefined) void loadSlate(threadId);
   }, [asking, ask, threadId]);
   if (ask === undefined) return null;
-  return <ConsentSheet ask={ask} answer={scope => slateLink(threadId).approve(ask.key, scope)} onClose={() => askConsent(threadId, undefined)} />;
+  const close = () => {
+    markSeen(threadId, ask.key);
+    askConsent(threadId, undefined);
+  };
+  return (
+    <ConsentSheet
+      key={ask.key}
+      ask={ask}
+      cadence={cadenceOf(slateBundle(threadId).engine.document, ask.run)}
+      more={unseen.filter(a => a.key !== ask.key).length}
+      answer={scope => slateLink(threadId).approve(ask.key, scope).then(() => void loadSlate(threadId))}
+      onClose={close}
+    />
+  );
 }
 
 /** No slate yet, cleared, rewound to before it, or newer than this build: the panel's own empty state. */

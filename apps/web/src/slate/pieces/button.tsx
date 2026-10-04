@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { stepsOf, type SlateStep } from "../model.js";
 import { Button, DANGER_BUTTON } from "../../components/ui/button.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
 import type { PieceView } from "../SlateView.js";
-import { str } from "./look.js";
+import { str, heldBy } from "./look.js";
 import { Outcome } from "./outcome.js";
 import { usePress } from "./press.js";
 
@@ -39,24 +40,36 @@ export const button: PieceView = {
   component: function ButtonPiece({ id, piece, props, slate, raise }) {
     const { busy, said, refused, press } = usePress(() => raise("press"));
     const label = str(props["label"]) ?? "";
-    const held = str(props["held"]);
+    const held = heldBy(props["held"]);
     const kind = props["variant"];
     const variant = kind === "primary" && slate.isLoud("primary", id) ? "default" : kind === "quiet" ? "ghost" : "outline";
-    const title = held ?? str(props["note"]) ?? pressTitle(piece.on?.press);
+    const control = (
+      <Button
+        variant={variant}
+        size={props["size"] === "small" ? "xs" : "default"}
+        className={kind === "danger" ? DANGER_BUTTON : undefined}
+        held={held !== undefined}
+        disabled={busy}
+        aria-busy={busy || undefined}
+        title={held === undefined ? (str(props["note"]) ?? pressTitle(piece.on?.press)) : undefined}
+        onClick={press}
+      >
+        {label}
+      </Button>
+    );
     return (
       <div className="flex min-w-0 flex-col items-start gap-1">
-        <Button
-          variant={variant}
-          size={props["size"] === "small" ? "xs" : "default"}
-          className={kind === "danger" ? DANGER_BUTTON : undefined}
-          held={held !== undefined}
-          disabled={busy}
-          aria-busy={busy || undefined}
-          title={title}
-          onClick={press}
-        >
-          {label}
-        </Button>
+        {held === undefined ? (
+          control
+        ) : (
+          // A disabled button takes no pointer, so the sentence it is held by rides a tooltip on the span around it.
+          <Tooltip>
+            <TooltipTrigger render={<span data-slate-held-button={held} className="inline-flex" />}>{control}</TooltipTrigger>
+            <TooltipPopup side="top" className="max-w-72 text-pretty">
+              {held}
+            </TooltipPopup>
+          </Tooltip>
+        )}
         <Outcome said={said} refused={refused} />
       </div>
     );
