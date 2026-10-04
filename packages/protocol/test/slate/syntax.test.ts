@@ -94,6 +94,22 @@ describe("patches", () => {
     return applySlatePatch(base, values, p.patch!);
   };
 
+  it("sets a piece's text from a text child of <props>, with its holes, and refuses one on a piece that takes no text", () => {
+    const r = apply(`<props id="eta">Due in {$steps | count} steps</props>`);
+    expect(r.errors).toEqual([]);
+    expect(r.document!.pieces.eta!.props).toEqual({ value: { format: "Due in ${$steps | count} steps" } });
+    expect(apply(`<props id="eta" tone="muted">Later</props>`).document!.pieces.eta!.props).toEqual({ value: "Later", tone: "muted" });
+    expect(parseSlatePatch(`<props id="week">Hi</props>`, base).errors.map(e => e.code)).toEqual(["P105"]);
+    expect(parseSlatePatch(`<props id="eta" value="a">b</props>`, base).errors.map(e => e.code)).toEqual(["T303"]);
+  });
+
+  it("patches a piece whose id is also a run's name", () => {
+    const d = doc(`<slate>\n  <run name="spot" cmd="true" />\n  <column><text id="spot">x</text></column>\n</slate>`);
+    const p = parseSlatePatch(`<props id="spot" tone="muted" />`, d);
+    expect(p.errors).toEqual([]);
+    expect(applySlatePatch(d, slateStartValues(d), p.patch!).document!.pieces.spot!.props).toEqual({ value: "x", tone: "muted" });
+  });
+
   it("merges props, removes one with null, and leaves the rest", () => {
     const r = apply(`<props id="week" tone="warning" note={null} />`);
     expect(r.errors).toEqual([]);

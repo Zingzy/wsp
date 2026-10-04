@@ -148,3 +148,40 @@ describe("the sketch says what the person sees", () => {
     });
   }
 });
+
+describe("the sketch of the sessions' writes", () => {
+  const wrap = (pieces: string, decls = ""): string => `<slate title="T">\n${decls}\n  <column>\n    ${pieces}\n  </column>\n</slate>`;
+  const sketch = (text: string, set: Record<string, SlateJson> = {}): string => {
+    const r = parseSlate(text);
+    expect(r.errors).toEqual([]);
+    return sketchSlate(r.document!, { ...slateStartValues(r.document!), ...set }, { now });
+  };
+
+  it("leaves out a fact, a column and an option whose when does not hold, and keeps them when it does", () => {
+    const decls = `  <value name="all" start={false} />\n  <value name="pick" start={null} />\n  <value name="rows" start={[{ name: "node", pid: 19271 }]} />`;
+    const text = wrap(`<facts><fact label="Name" value="node" /><fact label="PID" value="19271" when={$all} /></facts>
+    <table items={$rows}><col title="Name" value={item.name} /><col title="PID" value={item.pid} when={$all} /></table>
+    <select label="Pick" value={$pick}><option value="a" /><option value="b" when={$all} /></select>`, decls);
+    const off = sketch(text);
+    expect(off).toContain("Name: node  [facts-1 facts]");
+    expect(off).not.toContain("PID: 19271");
+    expect(off).toContain("| Name |  [table-1 table]");
+    expect(off).toContain("Pick: (none) (of a)");
+    const on = sketch(text, { all: true });
+    expect(on).toContain("Name: node  PID: 19271");
+    expect(on).toContain("| Name | PID |");
+    expect(on).toContain("(of a, b)");
+  });
+
+  it("draws a section a literal open={false} starts shut as collapsed", () => {
+    expect(sketch(wrap(`<section title="More" collapsible open={false}><text>inside</text></section>`))).toContain("More (collapsed)");
+  });
+
+  it("names an icon a formula gives that the kit lacks as a problem, and stays quiet on one it has", () => {
+    const text = wrap(`<number label="Change" value={$d} icon={$d >= 0 ? 'trending-up' : 'rocket-ship'} />`, `  <value name="d" start={1} />`);
+    expect(sketch(text)).toContain("0 problems");
+    const s = sketch(text, { d: -1 });
+    expect(s).toContain("1 problem");
+    expect(s).toContain('R905 number-1.icon: icon "rocket-ship" is not in the kit, so it draws none');
+  });
+});

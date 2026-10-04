@@ -353,7 +353,7 @@ class Compiler {
     const kinds = (["cmd", "tool", "resource"] as const).filter(k => attr(k) !== undefined || (k === "cmd" && el.text !== undefined));
     if (attr("cmd") !== undefined && el.text !== undefined) { this.error("K701", `<run name="${name}"> has cmd= and a command inside; keep one`, el.line, { piece: key }); return; }
     if (kinds.length !== 1) { this.error("K701", `<run name="${name}"> takes exactly one of cmd, tool or resource`, el.line, { piece: key }); return; }
-    const common: { confirm?: string; every?: number; once?: true; always?: true } = {};
+    const common: Pick<Extract<SlateRunDecl, { kind: "cmd" }>, "confirm" | "every" | "once" | "always"> = {};
     const every = attr("every");
     if (every !== undefined) {
       const s = seconds(every);
@@ -363,7 +363,11 @@ class Compiler {
     if (attr("once") !== undefined) common.once = true;
     if (attr("always") !== undefined) common.always = true;
     const confirm = attr("confirm");
-    if (confirm !== undefined) { if (confirm.kind !== "string") this.error("T303", "confirm is a sentence in quotes", confirm.line, { piece: key, prop: "confirm" }); else common.confirm = confirm.value; }
+    if (confirm !== undefined) {
+      const v = confirm.kind === "braced" ? this.valueText(confirm.value) : confirm.value;
+      if (typeof v === "string" || isSlateBinding(v) || isSlateFormat(v)) common.confirm = v;
+      else this.error("T303", "confirm is a sentence: confirm=\"Stop it?\" or confirm={`Kill ${$name}?`}", confirm.line, { piece: key, prop: "confirm" });
+    }
     const kind = kinds[0]!;
     let run: SlateRunDecl;
     if (kind === "cmd") {
@@ -528,9 +532,9 @@ class Compiler {
     let id: string;
     if (idAttr !== undefined && idAttr.kind === "string" && SLATE_ID.test(idAttr.value)) {
       id = idAttr.value;
-      if (this.doc.pieces[id] !== undefined || this.names.has(id)) this.error("P104", `${id} is used twice`, idAttr.line, { piece: id });
+      if (this.doc.pieces[id] !== undefined) this.error("P104", `${id} is used twice`, idAttr.line, { piece: id });
     } else {
-      if (idAttr !== undefined) this.error("P103", `"${idAttr.value}" is not a piece id: lowercase letters, digits and dashes, starting with a letter`, idAttr.line, { fix: idAttr.value.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^[^a-z]+/, "") || undefined });
+      if (idAttr !== undefined) this.error("P103", `"${idAttr.value}" is not a piece id: letters, digits, dashes and _, starting with a letter`, idAttr.line, { fix: idAttr.value.replace(/[^A-Za-z0-9_-]/g, "-").replace(/^[^A-Za-z]+/, "") || undefined });
       id = this.mint(el.tag);
     }
     this.doc.pieces[id] = { type: el.tag };
@@ -653,7 +657,7 @@ class Compiler {
     return { bind: t };
   }
 
-  private textChild(parts: (string | Hole)[]): SlatePropValue {
+  textChild(parts: (string | Hole)[]): SlatePropValue {
     let format = "";
     let holes = 0;
     for (const p of parts) {
@@ -764,6 +768,12 @@ class Compiler {
             (op.props ??= {})[a.name] = isNull ? null : this.value(a);
           }
           const target = current?.pieces[id];
+          if (el.text !== undefined) {
+            const textProp = target === undefined ? undefined : SLATE_PIECES[target.type]?.textProp;
+            if (target !== undefined && textProp === undefined) this.error("P105", `${target.type} takes no text child; set its props as attributes: <props id="${id}" ... />`, el.line, { piece: id });
+            else if (textProp !== undefined && op.props?.[textProp] !== undefined) this.error("T303", `<props> has both ${textProp}= and a text child; use one`, el.line, { piece: id, prop: textProp });
+            else if (textProp !== undefined) { (op.props ??= {})[textProp] = this.textChild(el.text); this.lines.set(`${id}.${textProp}`, el.line); }
+          }
           for (const ch of el.children) {
             const spec = target === undefined ? undefined : SLATE_PIECES[target.type]?.items[ch.tag];
             if (spec === undefined) {
@@ -1011,7 +1021,7 @@ export function printSlate(doc: SlateDoc): string {
       parts.push(`tool="${r.server}.${r.tool}"`);
       if (r.args !== undefined) parts.push(`args={${valueExpr(r.args)}}`);
     } else parts.push(`resource=${quoteAttr(`${r.server}:${r.uri}`)}`);
-    if ("confirm" in r && r.confirm !== undefined) parts.push(`confirm=${quoteAttr(r.confirm)}`);
+    if ("confirm" in r && r.confirm !== undefined) parts.push(typeof r.confirm === "string" ? `confirm=${quoteAttr(r.confirm)}` : attrText("confirm", r.confirm));
     if (r.every !== undefined) parts.push(`every={${r.every}}`);
     if ("once" in r && r.once === true) parts.push("once");
     if (r.always === true) parts.push("always");

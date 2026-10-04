@@ -520,7 +520,7 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
       return { key: serverKey(d.server), run, kind: "server", server: d.server, computer, why: HELD_APPROVAL, tools, tool: d.kind === "tool" ? d.tool : d.uri, ...(args !== undefined ? { args } : {}) };
     }
     const tool = d as Extract<McpRunDecl, { kind: "tool" }>;
-    return { key: toolKey(d), run, kind: "tool", server: d.server, tool: tool.tool, computer, why: HELD_CONFIRM, args: args ?? {}, ...(tool.confirm !== undefined ? { confirm: tool.confirm } : {}) };
+    return { key: toolKey(d), run, kind: "tool", server: d.server, tool: tool.tool, computer, why: HELD_CONFIRM, args: args ?? {}, ...(typeof tool.confirm === "string" ? { confirm: tool.confirm } : {}) };
   };
 
   const hold = (req: McpRunStart, l: Live, ask: "server" | "tool" | "budget", runs: number): RunStartAnswer => {

@@ -9,9 +9,10 @@ export const SlateJson: z.ZodType<SlateJson> = z.lazy(() =>
   z.union([z.null(), z.boolean(), z.number(), z.string(), z.array(SlateJson), z.record(SlateJson)]),
 );
 
-/** A piece id: a lowercase letter, then lowercase letters, digits or "-", 1 to 48 characters. */
+/** A piece id: a letter, then letters, digits, "-" or "_", 1 to 48 characters. Ids and declared names are apart:
+ * a piece "spot" and a run $spot never collide. */
 export type SlateId = string;
-export const SLATE_ID = /^[a-z][a-z0-9-]{0,47}$/;
+export const SLATE_ID = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
 /** A value, derived value or run name, read as $name. */
 export type SlateName = string;
 export const SLATE_NAME = /^[a-z_][a-zA-Z0-9_]{0,47}$/;
@@ -99,7 +100,8 @@ export type SlateSecretDecl = SlateValueDecl & { secret: true };
 /** One expression in the language of 04, as source text. */
 export type SlateDerivedDecl = SlateExpression;
 
-interface RunCommon { confirm?: string; every?: number; once?: true; always?: true }
+/** confirm is the sentence the sheet asks on every start: literal, or a formula read when the run is held. */
+interface RunCommon { confirm?: string | SlateBinding | SlateFormat; every?: number; once?: true; always?: true }
 export type SlateRunDecl =
   | (RunCommon & {
       kind: "cmd"; cmd: string; env?: Record<string, SlatePropValue>; args?: SlatePropValue[]; stdin?: SlatePropValue;
@@ -144,7 +146,7 @@ export interface SlateDoc {
 /** The stored document; the wire calls it Slate. */
 export type Slate = SlateDoc;
 
-const RunCommonSchema = { confirm: z.string().optional(), every: z.number().optional(), once: z.literal(true).optional(), always: z.literal(true).optional() };
+const RunCommonSchema = { confirm: z.union([z.string(), SlateBinding, SlateFormat]).optional(), every: z.number().optional(), once: z.literal(true).optional(), always: z.literal(true).optional() };
 export const SlateRunDeclSchema: z.ZodType<SlateRunDecl> = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("cmd"), cmd: z.string(), env: z.record(SlatePropValue).optional(), args: z.array(SlatePropValue).optional(), stdin: SlatePropValue.optional(),
