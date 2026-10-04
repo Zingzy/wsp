@@ -2,7 +2,7 @@
 // NOTICE; logic only) and measured behavior in solari-poc/RESULTS.md.
 
 import { randomUUID } from "node:crypto";
-import { inFolder, launchWords, programWord, shellQuote } from "@wsp/protocol";
+import { inFolder, launchWords, MCP_SERVER_NAME, programWord, shellQuote } from "@wsp/protocol";
 import type { AgentLaunch, McpServerSpec, TurnImage } from "@wsp/protocol";
 import { PERMISSION_PROMPT_TOOL, SKIP_PROMPTS_MODE } from "./permissions.js";
 
@@ -168,7 +168,9 @@ function permissionFlags(mode: string | undefined): string[] {
  */
 function mcpConfigFlag(servers: Readonly<Record<string, McpServerSpec>> | undefined): string[] {
   if (servers === undefined || Object.keys(servers).length === 0) return [];
-  const mcpServers = Object.fromEntries(Object.entries(servers).map(([name, s]) => [name, { command: s.command, args: [...s.args] }]));
+  // The wsp server loads its tools up front and marks every one but the slate's to stay behind tool search: Claude Code
+  // 2.1.289 takes a tool's own alwaysLoad only as an exception to its server's, and Haiku never searched for the slate.
+  const mcpServers = Object.fromEntries(Object.entries(servers).map(([name, s]) => [name, { command: s.command, args: [...s.args], ...(name === MCP_SERVER_NAME ? { alwaysLoad: true } : {}) }]));
   return [`--mcp-config ${shellQuote(JSON.stringify({ mcpServers }))}`];
 }
 

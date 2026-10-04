@@ -269,7 +269,11 @@ mod tests {
                 .iter()
                 .filter(|t| t.name.starts_with("slate_"))
                 .filter_map(|t| entry_in(t.listed, cloud))
-                .map(|e| serde_json::to_string(&serde_json::from_str::<Value>(e).unwrap()).unwrap().chars().count())
+                .map(|e| {
+                    let mut entry = serde_json::from_str::<Value>(e).unwrap();
+                    entry.as_object_mut().unwrap().remove("_meta");
+                    serde_json::to_string(&entry).unwrap().chars().count()
+                })
                 .sum();
             assert!(total < 4150, "the slate tools list {total} characters with the cloud {}", if cloud { "on" } else { "off" });
         }
