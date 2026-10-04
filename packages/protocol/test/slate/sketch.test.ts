@@ -53,8 +53,8 @@ describe("the sketch", () => {
 });
 
 describe("the catalog", () => {
-  it("keeps the index under 900 tokens and its example valid", () => {
-    expect(slateTokens(slateCatalog())).toBeLessThan(900);
+  it("keeps the index near 1,000 tokens and its example valid", () => {
+    expect(slateTokens(slateCatalog())).toBeLessThan(1050);
     expect(parseSlate(SLATE_INDEX_EXAMPLE).errors).toEqual([]);
     expect(slateCatalog()).toContain(SLATE_INDEX_EXAMPLE);
   });
@@ -65,9 +65,9 @@ describe("the catalog", () => {
   });
 
   it("answers runs, functions, steps, handlers and examples within their budgets", () => {
-    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(400);
+    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(500);
     for (const n of ["functions", "steps", "handlers"]) expect(slateTokens(slateCatalog(n)), n).toBeLessThan(600);
-    expect(slateTokens(slateCatalog("examples"))).toBeLessThan(2500);
+    expect(slateTokens(slateCatalog("examples"))).toBeLessThan(3500);
     for (const e of SLATE_EXAMPLES) expect(parseSlate(e.text).errors, e.title).toEqual([]);
   });
 

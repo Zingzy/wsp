@@ -154,7 +154,7 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
     const r = values[name] as Partial<SlateRunRecord> | undefined;
     if (r?.state === undefined || r.state === "idle") continue;
     const facts = [r.exit !== undefined && r.exit !== null ? `exit ${r.exit}` : undefined, r.ms !== undefined ? `${r.ms} ms` : undefined].filter(Boolean);
-    runLines.push(`  $${name}: ${r.state}${facts.length > 0 ? ` (${facts.join(", ")})` : ""}${r.why !== undefined ? ` ${r.why}` : ""}`);
+    runLines.push(`  $${name}: ${r.state}${facts.length > 0 ? ` (${facts.join(", ")})` : ""}${r.why !== undefined ? ` ${r.why}` : ""}${r.stale === true ? ", stale: the command changed since it ran" : ""}`);
   }
   if (runLines.length > 0) lines.push("runs:", ...runLines);
   if (problems.length > 0) {

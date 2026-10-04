@@ -317,7 +317,7 @@ class Compiler {
     };
     const ok = allowed[el.tag]!;
     for (const a of el.attrs) if (!ok.includes(a.name)) this.error("T302", `<${el.tag}> has no attribute ${a.name}; it takes ${ok.join(", ")}`, a.line, { fix: nearest(a.name, ok) });
-    if ((el.text !== undefined || el.children.length > 0) && !(el.tag === "when" && el.attrs.every(a => a.name !== "do"))) {
+    if ((el.text !== undefined || el.children.length > 0) && !(el.tag === "when" && el.attrs.every(a => a.name !== "do")) && !(el.tag === "run" && el.children.length === 0)) {
       const hint = el.tag === "when" ? "when takes do={steps}" : `<${el.tag}> is self-closing and takes no children`;
       this.error("A601", hint, el.line, el.tag === "when" ? { fix: "<when change={$id} do={start($check)} />" } : {});
     }
@@ -350,7 +350,8 @@ class Compiler {
     const key = `$${name}`;
     const attr = (n: string): Attr | undefined => el.attrs.find(a => a.name === n);
     for (const a of el.attrs) this.lines.set(`${key}.${a.name}`, a.line);
-    const kinds = (["cmd", "tool", "resource"] as const).filter(k => attr(k) !== undefined);
+    const kinds = (["cmd", "tool", "resource"] as const).filter(k => attr(k) !== undefined || (k === "cmd" && el.text !== undefined));
+    if (attr("cmd") !== undefined && el.text !== undefined) { this.error("K701", `<run name="${name}"> has cmd= and a command inside; keep one`, el.line, { piece: key }); return; }
     if (kinds.length !== 1) { this.error("K701", `<run name="${name}"> takes exactly one of cmd, tool or resource`, el.line, { piece: key }); return; }
     const common: { confirm?: string; every?: number; once?: true; always?: true } = {};
     const every = attr("every");
@@ -366,9 +367,11 @@ class Compiler {
     const kind = kinds[0]!;
     let run: SlateRunDecl;
     if (kind === "cmd") {
-      const cmd = attr("cmd")!;
-      const literal = cmd.kind === "string" ? cmd.value : cmd.kind === "braced" ? stringLiteral(cmd.value) : undefined;
-      if (literal === undefined) this.error("K700", "the command is literal; hand values to it with env={{ NAME: $value }}, args={[...]} or stdin={...}", cmd.line, { piece: key, prop: "cmd", fix: "cmd='gh api \"$URL\"' env={{ URL: $url }}" });
+      const cmd = attr("cmd");
+      const literal = cmd === undefined ? commandBody(el.text!) : cmd.kind === "string" ? cmd.value : cmd.kind === "braced" ? commandText(cmd.value) : undefined;
+      if (literal === undefined) {
+        this.error("K700", "the command is literal text: cmd=\"...\", cmd={\"...\"} with \\\" escapes, or <run name=\"x\">{`any text`}</run>; values reach it as env, args or stdin", cmd?.line ?? el.line, { piece: key, prop: "cmd", fix: "cmd='gh api \"$URL\"' env={{ URL: $url }}" });
+      }
       const r: Extract<SlateRunDecl, { kind: "cmd" }> = { kind: "cmd", cmd: literal ?? "", ...common };
       const env = attr("env");
       if (env !== undefined) { const o = this.object(env, key); if (o !== undefined) r.env = o; }
@@ -801,6 +804,22 @@ function explicitIds(el: El): string[] {
   return out;
 }
 
+/** A command in braces: {"..."} or {'...'} with string escapes, or {`...`} as written, shell $ and braces included;
+ * a ${$value} hole is a slate value pasted into the command, which goes through env instead. */
+function commandText(braced: string): string | undefined {
+  const t = braced.trim();
+  if (t.length >= 2 && t.startsWith("`") && t.endsWith("`") && !t.slice(1, -1).includes("`")) return /\$\{\s*\$/.test(t) ? undefined : dedent(t.slice(1, -1));
+  return stringLiteral(t);
+}
+
+/** The command a <run> holds as its child: one braced command, or plain text. */
+function commandBody(text: (string | Hole)[]): string | undefined {
+  const holes = text.filter((t): t is Hole => typeof t !== "string");
+  const words = text.filter((t): t is string => typeof t === "string").join("");
+  if (holes.length === 1 && words.trim() === "") return commandText(holes[0]!.expr);
+  return holes.length === 0 && words.trim() !== "" ? dedent(words) : undefined;
+}
+
 /** A quoted string literal's value, or undefined when the text is anything else. */
 function stringLiteral(text: string): string | undefined {
   const { ast } = parseSlateExpression(text.trim());
@@ -962,7 +981,8 @@ export function printSlate(doc: SlateDoc): string {
   for (const [name, r] of Object.entries(doc.runs)) {
     const parts = ["<run", `name="${name}"`];
     if (r.kind === "cmd") {
-      parts.push(`cmd=${quoteAttr(r.cmd)}`);
+      const raw = (r.cmd.includes("\n") || (r.cmd.includes('"') && r.cmd.includes("'"))) && !r.cmd.includes("`") && dedent(r.cmd) === r.cmd;
+      parts.push(raw ? `cmd={\`${r.cmd}\`}` : `cmd=${quoteAttr(r.cmd)}`);
       if (r.env !== undefined) parts.push(`env={${valueExpr(r.env)}}`);
       if (r.args !== undefined) parts.push(`args={[${r.args.map(valueExpr).join(", ")}]}`);
       if (r.stdin !== undefined) parts.push(attrText("stdin", r.stdin));
