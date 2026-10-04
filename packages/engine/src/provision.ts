@@ -6,16 +6,16 @@
 // the computer is reached: it drives a Machine, which for a box is that
 // computer over the link its daemon holds.
 import { COMPILER_ROW, ROAD_MODULES, catalogEntry, catalogIdOfRow } from "@wsp/catalog";
-import { agentOfRow, plural, presentElsewhereLine, provisionServersLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
+import { TOOL_PREFIX, agentOfRow, plural, presentElsewhereLine, provisionServersLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { markersOf, pagedReads } from "./exec-detached.js";
-import { installBase } from "./golden-base.js";
+import { baseInstalls, installBase } from "./golden-base.js";
 import { TOOLS_PATH, agentSteps, pathLine, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import type { McpPlan } from "./golden-mcp.js";
 import { installTools, type ToolResult } from "./golden-tools.js";
 import type { GoldenImport, ImportResult, PackFiles } from "./golden.js";
 import { applyMachineContext } from "./machine-context.js";
 import type { Machine } from "./machine.js";
-import { closeAgentFiles, oncePathsOf, provisionFiles, type OwnedPaths, type ProvisionLanding } from "./provision-files.js";
+import { closeAgentFiles, oncePathsOf, outsideAfterScript, outsideBeforeScript, provisionFiles, type OwnedPaths, type ProvisionLanding } from "./provision-files.js";
 import { provisionMcp } from "./provision-mcp.js";
 
 /** What the recipe comes to on a computer you own, in run order: the node step, the agents after it, the tools by
@@ -325,9 +325,53 @@ async function filesRound(machine: Machine, files: NonNullable<ProvisionPlan["fi
  * computer stopped answering, which is the one thing a step cannot report a row for. */
 export async function provisionStep(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: ProvisionOn): Promise<PlaceProvisionRow[]> {
   const marked: ProvisionStage = (detail, at, row) => stage(detail, at, row === undefined ? undefined : { ...row, step });
-  const rows = await stepRows(machine, plan, step, run, marked, on);
-  return rows.map(row => ({ ...row, step }));
+  // Only a plan with wsp's prefix runs on a computer somebody owns; an image is sealed whole and never left.
+  const walked = plan.prefix === undefined ? [] : outsideRoots(plan, step);
+  if (walked.length > 0) await machine.exec(outsideBeforeScript(step, walked), { timeoutMs: OUTSIDE_MS }).catch(() => undefined);
+  try {
+    const rows = await stepRows(machine, plan, step, run, marked, on);
+    return rows.map(row => ({ ...row, step }));
+  } finally {
+    // A step that stopped part way still wrote what it wrote.
+    if (walked.length > 0) await machine.exec(outsideAfterScript(step, walked), { timeoutMs: OUTSIDE_MS }).catch(() => undefined);
+  }
 }
+
+/** The rows a step installs, whose roads say where it writes. */
+function stepInstalls(plan: ProvisionPlan, step: EngineStep): readonly ToolInstall[] {
+  switch (step) {
+    case "floor":
+      return baseInstalls(new Set(), plan.path, plan.prefix, leftOff(plan.compiler));
+    case "agents":
+      return plan.steps.slice(0, plan.agents);
+    case "clis":
+      return plan.steps.slice(plan.agents);
+    case "github":
+      return plan.github ?? [];
+    case "configs":
+      return plan.configTools ?? [];
+    default:
+      return [];
+  }
+}
+
+/** The folders under /usr/local and /opt a step's roads write, off each road's own roots and the folders its
+ * commands answer from (go's GOBIN is the links folder, which its roots do not name): what the record around the
+ * step walks, so a file somebody else puts anywhere else meanwhile is never read as the step's. wsp's own folder
+ * goes whole on a leave and is never walked. */
+export function outsideRoots(plan: ProvisionPlan, step: EngineStep): string[] {
+  const dirs = stepInstalls(plan, step).flatMap(row => [...ROAD_MODULES[row.manager].roots, ...(row.bins ?? [])]);
+  const clipped = dirs.flatMap(dir => OUTSIDE_TOPS.flatMap(top => (within(dir, top) ? [dir] : within(top, dir) ? [top] : []))).filter(dir => !within(dir, TOOL_PREFIX));
+  const unique = [...new Set(clipped)].sort();
+  return unique.filter(dir => !unique.some(other => other !== dir && within(dir, other)));
+}
+
+const OUTSIDE_TOPS = ["/usr/local", "/opt"];
+const within = (path: string, dir: string): boolean => path === dir || path.startsWith(`${dir}/`);
+
+/** How long the listing on either side of a step gets: a walk of the folders it writes, and the digests of what the
+ * step made, which for Node and an agent is a few hundred megabytes. */
+const OUTSIDE_MS = 120_000;
 
 async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: ProvisionOn): Promise<PlaceProvisionRow[]> {
   switch (step) {

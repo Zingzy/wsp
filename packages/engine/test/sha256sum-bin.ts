@@ -6,7 +6,8 @@
 // coreutils 9.4 answers them: `-z` ends each record with a NUL instead of a
 // newline and leaves the path as it is, `--` ends the flags, a path that is
 // not there is said on stderr and the rest are still read, and the exit is
-// non-zero once any of them was missing.
+// non-zero once any of them was missing. The exit is set, never called: a
+// call drops what is still queued for a pipe, which a long list fills.
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,11 +22,11 @@ const READ = [
   'if(flags&&(a==="-z"||a==="--zero")){zero=true;continue}',
   "files.push(a)}",
   'const end=zero?"\\0":"\\n";let missing=false;',
-  'if(files.length===0){process.stdout.write(hash(fs.readFileSync(0))+"  -"+end);process.exit(0)}',
+  'if(files.length===0)process.stdout.write(hash(fs.readFileSync(0))+"  -"+end);',
   "for(const f of files){",
   'try{process.stdout.write(hash(fs.readFileSync(f))+"  "+f+end)}',
   'catch{missing=true;process.stderr.write("sha256sum: "+f+": No such file or directory\\n")}}',
-  "process.exit(missing?1:0)",
+  "process.exitCode=missing?1:0",
 ].join("");
 
 // The program is single-quoted for the shell and holds no quote of that kind; the flags come after `--` so node

@@ -7,7 +7,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { promisify } from "node:util";
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
-import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, relative, resolve } from "node:path";
@@ -34,13 +34,13 @@ import WebSocket from "ws";
 import { macKindOf, ALREADY_JOINED_LINE, DAEMON_VERSION, configHardLinkRefusal, backUrl, PLACE_LOGIN_REFUSED_KIND, PLACE_HOST_KEY_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoPicksLine, placeProvisioningLine, setupWord, RecipeFile, type PlaceProvisionRow, type PendingComputer, type PlaceSetup, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
-import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
+import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, outsideAfterScript, outsideBeforeScript, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine, noPlaceSystemLine } from "../src/daemon-binary.js";
 import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { computerLines, hostPlatform, placeLines, placeNames } from "../src/verbs.js";
-import { namesPlace, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { namesPlace, placeOutsideLeftLine, TOOL_PREFIX, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { pinnedDroppingPort, refusedPort } from "../../runtime/test/held-port.js";
 import {
   ADD_FLAGS_REFUSAL,
@@ -121,14 +121,14 @@ runsFromItsOwnFolder();
 /** The leave as a case runs it: the workspace profile it takes off is one under the case's own home unless the case
  * names another, since a suite run as root otherwise takes the machine's own profile off it. */
 const sweepPlace = (opts: PlaceSweepOptions = {}): ReturnType<typeof sweepPlaceHere> =>
-  sweepPlaceHere({ ...(opts.home === undefined ? {} : { apparmorProfile: join(opts.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(opts.home) }), ...opts });
+  sweepPlaceHere({ ...(opts.home === undefined ? {} : { apparmorProfile: join(opts.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(opts.home), systemRoot: join(opts.home, "system") }), ...opts });
 
 /** wsp's install folder and the folder its commands are linked into, under a case's own home, for the same reason. */
 const toolsUnder = (home: string): { prefix: string; links: string } => ({ prefix: join(home, "opt-wsp"), links: join(home, "usr-local-bin") });
 
 /** `wsp leave` as a case runs it, with the same profile under the case's own home. */
 const leaveCommand = (io: Parameters<typeof leaveCommandHere>[0], args: readonly string[], deps: NonNullable<Parameters<typeof leaveCommandHere>[2]>): ReturnType<typeof leaveCommandHere> =>
-  leaveCommandHere(io, args, { apparmorProfile: join(deps.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(deps.home), ...deps });
+  leaveCommandHere(io, args, { apparmorProfile: join(deps.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(deps.home), systemRoot: join(deps.home, "system"), ...deps });
 
 /** The machine's own profile as the file found it, which every case leaves exactly as it was. */
 const MACHINES_PROFILE = existsSync(WSP_WORKSPACE_APPARMOR_PATH) ? readFileSync(WSP_WORKSPACE_APPARMOR_PATH) : undefined;
@@ -1286,6 +1286,55 @@ describe("taking wsp off the computer it is typed on", () => {
     const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, uid: 0 });
     expect(swept.removed).toContain(placeKeptForLinkLine(tools.prefix));
     expect(existsSync(join(elsewhere, "keep"))).toBe(true);
+  });
+
+  it("takes the binaries the setup wrote outside the home where the leave runs as root, and keeps the box's own", async () => {
+    const home = tmp("leave-outside");
+    const system = realpathSync(tmp("leave-outside-root"));
+    const sh = shWithSha256sum();
+    mkdirSync(join(system, "usr/local/bin"), { recursive: true });
+    writeFileSync(join(system, "usr/local/bin/jq"), "the box's own jq\n");
+    sh(outsideBeforeScript("agents", ["/usr/local/bin"], system));
+    writeFileSync(join(system, "usr/local/bin/claude"), "claude 2.1.280\n");
+    writeFileSync(join(system, "usr/local/bin/gopls"), "gopls\n");
+    writeFileSync(join(system, "usr/local/bin/jq"), "jq over the box's own\n");
+    sh(outsideAfterScript("agents", ["/usr/local/bin"], system));
+    const tools = { prefix: join(system, TOOL_PREFIX), links: join(system, "usr/local/bin") };
+    const other = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 1000, tools, systemRoot: system });
+    expect(other.removed).not.toContain(join(system, "usr/local/bin/claude"));
+    expect(existsSync(join(system, "usr/local/bin/claude"))).toBe(true);
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 0, tools, systemRoot: system });
+    expect(swept.removed).toEqual(expect.arrayContaining([join(system, "usr/local/bin/claude"), join(system, "usr/local/bin/gopls"), tools.prefix]));
+    expect(readdirSync(join(system, "usr/local/bin"))).toEqual(["jq"]);
+    expect(existsSync(tools.prefix)).toBe(false);
+  });
+
+  it("keeps wsp's install folder and its list when the leave outside the home was cut short, and says so", async () => {
+    const home = tmp("leave-outside-cut");
+    const system = realpathSync(tmp("leave-outside-cut-root"));
+    const whole = shWithSha256sum();
+    mkdirSync(join(system, "usr/local/bin"), { recursive: true });
+    whole(outsideBeforeScript("agents", ["/usr/local/bin"], system));
+    writeFileSync(join(system, "usr/local/bin/claude"), "claude 2.1.280\n");
+    whole(outsideAfterScript("agents", ["/usr/local/bin"], system));
+    // The shell running the leave killed part way, as a bound kills it; the read answers nothing, as the leave's own does.
+    const stub = tmp("leave-outside-cut-stub");
+    writeStub(join(stub, "xargs"), "#!/bin/sh\nkill -KILL $PPID\n");
+    const cut = (script: string): string => {
+      try {
+        return whole(`PATH=${shellQuote(stub)}:$PATH\n${script}`);
+      } catch {
+        return "";
+      }
+    };
+    const tools = { prefix: join(system, TOOL_PREFIX), links: join(system, "usr/local/bin") };
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: cut, uid: 0, tools, systemRoot: system });
+    expect(swept.removed).toContain(placeOutsideLeftLine(tools.prefix));
+    expect(existsSync(join(tools.prefix, "landed"))).toBe(true);
+    expect(existsSync(join(system, "usr/local/bin/claude"))).toBe(true);
+    const again = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: whole, uid: 0, tools, systemRoot: system });
+    expect(again.removed).toEqual(expect.arrayContaining([join(system, "usr/local/bin/claude"), tools.prefix]));
+    expect(existsSync(tools.prefix)).toBe(false);
   });
 
   it("says what the manager answered when the stop refused, and still takes the file", async () => {
