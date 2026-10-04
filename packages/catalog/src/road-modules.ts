@@ -9,7 +9,7 @@
 // machine's own home for a job with no prefix, and a folder of wsp's own under
 // /opt for a computer somebody owns, whose daemon resolves no command through
 // a folder the workspaces there can write.
-import { HOMEBREW_HOME as LINUXBREW_HOME, HOMEBREW_PREFIX as BREW_PREFIX, PNPM_HOME, shellQuote } from "@wsp/protocol";
+import { HOMEBREW_HOME as LINUXBREW_HOME, HOMEBREW_PREFIX as BREW_PREFIX, PNPM_HOME, TOOL_PREFIX, shellQuote } from "@wsp/protocol";
 import { APT_ENV, GUEST_HOME, HOME_BIN, LOCAL_BIN, ROADS, type InstallRoad, type PackageRoad, type ReleaseAsset, type ReleaseAssets, type RoadName, pinCheckLine, standingPin, versionOf } from "./roads.js";
 
 type Road<K extends RoadName> = Extract<InstallRoad, { road: K }>;
@@ -118,7 +118,7 @@ export const APT_BIN = "/usr/bin";
  * daemon on such a computer resolves every command through a fixed PATH that holds no folder under the home
  * the workspaces share, which is why nothing may install there. A machine wsp forked takes no prefix: its
  * home is root's alone and each manager keeps its own folder under it. */
-export const TOOL_PREFIX = "/opt/wsp";
+export { TOOL_PREFIX };
 
 /** Where one manager keeps what it installs, and where a command it installed answers from. */
 export interface InstallHome {

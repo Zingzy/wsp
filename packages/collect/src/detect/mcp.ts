@@ -7,7 +7,7 @@
 // never read.
 import { createHash } from "node:crypto";
 import { MAC_BIN_DIRS, MAC_ONLY, MCP_AGENTS, type McpAgent, type McpConfig, type McpServer, type McpTransport } from "@wsp/catalog";
-import { MCP_ID_PREFIX, fmtBytes } from "@wsp/protocol";
+import { MCP_ID_PREFIX, fmtBytes, type ServerSignIn } from "@wsp/protocol";
 import { type Host, expand, tilde } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
 import { isSecretName } from "./shell-rc.js";
@@ -220,7 +220,11 @@ interface Carried {
   notes: string[];
   paths: string[];
   bytes: number;
+  signIn: ServerSignIn;
 }
+
+/** A secret the definition carries under a name that says key is a key; any other is a token. */
+const keyOrToken = (names: readonly string[]): ServerSignIn => (names.some(n => /key/i.test(n)) ? "key" : "token");
 
 /** Home paths a stdio definition runs against (arguments, cwd, env values), `~`-relative, the command itself and
  * anything under ~/.local/bin left out: what the machine needs beside the definition. */
@@ -260,15 +264,20 @@ async function homeDeps(host: Host, server: McpServer, carriedPaths: readonly st
 /** What a definition carries: secret-named env values by size, the file such a value points at (which travels on
  * the row), header values, and where its mcp-remote sign-in or, as the agent's entry says, its http sign-in lives. Nothing is read. */
 async function carried(host: Host, server: McpServer, agent: McpAgent, remoteTokens: ReadonlyMap<string, number>): Promise<Carried> {
-  const out: Carried = { secrets: [], notes: [], paths: [], bytes: 0 };
+  const out: Carried = { secrets: [], notes: [], paths: [], bytes: 0, signIn: "none" };
   const t = server.transport;
+  // The names the server reads its secret under, whether the definition carries the value or the machine sets it.
+  const named = [...server.envRefs];
   if (t.kind === "http") {
     for (const [k, v] of Object.entries(t.headers)) out.secrets.push(`header ${k} (${Buffer.byteLength(v)} B)`);
     if (agent.mcp.httpAuth !== undefined) out.notes.push(agent.mcp.httpAuth);
+    const headers = Object.keys(t.headers);
+    out.signIn = headers.length > 0 || named.length > 0 ? keyOrToken([...headers, ...named]) : agent.mcp.httpAuth !== undefined ? "oauth" : "none";
     return out;
   }
   for (const [k, v] of Object.entries(t.env)) {
     if (!secretNamed(k)) continue;
+    named.push(k);
     const abs = v.startsWith("~/") ? expand(host, v) : v;
     const st = abs.startsWith("/") ? await host.fs.stat(abs) : undefined;
     if (st?.kind === "file") {
@@ -283,12 +292,15 @@ async function carried(host: Host, server: McpServer, agent: McpAgent, remoteTok
     }
     out.secrets.push(`env ${k} (${Buffer.byteLength(v)} B)`);
   }
-  for (const r of readArgs(t, host.home)) if (r.secret !== undefined) out.secrets.push(r.secret);
+  const args = readArgs(t, host.home).flatMap(r => (r.secret !== undefined ? [r.secret] : []));
+  out.secrets.push(...args);
   const hash = mcpRemoteHash(t.args);
   if (hash !== undefined) {
     const bytes = remoteTokens.get(hash);
     out.notes.push(bytes === undefined ? "no saved sign-in; the browser sign-in runs again on the machine" : `its saved sign-in (${fmtBytes(bytes)}) travels on the ${MCP_REMOTE_LABEL} row`);
   }
+  // mcp-remote's own browser sign-in is the server's, whatever its url reads as among the arguments.
+  out.signIn = hash !== undefined ? "oauth" : named.length > 0 ? keyOrToken(named) : args.length > 0 ? "token" : "none";
   return out;
 }
 
@@ -317,6 +329,7 @@ function serverRow(agent: McpAgent, server: McpServer, fit: LinuxFit, deps: Home
     // A server that carries a secret travels only on a copy answer, never on a bare tick.
     ...(c.secrets.length > 0 ? { consent: true } : {}),
     detail: words.join("; "),
+    signIn: c.signIn,
   };
 }
 

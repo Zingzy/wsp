@@ -117,13 +117,23 @@ export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicke
   );
 }
 
-export function ServersPicks({ picks, options, onChange, onlyTicked = false }: PickProps) {
+/** The servers, each saying how it signs in on the computer, as an agent's row says it. */
+export function ServersPicks({ picks, options, onChange, box, onlyTicked = false }: PickProps) {
   return (
     <Grid id="servers">
       {options.mcp
         .filter(server => !onlyTicked || picks.mcp[server.name] !== undefined)
         .map(server => (
-          <PickRow key={server.name} id={server.name} checked={picks.mcp[server.name] !== undefined} onCheckedChange={next => onChange(tick(picks, "mcp", server.name, next, options))} glyph={<PlugIcon aria-hidden className={GLYPH} />} name={server.name} marks={<AgentMarks agents={server.agents} />} />
+          <PickRow
+            key={server.name}
+            id={server.name}
+            checked={picks.mcp[server.name] !== undefined}
+            onCheckedChange={next => onChange(tick(picks, "mcp", server.name, next, options))}
+            glyph={<PlugIcon aria-hidden className={GLYPH} />}
+            name={server.name}
+            marks={<AgentMarks agents={server.agents} />}
+            {...(server.kind === undefined ? {} : { note: ADD_COMPUTER_WORDS.serverSignIn(server.kind, box) })}
+          />
         ))}
     </Grid>
   );
@@ -203,12 +213,13 @@ export function Choice({ id, picked, glyph, name, note, fact }: { id: string; pi
  * where it holds one, signing in there, or skipping it for now. */
 export function GitHubPicks({ picks, options, onChange, box, here }: PickProps & { here: string }) {
   const picked = githubPick(picks);
+  const offered = options.configs.find(c => c.id === "github");
   const words: Record<GitHubSignIn, { name: string; note?: string }> = {
-    vault: { name: `Use the token from ${here}` },
+    vault: { name: `Use the token from ${here}`, ...(offered?.account === undefined ? {} : { note: ADD_COMPUTER_WORDS.githubAccount(offered.account, offered.scopes ?? []) }) },
     machine: { name: `Sign in on ${box}`, note: "A tab opens in your browser here." },
     skip: { name: ADD_COMPUTER_WORDS.skipForNow, note: "Private repos will not clone until you sign in. You can do it later in Settings." },
   };
-  const choices = (options.configs.find(c => c.id === "github")?.signins ?? []).map(id => ({ id, ...words[id] }));
+  const choices = (offered?.signins ?? []).map(id => ({ id, ...words[id] }));
   return (
     <RadioGroup value={picked} onValueChange={next => onChange(setGitHub(picks, next as GitHubSignIn))} className="gap-0">
       <Grid id="github">

@@ -4,8 +4,10 @@
 // as a frame of its own, the result last, and the tool that never waits on
 // the person. The host is a fake that plays one add; the box's own checks
 // and the plan off a computer's picks are read here too.
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { writeStub } from "../../protocol/test/stub-script.js";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Manifest } from "@wsp/collect";
@@ -13,7 +15,7 @@ import { RecipeFile, SETUP_STEP_WORDS, type AddLine, type PlaceSetup, type Place
 import { sshWordReach, type SshLocalRun } from "@wsp/engine";
 import { PassThrough } from "node:stream";
 import { gunzipSync } from "node:zlib";
-import { addCommand, addFlags, choosingLine, followSetup, parsePlaceCheck, placeCheckRefusal, PLACE_CHECK_SPARE_BYTES, RESUME_FLAGS_REFUSAL, SETUP_FLAGS_REFUSAL } from "../src/places.js";
+import { addCommand, addFlags, choosingLine, followSetup, parsePlaceCheck, placeCheckRefusal, placeCheckRows, PLACE_CHECK_SCRIPT, PLACE_CHECK_SPARE_BYTES, RESUME_FLAGS_REFUSAL, SETUP_FLAGS_REFUSAL } from "../src/places.js";
 import { picksRows, placeProvisioner } from "../src/place-provision.js";
 import { addComputer, ADD_TOOL_FIX, watchSetup } from "../src/setup-follow.js";
 import { captured } from "./verbs-fixture.js";
@@ -266,15 +268,45 @@ describe("the checks a box passes before anything of wsp's goes on it", () => {
     expect(placeCheckRefusal("spoo", "/home/dev", read(["uid 1000", "systemd yes"]), need)).toContain("not root");
     // Root alone this time, said with what to do: a login with passwordless sudo is refused the same way.
     const asUser = placeCheckRefusal("dev@10.0.0.9", "/home/dev", read(["uid 1000"]), need)!;
-    expect(asUser).toContain("root on the box is required");
-    expect(asUser).toContain("wsp add root@10.0.0.9");
+    expect(asUser).toContain("wsp needs root there");
+    expect(asUser).toContain("add root@10.0.0.9 instead");
     // An alias is named by the host it reaches, beside the ssh config line that makes the alias log in as root.
     const asAlias = placeCheckRefusal("spoo", "/home/dev", read(["uid 1000"]), need, "65.21.4.12")!;
-    expect(asAlias).toContain("wsp add root@65.21.4.12");
+    expect(asAlias).toContain("add root@65.21.4.12 instead");
     expect(asAlias).toContain("User root under Host spoo");
+    // The app draws these on the check's row, so neither says an internal word or a command for a terminal.
+    for (const said of [asUser, asAlias, placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd no"]), need)!]) {
+      expect(said).not.toMatch(/\bdaemons?\b/i);
+      expect(said).not.toMatch(/\bwsp (add|remove|leave|join|computers)\b/);
+    }
     expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd no"]), need)).toContain("runs no systemd");
     expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd yes", "cgroup2 no"]), need)).toContain("no cgroup v2");
     expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd yes", "cgroup2 yes", `free ${1024 ** 3}`]), need)).toContain("1 GB free under /root");
+  });
+
+  it("times each check on the box itself, since the three are read in one run, and each row carries its own time", () => {
+    const checked = read(["uid 0", "ms root 2", "systemd yes", "cgroup2 yes", "ms system 3", `free ${10 * 1024 ** 3}`, "ms disk 14"]);
+    expect(placeCheckRows("spoo", "/root", checked, need).map(r => [r.step, r.ms])).toEqual([
+      ["root", 2],
+      ["system", 3],
+      ["disk", 14],
+    ]);
+    // A box whose date cannot count milliseconds says no time, and no row makes one up.
+    expect(placeCheckRows("spoo", "/root", read(["uid 0", "systemd yes", "cgroup2 yes"]), need).map(r => r.ms)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("runs on a shell whose date cannot count milliseconds without an error, and says the facts all the same", () => {
+    const ran = spawnSync("/bin/sh", ["-c", PLACE_CHECK_SCRIPT], { encoding: "utf8" });
+    expect(ran.stderr).toBe("");
+    const checked = parsePlaceCheck(ran.stdout);
+    expect(checked.uid).toBe(process.getuid!());
+    for (const ms of Object.values(checked.ms ?? {})) expect(Number.isInteger(ms)).toBe(true);
+    // A date that counts nanoseconds, as GNU's does, times every check.
+    const bin = mkdtempSync(join(tmpdir(), "wsp-check-date-"));
+    writeStub(join(bin, "date"), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} -e 'console.log(String(process.hrtime.bigint()))'\n`);
+    const timed = spawnSync("/bin/sh", ["-c", PLACE_CHECK_SCRIPT], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env["PATH"] ?? ""}` } });
+    rmSync(bin, { recursive: true, force: true });
+    expect(Object.keys(parsePlaceCheck(timed.stdout).ms ?? {}).sort()).toEqual(["disk", "root", "system"]);
   });
 
   it("refuses nothing a box would not say, and reads no line that is not its own", () => {

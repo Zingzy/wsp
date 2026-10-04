@@ -3132,6 +3132,8 @@ export const PlaceStageEvent = z.object({
   /** The computer the step ran on, carried by the steps of a job on a computer this host already holds: a reader
    * that acts on a step rather than printing it needs the row and not the stream it rode. */
   placeId: z.string().optional(),
+  /** How long the step took, once it ended. */
+  ms: z.number().int().nonnegative().optional(),
 });
 export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
 
@@ -3144,7 +3146,7 @@ export const PlaceAddJob = z.object({
   sshPort: z.number().int().optional(),
   startedAt: z.string(),
   state: z.enum(["running", "done", "failed"]),
-  steps: z.array(z.object({ step: PlaceAddStep, state: z.enum(["running", "done", "failed"]), note: z.string().optional() })),
+  steps: z.array(z.object({ step: PlaceAddStep, state: z.enum(["running", "done", "failed"]), note: z.string().optional(), ms: z.number().int().nonnegative().optional() })),
   said: z.string().optional(),
   fix: z.string().optional(),
   kind: z.string().optional(),
@@ -3158,8 +3160,8 @@ export type PlaceAddJob = z.infer<typeof PlaceAddJob>;
 /** The job with one more step said, the one rule the host and the app both keep it by: the step's line replaced
  * where it stands, the job done once the computer joined, failed once a step failed. The setup that runs on behind
  * a join rides place.setup frames and is the computer's row's to say, not the add's. */
-export function withPlaceStage(job: PlaceAddJob, e: Pick<PlaceStageEvent, "step" | "state" | "note" | "placeId">): PlaceAddJob {
-  const line = { step: e.step, state: e.state, ...(e.note !== undefined ? { note: e.note } : {}) };
+export function withPlaceStage(job: PlaceAddJob, e: Pick<PlaceStageEvent, "step" | "state" | "note" | "placeId" | "ms">): PlaceAddJob {
+  const line = { step: e.step, state: e.state, ...(e.note !== undefined ? { note: e.note } : {}), ...(e.ms !== undefined ? { ms: e.ms } : {}) };
   const at = job.steps.findIndex(s => s.step === e.step);
   const steps = at === -1 ? [...job.steps, line] : job.steps.map((s, i) => (i === at ? line : s));
   if (e.step === "join" && e.state === "done") return { ...job, steps, state: "done", ...(e.placeId !== undefined ? { placeId: e.placeId } : {}) };
@@ -3283,6 +3285,8 @@ export const PlaceProvisionRow = z.object({
   /** The setup step the row belongs to, which decides how its failure weighs. */
   step: z.lazy(() => PlaceSetupStep).optional(),
   note: z.string().optional(),
+  /** On a row that did not land: what to do about it, beside the note that says what happened. */
+  fix: z.string().optional(),
   ms: z.number().int().nonnegative().optional(),
 });
 export type PlaceProvisionRow = z.infer<typeof PlaceProvisionRow>;
@@ -5074,6 +5078,7 @@ const DAEMON_CONTENTS = [
   "b423faeb3b4ae38a7456d11b877ab8720adaaa62650c5b33209ee24e02fb37b9",
   "4076321ab3d83fb3893ad81b9222fc36b92dccec81e8e9bc4566cc64a412b299",
   "81b16217319586241e368d7cb84fa0383a11b8d056a03053c700140422ff5e71",
+  "2d3c09680f6c9dca01d8915f8d7be7306ba0db7fc6e1734353a86bf5afaa4e4e",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5402,7 +5407,9 @@ const DAEMON_CONTENTS = [
  * git.switchNew puts a folder on a new branch with its changes carried along; git.fetchBranch fetches one branch of a
  * remote into a local branch, moving it only forward.
  * Version 115: Daemon port-file test times out on Linux CI about half the time.
- * Version 116: recipes and the add-a-computer setup job. */
+ * Version 116: recipes and the add-a-computer setup job.
+ * Version 117: A leave run as root takes wsp's install folder, /opt/wsp, off the computer with every link in
+ * /usr/local/bin pointing under it, and nothing else of either; a prefix that is itself a link stays and is said. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5636,6 +5643,27 @@ export const nothingToSkipLine = (row: string, name: string): string => `nothing
 export const GITHUB_SKIPPED_LINE = "skipped; gh is not signed in there";
 export const NEEDS_GITHUB_LINE = "private; needs GitHub to clone";
 export const WAITS_ON_GITHUB_LINE = "private; waits on the GitHub sign-in to clone";
+
+/** What to do about a row of the setup that did not land, beside what happened: the reason's own fix where the
+ * reason is one wsp knows, else its step's. `box` is the computer's name. */
+export function setupRowFix(row: Pick<PlaceProvisionRow, "step" | "note">, box: string): string | undefined {
+  if (row.note === NEEDS_GITHUB_LINE) return `Sign GitHub in on ${box}, then retry.`;
+  if (row.step === undefined) return undefined;
+  const fixes: Record<PlaceSetupStep, string> = {
+    floor: `Check that ${box} can reach its package mirrors, then retry.`,
+    agents: `Retry, or install it on ${box} yourself and skip it here.`,
+    signins: "Retry for a fresh code, or sign in later in Settings.",
+    clis: `Retry, or install it on ${box} yourself and skip it here.`,
+    skills: "Check the skill's folder here, then retry.",
+    mcp: "Check the server's entry in the agent's settings here, then retry.",
+    plugins: `Retry, or add it on ${box} yourself and skip it here.`,
+    configs: "Check the file here, then retry.",
+    folders: "Check that the folder is still where it was, then retry.",
+    github: "Retry for a fresh sign-in, or sign in later in Settings.",
+    context: "Retry; nothing else waits on it.",
+  };
+  return fixes[row.step];
+}
 
 /** How many of the setup's steps after the base tools run at once on a computer of this much memory: one per 2 GB,
  * at least one and at most four, so a small box never runs two installs into each other's memory. */
@@ -6248,6 +6276,17 @@ export const hostKeyRefusal = (url: string): string => `the host at ${url} did n
 /** What a remove says about a place that was not linked when it ran: the records here are gone and the agent on
  * that computer is not, since nothing could reach it to sweep. */
 export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the agent on it is still installed; run ${PLACE_LEAVE_LINE} on that computer when it is back`;
+
+/** What a remove took off that computer by its agent's own command: a plugin the setup put on there. */
+export const pluginOffLine = (name: string): string => `plugin ${name}`;
+
+/** What a remove says of the plugins the setup put on that computer and could not take off: they stay there. */
+export const pluginsKeptLine = (name: string, plugins: readonly string[]): string =>
+  `${plugins.join(", ")} ${plugins.length === 1 ? "is" : "are"} still on ${name}: wsp could not take ${plugins.length === 1 ? "it" : "them"} off`;
+
+/** What a remove took off this host's list with that computer: a project the recipe's folders step made there. The
+ * checkout on that computer is the person's and stays. */
+export const projectLeftLine = (name: string): string => `project ${name}, its folder there left as it is`;
 
 /** What a place that is connected but has never said which port its daemon bound is refused with: a pane needs
  * that port to carry to, and only that computer knows it. */
