@@ -479,8 +479,8 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   const scrub = (r: SlateRecord, text: string): string => runs.secrets.scrub(r.threadId, text);
 
-  const sketched = (r: SlateRecord, views: ReadonlyMap<string, SlateJson | undefined>): string => {
-    const text = sketchSlate(r.document, r.values, { ...contextOf(r, views), version: r.version });
+  const sketched = (r: SlateRecord, views: ReadonlyMap<string, SlateJson | undefined>, check = false): string => {
+    const text = sketchSlate(r.document, r.values, { ...contextOf(r, views), version: r.version, ...(check ? { check: true } : {}) });
     return scrub(r, /^slate v\d/.test(text) ? text : text.replace(/^slate\b/, `slate v${r.version}`));
   };
   const sketchOf = async (r: SlateRecord): Promise<string> => sketched(r, await viewsFor(r));
@@ -876,7 +876,7 @@ export function createSlates(deps: SlatesDeps): Slates {
           const doc = checked.document;
           if (p.check === true) {
             const preview: SlateRecord = { ...r, document: doc, values: valuesFor({ threadId, document: null, values: {} }, doc) };
-            return { version: r.version, text: sketched(preview, new Map()), warnings: checked.warnings, problems: [] };
+            return { version: r.version, text: sketched(preview, new Map(), true), warnings: checked.warnings, problems: [] };
           }
           checkVersion(r, p.ifVersion);
           if (by === "agent") spendWrite(threadId);
@@ -895,7 +895,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         if (applied.errors.length > 0 || applied.document === undefined) throw invalid(applied.errors, applied.warnings);
         const next = applied.document;
         const values = next === null ? r.values : valuesFor({ threadId, document: r.document, values: applied.values ?? r.values }, next);
-        if (p.check === true) return { version: r.version, text: sketched({ ...r, document: next, values }, new Map()), warnings: applied.warnings, problems: [] };
+        if (p.check === true) return { version: r.version, text: sketched({ ...r, document: next, values }, new Map(), true), warnings: applied.warnings, problems: [] };
         checkVersion(r, p.ifVersion);
         if (by === "agent") spendWrite(threadId);
         const touched = [...new Set(ops.flatMap(op => ("id" in op && typeof op.id === "string" ? [op.id] : [])))];
