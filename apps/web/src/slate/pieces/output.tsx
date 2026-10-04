@@ -8,6 +8,7 @@ import { Crab } from "../../components/status/Crab.js";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
 import { isRunRecord, type SlateRunState } from "../model.js";
+import { ResultByShape } from "../shape.js";
 import type { PieceView } from "../SlateView.js";
 import { str } from "./look.js";
 import { Quiet } from "./quiet.js";
@@ -45,7 +46,7 @@ const runName = (value: unknown): string | undefined => (typeof value === "strin
 export const output: PieceView = {
   type: "output",
   rowScoped: ["run"],
-  component: function OutputPiece({ piece, props, slate, cancel }) {
+  component: function OutputPiece({ id, piece, props, slate, raise, cancel, sender }) {
     const run = runName(piece.props?.["run"]);
     const record = run === undefined ? undefined : slate.values[run];
     const box = useRef<HTMLDivElement>(null);
@@ -59,6 +60,9 @@ export const output: PieceView = {
     }, [running, lines.length]);
     if (run === undefined) return <Quiet>{RUN_WORDS.idle}</Quiet>;
     const why = isRunRecord(record) && (state === "held" || state === "failed") ? record.why : undefined;
+    // A tool or resource run's result draws by its shape; its failure and a command's output stay lines.
+    const kind = slate.document?.runs?.[run]?.kind;
+    const result = kind !== undefined && kind !== "cmd" && isRunRecord(record) && state !== "failed" ? (record.json ?? record.out) : undefined;
     const label = str(props["label"]);
     return (
       <div data-slate-output={run} className="flex min-w-0 flex-col gap-1.5">
@@ -79,7 +83,11 @@ export const output: PieceView = {
             </Button>
           ) : null}
         </div>
-        {lines.length === 0 && state === "idle" ? null : (
+        {result !== undefined ? (
+          <div data-slate-result={run} className="min-w-0">
+            <ResultByShape value={result} shared={{ id, slate, raise, cancel, sender }} />
+          </div>
+        ) : lines.length === 0 && state === "idle" ? null : (
           <div
             ref={box}
             role="log"
