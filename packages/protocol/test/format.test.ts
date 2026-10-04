@@ -552,6 +552,7 @@ describe("a turn's activity in one line each", () => {
     expect(toolActivityLine("WebSearch", JSON.stringify({ query: "solari snapshot" }))).toBe("searching the web for solari snapshot");
     expect(toolActivityLine("WebFetch", JSON.stringify({ url: "https://example.com" }))).toBe("fetching https://example.com");
     expect(toolActivityLine("Task", JSON.stringify({ description: "review the diff" }))).toBe("agent: review the diff");
+    expect(toolActivityLine("spawn_agent", JSON.stringify({ prompt: "review the diff\nand say what broke" }))).toBe("agent: review the diff");
   });
 
   it("counts the paths of a change call that carries several, and names the one it carries alone", () => {
@@ -674,6 +675,7 @@ describe("the one registry every client reads a tool call from", () => {
     expect(toolCallFacts("Grep", JSON.stringify({ pattern: "shellQuote", path: "src" }))).toEqual({ detail: "shellQuote" });
     expect(toolCallFacts("web_search", JSON.stringify({ query: "solari snapshot" }))).toEqual({ itemType: "web_search", detail: "solari snapshot" });
     expect(toolCallFacts("Task", JSON.stringify({ description: "scan repo", prompt: "find every caller" }))).toEqual({ itemType: "collab_agent_tool_call", detail: "scan repo" });
+    expect(toolCallFacts("spawn_agent", JSON.stringify({ prompt: "find every caller" }))).toEqual({ itemType: "collab_agent_tool_call", detail: "find every caller" });
   });
 
   it("reads a name with no row by the general field order, and an mcp call by its name", () => {

@@ -367,6 +367,11 @@ function itemDeltas(done: boolean, item: Item, sessionId: string): AdapterEvent[
       const text = failed() ? (str(rec(item.error)?.message) ?? "") : JSON.stringify(rec(item.result)?.content ?? []);
       return [delta({ kind: "tool_result", text, toolUseId: item.id, isError: failed() })];
     }
+    case "collabAgentToolCall":
+      if (item.tool !== "spawnAgent") return [];
+      return done
+        ? [delta({ kind: "tool_result", text: "", toolUseId: item.id, isError: failed() })]
+        : [delta({ kind: "tool_use", text: JSON.stringify({ prompt: str(item.prompt) ?? "" }), toolName: "spawn_agent", toolUseId: item.id })];
     case "webSearch":
       return done
         ? [
