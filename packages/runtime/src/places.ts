@@ -54,6 +54,7 @@ import {
   placeNoPicksLine,
   placeProvisionPaths,
   placeProvisioningLine,
+  placeSyncingLine,
   pluginOffLine,
   pluginsKeptLine,
   setupRowFix,
@@ -517,6 +518,7 @@ export interface PlaceDoorOptions {
 /** A saved recipe resolved against this computer now: its file, what this computer has for each row, the hash. */
 export interface RecipeResolver {
   resolve(slug: string): Promise<{ file: RecipeFile; items: Record<string, string>; hash: string }>;
+  resolveFile(file: RecipeFile): Promise<{ file: RecipeFile; items: Record<string, string>; hash: string }>;
 }
 
 /** The host's half of one handshake: what it answers the other end with, the bytes that end's own signature must
@@ -639,10 +641,11 @@ export interface PlaceDoor {
   rows(): Promise<PlaceView[]>;
   /** Every add over ssh still running and the last ADDS_KEPT that finished, oldest first. */
   adds(): PlaceAddJob[];
-  /** Puts the daemon this host deploys on one place where it is behind, then runs its setup again from its picks.
+  /** Puts the daemon this host deploys on one place where it is behind, and the login files this host spells. What
+   * the computer was set up with stays: a computer that follows a recipe syncs to it, which runs only what moved.
    * Refuses in one sentence a place this host does not hold, and a computer that is behind on a runtime wired with
-   * no updater; a computer already on this daemon takes the setup alone. */
-  update(placeId: string, addId?: string): Promise<PlaceUpdateReply>;
+   * no updater. */
+  update(placeId: string): Promise<PlaceUpdateReply>;
   remove(placeId: string): Promise<PlaceRemoved>;
   /** Every place a word picks, by id or by the name the person gave it: none, one, or the two that share a name,
    * which is a refusal the caller writes with the ids in it. */
@@ -1302,6 +1305,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * runs installing over each other. A computer is in here from before its picks are planned, which is a read of
    * this whole computer, until the job ends. */
   const setting = new Set<string>();
+  /** The computers a sync to their recipe is going on: one at a time per computer, apart from the setups above, since
+   * a sync moves rows on a computer already set up and never stands in the way of a thread there. */
+  const syncing = new Set<string>();
 
   /** The sign-ins a setup is following on a computer, by `<place id>/<agent>`: what a later run that takes one over
    * quiets at once and lets go of once it follows the sign-in itself. */
@@ -1410,9 +1416,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const home = record.report.login["HOME"]!;
     const machine = new PlaceMachine(linkTo(placeId), { id: record.name, home });
     const log = provisionRecord(machine, home, `wsp ${wiring.hostName()} ${sync === undefined ? "set up" : "synced"} ${record.name} ${sync === undefined ? "from" : "to"} ${picks.name} at ${sync === undefined ? started.startedAt : new Date(clockNow()).toISOString()}`);
-    // A computer that follows a saved recipe is held against that recipe as this computer has it, so a sync after
-    // the setup finds nothing to do; one that follows none against the picks themselves.
-    const resolved = sync ?? (record.recipe === undefined || record.recipe === NO_RECIPE ? undefined : await opts.recipes?.()?.resolve(record.recipe).catch(() => undefined));
+    // Held row by row against what was applied, a recipe followed or the picks themselves, so a follow or a sync
+    // after the setup runs only what moved rather than every row again.
+    const shelf = opts.recipes?.();
+    const resolved = sync ?? (await (record.recipe === undefined || record.recipe === NO_RECIPE ? shelf?.resolveFile(picks) : shelf?.resolve(record.recipe))?.catch(() => undefined));
     const hash = resolved?.hash ?? picksHash(picks);
     // The rows of the steps that already ended stand: a resume runs only what did not. A sync keeps every row and
     // writes each step's over its own.
@@ -1786,6 +1793,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const record = await recordOf(placeId);
     if (record === undefined) return {};
     if (setting.has(placeId)) throw Object.assign(new Error(placeProvisioningLine(record.name, record.setup?.steps.find(l => l.state === "running")?.step)), { kind: "conflict" });
+    if (syncing.has(placeId)) throw Object.assign(new Error(placeSyncingLine(record.name)), { kind: "conflict" });
     const home = record.report.login["HOME"];
     // Every path the job builds comes off that home, so a computer that reported none gets nothing and says so.
     if (home === undefined) return { said: placeNoHomeLine(record.name) };
@@ -1840,11 +1848,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * that changed here go on, and a sync with nothing moved runs nothing there. A computer that is not linked reads
    * Behind and catches up when it dials back. */
   const syncPlace = async (placeId: string): Promise<void> => {
-    if (setting.has(placeId)) {
+    if (setting.has(placeId) || syncing.has(placeId)) {
       again.add(placeId);
       return;
     }
-    setting.add(placeId);
+    syncing.add(placeId);
     try {
       const record = await recordOf(placeId);
       if (record === undefined || wiring.provision === undefined) return;
@@ -1867,7 +1875,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const started: PlaceSetup = record.setup!;
       await runSetup(placeId, started.addId, resolved.file, new Set(), started, [], { ...resolved, changes, steps: stepsFor(changes, resolved.file), moved, before: record.picks!, state });
     } finally {
-      setting.delete(placeId);
+      syncing.delete(placeId);
       if (again.delete(placeId)) syncSoon(placeId, 0);
     }
   };
@@ -2891,13 +2899,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       return { place: await withCap(row, await rowIds()) };
     },
 
-    async update(placeId, addId) {
+    async update(placeId) {
       const held = await recordOf(placeId);
       if (held === undefined) throw new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name)));
       // Read before anything: another setup on that computer is refused as the op's own refusal, so whoever asked
       // reads one sentence and the line returns rather than following a job it did not start.
       const busy = setting.has(held.id) ? settingNow(held) : undefined;
       if (busy !== undefined) throw Object.assign(new Error(busy), { kind: "conflict" });
+      // A daemon moved under a sync restarts the agent and cuts the link the sync installs over.
+      if (syncing.has(held.id)) throw Object.assign(new Error(placeSyncingLine(held.name)), { kind: "conflict" });
       const from = held.report.daemonVersion;
       // A binary goes only where that computer is behind: a computer already running this wsp's daemon is the
       // common case for a recipe that changed, and the recipe half below is what the person asked for.
@@ -2936,9 +2946,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           };
         }
       }
-      // A stream of its own: this is not an install, and the frames ride it the way a join's steps ride the add's.
-      const started = await startedOrSaid(placeId, addId ?? `a_${randomBytes(6).toString("hex")}`);
-      return { name: held.name, ...(daemon === undefined ? {} : { daemon }), ...started };
+      // A setup run again from the picks installs every row once more, which on a box that runs other things is
+      // its disk and its cores for nothing (spoo filled its disk this way, 2026-10-04); a sync moves only the rows
+      // that changed.
+      if (held.recipe !== undefined && held.recipe !== NO_RECIPE) syncSoon(placeId, 0);
+      return { name: held.name, ...(daemon === undefined ? {} : { daemon }) };
     },
 
     async remove(placeId) {
@@ -3086,7 +3098,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           continue;
         }
         names.push(r.name);
-        if (!setting.has(r.id)) await markSync(r.id, { state: "behind", changes: read.changes.map(c => c.key), since: r.sync?.since ?? new Date(clockNow()).toISOString() });
+        if (!setting.has(r.id) && !syncing.has(r.id)) await markSync(r.id, { state: "behind", changes: read.changes.map(c => c.key), since: r.sync?.since ?? new Date(clockNow()).toISOString() });
         syncSoon(r.id, afterMs);
       }
       return names;

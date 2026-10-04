@@ -82,7 +82,7 @@ export const onName = (name: string): string => onceNamed(name, n => ` on ${n}`)
 export const WHERE_WORDS = {
   /** A place list the host refused, said where the list would stand. */
   notRead: (said: string) => `Computers not read: ${said}`,
-  /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
+  /** Puts this wsp's daemon on that computer; what it was set up with stays. One word in both states, held and
    * dimmed while it runs: a label that changed to Updating moved the button's own width. */
   update: "Update",
   default: "default",
