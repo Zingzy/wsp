@@ -254,3 +254,34 @@ describe("what the kit adds", () => {
     expect(document.body.querySelector("[data-slate-consent-cmd]")!.textContent).toBe('kill "$PID"');
   });
 });
+
+describe("kit4's syntax, parsed and drawn", () => {
+  it("draws when on facts, columns and options, a shut section, icon formulas and the larger icon set", () => {
+    const doc = compiled(`<slate>
+<value name="pro" start={false} />
+<value name="pick" start={null} />
+<value name="rows" start={[{ name: "nginx", cost: "$2" }]} />
+<column>
+  <heading id="mail" value="Inbox" icon="mail" />
+  <heading id="rupee" value="Spend" icon={$pro ? 'indian-rupee' : 'dollar-sign'} />
+  <facts id="f"><fact label="Plan" value="Free" icon="gem" /><fact label="Seats" value="4" when={$pro} /></facts>
+  <table id="t" items={$rows}><col title="Name" value={item.name} /><col title="Cost" value={item.cost} when={$pro} /></table>
+  <select id="s" label="Size" value={$pick}><option value="s" label="Small" /><option value="xl" label="Huge" when={$pro} /></select>
+  <section id="sec" title="Logs" collapsible open={false}><text>inside</text></section>
+</column>
+</slate>`);
+    const { view, push } = draw(doc);
+    const c = view.container;
+    const icon = (id: string) => piece(c, id).querySelector("[data-slate-icon]")?.getAttribute("data-slate-icon");
+    expect(icon("mail")).toBe("mail");
+    expect(icon("rupee")).toBe("dollar-sign");
+    expect(icon("f")).toBe("gem");
+    expect(piece(c, "f").textContent).not.toContain("Seats");
+    expect([...piece(c, "t").querySelectorAll("th")].map(th => th.textContent)).toEqual(["Name"]);
+    expect(piece(c, "sec").querySelector("[data-slate-section]")!.hasAttribute("data-open")).toBe(false);
+    push({ $pro: true });
+    expect(icon("rupee")).toBe("indian-rupee");
+    expect(piece(c, "f").textContent).toContain("Seats 4");
+    expect([...piece(c, "t").querySelectorAll("th")].map(th => th.textContent)).toEqual(["Name", "Cost"]);
+  });
+});
