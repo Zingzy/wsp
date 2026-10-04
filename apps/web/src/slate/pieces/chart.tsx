@@ -1,35 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A line over a list, drawn by the Usage page's own chart: x and value read per row, oldest first.
-import { fmtClock, type SlateJson } from "@wsp/protocol";
+import { slateAxisWord as word, slateChartAxis, type SlateJson } from "@wsp/protocol";
 import { UsageChart } from "../../settings/usageChart.js";
 import type { PieceView } from "../SlateView.js";
 import { figure, str, TONE_INK, toneOf } from "./look.js";
 
 const HEIGHT: Record<string, number> = { small: 96, normal: 160, large: 240 };
-
-/** An x that reads as a time in ms is shown as a clock; anything else as written. */
-const word = (x: SlateJson | undefined): string => (typeof x === "number" && x > 1e12 ? fmtClock(x).slice(0, 5) : (str(x) ?? ""));
-
-const STEPS = [1, 2, 2.5, 5];
-
-/** The axis in four round steps holding every value: from 0 when the values sit nearer 0 than their spread, and a
- * band of 2 percent of the value (or 1) around a flat line. */
-export function chartAxis(values: readonly number[]): { from: number; to: number } {
-  const lo = Math.min(...values);
-  const hi = Math.max(...values);
-  const band = hi > lo ? 0 : (Math.abs(lo) * 0.02 || 1) / 2;
-  const low = lo >= 0 && lo <= hi - lo ? 0 : lo - band;
-  const high = hi + band;
-  const tidy = (v: number): number => Number(v.toPrecision(12));
-  let magnitude = 10 ** Math.floor(Math.log10((high - low) / 4));
-  for (let i = 0; ; i++) {
-    if (i === STEPS.length) (i = 0), (magnitude *= 10);
-    const step = STEPS[i]! * magnitude;
-    if (step * 4 < high - low) continue;
-    const from = tidy(Math.floor(tidy(low / step)) * step);
-    if (from + step * 4 >= high) return { from, to: tidy(from + step * 4) };
-  }
-}
 
 export const chart: PieceView = {
   type: "chart",
@@ -59,7 +35,7 @@ export const chart: PieceView = {
             height={HEIGHT[String(props["height"] ?? "normal")] ?? HEIGHT["normal"]}
             figure={shown}
             label={label}
-            axis={chartAxis(values)}
+            axis={slateChartAxis(values)}
           />
         )}
       </figure>

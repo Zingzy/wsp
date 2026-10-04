@@ -71,6 +71,7 @@ const FIXTURES: [string, string][] = [
   ["W004", wrap(`<text>a \u2014 b</text>`)],
   ["W011", wrap(`<text>x</text>`, `  <secret name="t" />\n  <run name="r" cmd='vercel ls --token "$T"' env={{ T: $t }} />`)],
   ["W012", wrap(`<text>Market closed \u00b7 Weekend close</text>`)],
+  ["W013", wrap(`<chart label="Requests" items={$hits} x={index} value={item.n} />`, `  <value name="hits" start={[{ n: 1 }, { n: 2 }]} />`)],
 ];
 
 describe("the validator", () => {
@@ -131,6 +132,17 @@ describe("the validator", () => {
     ];
     for (const piece of clean) expect(all(wrap(piece, decls)), piece).not.toContain("W012");
     expect(slateCatalog()).toContain("Layout separates things, never \"·\"");
+  });
+
+  it("warns W013 on a chart whose x is the row's index, and names a time in its fix", () => {
+    const decls = `  <value name="hits" start={[{ n: 1, at: 1 }]} />`;
+    for (const x of [`x={index}`, ``]) {
+      const w = parseSlate(wrap(`<chart label="Requests" items={$hits} ${x} value={item.n} />`, decls)).warnings.filter(p => p.code === "W013");
+      expect(w.map(p => [p.prop, p.fix]), x).toEqual([["x", "x={item.at}"]]);
+      expect(w[0]!.message).toContain("give each row its time, for example x={item.at}");
+    }
+    expect(all(wrap(`<chart label="Requests" items={$hits} x={item.at} value={item.n} />`, decls))).not.toContain("W013");
+    expect(slateCatalog("chart")).toContain("x: any, per row; a time on x (ISO or ms) labels the axis by clock, a number by its value");
   });
 
   it("refuses always without every as K703 and takes it with every (correction 2)", () => {

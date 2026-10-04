@@ -460,6 +460,7 @@ class Validator {
     if (p.type === "checklist" && props.editable === true && !(isSlateBinding(props.items) && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(props.items.bind.trim()) && this.kinds.get(props.items.bind.trim().slice(1)) === "value")) {
       this.add("S502", "an editable checklist writes its ticks back, so items binds a value: items={$steps}", { piece: id, prop: "items" });
     }
+    if (p.type === "chart" && (props.x === undefined || (isSlateBinding(props.x) && props.x.bind.trim() === "index"))) this.add("W013", "the chart's x is each row's index, so its axis reads 0 to the count; give each row its time, for example x={item.at}", { piece: id, prop: "x" }, "x={item.at}");
     if (p.type === "bars" && isSlateBinding(items) && slateIsSeries(items.bind.trim())) this.add("W003", `${items.bind} is a series over time; draw it as a line`, { piece: id, prop: "items" }, "<chart>");
     else if (p.type === "bars" && isSlateBinding(props.name) && readsTime(props.name.bind)) this.add("W003", `bars name each row by ${props.name.bind}, a time: a series over time is a line`, { piece: id, prop: "name" }, "<chart>");
     return spec.rowTemplate === true ? rowType : row;

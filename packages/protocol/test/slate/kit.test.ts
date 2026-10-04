@@ -32,7 +32,7 @@ describe("the richer kit", () => {
       `    <status tone="good">Live</status>`,
       `    <chip icon="git-branch">main</chip>`,
       `    <ring label="Done" value={3} max={4} format="fraction" tone="good" note="almost" />`,
-      `    <chart label="Line" items={$hist} value={item} format="usd" height="small" />`,
+      `    <chart label="Line" items={[{ at: '2026-10-04T12:00:00Z', v: 1 }, { at: '2026-10-04T12:01:00Z', v: 2 }, { at: '2026-10-04T12:02:00Z', v: 3 }]} x={item.at} value={item.v} format="usd" height="small" />`,
       `    <sparkline label="Load" values={$hist} />`,
       `    <bars label="Busiest" items={[{ n: 'a', v: 2 }]} name={item.n} value={item.v} />`,
       `    <choices label="Pick" value={$pick} options={[1, 2, 3]} answer={2} />`,
@@ -42,14 +42,15 @@ describe("the richer kit", () => {
     const doc = compiled(text);
     for (const type of ["heading", "grid", "status", "chip", "ring", "chart", "sparkline", "bars", "choices"]) expect(Object.values(doc.pieces).some(p => p.type === type), type).toBe(true);
     const sketch = sketchSlate(doc, { ...slateStartValues(doc), pick: 2 });
-    expect(sketch).toContain("# Gold  [heading-1 heading]");
+    expect(sketch).toContain("# Gold  [heading-1 heading icon=gauge]");
     expect(sketch).toContain("FEED");
     expect(sketch).toContain("grid of 3");
     expect(sketch).toContain("A  1  trend 1 to 3");
     expect(sketch).toContain("(good) Live");
     expect(sketch).toContain("[main]");
-    expect(sketch).toContain("Done  (3/4)  almost");
-    expect(sketch).toContain("Line  last 3, min 1, max 3 over 3 points");
+    expect(sketch).toContain("Done  (3/4) [########..]  almost");
+    expect(sketch).toContain("Line  last $3.00, min $1.00, max $3.00 over 3 points");
+    expect(sketch).toMatch(/\n {2}x \d\d:\d\d to \d\d:\d\d, y \$0\.00 to \$4\.00\n/);
     expect(sketch).toContain("(x) 2 right");
     expect(compiled(printSlate(doc))).toEqual(doc);
     for (const type of ["heading", "grid", "status", "chip", "ring", "chart", "sparkline", "bars", "choices", "number", "section"]) {
@@ -102,7 +103,7 @@ describe("the richer kit", () => {
     }
     expect(values.hist).toEqual([{ at: 1000, v: 2400.5 }, { at: 61000, v: 2401.25 }, { at: 121000, v: 2399 }]);
     const sketch = sketchSlate(doc, values, { now: 121000 });
-    for (const line of ["# Gold", "grid of 3", "Per ounce  $2399.00  trend 2400.5 to 2399", "Low  $2399.00", "High  $2401.25", "Feed", "(good) Live", "[every minute]", "Last hour  (3/60)", "Per ounce, last hour  last 2399, min 2399, max 2401.25 over 3 points"]) expect(sketch).toContain(line);
+    for (const line of ["# Gold", "grid of 3", "Per ounce  $2,399.00  trend 2400.5 to 2399", "Low  $2,399.00", "High  $2,401.25", "Feed", "(good) Live", "[every minute]", "Last hour  (3/60) [#.........]", "Per ounce, last hour  last $2,399.00, min $2,399.00, max $2,401.25 over 3 points", "  x 1000 to 121000, y $2,399.00 to $2,403.00"]) expect(sketch).toContain(line);
     let capped: SlateValues = { ...values, hist: Array.from({ length: 60 }, (_, i) => ({ at: i, v: i })) };
     capped = runSlateBatch(doc, capped, [{ path: "$spot", value: { state: "done", exit: 0, json: { price: 99 }, runs: 2 } }], { by: "run", now: 9 }).values;
     expect((capped.hist as SlateJson[]).length).toBe(60);

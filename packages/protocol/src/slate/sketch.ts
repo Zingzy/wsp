@@ -3,7 +3,7 @@
 // with no eyes knows what the person sees. Each piece type writes its own line; this file walks the tree, hides
 // what is hidden, tags each line with its id and type, lists the values, runs and problems, and caps the whole.
 import { evaluateSlateExpression, parseSlateFormat, resolveSlateProp, slateTruthy, type SlateEvalContext } from "./expr.js";
-import { SLATE_PIECES, type SlateSketchView } from "./kit.js";
+import { SLATE_PIECES, type SlatePropSpec, type SlateSketchView } from "./kit.js";
 import { SLATE_LIMITS } from "./limits.js";
 import { parseSlateOwnPath, slateEqual, slateStep } from "./paths.js";
 import { isSlateBinding, isSlateFormat, isSlateSecretHandle, type SlateDoc, type SlateJson, type SlatePiece, type SlateProblem, type SlatePropValue, type SlateRunRecord, type SlateValues } from "./types.js";
@@ -81,14 +81,15 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
   const lines: string[] = [];
   let pieceLines = 0;
   let folded = 0;
-  const view = (id: string, piece: SlatePiece): SlateSketchView => {
+  const view = (id: string, piece: SlatePiece, reads = new Set<string>()): SlateSketchView => {
     const rowCtx = (item: SlateJson, index: number): SlateEvalContext => ({ ...read, item, index });
     return {
       id,
       unbound,
-      raw: name => piece.props?.[name],
-      bound: name => { const v = piece.props?.[name]; return isSlateBinding(v) || isSlateFormat(v); },
+      raw: name => { reads.add(name); return piece.props?.[name]; },
+      bound: name => { reads.add(name); const v = piece.props?.[name]; return isSlateBinding(v) || isSlateFormat(v); },
       prop: name => {
+        reads.add(name);
         const v = piece.props?.[name];
         if (v === undefined) return undefined;
         return unbound ? braces(v) : resolveSlateProp(v, read);
@@ -101,9 +102,23 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
       read: path => { const p = parseSlateOwnPath(path); return p === undefined ? undefined : p.segs.reduce<SlateJson | undefined>((v, s) => slateStep(v, s), values[p.name]); },
     };
   };
-  const tag = (id: string, piece: SlatePiece, v: SlateSketchView): string => {
+  const tag = (id: string, piece: SlatePiece, v: SlateSketchView, look: string[] = []): string => {
     const words = TAG_PROPS.map(([name]) => (v.bound(name) && unbound ? undefined : v.prop(name)) as SlateJson | undefined).filter((w, i): w is string => typeof w === "string" && w !== TAG_PROPS[i]![1]);
-    return `[${[id, piece.type, ...words].join(" ")}]`;
+    return `[${[id, piece.type, ...words, ...look].join(" ")}]`;
+  };
+  /** Every prop the person sees that the piece's own line did not read and is not at its default, as a word: a flag by its name, the rest name=value. */
+  const lookWords = (piece: SlatePiece, props: Readonly<Record<string, SlatePropSpec>>, reads: ReadonlySet<string>): string[] => {
+    const words: string[] = [];
+    for (const [name, spec] of Object.entries(props)) {
+      if (spec.unseen !== undefined || spec.binds === "item" || reads.has(name) || TAG_PROPS.some(([t]) => t === name)) continue;
+      const raw = piece.props?.[name];
+      if (raw === undefined || raw === null || (unbound && (isSlateBinding(raw) || isSlateFormat(raw)))) continue;
+      const value = resolveSlateProp(raw, read);
+      if (spec.default !== undefined && slateEqual(value, spec.default)) continue;
+      if (value === true) words.push(name);
+      else if (value !== false && value !== undefined && value !== null) words.push(`${name}=${cut(typeof value === "string" ? value : JSON.stringify(value), 24)}`);
+    }
+    return words;
   };
   const emit = (indent: string, body: string, label: string): void => {
     if (pieceLines >= SLATE_LIMITS.sketchPieceLines) { folded++; return; }
@@ -118,7 +133,8 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
     seen.add(id);
     const indent = "  ".repeat(depth);
     const module = SLATE_PIECES[piece.type];
-    const v = view(id, piece);
+    const reads = new Set<string>();
+    const v = view(id, piece, reads);
     if (piece.when !== undefined && !unbound && !slateTruthy(evaluateSlateExpression(piece.when, read))) {
       emit(indent, "(hidden)", tag(id, piece, v));
       return;
@@ -129,9 +145,10 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
     }
     const drawn = module.sketch(v);
     const out = Array.isArray(drawn) ? drawn : [drawn];
-    const transparent = module.holdsChildren && out.every(l => l === "");
+    const look = lookWords(piece, module.props, reads);
+    const transparent = module.holdsChildren && out.every(l => l === "") && look.length === 0;
     if (!transparent) {
-      emit(indent, out[0] ?? "", tag(id, piece, v));
+      emit(indent, out[0] ?? "", tag(id, piece, v, look));
       for (const more of out.slice(1)) if (pieceLines < SLATE_LIMITS.sketchPieceLines) lines.push(`${indent}${cut(more, SLATE_LIMITS.sketchColumns - indent.length)}`);
     }
     if (piece.type === "section" && v.prop("open") === false) return;

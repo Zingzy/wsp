@@ -101,7 +101,7 @@ function pieceEntry(p: SlatePieceModule): string {
   const sketched = compiled === undefined ? "" : (sketchSlate(compiled, {}, { check: true }).split("\n")[1] ?? "");
   return [
     `${p.type} (${p.level}): ${p.purpose}`,
-    ...own.map(([k, s]) => `  ${k}: ${specText(s)}`),
+    ...own.map(([k, s]) => `  ${k}: ${specText(s)}${s.about !== undefined ? `; ${s.about}` : ""}`),
     ...Object.entries(p.items).map(([tag, s]) => `  <${tag}> ${Object.entries(s.fields).map(([k, f]) => `${k}${f.required === true ? "!" : ""}`).join(" ")}${s.row === true && s.events !== undefined ? " when onPress" : ""}${s.row === true ? " (item and index read the row)" : ""}`),
     `events: ${p.events.length > 0 ? p.events.map(e => `on${e[0]!.toUpperCase()}${e.slice(1)}`).join(", ") : "none"}${p.textProp !== undefined ? `; a text child fills ${p.textProp}` : ""}${p.holdsChildren ? "; holds children" : ""}`,
     ...(sketched !== "" ? [`sketch: ${sketched}`] : []),

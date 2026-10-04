@@ -2,7 +2,8 @@
 // The pieces of kit wsp/2 (05-pieces), one self-contained entry each: props, items, events, its sketch line and its
 // catalog text. The compiler, the validator, the sketch and the catalog read these and switch on no type name of
 // their own, so adding a piece is one entry here and one view in the web app.
-import { fmtBytes, fmtTokens } from "../format.js";
+import { fmtBytes, fmtCost, fmtTokens } from "../format.js";
+import { slateAxisWord, slateChartAxis } from "./chart.js";
 import { isSlateSecretHandle, type SlateEventName, type SlateJson, type SlatePropValue, type SlateRunRecord } from "./types.js";
 
 export const SLATE_TONES = ["default", "muted", "good", "warning", "bad", "info", "accent"] as const;
@@ -27,6 +28,10 @@ export interface SlatePropSpec {
   default?: SlateJson;
   min?: number;
   max?: number;
+  /** Why the person never sees this prop on the panel; a prop without it reaches the sketch. */
+  unseen?: string;
+  /** What the catalog's entry for the piece says beside the prop. */
+  about?: string;
 }
 
 export interface SlateItemSpec {
@@ -87,12 +92,13 @@ export interface SlatePieceModule {
 const str = (more: Partial<SlatePropSpec> = {}): SlatePropSpec => ({ type: "string", binds: "yes", ...more });
 const num = (more: Partial<SlatePropSpec> = {}): SlatePropSpec => ({ type: "number", binds: "yes", ...more });
 const flag = (): SlatePropSpec => ({ type: "boolean", binds: "no" });
-const enm = (values: readonly string[]): SlatePropSpec => ({ type: values, binds: "no" });
+const enm = (values: readonly string[], fallback?: string): SlatePropSpec => ({ type: values, binds: "no", ...(fallback !== undefined ? { default: fallback } : {}) });
 const tone = (values: readonly string[] = SLATE_TONES): SlatePropSpec => ({ type: values, binds: "yes" });
 const req = { required: true as const };
+const rowKey = (): SlatePropSpec => ({ type: "any", binds: "item", unseen: "names a row so it keeps its place as rows move" });
 const icon = (): SlatePropSpec => ({ type: "icon", binds: "no" });
 /** How a group sits: inner space, the app's inset ground, and where its children line up across. */
-const box = { pad: enm(PAD), surface: enm(SURFACE) };
+const box = { pad: enm(PAD, "none"), surface: enm(SURFACE, "plain") };
 
 /** A value as a sketch shows it: nothing for missing. */
 const shown = (v: SlateJson | undefined): string => (v === null || v === undefined ? "" : typeof v === "string" ? v : typeof v === "object" ? JSON.stringify(v) : String(v));
@@ -102,6 +108,19 @@ const trend = (label: string, vals: number[]): string => (vals.length === 0 ? `$
 const join2 = (...parts: string[]): string => parts.filter(p => p !== "").join("  ");
 const asList = (v: SlatePropValue | undefined): SlatePropValue[] => (Array.isArray(v) ? v : []);
 const rec = (v: SlateJson | undefined): Record<string, SlateJson> => (v !== null && typeof v === "object" && !Array.isArray(v) ? v : {});
+
+/** A row's or an item's look as a mark after it: [bad strong mono icon=zap], nothing when it has none. */
+function marks(r: Record<string, SlateJson | undefined>): string {
+  const words = [
+    typeof r.tone === "string" && r.tone !== "default" ? r.tone : "",
+    typeof r.emphasis === "string" && r.emphasis !== "normal" ? r.emphasis : "",
+    r.mono === true ? "mono" : "",
+    typeof r.align === "string" && r.align !== "start" ? r.align : "",
+    typeof r.width === "string" ? r.width : "",
+    typeof r.icon === "string" ? `icon=${r.icon}` : "",
+  ].filter(Boolean);
+  return words.length === 0 ? "" : ` [${words.join(" ")}]`;
+}
 
 function bar(value: SlateJson | undefined, max: SlateJson | undefined): string {
   if (!isNum(value)) return "[..........]";
@@ -117,7 +136,7 @@ function figure(format: string, value: SlateJson | undefined, max: SlateJson | u
     case "fraction": return `${value}/${shown(max)}`;
     case "tokens": return fmtTokens(value);
     case "bytes": return fmtBytes(value);
-    case "usd": return `$${value.toFixed(2)}`;
+    case "usd": return fmtCost(value);
     case "integer": return String(Math.round(value));
     case "none": return "";
     default: return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -145,17 +164,17 @@ const rowActionItem: SlateItemSpec = { prop: "rowActions", row: true, events: ["
 export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   column: {
     type: "column", level: "core", purpose: "Stacks children top to bottom.", holdsChildren: true,
-    props: { gap: enm(DENSITY), align: enm(["start", "center", "end", "stretch"]), ...box }, items: {}, events: [],
+    props: { gap: enm(DENSITY, "normal"), align: enm(["start", "center", "end", "stretch"], "stretch"), ...box }, items: {}, events: [],
     sketch: () => "", fallback: "children in order", example: `<column gap="tight"><text>One</text><text>Two</text></column>`,
   },
   grid: {
     type: "grid", level: "core", purpose: "Children in 2 to 4 equal columns, one column under 360 px.", holdsChildren: true,
-    props: { columns: { type: "integer", binds: "no", required: true, min: 2, max: 4 }, gap: enm(DENSITY), align: enm(PLACE), ...box }, items: {}, events: [],
+    props: { columns: { type: "integer", binds: "no", required: true, min: 2, max: 4 }, gap: enm(DENSITY, "normal"), align: enm(PLACE), ...box }, items: {}, events: [],
     sketch: v => `grid of ${shown(v.prop("columns"))}`, fallback: "column", example: `<grid columns={3}><number label="Open" value={3} /><number label="Done" value={9} /><number label="Failed" value={0} /></grid>`,
   },
   row: {
     type: "row", level: "core", purpose: "Places children side by side.", holdsChildren: true,
-    props: { gap: enm(DENSITY), align: enm(["start", "center", "end", "between"]), wrap: flag() }, items: {}, events: [],
+    props: { gap: enm(DENSITY, "normal"), align: enm(["start", "center", "end", "between"], "start"), wrap: flag() }, items: {}, events: [],
     sketch: () => "", fallback: "as column", example: `<row align="between"><text>Left</text><text>Right</text></row>`,
   },
   section: {
@@ -167,7 +186,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   tabs: {
     type: "tabs", level: "working", purpose: "One child at a time, picked by a segmented control.", holdsChildren: true,
     props: { selected: { type: "string", binds: "state" } },
-    items: { tab: { prop: "tabs", min: 2, max: 6, fields: { title: str({ ...req, binds: "no" }), piece: { type: "id", binds: "no", required: true } } } },
+    items: { tab: { prop: "tabs", min: 2, max: 6, fields: { title: str({ ...req, binds: "no" }), piece: { type: "id", binds: "no", required: true, unseen: "names the child a tab shows; the children are sketched beneath" } } } },
     events: ["change"],
     sketch: v => {
       const tabs = asList(v.raw("tabs")).map(t => shown(rec(t as SlateJson).title));
@@ -202,7 +221,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   number: {
     type: "number", level: "core", purpose: "A figure with a label.", holdsChildren: false,
-    props: { label: str(req), value: { type: "text", binds: "yes", required: true }, format: enm(FIGURE), unit: str(), tone: tone(), note: str(), size: enm(["normal", "large"]), icon: icon(), trend: { type: "list", binds: "yes" } },
+    props: { label: str(req), value: { type: "text", binds: "yes", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), note: str(), size: enm(["normal", "large"]), icon: icon(), trend: { type: "list", binds: "yes" } },
     items: {}, events: [],
     sketch: v => {
       const value = v.prop("value");
@@ -214,7 +233,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   meter: {
     type: "meter", level: "core", purpose: "One value against a maximum.", holdsChildren: false,
-    props: { label: str(req), value: num(req), max: num(), note: str(), tone: tone(["default", "good", "warning", "bad"]), format: enm(["percent", "value", "fraction", "tokens", "bytes", "none"]) },
+    props: { label: str(req), value: num(req), max: num(), note: str(), tone: tone(["default", "good", "warning", "bad"]), format: enm(["percent", "value", "fraction", "tokens", "bytes", "none"], "percent") },
     items: {}, events: [],
     sketch: v => {
       const value = v.prop("value");
@@ -227,21 +246,31 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   bars: {
     type: "bars", level: "core", purpose: "Categories compared as rows of name, track and figure; never a series over time.", holdsChildren: false, repeating: true,
-    props: { label: str(req), items: { type: "list", binds: "yes", required: true }, key: { type: "any", binds: "item" }, name: { type: "string", binds: "item", required: true }, value: { type: "number", binds: "item", required: true }, tone: { type: SLATE_TONES, binds: "item" }, max: num(), format: enm(["percent", "value", "none"]) },
+    props: { label: str(req), items: { type: "list", binds: "yes", required: true }, key: rowKey(), name: { type: "string", binds: "item", required: true }, value: { type: "number", binds: "item", required: true }, tone: { type: SLATE_TONES, binds: "item" }, max: num(), format: enm(["percent", "value", "none"], "value") },
     items: {}, events: [],
-    sketch: v => [shown(v.prop("label")), ...rows(v, (item, i) => { const r = v.row({ name: v.raw("name") ?? null, value: v.raw("value") ?? null }, item, i); return `  ${shown(r.name)}  ${bar(r.value ?? null, v.prop("max") ?? 100)} ${shown(r.value)}`; }).slice(0, 5)],
+    sketch: v => [shown(v.prop("label")), ...rows(v, (item, i) => { const r = v.row({ name: v.raw("name") ?? null, value: v.raw("value") ?? null }, item, i); const t = v.row({ tone: v.raw("tone") ?? null }, item, i); return `  ${shown(r.name)}  ${bar(r.value ?? null, v.prop("max") ?? 100)} ${figure(String(v.prop("format") ?? "value"), r.value, v.prop("max"))}${marks(t)}`; }).slice(0, 5)],
     fallback: "table", example: `<bars label="Busiest" items={processes.list | take(5)} name={item.name} value={item.cpu} />`,
   },
   chart: {
     type: "chart", level: "core", purpose: "A line over a list, oldest first: x and value read each row.", holdsChildren: false, repeating: true,
-    props: { label: str(req), items: { type: "list", binds: "yes", required: true }, x: { type: "any", binds: "item" }, value: { type: "number", binds: "item", required: true }, format: enm(FIGURE), unit: str(), tone: tone(), height: enm(SIZE) },
+    props: { label: str(req), items: { type: "list", binds: "yes", required: true }, x: { type: "any", binds: "item", about: "a time on x (ISO or ms) labels the axis by clock, a number by its value" }, value: { type: "number", binds: "item", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), height: enm(SIZE, "normal") },
     items: {}, events: [],
     sketch: v => {
       const label = shown(v.prop("label"));
       const items = v.prop("items");
-      if (v.unbound) return `${label}  line of ${shown(items)}`;
-      const vals = Array.isArray(items) ? items.map((item, i) => v.row({ value: v.raw("value") ?? null }, item, i).value).filter(isNum) : [];
-      return trend(label, vals);
+      if (v.unbound) return `${label}  line of ${shown(items)}, x ${v.raw("x") === undefined ? "{index}" : shown(v.prop("x"))}`;
+      const x = v.raw("x");
+      const rowsRead = (Array.isArray(items) ? items : []).map((item, i) => ({ x: x === undefined ? i : v.row({ x }, item, i).x, value: v.row({ value: v.raw("value") ?? null }, item, i).value })).filter(r => isNum(r.value));
+      if (rowsRead.length === 0) return `${label}  no points yet`;
+      const vals = rowsRead.map(r => r.value as number);
+      const format = String(v.prop("format") ?? "plain");
+      const unit = shown(v.prop("unit"));
+      const fig = (n: number): string => [figure(format, n, undefined), unit].filter(Boolean).join(" ");
+      const axis = slateChartAxis(vals.length === 1 ? [vals[0]!, vals[0]!] : vals);
+      return [
+        `${label}  last ${fig(vals.at(-1)!)}, min ${fig(Math.min(...vals))}, max ${fig(Math.max(...vals))} over ${vals.length} point${vals.length === 1 ? "" : "s"}`.trimStart(),
+        `  x ${slateAxisWord(rowsRead[0]!.x)} to ${slateAxisWord(rowsRead.at(-1)!.x)}, y ${fig(axis.from)} to ${fig(axis.to)}`,
+      ];
     },
     fallback: "text", example: `<chart label="Gold" items={$hist} x={item.at} value={item.v} format="usd" />`,
   },
@@ -253,40 +282,40 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   table: {
     type: "table", level: "core", purpose: "Rows with columns from a bound list: <col> per column, <action> per row button.", holdsChildren: false, repeating: true,
-    props: { items: { type: "list", binds: "yes", required: true }, key: { type: "any", binds: "item" }, empty: str(), rows: { type: "integer", binds: "no", min: 1, max: 5000 } },
+    props: { items: { type: "list", binds: "yes", required: true }, key: rowKey(), empty: str(), rows: { type: "integer", binds: "no", min: 1, max: 5000 } },
     items: {
-      col: { prop: "columns", row: true, min: 1, max: 8, fields: { title: str({ ...req, binds: "no" }), value: { type: "text", binds: "item", required: true }, tone: { type: SLATE_TONES, binds: "item" }, emphasis: { type: EMPHASIS, binds: "item" }, mono: flag(), align: enm(["start", "end"]), width: enm(["fit", "fill"]) } },
+      col: { prop: "columns", row: true, min: 1, max: 8, fields: { title: str({ ...req, binds: "no" }), value: { type: "text", binds: "item", required: true }, tone: { type: SLATE_TONES, binds: "item" }, emphasis: { type: EMPHASIS, binds: "item" }, mono: flag(), align: enm(["start", "end"], "start"), width: enm(["fit", "fill"]) } },
       action: rowActionItem,
     },
     events: [],
     sketch: v => {
       const cols = asList(v.raw("columns"));
-      const head = `| ${cols.map(c => shown(rec(c as SlateJson).title)).join(" | ")} |`;
-      return [head, ...rows(v, (item, i) => `| ${cols.map(c => shown(v.row(c, item, i).value)).join(" | ")} |${actions(v, item, i)}`)];
+      const head = `| ${cols.map(c => { const r = rec(c as SlateJson); return `${shown(r.title)}${marks({ mono: r.mono, align: r.align, width: r.width })}`; }).join(" | ")} |`;
+      return [head, ...rows(v, (item, i) => `| ${cols.map(c => { const r = v.row(c, item, i); return `${shown(r.value)}${marks({ tone: r.tone, emphasis: r.emphasis })}`; }).join(" | ")} |${actions(v, item, i)}`)];
     },
     fallback: "a list of text rows",
     example: `<table id="checks" items={pr.checks} key={item.name}><col title="Check" value={item.name} /><action label="Fix" when={item.state == 'fail'} onPress={send("Fix this check.", item.name)} /></table>`,
   },
   list: {
     type: "list", level: "working", purpose: "Its one child drawn per row of a bound list.", holdsChildren: true, repeating: true, rowTemplate: true, childLimit: { max: 1, types: [] },
-    props: { items: { type: "list", binds: "yes", required: true }, key: { type: "any", binds: "item" }, empty: str(), gap: enm(DENSITY) },
+    props: { items: { type: "list", binds: "yes", required: true }, key: rowKey(), empty: str(), gap: enm(DENSITY, "normal") },
     items: { action: rowActionItem }, events: [],
     sketch: v => rows(v, (item, i) => `- ${shown(item)}${actions(v, item, i)}`),
     fallback: "text rows", example: `<list items={thread.plan.steps}><text>{item.text}</text></list>`,
   },
   checklist: {
     type: "checklist", level: "core", purpose: "Rows with a tick; editable writes the tick back to the value.", holdsChildren: false, repeating: true,
-    props: { items: { type: "list", binds: "yes", required: true }, key: { type: "any", binds: "item" }, title: { type: "string", binds: "item", required: true }, done: { type: "boolean", binds: "item", required: true }, state: { type: ["pending", "working", "done"], binds: "item" }, note: { type: "string", binds: "item" }, editable: flag(), empty: str() },
+    props: { items: { type: "list", binds: "yes", required: true }, key: rowKey(), title: { type: "string", binds: "item", required: true }, done: { type: "boolean", binds: "item", required: true }, state: { type: ["pending", "working", "done"], binds: "item", unseen: "this build's checklist draws done alone" }, note: { type: "string", binds: "item" }, editable: flag(), empty: str() },
     items: {}, events: ["change"],
-    sketch: v => rows(v, (item, i) => { const r = v.row({ title: v.raw("title") ?? null, done: v.raw("done") ?? null }, item, i); return `[${r.done === true ? "x" : " "}] ${shown(r.title)}`; }),
+    sketch: v => rows(v, (item, i) => { const r = v.row({ title: v.raw("title") ?? null, done: v.raw("done") ?? null }, item, i); const note = shown(v.row({ note: v.raw("note") ?? null }, item, i).note); return `[${r.done === true ? "x" : " "}] ${shown(r.title)}${note === "" ? "" : `  ${note}`}`; }),
     fallback: "text rows", example: `<checklist items={$steps} title={item.title} done={item.done} editable />`,
   },
   facts: {
     type: "facts", level: "core", purpose: "Label and value pairs: <fact> per pair.", holdsChildren: false,
-    props: { layout: enm(["line", "grid"]) },
+    props: { layout: enm(["line", "grid"], "line") },
     items: { fact: { prop: "facts", min: 1, max: 12, fields: { label: str(req), value: { type: "text", binds: "yes", required: true }, tone: tone(), emphasis: { type: EMPHASIS, binds: "yes" }, mono: flag(), icon: icon() } } },
     events: [],
-    sketch: v => asList(v.raw("facts")).map((f, i) => v.row(f, null, i)).filter(f => f.value !== null && f.value !== undefined && f.value !== "").map(f => `${shown(f.label)}: ${shown(f.value)}`).join("  "),
+    sketch: v => asList(v.raw("facts")).map((f, i) => v.row(f, null, i)).filter(f => f.value !== null && f.value !== undefined && f.value !== "").map(f => `${shown(f.label)}: ${shown(f.value)}${marks(f)}`).join("  "),
     fallback: "text lines", example: `<facts><fact label="State" value={pr.word} /><fact label="Review" value={word(pr.review)} /></facts>`,
   },
   data: {
@@ -306,12 +335,12 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   ring: {
     type: "ring", level: "core", purpose: "Progress as a ring with its figure inside.", holdsChildren: false,
-    props: { label: str(req), value: num(req), max: num(), format: enm(["percent", "value", "fraction"]), tone: tone(["default", "good", "warning", "bad"]), note: str() }, items: {}, events: [],
+    props: { label: str(req), value: num(req), max: num(), format: enm(["percent", "value", "fraction"], "percent"), tone: tone(["default", "good", "warning", "bad"]), note: str() }, items: {}, events: [],
     sketch: v => {
       const value = v.prop("value");
       const max = v.prop("max") ?? 100;
       if (v.unbound || !isNum(value)) return join2(shown(v.prop("label")), `(${v.unbound ? shown(value) : "not read yet"})`);
-      return join2(shown(v.prop("label")), `(${figure(String(v.prop("format") ?? "percent"), value, max)})`, shown(v.prop("note")));
+      return join2(shown(v.prop("label")), `(${figure(String(v.prop("format") ?? "percent"), value, max)}) ${bar(value, max)}`, shown(v.prop("note")));
     },
     fallback: "meter", example: `<ring label="Done" value={$done} max={len($steps)} format="fraction" />`,
   },
@@ -322,7 +351,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   image: {
     type: "image", level: "extended", purpose: "An image from a data: URI or a file in the thread's folder.", holdsChildren: false,
-    props: { src: str(req), alt: str(req), fit: enm(["contain", "cover"]) }, items: {}, events: [],
+    props: { src: str(req), alt: str(req), fit: enm(["contain", "cover"], "contain") }, items: {}, events: [],
     sketch: v => `image: ${shown(v.prop("alt"))}`, fallback: "the alt text", example: `<image src="docs/shot.png" alt="The panel" />`,
   },
   output: {
@@ -347,7 +376,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   input: {
     type: "input", level: "core", purpose: "Text in, written to its $value as the person types; a secret's input is a password field.", holdsChildren: false, interactive: true,
-    props: { label: str(req), value: { type: "text", binds: "state", required: true }, lines: { type: "integer", binds: "no", min: 1, max: 20 }, kind: enm(["text", "number", "password"]), placeholder: str(), held: str(), mono: flag(), submit: str() },
+    props: { label: str(req), value: { type: "text", binds: "state", required: true }, lines: { type: "integer", binds: "no", min: 1, max: 20 }, kind: enm(["text", "number", "password"], "text"), placeholder: str(), held: str(), mono: flag(), submit: str() },
     items: {}, events: ["change", "submit"],
     sketch: v => {
       const raw = v.prop("value");
@@ -365,8 +394,9 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
     events: ["change"],
     sketch: v => {
       const opts = v.prop("options");
-      const n = Array.isArray(opts) ? opts.length : 0;
-      return `${shown(v.prop("label"))}: ${shown(v.prop("value")) || "(none)"} (of ${n})`;
+      const list = (Array.isArray(opts) ? opts : []).map(o => { const r = rec(o); return shown(o !== null && typeof o === "object" ? (r.label ?? r.value) : o); });
+      const empty = shown(v.prop("placeholder")) === "" ? "(none)" : `(none, "${shown(v.prop("placeholder"))}")`;
+      return `${shown(v.prop("label"))}: ${shown(v.prop("value")) || empty} (of ${list.length <= 6 ? list.join(", ") || "0" : list.length})`;
     },
     fallback: "none needed", example: `<select label="Hide" value={$hide}><option value="Done" /><option value="Canceled" /></select>`,
   },
@@ -380,12 +410,13 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
       const answer = v.prop("answer");
       const opts = v.prop("options");
       const list = (Array.isArray(opts) ? opts : []).map(o => (o !== null && typeof o === "object" && !Array.isArray(o) ? o : { value: o }));
-      const marks = list.map(o => {
+      const lines = list.map(o => {
         const chosen = picked !== null && picked !== undefined && JSON.stringify(o.value) === JSON.stringify(picked);
         const right = answer !== null && answer !== undefined && picked !== null && picked !== undefined && JSON.stringify(o.value) === JSON.stringify(answer);
-        return `(${chosen ? "x" : " "}) ${shown(o.label ?? o.value)}${right ? " right" : chosen && answer !== null && answer !== undefined ? " wrong" : ""}`;
+        return `(${chosen ? "x" : " "}) ${shown(o.label ?? o.value)}${right ? " right" : chosen && answer !== null && answer !== undefined ? " wrong" : ""}${o.note !== undefined && o.note !== null ? `  ${shown(o.note)}` : ""}`;
       });
-      return [`${shown(v.prop("label"))}:`, ...marks.map(m => `  ${m}`)];
+      const lost = picked !== null && picked !== undefined && !list.some(o => JSON.stringify(o.value) === JSON.stringify(picked));
+      return [`${shown(v.prop("label"))}:${lost ? ` ${shown(picked)}` : ""}`, ...lines.map(m => `  ${m}`)];
     },
     fallback: "select", example: `<choices label="Which layer routes packets?" value={$pick} options={$q.options} answer={$q.answer} />`,
   },
@@ -406,7 +437,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
     props: { tool: str({ ...req, binds: "no" }), label: str(), into: { type: "path", binds: "no", required: true }, submit: str({ binds: "no" }), confirm: str({ binds: "no" }) },
     items: { field: { prop: "fields", fields: { name: str({ ...req, binds: "no" }), label: str({ binds: "no" }), hidden: flag(), value: { type: "any", binds: "yes" } } } },
     events: ["submit"],
-    sketch: v => `form ${shown(v.prop("tool"))}: ${asList(v.raw("fields")).map((f, i) => { const r = v.row(f, null, i); return `${shown(r.name)}=${shown(r.value)}`; }).join(", ")} [ ${shown(v.prop("submit")) || "Submit"} ]`,
+    sketch: v => `form ${shown(v.prop("tool"))}: ${asList(v.raw("fields")).map((f, i) => v.row(f, null, i)).filter(r => r.hidden !== true).map(r => `${shown(r.label ?? r.name)}=${shown(r.value)}`).join(", ")} [ ${shown(v.prop("submit")) || "Submit"} ]`,
     fallback: "text", example: `<form tool="linear.create_issue" into={$created} submit="Create"><field name="title" label="What needs doing" /></form>`,
   },
   empty: {
@@ -417,7 +448,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   terminal: {
     type: "terminal", level: "extended", purpose: "A live terminal with a command typed and not run.", holdsChildren: false,
-    props: { label: str(req), command: str(), cwd: str({ binds: "no" }), height: enm(["small", "normal", "tall"]) }, items: {}, events: [],
+    props: { label: str(req), command: str(), cwd: str({ binds: "no" }), height: enm(["small", "normal", "tall"], "normal") }, items: {}, events: [],
     sketch: v => `terminal: ${shown(v.prop("command"))}`, fallback: "code", example: `<terminal label="Tests" command="pnpm test" />`,
   },
   diff: {
@@ -437,7 +468,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   "mcp-app": {
     type: "mcp-app", level: "extended", purpose: "An MCP server's own view in a sandboxed frame.", holdsChildren: false,
-    props: { label: str(req), server: str({ ...req, binds: "no" }), resource: str({ ...req, binds: "no" }), tool: str({ binds: "no" }), args: { type: "any", binds: "yes" }, height: enm(["small", "normal", "tall"]) },
+    props: { label: str(req), server: str({ ...req, binds: "no" }), resource: str({ ...req, binds: "no" }), tool: str({ binds: "no" }), args: { type: "any", binds: "yes" }, height: enm(["small", "normal", "tall"], "normal") },
     items: {}, events: [],
     sketch: v => `mcp app: ${shown(v.prop("label"))} (${shown(v.prop("server"))}, ${shown(v.prop("resource"))})`, fallback: "text", example: `<mcp-app label="Board" server="linear" resource="ui://board" />`,
   },

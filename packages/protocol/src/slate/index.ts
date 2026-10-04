@@ -20,5 +20,6 @@ export { validateSlate, validateDocument, type SlateLines } from "./validate.js"
 export { applySlatePatch, carrySlateValues, slateStartValues } from "./patch.js";
 export { runSlateBatch, type SlateBatchResult, type SlateBatchContext, type SlateBatchSend, type SlateBatchWindowStep, type SlateWriter } from "./batch.js";
 export { sketchSlate, type SlateSketchContext } from "./sketch.js";
+export { slateAxisWord, slateChartAxis } from "./chart.js";
 export { slateCatalog, slateTokens, SLATE_RULES } from "./catalog.js";
 export { SLATE_EXAMPLES } from "./examples.js";

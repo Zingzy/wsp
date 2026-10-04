@@ -3,11 +3,10 @@
 // the quiz's choices write the pick, and every icon a slate may name has its component.
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { parseSlate, slateStartValues, SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { parseSlate, slateChartAxis, slateStartValues, SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { SLATE_VIEWS } from "./pieces";
-import { chartAxis } from "./pieces/chart";
 import { SLATE_ICON_VIEWS } from "./pieces/icon";
 import { SlateView } from "./SlateView";
 import { fakeLink, manualScheduler } from "./testing";
@@ -96,7 +95,7 @@ describe("the richer kit in the renderer", () => {
 
     it("holds every value in four round steps", () => {
       for (const values of [[2400.5, 2401.25, 2399], [4141.8, 4141.8], [0, 0], [-5, -5], [3, 1000], [0.001, 0.0012], [-40, 25], [99.9, 100.1]]) {
-        const { from, to } = chartAxis(values);
+        const { from, to } = slateChartAxis(values);
         expect(from, String(values)).toBeLessThanOrEqual(Math.min(...values));
         expect(to, String(values)).toBeGreaterThanOrEqual(Math.max(...values));
         expect(to, String(values)).toBeGreaterThan(from);

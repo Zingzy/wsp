@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSlate, runSlateBatch, sketchSlate, slateCatalog, slateStartValues, slateTokens, SLATE_EXAMPLES, SLATE_PIECES, SLATE_SOURCES, type SlateDoc } from "../../src/slate/index.js";
+import { parseSlate, runSlateBatch, sketchSlate, slateCatalog, slateStartValues, slateTokens, SLATE_EXAMPLES, SLATE_PIECES, SLATE_SOURCES, type SlateDoc, type SlateJson } from "../../src/slate/index.js";
 import { SLATE_INDEX_EXAMPLE } from "../../src/slate/catalog.js";
 import { SPEC_EXAMPLES } from "./examples.js";
 
@@ -27,7 +27,7 @@ describe("the sketch", () => {
       "Step 2 of 4  [text-1 text strong]",
       "(hidden) [section-1 section]",
       "2. The project  [section-2 section]",
-      '  Project name on Vercel: "wsp-landing"  [project-name input]',
+      '  Project name on Vercel: "wsp-landing"  [project-name input mono]',
       "  Approve the check to go on  [text-2 text muted]",
       "  (hidden) [text-3 text muted]",
       "  (hidden) [text-4 text bad]",
@@ -78,4 +78,73 @@ describe("the catalog", () => {
   it("every piece's catalog example compiles", () => {
     for (const p of Object.values(SLATE_PIECES)) expect(slateCatalog(p.type), p.type).toMatch(/\nsketch: /);
   });
+});
+
+describe("the sketch says what the person sees", () => {
+  type Spec = (typeof SLATE_PIECES)[string]["props"][string];
+  const ROWS = [{ name: "a", v: 1, at: 1_759_000_000_000, title: "A", done: false }, { name: "b", v: 2, at: 1_759_000_060_000, title: "B", done: true }];
+  /** Two different literals a prop of this spec may hold, the first one what a fresh piece is given: its default
+   * where it has one, so the second moves it away from the default. */
+  const pair = (name: string, spec: Spec): [SlateJson, SlateJson] => {
+    const t = spec.type;
+    if (Array.isArray(t)) return spec.default === undefined ? [t[0]!, t[1]!] : [spec.default, t.find(v => v !== spec.default)!];
+    switch (t) {
+      case "boolean": return [true, false];
+      case "number": return [40, 70];
+      case "text": return [12345, 23456];
+      case "integer": return [spec.min ?? 1, (spec.min ?? 1) + 1];
+      case "list": return name === "items" ? [ROWS, [...ROWS, { ...ROWS[1]!, name: "c", v: 3, at: 1_759_000_120_000 }]] : [[1, 2, 3], [4, 5, 6, 7]];
+      case "icon": return ["zap", "clock"];
+      case "path": return ["$r", "$s"];
+      case "id": return ["a", "b"];
+      default: return ["Alpha", "Beta"];
+    }
+  };
+  /** A prop the person sees only in some state, and that state: a placeholder while empty, an answer once picked. */
+  const SHOWN_WHEN: Record<string, Record<string, SlateJson>> = { placeholder: { value: "" }, answer: { options: ["Alpha", "Beta"], value: "Alpha" } };
+  const fresh = (type: string): Record<string, SlateJson> => {
+    const m = SLATE_PIECES[type]!;
+    const props: Record<string, SlateJson> = {};
+    for (const [name, spec] of Object.entries(m.props)) if (spec.required === true) props[name] = pair(name, spec)[0];
+    for (const item of Object.values(m.items)) {
+      if ((item.min ?? 0) === 0) continue;
+      props[item.prop] = Array.from({ length: item.min! }, (_, i) => Object.fromEntries(Object.entries(item.fields).filter(([, f]) => f.required === true).map(([k, f]) => [k, f.type === "id" ? `c${i}` : `${String(pair(k, f)[0])}${i}`])));
+    }
+    return props;
+  };
+  const sketchOf = (type: string, props: Record<string, SlateJson>): string => {
+    const run = { state: "done", exit: 0, out: "hi", err: "", runs: 1 };
+    const doc = { schema: 2, root: "p", values: {}, derived: {}, reactions: [], runs: { r: { kind: "cmd", cmd: "true" }, s: { kind: "cmd", cmd: "true" } }, pieces: { p: { type, props } } } as unknown as SlateDoc;
+    return sketchSlate(doc, { r: run, s: { ...run, out: "other" } } as never, { now });
+  };
+
+  it("says a chart's axes as they are labelled: an index from 0, a time by the clock", () => {
+    const traffic = (x: string) => parseSlate(`<slate><value name="hits" start={${JSON.stringify(Array.from({ length: 60 }, (_, i) => ({ n: 100 + i, at: Date.parse("2026-10-04T16:48:00") + i * 60_000 })))}} /><column><chart label="Requests" items={$hits} ${x} value={item.n} /></column></slate>`).document!;
+    const byIndex = sketchSlate(traffic("x={index}"), slateStartValues(traffic("x={index}")));
+    expect(byIndex).toContain("Requests  last 159, min 100, max 159 over 60 points");
+    expect(byIndex.split("\n")).toContain("  x 0 to 59, y 100 to 180");
+    const byTime = sketchSlate(traffic("x={item.at}"), slateStartValues(traffic("x={item.at}")));
+    expect(byTime.split("\n")).toContain("  x 16:48 to 17:47, y 100 to 180");
+  });
+
+  for (const [type, m] of Object.entries(SLATE_PIECES)) {
+    it(`${type}: every prop it declares that the person sees changes its sketch`, () => {
+      for (const [name, spec] of Object.entries(m.props)) {
+        if (spec.unseen !== undefined) continue;
+        const [a, b] = pair(name, spec);
+        const base = { ...fresh(type), ...SHOWN_WHEN[name] };
+        expect(sketchOf(type, { ...base, [name]: a }), `${type}.${name}`).not.toBe(sketchOf(type, { ...base, [name]: b }));
+      }
+      for (const [kind, item] of Object.entries(m.items)) {
+        for (const [field, spec] of Object.entries(item.fields)) {
+          if (spec.unseen !== undefined) continue;
+          const [a, b] = pair(field, spec);
+          const base = fresh(type);
+          const list = (base[item.prop] as Record<string, SlateJson>[] | undefined) ?? [Object.fromEntries(Object.entries(item.fields).filter(([, f]) => f.required === true).map(([k, f]) => [k, pair(k, f)[0]]))];
+          const withField = (v: SlateJson) => ({ ...base, ...(item.row === true ? { items: ROWS } : {}), [item.prop]: list.map((x, i) => (i === 0 ? { ...x, [field]: v } : x)) });
+          expect(sketchOf(type, withField(a)), `${type} <${kind} ${field}>`).not.toBe(sketchOf(type, withField(b)));
+        }
+      }
+    });
+  }
 });
