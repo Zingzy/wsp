@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSlate, parseSlatePatch, slateCatalog, validateSlate, SLATE_CODES } from "../../src/slate/index.js";
+import { parseSlate, parseSlatePatch, printSlate, slateCatalog, validateSlate, SLATE_CODES, SLATE_ICONS } from "../../src/slate/index.js";
 import { SPEC_EXAMPLES } from "./examples.js";
 
 const wrap = (pieces: string, decls = ""): string => `<slate title="T">\n${decls}\n  <column>\n    ${pieces}\n  </column>\n</slate>`;
@@ -72,6 +72,7 @@ const FIXTURES: [string, string][] = [
   ["W011", wrap(`<text>x</text>`, `  <secret name="t" />\n  <run name="r" cmd='vercel ls --token "$T"' env={{ T: $t }} />`)],
   ["W012", wrap(`<text>Market closed \u00b7 Weekend close</text>`)],
   ["W013", wrap(`<chart label="Requests" items={$hits} x={index} value={item.n} />`, `  <value name="hits" start={[{ n: 1 }, { n: 2 }]} />`)],
+  ["W014", wrap(`<text mono>Kill the node process now</text>`)],
 ];
 
 describe("the validator", () => {
@@ -131,7 +132,7 @@ describe("the validator", () => {
       `<text>\u2022 first</text>`,
     ];
     for (const piece of clean) expect(all(wrap(piece, decls)), piece).not.toContain("W012");
-    expect(slateCatalog()).toContain("Layout separates things, never \"·\"");
+    expect(slateCatalog()).toContain("Separate things by layout, never by ·, • or |.");
   });
 
   it("warns W013 on a chart whose x is the row's index, and names a time in its fix", () => {
@@ -175,5 +176,72 @@ describe("the validator", () => {
     expect(parseSlatePatch(`<text>no id</text>`, base).errors[0]!.code).toBe("P105");
     expect(parseSlatePatch(`<when change={pr.number} do={copy('x')} />`, base).errors.map(e => e.code)).toContain("P107");
     expect(parseSlatePatch(`<text id="ghost">x</text>`, base).errors[0]!.code).toBe("D203");
+  });
+});
+
+// Each write the owner's sessions had refused, now taken.
+describe("writes the sessions were refused", () => {
+  const clean = (text: string): void => { const r = parseSlate(text); expect(r.errors, text).toEqual([]); };
+
+  it("takes a confirm formula, checks it like any prop, and prints it back", () => {
+    const decls = "  <value name=\"pid\" start={19271} />\n  <value name=\"name\" start=\"node\" />\n  <run name=\"kill\" cmd='kill \"$PID\"' env={{ PID: $pid }} confirm={`Kill ${$name} (PID ${$pid})?`} />";
+    const r = parseSlate(wrap(`<button label="Kill" onPress={start($kill)} />`, decls));
+    expect(r.errors).toEqual([]);
+    expect(r.document!.runs.kill).toMatchObject({ confirm: { format: "Kill ${$name} (PID ${$pid})?" } });
+    expect(parseSlate(printSlate(r.document!)).document!.runs.kill).toEqual(r.document!.runs.kill);
+    clean(wrap(`<text>x</text>`, `  <value name="ok" start={true} />\n  <run name="r" cmd="true" confirm={$ok ? 'Again?' : 'Run it?'} />`));
+    clean(wrap(`<text>x</text>`, `  <run name="r" cmd="true" confirm="Run it?" />`));
+    expect(all(wrap(`<text>x</text>`, `  <run name="r" cmd="true" confirm={$nope} />`))).toContain("S501");
+    expect(all(wrap(`<text>x</text>`, `  <secret name="t" />\n  <run name="r" cmd="true" confirm={$t} />`))).toContain("S520");
+  });
+
+  it("takes when on a fact, a column, an option and a row action; a column's reads the piece's scope, an action's the row", () => {
+    const decls = `  <value name="all" start={false} />\n  <value name="pick" start={null} />\n  <value name="rows" start={[{ name: "a", pid: 1 }]} />`;
+    clean(wrap(`<facts><fact label="PID" value="1" when={$all} /></facts>`, decls));
+    clean(wrap(`<table items={$rows}><col title="Name" value={item.name} /><col title="PID" value={item.pid} when={$all} /><action label="Kill" when={item.pid > 0} onPress={send("Kill it.", item.pid)} /></table>`, decls));
+    clean(wrap(`<select label="Pick" value={$pick}><option value="a" /><option value="b" when={$all} /></select>`, decls));
+    clean(wrap(`<choices label="Pick" value={$pick}><option value="a" /><option value="b" when={$all} /></choices>`, decls));
+    expect(all(wrap(`<table items={$rows}><col title="PID" value={item.pid} when={item.pid > 0} /></table>`, decls))).toContain("X409");
+  });
+
+  it("takes a literal as a section's first state, and still a two-way value", () => {
+    clean(wrap(`<section title="More" collapsible open={false}><text>x</text></section>`));
+    clean(wrap(`<section title="More" collapsible open={$open}><text>x</text></section>`, `  <value name="open" start={true} />`));
+    expect(all(wrap(`<section title="More" open="no"><text>x</text></section>`))).toContain("X410");
+    expect(all(wrap(`<toggle label="On" value={true} />`))).toContain("X410");
+  });
+
+  it("knows about 200 icons, the sessions' among them, and takes a formula over them", () => {
+    expect(SLATE_ICONS.length).toBeGreaterThanOrEqual(190);
+    for (const n of ["mail", "gem", "inbox", "trending-up", "trending-down", "thermometer", "cloud-rain", "sun", "dollar-sign", "indian-rupee"]) expect(SLATE_ICONS, n).toContain(n);
+    clean(wrap(`<heading icon="gem">Gold</heading><number label="Change" value={$d} icon={$d >= 0 ? 'trending-up' : 'trending-down'} />`, `  <value name="d" start={1} />`));
+    clean(wrap(`<facts><fact label="Mail" value="3" icon={'inbox'} /></facts>`));
+    expect(all(wrap(`<heading icon="gold-bar">Gold</heading>`))).toContain("T306");
+  });
+
+  it("takes camelCase piece ids, and a piece id may be a run's name", () => {
+    const r = parseSlate(wrap(`<number id="goldPrice" label="Gold" value={$spot.json.v} /><text id="spot">x</text><text id="spot_at">y</text>`, `  <run name="spot" cmd="echo '{}'" />`));
+    expect(r.errors).toEqual([]);
+    expect(Object.keys(r.document!.pieces)).toEqual(expect.arrayContaining(["goldPrice", "spot", "spot_at"]));
+    expect(all(wrap(`<text id="9lives">x</text>`))).toContain("P103");
+    expect(all(wrap(`<text id="a">x</text><text id="a">y</text>`))).toContain("P104");
+  });
+
+  it("warns W014 on mono over a sentence, with drop mono as the fix, and never on a figure, an id, a time or a path", () => {
+    const decls = `  <value name="pid" start={1} />\n  <value name="rows" start={[{ n: "a" }]} />`;
+    const warned = [
+      `<text mono>Kill the node process now</text>`,
+      `<text mono>{$pid} processes are running here</text>`,
+      `<facts><fact label="Note" value="the market is closed today" mono /></facts>`,
+      "<table items={$rows}><col title=\"Why\" value={`waiting on the ${item.n} lock`} mono /></table>",
+    ];
+    for (const piece of warned) {
+      const w = parseSlate(wrap(piece, decls)).warnings.filter(x => x.code === "W014");
+      expect(w, piece).toHaveLength(1);
+      expect(w[0]!.fix, piece).toBe("drop mono");
+    }
+    for (const piece of [`<text mono>{$pid}</text>`, `<text mono>2026-10-04 17:23 UTC</text>`, `<text mono>src/slate/kit.ts</text>`, `<text mono>PID 19271</text>`, `<facts><fact label="Head" value="b5ebeeff4" mono /></facts>`]) {
+      expect(all(wrap(piece, decls)), piece).not.toContain("W014");
+    }
   });
 });

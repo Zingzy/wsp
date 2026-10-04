@@ -73,7 +73,7 @@ describe("the richer kit", () => {
     expect(misspelt.errors).toMatchObject([{ code: "T306", piece: "text-1", prop: "icon", fix: `icon="gauge"` }]);
     expect(misspelt.errors[0]!.message).toContain("did you mean gauge?");
     expect(parseSlate(slate(`    <button label="x" icon="GitBranchIcon" onPress={set($pick, 1)} />`)).errors).toMatchObject([{ code: "T306", fix: `icon="git-branch"` }]);
-    expect(parseSlate(slate(`    <text icon={$pick}>x</text>`)).errors.map(e => e.code)).toEqual(["T305"]);
+    expect(parseSlate(slate(`    <text icon={$pick}>x</text>`)).errors).toEqual([]);
     expect(slateCatalog("icons")).toContain(SLATE_ICONS.join(" "));
   });
 

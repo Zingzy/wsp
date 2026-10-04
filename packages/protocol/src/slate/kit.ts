@@ -32,6 +32,8 @@ export interface SlatePropSpec {
   unseen?: string;
   /** What the catalog's entry for the piece says beside the prop. */
   about?: string;
+  /** A two-way prop that also takes a literal: the state it starts in, which the person then changes. */
+  literal?: true;
 }
 
 export interface SlateItemSpec {
@@ -40,6 +42,8 @@ export interface SlateItemSpec {
   fields: Record<string, SlatePropSpec>;
   /** Read in the row scope of the piece's items: a column, a row action. */
   row?: true;
+  /** Its when reads the row, hiding the item on that row alone; every other item's when hides it whole. */
+  rowWhen?: true;
   events?: readonly SlateEventName[];
   min?: number;
   max?: number;
@@ -96,7 +100,7 @@ const enm = (values: readonly string[], fallback?: string): SlatePropSpec => ({ 
 const tone = (values: readonly string[] = SLATE_TONES): SlatePropSpec => ({ type: values, binds: "yes" });
 const req = { required: true as const };
 const rowKey = (): SlatePropSpec => ({ type: "any", binds: "item", unseen: "names a row so it keeps its place as rows move" });
-const icon = (): SlatePropSpec => ({ type: "icon", binds: "no" });
+const icon = (): SlatePropSpec => ({ type: "icon", binds: "yes" });
 /** How a group sits: inner space, the app's inset ground, and where its children line up across. */
 const box = { pad: enm(PAD, "none"), surface: enm(SURFACE, "plain") };
 
@@ -143,6 +147,11 @@ function figure(format: string, value: SlateJson | undefined, max: SlateJson | u
   }
 }
 
+/** The items of a list prop whose when holds; a check with no thread keeps them all. */
+function present(v: SlateSketchView, list: SlatePropValue[]): SlatePropValue[] {
+  return list.filter((x, i) => { const when = rec(x as SlateJson).when; return typeof when !== "string" || v.test(when, null, i); });
+}
+
 /** Rows of a repeating piece, cut to 8, with the rest counted. */
 function rows(v: SlateSketchView, line: (item: SlateJson, index: number) => string, empty = "Nothing here"): string[] {
   const items = v.prop("items");
@@ -159,7 +168,7 @@ function actions(v: SlateSketchView, item: SlateJson, index: number): string {
   }).map(a => ` [${shown(v.row(a, item, index).label)}]`).join("");
 }
 
-const rowActionItem: SlateItemSpec = { prop: "rowActions", row: true, events: ["press"], max: 3, fields: { label: { type: "string", binds: "item", required: true } } };
+const rowActionItem: SlateItemSpec = { prop: "rowActions", row: true, rowWhen: true, events: ["press"], max: 3, fields: { label: { type: "string", binds: "item", required: true } } };
 
 export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   column: {
@@ -179,7 +188,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   section: {
     type: "section", level: "core", purpose: "A titled group, optionally collapsible.", holdsChildren: true,
-    props: { title: str(req), note: str(), icon: icon(), collapsible: flag(), open: { type: "boolean", binds: "state" }, align: enm(PLACE), ...box }, items: {}, events: ["change"],
+    props: { title: str(req), note: str(), icon: icon(), collapsible: flag(), open: { type: "boolean", binds: "state", literal: true, about: "open={false} starts it shut; open={$open} also keeps it" }, align: enm(PLACE), ...box }, items: {}, events: ["change"],
     sketch: v => (v.prop("open") === false ? `${shown(v.prop("title"))} (collapsed)` : shown(v.prop("title"))),
     fallback: "children under a text with the title", example: `<section title="Files changed" collapsible><text>None yet</text></section>`,
   },
@@ -289,7 +298,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
     },
     events: [],
     sketch: v => {
-      const cols = asList(v.raw("columns"));
+      const cols = present(v, asList(v.raw("columns")));
       const head = `| ${cols.map(c => { const r = rec(c as SlateJson); return `${shown(r.title)}${marks({ mono: r.mono, align: r.align, width: r.width })}`; }).join(" | ")} |`;
       return [head, ...rows(v, (item, i) => `| ${cols.map(c => { const r = v.row(c, item, i); return `${shown(r.value)}${marks({ tone: r.tone, emphasis: r.emphasis })}`; }).join(" | ")} |${actions(v, item, i)}`)];
     },
@@ -315,7 +324,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
     props: { layout: enm(["line", "grid"], "line") },
     items: { fact: { prop: "facts", min: 1, max: 12, fields: { label: str(req), value: { type: "text", binds: "yes", required: true }, tone: tone(), emphasis: { type: EMPHASIS, binds: "yes" }, mono: flag(), icon: icon() } } },
     events: [],
-    sketch: v => asList(v.raw("facts")).map((f, i) => v.row(f, null, i)).filter(f => f.value !== null && f.value !== undefined && f.value !== "").map(f => `${shown(f.label)}: ${shown(f.value)}${marks(f)}`).join("  "),
+    sketch: v => present(v, asList(v.raw("facts"))).map((f, i) => v.row(f, null, i)).filter(f => f.value !== null && f.value !== undefined && f.value !== "").map(f => `${shown(f.label)}: ${shown(f.value)}${marks(f)}`).join("  "),
     fallback: "text lines", example: `<facts><fact label="State" value={pr.word} /><fact label="Review" value={word(pr.review)} /></facts>`,
   },
   data: {
@@ -394,7 +403,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
     events: ["change"],
     sketch: v => {
       const opts = v.prop("options");
-      const list = (Array.isArray(opts) ? opts : []).map(o => { const r = rec(o); return shown(o !== null && typeof o === "object" ? (r.label ?? r.value) : o); });
+      const list = (Array.isArray(opts) ? present(v, opts) as SlateJson[] : []).map(o => { const r = rec(o); return shown(o !== null && typeof o === "object" ? (r.label ?? r.value) : o); });
       const empty = shown(v.prop("placeholder")) === "" ? "(none)" : `(none, "${shown(v.prop("placeholder"))}")`;
       return `${shown(v.prop("label"))}: ${shown(v.prop("value")) || empty} (of ${list.length <= 6 ? list.join(", ") || "0" : list.length})`;
     },
@@ -409,7 +418,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
       const picked = v.prop("value");
       const answer = v.prop("answer");
       const opts = v.prop("options");
-      const list = (Array.isArray(opts) ? opts : []).map(o => (o !== null && typeof o === "object" && !Array.isArray(o) ? o : { value: o }));
+      const list = (Array.isArray(opts) ? present(v, opts) as SlateJson[] : []).map(o => (o !== null && typeof o === "object" && !Array.isArray(o) ? o : { value: o }));
       const lines = list.map(o => {
         const chosen = picked !== null && picked !== undefined && JSON.stringify(o.value) === JSON.stringify(picked);
         const right = answer !== null && answer !== undefined && picked !== null && picked !== undefined && JSON.stringify(o.value) === JSON.stringify(answer);

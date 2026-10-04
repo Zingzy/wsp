@@ -368,6 +368,20 @@ describe("the slate v2 host", () => {
     expect(aged.problems).toEqual([]);
   });
 
+  it("a confirm formula reaches the sheet as its text, read when the run is held", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-confirm-");
+    const text = `<slate>
+  <value name="pid" start={19271} />
+  <value name="name" start="node" />
+  <run name="kill" cmd="true" confirm={\`Kill \${$name} (PID \${$pid})?\`} />
+  <button id="kill-it" label="Kill" onPress={start($kill)} />
+</slate>`;
+    const written = await rt.slates.write({ text }, asThread);
+    await rt.slates.event({ threadId, version: written.version, piece: "kill-it", event: "press", requestId: "r-kill" });
+    await rt.slates.settled();
+    expect((await rt.slates.get(threadId))!.asks).toMatchObject([{ run: "kill", confirm: "Kill node (PID 19271)?" }]);
+  });
+
   it("a check rehearses values and a press on a copy, a bare name writes $name, and a changed command marks its last result stale", async () => {
     const { rt, threadId, asThread } = await threadOn("wsp-slates-rehearse-");
     await rt.slates.write({ text: QUIZ }, asThread);
