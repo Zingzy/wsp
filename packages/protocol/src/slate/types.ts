@@ -206,8 +206,10 @@ export interface SlateRunRecord {
   /** How many times the run has started in this slate's life. */
   runs: number;
   cut?: true;
+  /** The command changed since this record was written; the next start drops it. */
+  stale?: true;
 }
-export const SLATE_RUN_FIELDS = ["state", "why", "exit", "out", "err", "json", "lines", "startedAt", "endedAt", "ms", "runs", "cut"] as const;
+export const SLATE_RUN_FIELDS = ["state", "why", "exit", "out", "err", "json", "lines", "startedAt", "endedAt", "ms", "runs", "cut", "stale"] as const;
 export const SLATE_RUN_IDLE: SlateRunRecord = { state: "idle", runs: 0 };
 
 /** What $secret reads: never the plaintext. */

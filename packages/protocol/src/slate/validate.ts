@@ -24,7 +24,7 @@ interface Where { piece?: string; prop?: string }
 
 const RUN_FIELD_TYPES: Record<string, SlateType> = {
   state: { t: "string" }, why: { t: "string" }, exit: { t: "number" }, out: { t: "any" }, err: { t: "string" }, json: { t: "any" },
-  lines: { t: "list", of: { t: "string" } }, startedAt: { t: "number" }, endedAt: { t: "number" }, ms: { t: "number" }, runs: { t: "number" }, cut: { t: "boolean" },
+  lines: { t: "list", of: { t: "string" } }, startedAt: { t: "number" }, endedAt: { t: "number" }, ms: { t: "number" }, runs: { t: "number" }, cut: { t: "boolean" }, stale: { t: "boolean" },
 };
 const SECRET_FIELD_TYPES: Record<string, SlateType> = { set: { t: "boolean" }, len: { t: "number" }, at: { t: "number" } };
 
@@ -69,12 +69,22 @@ class Validator {
   }
 
   add(code: SlateCode, message: string, w: Where = {}, fix?: string): void {
-    const p = slateProblem(code, message, { piece: w.piece, prop: w.prop, line: this.lineOf(w), fix });
+    const p = slateProblem(code, message, { piece: w.piece, prop: w.prop, line: this.lineOf(w), fix: fix !== undefined && this.wrote(w, fix) ? undefined : fix });
     if (SLATE_WARNINGS.has(code)) { this.warnings.push(p); return; }
     const key = `${code}|${w.piece}|${w.prop}|${message}`;
     if (this.seenErrors.has(key) || this.errors.length >= SLATE_LIMITS.errorsPerPass) return;
     this.seenErrors.add(key);
     this.errors.push(p);
+  }
+
+  /** Whether a fix only says again what the piece already holds, which tells the agent nothing. */
+  private wrote(w: Where, fix: string): boolean {
+    if (w.piece === undefined || w.prop === undefined) return false;
+    const v = this.doc.pieces[w.piece]?.props?.[w.prop];
+    if (v === undefined) return false;
+    const text = typeof v === "string" ? [v, `${w.prop}="${v}"`] : isSlateBinding(v) ? [v.bind, `{${v.bind}}`, `${w.prop}={${v.bind}}`] : [];
+    const flat = (x: string): string => x.replace(/\s+/g, "");
+    return text.some(t => flat(t) === flat(fix));
   }
 
   run(): void {
@@ -485,7 +495,11 @@ class Validator {
         const bind = isSlateBinding(v) ? v.bind.trim() : "";
         const m = /^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(bind);
         const kind = m !== null ? this.kinds.get(m[1]!) : undefined;
-        if (m === null) { this.add("X410", `${name} on ${type} is two-way and binds a bare $value: ${name}={$name}`, w); return; }
+        if (m === null) {
+          const into = name === "value" ? "picked" : name;
+          this.add("X410", `${name} on ${type} writes back, so it binds one plain value, not ${bind}; bind a value of its own and keep a list with append in a <when> if you need one per item`, w, `<value name="${into}" start={null} /> and ${name}={$${into}}`);
+          return;
+        }
         if (kind === undefined) { this.add("S501", `$${m[1]} is not declared; add <value name="${m[1]}" start=... />`, w, nearest(m[1]!, [...this.kinds.keys()])); return; }
         if (kind === "secret" && type !== "input") { this.add("S520", "a secret is typed into an input and nowhere else", w); return; }
         if (kind !== "value" && kind !== "secret") { this.add("X410", `${name} on ${type} writes a value; $${m[1]} is ${kind === "derived" ? "derived" : "a run"}`, w); return; }

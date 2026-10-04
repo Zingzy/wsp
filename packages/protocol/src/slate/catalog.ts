@@ -69,14 +69,13 @@ function index(): string {
     "Slate kit wsp/2, written as JSX-like text. Pieces (attributes; <items>):",
     ...core.map(pieceLine),
     "Every piece: id, when={cond}. tone: default muted good warning bad info accent. emphasis: normal strong quiet.",
-    "pad: none tight normal loose; surface=\"inset\" is the card ground; align start center end: center a lone figure, a quiz card or an empty state, never tables, facts, forms or long text.",
+    "On section, column and grid: pad none tight normal loose; surface=\"inset\" sets the group on the app's card ground; align start center end lines children up across it (start when not set).",
     "icon=\"<lucide name>\" (slate_catalog icons). bars compare categories; time is a chart.",
     "Sources, read only:",
     ...["thread", "usage", "cost", "time", "git", "pr"].map(sourceLine),
     "Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once> <when change={$path} or done={$run} do={steps}>",
     `Steps: ${Object.keys(SLATE_STEPS).join(" ")}. Functions: ${Object.keys(SLATE_FUNCTIONS).join(" ")}.`,
     `After |: ${Object.keys(SLATE_PIPE_STEPS).join(" ")}. $run reads state exit out err json; a secret only .set .len.`,
-    "Chart history: <when done={$spot} do={set($hist, last(append($hist, { at: time.now, v: $spot.json.v }), 60))} />",
     "Rules:",
     ...SLATE_RULES.map((r, i) => `${i + 1}. ${r}`),
     SLATE_INDEX_EXAMPLE,
@@ -132,8 +131,10 @@ function sourceEntry(name: string): string {
 const RUNS = `runs: a command the slate starts with no turn of yours.
 <run name="check" cmd='gh api "repos/$REPO/issues/$ID"' env={{ REPO: $repo, ID: $id }} timeout={20} />
 <run name="tests" cmd="pnpm test $1" args={["cart"]} stream once />
+<run name="py">{\`python3 -c "print('both quotes, $HOME, {braces}')"\`}</run>
+cmd="..." or cmd='...' takes no escapes; for any text write cmd={"say \\"hi\\""} or the block above, which takes the text as written.
 <run name="ci" cmd='gh secret set TOKEN --repo "$REPO"' stdin={$token} env={{ REPO: $repo }} on="host" />
-cmd is literal, run by bash -c; values reach it only as env ($ID), args ($1) or stdin. A secret goes only on stdin or in the program's own env variable, never after a flag (W011).
+The command is literal, run by bash -c; values reach it only as env ($ID), args ($1) or stdin. A secret goes only on stdin or in the program's own env variable, never after a flag (W011).
 on: thread (default) or host. timeout: seconds, default 60, at most 600. every={60}: seconds, at least 10, while the slate is shown; always keeps it ticking. once: a start while running does nothing; else it restarts.
 start($run) in a handler or a <when>. The person approves each command once; until then it reads held. confirm="..." asks every start.
 $run reads ${SLATE_RUN_FIELDS.join(" ")}; state is idle held running done failed cancelled; output is scrubbed of secrets.
