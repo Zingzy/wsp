@@ -3,13 +3,13 @@
 // response_item line whose payload is a function_call is a call: exec_command
 // (and the older shell) carry the command in a JSON string of arguments.
 import type { Host } from "../host.js";
-import { type Call, type HistoryReader, isRecord, jsonlFiles, stem, tryJson } from "./reader.js";
+import { type Call, type HistoryReader, isRecord, jsonlFiles, stem, timeOf, tryJson } from "./reader.js";
 
 const SHELLS = new Set(["exec_command", "shell", "container.exec", "local_shell"]);
 
-export function codexCall(session: string, name: string, args: unknown, folder?: string): Call {
+export function codexCall(session: string, name: string, args: unknown, folder?: string, at?: number): Call {
   const arg = isRecord(args) ? args : {};
-  const where = folder !== undefined ? { folder } : {};
+  const where = { ...(folder !== undefined ? { folder } : {}), ...(at !== undefined ? { at } : {}) };
   if (SHELLS.has(name)) {
     const cmd = arg["cmd"] ?? arg["command"];
     if (typeof cmd === "string") return { session, ...where, kind: "shell", line: cmd };
@@ -20,6 +20,7 @@ export function codexCall(session: string, name: string, args: unknown, folder?:
 
 export const codexReader: HistoryReader = {
   files: (host, root) => jsonlFiles(host, root, stem),
+  holder: (_root, file) => file,
   async *read(host: Host, _root: string, file: string): AsyncIterable<Call> {
     const session = stem(file);
     // The rollout opens with a session_meta whose payload names the folder; every call after it is that folder's.
@@ -36,7 +37,7 @@ export const codexReader: HistoryReader = {
       const payload = row["payload"];
       if (payload["type"] !== "function_call" || typeof payload["name"] !== "string") continue;
       const args = typeof payload["arguments"] === "string" ? tryJson(payload["arguments"]) : payload["arguments"];
-      yield codexCall(session, payload["name"], args, folder);
+      yield codexCall(session, payload["name"], args, folder, timeOf(row["timestamp"]));
     }
   },
 };

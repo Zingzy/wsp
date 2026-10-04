@@ -126,6 +126,33 @@ describe("Claude Code reader", () => {
     ]);
     expect(JSON.stringify([...usage.commands, ...usage.installs, ...usage.tools])).not.toContain("sk-ant-x");
   });
+
+  it("counts a session once when two project folders hold its files, by the folder whose newest call is latest", async () => {
+    const at = (m: number) => `2026-09-06T10:${String(m).padStart(2, "0")}:00.000Z`;
+    const call = (session: string, m: number, cwd: string, command: string) =>
+      line({ type: "assistant", cwd, sessionId: session, timestamp: at(m), message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command } }] } });
+    const HOME = "/Users/dev/wsp";
+    const COPY = "/private/tmp/wsp-test/export-dev/wsp";
+    const host = fakeHost({
+      files: {
+        "~/.claude/projects/-Users-dev-wsp/s1.jsonl": [call("s1", 1, HOME, "gh pr view"), call("s1", 2, HOME, "gh pr list"), call("s1", 50, HOME, "cargo build")].join("\n"),
+        "~/.claude/projects/-Users-dev-wsp/s1/subagents/agent-a.jsonl": call("s1", 3, HOME, "jq ."),
+        "~/.claude/projects/-private-tmp-wsp-test-export-dev-wsp/s1.jsonl": [call("s1", 1, COPY, "gh pr view"), call("s1", 2, COPY, "gh pr list")].join("\n"),
+        "~/.claude/projects/-private-tmp-wsp-test-export-dev-wsp/s1/subagents/agent-a.jsonl": call("s1", 3, COPY, "jq ."),
+        "~/.claude/projects/-private-tmp-wsp-test-export-dev-wsp/s2.jsonl": call("s2", 5, COPY, "gh auth status"),
+      },
+    });
+    const usage = await readStore(host, HISTORY_READERS["claude-jsonl"], "/Users/dev/.claude/projects");
+    expect(usage.sessions).toBe(2);
+    expect(usage.calls).toBe(5);
+    expect([...usage.commands]).toEqual([
+      ["gh", { sessions: 2, calls: 3 }],
+      ["cargo", { sessions: 1, calls: 1 }],
+      ["jq", { sessions: 1, calls: 1 }],
+    ]);
+    const home = await readStore(host, HISTORY_READERS["claude-jsonl"], "/Users/dev/.claude/projects", { folders: [HOME] });
+    expect(home).toMatchObject({ sessions: 1, calls: 4 });
+  });
 });
 
 describe("Codex reader", () => {
@@ -258,7 +285,7 @@ describe("the session cache", () => {
 
   const CLAUDE = CATALOG_AGENTS.filter(a => a.id === "claude");
   /** PARSE_VERSION and what the files that fill a bucket hashed to when it was last bumped. */
-  const FINGERPRINT = "1:085b795c96d6ef04";
+  const FINGERPRINT = "2:8d7258f9d6375eff";
   const S1 = "~/.claude/projects/-Users-dev-proj/s1.jsonl";
   const S2 = "~/.claude/projects/-Users-dev-proj/s2.jsonl";
   const FIRST = [claudeLine("s1", [{ name: "Bash", input: { command: "gh pr view" } }]), claudeLine("s1", [{ name: "Read", input: { file_path: "/x" } }])].join("\n");

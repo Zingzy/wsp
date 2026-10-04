@@ -72,6 +72,8 @@ export interface HistoryBucket {
   session: string;
   /** The folder the session ran in, when its store records one; the recipe weighs the bucket by it. */
   folder?: string;
+  /** The newest call of that session in that file, ms epoch, where its store keeps a time. */
+  at?: number;
   /** Every tool call of that session in that file, the ones no name came out of included. */
   calls: number;
   /** Command name to how often it ran. */
@@ -100,6 +102,7 @@ export async function reduceCalls(calls: AsyncIterable<Call>): Promise<HistoryBu
       buckets.set(key, b);
     }
     b.calls += 1;
+    if (c.at !== undefined && (b.at === undefined || c.at > b.at)) b.at = c.at;
     switch (c.kind) {
       case "shell":
         for (const name of commandNames(c.line)) b.commands[name] = (b.commands[name] ?? 0) + 1;
@@ -117,6 +120,26 @@ export async function reduceCalls(calls: AsyncIterable<Call>): Promise<HistoryBu
     }
   }
   return [...buckets.values()];
+}
+
+/** The buckets with every session counted from one holder: one session id under two holders is its files copied,
+ * and the holder whose newest call is latest is the one that kept growing. On a tie the first holder found keeps it. */
+export function oneHolder(held: readonly { holder: string; buckets: readonly HistoryBucket[] }[]): HistoryBucket[] {
+  const newest = new Map<string, { holder: string; at: number }>();
+  const seen = new Map<string, Map<string, number>>();
+  for (const { holder, buckets } of held) {
+    for (const b of buckets) {
+      const holders = seen.get(b.session) ?? seen.set(b.session, new Map()).get(b.session)!;
+      holders.set(holder, Math.max(holders.get(holder) ?? -Infinity, b.at ?? -Infinity));
+    }
+  }
+  for (const [session, holders] of seen) {
+    for (const [holder, at] of holders) {
+      const kept = newest.get(session);
+      if (kept === undefined || at > kept.at) newest.set(session, { holder, at });
+    }
+  }
+  return held.flatMap(({ holder, buckets }) => buckets.filter(b => newest.get(b.session)?.holder === holder));
 }
 
 /** Every bucket of one agent's store added up. With `folders`, only the buckets whose session ran at one of them or

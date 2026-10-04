@@ -11,6 +11,8 @@ interface CallBase {
   /** The folder the session ran in, as its own store records it; a format that records none leaves it off, and a
    * recipe weighed against named folders then counts nothing from it. */
   folder?: string;
+  /** When the store says the call was made, ms epoch; a format that keeps no time leaves it off. */
+  at?: number;
 }
 
 export type Call = (CallBase & { kind: "shell"; line: string }) | (CallBase & { kind: "other"; name: string });
@@ -29,12 +31,15 @@ export interface HistoryReader {
   /** Every tool call in one of those files, keyed by the top-level session it belongs to. A throw when the file is
    * there and cannot be read. */
   read(host: Host, root: string, file: string): AsyncIterable<Call>;
+  /** Where a file's sessions sit: Claude Code's project folder, else the file itself. One session id under two
+   * holders is one session's files copied, so only one holder's calls are counted. */
+  holder(root: string, file: string): string;
 }
 
 /** What a file's stamp cannot see: the code that turns it into buckets. A finished session file's stamp never moves
  * again, so a cache keyed on the stamp alone would hand back an older parser's counts forever. Bump this when
  * commands.ts, tally.ts or a reader changes what a bucket comes to; history.test.ts goes red until you do. */
-export const PARSE_VERSION = 1;
+export const PARSE_VERSION = 2;
 
 /** The file with the stamp a cache compares: its modification time and its size, so a rewrite that keeps either one
  * is still read again. Nothing when the path is not a file. */
@@ -68,6 +73,12 @@ export function tryJson(text: string): unknown {
 }
 
 /** The file's name without its directory or extension. */
+/** A store's timestamp as ms epoch, or nothing where it is not one. */
+export const timeOf = (v: unknown): number | undefined => {
+  const at = typeof v === "string" ? Date.parse(v) : NaN;
+  return Number.isFinite(at) ? at : undefined;
+};
+
 export function stem(path: string): string {
   const base = path.slice(path.lastIndexOf("/") + 1);
   const dot = base.lastIndexOf(".");
