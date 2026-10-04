@@ -21,7 +21,7 @@
 // lines after one of its own slashes. A file's own text is folded away rather than shown, since a wall of
 // it between the question and the buttons is what nobody reads, and the fold
 // opens into a box of its own height so the buttons stay on the screen.
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, GlobeIcon, MessageCircleQuestionIcon, SquarePenIcon, TerminalIcon, WrenchIcon, type LucideIcon } from "lucide-react";
 import { isPromptOpen, type PermissionPrompt } from "../../adapt";
 import { permissionOutcomeLine, permissionPromptWords, pickedOptions } from "@wsp/protocol";
 import { Button } from "../ui/button";
@@ -34,6 +34,45 @@ import { QuestionPrompt } from "./QuestionPrompt";
  * A run wider than the row makes the line scroll sideways instead. */
 function commandParts(command: string): (string | { readonly token: string; readonly at: number })[] {
   return command.split(/(\s+)/).map((part, at) => (/^\s*$/.test(part) ? part : { token: part, at }));
+}
+
+/** The glyph a prompt's record wears, by what the call was, as the timeline's tool rows wear theirs. */
+const RECORD_GLYPHS: Readonly<Record<string, LucideIcon>> = {
+  Bash: TerminalIcon,
+  command_execution: TerminalIcon,
+  Edit: SquarePenIcon,
+  MultiEdit: SquarePenIcon,
+  Write: SquarePenIcon,
+  file_change: SquarePenIcon,
+  WebFetch: GlobeIcon,
+};
+const recordGlyph = (toolName: string, question: boolean): LucideIcon => (question ? MessageCircleQuestionIcon : (RECORD_GLYPHS[toolName] ?? WrenchIcon));
+
+/** The record of a prompt in the timeline's own tool-row look: the glyph in its slot, what was asked in one line, and
+ * once it is closed what was picked after it in the muted ink; the whole of each rides the hover. While the dock
+ * holds the open prompt the row says only what is asked. */
+function RecordRow({ glyph: Glyph, says, code, outcome, askId, open }: { glyph: LucideIcon; says: string; code?: string; outcome?: { word: string; kind: string }; askId: string; open: boolean }) {
+  const ink = open ? "text-muted-foreground" : "text-foreground/80";
+  return (
+    <div className="flex min-h-6 w-full min-w-0 items-center gap-1.5 px-0.5 py-0.5 text-sm leading-relaxed" data-permission-record={askId} data-permission-waiting={open || undefined} title={code === undefined ? says : `${says} ${code}`}>
+      <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
+        <Glyph className="size-4 shrink-0 stroke-[1.8] opacity-70" aria-hidden />
+      </span>
+      <span className={`min-w-0 shrink-0 ${ink}`} data-permission-says="">
+        {says}
+      </span>
+      {code === undefined ? null : (
+        <code className={`min-w-0 flex-1 overflow-x-auto whitespace-pre break-normal font-mono text-xs ${ink}`} data-permission-code="">
+          {code}
+        </code>
+      )}
+      {outcome === undefined ? null : (
+        <span className="min-w-0 shrink-0 truncate text-secondary-label" data-permission-outcome={outcome.kind} title={outcome.word}>
+          {outcome.word}
+        </span>
+      )}
+    </div>
+  );
 }
 
 export function PermissionPromptRow({
@@ -60,51 +99,45 @@ export function PermissionPromptRow({
   // The gutter is the timeline's; a prompt inside a fold (the one an asker names) sits on the fold's body, which
   // already holds one, and a second would push it right of the lines the same agent wrote above it.
   const gutter = asker === undefined ? " px-1" : "";
+  if (!open) {
+    return (
+      <div className={`min-w-0 pb-2 pt-1${gutter}`} data-permission-prompt={permission.askId} data-permission-open="false">
+        <div className="flex min-w-0 flex-col gap-1">
+          {asker === undefined ? null : (
+            <span className="text-[11px] leading-4 text-muted-foreground" data-permission-asker="">
+              {asker}
+            </span>
+          )}
+          <RecordRow glyph={recordGlyph(permission.toolName, words.questions !== undefined)} says={words.says} {...(words.code === undefined || words.questions !== undefined ? {} : { code: words.code })} askId={permission.askId} open={waiting} {...(waiting ? {} : { outcome: { word: permissionOutcomeLine(permission.outcome!, named), kind: permission.outcome! } })} />
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className={`min-w-0 pb-2 pt-1${gutter}`} data-permission-prompt={permission.askId} data-permission-open={open ? "true" : "false"}>
+    <div className={`min-w-0 pb-2 pt-1${gutter}`} data-permission-prompt={permission.askId} data-permission-open="true">
       <div className="flex min-w-0 flex-col gap-1">
         {asker === undefined ? null : (
           <span className="text-[11px] leading-4 text-muted-foreground" data-permission-asker="">
             {asker}
           </span>
         )}
-        {words.questions !== undefined ? (
-          open ? (
-            <QuestionPrompt onAnswer={answer} questions={words.questions} />
-          ) : waiting ? (
-            <span className="break-words whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground" data-permission-says="">
-              {words.says}
-            </span>
-          ) : (
-            <>
-              <span className="break-words whitespace-pre-wrap text-sm leading-relaxed text-foreground/80" data-permission-says="">
-                {words.says}
-              </span>
-              <span className="text-xs leading-4 text-muted-foreground" data-permission-outcome={permission.outcome ?? undefined}>
-                {permissionOutcomeLine(permission.outcome!, named)}
-              </span>
-            </>
-          )
-        ) : null}
+        {words.questions !== undefined ? <QuestionPrompt onAnswer={answer} questions={words.questions} /> : null}
         {words.questions !== undefined ? null : words.code === undefined ? (
-          <span className={`break-words whitespace-pre-wrap text-sm leading-relaxed ${waiting ? "text-muted-foreground" : "text-foreground/80"}`} data-permission-lead="" data-permission-says="">
+          <span className="break-words whitespace-pre-wrap text-sm leading-relaxed text-foreground/80" data-permission-lead="" data-permission-says="">
             {words.says}
           </span>
         ) : (
           <div className="flex min-w-0 items-start gap-1.5" data-permission-lead="">
-            <span className={`shrink-0 text-sm leading-relaxed ${waiting ? "text-muted-foreground" : "text-foreground/80"}`} data-permission-says="">
+            <span className="shrink-0 text-sm leading-relaxed text-foreground/80" data-permission-says="">
               {words.says}
             </span>
-            <code
-              data-permission-code=""
-              className={`min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-normal py-1 font-mono text-xs leading-4 ${waiting ? "text-muted-foreground" : "text-foreground/80"}`}
-            >
+            <code data-permission-code="" className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-normal py-1 font-mono text-xs leading-4 text-foreground/80">
               {commandParts(words.code).map(part => (typeof part === "string" ? part : <span key={part.at} className="whitespace-pre">{part.token}</span>))}
             </code>
           </div>
         )}
-        {words.rest === "" || waiting ? null : <span className="break-words whitespace-pre-wrap font-mono text-xs leading-4 text-muted-foreground">{words.rest}</span>}
-        {words.body === undefined || waiting ? null : (
+        {words.rest === "" ? null : <span className="break-words whitespace-pre-wrap font-mono text-xs leading-4 text-muted-foreground">{words.rest}</span>}
+        {words.body === undefined ? null : (
           <Collapsible>
             <CollapsibleTrigger
               data-permission-body-trigger=""
@@ -123,7 +156,7 @@ export function PermissionPromptRow({
             </CollapsiblePanel>
           </Collapsible>
         )}
-        {words.questions !== undefined ? null : open ? (
+        {words.questions !== undefined ? null : (
           <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
             {permission.options.map(option => (
               <Button
@@ -138,10 +171,6 @@ export function PermissionPromptRow({
               </Button>
             ))}
           </div>
-        ) : waiting ? null : (
-          <span className="text-xs leading-4 text-muted-foreground" data-permission-outcome={permission.outcome ?? undefined}>
-            {permissionOutcomeLine(permission.outcome!, named)}
-          </span>
         )}
       </div>
     </div>

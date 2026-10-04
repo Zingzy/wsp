@@ -1,35 +1,40 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The composer's place while the agent waits on the person: a prompt the
-// harness relayed, drawn as a menu where the box was, in the composer's own
-// frame, so the one place a person types is the one place they answer. The
-// menu is keyboard first, as the CLIs' own are: arrows move, digits pick, Enter
-// answers, Space ticks where a question takes several, Esc closes an open
-// field and then folds the dock to one line over the composer. The last row of
-// a question is Other, which opens a field; Deny opens one too, for what to do
-// instead. The field lives in the foot, where the key hints were, so opening
-// it moves no row and grows nothing. A prompt with several questions takes
-// them one at a time with the count in the head, the earlier answers standing
-// as quiet lines above the current one, and sends every pick as one answer at
-// the end, since one pick closes one prompt. A consent prompt leads with the
-// protocol's own words for the call (the command in the mono face, an edit as
-// its lines), then the options the harness offered, bare: the one sentence
-// drawn under an option is the catalog's own for the access mode it moves the
-// turn to. Once answered the dock goes and the composer comes back; the
-// timeline keeps the record.
-import { ArrowDownIcon, ArrowUpIcon, CornerDownLeftIcon } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+// harness relayed, drawn in the composer's own frame as one step of a settings
+// dialog, so the one place a person types is the one place they answer and it
+// reads like every other screen that asks them something. A head (the agent's
+// mark and the question, or what the call is, as the protocol words it; the
+// step's count as a quiet figure; one line under it only where there is one),
+// then the settings cards, then the dialog's foot. One of many is a card of
+// Choice rows, many of many a card of ticked rows, as the Add a computer steps
+// draw them; a form's earlier answers stand as lines in a card above the
+// current question; a command, a path or an address is a copy row under the
+// head; an edit is its file as a row with the lines that change under it in
+// the step-log mono. Digits pick a row, arrows move the pick, Space ticks,
+// Enter is the foot's primary button, Esc leaves the field and then folds the
+// dock to one row over the composer. Other and Deny take their words in a
+// field in the row's own right column, so no row moves. Once answered the dock
+// goes and the composer comes back; the timeline keeps the record.
+import { FileIcon, MessageCircleQuestionIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { agentName } from "@wsp/catalog";
 import { permissionPromptWords, pickedOptionId, type AskedQuestion } from "@wsp/protocol";
 import { isPromptOpen, type PermissionPrompt } from "../../adapt";
 import { cn } from "../../lib/utils";
+import { Choice } from "../../settings/add/PickLists";
+import { PickRow } from "../../settings/add/PickRow";
+import { FACT } from "../../settings/format";
+import { GlyphFrame, Grid } from "../../settings/grid";
+import { CARD_INSET, LIST_TITLE, NOTE, ROW_FIELD } from "../../settings/layout";
+import { Line } from "../../settings/rows";
+import { CopyRow } from "../../settings/sheetParts";
 import { Button } from "../ui/button";
-import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
-import { Kbd } from "../ui/kbd";
+import { RadioGroup } from "../ui/radio-group";
 import { ComposerSurface } from "./ComposerSurface";
 import { HarnessMark } from "./HarnessMark";
 
-/** One row of the menu: a label, the one sentence it may carry, and the field it opens where it opens one. */
+/** One row of a card: a name, the one sentence it may carry, and the field it opens where it opens one. */
 interface MenuRow {
   readonly id: string;
   readonly label: string;
@@ -47,14 +52,28 @@ export interface ModeWords {
 /** The last row of every question, as the CLI draws it: a pick that is none of the above, typed. */
 const OTHER: MenuRow = { id: "other", label: "Other", description: "", field: "Type your answer" };
 const DENY_FIELD = "What to do instead";
-const STRIP_LEAD = "Waiting for you";
+const WRITE_INSTEAD = "Write a message instead";
+const FOLDED_TITLE = "Waiting for you";
+const ANSWER_WORD = "Answer";
+const NEXT_WORD = "Next";
+const BACK_WORD = "Back";
 
-const CODE_CLASS = "font-mono text-xs leading-4 text-foreground/80";
+/** The dialog's title, head, body and foot, in the classes Add a computer draws them with. */
+const TITLE_CLASS = "text-[15px] leading-5 font-medium text-foreground";
+const HEAD_CLASS = "flex flex-row items-start justify-between gap-6 px-5 pt-4 pb-3";
+const BODY_CLASS = "flex flex-col gap-5 px-5 pt-2 pb-5";
+const FOOT_CLASS = "flex flex-col-reverse gap-2 px-5 pt-3 pb-4 sm:flex-row sm:items-center sm:justify-end";
+/** The field a row opens, in its right column, wide enough for a sentence; under 640 px it takes the row's width. */
+const FIELD_CLASS = cn(ROW_FIELD, "w-96 max-sm:w-full");
+/** The step-log mono block the computer's page opens under a row, on the words' left edge past a glyph frame. */
+const LOG_CLASS = "max-h-48 overflow-auto font-mono text-[11px] leading-4 whitespace-pre-wrap break-words text-muted-foreground tabular-nums";
+const LOG_EDGE = "pl-[calc(var(--settings-inset,20px)+44px)] pr-(--settings-inset,20px) pb-4";
+/** A changed line's ink, the Changes pane's own: it tints its rows from --success and --destructive. */
+const LINE_INK = { "-": "text-destructive-foreground", "+": "text-success" } as const;
+const GLYPH = "size-4 text-foreground/80";
 
-/** A command wraps at its spaces and nowhere else, as the timeline's row does. */
-function commandParts(command: string): ReactNode[] {
-  return command.split(/(\s+)/).map((part, at) => (/^\s*$/.test(part) ? part : <span key={at} className="whitespace-pre">{part}</span>));
-}
+/** What a row's hover says: the keys that pick it, since the foot carries no hint strip. */
+const rowHover = (at: number, multi: boolean): string => (multi ? `${at + 1} or Space ticks this, Enter answers, Esc puts the question away` : `${at + 1} picks this, Enter answers, Esc puts the question away`);
 
 /** The call's input as fields, or nothing while it is not an object. */
 function fieldsOf(input: string): Record<string, unknown> {
@@ -73,85 +92,37 @@ function editOf(fields: Record<string, unknown>): { old: string; next: string } 
   return typeof first["old_string"] === "string" && typeof first["new_string"] === "string" ? { old: first["old_string"], next: first["new_string"] } : null;
 }
 
-/** The lines that go and the lines that come, in the diff's two inks: the sign in its own column and the text
- * wrapping under itself at its spaces, two tinted bands and no box around them. */
+/** An edit as the step log draws a step's output, in the Changes pane's inks: the lines that go with their sign,
+ * then the lines that come; the sign keeps a column of its own so a wrapped line hangs under its text. */
 function EditLines({ edit }: { edit: { old: string; next: string } }) {
-  const line = (text: string, sign: "-" | "+", at: number) => (
-    <div
-      key={`${sign}${at}`}
-      data-edit-line={sign}
-      className={cn("grid grid-cols-[1rem_minmax(0,1fr)] gap-2 px-3 py-px", sign === "-" ? "bg-[color-mix(in_srgb,var(--error-foreground)_9%,transparent)]" : "bg-[color-mix(in_srgb,var(--success)_9%,transparent)]")}
-    >
-      <span className={cn("select-none", sign === "-" ? "text-error-foreground" : "text-success")}>{sign}</span>
-      <span className="min-w-0 whitespace-pre-wrap break-words text-foreground/80">{text === "" ? " " : text}</span>
+  const line = (sign: "-" | "+", text: string, at: number) => (
+    <div key={`${sign}${at}`} data-edit-line={sign} className={cn("grid grid-cols-[1rem_minmax(0,1fr)]", LINE_INK[sign])}>
+      <span className="select-none">{sign}</span>
+      <span className="min-w-0 whitespace-pre-wrap break-words">{text === "" ? " " : text}</span>
     </div>
   );
   return (
-    <div data-edit-lines className={cn("max-h-56 overflow-y-auto rounded-lg py-1", CODE_CLASS)}>
-      {edit.old.split("\n").map((text, at) => line(text, "-", at))}
-      {edit.next.split("\n").map((text, at) => line(text, "+", at))}
+    <div data-prompt-edit className={cn(LOG_CLASS, LOG_EDGE)}>
+      {edit.old.split("\n").map((text, at) => line("-", text, at))}
+      {edit.next.split("\n").map((text, at) => line("+", text, at))}
     </div>
   );
 }
 
-function Hint({ word, children }: { word: string; children: ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground">
-      {children}
-      {word}
-    </span>
-  );
-}
+/** A path as the thread reads it: inside the thread's folder, the part under that folder. */
+const pathIn = (path: string, cwd: string | undefined): string => (cwd !== undefined && path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path);
 
-/** One row: its number as a key, the label, the one sentence it may carry; a tick box at the end where the
- * question takes several. The row never changes height: a field it opens lives in the foot. */
-const OptionRow = memo(function OptionRow({
-  row,
-  at,
-  active,
-  ticked,
-  multi,
-  onHover,
-  onPick,
-}: {
-  row: MenuRow;
-  at: number;
-  active: boolean;
-  ticked: boolean;
-  multi: boolean;
-  onHover: (at: number) => void;
-  onPick: (at: number) => void;
-}) {
-  return (
-    <div
-      role="option"
-      aria-selected={active}
-      data-prompt-option={row.id}
-      data-active={active || undefined}
-      data-ticked={ticked || undefined}
-      className={cn("flex min-w-0 cursor-pointer items-start gap-3 rounded-lg px-3 py-2 transition-colors duration-150", active && "bg-accent")}
-      onMouseMove={() => onHover(at)}
-      onClick={() => onPick(at)}
-    >
-      <Kbd className={cn("mt-px shrink-0", active && "bg-background/60 text-foreground")}>{at + 1}</Kbd>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className={cn("text-sm leading-5", active || ticked ? "text-foreground" : "text-foreground/85")}>{row.label}</span>
-        {row.description === "" ? null : <span className="text-xs leading-4 text-muted-foreground">{row.description}</span>}
-      </span>
-      {multi ? <Checkbox checked={ticked} tone="neutral" tabIndex={-1} className="mt-0.5" onCheckedChange={() => onPick(at)} /> : null}
-    </div>
-  );
-});
+/** The values the lead does not carry, as the protocol lists them, one `key: value` a line. */
+const restLines = (rest: string): { key: string; value: string }[] =>
+  rest
+    .split("\n")
+    .filter(line => line !== "")
+    .map(line => {
+      const at = line.indexOf(": ");
+      return at < 0 ? { key: line, value: "" } : { key: line.slice(0, at), value: line.slice(at + 2) };
+    });
 
-/** A question answered earlier in the same prompt, as one quiet line a person can go back to. */
-function AnsweredLine({ question, answer, onBack }: { question: AskedQuestion; answer: string; onBack: () => void }) {
-  return (
-    <button type="button" data-prompt-answered className="flex h-7 min-w-0 items-center gap-3 rounded-lg px-3 text-left transition-colors duration-150 hover:bg-accent" onClick={onBack}>
-      <span className="w-28 shrink-0 truncate text-xs leading-4 text-muted-foreground">{question.header === "" ? question.question : question.header}</span>
-      <span className="min-w-0 truncate text-sm leading-5 text-foreground/85">{answer}</span>
-    </button>
-  );
-}
+const fileName = (path: string): string => path.split("/").filter(Boolean).at(-1) ?? path;
 
 interface Settled {
   readonly ids: string[];
@@ -173,10 +144,10 @@ export function PromptDock({
   cwd?: string;
   /** The access modes the agent's catalog lists, for the sentence under an option that moves the turn to one. */
   modes?: ReadonlyArray<ModeWords>;
-  /** The pick, and the words typed into the open field where one was: what to do instead on a deny, the answer
-   * itself on Other. */
+  /** The pick, and the words typed into the field where one was: what to do instead on a deny, the answer itself
+   * on Other. */
   onAnswer: (sessionId: string, askId: string, optionId: string, text?: string) => void;
-  /** Hands the composer back with the prompt folded to one line above it, for a person who wants to write first. */
+  /** Hands the composer back with the prompt folded to one row above it, for a person who wants to write first. */
   onWriteInstead?: () => void;
 }) {
   const words = useMemo(() => permissionPromptWords(permission.toolName, permission.input, permission.detail), [permission]);
@@ -202,24 +173,23 @@ export function PromptDock({
   );
   // A question with nothing to pick from is the field alone, open from the start.
   const textOnly = question !== undefined && question.options.length === 0;
-  const [active, setActive] = useState(0);
-  const [fieldOpen, setFieldOpen] = useState<string | null>(textOnly ? OTHER.id : null);
+  // The first row is picked from the start, as the CLIs' own menus stand; a tick list starts bare.
+  const [picked, setPicked] = useState<string>(() => rows[0]?.id ?? "");
+  const [typedSome, setTypedSome] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const fieldRef = useRef<HTMLInputElement | null>(null);
   const ticked = answers[step]?.ids ?? [];
+  const pickedRow = rows.find(r => r.id === picked);
+  const fieldOpen = textOnly || (multi ? ticked.includes(OTHER.id) : pickedRow?.field !== undefined);
 
   useEffect(() => {
     rootRef.current?.focus({ preventScroll: true });
   }, [permission.askId]);
   useEffect(() => {
-    if (fieldOpen !== null) fieldRef.current?.focus();
+    if (fieldOpen) fieldRef.current?.focus();
   }, [fieldOpen]);
 
   const typedNow = (): string => fieldRef.current?.value.trim() ?? "";
-  const closeField = useCallback(() => {
-    setFieldOpen(null);
-    rootRef.current?.focus({ preventScroll: true });
-  }, []);
 
   const answer = useCallback(
     (optionId: string, text?: string) => onAnswer(permission.sessionId, permission.askId, optionId, text === undefined || text === "" ? undefined : text),
@@ -232,265 +202,262 @@ export function PromptDock({
     [answer],
   );
 
+  const goTo = (at: number, coming: AskedQuestion): void => {
+    setStep(at);
+    setPicked(coming.options[0] === undefined ? OTHER.id : coming.options[0].id);
+    setTypedSome(false);
+    rootRef.current?.focus({ preventScroll: true });
+  };
+
   const settle = useCallback(
-    (picked: Settled) => {
+    (settledNow: Settled) => {
       if (questions === undefined) return;
-      const next = answers.map((a, at) => (at === step ? picked : a));
+      const next = answers.map((a, at) => (at === step ? settledNow : a));
       setAnswers(next);
-      if (step + 1 < questions.length) {
-        const coming = questions[step + 1]!;
-        setStep(step + 1);
-        setActive(0);
-        setFieldOpen(coming.options.length === 0 ? OTHER.id : null);
-      } else sendAll(next);
+      const coming = questions[step + 1];
+      if (coming !== undefined) goTo(step + 1, coming);
+      else sendAll(next);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [answers, questions, sendAll, step],
   );
 
-  /** What a multi-select sends: the ticks, and the typed words beside them where the Other field holds any. */
-  const answerMulti = useCallback(() => {
-    const typed = fieldOpen === OTHER.id ? typedNow() : "";
-    if (ticked.length === 0 && typed === "") return;
-    settle({ ids: ticked, ...(typed === "" ? {} : { typed }) });
-  }, [fieldOpen, settle, ticked]);
+  /** Whether the primary button can be pressed: a tick list needs a tick or words, a field row needs its words. */
+  const held = multi ? ticked.filter(id => id !== OTHER.id).length === 0 && !(ticked.includes(OTHER.id) && typedSome) : fieldOpen && !consent && !typedSome;
 
-  const submitField = useCallback(() => {
-    const row = rows.find(r => r.id === fieldOpen);
-    if (row === undefined) return;
+  /** What Enter and the primary button do: the pick as it stands, with the field's words where a field is open. */
+  const confirm = useCallback(() => {
+    if (held) return;
+    const typed = fieldOpen ? typedNow() : "";
     if (consent) {
-      answer(row.id, typedNow());
+      if (pickedRow !== undefined) answer(pickedRow.id, pickedRow.field === undefined ? undefined : typed);
       return;
     }
     if (multi) {
-      answerMulti();
+      settle({ ids: ticked.filter(id => id !== OTHER.id), ...(typed === "" ? {} : { typed }) });
       return;
     }
-    const typed = typedNow();
-    if (typed !== "") settle({ ids: [], typed });
-  }, [answer, answerMulti, consent, fieldOpen, multi, rows, settle]);
+    if (picked === OTHER.id) settle({ ids: [], typed });
+    else settle({ ids: [picked] });
+  }, [answer, consent, fieldOpen, held, multi, picked, pickedRow, settle, ticked]);
 
-  const pick = useCallback(
-    (at: number) => {
-      const row = rows[at];
-      if (row === undefined) return;
-      setActive(at);
-      if (row.field !== undefined) {
-        if (fieldOpen !== row.id) setFieldOpen(row.id);
-        else submitField();
-        return;
-      }
-      if (consent) {
-        answer(row.id);
-        return;
-      }
-      if (multi) {
-        const ids = ticked.includes(row.id) ? ticked.filter(id => id !== row.id) : [...ticked, row.id];
-        setAnswers(answers.map((a, i) => (i === step ? { ...a, ids } : a)));
-        return;
-      }
-      settle({ ids: [row.id] });
+  const tick = useCallback(
+    (id: string, on: boolean) => {
+      const ids = on ? [...ticked.filter(t => t !== id), id] : ticked.filter(t => t !== id);
+      setAnswers(answers.map((a, i) => (i === step ? { ...a, ids } : a)));
     },
-    [answer, answers, consent, fieldOpen, multi, rows, settle, step, submitField, ticked],
+    [answers, step, ticked],
   );
-  const hover = useCallback((at: number) => setActive(at), []);
+
+  /** Focus the nth tick box, so Space and the arrows act on a real control. */
+  const focusTick = (at: number): void => {
+    const boxes = rootRef.current?.querySelectorAll<HTMLElement>("[data-pick-row] [data-slot=checkbox]") ?? [];
+    boxes[((at % boxes.length) + boxes.length) % boxes.length]?.focus();
+  };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
     if (event.target instanceof HTMLInputElement) return;
     const { key } = event;
     if (key === "Escape") {
       event.preventDefault();
-      if (fieldOpen !== null) closeField();
-      else onWriteInstead?.();
-      return;
-    }
-    if (key === "ArrowDown" || key === "ArrowUp") {
-      event.preventDefault();
-      setActive(a => (a + (key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length);
-      return;
-    }
-    if (/^[1-9]$/.test(key)) {
-      const at = Number(key) - 1;
-      if (at < rows.length) {
-        event.preventDefault();
-        pick(at);
-      }
-      return;
-    }
-    if (key === " " && multi) {
-      event.preventDefault();
-      pick(active);
+      onWriteInstead?.();
       return;
     }
     if (key === "Enter") {
       event.preventDefault();
-      if (multi && rows[active]?.id !== OTHER.id) answerMulti();
-      else pick(active);
+      confirm();
+      return;
+    }
+    if (/^[1-9]$/.test(key)) {
+      const at = Number(key) - 1;
+      const row = rows[at];
+      if (row === undefined) return;
+      event.preventDefault();
+      if (multi) {
+        tick(row.id, !ticked.includes(row.id));
+        focusTick(at);
+      } else if (picked === row.id && row.field !== undefined) fieldRef.current?.focus();
+      else setPicked(row.id);
+      return;
+    }
+    if (key === "ArrowDown" || key === "ArrowUp") {
+      const move = key === "ArrowDown" ? 1 : -1;
+      if (multi) {
+        const boxes = [...(rootRef.current?.querySelectorAll<HTMLElement>("[data-pick-row] [data-slot=checkbox]") ?? [])];
+        const at = boxes.findIndex(box => box === document.activeElement);
+        event.preventDefault();
+        focusTick(at < 0 ? (move > 0 ? 0 : -1) : at + move);
+        return;
+      }
+      if (event.target !== event.currentTarget) return;
+      event.preventDefault();
+      const at = rows.findIndex(r => r.id === picked);
+      setPicked(rows[(at + move + rows.length) % rows.length]!.id);
     }
   };
 
-  const open = isPromptOpen(permission);
-  if (!open) return null;
+  /** Esc in the field: the pick goes back to the first row and the dock has the keys again; a tick list keeps its
+   * ticks and only the focus moves. */
+  const leaveField = (): void => {
+    if (!multi && !textOnly) setPicked(rows[0]?.id ?? "");
+    rootRef.current?.focus({ preventScroll: true });
+  };
+
+  const field = (row: MenuRow): ReactNode => (
+    <Input
+      key={row.id}
+      ref={fieldRef}
+      nativeInput
+      data-prompt-field
+      defaultValue=""
+      placeholder={row.field}
+      aria-label={row.field}
+      className={FIELD_CLASS}
+      onChange={event => setTypedSome(event.target.value.trim() !== "")}
+      onKeyDown={event => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          confirm();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          leaveField();
+        }
+        event.stopPropagation();
+      }}
+    />
+  );
+
+  if (!isPromptOpen(permission)) return null;
   const count = questions !== undefined && questions.length > 1 ? `${step + 1} of ${questions.length}` : null;
-  // The lead's trailing colon joins it to the code on one line; here the code has a line of its own.
-  const lead = words.says.replace(/:$/, "");
+  // The lead's trailing colon joins it to the code on one line; here the code has a row of its own.
+  const title = question === undefined ? words.says.replace(/:$/, "") : question.question;
+  // A question's header word stands under it only where the question does not already say it.
+  const note = question === undefined ? words.note : question.header === "" || question.question.toLowerCase().includes(question.header.toLowerCase()) ? undefined : question.header;
   const runsIn = typeof fields["cwd"] === "string" && fields["cwd"] !== cwd ? (fields["cwd"] as string) : null;
-  // Enter's one word, and the button's: the same word wherever both are drawn.
-  const nextWord = questions !== undefined && step + 1 < questions.length ? "Next" : "Answer";
-  const enterWord = multi ? nextWord : fieldOpen !== null ? "Send" : "pick";
-  const button = multi ? nextWord : fieldOpen !== null ? "Send" : null;
-  const fieldRow = rows.find(r => r.id === fieldOpen);
+  const filePath = typeof fields["file_path"] === "string" ? (fields["file_path"] as string) : null;
+  const primaryWord = consent ? (permission.options.find(o => o.id === picked)?.effect === "deny" ? "Deny" : "Allow") : questions !== undefined && step + 1 < questions.length ? NEXT_WORD : ANSWER_WORD;
+  const earlier = questions === undefined ? [] : questions.slice(0, step);
+  const rest = question === undefined && words.body === undefined && filePath === null ? restLines(words.rest) : [];
 
   return (
     <div className="px-3 pb-3 sm:px-4 sm:pb-4">
       <ComposerSurface.Shell data-prompt-dock={permission.askId}>
         <ComposerSurface.Host>
           <ComposerSurface.Main>
-            <div
-              ref={rootRef}
-              tabIndex={-1}
-              role="listbox"
-              aria-label={question === undefined ? words.lead : question.question}
-              className="flex min-w-0 flex-col gap-3 px-3 pt-3.5 pb-3 outline-none sm:px-4 sm:pt-4 sm:pb-3.5"
-              onKeyDown={onKeyDown}
-            >
-              {/* The head: who asks, and what. A question keeps the header the harness gave it over the question
-                  itself; a consent is the protocol's sentence for the call, then the call. */}
-              <div className="flex min-w-0 flex-col gap-1 px-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  {agent === null ? null : (
-                    <span className="inline-flex shrink-0 text-muted-foreground">
-                      <HarnessMark harness={agent} label={agentName(agent)} className="size-3" />
-                    </span>
-                  )}
-                  {question !== undefined ? (
-                    <span data-prompt-header className="min-w-0 flex-1 truncate text-[11px] leading-4 text-muted-foreground">
-                      {question.header === "" ? "Question" : question.header}
-                    </span>
-                  ) : (
-                    <span data-prompt-says className="min-w-0 flex-1 truncate text-sm leading-5 text-foreground">
-                      {lead}
-                    </span>
-                  )}
-                  {count === null ? null : (
-                    <span data-prompt-count className="shrink-0 font-mono text-[11px] leading-4 text-muted-foreground tabular-nums">
-                      {count}
-                    </span>
+            <div ref={rootRef} tabIndex={-1} data-prompt-root aria-label={title} className="flex min-w-0 flex-col outline-none" onKeyDown={onKeyDown}>
+              <div data-slot="dialog-header" className={HEAD_CLASS}>
+                <div className="flex min-w-0 flex-col gap-1">
+                  <h2 data-prompt-title className={cn(TITLE_CLASS, "flex min-w-0 items-center gap-2")}>
+                    {agent === null ? null : <HarnessMark harness={agent} label={agentName(agent)} className={cn(GLYPH, "shrink-0")} />}
+                    <span className="min-w-0 break-words">{title}</span>
+                  </h2>
+                  {note === undefined ? null : (
+                    <p data-prompt-note className={cn(NOTE, "break-words")}>
+                      {note}
+                    </p>
                   )}
                 </div>
-                {question !== undefined ? (
-                  <span data-prompt-question className="break-words whitespace-pre-wrap text-sm leading-5 text-foreground">
-                    {question.question}
-                  </span>
-                ) : null}
-                {words.note === undefined ? null : (
-                  <span data-prompt-note className="break-words text-[13px] leading-5 text-foreground/80">
-                    {words.note}
+                {count === null ? null : (
+                  <span data-prompt-count className={cn(FACT, "shrink-0")}>
+                    {count}
                   </span>
                 )}
-                {words.code === undefined ? null : (
-                  <code data-prompt-code className={cn("min-w-0 overflow-x-auto whitespace-pre-wrap break-normal py-0.5", CODE_CLASS)}>
-                    {commandParts(words.code)}
-                  </code>
-                )}
-                {runsIn === null ? null : <span className={cn("truncate text-muted-foreground", CODE_CLASS)}>in {runsIn}</span>}
-                {words.rest === "" ? null : <span className={cn("break-words whitespace-pre-wrap text-muted-foreground", CODE_CLASS)}>{words.rest}</span>}
               </div>
-              {edit === null ? null : (
-                <div className="px-3">
-                  <EditLines edit={edit} />
-                </div>
-              )}
-              {words.body === undefined ? null : (
-                <div className="px-3">
-                  <details className="group">
-                    <summary className="cursor-pointer list-none text-xs leading-4 text-muted-foreground hover:text-foreground">{words.body.label}</summary>
-                    <pre className={cn("mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words text-muted-foreground", CODE_CLASS)}>{words.body.text}</pre>
-                  </details>
-                </div>
-              )}
-              {/* Earlier questions of the same prompt, settled, each one line. */}
-              {questions !== undefined && step > 0 ? (
-                <div className="flex flex-col">
-                  {questions.slice(0, step).map((q, at) => (
-                    <AnsweredLine
-                      key={q.key}
-                      question={q}
-                      answer={[...(answers[at]?.ids ?? []).map(id => q.options.find(o => o.id === id)?.label ?? id), ...(answers[at]?.typed === undefined ? [] : [answers[at]!.typed!])].join(", ")}
-                      onBack={() => {
-                        setStep(at);
-                        setActive(0);
-                        setFieldOpen(null);
-                      }}
-                    />
-                  ))}
-                </div>
-              ) : null}
-              {textOnly ? null : (
-                <div className="flex flex-col" data-prompt-options>
-                  {rows.map((row, at) => (
-                    <OptionRow key={row.id} row={row} at={at} active={at === active} ticked={ticked.includes(row.id)} multi={multi && row.id !== OTHER.id} onHover={hover} onPick={pick} />
-                  ))}
-                </div>
-              )}
-              {/* The foot, one fixed row: the keys, or the field they give way to, and the one button Enter stands for. */}
-              <div data-prompt-foot className="flex h-8 min-w-0 items-center gap-3 px-3">
-                {fieldRow !== undefined ? (
-                  <Input
-                    key={fieldRow.id}
-                    ref={fieldRef}
-                    nativeInput
-                    size="sm"
-                    data-prompt-field
-                    defaultValue=""
-                    placeholder={fieldRow.field}
-                    aria-label={fieldRow.field}
-                    className="min-w-0 flex-1 rounded-lg border border-input bg-(--input-fill) text-sm"
-                    onKeyDown={event => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        submitField();
-                      } else if (event.key === "Escape") {
-                        event.preventDefault();
-                        closeField();
-                      }
-                      event.stopPropagation();
-                    }}
-                  />
-                ) : (
-                  <span className="hidden min-w-0 flex-1 items-center gap-4 sm:flex" data-prompt-hints>
-                    <Hint word="move">
-                      <Kbd aria-hidden>
-                        <ArrowUpIcon className="size-3" />
-                      </Kbd>
-                      <Kbd aria-hidden>
-                        <ArrowDownIcon className="size-3" />
-                      </Kbd>
-                    </Hint>
-                    {multi ? (
-                      <Hint word="tick">
-                        <Kbd aria-hidden>space</Kbd>
-                      </Hint>
-                    ) : null}
-                    <Hint word={enterWord}>
-                      <Kbd aria-hidden>
-                        <CornerDownLeftIcon className="size-3" />
-                      </Kbd>
-                    </Hint>
-                  </span>
+              <div data-slot="dialog-panel" className={BODY_CLASS}>
+                {words.code === undefined || question !== undefined ? null : (
+                  <div className="flex flex-col gap-2">
+                    <CopyRow k="prompt-code" value={words.code} />
+                    {runsIn === null ? null : <p className={cn(FACT, "truncate")}>in {runsIn}</p>}
+                  </div>
                 )}
-                <span className="ms-auto flex shrink-0 items-center gap-2">
+                {filePath === null || question !== undefined ? null : (
+                  <Grid id="prompt-file">
+                    <div className="flex flex-col">
+                      <div className={cn("flex items-center gap-3 py-3 min-h-15", CARD_INSET)}>
+                        <GlyphFrame>
+                          <FileIcon aria-hidden className={GLYPH} />
+                        </GlyphFrame>
+                        <span className="flex min-w-0 flex-col">
+                          <span className={cn(LIST_TITLE, "truncate")}>{fileName(filePath)}</span>
+                          <span className={cn(FACT, "truncate")} title={filePath}>
+                            {pathIn(filePath, cwd)}
+                          </span>
+                        </span>
+                      </div>
+                      {edit !== null ? (
+                        <EditLines edit={edit} />
+                      ) : words.body === undefined ? null : (
+                        <pre data-prompt-body className={cn(LOG_CLASS, LOG_EDGE)}>
+                          {words.body.text}
+                        </pre>
+                      )}
+                    </div>
+                  </Grid>
+                )}
+                {rest.length === 0 ? null : (
+                  <Grid id="prompt-fields">
+                    {rest.map(line => (
+                      <Line key={line.key} id={line.key} label={line.key} value={line.value} valueClass="fact" />
+                    ))}
+                  </Grid>
+                )}
+                {earlier.length === 0 ? null : (
+                  <Grid id="prompt-answered">
+                    {earlier.map((q, at) => (
+                      <Line
+                        key={q.key}
+                        id={q.key}
+                        label={q.header === "" ? q.question : q.header}
+                        value={[...(answers[at]?.ids ?? []).map(id => q.options.find(o => o.id === id)?.label ?? id), ...(answers[at]?.typed === undefined ? [] : [answers[at]!.typed!])].join(", ")}
+                        hover={q.question}
+                        attrs={{ "data-prompt-answered": q.key }}
+                      />
+                    ))}
+                  </Grid>
+                )}
+                {textOnly ? (
+                  <Input ref={fieldRef} nativeInput data-prompt-field size="lg" autoComplete="off" defaultValue="" placeholder={OTHER.field} aria-label={OTHER.field} onChange={event => setTypedSome(event.target.value.trim() !== "")} onKeyDown={event => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      confirm();
+                    } else if (event.key === "Escape") {
+                      event.preventDefault();
+                      leaveField();
+                    }
+                    event.stopPropagation();
+                  }} />
+                ) : multi ? (
+                  <Grid id="prompt-options">
+                    {rows.map((row, at) => (
+                      <PickRow key={row.id} id={row.id} checked={ticked.includes(row.id)} dim={false} onCheckedChange={on => tick(row.id, on)} name={row.label} {...(row.description === "" ? {} : { note: row.description })} hover={rowHover(at, true)} attrs={{ "data-prompt-option": row.id }} {...(row.field !== undefined && ticked.includes(row.id) ? { slot: field(row) } : {})} />
+                    ))}
+                  </Grid>
+                ) : (
+                  <RadioGroup value={picked} onValueChange={next => setPicked(String(next))} className="gap-0">
+                    <Grid id="prompt-options">
+                      {rows.map((row, at) => (
+                        <Choice key={row.id} id={row.id} picked={picked === row.id} name={row.label} {...(row.description === "" ? {} : { note: row.description })} hover={rowHover(at, false)} attrs={{ "data-prompt-option": row.id }} {...(row.field !== undefined && picked === row.id ? { slot: field(row) } : {})} />
+                      ))}
+                    </Grid>
+                  </RadioGroup>
+                )}
+              </div>
+              <div data-slot="dialog-footer" data-prompt-foot className={FOOT_CLASS}>
+                <span className="flex min-h-5 items-center max-sm:justify-center sm:me-auto">
                   {onWriteInstead === undefined ? null : (
-                    // A phone's foot has room for the field or this, not both; Esc still folds the dock there.
-                    <Button size="xs" variant="ghost" data-prompt-write className={cn(fieldRow !== undefined && "max-sm:hidden")} onClick={onWriteInstead}>
-                      Write a message instead
-                    </Button>
-                  )}
-                  {button === null ? null : (
-                    <Button size="xs" variant="default" data-prompt-answer held={multi && ticked.length === 0 && fieldOpen === null} onClick={() => (multi ? answerMulti() : submitField())}>
-                      {button}
+                    <Button size="xs" variant="ghost" data-prompt-write className="px-0 [:hover,[data-pressed]]:bg-transparent" onClick={onWriteInstead}>
+                      {WRITE_INSTEAD}
                     </Button>
                   )}
                 </span>
+                {step === 0 || questions === undefined ? null : (
+                  <Button variant="outline" data-prompt-back onClick={() => goTo(step - 1, questions[step - 1]!)}>
+                    {BACK_WORD}
+                  </Button>
+                )}
+                <Button data-prompt-answer held={held} onClick={confirm}>
+                  {primaryWord}
+                </Button>
               </div>
             </div>
           </ComposerSurface.Main>
@@ -500,18 +467,33 @@ export function PromptDock({
   );
 }
 
-/** The prompt folded to one line over the composer, for the person who chose to write first: the timeline's own
- * words for the wait, what is asked, and the way back to the menu. */
+/** The prompt folded to one row over the composer, for the person who chose to write first: the question glyph in
+ * its frame, the timeline's own words for the wait, what is asked, and the way back to the dock. */
 export function PromptStrip({ permission, onOpen }: { permission: PermissionPrompt; onOpen: () => void }) {
   const words = permissionPromptWords(permission.toolName, permission.input, permission.detail);
   const line = words.questions !== undefined ? words.questions[0]!.question : words.lead;
   return (
-    <div className="mx-auto flex h-8 w-full max-w-3xl min-w-0 items-center gap-3 px-6 text-xs leading-4 text-muted-foreground sm:px-7" data-prompt-strip>
-      <span className="shrink-0">{STRIP_LEAD}</span>
-      <span className="min-w-0 flex-1 truncate text-foreground/85">{line}</span>
-      <Button size="xs" variant="outline" onClick={onOpen}>
-        Answer
-      </Button>
+    <div className="px-3 pb-2 sm:px-4">
+      <ComposerSurface.Shell data-prompt-strip>
+        <ComposerSurface.Host>
+          <ComposerSurface.Main>
+            <div className="flex min-h-15 items-center gap-3 px-5 py-3">
+              <GlyphFrame>
+                <MessageCircleQuestionIcon aria-hidden className={GLYPH} />
+              </GlyphFrame>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className={LIST_TITLE}>{FOLDED_TITLE}</span>
+                <span className={cn(NOTE, "truncate")} title={line}>
+                  {line}
+                </span>
+              </span>
+              <Button size="xs" variant="outline" data-prompt-open onClick={onOpen}>
+                {ANSWER_WORD}
+              </Button>
+            </div>
+          </ComposerSurface.Main>
+        </ComposerSurface.Host>
+      </ComposerSurface.Shell>
     </div>
   );
 }

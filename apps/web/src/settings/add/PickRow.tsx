@@ -17,6 +17,7 @@ export const PICK_TEXT_EDGE = "pl-[calc(var(--settings-inset,20px)+72px)]";
 export function PickRow({
   id,
   checked,
+  dim = true,
   onCheckedChange,
   glyph,
   name,
@@ -24,12 +25,17 @@ export function PickRow({
   marks,
   note,
   slot,
+  hover,
+  attrs,
   children,
 }: {
   id: string;
   checked: boolean;
+  /** Whether an unticked row's words go muted; off for a list where every row is an answer to read. */
+  dim?: boolean;
   onCheckedChange?: (next: boolean) => void;
-  glyph: ReactNode;
+  /** The mark in its frame, where the thing has one of its own. */
+  glyph?: ReactNode;
   name: string;
   /** A version or a path, in the mono after the name. */
   tag?: string;
@@ -38,17 +44,20 @@ export function PickRow({
   note?: string;
   /** One control or one fact at the right. */
   slot?: ReactNode;
+  /** One sentence on hover: the keys that tick the row. */
+  hover?: string;
+  attrs?: Record<string, string>;
   children?: ReactNode;
 }) {
   return (
-    <div data-pick-row={id} data-checked={checked} className="flex flex-col">
-      <label className={cn("flex cursor-pointer flex-col justify-center gap-3 py-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5", CARD_INSET, ROW_FLOOR)}>
+    <div data-pick-row={id} data-checked={checked} className="flex flex-col" {...attrs}>
+      <label {...(hover === undefined ? {} : { title: hover })} className={cn("flex cursor-pointer flex-col justify-center gap-3 py-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5", CARD_INSET, ROW_FLOOR)}>
         <span className="flex min-w-0 items-center gap-3">
           <Checkbox checked={checked} {...(onCheckedChange === undefined ? {} : { onCheckedChange })} className="shrink-0" />
-          <GlyphFrame>{glyph}</GlyphFrame>
-          <span className={cn("flex min-w-0 flex-col", !checked && "text-muted-foreground")}>
+          {glyph === undefined ? null : <GlyphFrame>{glyph}</GlyphFrame>}
+          <span className={cn("flex min-w-0 flex-col", dim && !checked && "text-muted-foreground")}>
             <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-              <span data-pick-name className={cn(LIST_TITLE, "min-w-0 break-words", !checked && "text-muted-foreground")}>
+              <span data-pick-name className={cn(LIST_TITLE, "min-w-0 break-words", dim && !checked && "text-muted-foreground")}>
                 {name}
               </span>
               {tag === undefined ? null : <span className={cn(FACT, "shrink-0")}>{tag}</span>}

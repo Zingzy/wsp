@@ -703,11 +703,9 @@ describe("the sidebar's list of thread tiles", () => {
       await act(async () => useStore.setState({ sessions: sessions(all) } as never));
       await waitFor(() => expect(screen.getByText("kept on top")).toBeDefined());
       expect(heads()).toEqual(["pinned", "needs-you"]);
-      // Needs you says its state as its tiles do: the glyph in its ink, the word on the hover and for a screen reader.
-      expect([...document.querySelectorAll("[data-section-head]")].map(head => head.textContent)).toEqual(["Pinned (1)", "(1)"]);
-      const needsYouHead = document.querySelector<HTMLElement>("[data-section-head=needs-you]")!;
-      expect(needsYouHead.querySelector("[data-group-word]")!.getAttribute("aria-label")).toBe("Needs you");
-      expect(needsYouHead.querySelector("[data-group-word] svg")!.getAttribute("class")).toContain("lucide-message-circle-question");
+      // Every head names its section in words, Needs you as Pinned and Settled do; the state glyph is the tiles' alone.
+      expect([...document.querySelectorAll("[data-section-head]")].map(head => head.textContent)).toEqual(["Pinned (1)", "Needs you (1)"]);
+      expect(document.querySelector("[data-section-head=needs-you] svg.lucide-message-circle-question")).toBeNull();
       expect(rowIds()).toEqual(["thread:th_pinned", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle", "settled"]);
       expect(walkIds()).toEqual(["section:pinned", "thread:th_pinned", "section:needs-you", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle", "settled"]);
       expect(screen.queryByText("snoozed away")).toBeNull();
@@ -746,7 +744,7 @@ describe("the sidebar's list of thread tiles", () => {
       fireEvent.click(head("needs-you"));
       await waitFor(() => expect(screen.queryByText("wants an answer")).toBeNull());
       expect(head("needs-you").getAttribute("aria-expanded")).toBe("false");
-      expect(head("needs-you").textContent).toBe("(1)");
+      expect(head("needs-you").textContent).toBe("Needs you (1)");
       expect(screen.getByText("still going")).toBeDefined();
       expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled", "needs-you"]);
       fireEvent.click(head("pinned"));

@@ -245,13 +245,13 @@ useRightPanelStore.getState().close(MAC.id);
 /** The keys the query names, as the person would press them, sent to the dock once it is on the page. */
 const KEYS: Record<string, string> = { down: "ArrowDown", up: "ArrowUp", enter: "Enter", space: " ", esc: "Escape" };
 function drive(): void {
-  const dock = document.querySelector<HTMLElement>("[data-prompt-dock] [role=listbox]");
+  const dock = document.querySelector<HTMLElement>("[data-prompt-dock] [data-prompt-root]");
   if (dock === null) {
     setTimeout(drive, 50);
     return;
   }
   const press = (key: string): void => {
-    const el = document.activeElement instanceof HTMLInputElement ? document.activeElement : dock;
+    const el = document.activeElement instanceof HTMLElement && dock.contains(document.activeElement) ? document.activeElement : dock;
     el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
   };
   // One key per tick, as a hand presses them: a burst inside one tick lands on state React has not yet drawn.
