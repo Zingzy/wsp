@@ -9,6 +9,7 @@
 // (PlaceNonce, PlacePublicKey, PlaceSignature) and the bytes they sign come
 // from placeLinkTranscript, so this file holds the host's half of the
 // handshake and no rule of its own about how it is spelled.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, createPublicKey, randomBytes } from "node:crypto";
 import { createServer, type Server, type Socket } from "node:net";
 import {
@@ -1318,16 +1319,34 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * reading, so the start, the update and the gate a create passes cannot disagree about whether it is busy. */
   const settingNow = (record: PlaceRecord): string | undefined =>
     setting.has(record.id) || record.setup?.state === "running" ? placeProvisioningLine(record.name, record.setup?.steps.find(l => l.state === "running")?.step) : undefined;
+  /** The computer whose setup's own folder step the running call belongs to: a project's clone there is the job's
+   * own work rather than a fork landing on a half set up computer, so the gate lets that call alone through. Every
+   * call reached from the folder add carries the pass, so nothing reached from it may fork a workspace there. */
+  const foldersOf = new AsyncLocalStorage<string>();
+
+  /** The read-then-write of a computer's record, one at a time per computer: the setup's writes and the folder
+   * add's first write of what that computer forks with run at once, and either would land over the other. */
+  const recordTurns = new Map<string, Promise<unknown>>();
+  const inRecordTurn = <T>(placeId: string, write: () => Promise<T>): Promise<T> => {
+    const run = (recordTurns.get(placeId) ?? Promise.resolve()).then(write);
+    const settled = run.catch(() => undefined);
+    recordTurns.set(placeId, settled);
+    void settled.then(() => {
+      if (recordTurns.get(placeId) === settled) recordTurns.delete(placeId);
+    });
+    return run;
+  };
 
   /** One write of a setup's state onto the record as it stands, since an attach's write of lastSeenAt goes on
    * beside it. */
-  const writeSetup = async (placeId: string, patch: Partial<Pick<PlaceRecord, "setup" | "applied" | "picks" | "recipe" | "sync">>): Promise<void> => {
-    const now = await recordOf(placeId);
-    if (now === undefined) return;
-    const next = { ...now, ...patch };
-    if ("sync" in patch && patch.sync === undefined) delete next.sync;
-    await keep(next);
-  };
+  const writeSetup = (placeId: string, patch: Partial<Pick<PlaceRecord, "setup" | "applied" | "picks" | "recipe" | "sync">>): Promise<void> =>
+    inRecordTurn(placeId, async () => {
+      const now = await recordOf(placeId);
+      if (now === undefined) return;
+      const next = { ...now, ...patch };
+      if ("sync" in patch && patch.sync === undefined) delete next.sync;
+      await keep(next);
+    });
 
   /** Which computers follow a recipe moved, or the recipe did, on the stream every client watches. */
   const recipesMoved = (slug: string): void => opts.onSetup?.({ type: "recipes.changed", slug });
@@ -1609,8 +1628,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     /** One folder made a project there by the add's own road. */
     const addFolder = async (key: string, folder: RecipeFile["folders"][string]): Promise<PlaceProvisionRow> => {
       const label = folder.name ?? key;
-      if (recording.addFolder === undefined) return { id: `folders/${key}`, label, outcome: "failed", note: NO_FOLDER_ROAD };
-      return recording.addFolder(placeId, key, folder).catch((e: unknown): PlaceProvisionRow => ({ id: `folders/${key}`, label, outcome: "failed", note: firstLineOf(e) }));
+      const add = recording.addFolder;
+      if (add === undefined) return { id: `folders/${key}`, label, outcome: "failed", note: NO_FOLDER_ROAD };
+      return foldersOf.run(placeId, () => add(placeId, key, folder)).catch((e: unknown): PlaceProvisionRow => ({ id: `folders/${key}`, label, outcome: "failed", note: firstLineOf(e) }));
     };
 
     /** The folders, each a project on that computer. One whose repository needs GitHub there waits on the GitHub
@@ -2501,7 +2521,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // A computer whose setup is still going on is not forked into while it runs: the workspace would come up
       // without the agent the job is putting there. The running workspaces on it are untouched, since they read
       // backendOf and not this.
-      const busy = settingNow(record);
+      const busy = foldersOf.getStore() === placeId ? undefined : settingNow(record);
       if (busy !== undefined) throw new PlaceProvisioningError(busy);
       const made = door.backendOf(placeId);
       if (made !== undefined) return made;
@@ -2515,10 +2535,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // Onto the record as it stands rather than as it was when the frame went out, and only while the daemon
         // that answered is still the one running there: a computer that dialled back on another version while
         // this was out has a read of its own behind that attach, and this answer is not its facts any more.
-        const now = (await recordOf(placeId)) ?? record;
-        if (now.report.daemonVersion !== record.report.daemonVersion) return LinkBackend.of(linkTo(placeId), facts);
-        await keep({ ...now, backendFacts: facts });
-        return backendFrom(placeId, facts);
+        return inRecordTurn(placeId, async () => {
+          const now = (await recordOf(placeId)) ?? record;
+          if (now.report.daemonVersion !== record.report.daemonVersion) return LinkBackend.of(linkTo(placeId), facts);
+          await keep({ ...now, backendFacts: facts });
+          return backendFrom(placeId, facts);
+        });
       })().finally(() => asking.delete(placeId));
       asking.set(placeId, read);
       return read;
