@@ -663,6 +663,16 @@ export function createSlates(deps: SlatesDeps): Slates {
     }
   };
 
+  /** The record a start inside a batch will give: running where the person said always and nothing asks every
+   * time, else held for the sheet. */
+  const provisional = (r: SlateRecord, run: string): SlateRunRecord => {
+    const decl = r.document?.runs[run];
+    const prior = r.values[run];
+    const count = isRunRecord(prior) ? prior.runs : 0;
+    const approved = decl?.kind === "cmd" && decl.confirm === undefined && r.approvals[runs.key(decl as CmdRunDecl)]?.state === "allowed";
+    return approved ? { state: "running", runs: count + 1, startedAt: deps.now() } : { state: "held", why: HELD_APPROVAL, runs: count };
+  };
+
   /** A record the runs module wrote outside a batch (an end, a cancel, a queued start, an approval): one batch, so
    * done reactions fire with the window closed (02, "Runs"). */
   async function runMoved(threadId: string, run: string, record: RunRecord): Promise<void> {
@@ -687,15 +697,18 @@ export function createSlates(deps: SlatesDeps): Slates {
     const views = await viewsFor(r);
     const asks: RunAsk[] = [];
     const before = r.values;
+    const deferred: { run: string; by: RunBy; record: SlateRunRecord }[] = [];
     const ctx = {
       ...contextOf(r, views),
       by,
       ...(o.event !== undefined ? { event: o.event } : {}),
       reactionSends: r.sendsAllowed !== undefined,
+      // A run's env reads the values as this batch leaves them, so the batch gets the record the start will give and
+      // the command is spawned once they are stored.
       start: (run: string, startBy: "person" | "reaction"): SlateRunRecord => {
-        const started = startNow(r, run, by === "timer" ? "timer" : startBy, views);
-        if (started.ask !== undefined) asks.push(started.ask);
-        return started.record;
+        const record = provisional(r, run);
+        deferred.push({ run, by: by === "timer" ? "timer" : startBy, record });
+        return record;
       },
     };
     // A timer's start is no step of the document: it starts here and its record goes in as a run's write.
@@ -709,6 +722,14 @@ export function createSlates(deps: SlatesDeps): Slates {
     r.values = result.values;
     keepProblems(r, result.problems);
     for (const run of result.cancels) runs.cancel(r.threadId, run);
+    for (const d of deferred) {
+      const started = startNow(r, d.run, d.by, views);
+      if (started.ask !== undefined) asks.push(started.ask);
+      // The runs module held it for a reason the batch could not see (four running, the start budget): that record
+      // goes through a batch of its own.
+      if (started.record.state === d.record.state) r.values[d.run] = asJson(started.record);
+      else void serial(r.threadId, () => runMoved(r.threadId, d.run, started.record as RunRecord));
+    }
 
     const sends: BatchOut["sends"] = [];
     const now = o.sendAt ?? deps.now();
@@ -870,7 +891,7 @@ export function createSlates(deps: SlatesDeps): Slates {
           checkVersion(r, p.ifVersion);
           return undo(r, by);
         }
-        const applied = applySlatePatch(r.document, r.values, parsed.patch);
+        const applied = applySlatePatch(r.document, r.values, parsed.patch, parsed.lines);
         if (applied.errors.length > 0 || applied.document === undefined) throw invalid(applied.errors, applied.warnings);
         const next = applied.document;
         const values = next === null ? r.values : valuesFor({ threadId, document: r.document, values: applied.values ?? r.values }, next);
