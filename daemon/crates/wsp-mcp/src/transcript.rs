@@ -349,6 +349,7 @@ fn row_line(name: &str, input: &Value, moment: Moment) -> Option<Option<String>>
         "WebSearch" | "web_search" => about("searching the web for", Some("searched the web for"), "query"),
         "WebFetch" => about("fetching", Some("fetched"), "url"),
         "Task" | "Agent" => about("agent:", None, "description"),
+        "spawn_agent" => about("agent:", None, "prompt"),
         "AskUserQuestion" => first_question(input).map(|q| format!("asked: {q}")),
         _ => return None,
     })
