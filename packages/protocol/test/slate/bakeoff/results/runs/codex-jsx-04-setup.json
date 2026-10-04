@@ -1,0 +1,23 @@
+{
+  "agent": "codex",
+  "model": "gpt-5.6-sol (high)",
+  "syntax": "jsx",
+  "prompt": "04-setup",
+  "referenceChars": 18993,
+  "referenceTokens": 4749,
+  "writes": [
+    {
+      "reply": "```jsx\n<slate title=\"Set up Stripe webhook\" state={{ endpointUrl: \"\", signingSecret: \"\" }}>\n  <column id=\"root\">\n    <section id=\"step-1\" title=\"1. Create the endpoint\">\n      <text id=\"step-1-help\" muted small>In Stripe, add a webhook endpoint for your app, choose the events it should receive, then copy its endpoint URL.</text>\n      <input\n        id=\"endpoint-url\"\n        label=\"Endpoint URL\"\n        value={state.endpointUrl}\n        placeholder=\"https://example.com/api/stripe/webhook\"\n        mono\n      />\n    </section>\n    <section id=\"step-2\" title=\"2. Copy the signing secret\">\n      <text id=\"step-2-help\" muted small>Reveal the endpoint's signing secret in Stripe and paste the full value beginning with whsec_.</text>\n      <input\n        id=\"signing-secret\"\n        label=\"Webhook signing secret\"\n        value={state.signingSecret}\n        placeholder=\"whsec_…\"\n        mono\n      />\n    </section>\n    <section id=\"step-3\" title=\"3. Send both for configuration\">\n      <text id=\"step-3-help\" muted small>Press once and I’ll use both values to write the webhook configuration.</text>\n      <button\n        id=\"configure\"\n        primary\n        label=\"Write the Stripe webhook config\"\n        held=\"Sending webhook settings…\"\n        onPress={send(\"Write the Stripe webhook configuration using the endpoint URL and signing secret from the slate.\", { with: [state.endpointUrl, state.signingSecret] })}\n      />\n    </section>\n  </column>\n</slate>\n```",
+      "slate": "<slate title=\"Set up Stripe webhook\" state={{ endpointUrl: \"\", signingSecret: \"\" }}>\n  <column id=\"root\">\n    <section id=\"step-1\" title=\"1. Create the endpoint\">\n      <text id=\"step-1-help\" muted small>In Stripe, add a webhook endpoint for your app, choose the events it should receive, then copy its endpoint URL.</text>\n      <input\n        id=\"endpoint-url\"\n        label=\"Endpoint URL\"\n        value={state.endpointUrl}\n        placeholder=\"https://example.com/api/stripe/webhook\"\n        mono\n      />\n    </section>\n    <section id=\"step-2\" title=\"2. Copy the signing secret\">\n      <text id=\"step-2-help\" muted small>Reveal the endpoint's signing secret in Stripe and paste the full value beginning with whsec_.</text>\n      <input\n        id=\"signing-secret\"\n        label=\"Webhook signing secret\"\n        value={state.signingSecret}\n        placeholder=\"whsec_…\"\n        mono\n      />\n    </section>\n    <section id=\"step-3\" title=\"3. Send both for configuration\">\n      <text id=\"step-3-help\" muted small>Press once and I’ll use both values to write the webhook configuration.</text>\n      <button\n        id=\"configure\"\n        primary\n        label=\"Write the Stripe webhook config\"\n        held=\"Sending webhook settings…\"\n        onPress={send(\"Write the Stripe webhook configuration using the endpoint URL and signing secret from the slate.\", { with: [state.endpointUrl, state.signingSecret] })}\n      />\n    </section>\n  </column>\n</slate>",
+      "slateChars": 1457,
+      "slateTokens": 365,
+      "apiOutputTokens": 431,
+      "ms": 15491,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}

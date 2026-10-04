@@ -1,0 +1,23 @@
+{
+  "agent": "claude",
+  "model": "claude-opus-5-5",
+  "syntax": "lines",
+  "prompt": "06-playful",
+  "referenceChars": 17881,
+  "referenceTokens": 4471,
+  "writes": [
+    {
+      "reply": "```\nslate 1 \"Coffee meter\"\n\nroot: column\n  none: empty title=\"The pot is still brewing\" body=\"No turn has reported its context yet.\" when={isNull(thread.context)}\n  cup: column tight when={exists(thread.context)}\n    coffee: meter label=\"☕ Coffee\" value={thread.context.used} max={thread.context.window} tone={thread.context.percent >= 80 ? 'bad' : (thread.context.percent >= 50 ? 'warning' : 'good')} percent note=`${tokens(thread.context.free)} of ${tokens(thread.context.window)} still in the pot`\n    caption: text value={thread.context.percent >= 80 ? 'Down to the grounds. Time to put the kettle on and write it all down.' : (thread.context.percent >= 50 ? 'Halfway down the mug. Still warm, but you can see the bottom.' : 'Freshly poured. Sip slowly, there is plenty left.')} tone={thread.context.percent >= 80 ? 'bad' : (thread.context.percent >= 50 ? 'warning' : 'muted')} emphasis={thread.context.percent >= 80 ? 'strong' : 'normal'}\n  break: button label=\"Take a coffee break\" primary note=\"Asks the agent to pause and sum up where things stand.\"\n    @press send text=\"Take a coffee break: stop where you are and summarise where we are, what is done, what is left, and anything you are unsure about.\" with=[thread.context.percent, thread.plan]\n```",
+      "slate": "slate 1 \"Coffee meter\"\n\nroot: column\n  none: empty title=\"The pot is still brewing\" body=\"No turn has reported its context yet.\" when={isNull(thread.context)}\n  cup: column tight when={exists(thread.context)}\n    coffee: meter label=\"☕ Coffee\" value={thread.context.used} max={thread.context.window} tone={thread.context.percent >= 80 ? 'bad' : (thread.context.percent >= 50 ? 'warning' : 'good')} percent note=`${tokens(thread.context.free)} of ${tokens(thread.context.window)} still in the pot`\n    caption: text value={thread.context.percent >= 80 ? 'Down to the grounds. Time to put the kettle on and write it all down.' : (thread.context.percent >= 50 ? 'Halfway down the mug. Still warm, but you can see the bottom.' : 'Freshly poured. Sip slowly, there is plenty left.')} tone={thread.context.percent >= 80 ? 'bad' : (thread.context.percent >= 50 ? 'warning' : 'muted')} emphasis={thread.context.percent >= 80 ? 'strong' : 'normal'}\n  break: button label=\"Take a coffee break\" primary note=\"Asks the agent to pause and sum up where things stand.\"\n    @press send text=\"Take a coffee break: stop where you are and summarise where we are, what is done, what is left, and anything you are unsure about.\" with=[thread.context.percent, thread.plan]",
+      "slateChars": 1250,
+      "slateTokens": 313,
+      "apiOutputTokens": 747,
+      "ms": 11077,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}

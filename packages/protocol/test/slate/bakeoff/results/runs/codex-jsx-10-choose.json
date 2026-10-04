@@ -1,0 +1,54 @@
+{
+  "agent": "codex",
+  "model": "gpt-5.6-sol (high)",
+  "syntax": "jsx",
+  "prompt": "10-choose",
+  "referenceChars": 18993,
+  "referenceTokens": 4749,
+  "writes": [
+    {
+      "reply": "```jsx\n<slate\n  title=\"Choose a job queue database\"\n  state={{\n    selected: \"\",\n    note: \"\",\n    options: [\n      { name: \"Postgres\", setup: \"Already running\", concurrency: \"Row locks\", tradeoff: \"Uses existing infrastructure\" },\n      { name: \"SQLite\", setup: \"Zero setup\", concurrency: \"One writer\", tradeoff: \"Best for a simple local queue\" },\n      { name: \"DynamoDB\", setup: \"Managed\", concurrency: \"Scales broadly\", tradeoff: \"Costs money\" }\n    ]\n  }}\n>\n  <column id=\"root\" tight>\n    <table id=\"options\" items={state.options} key={item.name}>\n      <col\n        title=\"Database\"\n        value={item.name}\n        tone={item.name == state.selected ? 'good' : 'default'}\n      />\n      <col title=\"Setup\" value={item.setup} />\n      <col title=\"Concurrency\" value={item.concurrency} />\n      <col title=\"Tradeoff\" value={item.tradeoff} />\n      <action\n        label={item.name == state.selected ? 'Selected' : 'Pick'}\n        onPress={set(state.selected, item.name)}\n      />\n    </table>\n    <input\n      id=\"note\"\n      label={`Note for ${orElse(state.selected, 'your pick')}`}\n      value={state.note}\n      lines={3}\n      placeholder=\"Why this option, constraints, or anything to keep in mind\"\n      held={state.selected == '' ? 'Pick a database first' : ''}\n      submit=\"Send choice\"\n      onSubmit={send(\"Use my selected database for the job queue, taking my note into account.\", { with: [state.selected, state.note] })}\n    />\n  </column>\n</slate>\n```",
+      "slate": "<slate\n  title=\"Choose a job queue database\"\n  state={{\n    selected: \"\",\n    note: \"\",\n    options: [\n      { name: \"Postgres\", setup: \"Already running\", concurrency: \"Row locks\", tradeoff: \"Uses existing infrastructure\" },\n      { name: \"SQLite\", setup: \"Zero setup\", concurrency: \"One writer\", tradeoff: \"Best for a simple local queue\" },\n      { name: \"DynamoDB\", setup: \"Managed\", concurrency: \"Scales broadly\", tradeoff: \"Costs money\" }\n    ]\n  }}\n>\n  <column id=\"root\" tight>\n    <table id=\"options\" items={state.options} key={item.name}>\n      <col\n        title=\"Database\"\n        value={item.name}\n        tone={item.name == state.selected ? 'good' : 'default'}\n      />\n      <col title=\"Setup\" value={item.setup} />\n      <col title=\"Concurrency\" value={item.concurrency} />\n      <col title=\"Tradeoff\" value={item.tradeoff} />\n      <action\n        label={item.name == state.selected ? 'Selected' : 'Pick'}\n        onPress={set(state.selected, item.name)}\n      />\n    </table>\n    <input\n      id=\"note\"\n      label={`Note for ${orElse(state.selected, 'your pick')}`}\n      value={state.note}\n      lines={3}\n      placeholder=\"Why this option, constraints, or anything to keep in mind\"\n      held={state.selected == '' ? 'Pick a database first' : ''}\n      submit=\"Send choice\"\n      onSubmit={send(\"Use my selected database for the job queue, taking my note into account.\", { with: [state.selected, state.note] })}\n    />\n  </column>\n</slate>",
+      "slateChars": 1458,
+      "slateTokens": 365,
+      "apiOutputTokens": 817,
+      "ms": 25734,
+      "valid": false,
+      "errors": [
+        {
+          "code": "X409",
+          "name": "item-outside-scope",
+          "message": "item is only known inside a repeating piece's row",
+          "line": 14
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "reply": "```jsx\n<slate\n  title=\"Choose a job queue database\"\n  state={{\n    selected: \"\",\n    note: \"\",\n    options: [\n      { name: \"Postgres\", setup: \"Already running\", concurrency: \"Row locks\", tradeoff: \"Uses existing infrastructure\" },\n      { name: \"SQLite\", setup: \"Zero setup\", concurrency: \"One writer\", tradeoff: \"Best for a simple local queue\" },\n      { name: \"DynamoDB\", setup: \"Managed\", concurrency: \"Scales broadly\", tradeoff: \"Costs money\" }\n    ]\n  }}\n>\n  <column id=\"root\" tight>\n    <table id=\"options\" items={state.options} key=\"name\">\n      <col\n        title=\"Database\"\n        value={item.name}\n        tone={item.name == state.selected ? 'good' : 'default'}\n      />\n      <col title=\"Setup\" value={item.setup} />\n      <col title=\"Concurrency\" value={item.concurrency} />\n      <col title=\"Tradeoff\" value={item.tradeoff} />\n      <action\n        label={item.name == state.selected ? 'Selected' : 'Pick'}\n        onPress={set(state.selected, item.name)}\n      />\n    </table>\n    <input\n      id=\"note\"\n      label={`Note for ${orElse(state.selected, 'your pick')}`}\n      value={state.note}\n      lines={3}\n      placeholder=\"Why this option, constraints, or anything to keep in mind\"\n      held={state.selected == '' ? 'Pick a database first' : ''}\n      submit=\"Send choice\"\n      onSubmit={send(\"Use my selected database for the job queue, taking my note into account.\", { with: [state.selected, state.note] })}\n    />\n  </column>\n</slate>\n```",
+      "slate": "<slate\n  title=\"Choose a job queue database\"\n  state={{\n    selected: \"\",\n    note: \"\",\n    options: [\n      { name: \"Postgres\", setup: \"Already running\", concurrency: \"Row locks\", tradeoff: \"Uses existing infrastructure\" },\n      { name: \"SQLite\", setup: \"Zero setup\", concurrency: \"One writer\", tradeoff: \"Best for a simple local queue\" },\n      { name: \"DynamoDB\", setup: \"Managed\", concurrency: \"Scales broadly\", tradeoff: \"Costs money\" }\n    ]\n  }}\n>\n  <column id=\"root\" tight>\n    <table id=\"options\" items={state.options} key=\"name\">\n      <col\n        title=\"Database\"\n        value={item.name}\n        tone={item.name == state.selected ? 'good' : 'default'}\n      />\n      <col title=\"Setup\" value={item.setup} />\n      <col title=\"Concurrency\" value={item.concurrency} />\n      <col title=\"Tradeoff\" value={item.tradeoff} />\n      <action\n        label={item.name == state.selected ? 'Selected' : 'Pick'}\n        onPress={set(state.selected, item.name)}\n      />\n    </table>\n    <input\n      id=\"note\"\n      label={`Note for ${orElse(state.selected, 'your pick')}`}\n      value={state.note}\n      lines={3}\n      placeholder=\"Why this option, constraints, or anything to keep in mind\"\n      held={state.selected == '' ? 'Pick a database first' : ''}\n      submit=\"Send choice\"\n      onSubmit={send(\"Use my selected database for the job queue, taking my note into account.\", { with: [state.selected, state.note] })}\n    />\n  </column>\n</slate>",
+      "slateChars": 1453,
+      "slateTokens": 364,
+      "apiOutputTokens": 1331,
+      "ms": 37757,
+      "valid": false,
+      "errors": [
+        {
+          "code": "T303",
+          "name": "prop-type",
+          "message": "key takes an expression in braces; \"name\" is text. To bind it, write key={name}.",
+          "line": 14
+        },
+        {
+          "code": "X409",
+          "name": "item-outside-scope",
+          "message": "item is only known inside a repeating piece's row",
+          "line": 14
+        }
+      ],
+      "warnings": []
+    }
+  ],
+  "firstValid": false,
+  "validWithinTwo": false
+}

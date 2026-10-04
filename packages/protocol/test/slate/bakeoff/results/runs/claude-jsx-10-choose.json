@@ -1,0 +1,48 @@
+{
+  "agent": "claude",
+  "model": "claude-opus-5-5",
+  "syntax": "jsx",
+  "prompt": "10-choose",
+  "referenceChars": 18993,
+  "referenceTokens": 4749,
+  "writes": [
+    {
+      "reply": "```jsx\n<slate title=\"Job queue database\" state={{ pick: \"\", note: \"\", options: [{ name: \"Postgres\", notes: \"Already running, row locks\" }, { name: \"SQLite\", notes: \"Zero setup, one writer\" }, { name: \"DynamoDB\", notes: \"Managed, costs money\" }] }}>\n  <column id=\"root\">\n    <table id=\"options\" items={state.options} key={item.name}>\n      <col strong title=\"Database\" value={item.name} />\n      <col title=\"Notes\" value={item.notes} />\n      <col\n        end\n        title=\"Pick\"\n        value={item.name == state.pick ? 'Picked' : ''}\n        tone={item.name == state.pick ? 'good' : 'muted'}\n      />\n      <action\n        label=\"Pick\"\n        when={item.name != state.pick}\n        onPress={set(state.pick, item.name)}\n      />\n    </table>\n    <text id=\"picked\" muted when={state.pick == \"\"}>Nothing picked yet.</text>\n    <text id=\"picked-now\" good when={state.pick != \"\"}>You picked {state.pick}.</text>\n    <input\n      id=\"note\"\n      label=\"Note with your pick\"\n      value={state.note}\n      lines={3}\n      placeholder=\"Why this one, or anything to watch for\"\n      onSubmit={send(\"I picked a database for the job queue.\", { with: [state.pick, state.note] })}\n    />\n    <button\n      id=\"send\"\n      primary\n      label=\"Send my pick\"\n      when={state.pick != \"\"}\n      onPress={send(\"I picked a database for the job queue.\", { with: [state.pick, state.note] })}\n    />\n  </column>\n</slate>\n```",
+      "slate": "<slate title=\"Job queue database\" state={{ pick: \"\", note: \"\", options: [{ name: \"Postgres\", notes: \"Already running, row locks\" }, { name: \"SQLite\", notes: \"Zero setup, one writer\" }, { name: \"DynamoDB\", notes: \"Managed, costs money\" }] }}>\n  <column id=\"root\">\n    <table id=\"options\" items={state.options} key={item.name}>\n      <col strong title=\"Database\" value={item.name} />\n      <col title=\"Notes\" value={item.notes} />\n      <col\n        end\n        title=\"Pick\"\n        value={item.name == state.pick ? 'Picked' : ''}\n        tone={item.name == state.pick ? 'good' : 'muted'}\n      />\n      <action\n        label=\"Pick\"\n        when={item.name != state.pick}\n        onPress={set(state.pick, item.name)}\n      />\n    </table>\n    <text id=\"picked\" muted when={state.pick == \"\"}>Nothing picked yet.</text>\n    <text id=\"picked-now\" good when={state.pick != \"\"}>You picked {state.pick}.</text>\n    <input\n      id=\"note\"\n      label=\"Note with your pick\"\n      value={state.note}\n      lines={3}\n      placeholder=\"Why this one, or anything to watch for\"\n      onSubmit={send(\"I picked a database for the job queue.\", { with: [state.pick, state.note] })}\n    />\n    <button\n      id=\"send\"\n      primary\n      label=\"Send my pick\"\n      when={state.pick != \"\"}\n      onPress={send(\"I picked a database for the job queue.\", { with: [state.pick, state.note] })}\n    />\n  </column>\n</slate>",
+      "slateChars": 1396,
+      "slateTokens": 349,
+      "apiOutputTokens": 1348,
+      "ms": 17708,
+      "valid": false,
+      "errors": [
+        {
+          "code": "P102",
+          "name": "unknown-flag",
+          "message": "\"strong\" is not a flag of <col>",
+          "line": 4
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "reply": "```\n<slate title=\"Job queue database\" state={{ pick: \"\", note: \"\", options: [{ name: \"Postgres\", notes: \"Already running, row locks\" }, { name: \"SQLite\", notes: \"Zero setup, one writer\" }, { name: \"DynamoDB\", notes: \"Managed, costs money\" }] }}>\n  <column id=\"root\">\n    <table id=\"options\" items={state.options} key={item.name}>\n      <col title=\"Database\" value={item.name} />\n      <col title=\"Notes\" value={item.notes} />\n      <col\n        end\n        title=\"Pick\"\n        value={item.name == state.pick ? 'Picked' : ''}\n        tone={item.name == state.pick ? 'good' : 'muted'}\n      />\n      <action\n        label=\"Pick\"\n        when={item.name != state.pick}\n        onPress={set(state.pick, item.name)}\n      />\n    </table>\n    <text id=\"picked\" muted when={state.pick == \"\"}>Nothing picked yet.</text>\n    <text id=\"picked-now\" good strong when={state.pick != \"\"}>You picked {state.pick}.</text>\n    <input\n      id=\"note\"\n      label=\"Note with your pick\"\n      value={state.note}\n      lines={3}\n      placeholder=\"Why this one, or anything to watch for\"\n      onSubmit={send(\"I picked a database for the job queue.\", { with: [state.pick, state.note] })}\n    />\n    <button\n      id=\"send\"\n      primary\n      label=\"Send my pick\"\n      when={state.pick != \"\"}\n      onPress={send(\"I picked a database for the job queue.\", { with: [state.pick, state.note] })}\n    />\n  </column>\n</slate>\n```",
+      "slate": "<slate title=\"Job queue database\" state={{ pick: \"\", note: \"\", options: [{ name: \"Postgres\", notes: \"Already running, row locks\" }, { name: \"SQLite\", notes: \"Zero setup, one writer\" }, { name: \"DynamoDB\", notes: \"Managed, costs money\" }] }}>\n  <column id=\"root\">\n    <table id=\"options\" items={state.options} key={item.name}>\n      <col title=\"Database\" value={item.name} />\n      <col title=\"Notes\" value={item.notes} />\n      <col\n        end\n        title=\"Pick\"\n        value={item.name == state.pick ? 'Picked' : ''}\n        tone={item.name == state.pick ? 'good' : 'muted'}\n      />\n      <action\n        label=\"Pick\"\n        when={item.name != state.pick}\n        onPress={set(state.pick, item.name)}\n      />\n    </table>\n    <text id=\"picked\" muted when={state.pick == \"\"}>Nothing picked yet.</text>\n    <text id=\"picked-now\" good strong when={state.pick != \"\"}>You picked {state.pick}.</text>\n    <input\n      id=\"note\"\n      label=\"Note with your pick\"\n      value={state.note}\n      lines={3}\n      placeholder=\"Why this one, or anything to watch for\"\n      onSubmit={send(\"I picked a database for the job queue.\", { with: [state.pick, state.note] })}\n    />\n    <button\n      id=\"send\"\n      primary\n      label=\"Send my pick\"\n      when={state.pick != \"\"}\n      onPress={send(\"I picked a database for the job queue.\", { with: [state.pick, state.note] })}\n    />\n  </column>\n</slate>",
+      "slateChars": 1396,
+      "slateTokens": 349,
+      "apiOutputTokens": 640,
+      "ms": 8179,
+      "valid": false,
+      "errors": [
+        {
+          "code": "X409",
+          "name": "item-outside-scope",
+          "message": "item is only known inside a repeating piece's row",
+          "line": 3
+        }
+      ],
+      "warnings": []
+    }
+  ],
+  "firstValid": false,
+  "validWithinTwo": false
+}

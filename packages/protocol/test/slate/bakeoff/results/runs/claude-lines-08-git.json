@@ -1,0 +1,47 @@
+{
+  "agent": "claude",
+  "model": "claude-opus-5-5",
+  "syntax": "lines",
+  "prompt": "08-git",
+  "referenceChars": 17881,
+  "referenceTokens": 4471,
+  "writes": [
+    {
+      "reply": "```\nslate 1 \"Branch\"\n\nroot: column\n  none: empty title=\"Not a checkout\" body=\"This thread's folder is not a git checkout.\" when={git.branch == null}\n  head: row between when={git.branch != null}\n    branch: text value={git.branch} mono strong\n    changed: text value=`${plural(git.changed, 'file')} changed` muted\n  counts: facts grid when={git.branch != null and !git.countsUnknown}\n    - fact label=\"Ahead\" value={git.ahead}\n    - fact label=\"Behind\" value={git.behind} tone={git.behind > 0 ? 'warning' : 'muted'}\n    - fact label=\"Changed\" value={git.changed}\n  unknown: text value=\"Counts against upstream are not known yet.\" muted small when={git.branch != null and git.countsUnknown}\n  read: text value=`read ${ago(git.readAt)}` muted small when={exists(git.readAt)}\n  rebase: button label=\"Rebase onto upstream\" primary when={git.branch != null and !git.countsUnknown and git.behind > 0}\n    @press send text=\"This branch is behind upstream. Rebase it onto upstream and resolve any conflicts.\" with=[git.branch, git.ahead, git.behind]\n```",
+      "slate": "slate 1 \"Branch\"\n\nroot: column\n  none: empty title=\"Not a checkout\" body=\"This thread's folder is not a git checkout.\" when={git.branch == null}\n  head: row between when={git.branch != null}\n    branch: text value={git.branch} mono strong\n    changed: text value=`${plural(git.changed, 'file')} changed` muted\n  counts: facts grid when={git.branch != null and !git.countsUnknown}\n    - fact label=\"Ahead\" value={git.ahead}\n    - fact label=\"Behind\" value={git.behind} tone={git.behind > 0 ? 'warning' : 'muted'}\n    - fact label=\"Changed\" value={git.changed}\n  unknown: text value=\"Counts against upstream are not known yet.\" muted small when={git.branch != null and git.countsUnknown}\n  read: text value=`read ${ago(git.readAt)}` muted small when={exists(git.readAt)}\n  rebase: button label=\"Rebase onto upstream\" primary when={git.branch != null and !git.countsUnknown and git.behind > 0}\n    @press send text=\"This branch is behind upstream. Rebase it onto upstream and resolve any conflicts.\" with=[git.branch, git.ahead, git.behind]",
+      "slateChars": 1037,
+      "slateTokens": 260,
+      "apiOutputTokens": 898,
+      "ms": 11051,
+      "valid": false,
+      "errors": [
+        {
+          "code": "X400",
+          "name": "expr-syntax",
+          "message": "write not instead of !",
+          "line": 8
+        },
+        {
+          "code": "X400",
+          "name": "expr-syntax",
+          "message": "write not instead of !",
+          "line": 14
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "reply": "```\nslate 1 \"Branch\"\n\nroot: column\n  none: empty title=\"Not a checkout\" body=\"This thread's folder is not a git checkout.\" when={git.branch == null}\n  head: row between when={git.branch != null}\n    branch: text value={git.branch} mono strong\n    changed: text value=`${plural(git.changed, 'file')} changed` muted\n  counts: facts grid when={git.branch != null and not git.countsUnknown}\n    - fact label=\"Ahead\" value={git.ahead}\n    - fact label=\"Behind\" value={git.behind} tone={git.behind > 0 ? 'warning' : 'muted'}\n    - fact label=\"Changed\" value={git.changed}\n  unknown: text value=\"Counts against upstream are not known yet.\" muted small when={git.branch != null and git.countsUnknown}\n  read: text value=`read ${ago(git.readAt)}` muted small when={exists(git.readAt)}\n  rebase: button label=\"Rebase onto upstream\" primary when={git.branch != null and not git.countsUnknown and git.behind > 0}\n    @press send text=\"This branch is behind upstream. Rebase it onto upstream and resolve any conflicts.\" with=[git.branch, git.ahead, git.behind]\n```",
+      "slate": "slate 1 \"Branch\"\n\nroot: column\n  none: empty title=\"Not a checkout\" body=\"This thread's folder is not a git checkout.\" when={git.branch == null}\n  head: row between when={git.branch != null}\n    branch: text value={git.branch} mono strong\n    changed: text value=`${plural(git.changed, 'file')} changed` muted\n  counts: facts grid when={git.branch != null and not git.countsUnknown}\n    - fact label=\"Ahead\" value={git.ahead}\n    - fact label=\"Behind\" value={git.behind} tone={git.behind > 0 ? 'warning' : 'muted'}\n    - fact label=\"Changed\" value={git.changed}\n  unknown: text value=\"Counts against upstream are not known yet.\" muted small when={git.branch != null and git.countsUnknown}\n  read: text value=`read ${ago(git.readAt)}` muted small when={exists(git.readAt)}\n  rebase: button label=\"Rebase onto upstream\" primary when={git.branch != null and not git.countsUnknown and git.behind > 0}\n    @press send text=\"This branch is behind upstream. Rebase it onto upstream and resolve any conflicts.\" with=[git.branch, git.ahead, git.behind]",
+      "slateChars": 1043,
+      "slateTokens": 261,
+      "apiOutputTokens": 413,
+      "ms": 6371,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": false,
+  "validWithinTwo": true
+}

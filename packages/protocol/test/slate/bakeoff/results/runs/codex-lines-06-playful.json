@@ -1,0 +1,23 @@
+{
+  "agent": "codex",
+  "model": "gpt-5.6-sol (high)",
+  "syntax": "lines",
+  "prompt": "06-playful",
+  "referenceChars": 17881,
+  "referenceTokens": 4471,
+  "writes": [
+    {
+      "reply": "```slate\nslate 1 \"Coffee meter\"\n\nroot: column\n  coffee: meter label=\"Coffee level\" value={thread.context.used} max={thread.context.window} tokens tone={thread.context.percent >= 80 ? 'bad' : (thread.context.percent >= 50 ? 'warning' : 'good')} note=`${pct(thread.context.percent)} brewed`\n  caption: text value={thread.context.percent >= 80 ? 'The mug is overflowing. Step away from the keyboard.' : (thread.context.percent >= 50 ? 'Half-caf is over. Things are getting espresso-ly serious.' : 'Fresh pot, plenty of room to brew.')} tone={thread.context.percent >= 80 ? 'bad' : (thread.context.percent >= 50 ? 'warning' : 'good')} strong\n  break: button label=\"Take a break & recap\" primary\n    @press send text=\"Take a break and summarise where we are in this thread.\"\n```",
+      "slate": "slate 1 \"Coffee meter\"\n\nroot: column\n  coffee: meter label=\"Coffee level\" value={thread.context.used} max={thread.context.window} tokens tone={thread.context.percent >= 80 ? 'bad' : (thread.context.percent >= 50 ? 'warning' : 'good')} note=`${pct(thread.context.percent)} brewed`\n  caption: text value={thread.context.percent >= 80 ? 'The mug is overflowing. Step away from the keyboard.' : (thread.context.percent >= 50 ? 'Half-caf is over. Things are getting espresso-ly serious.' : 'Fresh pot, plenty of room to brew.')} tone={thread.context.percent >= 80 ? 'bad' : (thread.context.percent >= 50 ? 'warning' : 'good')} strong\n  break: button label=\"Take a break & recap\" primary\n    @press send text=\"Take a break and summarise where we are in this thread.\"",
+      "slateChars": 760,
+      "slateTokens": 190,
+      "apiOutputTokens": 205,
+      "ms": 11346,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}

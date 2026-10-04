@@ -1,0 +1,23 @@
+{
+  "agent": "codex",
+  "model": "gpt-5.6-sol (high)",
+  "syntax": "lines",
+  "prompt": "01-pr",
+  "referenceChars": 17881,
+  "referenceTokens": 4471,
+  "writes": [
+    {
+      "reply": "```slate\nslate 1 \"Pull request\"\n\nroot: column\n  none: empty title=\"No pull request yet\" body=\"This branch has no pull request.\" when={pr.number == null}\n  head: facts when={pr.number != null}\n    - fact label=\"State\" value={pr.word}\n    - fact label=\"Review\" value={pr.review}\n    - fact label=\"Mergeable\" value={pr.mergeable} tone={pr.mergeable == 'mergeable' ? 'good' : (pr.mergeable == 'conflicting' ? 'warning' : 'muted')}\n  checks: table items={pr.checks} key={item.name} empty=\"No checks yet\" when={pr.number != null}\n    - col title=\"Check\" value={item.name}\n    - col title=\"State\" value={item.state} tone={item.state == 'fail' ? 'bad' : (item.state == 'pass' ? 'good' : (item.state == 'pending' ? 'warning' : 'muted'))}\n    - col title=\"Took\" value={item.completedAt ? duration(num(item.completedAt) - num(item.startedAt)) : 'running'} mono align=end\n    - action label=\"Hand to agent\" when={item.state == 'fail'}\n      @press send text=\"A pull request check failed. Read its log and fix it.\" with=[item.name, item.link]\n  fix: button label=\"Fix all failing checks\" primary when={contains(pluck(pr.checks, 'state'), 'fail')}\n    @press send text=\"Fix all the failing pull request checks shown on the slate.\" with=[pr.checks]\n```",
+      "slate": "slate 1 \"Pull request\"\n\nroot: column\n  none: empty title=\"No pull request yet\" body=\"This branch has no pull request.\" when={pr.number == null}\n  head: facts when={pr.number != null}\n    - fact label=\"State\" value={pr.word}\n    - fact label=\"Review\" value={pr.review}\n    - fact label=\"Mergeable\" value={pr.mergeable} tone={pr.mergeable == 'mergeable' ? 'good' : (pr.mergeable == 'conflicting' ? 'warning' : 'muted')}\n  checks: table items={pr.checks} key={item.name} empty=\"No checks yet\" when={pr.number != null}\n    - col title=\"Check\" value={item.name}\n    - col title=\"State\" value={item.state} tone={item.state == 'fail' ? 'bad' : (item.state == 'pass' ? 'good' : (item.state == 'pending' ? 'warning' : 'muted'))}\n    - col title=\"Took\" value={item.completedAt ? duration(num(item.completedAt) - num(item.startedAt)) : 'running'} mono align=end\n    - action label=\"Hand to agent\" when={item.state == 'fail'}\n      @press send text=\"A pull request check failed. Read its log and fix it.\" with=[item.name, item.link]\n  fix: button label=\"Fix all failing checks\" primary when={contains(pluck(pr.checks, 'state'), 'fail')}\n    @press send text=\"Fix all the failing pull request checks shown on the slate.\" with=[pr.checks]",
+      "slateChars": 1224,
+      "slateTokens": 306,
+      "apiOutputTokens": 353,
+      "ms": 16262,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}

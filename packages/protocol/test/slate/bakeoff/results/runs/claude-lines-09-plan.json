@@ -1,0 +1,23 @@
+{
+  "agent": "claude",
+  "model": "claude-opus-5-5",
+  "syntax": "lines",
+  "prompt": "09-plan",
+  "referenceChars": 17881,
+  "referenceTokens": 4471,
+  "writes": [
+    {
+      "reply": "```\nslate 1 \"Plan\"\n\nstate.step = \"\"\n\nroot: column\n  none: empty title=\"No plan yet\" body=\"The agent hasn't shared a plan in this thread.\" when={isNull(thread.plan) or len(thread.plan.steps) == 0}\n  plan: column when={exists(thread.plan) and len(thread.plan.steps) > 0}\n    progress: meter label=\"Steps done\" value={round((7 * len(thread.plan.steps) - len(join(pluck(thread.plan.steps, 'state'), ''))) / 3)} max={len(thread.plan.steps)} fraction note=`${round((7 * len(thread.plan.steps) - len(join(pluck(thread.plan.steps, 'state'), ''))) / 3)} of ${plural(len(thread.plan.steps), 'step')} done`\n    summary: text value={thread.plan.text} muted small when={exists(thread.plan.text)}\n    steps: table items={thread.plan.steps} key={index} empty=\"No steps yet\"\n      - col title=\"#\" value={index + 1} mono align=end width=fit\n      - col title=\"Step\" value={item.text} width=fill\n      - col title=\"State\" value={item.state} tone={item.state == 'done' ? 'good' : (item.state == 'working' ? 'info' : 'muted')} width=fit\n  step: input label=\"Extra step\" value={state.step} lines=2 placeholder=\"A step to add to the plan\"\n    @submit send text=\"Please add this step to your plan.\" with=[state.step]\n    @submit set path=state.step value=\"\"\n  add: button label=\"Send step\" primary when={len(trim(state.step)) > 0}\n    @press send text=\"Please add this step to your plan.\" with=[state.step]\n    @press set path=state.step value=\"\"\n```",
+      "slate": "slate 1 \"Plan\"\n\nstate.step = \"\"\n\nroot: column\n  none: empty title=\"No plan yet\" body=\"The agent hasn't shared a plan in this thread.\" when={isNull(thread.plan) or len(thread.plan.steps) == 0}\n  plan: column when={exists(thread.plan) and len(thread.plan.steps) > 0}\n    progress: meter label=\"Steps done\" value={round((7 * len(thread.plan.steps) - len(join(pluck(thread.plan.steps, 'state'), ''))) / 3)} max={len(thread.plan.steps)} fraction note=`${round((7 * len(thread.plan.steps) - len(join(pluck(thread.plan.steps, 'state'), ''))) / 3)} of ${plural(len(thread.plan.steps), 'step')} done`\n    summary: text value={thread.plan.text} muted small when={exists(thread.plan.text)}\n    steps: table items={thread.plan.steps} key={index} empty=\"No steps yet\"\n      - col title=\"#\" value={index + 1} mono align=end width=fit\n      - col title=\"Step\" value={item.text} width=fill\n      - col title=\"State\" value={item.state} tone={item.state == 'done' ? 'good' : (item.state == 'working' ? 'info' : 'muted')} width=fit\n  step: input label=\"Extra step\" value={state.step} lines=2 placeholder=\"A step to add to the plan\"\n    @submit send text=\"Please add this step to your plan.\" with=[state.step]\n    @submit set path=state.step value=\"\"\n  add: button label=\"Send step\" primary when={len(trim(state.step)) > 0}\n    @press send text=\"Please add this step to your plan.\" with=[state.step]\n    @press set path=state.step value=\"\"",
+      "slateChars": 1419,
+      "slateTokens": 355,
+      "apiOutputTokens": 1536,
+      "ms": 19539,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}

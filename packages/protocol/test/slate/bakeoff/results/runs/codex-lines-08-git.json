@@ -1,0 +1,23 @@
+{
+  "agent": "codex",
+  "model": "gpt-5.6-sol (high)",
+  "syntax": "lines",
+  "prompt": "08-git",
+  "referenceChars": 17881,
+  "referenceTokens": 4471,
+  "writes": [
+    {
+      "reply": "```text\nslate 1 \"Branch status\"\n\nroot: column\n  branch: text value={git.branch} mono placeholder=\"Not a Git checkout\"\n  status: facts when={git.branch != null}\n    - fact label=\"Ahead\" value={git.ahead}\n    - fact label=\"Behind\" value={git.behind} tone={git.behind > 0 ? 'warning' : 'muted'}\n    - fact label=\"Changed files\" value={git.changed}\n  rebase: button label=\"Rebase onto upstream\" primary when={git.branch != null and git.behind > 0}\n    @press send text=\"Rebase this branch onto its upstream branch.\" with=[git.branch, git.head, git.behind]\n```",
+      "slate": "slate 1 \"Branch status\"\n\nroot: column\n  branch: text value={git.branch} mono placeholder=\"Not a Git checkout\"\n  status: facts when={git.branch != null}\n    - fact label=\"Ahead\" value={git.ahead}\n    - fact label=\"Behind\" value={git.behind} tone={git.behind > 0 ? 'warning' : 'muted'}\n    - fact label=\"Changed files\" value={git.changed}\n  rebase: button label=\"Rebase onto upstream\" primary when={git.branch != null and git.behind > 0}\n    @press send text=\"Rebase this branch onto its upstream branch.\" with=[git.branch, git.head, git.behind]",
+      "slateChars": 543,
+      "slateTokens": 136,
+      "apiOutputTokens": 158,
+      "ms": 8445,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}

@@ -1,0 +1,23 @@
+{
+  "agent": "codex",
+  "model": "gpt-5.6-sol (high)",
+  "syntax": "jsx",
+  "prompt": "09-plan",
+  "referenceChars": 18993,
+  "referenceTokens": 4749,
+  "writes": [
+    {
+      "reply": "```jsx\n<slate title=\"Current plan\" state={{ extraStep: \"\" }}>\n  <column id=\"root\">\n    <number\n      id=\"done-count\"\n      integer\n      label=\"Steps done\"\n      value={count(pluck(thread.plan.steps, 'state') == 'done')}\n      note={`${len(thread.plan.steps)} total`}\n    />\n    <table id=\"plan-steps\" items={thread.plan.steps} key={index} empty=\"No plan steps yet\">\n      <col title=\"Step\" value={item.text} />\n      <col\n        title=\"State\"\n        value={item.state}\n        tone={item.state == 'done' ? 'good' : (item.state == 'working' ? 'accent' : 'muted')}\n      />\n    </table>\n    <input\n      id=\"extra-step\"\n      label=\"Extra step\"\n      value={state.extraStep}\n      placeholder=\"Type another step\"\n      submit=\"Send step\"\n      onSubmit={send(\"Add this extra step to the current plan.\", { with: [state.extraStep] })}\n    />\n  </column>\n</slate>\n```",
+      "slate": "<slate title=\"Current plan\" state={{ extraStep: \"\" }}>\n  <column id=\"root\">\n    <number\n      id=\"done-count\"\n      integer\n      label=\"Steps done\"\n      value={count(pluck(thread.plan.steps, 'state') == 'done')}\n      note={`${len(thread.plan.steps)} total`}\n    />\n    <table id=\"plan-steps\" items={thread.plan.steps} key={index} empty=\"No plan steps yet\">\n      <col title=\"Step\" value={item.text} />\n      <col\n        title=\"State\"\n        value={item.state}\n        tone={item.state == 'done' ? 'good' : (item.state == 'working' ? 'accent' : 'muted')}\n      />\n    </table>\n    <input\n      id=\"extra-step\"\n      label=\"Extra step\"\n      value={state.extraStep}\n      placeholder=\"Type another step\"\n      submit=\"Send step\"\n      onSubmit={send(\"Add this extra step to the current plan.\", { with: [state.extraStep] })}\n    />\n  </column>\n</slate>",
+      "slateChars": 854,
+      "slateTokens": 214,
+      "apiOutputTokens": 238,
+      "ms": 10662,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}

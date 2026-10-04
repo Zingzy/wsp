@@ -1,0 +1,23 @@
+{
+  "agent": "codex",
+  "model": "gpt-5.6-sol (high)",
+  "syntax": "jsx",
+  "prompt": "02-tracker",
+  "referenceChars": 18993,
+  "referenceTokens": 4749,
+  "writes": [
+    {
+      "reply": "```jsx\n<slate title=\"Auth module refactor\" state={{ tokenStore: false, middleware: false, cookiePath: false, tests: false, migrationNote: false }}>\n  <column id=\"root\">\n    <number\n      id=\"done\"\n      integer\n      large\n      label=\"Steps done\"\n      value={num(state.tokenStore) + num(state.middleware) + num(state.cookiePath) + num(state.tests) + num(state.migrationNote)}\n      note=\"of 5\"\n    />\n    <column id=\"steps\" tight>\n      <button\n        id=\"token-store\"\n        quiet\n        label={if(state.tokenStore, '☑ Extract the token store', '☐ Extract the token store')}\n        onPress={toggle(state.tokenStore)}\n      />\n      <button\n        id=\"middleware\"\n        quiet\n        label={if(state.middleware, '☑ Move session checks into middleware', '☐ Move session checks into middleware')}\n        onPress={toggle(state.middleware)}\n      />\n      <button\n        id=\"cookie-path\"\n        quiet\n        label={if(state.cookiePath, '☑ Delete the old cookie path', '☐ Delete the old cookie path')}\n        onPress={toggle(state.cookiePath)}\n      />\n      <button\n        id=\"tests\"\n        quiet\n        label={if(state.tests, '☑ Update the tests', '☐ Update the tests')}\n        onPress={toggle(state.tests)}\n      />\n      <button\n        id=\"migration-note\"\n        quiet\n        label={if(state.migrationNote, '☑ Write the migration note', '☐ Write the migration note')}\n        onPress={toggle(state.migrationNote)}\n      />\n    </column>\n    <button\n      id=\"next\"\n      primary\n      label=\"Go on to the next step\"\n      onPress={send(\"Go on to the next unchecked auth refactor step on the slate.\", { with: [state.tokenStore, state.middleware, state.cookiePath, state.tests, state.migrationNote] })}\n    />\n  </column>\n</slate>\n```",
+      "slate": "<slate title=\"Auth module refactor\" state={{ tokenStore: false, middleware: false, cookiePath: false, tests: false, migrationNote: false }}>\n  <column id=\"root\">\n    <number\n      id=\"done\"\n      integer\n      large\n      label=\"Steps done\"\n      value={num(state.tokenStore) + num(state.middleware) + num(state.cookiePath) + num(state.tests) + num(state.migrationNote)}\n      note=\"of 5\"\n    />\n    <column id=\"steps\" tight>\n      <button\n        id=\"token-store\"\n        quiet\n        label={if(state.tokenStore, '☑ Extract the token store', '☐ Extract the token store')}\n        onPress={toggle(state.tokenStore)}\n      />\n      <button\n        id=\"middleware\"\n        quiet\n        label={if(state.middleware, '☑ Move session checks into middleware', '☐ Move session checks into middleware')}\n        onPress={toggle(state.middleware)}\n      />\n      <button\n        id=\"cookie-path\"\n        quiet\n        label={if(state.cookiePath, '☑ Delete the old cookie path', '☐ Delete the old cookie path')}\n        onPress={toggle(state.cookiePath)}\n      />\n      <button\n        id=\"tests\"\n        quiet\n        label={if(state.tests, '☑ Update the tests', '☐ Update the tests')}\n        onPress={toggle(state.tests)}\n      />\n      <button\n        id=\"migration-note\"\n        quiet\n        label={if(state.migrationNote, '☑ Write the migration note', '☐ Write the migration note')}\n        onPress={toggle(state.migrationNote)}\n      />\n    </column>\n    <button\n      id=\"next\"\n      primary\n      label=\"Go on to the next step\"\n      onPress={send(\"Go on to the next unchecked auth refactor step on the slate.\", { with: [state.tokenStore, state.middleware, state.cookiePath, state.tests, state.migrationNote] })}\n    />\n  </column>\n</slate>",
+      "slateChars": 1741,
+      "slateTokens": 436,
+      "apiOutputTokens": 1210,
+      "ms": 34112,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}

@@ -1,0 +1,23 @@
+{
+  "agent": "codex",
+  "model": "gpt-5.6-sol (high)",
+  "syntax": "lines",
+  "prompt": "03-usage",
+  "referenceChars": 17881,
+  "referenceTokens": 4471,
+  "writes": [
+    {
+      "reply": "```text\nslate 1 \"Usage limits\"\n\nroot: column\n  context: meter label=\"Thread context\" value={thread.context.percent} percent tone={thread.context.percent > 80 ? 'warning' : 'default'} note=`${tokens(thread.context.free)} free of ${tokens(thread.context.window)}`\n\n  limits: column tight\n    session: meter label=\"5-hour usage\" value={usage.session.percent} percent tone={usage.session.percent > 80 ? 'warning' : 'default'} note=`resets ${until(usage.session.resetsAt)}`\n    week: meter label=\"Weekly usage\" value={usage.week.percent} percent tone={usage.week.percent > 80 ? 'warning' : 'default'} note=`resets ${until(usage.week.resetsAt)}, ${weekday(usage.week.resetsAt)}`\n  why: text value={usage.note} muted small when={exists(usage.note)}\n```",
+      "slate": "slate 1 \"Usage limits\"\n\nroot: column\n  context: meter label=\"Thread context\" value={thread.context.percent} percent tone={thread.context.percent > 80 ? 'warning' : 'default'} note=`${tokens(thread.context.free)} free of ${tokens(thread.context.window)}`\n\n  limits: column tight\n    session: meter label=\"5-hour usage\" value={usage.session.percent} percent tone={usage.session.percent > 80 ? 'warning' : 'default'} note=`resets ${until(usage.session.resetsAt)}`\n    week: meter label=\"Weekly usage\" value={usage.week.percent} percent tone={usage.week.percent > 80 ? 'warning' : 'default'} note=`resets ${until(usage.week.resetsAt)}, ${weekday(usage.week.resetsAt)}`\n  why: text value={usage.note} muted small when={exists(usage.note)}",
+      "slateChars": 733,
+      "slateTokens": 184,
+      "apiOutputTokens": 196,
+      "ms": 8806,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}

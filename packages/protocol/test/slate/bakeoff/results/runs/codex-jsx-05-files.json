@@ -1,0 +1,23 @@
+{
+  "agent": "codex",
+  "model": "gpt-5.6-sol (high)",
+  "syntax": "jsx",
+  "prompt": "05-files",
+  "referenceChars": 18993,
+  "referenceTokens": 4749,
+  "writes": [
+    {
+      "reply": "```jsx\n<slate title=\"Files changed\">\n  <column id=\"root\">\n    <table id=\"files\" items={thread.changes.files} key={item.path} empty=\"Nothing changed yet\">\n      <col mono title=\"File\" value={item.path} />\n      <col good end title=\"Added\" value={item.additions} />\n      <col bad end title=\"Removed\" value={item.deletions} />\n      <action\n        label=\"Explain\"\n        onPress={send(\"Explain this file's change.\", { with: [item.path, item.kind, item.additions, item.deletions] })}\n      />\n    </table>\n  </column>\n</slate>\n```",
+      "slate": "<slate title=\"Files changed\">\n  <column id=\"root\">\n    <table id=\"files\" items={thread.changes.files} key={item.path} empty=\"Nothing changed yet\">\n      <col mono title=\"File\" value={item.path} />\n      <col good end title=\"Added\" value={item.additions} />\n      <col bad end title=\"Removed\" value={item.deletions} />\n      <action\n        label=\"Explain\"\n        onPress={send(\"Explain this file's change.\", { with: [item.path, item.kind, item.additions, item.deletions] })}\n      />\n    </table>\n  </column>\n</slate>",
+      "slateChars": 518,
+      "slateTokens": 130,
+      "apiOutputTokens": 150,
+      "ms": 9812,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}

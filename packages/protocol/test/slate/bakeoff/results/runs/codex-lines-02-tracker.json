@@ -1,0 +1,23 @@
+{
+  "agent": "codex",
+  "model": "gpt-5.6-sol (high)",
+  "syntax": "lines",
+  "prompt": "02-tracker",
+  "referenceChars": 17881,
+  "referenceTokens": 4471,
+  "writes": [
+    {
+      "reply": "```slate\nslate 1 \"Auth module refactor\"\n\nstate.tokenStore = false\nstate.middleware = false\nstate.oldCookie = false\nstate.tests = false\nstate.migrationNote = false\n\nroot: column\n  done: number label=\"Steps done\" value={num(state.tokenStore) + num(state.middleware) + num(state.oldCookie) + num(state.tests) + num(state.migrationNote)} integer large\n  progress: meter label=\"Progress\" value={num(state.tokenStore) + num(state.middleware) + num(state.oldCookie) + num(state.tests) + num(state.migrationNote)} max=5 fraction\n  steps: section title=\"Refactor steps\"\n    token-store: row tight start\n      token-store-check: button label={state.tokenStore ? '☑' : '☐'} quiet small\n        @press toggle path=state.tokenStore\n      token-store-text: text value=\"Extract the token store\" tone={state.tokenStore ? 'good' : 'default'}\n    middleware: row tight start\n      middleware-check: button label={state.middleware ? '☑' : '☐'} quiet small\n        @press toggle path=state.middleware\n      middleware-text: text value=\"Move session checks into middleware\" tone={state.middleware ? 'good' : 'default'}\n    old-cookie: row tight start\n      old-cookie-check: button label={state.oldCookie ? '☑' : '☐'} quiet small\n        @press toggle path=state.oldCookie\n      old-cookie-text: text value=\"Delete the old cookie path\" tone={state.oldCookie ? 'good' : 'default'}\n    tests: row tight start\n      tests-check: button label={state.tests ? '☑' : '☐'} quiet small\n        @press toggle path=state.tests\n      tests-text: text value=\"Update the tests\" tone={state.tests ? 'good' : 'default'}\n    migration-note: row tight start\n      migration-note-check: button label={state.migrationNote ? '☑' : '☐'} quiet small\n        @press toggle path=state.migrationNote\n      migration-note-text: text value=\"Write the migration note\" tone={state.migrationNote ? 'good' : 'default'}\n  next: button label=\"Go on to the next step\" primary\n    @press send text=\"Go on to the next unchecked auth refactor step on the slate.\" with=[state.tokenStore, state.middleware, state.oldCookie, state.tests, state.migrationNote]\n```",
+      "slate": "slate 1 \"Auth module refactor\"\n\nstate.tokenStore = false\nstate.middleware = false\nstate.oldCookie = false\nstate.tests = false\nstate.migrationNote = false\n\nroot: column\n  done: number label=\"Steps done\" value={num(state.tokenStore) + num(state.middleware) + num(state.oldCookie) + num(state.tests) + num(state.migrationNote)} integer large\n  progress: meter label=\"Progress\" value={num(state.tokenStore) + num(state.middleware) + num(state.oldCookie) + num(state.tests) + num(state.migrationNote)} max=5 fraction\n  steps: section title=\"Refactor steps\"\n    token-store: row tight start\n      token-store-check: button label={state.tokenStore ? '☑' : '☐'} quiet small\n        @press toggle path=state.tokenStore\n      token-store-text: text value=\"Extract the token store\" tone={state.tokenStore ? 'good' : 'default'}\n    middleware: row tight start\n      middleware-check: button label={state.middleware ? '☑' : '☐'} quiet small\n        @press toggle path=state.middleware\n      middleware-text: text value=\"Move session checks into middleware\" tone={state.middleware ? 'good' : 'default'}\n    old-cookie: row tight start\n      old-cookie-check: button label={state.oldCookie ? '☑' : '☐'} quiet small\n        @press toggle path=state.oldCookie\n      old-cookie-text: text value=\"Delete the old cookie path\" tone={state.oldCookie ? 'good' : 'default'}\n    tests: row tight start\n      tests-check: button label={state.tests ? '☑' : '☐'} quiet small\n        @press toggle path=state.tests\n      tests-text: text value=\"Update the tests\" tone={state.tests ? 'good' : 'default'}\n    migration-note: row tight start\n      migration-note-check: button label={state.migrationNote ? '☑' : '☐'} quiet small\n        @press toggle path=state.migrationNote\n      migration-note-text: text value=\"Write the migration note\" tone={state.migrationNote ? 'good' : 'default'}\n  next: button label=\"Go on to the next step\" primary\n    @press send text=\"Go on to the next unchecked auth refactor step on the slate.\" with=[state.tokenStore, state.middleware, state.oldCookie, state.tests, state.migrationNote]",
+      "slateChars": 2087,
+      "slateTokens": 522,
+      "apiOutputTokens": 817,
+      "ms": 14687,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}

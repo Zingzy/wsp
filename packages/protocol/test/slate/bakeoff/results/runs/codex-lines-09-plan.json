@@ -1,0 +1,48 @@
+{
+  "agent": "codex",
+  "model": "gpt-5.6-sol (high)",
+  "syntax": "lines",
+  "prompt": "09-plan",
+  "referenceChars": 17881,
+  "referenceTokens": 4471,
+  "writes": [
+    {
+      "reply": "```slate\nslate 1 \"Current plan\"\n\nstate.extraStep = \"\"\n\nroot: column\n  progress: number label=\"Done\" value={sum([if(exists(thread.plan.steps[0]), if(thread.plan.steps[0].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[1]), if(thread.plan.steps[1].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[2]), if(thread.plan.steps[2].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[3]), if(thread.plan.steps[3].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[4]), if(thread.plan.steps[4].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[5]), if(thread.plan.steps[5].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[6]), if(thread.plan.steps[6].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[7]), if(thread.plan.steps[7].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[8]), if(thread.plan.steps[8].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[9]), if(thread.plan.steps[9].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[10]), if(thread.plan.steps[10].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[11]), if(thread.plan.steps[11].state == 'done', 1, 0), 0)])} integer note=`of ${len(thread.plan.steps)} steps`\n  steps: table items={thread.plan.steps} key={index} empty=\"No plan steps yet\"\n    - col title=\"#\" value={index + 1} align=end\n    - col title=\"Step\" value={item.text} width=fill\n    - col title=\"State\" value={item.state} tone={item.state == 'done' ? 'good' : (item.state == 'working' ? 'info' : 'muted')}\n  extra: input label=\"Extra step\" value={state.extraStep} placeholder=\"Type another step…\" submit=\"Send step\"\n    @submit send text=\"Add this extra step to the current plan.\" with=[state.extraStep]\n```",
+      "slate": "slate 1 \"Current plan\"\n\nstate.extraStep = \"\"\n\nroot: column\n  progress: number label=\"Done\" value={sum([if(exists(thread.plan.steps[0]), if(thread.plan.steps[0].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[1]), if(thread.plan.steps[1].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[2]), if(thread.plan.steps[2].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[3]), if(thread.plan.steps[3].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[4]), if(thread.plan.steps[4].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[5]), if(thread.plan.steps[5].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[6]), if(thread.plan.steps[6].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[7]), if(thread.plan.steps[7].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[8]), if(thread.plan.steps[8].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[9]), if(thread.plan.steps[9].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[10]), if(thread.plan.steps[10].state == 'done', 1, 0), 0), if(exists(thread.plan.steps[11]), if(thread.plan.steps[11].state == 'done', 1, 0), 0)])} integer note=`of ${len(thread.plan.steps)} steps`\n  steps: table items={thread.plan.steps} key={index} empty=\"No plan steps yet\"\n    - col title=\"#\" value={index + 1} align=end\n    - col title=\"Step\" value={item.text} width=fill\n    - col title=\"State\" value={item.state} tone={item.state == 'done' ? 'good' : (item.state == 'working' ? 'info' : 'muted')}\n  extra: input label=\"Extra step\" value={state.extraStep} placeholder=\"Type another step…\" submit=\"Send step\"\n    @submit send text=\"Add this extra step to the current plan.\" with=[state.extraStep]",
+      "slateChars": 1682,
+      "slateTokens": 421,
+      "apiOutputTokens": 3021,
+      "ms": 76824,
+      "valid": false,
+      "errors": [
+        {
+          "code": "X407",
+          "name": "expr-limit",
+          "message": "the expression is 1029 characters; the most is 500",
+          "line": 6
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "reply": "```slate\nslate 1 \"Current plan\"\n\nstate.extraStep = \"\"\n\nroot: column\n  progress: number label=\"Done\" value={sum([num(thread.plan.steps[0].state=='done'),num(thread.plan.steps[1].state=='done'),num(thread.plan.steps[2].state=='done'),num(thread.plan.steps[3].state=='done'),num(thread.plan.steps[4].state=='done'),num(thread.plan.steps[5].state=='done'),num(thread.plan.steps[6].state=='done'),num(thread.plan.steps[7].state=='done'),num(thread.plan.steps[8].state=='done'),num(thread.plan.steps[9].state=='done'),num(thread.plan.steps[10].state=='done'),num(thread.plan.steps[11].state=='done')])} integer note=`of ${len(thread.plan.steps)} steps`\n  steps: table items={thread.plan.steps} key={index} empty=\"No plan steps yet\"\n    - col title=\"#\" value={index + 1} align=end\n    - col title=\"Step\" value={item.text} width=fill\n    - col title=\"State\" value={item.state} tone={item.state == 'done' ? 'good' : (item.state == 'working' ? 'info' : 'muted')}\n  extra: input label=\"Extra step\" value={state.extraStep} placeholder=\"Type another step…\" submit=\"Send step\"\n    @submit send text=\"Add this extra step to the current plan.\" with=[state.extraStep]\n```",
+      "slate": "slate 1 \"Current plan\"\n\nstate.extraStep = \"\"\n\nroot: column\n  progress: number label=\"Done\" value={sum([num(thread.plan.steps[0].state=='done'),num(thread.plan.steps[1].state=='done'),num(thread.plan.steps[2].state=='done'),num(thread.plan.steps[3].state=='done'),num(thread.plan.steps[4].state=='done'),num(thread.plan.steps[5].state=='done'),num(thread.plan.steps[6].state=='done'),num(thread.plan.steps[7].state=='done'),num(thread.plan.steps[8].state=='done'),num(thread.plan.steps[9].state=='done'),num(thread.plan.steps[10].state=='done'),num(thread.plan.steps[11].state=='done')])} integer note=`of ${len(thread.plan.steps)} steps`\n  steps: table items={thread.plan.steps} key={index} empty=\"No plan steps yet\"\n    - col title=\"#\" value={index + 1} align=end\n    - col title=\"Step\" value={item.text} width=fill\n    - col title=\"State\" value={item.state} tone={item.state == 'done' ? 'good' : (item.state == 'working' ? 'info' : 'muted')}\n  extra: input label=\"Extra step\" value={state.extraStep} placeholder=\"Type another step…\" submit=\"Send step\"\n    @submit send text=\"Add this extra step to the current plan.\" with=[state.extraStep]",
+      "slateChars": 1141,
+      "slateTokens": 286,
+      "apiOutputTokens": 890,
+      "ms": 28817,
+      "valid": false,
+      "errors": [
+        {
+          "code": "X400",
+          "name": "expr-syntax",
+          "message": "unexpected [ at column 5",
+          "line": 6
+        }
+      ],
+      "warnings": []
+    }
+  ],
+  "firstValid": false,
+  "validWithinTwo": false
+}

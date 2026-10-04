@@ -1,0 +1,23 @@
+{
+  "agent": "claude",
+  "model": "claude-opus-5-5",
+  "syntax": "lines",
+  "prompt": "05-files",
+  "referenceChars": 17881,
+  "referenceTokens": 4471,
+  "writes": [
+    {
+      "reply": "```\nslate 1 \"Files changed\"\n\nroot: column\n  files: table items={thread.changes.files} key={item.path} empty=\"Nothing changed yet\"\n    - col title=\"File\" value={item.path} mono\n    - col title=\"Added\" value={item.additions} tone=good align=end\n    - col title=\"Removed\" value={item.deletions} tone=bad align=end\n    - action label=\"Explain\"\n      @press send text=\"Explain the change you made to this file.\" with=[item.path, item.kind, item.additions, item.deletions]\n  summary: text value=`${plural(len(thread.changes.files), 'file')}, ${sum(thread.changes.files, 'additions')} added, ${sum(thread.changes.files, 'deletions')} removed` muted small when={len(thread.changes.files) > 0}\n```",
+      "slate": "slate 1 \"Files changed\"\n\nroot: column\n  files: table items={thread.changes.files} key={item.path} empty=\"Nothing changed yet\"\n    - col title=\"File\" value={item.path} mono\n    - col title=\"Added\" value={item.additions} tone=good align=end\n    - col title=\"Removed\" value={item.deletions} tone=bad align=end\n    - action label=\"Explain\"\n      @press send text=\"Explain the change you made to this file.\" with=[item.path, item.kind, item.additions, item.deletions]\n  summary: text value=`${plural(len(thread.changes.files), 'file')}, ${sum(thread.changes.files, 'additions')} added, ${sum(thread.changes.files, 'deletions')} removed` muted small when={len(thread.changes.files) > 0}",
+      "slateChars": 680,
+      "slateTokens": 170,
+      "apiOutputTokens": 262,
+      "ms": 5829,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}

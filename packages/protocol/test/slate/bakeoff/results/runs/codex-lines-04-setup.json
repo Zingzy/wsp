@@ -1,0 +1,23 @@
+{
+  "agent": "codex",
+  "model": "gpt-5.6-sol (high)",
+  "syntax": "lines",
+  "prompt": "04-setup",
+  "referenceChars": 17881,
+  "referenceTokens": 4471,
+  "writes": [
+    {
+      "reply": "```slate\nslate 1 \"Set up Stripe webhook\"\n\nstate.endpointUrl = \"\"\nstate.signingSecret = \"\"\n\nroot: column\n  step1: section title=\"1. Paste the endpoint URL\"\n    step1-help: text value=\"Use the public HTTPS URL Stripe should call when an event occurs.\" muted small\n    endpoint: input label=\"Endpoint URL\" value={state.endpointUrl} placeholder=\"https://example.com/api/stripe/webhook\" mono\n  step2: section title=\"2. Paste the signing secret\"\n    step2-help: text value=\"Copy the endpoint's signing secret from Stripe; it usually begins with whsec_.\" muted small\n    secret: input label=\"Webhook signing secret\" value={state.signingSecret} placeholder=\"whsec_...\" mono\n  step3: section title=\"3. Send both values\"\n    step3-help: text value=\"Press once and I’ll use these values to write the webhook configuration.\" muted small\n    configure: button label=\"Send values and write config\" primary held={trim(state.endpointUrl) == '' or trim(state.signingSecret) == '' ? 'Paste both values first' : ''}\n      @press send text=\"Configure the Stripe webhook using the endpoint URL and signing secret from the slate. Write the required config.\" with=[state.endpointUrl, state.signingSecret]\n```",
+      "slate": "slate 1 \"Set up Stripe webhook\"\n\nstate.endpointUrl = \"\"\nstate.signingSecret = \"\"\n\nroot: column\n  step1: section title=\"1. Paste the endpoint URL\"\n    step1-help: text value=\"Use the public HTTPS URL Stripe should call when an event occurs.\" muted small\n    endpoint: input label=\"Endpoint URL\" value={state.endpointUrl} placeholder=\"https://example.com/api/stripe/webhook\" mono\n  step2: section title=\"2. Paste the signing secret\"\n    step2-help: text value=\"Copy the endpoint's signing secret from Stripe; it usually begins with whsec_.\" muted small\n    secret: input label=\"Webhook signing secret\" value={state.signingSecret} placeholder=\"whsec_...\" mono\n  step3: section title=\"3. Send both values\"\n    step3-help: text value=\"Press once and I’ll use these values to write the webhook configuration.\" muted small\n    configure: button label=\"Send values and write config\" primary held={trim(state.endpointUrl) == '' or trim(state.signingSecret) == '' ? 'Paste both values first' : ''}\n      @press send text=\"Configure the Stripe webhook using the endpoint URL and signing secret from the slate. Write the required config.\" with=[state.endpointUrl, state.signingSecret]",
+      "slateChars": 1172,
+      "slateTokens": 293,
+      "apiOutputTokens": 565,
+      "ms": 21657,
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "firstValid": true,
+  "validWithinTwo": true
+}
