@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "slate_read",
-    "description": "Reads this thread's slate: values, runs, sketch.",
+    "description": "Reads this thread's slate: sketch, JSX-like form, values, runs.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -18,6 +18,9 @@
           "type": "boolean"
         },
         "sketch": {
+          "type": "boolean"
+        },
+        "document": {
           "type": "boolean"
         }
       },
@@ -55,7 +58,7 @@
   },
   "cloudOn": {
     "name": "slate_read",
-    "description": "Reads this thread's slate: values, runs, sketch.",
+    "description": "Reads this thread's slate: sketch, JSX-like form, values, runs.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -72,6 +75,9 @@
           "type": "boolean"
         },
         "sketch": {
+          "type": "boolean"
+        },
+        "document": {
           "type": "boolean"
         }
       },

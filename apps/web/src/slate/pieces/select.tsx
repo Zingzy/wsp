@@ -4,7 +4,7 @@ import type { SlateJson } from "@wsp/protocol";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../components/ui/select.js";
 import type { PieceView } from "../SlateView.js";
 import { getOwn } from "../paths.js";
-import { str } from "./look.js";
+import { str, heldBy } from "./look.js";
 import { twoWayPath } from "./press.js";
 
 function optionsOf(value: SlateJson | undefined): { value: string; label: string }[] {
@@ -24,7 +24,7 @@ export const select: PieceView = {
     const options = optionsOf(props["options"]);
     const current = str(path === undefined ? props["value"] : getOwn(slate.values, path)) ?? null;
     const label = str(props["label"]) ?? "";
-    const held = str(props["held"]);
+    const held = heldBy(props["held"]);
     return (
       <div className="flex min-w-0 flex-col gap-1.5">
         <span className="text-[13px] leading-5 text-foreground">{label}</span>

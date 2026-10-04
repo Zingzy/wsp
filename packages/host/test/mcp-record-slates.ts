@@ -50,7 +50,7 @@ export const SLATE_ANSWERED: Record<string, Case[]> = {
   slate_read: [
     {
       case: "values and the text",
-      arguments: { values: ["$env.state", "usage.week.percent"], text: true },
+      arguments: { values: ["$env.state", "usage.week.percent"], text: true, document: true },
       env: TURN,
       replies: { "slates.read": reply({ version: 23, text: SKETCH, document: { schema: 2, root: "r" }, values: { "$env.state": "done", "usage.week.percent": 46.5 }, runs: { env: { state: "done", exit: 0, out: "wrote .env [secret:token]" } }, problems: [], approvals: { "run:env": "allowed" } }) },
     },

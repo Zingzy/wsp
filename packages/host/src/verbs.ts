@@ -3899,26 +3899,26 @@ const SLATE_VERBS: readonly Verb[] = [
   },
   {
     name: "slate read",
-    usage: "wsp slate read [<thread>] [--values <path>]... [--text] [--no-sketch]",
-    about: "the slate as it stands: values, derived values, runs, problems, the paths named and the sketch; --text adds the JSX-like form",
+    usage: "wsp slate read [<thread>] [--values <path>]... [--no-text] [--no-sketch] [--document]",
+    about: "the slate as it stands: the sketch, then the JSX-like form, the values, derived values, runs, problems and the paths named; --no-text leaves out the JSX-like form, --document adds the stored JSON",
     page: "agent",
-    options: { values: { type: "string", multiple: true }, text: { type: "boolean" }, "no-sketch": { type: "boolean" } },
+    options: { values: { type: "string", multiple: true }, "no-text": { type: "boolean" }, "no-sketch": { type: "boolean" }, document: { type: "boolean" } },
     run: async ctx => {
       if (ctx.args.length > 1) throw usageRefusal("wsp slate read takes one thread at most.", usageIs(ctx));
       const client = await ctx.client();
       const values = flagList(ctx.flags, "values");
-      const read = await slateAsk<{ text: string }>(client, "slates.read", { ...(await slateTarget(client, ctx.args[0], ctx.env)), ...(values.length > 0 ? { values } : {}), ...(ctx.flags["text"] === true ? { text: true } : {}), ...(ctx.flags["no-sketch"] === true ? { sketch: false } : {}) });
+      const read = await slateAsk<{ text: string }>(client, "slates.read", { ...(await slateTarget(client, ctx.args[0], ctx.env)), ...(values.length > 0 ? { values } : {}), ...(ctx.flags["no-text"] === true ? { text: false } : {}), ...(ctx.flags["no-sketch"] === true ? { sketch: false } : {}), ...(ctx.flags["document"] === true ? { document: true } : {}) });
       emitSlate(ctx, read);
       return 0;
     },
     tool: tool({
-      description: "Reads this thread's slate: values, runs, sketch.",
-      input: { thread: SlateThreadIn, values: z.array(z.string()).optional(), text: z.boolean().optional(), sketch: z.boolean().optional() },
+      description: "Reads this thread's slate: sketch, JSX-like form, values, runs.",
+      input: { thread: SlateThreadIn, values: z.array(z.string()).optional(), text: z.boolean().optional(), sketch: z.boolean().optional(), document: z.boolean().optional() },
       output: slateOut("document", "values", "derived", "runs", "state", "problems", "comments", "approvals"),
       stream: ["text"],
-      call: async ({ thread, values, text, sketch }, deps) => {
+      call: async ({ thread, values, text, sketch, document }, deps) => {
         const client = await deps.client();
-        const read = await slateAsk<{ text: string }>(client, "slates.read", { ...(await slateTarget(client, thread, deps.env)), ...pick({ values, text, sketch }) });
+        const read = await slateAsk<{ text: string }>(client, "slates.read", { ...(await slateTarget(client, thread, deps.env)), ...pick({ values, text, sketch, document }) });
         return asText(read.text, read);
       },
     }),
@@ -6323,9 +6323,10 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   file: "a file on this computer to send with the message: an image goes as an image, any other file lands in the thread's folder and the message names its path; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",
   "slate write check": "validate and sketch the slate, storing nothing",
-  "if-version": "the version a read printed; refused with V750 when the slate moved past it",
+  "if-version": "the version a read printed; refused with V750 when the document moved past it",
   "slate read values": "a path to resolve now, like '$check.exit' or usage.week.percent, or * for every bound one; repeats",
-  "slate read text": "also print the slate in the JSX-like form a patch is written against",
+  "slate read no-text": "leave out the slate in the JSX-like form a patch is written against",
+  "slate read document": "also print the stored JSON document",
   "slate read no-sketch": "leave the sketch out",
   threads: "how many threads may run on that computer at once; a new one waits past it",
   machines: "how many machines may run on that cloud at once",

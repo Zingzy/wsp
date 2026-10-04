@@ -54,7 +54,7 @@ export function slateApi(c: Requester): SlateApi {
     approve: async (threadId, key, scope) => void (await c.request("slates.approve", { threadId, key, scope })),
     cancel: async (threadId, run) => void (await c.request("slates.cancel", { threadId, run })),
     shown: async threadId => void (await c.request("slates.shown", { threadId })),
-    sketch: async threadId => SlateReadAnswer.parse(await c.request<unknown>("slates.read", { threadId, sketch: true })).text,
+    sketch: async threadId => SlateReadAnswer.parse(await c.request<unknown>("slates.read", { threadId, sketch: true, text: false })).text,
     undo: threadId => write(threadId, "<undo />"),
     clear: threadId => write(threadId, "<clear />"),
     subscribe: async (threadId, sources) => void (await c.request("slates.subscribe", { threadId, sources: [...sources] })),

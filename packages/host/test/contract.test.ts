@@ -467,8 +467,9 @@ describe("the agent contract on the command line and the tool door", () => {
     const behind = await run("slate", "write", opened.threadId, change, "--if-version", "1", "--json");
     expect(behind.code).toBe(EXIT_CODES.provider);
     expect(failure(behind.io).error).toContain("V750");
-    expect(await last("slate state", "slate", "state", opened.threadId, "$done=2")).toMatchObject({ version: 3 });
-    expect(await last("slate read", "slate", "read", opened.threadId, "--values", "$done", "--text")).toMatchObject({ version: 3, values: { $done: 2 } });
+    // A value is data: it moves the revision, never the document's version.
+    expect(await last("slate state", "slate", "state", opened.threadId, "$done=2")).toMatchObject({ version: 2 });
+    expect(await last("slate read", "slate", "read", opened.threadId, "--values", "$done", "--document")).toMatchObject({ version: 2, values: { $done: 2 }, document: { schema: 2 } });
     // A project on this computer: its worktree for a branch, the worktree taken away, and a thread in its folder
     // deleted by its id, the folder left as it stands.
     const here = join(dir, "here-proj");

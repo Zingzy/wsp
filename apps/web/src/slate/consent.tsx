@@ -9,7 +9,7 @@ import { Button } from "../components/ui/button.js";
 import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { RUNS, type SlateEngine } from "./engine.js";
 import { cn } from "../lib/utils.js";
-import { isRunRecord, type SlateApproval, type SlateAsk } from "./model.js";
+import { isRunRecord, type SlateApproval, type SlateAsk, type SlateDoc } from "./model.js";
 import { usePieceVersion } from "./SlateView.js";
 
 export const CONSENT_WORDS = {
@@ -21,7 +21,24 @@ export const CONSENT_WORDS = {
   always: "Always in this thread",
   run: "Run",
   wrote: "Written by the agent in this thread",
+  more: (n: number) => (n === 1 ? "1 more command waits after this one" : `${n} more commands wait after this one`),
 } as const;
+
+const seconds = (s: number): string => (s < 120 || s % 60 !== 0 ? `${s} s` : s < 7200 || s % 3600 !== 0 ? `${s / 60} min` : `${s / 3600} h`);
+
+/** How often the run starts and whether it starts while the slate is off screen, as the sheet says it (07,
+ * "Consent"): its timer, else the reactions that start it, else a press. */
+export function cadenceOf(doc: SlateDoc | null, run: string): string {
+  const decl = doc?.runs?.[run];
+  if (decl?.every !== undefined) {
+    const every = `Runs every ${seconds(decl.every)}`;
+    return decl.always === true ? `${every}, also while this slate is not on screen` : `${every}, only while this slate is on screen`;
+  }
+  const when = (doc?.reactions ?? []).flatMap(reaction =>
+    reaction.do.some(step => step.do === "start" && step.run.replace(/^\$/, "") === run) ? ["change" in reaction.on ? `${reaction.on.change.join(" or ")} changes` : `$${reaction.on.done.replace(/^\$/, "")} finishes`] : [],
+  );
+  return when.length > 0 ? `Runs each time ${when.join(" or ")}` : "Runs when you press it";
+}
 
 /** The slate's held runs in document order, each with the host's sheet where the record carries one. */
 export function heldRuns(engine: SlateEngine, asks: readonly SlateAsk[]): { run: string; cmd: string; ask: SlateAsk | undefined }[] {
@@ -61,7 +78,7 @@ export function HeldRuns({ engine, asks, review, refuse }: { engine: SlateEngine
 
 const dots = (value: string): boolean => /^•+/.test(value);
 
-export function ConsentSheet({ ask, answer, onClose }: { ask: SlateAsk; answer(scope: SlateApproval): Promise<unknown>; onClose(): void }) {
+export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask: SlateAsk; cadence: string; more?: number; answer(scope: SlateApproval): Promise<unknown>; onClose(): void }) {
   const env = Object.entries(ask.env);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | undefined>(undefined);
@@ -81,6 +98,9 @@ export function ConsentSheet({ ask, answer, onClose }: { ask: SlateAsk; answer(s
       <pre data-slate-consent-cmd className="max-h-[calc(12*1rem+1rem)] overflow-auto whitespace-pre-wrap break-all rounded-md bg-accent px-2.5 py-2 font-mono text-xs leading-4 tabular-nums text-foreground">
         {ask.cmd}
       </pre>
+      <p data-slate-consent-cadence className="text-foreground">
+        {cadence}
+      </p>
       {env.length === 0 && ask.args.length === 0 && ask.stdin === undefined ? null : (
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-xs leading-4 tabular-nums">
           {env.map(([name, value]) => (
@@ -110,6 +130,7 @@ export function ConsentSheet({ ask, answer, onClose }: { ask: SlateAsk; answer(s
         <br />
         {CONSENT_WORDS.wrote}.
       </p>
+      {more > 0 ? <p data-slate-consent-more className="text-muted-foreground">{CONSENT_WORDS.more(more)}</p> : null}
       {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}
     </div>
   );

@@ -32,7 +32,7 @@ function counted(views: PieceViews): { views: PieceViews; renders: Map<string, n
 function draw(doc: SlateDoc, values: Record<string, SlateJson>, opts: { views?: PieceViews; link?: Partial<SlateLink>; state?: Record<string, SlateJson> } = {}) {
   const scheduler = manualScheduler();
   const engine = new SlateEngine("t1", path => values[path], scheduler);
-  engine.setRecord(doc, opts.state ?? slateStartValues(doc), 3);
+  engine.setRecord(doc, opts.state ?? slateStartValues(doc), 3, 3);
   const link = fakeLink(opts.link);
   const sender = new StateSender(engine, () => link);
   const runner = new ActionRunner(engine, () => link);
@@ -145,7 +145,7 @@ describe("the slate renderer", () => {
     fireEvent.change(field, { target: { value: "half typed" } });
     const before = new Map(renders);
     const patched: SlateDoc = { ...EVERY_PIECE, pieces: { ...EVERY_PIECE.pieces, line: { type: "text", props: { value: "Patched", tone: "muted" } } } };
-    act(() => engine.setRecord(patched, { note: "" }, 4));
+    act(() => engine.setRecord(patched, { note: "" }, 4, 4));
     frame();
     expect(screen.getByText("Patched")).toBeTruthy();
     expect([...renders].filter(([id, n]) => n !== before.get(id)).map(([id]) => id)).not.toContain("title");
