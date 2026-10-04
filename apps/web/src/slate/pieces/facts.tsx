@@ -3,7 +3,7 @@ import type { SlateJson } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { SlateIcon } from "./icon.js";
-import { str, TONE_INK, toneOf } from "./look.js";
+import { isSentence, str, TONE_INK, toneOf } from "./look.js";
 
 interface Fact {
   label: string;
@@ -20,7 +20,7 @@ function factsOf(value: SlateJson | undefined): Fact[] {
     const shown = str(entry["value"]);
     // A pair whose value is missing is left out.
     if (shown === undefined || shown === "") return [];
-    return [{ label: str(entry["label"]) ?? "", value: shown, tone: entry["tone"], mono: entry["mono"] === true, icon: entry["icon"] }];
+    return [{ label: str(entry["label"]) ?? "", value: shown, tone: entry["tone"], mono: entry["mono"] === true && !isSentence(shown), icon: entry["icon"] }];
   });
 }
 

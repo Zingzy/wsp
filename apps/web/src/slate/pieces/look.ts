@@ -53,6 +53,11 @@ export const str = (value: SlateJson | undefined): string | undefined =>
 /** The sentence a control is held by: a non-empty text holds it, anything else (null, false, "") lets it go. */
 export const heldBy = (value: SlateJson | undefined): string | undefined => (typeof value === "string" && value.trim() !== "" ? value : undefined);
 
+const WORD = /^[A-Za-z][a-z'’]*[,.;:!?]?$/;
+/** Text that reads as a sentence, three plain words or more, rather than a figure, an id, a time or a path: mono on
+ * it draws in the normal face. */
+export const isSentence = (value: SlateJson | undefined): boolean => typeof value === "string" && value.trim().split(/\s+/).filter(word => WORD.test(word)).length >= 3;
+
 export const num = (value: SlateJson | undefined): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 
 /** A figure through the formatter its word names; a word this build does not know reads plain. */
