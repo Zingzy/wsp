@@ -1,5 +1,173 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What slate_catalog answers, as text (10, "The catalog call").
+// What slate_catalog answers (10, "The catalog call"): only the part asked for, as text, read off the registries.
+// The index stays under 900 tokens and an entry for a piece under 200; slateTokens is the estimate the tests hold.
+import { SLATE_FUNCTIONS, SLATE_PIPE_STEPS } from "./expr.js";
+import { SLATE_EXAMPLES } from "./examples.js";
+import { SLATE_PIECES, SLATE_TONES, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
+import { nearest } from "./problems.js";
+import { sketchSlate } from "./sketch.js";
+import { SLATE_SOURCES, slateShapeText, type SlateShape } from "./sources.js";
+import { SLATE_STEPS } from "./steps.js";
+import { compileSlateText } from "./syntax.js";
+import { SLATE_RUN_FIELDS } from "./types.js";
+
+/** A conservative token count: each word, each number and each other non-space character is one. Real tokenizers
+ * join common words with their spaces and punctuation, so they count fewer. */
+export function slateTokens(text: string): number {
+  return text.match(/[A-Za-z]+|\d+|[^\sA-Za-z\d]/g)?.length ?? 0;
+}
+
+export const SLATE_RULES: readonly string[] = [
+  "One <slate>, one root piece; declarations beside it. id=\"...\" on any piece you will change later.",
+  "prop=\"text\" is literal; prop={formula} reads live data or $values; a text child with {holes} fills a sentence. Nothing in braces is JavaScript.",
+  "Props are meaning, never style: tone, emphasis, size, variant, mono. held on a button is a sentence that disables it; bind it to a condition or leave it out.",
+  "A list binds to items; <col> names a column; item and index read the row; | where(...) and friends reshape.",
+  "A press reaches you only through send(\"literal text\", $path, ...). Chains run without you: <when change={$x} do={start($run)} />, <when done={$run} do={set($y, $run.json.z)} />.",
+  "Write once, then patch by id or set a value; never rewrite the slate every turn.",
+];
+
+export const SLATE_INDEX_EXAMPLE = `<slate title="Issue">
+  <value name="id" start="" />
+  <run name="check" cmd='gh api "repos/Zingzy/wsp/issues/$ID"' env={{ ID: $id }} />
+  <when change={$id} do={start($check)} />
+  <column>
+    <input label="Issue" value={$id} />
+    <text when={$check.exit == 0}>{$check.json.title}</text>
+    <button label="Fix it" onPress={send("Fix this issue.", $id)} />
+  </column>
+</slate>`;
+
+function pieceLine(p: SlatePieceModule): string {
+  const props = Object.keys(p.props).filter(k => !Object.values(p.items).some(i => i.prop === k));
+  const items = Object.entries(p.items).map(([tag, s]) => `<${tag} ${[...Object.keys(s.fields), ...(s.row === true && s.events !== undefined ? ["when", "onPress"] : [])].join(" ")}>`);
+  const events = p.events.map(e => `on${e[0]!.toUpperCase()}${e.slice(1)}`);
+  return `${p.type}: ${[...props, ...events].join(" ")}${items.length > 0 ? `; ${items.join(" ")}` : ""}${p.holdsChildren && p.childLimit === undefined ? "; children" : ""}`;
+}
+
+/** The fields the index names for each source; the entry for the source has the rest. */
+const INDEX_FIELDS: Record<string, readonly string[]> = {
+  thread: ["id", "title", "status", "agent", "model", "turns", "lastTurn", "cost", "tokens", "context", "changes", "plan", "waitingOn", "subagents"],
+  usage: ["account", "windows", "session", "week", "status", "note"],
+  cost: ["rateUsdPerHour", "accruedUsd"],
+  time: ["now", "today", "zone"],
+  git: ["branch", "head", "ahead", "behind", "changed"],
+  pr: ["number", "url", "state", "draft", "branch", "headSubject", "mergeable", "review", "checks", "word"],
+};
+
+function sourceLine(name: string): string {
+  const shape = SLATE_SOURCES[name]!.shape;
+  if ("keyed" in shape) return `${name}.<server>: state tools[] resources[]`;
+  const fields = Object.entries(shape.fields).filter(([k]) => INDEX_FIELDS[name]?.includes(k) ?? true);
+  const more = fields.length < Object.keys(shape.fields).length ? " ..." : "";
+  return `${name}: ${fields.map(([k, v]) => (typeof v === "object" && "list" in v ? `${k}[]` : k)).join(" ")}${more}`;
+}
+
+function index(): string {
+  const core = Object.values(SLATE_PIECES).filter(p => p.level === "core");
+  const working = Object.values(SLATE_PIECES).filter(p => p.level === "working");
+  const later = Object.values(SLATE_PIECES).filter(p => p.level === "extended").map(p => p.type);
+  return [
+    "Slate kit wsp/2, written as JSX-like text. Pieces (attributes; <items>):",
+    ...core.map(pieceLine),
+    `Phase 2: ${[...working.map(p => p.type), ...later].join(" ")}.`,
+    "Every piece: id, when={cond}. tone: default muted good warning bad info accent. emphasis: normal strong quiet.",
+    "Sources, read only:",
+    ...["thread", "usage", "cost", "time", "git", "pr"].map(sourceLine),
+    "Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once> <when change={$path} or done={$run} do={steps}>",
+    `Steps: ${Object.keys(SLATE_STEPS).join(" ")}. Functions: ${Object.keys(SLATE_FUNCTIONS).join(" ")}.`,
+    `After |: ${Object.keys(SLATE_PIPE_STEPS).join(" ")}. $run reads state exit out err json; a secret only .set .len.`,
+    "Rules:",
+    ...SLATE_RULES.map((r, i) => `${i + 1}. ${r}`),
+    SLATE_INDEX_EXAMPLE,
+    "More: slate_catalog with a piece, a source, runs, functions, steps, handlers or examples.",
+  ].join("\n");
+}
+
+function specText(spec: SlatePropSpec): string {
+  const tones = Array.isArray(spec.type) && (spec.type as readonly string[]).join() === SLATE_TONES.join();
+  const type = tones ? "tone" : Array.isArray(spec.type) ? (spec.type as readonly string[]).join("|") : spec.type === "text" ? "text or number" : spec.type === "path" ? "$run" : (spec.type as string);
+  const marks = [
+    spec.required === true ? "required" : undefined,
+    spec.binds === "yes" ? "formula" : spec.binds === "state" ? "two-way $value" : spec.binds === "item" ? "per row" : undefined,
+    spec.min !== undefined && spec.max !== undefined ? `${spec.min} to ${spec.max}` : undefined,
+  ].filter(Boolean);
+  return marks.length > 0 ? `${type}, ${marks.join(", ")}` : type;
+}
+
+function pieceEntry(p: SlatePieceModule): string {
+  const own = Object.entries(p.props).filter(([k]) => !Object.values(p.items).some(i => i.prop === k));
+  const compiled = compileSlateText(`<slate><column>${p.example}</column></slate>`).document;
+  const sketched = compiled === undefined ? "" : (sketchSlate(compiled, {}, { check: true }).split("\n")[1] ?? "");
+  return [
+    `${p.type} (${p.level}): ${p.purpose}`,
+    ...own.map(([k, s]) => `  ${k}: ${specText(s)}`),
+    ...Object.entries(p.items).map(([tag, s]) => `  <${tag}> ${Object.entries(s.fields).map(([k, f]) => `${k}${f.required === true ? "!" : ""}`).join(" ")}${s.row === true && s.events !== undefined ? " when onPress" : ""}${s.row === true ? " (item and index read the row)" : ""}`),
+    `events: ${p.events.length > 0 ? p.events.map(e => `on${e[0]!.toUpperCase()}${e.slice(1)}`).join(", ") : "none"}${p.textProp !== undefined ? `; a text child fills ${p.textProp}` : ""}${p.holdsChildren ? "; holds children" : ""}`,
+    ...(sketched !== "" ? [`sketch: ${sketched}`] : []),
+    `example: ${p.example}`,
+  ].join("\n");
+}
+
+function sourceEntry(name: string): string {
+  const s = SLATE_SOURCES[name]!;
+  const paths: string[] = [];
+  const scalars = new Map<string, string[]>();
+  const walk = (prefix: string, shape: SlateShape): void => {
+    if (typeof shape === "string") { (scalars.get(shape) ?? scalars.set(shape, []).get(shape)!).push(prefix); return; }
+    paths.push(`  ${prefix}: ${slateShapeText(shape)}`);
+  };
+  if ("keyed" in s.shape) walk(`${name}.<server>`, s.shape.keyed);
+  else for (const [k, v] of Object.entries(s.shape.fields)) walk(`${name}.${k}`, v);
+  for (const [type, list] of scalars) paths.unshift(`  ${list.join(" ")}: ${type}`);
+  return [
+    `${name} (${s.level}): ${s.purpose}`,
+    ...paths,
+    `update: ${s.update}; scope: ${s.scope}; cost: ${s.cost}`,
+    ...Object.entries(s.notes ?? {}).map(([k, v]) => `note ${k}: ${v}`),
+    `example: {${s.example}}`,
+  ].join("\n");
+}
+
+const RUNS = `runs: a command the slate starts with no turn of yours.
+<run name="check" cmd='gh api "repos/$REPO/issues/$ID"' env={{ REPO: $repo, ID: $id }} timeout={20} />
+<run name="tests" cmd="pnpm test $1" args={["cart"]} stream once />
+<run name="ci" cmd='gh secret set TOKEN --repo "$REPO"' stdin={$token} env={{ REPO: $repo }} on="host" />
+cmd is literal, run by bash -c; values reach it only as env ($ID), args ($1) or stdin. A secret goes only on stdin or in the program's own env variable, never after a flag (W011).
+on: thread (default) or host. timeout: seconds, default 60, at most 600. every={60}: seconds, at least 10, while the slate is shown; always keeps it ticking. once: a start while running does nothing; else it restarts.
+start($run) in a handler or a <when>. The person approves each command once; until then it reads held. confirm="..." asks every start.
+$run reads ${SLATE_RUN_FIELDS.join(" ")}; state is idle held running done failed cancelled; output is scrubbed of secrets.
+Chain: <when change={$id} do={start($check)} />, then <when done={$check} do={set($ok, $check.exit == 0)} />; done fires whatever the outcome.
+Tool and resource runs (tool="server.tool", resource="server:uri") arrive in phase 2.`;
+
+function functionsEntry(): string {
+  const shown = new Set(["percent", "pct", "tokens", "usd", "duration", "ago", "until", "date", "plural", "word", "short", "num", "json", "contains", "orElse", "len", "first", "pluck"]);
+  return ["Functions (pure; a null argument gives null unless the function takes one):", ...Object.entries(SLATE_FUNCTIONS).map(([n, f]) => (shown.has(n) ? `${f.sig}: ${f.example}` : f.sig))].join("\n");
+}
+
+function stepsEntry(): string {
+  return ["List steps, after | (item and index read the element):", ...Object.values(SLATE_PIPE_STEPS).map(s => `${s.sig}: ${s.purpose}. ${s.example}`)].join("\n");
+}
+
+function handlersEntry(): string {
+  return ["Handler steps, in onPress, onSubmit, onChange and <when do>; one step or [a, b], at most 6:", ...Object.values(SLATE_STEPS).map(s => `${s.sig}: ${s.purpose}. ${s.runs === "window" ? "Window only, on a press. " : ""}Consent: ${s.consent}. ${s.example}`)].join("\n");
+}
+
+/** The catalog: the index with no name, else the named piece, source or chapter, as text. */
 export function slateCatalog(name?: string): string {
-  return name === undefined ? "slate catalog: not built yet" : `${name}: not built yet`;
+  if (name === undefined || name === "" || name === "index") return index();
+  const n = name.trim();
+  if (SLATE_PIECES[n] !== undefined) return pieceEntry(SLATE_PIECES[n]);
+  if (SLATE_SOURCES[n] !== undefined) return sourceEntry(n);
+  switch (n) {
+    case "runs": case "run": return RUNS;
+    case "functions": return functionsEntry();
+    case "steps": return stepsEntry();
+    case "handlers": return handlersEntry();
+    case "examples": return SLATE_EXAMPLES.map(e => `${e.title}:\n${e.text}`).join("\n\n");
+    default: {
+      const options = [...Object.keys(SLATE_PIECES), ...Object.keys(SLATE_SOURCES), "runs", "functions", "steps", "handlers", "examples"];
+      const fix = nearest(n, options);
+      return `${n} is not in the catalog${fix !== undefined ? `; did you mean ${fix}?` : "."} Ask for a piece, a source, runs, functions, steps, handlers or examples; a server's tools are the host's to answer.`;
+    }
+  }
 }

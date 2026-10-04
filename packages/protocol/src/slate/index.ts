@@ -18,5 +18,6 @@ export { parseSlate, parseSlatePatch, printSlate, compileSlateText } from "./syn
 export { validateSlate, validateDocument, type SlateLines } from "./validate.js";
 export { applySlatePatch, carrySlateValues, slateStartValues } from "./patch.js";
 export { runSlateBatch, type SlateBatchResult, type SlateBatchContext, type SlateBatchSend, type SlateBatchWindowStep, type SlateWriter } from "./batch.js";
-export { sketchSlate } from "./sketch.js";
-export { slateCatalog } from "./catalog.js";
+export { sketchSlate, type SlateSketchContext } from "./sketch.js";
+export { slateCatalog, slateTokens, SLATE_RULES } from "./catalog.js";
+export { SLATE_EXAMPLES } from "./examples.js";
