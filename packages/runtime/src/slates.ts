@@ -53,7 +53,7 @@ import {
 } from "@wsp/protocol";
 import type { Store } from "./store.js";
 import { createSlateRuns, restartedRecord, rewoundRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
-import { createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
+import { HELD_CONFIRM, createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
 import { HOST_SLATE_SOURCES, resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
 
 export const SLATES = "slates";
@@ -388,7 +388,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     const views = await viewsFor(r);
     for (const name of Object.keys(doc.runs)) {
       const rec = r.values[name];
-      if (isRunRecord(rec) && rec.state === "held" && rec.why === HELD_APPROVAL) startNow(r, name, "person", views);
+      if (isRunRecord(rec) && rec.state === "held" && (rec.why === HELD_APPROVAL || rec.why === HELD_CONFIRM)) startNow(r, name, "person", views);
     }
   }
 
@@ -748,6 +748,8 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   interface BatchOut {
     asks: RunAsk[];
+    /** The runs this batch started, held or not. */
+    started: string[];
     sends: { prompt: string; kind: "send" | "steer" | "queue"; requestId: string }[];
   }
 
@@ -755,7 +757,7 @@ export function createSlates(deps: SlatesDeps): Slates {
    * cancels, the sends composed, the values saved and pushed. Called inside serial. */
   async function batch(r: SlateRecord, input: { path: string; value: SlateJson }[], by: BatchBy, o: { event?: BatchEvent; starts?: string[]; requestId?: string; sendAt?: number }): Promise<BatchOut> {
     const doc = r.document;
-    if (doc === null) return { asks: [], sends: [] };
+    if (doc === null) return { asks: [], started: [], sends: [] };
     const views = await viewsFor(r);
     const asks: RunAsk[] = [];
     const before = r.values;
@@ -780,7 +782,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     if (sizeOf(result.values) > VALUES_BYTES) {
       keepProblems(r, [problem("S500", "values-too-big", `the values would be ${sizeOf(result.values)} bytes; a slate holds at most ${VALUES_BYTES}`)]);
       await save(r);
-      return { asks, sends: [] };
+      return { asks, started: [], sends: [] };
     }
     r.values = result.values;
     keepProblems(r, result.problems);
@@ -815,7 +817,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       await save(r);
       push(r, changed);
     }
-    return { asks, sends };
+    return { asks, started: deferred.map(d => d.run), sends };
   }
 
   /** The message a send puts into the thread (09, "The message"): the literal text, a blank line, one `slate:` line
@@ -1116,7 +1118,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         runs.release(p.threadId);
         const event: BatchEvent = { piece: p.piece, kind: p.event, ...(item !== undefined ? { item } : {}), ...(p.scope !== undefined ? { index: p.scope.index } : {}), ...(p.rowAction !== undefined ? { rowAction: p.rowAction } : {}) };
         const out = await batch(r, [], "person", { event, requestId: p.requestId, sendAt: now });
-        return { r, out, started: new Set(Object.keys(doc.runs).filter(run => doc.runs[run]!.kind !== "cmd")) };
+        return { r, out, started: new Set(out.started.filter(run => doc.runs[run]?.kind !== "cmd")) };
       });
       const answer = composed.then(async ({ r, out, started }): Promise<SlateEventAnswer> => {
         let landed: Awaited<ReturnType<typeof deliverAll>>;
