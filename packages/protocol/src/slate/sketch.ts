@@ -4,7 +4,7 @@
 // what is hidden, tags each line with its id and type, lists the values, runs and problems, and caps the whole.
 import { evaluateSlateExpression, parseSlateFormat, resolveSlateProp, slateTruthy, type SlateEvalContext } from "./expr.js";
 import { isSlateIcon } from "./icons.js";
-import { SLATE_PIECES, type SlatePieceModule, type SlatePropSpec, type SlateSketchView } from "./kit.js";
+import { SLATE_PIECES, slateHeldText, type SlatePieceModule, type SlatePropSpec, type SlateSketchView } from "./kit.js";
 import { SLATE_LIMITS } from "./limits.js";
 import { parseSlateOwnPath, slateEqual, slateStep } from "./paths.js";
 import { slateProblem } from "./problems.js";
@@ -137,6 +137,7 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
       const raw = piece.props?.[name];
       if (raw === undefined || raw === null || (unbound && (isSlateBinding(raw) || isSlateFormat(raw)))) continue;
       const value = resolveSlateProp(raw, read);
+      if (name === "held" && slateHeldText(value) === undefined) continue;
       if (spec.default !== undefined && slateEqual(value, spec.default)) continue;
       if (value === true) words.push(name);
       else if (value !== false && value !== undefined && value !== null) words.push(`${name}=${cut(typeof value === "string" ? value : JSON.stringify(value), 24)}`);
@@ -194,7 +195,7 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
     const r = values[name] as Partial<SlateRunRecord> | undefined;
     if (r?.state === undefined || r.state === "idle") continue;
     const facts = [r.exit !== undefined && r.exit !== null ? `exit ${r.exit}` : undefined, r.ms !== undefined ? `${r.ms} ms` : undefined].filter(Boolean);
-    runLines.push(`  $${name}: ${r.state}${facts.length > 0 ? ` (${facts.join(", ")})` : ""}${r.why !== undefined ? ` ${r.why}` : ""}${r.stale === true ? ", stale: the command changed since it ran" : ""}`);
+    runLines.push(`  $${name}: ${r.state}${r.refreshing === true ? ", refreshing" : ""}${facts.length > 0 ? ` (${facts.join(", ")})` : ""}${r.why !== undefined ? ` ${r.why}` : ""}${r.stale === true ? ", stale: the command changed since it ran" : ""}`);
   }
   if (runLines.length > 0) lines.push("runs:", ...runLines);
   if (problems.length > 0) {

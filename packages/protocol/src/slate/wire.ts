@@ -146,7 +146,8 @@ export const SlatesWriteParams = z.object({
   press: z.object({ piece: z.string(), index: z.number().int().nonnegative().optional(), action: z.number().int().nonnegative().optional() }).optional(),
   /** Text and document may both be left out of a rehearsal, which then runs against the slate as stored. */
 });
-export const SlatesStateParams = z.object({ ...threadParams, values: SlateWireValues, ifVersion: z.number().int().optional() });
+/** start names runs the person said "Always in this thread" to; any other is answered held and not started. */
+export const SlatesStateParams = z.object({ ...threadParams, values: SlateWireValues.optional(), start: z.array(z.string()).optional(), ifVersion: z.number().int().optional() });
 export const SlatesReadParams = z.object({
   ...threadParams,
   values: z.array(z.string()).optional(),

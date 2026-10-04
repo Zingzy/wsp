@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import type { AdapterEvent, Caller, EventUnion, SlateView, TurnResult } from "@wsp/protocol";
-import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
+import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, testPlatform } from "./stub-backend.js";
@@ -23,8 +23,9 @@ afterEach(async () => {
   for (const at of roots.splice(0)) rmSync(at, { recursive: true, force: true });
 });
 
-/** A harness that answers each turn at once and keeps every prompt it was started with. */
-function harness(prompts: string[]): HarnessAdapterFactory {
+/** A harness that answers each turn at once and keeps every prompt it was started with. It announces its model as
+ * Claude Code does, the 1M window as a suffix, and one named by nobody as the CLI's own default. */
+function harness(prompts: string[], starts: HarnessStartOptions[] = []): HarnessAdapterFactory {
   let n = 0;
   return () => ({
     steers: false,
@@ -32,11 +33,13 @@ function harness(prompts: string[]): HarnessAdapterFactory {
     start: o => {
       n += 1;
       prompts.push(o.prompt);
+      starts.push(o);
       const sessionId = o.resume ?? `55555555-5555-4555-8555-${String(n).padStart(12, "0")}`;
+      const model = o.model === undefined ? "claude-opus-5-5[1m]" : `${o.model}${o.contextWindow === "1m" ? "[1m]" : ""}`;
       const result: TurnResult = { status: "completed", text: "ok" };
       const finished = Promise.resolve().then(() => {
         const feed: AdapterEvent[] = [
-          { type: "session.start", sessionId },
+          { type: "session.start", sessionId, model },
           { type: "turn.anchor", sessionId, anchor: `a${n}` },
           { type: "turn.done", sessionId, result },
           { type: "session.end", sessionId, exitCode: 0, sawResult: true },
@@ -50,7 +53,7 @@ function harness(prompts: string[]): HarnessAdapterFactory {
 }
 
 /** A host on this computer over a temp root; the store is passed in so a second host can read what the first kept. */
-function host(root: string, store: Store, prompts: string[], events: EventUnion[]): Runtime {
+function host(root: string, store: Store, prompts: string[], events: EventUnion[], starts: HarnessStartOptions[] = []): Runtime {
   const state = join(root, "state");
   mkdirSync(state, { recursive: true });
   const local: LocalWiring = {
@@ -63,7 +66,7 @@ function host(root: string, store: Store, prompts: string[], events: EventUnion[
     platform: testPlatform(),
     daemonRoad: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }),
   };
-  const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: harness(prompts) }, local, statePath: join(state, "state.json") });
+  const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: harness(prompts, starts) }, local, statePath: join(state, "state.json") });
   rt.events.on("*", e => events.push(e as EventUnion));
   runtimes.push(rt);
   return rt;
@@ -462,18 +465,145 @@ const TICKER = `<slate title="Ticker">
 const events: EventUnion[] = [];
 
 /** A host over a temp root with one finished thread on a plain folder, and that thread as a caller. */
-async function threadOn(prefix: string): Promise<{ rt: Runtime; threadId: string; asThread: Caller }> {
+async function threadOn(prefix: string, o: { picks?: Partial<Record<"model" | "effort" | "permissionMode" | "contextWindow", string>>; store?: Store } = {}): Promise<{ rt: Runtime; root: string; threadId: string; asThread: Caller; starts: HarnessStartOptions[]; prompts: string[] }> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   roots.push(root);
   const folder = join(root, "plain");
   mkdirSync(folder);
   events.length = 0;
-  const rt = host(root, memoryStore(), [], events);
+  const starts: HarnessStartOptions[] = [];
+  const prompts: string[] = [];
+  const rt = host(root, o.store ?? memoryStore(), prompts, events, starts);
   const project = await rt.projects.add({ source: folder });
   const { workspace } = await rt.workspaces.folderFor({ project: project.id });
-  const first = await rt.sessions.start(workspace.id, { prompt: "one" });
+  const first = await rt.sessions.start(workspace.id, { prompt: "one", ...o.picks });
   await first.finished;
   const threadId = first.view().threadId!;
-  return { rt, threadId, asThread: { origin: "here", by: { kind: "thread", threadId, workspaceId: workspace.id, rootThreadId: threadId } } };
+  return { rt, root, threadId, starts, prompts, asThread: { origin: "here", by: { kind: "thread", threadId, workspaceId: workspace.id, rootThreadId: threadId } } };
 }
 
+
+const PRESS = `<slate><column><button id="go" label="Go on" onPress={send("Go on.")} /></column></slate>`;
+
+const PROBE = `<slate title="Probe">
+  <value name="n" start={0} />
+  <value name="done" start={0} />
+  <run name="probe" cmd='if [ "$N" -ge 2 ]; then sleep 1; fi; echo "run $N"' env={{ N: $n }} timeout={20} />
+  <run name="ask" cmd="echo asked" confirm="Run it?" />
+  <when change={$n} do={start($probe)} />
+  <when done={$probe} do={set($done, $done + 1)} />
+  <column>
+    <text id="out">{$probe.out}</text>
+    <button id="more" label="More" held={$n > 100 and 'too many'} onPress={set($n, $n + 1)} />
+    <input id="num" label="N" value={$n} held={$n > 100 and 'too many'} />
+  </column>
+</slate>`;
+
+const probeOf = async (rt: Runtime, threadId: string): Promise<Record<string, unknown>> => (await rt.slates.get(threadId))!.values["probe"] as Record<string, unknown>;
+
+describe("the slate v2 host, round 4", () => {
+  it("a press starts the agent's turn on the thread's own model, effort and access, at the 1M window only where the thread ran at it", async () => {
+    const opened = [
+      { model: "claude-fable-5-1", effort: "low", permissionMode: "acceptEdits" },
+      { model: "claude-opus-5-5", effort: "max", permissionMode: "default", contextWindow: "1m" },
+    ];
+    for (const picks of opened) {
+      const { rt, threadId, asThread, starts } = await threadOn("wsp-slates-picks-", { picks });
+      await rt.slates.write({ text: PRESS }, asThread);
+      const told = await rt.slates.event({ threadId, version: 1, piece: "go", event: "press", requestId: `go-${picks.model}` });
+      expect(told.outcome).toBe("started");
+      await vi.waitFor(() => expect(starts).toHaveLength(2));
+      const { prompt, resume, model, effort, permissionMode, contextWindow } = starts[1]!;
+      expect(prompt).toMatch(/^Go on\.\n\nslate: /);
+      expect(resume).toBe(starts[0]!.resume ?? "55555555-5555-4555-8555-000000000001");
+      expect({ model, effort, permissionMode, contextWindow }).toEqual({ contextWindow: undefined, ...picks });
+    }
+  }, 30_000);
+
+  it("a run that starts again keeps its last result, marked refreshing, until the new one replaces it, across a restart too", async () => {
+    const store = memoryStore();
+    const { rt, root, threadId, asThread } = await threadOn("wsp-slates-refresh-", { store });
+    await rt.slates.write({ text: PROBE }, asThread);
+    await rt.slates.state({ threadId, values: { $n: 1 } });
+    const asked = (await rt.slates.get(threadId))!;
+    await rt.slates.approve({ threadId, key: asked.asks[0]!.key, scope: "thread" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect(await probeOf(rt, threadId)).toMatchObject({ state: "done", out: "run 1\n" });
+    }, { timeout: 10_000 });
+
+    await rt.slates.state({ threadId, values: { $n: 2 } });
+    const running = await probeOf(rt, threadId);
+    expect(running).toMatchObject({ state: "running", refreshing: true, out: "run 1\n", exit: 0, runs: 2 });
+    expect(running["startedAt"]).toBeGreaterThanOrEqual(running["endedAt"] as number);
+    expect((await rt.slates.read({}, asThread)).text).toMatch(/\$probe: running, refreshing \(exit 0, \d+ ms\)/);
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect(await probeOf(rt, threadId)).toMatchObject({ state: "done", out: "run 2\n" });
+    }, { timeout: 10_000 });
+    expect(await probeOf(rt, threadId)).not.toHaveProperty("refreshing");
+
+    // Every running record the windows were pushed: the first run had nothing to keep, every later one kept it.
+    const pushed = events.flatMap(e => (e.type === "slate.values" && e.threadId === threadId && (e.values["$probe"] as { state?: string } | undefined)?.state === "running" ? [e.values["$probe"] as Record<string, unknown>] : []));
+    expect(pushed[0]).not.toHaveProperty("out");
+    expect(pushed[0]).not.toHaveProperty("refreshing");
+    expect(pushed.slice(1).length).toBeGreaterThan(0);
+    for (const r of pushed.slice(1)) expect(r).toMatchObject({ refreshing: true, out: expect.stringMatching(/^run \d\n$/) });
+    // The done reaction fired once per result, never for the refreshing record.
+    expect((await rt.slates.get(threadId))!.values["done"]).toBe(2);
+
+    // A host that never saw the run keeps the stored result through its next start.
+    await rt.close();
+    runtimes.splice(runtimes.indexOf(rt), 1);
+    const again = host(root, store, [], []);
+    await again.slates.ready();
+    await again.slates.state({ threadId, values: { $n: 3 } });
+    expect(await probeOf(again, threadId)).toMatchObject({ state: "running", refreshing: true, out: "run 2\n", runs: 3 });
+    await vi.waitFor(async () => {
+      await again.slates.settled();
+      expect(await probeOf(again, threadId)).toMatchObject({ state: "done", out: "run 3\n" });
+    }, { timeout: 10_000 });
+  }, 40_000);
+
+  it("the agent starts a run the person said always to, and an unapproved or ask-every-time run answers held without starting", async () => {
+    const { rt, threadId, asThread, prompts } = await threadOn("wsp-slates-agent-start-");
+    await rt.slates.write({ text: PROBE }, asThread);
+
+    const before = await rt.slates.state({ start: ["probe"] }, asThread);
+    expect(before.problems).toContainEqual(expect.objectContaining({ code: "R913", message: `$probe was not started: it starts from here once the person says "Always in this thread" to it` }));
+    const untouched = (await rt.slates.get(threadId))!;
+    expect(untouched.values["probe"]).toMatchObject({ state: "idle" });
+    expect(untouched.asks).toEqual([]);
+    await expect(rt.slates.state({ start: ["prob"] }, asThread)).rejects.toThrow(/K702 run-name.*Did you mean \$probe/);
+    await expect(rt.slates.state({}, asThread)).rejects.toThrow(/names neither/);
+
+    // The person approves it for the thread from the window.
+    await rt.slates.state({ threadId, values: { $n: 1 } });
+    await rt.slates.approve({ threadId, key: (await rt.slates.get(threadId))!.asks[0]!.key, scope: "thread" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["done"]).toBe(1);
+    }, { timeout: 10_000 });
+    const turns = prompts.length;
+
+    // Now the agent's start runs it, the done reaction fires, and no turn starts.
+    const started = await rt.slates.state({ start: ["$probe"] }, asThread);
+    expect(started.problems.filter(p => p.code === "R913")).toEqual([]);
+    expect(started.text).toMatch(/\$probe: (running|done)/);
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["done"]).toBe(2);
+    }, { timeout: 10_000 });
+    expect(await probeOf(rt, threadId)).toMatchObject({ state: "done", out: "run 1\n", runs: 2 });
+    expect(prompts.length).toBe(turns);
+
+    // A run that asks every time waits for the person whoever starts it.
+    const ask = await rt.slates.state({ start: ["ask"] }, asThread);
+    expect(ask.problems.map(p => p.code)).toContain("R913");
+    expect((await rt.slates.get(threadId))!.values["ask"]).toMatchObject({ state: "idle" });
+
+    // A held that reads false holds nothing, and the sketch says nothing of it.
+    expect(ask.text).toContain("[ More ]  [more button]");
+    expect(ask.text).not.toMatch(/held/);
+  }, 30_000);
+});
