@@ -8,7 +8,8 @@ import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { SLATE_VIEWS } from "./pieces";
 import { SlateView } from "./SlateView";
-import { fakeLink, manualScheduler } from "./testing";
+import { ConsentSheet } from "./consent";
+import { fakeLink, manualScheduler, slate } from "./testing";
 
 afterEach(cleanup);
 
@@ -185,5 +186,71 @@ describe("layout defaults", () => {
     const cell = piece(view.container, "t").querySelector("tbody td")!;
     expect(cell.className).not.toContain("font-mono");
     expect(cell.className).not.toContain("whitespace-nowrap");
+  });
+});
+
+describe("what the kit adds", () => {
+  const b = (expr: string) => ({ bind: expr });
+
+  it("hides a fact, a column and an option whose when does not hold, and shows it when it comes to", () => {
+    const doc = slate({
+      values: { pro: { start: false }, pick: { start: null }, rows: { start: [{ name: "nginx", cpu: "1%", cost: "$2" }] } },
+      root: "root",
+      pieces: {
+        root: { type: "column", children: ["f", "t", "s", "c"] },
+        f: { type: "facts", props: { facts: [{ label: "Plan", value: "Free" }, { label: "Seats", value: "4", when: "$pro" }] } },
+        t: { type: "table", props: { items: b("$rows"), columns: [{ title: "Name", value: b("item.name") }, { title: "CPU", value: b("item.cpu") }, { title: "Cost", value: b("item.cost"), when: "$pro" }] } },
+        s: { type: "select", props: { label: "Size", value: b("$pick"), options: [{ value: "s", label: "Small" }, { value: "xl", label: "Huge", when: "$pro" }] } },
+        c: { type: "choices", props: { label: "Plan", value: b("$pick"), options: [{ value: "free", label: "Free" }, { value: "team", label: "Team", when: "$pro" }] } },
+      },
+    });
+    const { view, push } = draw(doc);
+    const c = view.container;
+    expect(piece(c, "f").textContent).not.toContain("Seats");
+    expect([...piece(c, "t").querySelectorAll("th")].map(th => th.textContent)).toEqual(["Name", "CPU"]);
+    expect(piece(c, "c").querySelectorAll("[role=radio]")).toHaveLength(1);
+    push({ $pro: true });
+    expect(piece(c, "f").textContent).toContain("Seats 4");
+    expect([...piece(c, "t").querySelectorAll("th")].map(th => th.textContent)).toEqual(["Name", "CPU", "Cost"]);
+    expect(piece(c, "t").querySelector("tbody")!.textContent).toBe("nginx1%$2");
+    expect(piece(c, "c").querySelectorAll("[role=radio]")).toHaveLength(2);
+  });
+
+  it("starts a section shut on a literal open={false}, keeps the person's fold, and follows a new literal", () => {
+    const doc = (open: boolean) => slate({ root: "root", pieces: { root: { type: "column", children: ["sec"] }, sec: { type: "section", props: { title: "Logs", open }, children: ["body"] }, body: { type: "text", props: { value: "inside" } } } });
+    const { engine, view } = draw(doc(false));
+    const trigger = () => piece(view.container, "sec").querySelector<HTMLElement>("[data-slate-section]")!;
+    expect(trigger().getAttribute("data-open")).toBeNull();
+    act(() => engine.setRecord(doc(true), {}, 4, 4));
+    act(() => engine.flush());
+    expect(trigger().hasAttribute("data-open")).toBe(true);
+    expect(view.container.textContent).toContain("inside");
+  });
+
+  it("draws an icon a formula names, and none for a name the kit does not have", () => {
+    const doc = slate({
+      values: { ok: { start: true } },
+      root: "root",
+      pieces: {
+        root: { type: "column", children: ["h", "f", "odd"] },
+        h: { type: "heading", props: { value: "Build", icon: b("$ok ? 'circle-check' : 'circle-x'") } },
+        f: { type: "facts", props: { facts: [{ label: "State", value: "green", icon: b("$ok ? 'check' : 'circle-x'") }] } },
+        odd: { type: "heading", props: { value: "Odd", icon: b("'not-an-icon'") } },
+      },
+    });
+    const { view, push } = draw(doc);
+    const icon = (id: string) => piece(view.container, id).querySelector("[data-slate-icon]")?.getAttribute("data-slate-icon");
+    expect(icon("h")).toBe("circle-check");
+    expect(icon("f")).toBe("check");
+    expect(icon("odd")).toBeUndefined();
+    push({ $ok: false });
+    expect(icon("h")).toBe("circle-x");
+    expect(icon("f")).toBe("circle-x");
+  });
+
+  it("asks a confirm in the sheet with the text its formula read", () => {
+    render(<ConsentSheet ask={{ key: "k", run: "kill", kind: "cmd", cmd: 'kill "$PID"', env: { PID: "19271" }, args: [], computer: "this Mac", folder: "/tmp", timeoutS: 10, why: "asks every time", confirm: "Kill node (PID 19271)?" }} cadence="Runs when you press it" answer={async () => {}} onClose={() => {}} />);
+    expect(document.body.textContent).toContain("Kill node (PID 19271)?");
+    expect(document.body.querySelector("[data-slate-consent-cmd]")!.textContent).toBe('kill "$PID"');
   });
 });

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The meaning words a slate may say, drawn in the app's own tokens (05-styling). The agent picks a word; this file
 // is the whole of how each one looks, in every theme, since every class reads a theme token.
-import { fmtBytes, fmtCost, fmtDuration, fmtTokens, type SlateJson } from "@wsp/protocol";
+import { fmtBytes, fmtCost, fmtDuration, fmtTokens, type SlateJson, type SlatePropValue } from "@wsp/protocol";
 import { CARD_SURFACE } from "../../settings/rows.js";
 import type { SlateEngine } from "../engine.js";
+import { truthy } from "../actions.js";
+import { whenOf } from "../paths.js";
 
 export type Tone = "default" | "muted" | "good" | "warning" | "bad" | "info" | "accent";
 const TONES: ReadonlySet<string> = new Set(["default", "muted", "good", "warning", "bad", "info", "accent"]);
@@ -91,4 +93,14 @@ export function groupLook(props: Readonly<Record<string, SlateJson | undefined>>
   const inset = props["surface"] === "inset";
   const pad = typeof props["pad"] === "string" ? props["pad"] : inset ? "normal" : "none";
   return [PAD[pad] ?? "", inset ? CARD_SURFACE : "", typeof props["align"] === "string" ? (PLACE[props["align"]] ?? "") : ""].filter(Boolean).join(" ");
+}
+
+/** The items of a list prop the document wrote out whose when holds, as the view resolved them; a list from a value
+ * has no when of its own and comes whole. */
+export function present<T>(slate: SlateEngine, raw: SlatePropValue | undefined, resolved: readonly T[]): T[] {
+  if (!Array.isArray(raw) || raw.length !== resolved.length) return [...resolved];
+  return resolved.filter((_, at) => {
+    const when = whenOf(raw[at]);
+    return when === undefined || truthy(slate.evaluate(when));
+  });
 }

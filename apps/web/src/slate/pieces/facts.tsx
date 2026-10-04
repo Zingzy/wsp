@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateJson, SlatePropValue } from "@wsp/protocol";
+import type { SlateEngine } from "../engine.js";
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { SlateIcon } from "./icon.js";
-import { isSentence, str, TONE_INK, toneOf } from "./look.js";
+import { isSentence, present, str, TONE_INK, toneOf } from "./look.js";
 
 interface Fact {
   label: string;
@@ -13,9 +14,9 @@ interface Fact {
   icon: SlateJson | undefined;
 }
 
-function factsOf(value: SlateJson | undefined): Fact[] {
+function factsOf(slate: SlateEngine, raw: SlatePropValue | undefined, value: SlateJson | undefined): Fact[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap(entry => {
+  return present(slate, raw, value).flatMap(entry => {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return [];
     const shown = str(entry["value"]);
     // A pair whose value is missing is left out.
@@ -26,8 +27,8 @@ function factsOf(value: SlateJson | undefined): Fact[] {
 
 export const facts: PieceView = {
   type: "facts",
-  component: ({ id, props, slate }) => {
-    const list = factsOf(props["facts"]);
+  component: ({ id, piece, props, slate }) => {
+    const list = factsOf(slate, piece.props?.["facts"], props["facts"]);
     if (list.length === 0) return null;
     const ink = (fact: Fact) => cn(TONE_INK[toneOf(fact.tone, slate, id)], fact.mono && "font-mono text-xs tabular-nums");
     if (props["layout"] === "grid") {

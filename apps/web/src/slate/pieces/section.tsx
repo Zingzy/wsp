@@ -32,7 +32,8 @@ export const section: PieceView = {
         {refreshing ? <Refreshing className="ml-2" /> : null}
       </>
     );
-    if (props["collapsible"] !== true) {
+    // An open the agent set, literal or two-way, makes the section fold even where it did not say collapsible.
+    if (props["collapsible"] !== true && piece.props?.["open"] === undefined) {
       return (
         <section data-slate-section className="flex min-w-0 flex-col gap-2.5">
           <div className={HEAD}>{head}</div>

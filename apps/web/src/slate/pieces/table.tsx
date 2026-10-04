@@ -9,7 +9,7 @@ import { cn } from "../../lib/utils.js";
 import type { SlateEngine } from "../engine.js";
 import type { PieceViewProps, PieceView } from "../SlateView.js";
 import { truthy } from "../actions.js";
-import { isSentence, str, TONE_INK, toneOf } from "./look.js";
+import { isSentence, present, str, TONE_INK, toneOf } from "./look.js";
 import { Outcome } from "./outcome.js";
 import { usePress } from "./press.js";
 import { pressTitle } from "./button.js";
@@ -19,6 +19,9 @@ const records = (value: SlatePropValue | undefined): Template[] =>
   Array.isArray(value) ? value.filter((entry): entry is Template => entry !== null && typeof entry === "object" && !Array.isArray(entry)) : [];
 
 type Row = { item: SlateJson; index: number };
+
+/** The columns whose when holds, eight at most. */
+const shownColumns = (slate: SlateEngine, raw: SlatePropValue | undefined): Template[] => present(slate, raw, records(raw)).slice(0, 8);
 
 /** A figure as a cell shows it: a number, or text like 524 MB, 12%, $4.20 or 3 days. */
 const FIGURE = /^[-+]?[$€£]?\d[\d,]*(\.\d+)?\s?(%|[A-Za-z]{1,5}(\/s)?)?$/;
@@ -51,7 +54,7 @@ function tightWidths(slate: SlateEngine, id: string): (number | undefined)[] {
   const list = Array.isArray(items) ? items : [];
   const cap = slate.resolve(piece.props?.["rows"]);
   const shown = typeof cap === "number" ? list.slice(0, Math.max(0, Math.floor(cap))) : list;
-  return records(piece.props?.["columns"]).slice(0, 8).map(column => {
+  return shownColumns(slate, piece.props?.["columns"]).map(column => {
     const cells = shown.map((item, index) => slate.resolve(column["value"], { item, index }));
     const mono = column["mono"] === true && !cells.some(isSentence);
     if (!mono && (cells.length === 0 || !cells.every(isFigure))) return undefined;
@@ -78,7 +81,7 @@ export const table: PieceView = {
   rowScoped: ["columns", "rowActions", "key"],
   component: function TablePiece({ id, piece, props, slate, raise }) {
     const items = Array.isArray(props["items"]) ? props["items"] : [];
-    const columns = records(piece.props?.["columns"]).slice(0, 8);
+    const columns = shownColumns(slate, piece.props?.["columns"]);
     const actions = records(piece.props?.["rowActions"]).slice(0, 3);
     const cap = typeof props["rows"] === "number" ? Math.max(0, Math.floor(props["rows"])) : items.length;
     const shown = items.slice(0, cap);
