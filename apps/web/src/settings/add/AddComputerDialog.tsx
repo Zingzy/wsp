@@ -347,11 +347,11 @@ function RunningView({ place }: { place: PlaceView }) {
   const working = drawn.filter(row => row.state === "working").map(row => row.id);
   const output = useStepOutput(place.id, working.join(" "));
   const now = useNow(working.length > 0);
-  const addId = place.setup?.addId;
   const rows = drawn.map(row => {
-    if (row.state !== "working" || addId === undefined) return row;
+    if (row.state !== "working") return row;
     const said = output[row.id as PlaceSetupStep];
-    return { ...row, ms: runningMs(addId, row.id, now), ticking: true as const, ...(said === undefined ? {} : { output: said }) };
+    const ms = runningMs(place.setup, row.id, now);
+    return { ...row, ticking: true as const, ...(ms === undefined ? {} : { ms }), ...(said === undefined ? {} : { output: said }) };
   });
   const asks = rows.find(row => row.state === "needs-you" || row.state === "failed")?.id;
   const shown = useRef(false);
