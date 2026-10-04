@@ -4873,28 +4873,44 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     daemonNotes.delete(entry.record.id);
   };
 
+  /** The writes of each machine's roots file, one at a time: each writes the whole file, so two at once can land in
+   * either order. */
+  const rootsWrites = new Map<string, Promise<unknown>>();
+  const rootsWrite = <T>(machineId: string, work: () => Promise<T>): Promise<T> => {
+    const done = (rootsWrites.get(machineId) ?? Promise.resolve()).then(work);
+    const tail = done.catch(() => {});
+    rootsWrites.set(machineId, tail);
+    void tail.then(() => {
+      if (rootsWrites.get(machineId) === tail) rootsWrites.delete(machineId);
+    });
+    return done;
+  };
+
   /** The folders the record says this machine's daemon may browse beside its home. Derived state: the record is the
    * one place, and the file follows it on every connect, so a project that landed before the daemon read that file
-   * is browsable without a second import. Non-fatal: an update or a turn must not fail on it. */
-  const writeDaemonRoots = async (entry: LiveWorkspace): Promise<void> => {
-    // A host that has closed writes nothing more on a machine: the boot fires this at every running workspace
-    // without waiting for it, and a write that landed after the close would be this process touching a computer
-    // it has let go of.
-    if (closed) return;
-    // And nothing is written inside a workspace whose computer serves its daemon: that daemon reads the path off
-    // the frame and browses the workspace's own rootfs, so a list of folders inside it says nothing to anybody.
-    if (servedByItsComputer(entry) !== undefined) return;
-    // Every checkout the daemon serving this machine has to browse, not this workspace's alone: the file is that
-    // daemon's one list and is written whole, and on the computer the host runs on one daemon serves every
-    // workspace here, each in a copy of the project folder at a path of its own.
-    const sharing = [...live.values()].filter(e => e.record.machineId === entry.record.machineId);
-    const dests = [...new Set(sharing.flatMap(e => [projectHeld(e.record.project).path, checkoutOf(e.record)]))];
-    // Through the kind, which is what knows where that machine's daemon looks; the import road writes the same
-    // file through the same call, so a folder is browsable at the same path whichever of the two got there first.
-    await moduleOf(entry.record.kind)
-      .roots(entry, dests)
-      .catch((e: unknown) => console.warn(`browsable folders for ${entry.record.id} not written on ${entry.machine.id}: ${(e instanceof Error ? e.message : String(e)).slice(-200)}`));
-  };
+   * is browsable without a second import. Non-fatal: an update or a turn must not fail on it. `entry` names the
+   * machine and may be a record already gone from it, whose folders the write then leaves out. */
+  const writeDaemonRoots = (entry: LiveWorkspace): Promise<void> =>
+    rootsWrite(entry.record.machineId, async () => {
+      // A host that has closed writes nothing more on a machine: the boot fires this at every running workspace
+      // without waiting for it, and a write that landed after the close would be this process touching a computer
+      // it has let go of.
+      if (closed) return;
+      // And nothing is written inside a workspace whose computer serves its daemon: that daemon reads the path off
+      // the frame and browses the workspace's own rootfs, so a list of folders inside it says nothing to anybody.
+      if (servedByItsComputer(entry) !== undefined) return;
+      // Every checkout the daemon serving this machine has to browse, not this workspace's alone: the file is that
+      // daemon's one list and is written whole, and on the computer the host runs on one daemon serves every
+      // workspace here, each in a copy of the project folder at a path of its own. Read once the write before has
+      // landed, so a write never puts back a list older than the one already there.
+      const sharing = [...live.values()].filter(e => e.record.machineId === entry.record.machineId);
+      const dests = [...new Set(sharing.flatMap(e => [projectHeld(e.record.project).path, checkoutOf(e.record)]))];
+      // Through the kind, which is what knows where that machine's daemon looks; the import road writes the same
+      // file through the same call, so a folder is browsable at the same path whichever of the two got there first.
+      await moduleOf(entry.record.kind)
+        .roots(entry, dests)
+        .catch((e: unknown) => console.warn(`browsable folders for ${entry.record.id} not written on ${entry.machine.id}: ${(e instanceof Error ? e.message : String(e)).slice(-200)}`));
+    });
 
   /** Settles once no turn is running on the workspace: at once when none is, else when the last one ends. Replacing
    * the daemon ends the ptys under it, so the work a person or an agent started finishes first. */
@@ -5512,6 +5528,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         .catch((e: unknown) => console.warn(`${going.record.name}'s machine ${going.machine.id} kept something of this host's: ${e instanceof Error ? e.message : String(e)}`));
     }
     live.delete(id);
+    // A folder on this computer goes from its daemon's roots file with its record, since the computer and the
+    // folder both stay; a fork's machine goes with its record and takes its file along.
+    if (going !== undefined && copiesFolder(going.record.kind)) await writeDaemonRoots(going);
     revivedAt.delete(id);
     unreadAt.delete(id);
     unreached.delete(id);
@@ -6562,9 +6581,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     attach(record, machine);
     await persist(record);
-    // A worktree under the host's own folder sits outside the daemon's home root on a host serving another state
-    // file, so the daemon is told about it before a pane asks; the project folder is listed already.
-    if (worktree !== undefined) await writeDaemonRoots(live.get(id)!);
+    // A project folder outside the person's home, or a worktree under the host's own folder, is outside the daemon's
+    // home root, and the host's start lists only the records it found, so the file is written before a turn's snapshot.
+    await writeDaemonRoots(live.get(id)!);
     if (worktree?.made === true) armSweep();
     bus.emit({ type: "workspace.created", workspace: view(record) });
     return live.get(id)!;
@@ -11950,7 +11969,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const landed = await kind.import(entry, o, report);
         // The workspace's own project is its record's; a folder landed beside it is browsable too, and neither is
         // written onto the record, which names one project and nothing else.
-        await kind.roots(entry, [...new Set([projectHeld(entry.record.project).path, landed.result.dest])]);
+        await rootsWrite(entry.record.machineId, () => kind.roots(entry, [...new Set([projectHeld(entry.record.project).path, landed.result.dest])]));
         report("done", landed.done);
         return landed.result;
       } catch (e) {

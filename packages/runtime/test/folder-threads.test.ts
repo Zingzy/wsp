@@ -713,6 +713,59 @@ async function onGitHubHere(o: { sub?: string } = {}) {
   return { ...h, folder, author, project, url, bare };
 }
 
+describe("a project folder outside the daemon's home", () => {
+  it("is in the roots file by its first turn, which ends with the card of what changed", async () => {
+    const h = here();
+    let snapshots = 0;
+    h.daemon.answers["git.snapshot"] = f => {
+      if (!inRoots(h.roots, String(f["cwd"]))) return { id: 1, ok: false, code: "outside-root", error: `${String(f["cwd"])} resolves outside the workspace root` } as DaemonResponse;
+      snapshots += 1;
+      return { id: 1, ok: true, commit: String(snapshots).repeat(40) } as DaemonResponse;
+    };
+    h.daemon.answers["git.turn"] = () => ({ id: 1, ok: true, base: null, truncated: false, moved: [], files: [{ path: "hello.txt", kind: "added", additions: 1, deletions: 0, patch: "" }] }) as DaemonResponse;
+    const cards: unknown[] = [];
+    h.rt.events.on("*", e => {
+      if (e.type === "session.changes") cards.push(e);
+    });
+    const folder = repo();
+    const project = await h.rt.projects.add({ source: folder });
+    const at = await h.rt.workspaces.folderFor({ project: project.id });
+    await (await h.rt.sessions.start(at.workspace.id, { prompt: "write hello.txt" })).finished;
+    await until(() => cards.length > 0);
+    expect(cards).toEqual([expect.objectContaining({ from: "1".repeat(40), to: "2".repeat(40), files: [expect.objectContaining({ path: "hello.txt" })] })]);
+  });
+
+  it("is in the roots file beside every other folder whose record was made at the same time", async () => {
+    // The records are made 10 ms apart and each write of the roots file is held before it runs, the first longest,
+    // so a write that read fewer records lands after one that read more unless the writes go one at a time.
+    const backend = new LocalBackend({ root: scratch() });
+    const machine = await backend.get();
+    const exec = machine.exec.bind(machine);
+    let writes = 0;
+    machine.exec = async (cmd, o) => {
+      if (cmd.includes(".next")) await new Promise(r => setTimeout(r, (8 - writes++) * 15));
+      return exec(cmd, o);
+    };
+    const { rt, roots } = here({ backend });
+    const folders = Array.from({ length: 8 }, () => repo());
+    const projects = await Promise.all(folders.map(source => rt.projects.add({ source })));
+    await Promise.all(projects.map((p, i) => new Promise(r => setTimeout(r, i * 10)).then(() => rt.workspaces.folderFor({ project: p.id }))));
+    expect(readFileSync(roots, "utf8").split("\n").filter(Boolean).sort()).toEqual([...folders].sort());
+  });
+
+  it("leaves the roots file once its project is removed, and the other projects' folders stay", async () => {
+    const { rt, roots } = here();
+    const [kept, removed] = [repo(), repo()];
+    const keptProject = await rt.projects.add({ source: kept });
+    const removedProject = await rt.projects.add({ source: removed });
+    await rt.workspaces.folderFor({ project: keptProject.id });
+    await rt.workspaces.folderFor({ project: removedProject.id });
+    expect(readFileSync(roots, "utf8").split("\n").filter(Boolean).sort()).toEqual([kept, removed].sort());
+    await rt.projects.remove(removedProject.id);
+    expect(readFileSync(roots, "utf8").split("\n").filter(Boolean)).toEqual([kept]);
+  });
+});
+
 describe("a pull request's head", () => {
   it("of a merged pull request whose branch was deleted is still fetched, off the pull request's own head", async () => {
     const { rt, author, url, bare } = await onGitHubHere();
