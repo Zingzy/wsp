@@ -3249,6 +3249,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const standing = [...live.values()].map(e => ({ ...e.record, provider: providerOf(e.record) }));
           return runningOnPlace(placeId, rows, standing, foldThreads([...sessions.values()].map(s => s.view)));
         },
+        signInLine: (placeId, agent) => agentsRead.signInLine({ placeId }, { agent }),
         // The app's own sign-in road on that computer, read as a setup's row waiting on the person.
         signIn: async (placeId, agent, emit) => {
           const handle = await agentsRead.signIn({ placeId }, { agent }, emit);

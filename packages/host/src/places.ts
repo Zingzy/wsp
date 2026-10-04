@@ -440,6 +440,9 @@ export const placeNoLoginsLine = (name: string): string =>
 export const boxSignedInLine = (name: string, agent: string, detail?: string): string =>
   `${agentName(agent)} is signed in on ${name}${detail === undefined ? "" : ` (${detail})`}${sharedOn(agent) === undefined ? "." : "; every workspace there shares that login."}`;
 
+/** Said before a sign-in by hand starts over a login that stands there, which it replaces. */
+export const boxReplacesLine = (name: string, agent: string): string => `${agentName(agent)} is signed in on ${name}; this sign-in replaces that login.`;
+
 export const boxNotSignedInLine = (name: string, agent: string, said?: string): string =>
   `${agentName(agent)} is not signed in on ${name}${said === undefined ? "" : `: ${said}`}. wsp add ${name} --sign-in ${agent} runs it again.`;
 
@@ -1716,6 +1719,7 @@ async function runBoxSignIn(io: CliIO, client: HostClient, place: PlaceView, age
     io.error(placeNoLoginsLine(place.name));
     return false;
   }
+  if (place.signIns?.[agent] === "signed-in") io.log(boxReplacesLine(place.name, agent));
   // The host plans the line: a shared login at that computer's logins folder, any other as the owner of its home.
   const { line } = await client.request<{ line: unknown }>("agents.signInLine", { target: { placeId: place.id }, agent });
   const road = await deps.placeLink(client, place.id);

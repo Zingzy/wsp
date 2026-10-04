@@ -29,11 +29,13 @@ import {
   setupRowFix,
   placeProvisionPaths,
   placeProvisioningLine,
+  EXEC_DEADLINE_EXIT,
   placeSyncingLine,
   placeWord,
   probePath,
   DAEMON_VERSION,
   SIGN_IN_WAIT_MS,
+  SIGNED_IN_THERE,
   readJoinToken,
   type AgentsSignInEvent,
   type PlaceProvisionRow,
@@ -44,6 +46,7 @@ import {
   type PlaceReport,
   type SeedPlan,
 } from "@wsp/protocol";
+import { loginSignIn } from "@wsp/catalog";
 import type { EngineStep, ProvisionPlan } from "@wsp/engine";
 import type { AgentsActs, SignInRun } from "../src/agents-read.js";
 import type { RecipeShelf, SeedWiring } from "../src/runtime.js";
@@ -120,11 +123,16 @@ function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number
       const input = typeof frame["stdin"] === "string" ? Buffer.from(frame["stdin"], "base64").toString("utf8") : "";
       const said = answer?.(cmd);
       if (said !== undefined) return void c.say({ id: frame["id"], ok: true, exitCode: said.exitCode, stdout: said.stdout ?? "", stderr: "", truncated: false });
-      const gh = cmd.includes("gh auth status") && input.includes("GH_TOKEN=") ? "github.com\n  - Logged in to github.com account dev (GH_TOKEN)\n  - Token scopes: 'gist', 'read:org', 'repo'\n" : "";
+      // gh with no token on its input reads its own login there, and this computer has none.
+      if (cmd.includes("gh auth status") && !input.includes("GH_TOKEN=")) return void c.say({ id: frame["id"], ok: true, exitCode: 1, stdout: "You are not logged into any GitHub hosts. To log in, run: gh auth login\n", stderr: "", truncated: false });
+      const gh = cmd.includes("gh auth status") ? "github.com\n  - Logged in to github.com account dev (GH_TOKEN)\n  - Token scopes: 'gist', 'read:org', 'repo'\n" : "";
       c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: gh, stderr: "", truncated: false });
     });
   };
 }
+
+/** Codex's own status on a computer where it is signed in. */
+const codexIn = (cmd: string): { exitCode: number; stdout: string } | undefined => (cmd.includes("codex login status") ? { exitCode: 0, stdout: "Logged in using ChatGPT\n" } : undefined);
 
 /** What a computer on this host's own daemon reports, so no row reads behind for the daemon. */
 const CURRENT = report("spoo", { daemonVersion: DAEMON_VERSION });
@@ -193,13 +201,17 @@ function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>
   return { wired, ran, floors, picked, undone, release: () => release(), let: (step: EngineStep) => each.get(step)?.let(), arm };
 }
 
-/** Sign-ins as the app's own road runs them, each waiting on the test: the page and the code, then the end. */
-function signIns() {
+/** Sign-ins as the app's own road runs them, each waiting on the test: the page and the code, then the end. The
+ * line carries the catalog's status command, as the host plans it, unless `status` is false. */
+function signIns(o: { status?: boolean } = {}) {
   const started: string[] = [];
   const stopped: string[] = [];
   const ends = new Map<string, (e: Pick<AgentsSignInEvent, "state" | "said">) => void>();
   const acts: AgentsActs = {
-    signInLine: async () => ({ command: "codex login" }),
+    signInLine: async (_on, ask) => {
+      const status = o.status === false ? undefined : loginSignIn(ask.agent)?.status?.command;
+      return { command: `${ask.agent} login`, ...(status !== undefined ? { status } : {}) };
+    },
     signIn: async (_on, ask) => async (run: SignInRun) => {
       started.push(ask.agent);
       void run.stop.then(() => stopped.push(ask.agent));
@@ -259,8 +271,8 @@ async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; 
 }
 
 /** The computer's own daemon dialling this host again with the key it joined with, answering its link as before. */
-async function dialsBack(hostKey: PlaceKeyPair, placeId: string, pair: PlaceKeyPair, cmds: string[] = []): Promise<void> {
-  const { client, proved } = await relinkAt(srv!.port, hostKey, placeId, pair, CURRENT, answersFor(cmds));
+async function dialsBack(hostKey: PlaceKeyPair, placeId: string, pair: PlaceKeyPair, cmds: string[] = [], answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined): Promise<void> {
+  const { client, proved } = await relinkAt(srv!.port, hostKey, placeId, pair, CURRENT, answersFor(cmds, answer));
   expect(proved.ok, String(proved["error"])).toBe(true);
   sockets.push(client.ws);
 }
@@ -498,7 +510,8 @@ describe("a computer added with its picks", () => {
     const before = (a: PlaceSetupStep, b: PlaceSetupStep): boolean => lines.indexOf(a) < lines.indexOf(b);
     expect([before("floor", "agents"), before("agents", "clis"), before("clis", "mcp"), before("mcp", "plugins"), before("github", "folders"), before("folders", "context")]).toEqual([true, true, true, true, true, true]);
     expect(row.setup!.steps.every(l => typeof l.ms === "number")).toBe(true);
-    expect(row.applied?.rows.map(r => [r.id, r.step, r.outcome])).toEqual([
+    // The steps after the agents run side by side, so their rows land in whatever order they end.
+    expect(row.applied?.rows.map(r => [r.id, r.step, r.outcome]).sort()).toEqual([
       ["agents/claude", "agents", "installed"],
       ["signins/claude", "signins", "present"],
       ["tools/brew/gh", "clis", "installed"],
@@ -559,6 +572,92 @@ describe("a computer added with its picks", () => {
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     expect((await rowOf(place.id)).signIns).toEqual({ claude: "vault-key", codex: "signed-in" });
     expect(runtime!.places!.signInsAt(place.id)).toEqual({ claude: "vault-key", codex: "signed-in" });
+  });
+
+  it("starts no sign-in for an agent whose own status there says signed in, though the daemon's last list names no login", async () => {
+    const s = signIns();
+    const cmds: string[] = [];
+    const { frames } = await hosting({ provision: provisioner().wired, acts: s.acts, cmds, answer: codexIn, report: report("spoo", { daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], logins: [] }) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(s.started).toEqual([]);
+    expect(cmds.filter(c => c.includes("codex login status"))).toHaveLength(1);
+    const row = await rowOf(place.id);
+    expect(row.setup?.waiting).toEqual([]);
+    expect(row.applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "present", note: SIGNED_IN_THERE, step: "signins" });
+    expect(ended(frames).map(f => f.end)).toEqual(["ready"]);
+    // A sign-in the person asks for by hand is the one road that may replace that login.
+    await runtime!.agents.signIn({ placeId: place.id }, { agent: "codex" }, () => {});
+    expect(s.started).toEqual(["codex"]);
+  });
+
+  it("starts the sign-in where the agent's own status says signed out, though the daemon's last list still names its login", async () => {
+    const s = signIns();
+    await hosting({ provision: provisioner().wired, acts: s.acts, report: report("spoo", { daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], logins: ["codex/auth.json"] }) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.url !== undefined) === true);
+    expect(s.started).toEqual(["codex"]);
+  });
+
+  it("reads the daemon's logins list where the agent's status cannot be read there", async () => {
+    const s = signIns({ status: false });
+    await hosting({ provision: provisioner().wired, acts: s.acts, report: report("spoo", { daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], logins: ["codex/auth.json"] }) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(s.started).toEqual([]);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "present", note: SIGNED_IN_THERE });
+  });
+
+  it("reads a status cut at its deadline as unread, never as signed out, and starts no sign-in over the listed login", async () => {
+    const s = signIns();
+    await hosting({ provision: provisioner().wired, acts: s.acts, answer: cmd => (cmd.includes("codex login status") ? { exitCode: EXEC_DEADLINE_EXIT, stdout: "" } : undefined), report: report("spoo", { daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], logins: ["codex/auth.json"] }) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(s.started).toEqual([]);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "present", note: SIGNED_IN_THERE });
+  });
+
+  it("starts no sign-in for an agent whose login is no shared file, Gemini, where its status says signed in", async () => {
+    const s = signIns();
+    await hosting({ provision: provisioner().wired, acts: s.acts, answer: cmd => (cmd.includes("oauth_creds.json") ? { exitCode: 0, stdout: "oauth_creds.json\n" } : undefined), report: report("spoo", { daemonVersion: DAEMON_VERSION, agents: ["claude", "gemini"], logins: [] }) });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" }, gemini: { signin: "machine" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(s.started).toEqual([]);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/gemini")).toMatchObject({ outcome: "present", note: SIGNED_IN_THERE, step: "signins" });
+  });
+
+  it("starts no second sign-in when the setup runs again after the person signed in during the first", async () => {
+    const s = signIns();
+    let signedIn = false;
+    await hosting({ provision: provisioner().wired, acts: s.acts, answer: cmd => (signedIn ? codexIn(cmd) : undefined), report: report("spoo", { daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], logins: [] }) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.url !== undefined) === true);
+    signedIn = true;
+    s.end("codex", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).setup?.waiting.length === 0);
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const again = await runtime!.places!.setUp(place.id, {});
+    await until(async () => (await rowOf(place.id)).setup?.addId === again.addId && (await rowOf(place.id)).setup?.state === "done");
+    expect(s.started).toEqual(["codex"]);
+    expect((await rowOf(place.id)).setup?.waiting).toEqual([]);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "present", note: SIGNED_IN_THERE });
+  });
+
+  it("starts no GitHub sign-in where gh is signed in on that computer already, and a private folder clones", async () => {
+    const s = signIns();
+    const repo = privateRepo();
+    const cmds: string[] = [];
+    await hosting({ local: true, provision: provisioner().wired, acts: s.acts, cmds, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : cmd.includes("gh auth status") ? { exitCode: 0, stdout: "github.com\n  - Logged in to github.com account dev (keyring)\n" } : undefined) });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: repo, keep: [] } }, configs: { github: { signin: "machine" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(s.started).toEqual([]);
+    const row = await rowOf(place.id);
+    expect(row.setup?.waiting).toEqual([]);
+    expect(row.applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "present", note: SIGNED_IN_THERE, step: "github" });
+    expect(row.applied?.rows.find(r => r.id === "folders/app")?.note).not.toBe(NEEDS_GITHUB_LINE);
+    expect(row.applied?.rows.find(r => r.id === "folders/app")?.note).not.toBe(WAITS_ON_GITHUB_LINE);
   });
 
   it("stops at a floor that failed, says why, and runs nothing after it", async () => {
@@ -951,6 +1050,26 @@ describe("a host that stops in the middle of a setup", () => {
     expect((await rowOf(place.id)).setup?.waiting).toEqual([expect.objectContaining({ row: "signins/codex", url: "https://auth.example/codex/1", code: "CODE-1" })]);
   });
 
+  it("resumes a waiting sign-in the person finished by hand between runs as already there, with no second start", async () => {
+    const store = memoryStore();
+    const s1 = signIns();
+    const first = await hosting({ provision: provisioner().wired, store, acts: s1.acts });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code === "CODE-1") === true);
+    const held = (await store.get("places", place.id)) as PlaceRecord;
+    const steps = held.setup!.steps.filter(l => ["floor", "agents", "signins"].includes(l.step));
+    await store.put("places", place.id, { ...held, setup: { ...held.setup!, state: "running", steps, finishedAt: undefined } });
+    await stopHost();
+    const s2 = signIns();
+    await hosting({ provision: provisioner().wired, store, acts: s2.acts, hostKey: first.hostKey });
+    await dialsBack(first.hostKey, place.id, first.joined[0]!.pair, [], codexIn);
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(s2.started).toEqual([]);
+    expect((await rowOf(place.id)).setup?.waiting).toEqual([]);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "present", note: SIGNED_IN_THERE, step: "signins" });
+  });
+
   it("hands a sign-in still waiting to the retry that takes it over, so the old run writes nothing once it lands", async () => {
     const s = signIns();
     const { frames } = await hosting({ provision: provisioner().wired, acts: s.acts });
@@ -1254,6 +1373,20 @@ describe("a computer that follows a recipe", () => {
     await until(async () => (await rowOf(place.id)).applied?.hash === "h9");
     expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "folders/app")?.note).not.toBe(NEEDS_GITHUB_LINE);
     expect(cmds.some(c => c.includes("ls-remote"))).toBe(false);
+  });
+
+  it("starts no sign-in for an agent a sync adds whose own status there says signed in, and lands its row as already there", async () => {
+    const s = signIns();
+    const p = provisioner();
+    const r = shelf(V1, ITEMS);
+    await hosting({ provision: p.wired, recipes: r.recipes, acts: s.acts, answer: codexIn, report: report("spoo", { daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], logins: [] }) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: V1, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    r.move({ ...V1, agents: { ...V1.agents, codex: { signin: "machine" } } }, ITEMS, "h11");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h11");
+    expect(s.started).toEqual([]);
+    expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "signins/codex")).toMatchObject({ outcome: "present", note: SIGNED_IN_THERE, step: "signins" });
   });
 
   it("lands a folder a sync adds as a project on that computer", async () => {
