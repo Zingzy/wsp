@@ -455,6 +455,46 @@ pub(crate) fn sweep_workspace_profile(profile: &Path, read: &dyn Fn(&str) -> Str
     std::fs::remove_file(profile).ok().map(|()| profile.to_string_lossy().into_owned())
 }
 
+/// Takes wsp's install folder off this computer: every link in the links folder whose own target is under the
+/// prefix, then the prefix whole. A link is read, never followed, so a command of the computer's own there and a
+/// link pointing anywhere else stay; a prefix that is itself a link stays too, since what it points at is not
+/// wsp's. The host's own leave takes the same two by the same rule.
+pub(crate) fn sweep_tool_prefix(prefix: &Path, links: &Path) -> Vec<String> {
+    let Ok(meta) = std::fs::symlink_metadata(prefix) else { return Vec::new() };
+    if !meta.is_dir() {
+        return vec![words::place_kept_for_link(prefix.to_string_lossy())];
+    }
+    let mut removed = Vec::new();
+    for entry in std::fs::read_dir(links).into_iter().flatten().flatten() {
+        let link = entry.path();
+        let Ok(target) = std::fs::read_link(&link) else { continue };
+        if lexical(&links.join(target)).starts_with(prefix) && std::fs::remove_file(&link).is_ok() {
+            removed.push(link.to_string_lossy().into_owned());
+        }
+    }
+    if std::fs::remove_dir_all(prefix).is_ok() {
+        removed.push(prefix.to_string_lossy().into_owned());
+    }
+    removed
+}
+
+/// A path with its `.` and `..` read off by name alone, which is how a link's target is read against the folder it
+/// sits in without following anything.
+fn lexical(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// What one removal under the home did, which is what the leave's lines say.
 enum Removed {
     Gone,
@@ -1322,6 +1362,51 @@ mod tests {
         assert!(std::fs::symlink_metadata(at.bin_dir.join("xdg-open")).is_err());
         assert!(work.exists());
         assert!(sweep_place_home(home.path(), &|_| String::new()).is_empty());
+    }
+
+    #[test]
+    fn wsps_install_folder_goes_with_every_command_linked_out_of_it_and_nothing_else_there() {
+        let root = tempfile::tempdir().unwrap();
+        let prefix = root.path().join("opt-wsp");
+        let links = root.path().join("usr-local-bin");
+        std::fs::create_dir_all(prefix.join("uv/tools/ruff/bin")).unwrap();
+        std::fs::write(prefix.join("uv/tools/ruff/bin/ruff"), "#!/bin/sh\n").unwrap();
+        std::fs::create_dir_all(&links).unwrap();
+        std::os::unix::fs::symlink(prefix.join("uv/tools/ruff/bin/ruff"), links.join("ruff")).unwrap();
+        // A relative link reads by where it sits, and one whose target is already gone still points under it.
+        std::os::unix::fs::symlink("../opt-wsp/pnpm/bin/tsc", links.join("tsc")).unwrap();
+        // The computer's own: a file, a link elsewhere, and a folder that only starts like the prefix.
+        std::fs::write(links.join("jq"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink("/usr/bin/env", links.join("env2")).unwrap();
+        let old = root.path().join("opt-wsp-old");
+        std::fs::create_dir_all(&old).unwrap();
+        std::os::unix::fs::symlink(&old, links.join("old")).unwrap();
+        let swept = sweep_tool_prefix(&prefix, &links);
+        let said = |p: PathBuf| p.to_string_lossy().into_owned();
+        let mut taken = swept.clone();
+        taken.sort();
+        let mut wanted = vec![said(links.join("ruff")), said(links.join("tsc")), said(prefix.clone())];
+        wanted.sort();
+        assert_eq!(taken, wanted);
+        assert_eq!(swept.last(), Some(&said(prefix.clone())), "the folder goes after the links into it");
+        assert!(!prefix.exists());
+        let mut left: Vec<_> = std::fs::read_dir(&links).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, ["env2", "jq", "old"]);
+        assert!(old.exists());
+        assert!(sweep_tool_prefix(&prefix, &links).is_empty());
+    }
+
+    #[test]
+    fn an_install_folder_that_is_a_link_stays_and_is_said() {
+        let root = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::fs::write(elsewhere.path().join("keep"), "theirs").unwrap();
+        let prefix = root.path().join("opt-wsp");
+        std::os::unix::fs::symlink(elsewhere.path(), &prefix).unwrap();
+        let swept = sweep_tool_prefix(&prefix, &root.path().join("usr-local-bin"));
+        assert_eq!(swept, [words::place_kept_for_link(prefix.to_string_lossy())]);
+        assert!(elsewhere.path().join("keep").exists());
     }
 
     #[test]

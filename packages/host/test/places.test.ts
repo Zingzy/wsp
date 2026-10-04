@@ -10,7 +10,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sig
 import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, posix, resolve } from "node:path";
+import { basename, dirname, join, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
@@ -94,6 +94,7 @@ import {
   placeUpdateScript,
   placeUpdater,
   placeLeaver,
+  placeRunner,
   placeLeaveFailedLine,
   updatedLines,
   SIGN_IN_FLAGS_REFUSAL,
@@ -120,11 +121,14 @@ runsFromItsOwnFolder();
 /** The leave as a case runs it: the workspace profile it takes off is one under the case's own home unless the case
  * names another, since a suite run as root otherwise takes the machine's own profile off it. */
 const sweepPlace = (opts: PlaceSweepOptions = {}): ReturnType<typeof sweepPlaceHere> =>
-  sweepPlaceHere({ ...(opts.home === undefined ? {} : { apparmorProfile: join(opts.home, "etc-apparmor.d", "wsp-workspace") }), ...opts });
+  sweepPlaceHere({ ...(opts.home === undefined ? {} : { apparmorProfile: join(opts.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(opts.home) }), ...opts });
+
+/** wsp's install folder and the folder its commands are linked into, under a case's own home, for the same reason. */
+const toolsUnder = (home: string): { prefix: string; links: string } => ({ prefix: join(home, "opt-wsp"), links: join(home, "usr-local-bin") });
 
 /** `wsp leave` as a case runs it, with the same profile under the case's own home. */
 const leaveCommand = (io: Parameters<typeof leaveCommandHere>[0], args: readonly string[], deps: NonNullable<Parameters<typeof leaveCommandHere>[2]>): ReturnType<typeof leaveCommandHere> =>
-  leaveCommandHere(io, args, { apparmorProfile: join(deps.home, "etc-apparmor.d", "wsp-workspace"), ...deps });
+  leaveCommandHere(io, args, { apparmorProfile: join(deps.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(deps.home), ...deps });
 
 /** The machine's own profile as the file found it, which every case leaves exactly as it was. */
 const MACHINES_PROFILE = existsSync(WSP_WORKSPACE_APPARMOR_PATH) ? readFileSync(WSP_WORKSPACE_APPARMOR_PATH) : undefined;
@@ -1248,6 +1252,42 @@ describe("taking wsp off the computer it is typed on", () => {
     expect(swept.removed).toContain(profile);
   });
 
+  it("takes wsp's install folder and every command linked out of it where the leave runs as root, and nothing else there", async () => {
+    const home = tmp("leave-tools");
+    const tools = toolsUnder(home);
+    mkdirSync(join(tools.prefix, "uv", "tools", "ruff", "bin"), { recursive: true });
+    writeFileSync(join(tools.prefix, "uv", "tools", "ruff", "bin", "ruff"), "#!/bin/sh\n");
+    mkdirSync(join(tools.prefix, "pnpm", "bin"), { recursive: true });
+    mkdirSync(tools.links);
+    symlinkSync(join(tools.prefix, "uv", "tools", "ruff", "bin", "ruff"), join(tools.links, "ruff"));
+    // A relative link reads by where it sits, and one wsp's folder named already gone still points under it.
+    symlinkSync(relative(tools.links, join(tools.prefix, "pnpm", "bin", "tsc")), join(tools.links, "tsc"));
+    // The computer's own: a file, a link elsewhere, and a name that only starts like the folder.
+    writeFileSync(join(tools.links, "jq"), "#!/bin/sh\n");
+    symlinkSync("/usr/bin/env", join(tools.links, "env2"));
+    mkdirSync(`${tools.prefix}-old`);
+    symlinkSync(`${tools.prefix}-old`, join(tools.links, "old"));
+    const other = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, uid: 1000 });
+    expect(existsSync(tools.prefix)).toBe(true);
+    expect(other.removed).not.toContain(tools.prefix);
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, uid: 0 });
+    expect(swept.removed).toEqual(expect.arrayContaining([join(tools.links, "ruff"), join(tools.links, "tsc"), tools.prefix]));
+    expect(existsSync(tools.prefix)).toBe(false);
+    expect(readdirSync(tools.links).sort()).toEqual(["env2", "jq", "old"]);
+    expect(existsSync(`${tools.prefix}-old`)).toBe(true);
+  });
+
+  it("leaves wsp's install folder where it is a link, and says so", async () => {
+    const home = tmp("leave-tools-link");
+    const tools = toolsUnder(home);
+    const elsewhere = tmp("leave-tools-elsewhere");
+    writeFileSync(join(elsewhere, "keep"), "theirs");
+    symlinkSync(elsewhere, tools.prefix);
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, uid: 0 });
+    expect(swept.removed).toContain(placeKeptForLinkLine(tools.prefix));
+    expect(existsSync(join(elsewhere, "keep"))).toBe(true);
+  });
+
   it("says what the manager answered when the stop refused, and still takes the file", async () => {
     const home = tmp("leave-stop-refused");
     const manager = unitsUnder(home);
@@ -1669,7 +1709,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
 
   /** A box that takes the deploy and answers the word it is told to say about its own chip, recording every script
    * run on it and every file landed there. `arch` is what its `uname -m` answered on the read that adopted it. */
-  function fakeBox(arch: string | undefined, shell = "bash", box: { reaches?: (url: string) => boolean; holds?: string; dials?: string; proxied?: boolean; home?: string; checks?: string[] } = {}): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; stage: PlaceStaging } {
+  function fakeBox(arch: string | undefined, shell = "bash", box: { reaches?: (url: string) => boolean; holds?: string; dials?: string; proxied?: boolean; home?: string; checks?: string[] } = {}): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; times: Record<string, number | undefined>; stage: PlaceStaging } {
     const ran: string[] = [];
     const landed: string[] = [];
     const stages: string[] = [];
@@ -1701,7 +1741,18 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       offeredKeyFor: async () => ({ key: BOX_KEY }),
       knownHostsEntry: async () => ({ file: "/home/maya/.ssh/known_hosts", target: "box" }),
     };
-    return { backend, ran, landed, stages, stage: (step, state, note) => stages.push(`${step} ${state}${note === undefined ? "" : ` (${note})`}`) };
+    const times: Record<string, number | undefined> = {};
+    return {
+      backend,
+      ran,
+      landed,
+      stages,
+      times,
+      stage: (step, state, note, _placeId, ms) => {
+        stages.push(`${step} ${state}${note === undefined ? "" : ` (${note})`}`);
+        if (state !== "running") times[step] = ms;
+      },
+    };
   }
 
   /** The key the box's ssh answers with, and the key this computer's client already holds for it. */
@@ -1749,6 +1800,13 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       "disk done (20 GB free)",
       "check done (root, systemd, cgroup v2, 20 GB free)",
     ]);
+  });
+
+  it("says how long each step took as it ends: the checks as the box timed them, every other step as this host did", async () => {
+    const box = fakeBox("x86_64", "bash", { checks: ["uid 0", "ms root 2", "systemd yes", "cgroup2 yes", "ms system 3", `free ${20 * 1024 ** 3}`, "ms disk 14"] });
+    await placeInstaller({ backend: box.backend as never, ...assets(tmp("check-times"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage);
+    expect([box.times["root"], box.times["system"], box.times["disk"]]).toEqual([2, 3, 14]);
+    for (const step of ["connect", "check", "reach", "wsp"]) expect(box.times[step], step).toEqual(expect.any(Number));
   });
 
   it("fails the one check a box does not pass on its own row, with the sentence that names the fix", async () => {
@@ -3619,6 +3677,21 @@ describe("the leave over the ssh road, which a remove takes wherever this host h
     expect(asked[0]!.script).not.toContain("rm ");
     const at = placeDaemonPaths("/home/maya");
     for (const path of [at.placeFile, at.placeKey, at.tokenPath, at.inbox]) expect(asked[0]!.script).not.toContain(path);
+  });
+
+  it("runs one script over the same login for a remove that finds no link up, and says ssh's own line where the login would not stand", async () => {
+    const asked: { reach: SshReach; script: string; timeoutMs?: number }[] = [];
+    const transport: SshTransport = async (reach, script, o) => {
+      asked.push({ reach, script, ...(o?.timeoutMs !== undefined ? { timeoutMs: o.timeoutMs } : {}) });
+      return { exitCode: 1, stdout: "", stderr: "Plugin is in use" };
+    };
+    const said = await placeRunner({ transport })({ ssh: "root@65.21.4.12:2222", keyPath: "/Users/lena/.ssh/hetzner" }, "claude plugin uninstall 'x@y'", 5_000);
+    expect(said).toEqual({ exitCode: 1, stdout: "", stderr: "Plugin is in use" });
+    expect(asked[0]!.reach).toMatchObject({ user: "root", host: "65.21.4.12", port: 2222, keyPath: "/Users/lena/.ssh/hetzner" });
+    expect(asked[0]!.script).toBe(`bash -c ${shellQuote("claude plugin uninstall 'x@y'")}`);
+    expect(asked[0]!.timeoutMs).toBe(5_000);
+    const refused = placeRunner({ transport: async () => ({ exitCode: 255, stdout: "", stderr: "ssh: connect to host 65.21.4.12 port 2222: Connection refused" }) });
+    await expect(refused({ ssh: "root@65.21.4.12:2222" }, "true", 5_000)).rejects.toBeInstanceOf(PlaceLoginRefusedError);
   });
 
   it("reads back what that leave said it took, and none of the sentences a person reads around them", async () => {

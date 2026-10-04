@@ -6,15 +6,15 @@
 // computer's own row.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, rmSync, rmdirSync, statfsSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, rmdirSync, statfsSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { homedir, arch as osArch, platform, release, type as osType, uptime as upSeconds, userInfo } from "node:os";
 import { spawnRun } from "@wsp/collect";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS, configSum } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, landedFilesScript, writeConfigHere, localShape, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
-import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOwnedPaths, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
-import { dirname, join, relative, sep } from "node:path";
+import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOwnedPaths, TOOL_LINKS_DIR, TOOL_PREFIX, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { apparmorOffStep, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { onPath, runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
 import { runAll, runFailureLine, serviceManagerFor, STOP_WAIT_MS, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "./service.js";
@@ -247,6 +247,14 @@ export interface PlaceSweepOptions {
   uid?: number;
   /** Where the workspace profile a root install loaded sits; the one every install writes unless a caller hands another. */
   apparmorProfile?: string;
+  /** wsp's install folder and the folder its commands are linked into; the protocol's unless a caller hands others. */
+  tools?: ToolFolders;
+}
+
+/** The folder every manager installs under on a computer somebody owns, and the folder its commands are linked into. */
+export interface ToolFolders {
+  prefix: string;
+  links: string;
 }
 
 /** Which service the agent on this computer is, for the manager that holds it. Exported because the update road
@@ -343,13 +351,56 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
   }
   // The workspace profile only root's install loaded, unloaded before its file goes, as the host's remove does it.
   const profile = opts.apparmorProfile ?? WSP_WORKSPACE_APPARMOR_PATH;
-  if ((opts.uid ?? process.getuid?.()) === 0 && there(profile)) {
+  const root = (opts.uid ?? process.getuid?.()) === 0;
+  if (root && there(profile)) {
     sh(apparmorOffStep(profile).join("\n"));
     if (!there(profile)) removed.push(profile);
   }
+  // Only root's jobs install there, and only root can take it off.
+  if (root) removed.push(...sweepTools(opts.tools ?? { prefix: TOOL_PREFIX, links: TOOL_LINKS_DIR }));
   const said = unsourced(sshDaemonPlace({ home, path: "" }), home);
   if (said !== undefined && "removed" in said) removed.push(said.removed);
   return { removed, kept: [placeKeptLine(workFolderIn(home)), ...(said !== undefined && "kept" in said ? [said.kept] : [])] };
+}
+
+/** Takes wsp's install folder off this computer: every link in the links folder whose own target is under the
+ * prefix, then the prefix whole. A link is read, never followed, so a command of the computer's own there and a link
+ * pointing anywhere else stay; a prefix that is itself a link stays too, since what it points at is not wsp's. The
+ * daemon's leave takes the same two by the same rule. */
+export function sweepTools(at: ToolFolders): string[] {
+  let prefix;
+  try {
+    prefix = lstatSync(at.prefix);
+  } catch {
+    return [];
+  }
+  if (!prefix.isDirectory()) return [placeKeptForLinkLine(at.prefix)];
+  const removed: string[] = [];
+  let names: string[];
+  try {
+    names = readdirSync(at.links);
+  } catch {
+    names = [];
+  }
+  for (const name of names) {
+    const link = join(at.links, name);
+    let target: string;
+    try {
+      target = resolve(at.links, readlinkSync(link));
+    } catch {
+      continue;
+    }
+    if (target !== at.prefix && !target.startsWith(`${at.prefix}/`)) continue;
+    try {
+      unlinkSync(link);
+      removed.push(link);
+    } catch {
+      continue;
+    }
+  }
+  rmSync(at.prefix, { recursive: true, force: true });
+  if (!there(at.prefix)) removed.push(at.prefix);
+  return removed;
 }
 
 /** The ownership read as this computer runs it: the one script the engine renders for the home, through a plain sh

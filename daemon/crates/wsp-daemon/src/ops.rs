@@ -234,9 +234,14 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
                 let profile = ctx.options.apparmor_profile.clone().unwrap_or_else(|| wsp_frames::numbers::WORKSPACE_APPARMOR_PATH.into());
                 let swept = fs::blocking(move || {
                     let mut swept = crate::place::sweep_place_home(&home, &crate::place::sh_stdout);
-                    // Only root's install loaded the profile, and only root can take it off.
+                    // Only root's install loaded the profile and only root's jobs install under the prefix, and only
+                    // root can take either off.
                     if nix::unistd::geteuid().is_root() {
                         swept.extend(crate::place::sweep_workspace_profile(&profile, &crate::place::sh_stdout));
+                        swept.extend(crate::place::sweep_tool_prefix(
+                            std::path::Path::new(wsp_frames::numbers::TOOL_PREFIX),
+                            std::path::Path::new(wsp_frames::numbers::TOOL_LINKS_DIR),
+                        ));
                     }
                     Ok(swept)
                 })

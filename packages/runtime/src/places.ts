@@ -54,6 +54,11 @@ import {
   placeNoPicksLine,
   placeProvisionPaths,
   placeProvisioningLine,
+  pluginOffLine,
+  pluginsKeptLine,
+  setupRowFix,
+  ghStatusOf,
+  projectLeftLine,
   provisionLogLine,
   PendingComputer,
   RecipeFile,
@@ -211,6 +216,11 @@ export interface PlaceRecordRoad extends PlaceRoad {
   keyPath?: string;
 }
 
+/** The rows of one kind the setup put on that computer itself, by their key in the picks: a row it found already
+ * there reads present and is never counted, so a remove takes off only what wsp put there. */
+const madeBySetup = (held: PlaceRecord, kind: "folders" | "plugins"): string[] =>
+  Object.keys(held.picks?.[kind] ?? {}).filter(key => held.applied?.rows.some(r => r.id === `${kind}/${key}` && r.outcome === "installed") === true);
+
 const isPlaceRecord = (v: unknown): v is PlaceRecord => {
   const r = v as PlaceRecord | undefined;
   return typeof r === "object" && r !== null && typeof r.id === "string" && typeof r.publicKey === "string" && typeof r.name === "string";
@@ -270,6 +280,9 @@ export interface PlaceWiring {
   /** Takes back what an add put on a computer before the host stopped mid-install, over the login that add used:
    * the script the installer left on the pending record for it. Throws the road's own sentence. */
   undo?(login: PlaceLogin, script: string): Promise<void>;
+  /** Runs one script on a computer over the login the install used, for a remove that finds no link up. Answers
+   * what it exited with; throws the road's own sentence where the login would not stand. */
+  runOver?(login: PlaceLogin, script: string, timeoutMs: number): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** The forwards over ssh this host holds for computers that reach it no other way; the installer holds one before
    * the deploy and the records keep it held. Absent on a runtime served without the ssh road. */
   back?: PlaceBackHolder;
@@ -424,7 +437,8 @@ export interface PlaceInstalled {
 }
 
 /** How far one install has got; the words for each step are the protocol's. */
-export type PlaceStaging = (step: PlaceAddStep, state: "running" | "done" | "failed", note?: string, placeId?: string) => void;
+/** `ms` is how long the step took, said as it ends. */
+export type PlaceStaging = (step: PlaceAddStep, state: "running" | "done" | "failed", note?: string, placeId?: string, ms?: number) => void;
 export type PlaceInstaller = (req: PlaceInstallRequest, stage: PlaceStaging) => Promise<PlaceInstalled>;
 
 /** The one road into the runtime a place needs, handed in because it is the runtime's own: a place holds its forks
@@ -1391,7 +1405,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const applied = (): PlaceApplied => ({
       hash,
       at: new Date(clockNow()).toISOString(),
-      rows: [...new Map(rows.map(r => [r.id, r])).values()],
+      rows: [...new Map(rows.map(r => [r.id, r])).values()].map(r => {
+        const fix = r.outcome === "failed" && r.fix === undefined ? setupRowFix(r, record.name) : undefined;
+        return fix === undefined ? r : { ...r, fix };
+      }),
       ...(resolved !== undefined ? { items: resolved.items } : {}),
     });
     const push = (next: PlaceSetup): void => {
@@ -1578,7 +1595,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }
       const res = await machine.exec(withEnvFromInput(`${pathLine(plan.path, plan.prefix)}\ngh auth status --hostname github.com 2>&1`), { timeoutMs: GITHUB_MS, stdin: envInput({ [GITHUB_TOKEN_ENV]: token }) });
       // gh names the token's scopes on its status, which the row carries so a person reads what a clone may reach.
-      const scopes = /Token scopes:\s*(.+)/.exec(res.stdout)?.[1]?.replace(/'/g, "").trim();
+      const scopes = ghStatusOf(res.stdout).scopes?.join(", ");
       githubSettled(res.exitCode === 0);
       return [...gh, res.exitCode === 0 ? { id: GITHUB_ROW, label: "GitHub", outcome: "present", note: `${FROM_THE_VAULT}${scopes === undefined || scopes === "" ? "" : `; token scopes: ${scopes}`}` } : { id: GITHUB_ROW, label: "GitHub", outcome: "failed", note: lastLine(res.stdout) ?? `gh auth status exited ${res.exitCode}` }];
     };
@@ -1926,6 +1943,33 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const machine = new PlaceMachine(linkTo(placeId), { id: held.name, home });
     const took = await bounded(unmergeServers(machineServerPort(machine), home), UNMERGE_MS, `the servers wsp merged into the agents' files on ${held.name}`).catch(() => []);
     return took.flatMap(serversOutLines);
+  };
+
+  /** The plugins the setup put on that computer, each taken off by its agent's own command, the way a sync takes
+   * one out: over the link where it is up, else over the login the install used. A plugin the computer had before
+   * wsp stays. Answers the lines for the ones that came off and the names of the ones that did not, which the remove
+   * says; nothing here fails it. */
+  const pluginsOff = async (placeId: string, held: PlaceRecord, linked: boolean, login: PlaceLogin | undefined): Promise<{ off: string[]; kept: string[] }> => {
+    const home = held.report.login["HOME"];
+    const names = madeBySetup(held, "plugins");
+    const undo = wiring.provision?.undo;
+    if (home === undefined || held.picks === undefined || names.length === 0 || undo === undefined) return { off: [], kept: [] };
+    const planned = await undo(held.picks, names.map(name => ({ kind: "plugins" as const, name })), { home }).catch(() => []);
+    const machine = linked ? new PlaceMachine(linkTo(placeId), { id: held.name, home }) : undefined;
+    const runOver = wiring.runOver;
+    const run = async (cmd: string): Promise<boolean> => {
+      if (machine !== undefined) return (await machine.exec(cmd, { timeoutMs: UNDO_MS }).catch(() => undefined))?.exitCode === 0;
+      if (login === undefined || runOver === undefined) return false;
+      return (await runOver(login, cmd, UNDO_MS).catch(() => undefined))?.exitCode === 0;
+    };
+    const off: string[] = [];
+    const kept = names.filter(name => !planned.some(u => u.key === `plugins/${name}` && u.cmd !== undefined));
+    for (const u of planned) {
+      if (u.cmd === undefined) continue;
+      if (await run(u.cmd)) off.push(pluginOffLine(u.label));
+      else kept.push(u.label);
+    }
+    return { off, kept };
   };
 
   /** The record with what that computer forks with on it, waited for no longer than one round trip on a link
@@ -2596,10 +2640,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         return pendingWrites;
       };
       let step: PlaceAddStep = "connect";
-      const stage: PlaceStaging = (which, state, note, placeId) => {
+      const stage: PlaceStaging = (which, state, note, placeId, ms) => {
         if (state === "running") step = which;
         if (state === "running" && which === "check") void movePending({ ...pending, step: "check" });
-        const said: PlaceStageEvent = { type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}) };
+        const said: PlaceStageEvent = { type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}), ...(ms !== undefined ? { ms } : {}) };
         putAdd(addId, job => withPlaceStage(job, said));
         opts.onStage?.(said);
       };
@@ -2630,6 +2674,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (installed.back !== undefined) waiting.back = installed.back;
         const early = waiting.login === undefined || waiting.placeId === undefined ? undefined : await recordOf(waiting.placeId);
         if (early !== undefined) await keep(early);
+        const joining = Date.now();
         stage("join", "running");
         const placeId = await new Promise<string>((woken, fail) => {
           // The link may already be up: the computer dials the moment its own join has written its place file, and
@@ -2654,7 +2699,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         holdBack(held);
         // The size the box reported is not here: every road that draws this line draws the box's row beside it, and
         // a fact already in the row costs the line the room it needs to read whole.
-        stage("join", "done", [linkedOver(held.report.dialed, held.road?.back, req.hostUrls), `engine ${held.report.engine}`].filter(Boolean).join(", "), placeId);
+        stage("join", "done", [linkedOver(held.report.dialed, held.road?.back, req.hostUrls), `engine ${held.report.engine}`].filter(Boolean).join(", "), placeId, Date.now() - joining);
         // What that computer forks with, read over the link it has just opened and before this answers: the row a
         // join prints carries where that computer keeps the logins its workspaces share, which is what the
         // sign-in offered right after it reads. Waited for no longer than one frame on a fresh link takes: a
@@ -2881,11 +2926,17 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (forks.length > 0) throw new Error(placeHoldsForksRefusal(held.name, forks));
       // A project is one computer's: taken out from under its projects, the place id on each record would name
       // nothing. The forks are refused first, since a workspace of a project is a machine standing on this place.
+      // The projects the recipe's folders step made there are wsp's own and go with it; any other refuses.
+      const made = madeBySetup(held, "folders");
       const projects = await recording.projectsOn(placeId);
-      if (projects.length > 0) throw new Error(placeHoldsProjectsRefusal(held.name, projects));
+      const theirs = projects.filter(name => !made.some(key => (held.picks?.folders[key]?.name ?? key) === name));
+      if (theirs.length > 0) throw new Error(placeHoldsProjectsRefusal(held.name, theirs));
       const reach = live.get(placeId)?.reach;
       const leaver = wiring.leave;
       const login = loginOf(held);
+      // Before either road sweeps: a plugin comes off by its agent's own command, which may sit in the install folder
+      // the sweep takes, and nothing on that computer knows which plugins were wsp's.
+      const plugins = await pluginsOff(placeId, held, reach !== undefined, login);
       let swept: string[] = [];
       let note: string | undefined;
       // What the road that logs in did where it did not finish the job, for the lines about the road that followed.
@@ -2927,6 +2978,16 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
             note = loginRoad === undefined ? failed : `${placeLoginRoadLine(held.name, loginRoad.at, loginRoad.said)}, and ${failed}`;
           }
         }
+      }
+      swept = [...plugins.off, ...swept];
+      if (plugins.kept.length > 0) note = note === undefined ? pluginsKeptLine(held.name, plugins.kept) : `${note}; ${pluginsKeptLine(held.name, plugins.kept)}`;
+      for (const key of made) {
+        const folder = held.picks!.folders[key]!;
+        const gone = await recording.removeFolder?.(placeId, key, folder).then(
+          () => projectLeftLine(folder.name ?? key),
+          () => undefined,
+        );
+        if (gone !== undefined) swept.push(gone);
       }
       if (reach !== undefined) cut(placeId, "removed from this host");
       // After the sweep, since the link that sweep may ride comes in through the forward.

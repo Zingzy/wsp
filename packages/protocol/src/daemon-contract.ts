@@ -30,6 +30,12 @@ export const XDG_OPEN_PATH = "/usr/local/bin/xdg-open";
 /** Where a root install keeps the AppArmor profile its workspaces run under: written and loaded by the host's
  * deploy, unloaded by a remove, a leave and the daemon's own sweep. */
 export const WSP_WORKSPACE_APPARMOR_PATH = "/etc/apparmor.d/wsp-workspace";
+/** The folder of wsp's own every manager installs under on a computer somebody owns, and the folder each command
+ * installed there is linked into. Nothing but wsp's own jobs writes under the prefix and no workspace writes either
+ * on the computer itself, so a leave run as root takes every link in that folder pointing under the prefix, then
+ * the prefix whole, and nothing else of either. */
+export const TOOL_PREFIX = "/opt/wsp";
+export const TOOL_LINKS_DIR = "/usr/local/bin";
 /** Where the shim posts in the guest; root-only through the daemon's umask, unreachable from the edge. */
 export const OPEN_SOCKET_PATH = `${GUEST_WSP_HOME}/open.sock`;
 /** The socket a process inside a workspace on a computer somebody owns reaches its host over. The daemon of that
