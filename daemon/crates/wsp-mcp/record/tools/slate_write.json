@@ -11,12 +11,12 @@
         },
         "text": {
           "type": "string",
-          "description": "a <slate>, or a patch"
+          "description": "JSX-like text: a <slate>, or a patch"
         },
         "document": {
           "type": "object",
           "additionalProperties": {},
-          "description": "stored JSON, not text"
+          "description": "the stored form slate_read gives; use text"
         },
         "check": {
           "type": "boolean",
@@ -82,12 +82,12 @@
         },
         "text": {
           "type": "string",
-          "description": "a <slate>, or a patch"
+          "description": "JSX-like text: a <slate>, or a patch"
         },
         "document": {
           "type": "object",
           "additionalProperties": {},
-          "description": "stored JSON, not text"
+          "description": "the stored form slate_read gives; use text"
         },
         "check": {
           "type": "boolean",

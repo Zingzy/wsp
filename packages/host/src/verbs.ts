@@ -3870,8 +3870,8 @@ const SLATE_VERBS: readonly Verb[] = [
       description: "Writes this thread's slate, the live panel shown here beside the chat. Use it to show the person anything they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), or a dashboard, a form to fill in or a checklist. A run with every= refreshes itself on a timer with no turns, so nothing streams into the chat and nothing polls in a loop.",
       input: {
         thread: SlateThreadIn,
-        text: z.string().optional().describe("a <slate>, or a patch"),
-        document: z.record(z.string(), z.unknown()).optional().describe("stored JSON, not text"),
+        text: z.string().optional().describe("JSX-like text: a <slate>, or a patch"),
+        document: z.record(z.string(), z.unknown()).optional().describe("the stored form slate_read gives; use text"),
         check: z.boolean().optional().describe("store nothing"),
         values: z.record(z.string(), z.unknown()).optional().describe("with check: $path: value"),
         press: z.string().optional().describe("with check: piece id to press"),

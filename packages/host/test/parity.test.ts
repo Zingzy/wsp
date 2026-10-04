@@ -388,6 +388,10 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       // say, which tool search matches, to 3,400; a few words on each input, after agents guessed at them, to 4,150.
       expect(slate.reduce((n, t) => n + JSON.stringify(t).length, 0)).toBeLessThan(4150);
       for (const t of slate) for (const [name, input] of Object.entries(t.inputSchema.properties ?? {})) expect((input as { description?: string }).description, `${t.name}.${name}`).toBeTruthy();
+      // Small models sent JSON of their own as document; the inputs say which one takes the slate.
+      const write = slate.find(t => t.name === "slate_write")!.inputSchema.properties as Record<string, { description?: string }>;
+      expect(write["text"]!.description).toContain("JSX-like text");
+      expect(write["document"]!.description).toContain("use text");
     } finally {
       await client.close();
     }
