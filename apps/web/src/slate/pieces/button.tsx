@@ -4,7 +4,7 @@ import { Button, DANGER_BUTTON } from "../../components/ui/button.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
 import type { PieceView } from "../SlateView.js";
 import { str, heldBy } from "./look.js";
-import { SlateIcon } from "./icon.js";
+import { placeOf } from "./runs.js";
 import { Outcome } from "./outcome.js";
 import { usePress } from "./press.js";
 
@@ -43,11 +43,15 @@ export const button: PieceView = {
     const label = str(props["label"]) ?? "";
     const held = heldBy(props["held"]);
     const kind = props["variant"];
+    // The place sizes a button: the xs keycap in a card row's slot, the full keycap under a card or in the toolbar.
+    const parent = slate.parentId(id);
+    const holder = parent === undefined ? undefined : slate.piece(parent)?.type;
+    const small = (holder === "row" || holder === "empty") && placeOf(slate, id) === "inside";
     const variant = kind === "primary" && slate.isLoud("primary", id) ? "default" : kind === "quiet" ? "ghost" : "outline";
     const control = (
       <Button
         variant={variant}
-        size={props["size"] === "small" ? "xs" : "default"}
+        size={small ? "xs" : "default"}
         className={kind === "danger" ? DANGER_BUTTON : undefined}
         held={held !== undefined}
         disabled={busy}
@@ -55,7 +59,6 @@ export const button: PieceView = {
         title={held === undefined ? (str(props["note"]) ?? pressTitle(piece.on?.press)) : undefined}
         onClick={press}
       >
-        <SlateIcon name={props["icon"]} className="size-3.5" />
         {label}
       </Button>
     );

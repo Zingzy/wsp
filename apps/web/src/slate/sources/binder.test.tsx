@@ -137,7 +137,7 @@ describe("the window's sources", () => {
     const api = fakeHost({ "thread.context.used": 164_000, "thread.context.window": 1_000_000 });
     const doc = slate({ root: "m", pieces: { m: { type: "meter", props: { label: "Context", value: { bind: "thread.context.used" }, max: { bind: "thread.context.window" }, format: "tokens" } } } });
     drawBound(doc, fakeApp(), api);
-    expect(screen.getByText("not read yet")).toBeTruthy();
+    expect(screen.getByText("Not read yet")).toBeTruthy();
     await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
     expect(api.resolve).toHaveBeenCalledWith("t1", expect.arrayContaining(["thread.context.used", "thread.context.window"]));
     expect(screen.getByRole("meter", { name: "Context" }).getAttribute("aria-valuenow")).toBe("164000");

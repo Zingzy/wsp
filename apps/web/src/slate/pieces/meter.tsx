@@ -36,21 +36,22 @@ export const meter: PieceView = {
         aria-valuemin={0}
         aria-valuemax={max}
         {...(value !== undefined ? { "aria-valuenow": value } : {})}
-       
-        className="flex min-w-0 flex-col gap-1"
+        className="flex min-w-0 items-center justify-between gap-4"
       >
-        <div className="flex items-baseline justify-between gap-3">
-          <span className="min-w-0 truncate text-[13px] leading-5 text-foreground">{label}</span>
-          <span className="shrink-0 font-mono text-xs tabular-nums text-foreground">{shown}</span>
-        </div>
-        <span aria-hidden className="block h-1 w-full overflow-hidden rounded-full bg-foreground/10">
-          <span
-            data-slate-fill
-            className={cn("block h-full rounded-full transition-[width,background-color] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none", TONE_FILL[toneOf(props["tone"], slate, id)])}
-            style={{ width: `${Math.round(share * 1000) / 10}%` }}
-          />
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-sm leading-5 font-medium text-foreground">{label}</span>
+          {value !== undefined && note === undefined ? null : <span className="text-[13px] leading-[1.45] text-muted-foreground">{value === undefined ? "Not read yet" : note}</span>}
         </span>
-        <span className="text-[11px] leading-4 text-muted-foreground">{value === undefined ? "not read yet" : note}</span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span aria-hidden className="block h-1 w-14 overflow-hidden rounded-full bg-foreground/10">
+            <span
+              data-slate-fill
+              className={cn("block h-full rounded-full transition-[width,background-color] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none", TONE_FILL[toneOf(props["tone"], slate, id)])}
+              style={{ width: `${Math.round(share * 1000) / 10}%` }}
+            />
+          </span>
+          {shown === undefined ? null : <span className="font-mono text-xs tabular-nums text-foreground">{shown}</span>}
+        </span>
       </div>
     );
   },

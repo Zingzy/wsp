@@ -131,7 +131,9 @@ describe("layout defaults", () => {
     expect(p("when")).toContain("text-xs");
     expect(p("when")).toContain("text-muted-foreground");
     expect(p("loud")).toContain("text-warning");
-    expect(p("loud")).toContain("text-sm");
+    // A tone colours a word: 13 px at weight 500, as a state word.
+    expect(p("loud")).toContain("text-[13px]");
+    expect(p("loud")).toContain("font-medium");
     expect(p("plain")).toContain("text-sm");
     expect(p("plain")).toContain("text-foreground");
   });
@@ -168,11 +170,11 @@ describe("layout defaults", () => {
   </section>
 </column></slate>`);
     const { view, push } = draw(doc);
-    const ch = (id: string) => [...piece(view.container, id).querySelectorAll("col")].map(col => col.getAttribute("data-ch"));
+    const ch = (id: string) => [...piece(view.container, id).querySelectorAll("[role=columnheader]")].map(col => col.getAttribute("data-ch"));
     expect(ch("ta")).toEqual([null, "6", "23"]);
     expect(ch("tb")).toEqual([null, "6", "23"]);
     expect(ch("tc")).toEqual([null, "6", "5"]);
-    const up = piece(view.container, "ta").querySelector("tbody td:nth-child(3)")!;
+    const up = piece(view.container, "ta").querySelectorAll("[role=cell]")[2]!;
     expect(up.className).toContain("whitespace-nowrap");
     expect(up.className).toContain("font-mono");
     push({ $b: [{ name: "postgres", cpu: "1,234.5%", up: "x" }] });
@@ -183,7 +185,7 @@ describe("layout defaults", () => {
     const doc = compiled(`<slate><value name="l" start={[{ msg: "the build ran out of memory on the box" }]} />
 <column><table id="t" items={$l}><col title="Message" value={item.msg} mono /></table></column></slate>`);
     const { view } = draw(doc);
-    const cell = piece(view.container, "t").querySelector("tbody td")!;
+    const cell = piece(view.container, "t").querySelector("[role=cell]")!;
     expect(cell.className).not.toContain("font-mono");
     expect(cell.className).not.toContain("whitespace-nowrap");
   });
@@ -207,12 +209,12 @@ describe("what the kit adds", () => {
     const { view, push } = draw(doc);
     const c = view.container;
     expect(piece(c, "f").textContent).not.toContain("Seats");
-    expect([...piece(c, "t").querySelectorAll("th")].map(th => th.textContent)).toEqual(["Name", "CPU"]);
+    expect([...piece(c, "t").querySelectorAll("[role=columnheader]")].map(th => th.textContent)).toEqual(["Name", "CPU"]);
     expect(piece(c, "c").querySelectorAll("[role=radio]")).toHaveLength(1);
     push({ $pro: true });
-    expect(piece(c, "f").textContent).toContain("Seats 4");
-    expect([...piece(c, "t").querySelectorAll("th")].map(th => th.textContent)).toEqual(["Name", "CPU", "Cost"]);
-    expect(piece(c, "t").querySelector("tbody")!.textContent).toBe("nginx1%$2");
+    expect(piece(c, "f").textContent).toMatch(/Seats\s*4/);
+    expect([...piece(c, "t").querySelectorAll("[role=columnheader]")].map(th => th.textContent)).toEqual(["Name", "CPU", "Cost"]);
+    expect(piece(c, "t").querySelector("[data-slate-head] + div")!.textContent).toBe("nginx1%$2");
     expect(piece(c, "c").querySelectorAll("[role=radio]")).toHaveLength(2);
   });
 
@@ -227,25 +229,23 @@ describe("what the kit adds", () => {
     expect(view.container.textContent).toContain("inside");
   });
 
-  it("draws an icon a formula names, and none for a name the kit does not have", () => {
+  it("takes an icon a formula names on a text and a button and draws none: icons stay in glyph frames", () => {
     const doc = slate({
       values: { ok: { start: true } },
       root: "root",
       pieces: {
         root: { type: "column", children: ["h", "f", "odd"] },
-        h: { type: "heading", props: { value: "Build", icon: b("$ok ? 'circle-check' : 'circle-x'") } },
-        f: { type: "facts", props: { facts: [{ label: "State", value: "green", icon: b("$ok ? 'check' : 'circle-x'") }] } },
-        odd: { type: "heading", props: { value: "Odd", icon: b("'not-an-icon'") } },
+        h: { type: "text", props: { value: "Build", icon: b("$ok ? 'circle-check' : 'circle-x'") } },
+        f: { type: "button", props: { label: "State", icon: b("$ok ? 'check' : 'circle-x'") } },
+        odd: { type: "text", props: { value: "Odd", icon: b("'not-an-icon'") } },
       },
     });
     const { view, push } = draw(doc);
-    const icon = (id: string) => piece(view.container, id).querySelector("[data-slate-icon]")?.getAttribute("data-slate-icon");
-    expect(icon("h")).toBe("circle-check");
-    expect(icon("f")).toBe("check");
-    expect(icon("odd")).toBeUndefined();
+    expect(view.container.querySelector("[data-slate-icon]")).toBeNull();
+    expect(view.container.querySelector("[data-slate-failed]")).toBeNull();
     push({ $ok: false });
-    expect(icon("h")).toBe("circle-x");
-    expect(icon("f")).toBe("circle-x");
+    expect(view.container.querySelector("[data-slate-icon]")).toBeNull();
+    expect(piece(view.container, "h").textContent).toBe("Build");
   });
 
   it("asks a confirm in the sheet with the text its formula read", () => {
@@ -262,8 +262,8 @@ describe("kit4's syntax, parsed and drawn", () => {
 <value name="pick" start={null} />
 <value name="rows" start={[{ name: "nginx", cost: "$2" }]} />
 <column>
-  <heading id="mail" value="Inbox" icon="mail" />
-  <heading id="rupee" value="Spend" icon={$pro ? 'indian-rupee' : 'dollar-sign'} />
+  <text id="mail" value="Inbox" icon="mail" />
+  <button id="rupee" label="Spend" icon={$pro ? 'indian-rupee' : 'dollar-sign'} onPress={set($pick, 's')} />
   <facts id="f"><fact label="Plan" value="Free" icon="gem" /><fact label="Seats" value="4" when={$pro} /></facts>
   <table id="t" items={$rows}><col title="Name" value={item.name} /><col title="Cost" value={item.cost} when={$pro} /></table>
   <select id="s" label="Size" value={$pick}><option value="s" label="Small" /><option value="xl" label="Huge" when={$pro} /></select>
@@ -272,16 +272,12 @@ describe("kit4's syntax, parsed and drawn", () => {
 </slate>`);
     const { view, push } = draw(doc);
     const c = view.container;
-    const icon = (id: string) => piece(c, id).querySelector("[data-slate-icon]")?.getAttribute("data-slate-icon");
-    expect(icon("mail")).toBe("mail");
-    expect(icon("rupee")).toBe("dollar-sign");
-    expect(icon("f")).toBe("gem");
+    expect(c.querySelector("[data-slate-icon]")).toBeNull();
     expect(piece(c, "f").textContent).not.toContain("Seats");
-    expect([...piece(c, "t").querySelectorAll("th")].map(th => th.textContent)).toEqual(["Name"]);
+    expect([...piece(c, "t").querySelectorAll("[role=columnheader]")].map(th => th.textContent)).toEqual(["Name"]);
     expect(piece(c, "sec").querySelector("[data-slate-section]")!.hasAttribute("data-open")).toBe(false);
     push({ $pro: true });
-    expect(icon("rupee")).toBe("indian-rupee");
-    expect(piece(c, "f").textContent).toContain("Seats 4");
-    expect([...piece(c, "t").querySelectorAll("th")].map(th => th.textContent)).toEqual(["Name", "Cost"]);
+    expect(piece(c, "f").textContent).toMatch(/Seats\s*4/);
+    expect([...piece(c, "t").querySelectorAll("[role=columnheader]")].map(th => th.textContent)).toEqual(["Name", "Cost"]);
   });
 });

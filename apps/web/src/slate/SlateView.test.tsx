@@ -98,7 +98,7 @@ describe("the slate renderer", () => {
     expect(screen.getByRole("meter", { name: "Weekly" }).getAttribute("aria-valuenow")).toBe("46");
     expect(screen.getByText("resets 3d 7h")).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Check" })).toBeTruthy();
-    expect(screen.getByText("lint").closest("tr")?.textContent).toContain("fail");
+    expect(screen.getByText("lint").closest("[role=row]")?.textContent).toContain("fail");
     expect(screen.getByText("Read")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Go on" })).toBeTruthy();
     expect(screen.getByLabelText("Note for the agent")).toBeTruthy();
@@ -178,7 +178,7 @@ describe("the slate renderer", () => {
 
   it("draws quiet placeholders for values that have not arrived", () => {
     draw(EVERY_PIECE, {});
-    expect(screen.getByText("not read yet")).toBeTruthy();
+    expect(screen.getByText("Not read yet")).toBeTruthy();
     expect(screen.getByText("Nothing here")).toBeTruthy();
     expect(screen.queryByText("undefined")).toBeNull();
     expect(screen.queryByText("null")).toBeNull();

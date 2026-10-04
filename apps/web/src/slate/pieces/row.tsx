@@ -4,8 +4,10 @@ import type { PieceView } from "../SlateView.js";
 import { gapOf } from "./look.js";
 
 const ALIGN: Record<string, string> = { start: "justify-start", center: "justify-center", end: "justify-end", between: "justify-between" };
-/** With no align set, the buttons after the row's text sit at its end. */
-const ENDS = "[&>:not([data-slate-type=button])+[data-slate-type=button]]:ml-auto";
+/** With no align set, the buttons and the state word after the row's text sit at its end, and a filter beside a picker
+ * at the toolbar's. */
+const ENDS =
+  "[&>:not([data-slate-type=button])+[data-slate-type=button]]:ml-auto [&>[data-slate-type=select]+[data-slate-type=toggle]]:ml-auto [&>:not([data-slate-type=status])+[data-slate-type=status]]:ml-auto";
 
 export const row: PieceView = {
   type: "row",

@@ -37,7 +37,7 @@ export const ring: PieceView = {
         </span>
         <span className="flex min-w-0 flex-col">
           <span className="truncate text-[13px] leading-5 text-foreground">{label}</span>
-          <span className="text-[11px] leading-4 text-muted-foreground">{value === undefined ? "not read yet" : note}</span>
+          <span className="text-xs leading-4 text-muted-foreground">{value === undefined ? "Not read yet" : note}</span>
         </span>
       </div>
     );

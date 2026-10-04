@@ -110,7 +110,7 @@ describe("the Slate tab", () => {
     render(<SlateSurface />);
     expect(await screen.findByText("First version")).toBeTruthy();
     expect(screen.getByText("Progress")).toBeTruthy();
-    expect(screen.getByText("v1")).toBeTruthy();
+    expect(document.querySelector("[data-slate-version]")!.getAttribute("data-slate-version")).toBe("1");
     event({ type: "session.slate", workspaceId: "ws", sessionId: "s1", threadId: "t1", cause: "patch", version: 2, by: "agent", pieces: ["said"] });
     expect(await screen.findByText("Second version")).toBeTruthy();
     expect(slates.calls.filter(c => c === "get")).toHaveLength(2);

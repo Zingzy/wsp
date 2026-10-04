@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { Chip } from "../../components/ui/chips.js";
+// A short fact: a word in the foreground, 12 px from its neighbour, never framed; the branch glyph at 12 px where the
+// app already draws one beside a branch.
+import { GitBranch } from "lucide-react";
 import type { PieceView } from "../SlateView.js";
-import { SlateIcon } from "./icon.js";
 import { str } from "./look.js";
 
 export const chip: PieceView = {
@@ -10,8 +11,9 @@ export const chip: PieceView = {
     const text = str(props["value"]);
     if (text === undefined || text === "") return null;
     return (
-      <span className="inline-flex min-w-0">
-        <Chip item={{ text, glyph: <SlateIcon name={props["icon"]} className="size-3" /> }} />
+      <span data-slate-chip className="inline-flex min-w-0 items-center gap-1.5 text-[13px] leading-5 text-foreground">
+        {props["icon"] === "git-branch" ? <GitBranch aria-hidden className="size-3 shrink-0 text-muted-foreground" /> : null}
+        <span className="truncate">{text}</span>
       </span>
     );
   },

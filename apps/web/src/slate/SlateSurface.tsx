@@ -7,6 +7,7 @@ import { useEffect, useMemo } from "react";
 import { Button } from "../components/ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
+import { cn } from "../lib/utils.js";
 import { ScrollArea } from "../components/ui/scroll-area.js";
 import { useSelectedThreadId, useStore } from "../protocol/store.js";
 import { requestComposerFocus } from "../shell/shellRequests.js";
@@ -35,13 +36,17 @@ export const SLATE_WORDS = {
   cleared: "Cleared",
   rewound: "Rewound to before this slate existed",
   newer: (schema: number) => `This slate needs a newer wsp (schema ${schema})`,
-  undo: "Undo the agent's last change",
+  undo: (version: number) => `Undo v${version}`,
   clear: "Clear",
   copy: "Copy as text",
   stop: "Stop runs",
   forget: "Forget secrets",
   menu: "Slate menu",
 } as const;
+
+/** The panel's one column, 16 px in: the settings pages' 760 px cap, so a wide panel does not carry figures to its far
+ * edge. */
+const COLUMN = "mx-auto w-full max-w-[760px] px-4";
 
 export function SlateSurface() {
   const threadId = useSelectedThreadId();
@@ -89,7 +94,7 @@ function ThreadSlate({ threadId }: { threadId: string }) {
       <HeldRuns engine={bundle.engine} asks={entry.record?.asks ?? []} review={run => askConsent(threadId, { run })} refuse={ask => refuse(threadId, ask)} />
       <Consent threadId={threadId} />
       <ScrollArea className="min-h-0 flex-1">
-        <div className="px-3 pb-3 pt-1">
+        <div className={cn(COLUMN, "pb-8")}>
           <SlateView engine={bundle.engine} views={SLATE_VIEWS} runner={bundle.runner} sender={bundle.sender} />
         </div>
       </ScrollArea>
@@ -116,17 +121,16 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
     for (const path of secrets) void bundle.sender.secret(path, "");
   };
   return (
-    <div className="flex h-7 shrink-0 items-center gap-2 px-3 pt-1" title={engine.document?.title}>
-      <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{title}</span>
+    <div data-slate-version={engine.version} className={cn(COLUMN, "mt-3 mb-4 flex h-7 shrink-0 items-center gap-2")} title={engine.document?.title}>
+      <h2 className="min-w-0 flex-1 truncate text-[13px] leading-5 font-normal text-muted-foreground">{title}</h2>
       {refreshing ? <Refreshing /> : null}
-      <span data-slate-version className="font-mono text-[11px] tabular-nums text-muted-foreground">v{engine.version}</span>
       <Menu>
         <MenuTrigger render={<Button variant="ghost" size="icon" aria-label={SLATE_WORDS.menu} />}>
           <MoreHorizontal />
         </MenuTrigger>
         <MenuPopup align="end">
           <MenuItem disabled={entry.record?.canUndo !== true} onClick={() => void api?.undo(threadId).then(() => loadSlate(threadId))}>
-            {SLATE_WORDS.undo}
+            {SLATE_WORDS.undo(engine.version)}
           </MenuItem>
           <MenuItem onClick={() => void api?.clear(threadId).then(() => loadSlate(threadId))}>{SLATE_WORDS.clear}</MenuItem>
           {runs.length > 0 ? <MenuItem onClick={stop}>{SLATE_WORDS.stop}</MenuItem> : null}

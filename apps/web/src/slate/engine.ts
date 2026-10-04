@@ -226,21 +226,33 @@ export class SlateEngine {
    * which each say it themselves. */
   refreshingUnder(id: string): boolean {
     const runs = Object.keys(this.#doc?.runs ?? {}).filter(run => this.refreshing(run));
-    if (runs.length === 0) return false;
-    const reads = (path: string) => runs.some(run => touches(path, `$${run}`));
-    const seen = new Set<string>();
-    const visit = (child: string): boolean => {
-      if (seen.has(child)) return false;
-      seen.add(child);
-      const piece = this.piece(child);
-      if (piece === undefined || piece.type === "section" || piece.type === "output") return false;
-      const own = this.#readsOf(child);
-      return own.when.some(reads) || own.props.some(reads) || (piece.children ?? []).some(visit);
+    return runs.length > 0 && this.#readUnder(id, runs).length > 0;
+  }
+
+  /** The runs on a timer that a piece under this one reads, short of a nested section and of a run's own output. */
+  timedUnder(id: string): string[] {
+    const runs = Object.entries(this.#doc?.runs ?? {}).flatMap(([run, decl]) => (decl.every === undefined ? [] : [run]));
+    return runs.length === 0 ? [] : this.#readUnder(id, runs);
+  }
+
+  #readUnder(id: string, runs: readonly string[]): string[] {
+    const found = new Set<string>();
+    const note = (path: string) => {
+      for (const run of runs) if (touches(path, `$${run}`)) found.add(run);
     };
-    const piece = this.piece(id);
-    if (piece === undefined) return false;
-    const own = this.#readsOf(id);
-    return own.when.some(reads) || own.props.some(reads) || (piece.children ?? []).some(visit);
+    const seen = new Set<string>();
+    const visit = (at: string, top: boolean) => {
+      if (seen.has(at)) return;
+      seen.add(at);
+      const piece = this.piece(at);
+      if (piece === undefined || (!top && (piece.type === "section" || piece.type === "output"))) return;
+      const own = this.#readsOf(at);
+      own.when.forEach(note);
+      own.props.forEach(note);
+      for (const child of piece.children ?? []) visit(child, false);
+    };
+    visit(id, true);
+    return runs.filter(run => found.has(run));
   }
 
   /** A secret's path: the person types it, the host keeps it, the window holds only its handle (08). */
@@ -417,6 +429,11 @@ export class SlateEngine {
     return parent === undefined ? undefined : this.piece(parent);
   }
 
+  /** The id of the group a piece is drawn in. */
+  parentId(id: string): string | undefined {
+    return this.#parents.get(id);
+  }
+
   /** The tables drawn in the same section as this one (the slate's root where there is none), itself included,
    * so stacked tables can share their column widths. */
   tablesBeside(id: string): string[] {
@@ -577,7 +594,8 @@ function loudOf(doc: SlateDoc | null): Map<Loud, string> {
     const props = piece.props ?? {};
     if (props["variant"] === "primary" && !out.has("primary")) out.set("primary", id);
     if (props["size"] === "large" && !out.has("large")) out.set("large", id);
-    if (props["tone"] === "accent" && !out.has("accent")) out.set("accent", id);
+    // A chart draws its line in the accent unless it names another tone, so the first chart takes the slate's one hue.
+    if ((props["tone"] === "accent" || (piece.type === "chart" && props["tone"] === undefined)) && !out.has("accent")) out.set("accent", id);
     for (const child of piece.children ?? []) visit(child);
   };
   visit(doc.root);

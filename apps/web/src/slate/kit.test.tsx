@@ -37,36 +37,39 @@ describe("the richer kit in the renderer", () => {
     expect(Object.keys(SLATE_ICON_VIEWS).sort()).toEqual([...SLATE_ICONS].sort());
   });
 
-  it("draws the example: heading, three numbers with icons, an inset section, a status, a chip, a ring and a chart from a history", () => {
+  it("draws the example: heading, a stat strip of three numbers, a section card, a status, a chip, a ring and a chart from a history", () => {
     const doc = example("a live figure with an hour of history");
     const { view } = draw(doc, { hist: HIST, spot: { state: "done", exit: 0, json: { price: 2399 }, runs: 3 } });
     const c = view.container;
     expect(c.querySelector("[data-slate-failed]")).toBeNull();
     expect(screen.getByRole("heading", { name: "Gold" }).getAttribute("aria-level")).toBe("2");
     const grid = c.querySelector<HTMLElement>("[data-columns]")!;
+    // A strip of numbers stacks its cells until two 26 px figures fit side by side.
     expect(grid.className).toContain("grid-cols-1");
-    expect(grid.className).toContain("@min-[360px]:grid-cols-3");
+    expect(grid.className).toContain("@min-[34rem]:grid-cols-3");
     expect(grid.querySelectorAll("[data-slate-type=number]")).toHaveLength(3);
     expect(within(grid).getByText("Per ounce")).toBeTruthy();
     expect(grid.textContent).toContain("$2,399.00");
-    expect(grid.querySelector("[data-slate-sparkline] polyline")!.getAttribute("points")!.split(" ")).toHaveLength(3);
-    for (const name of ["gauge", "zap", "arrow-down", "arrow-up", "activity", "clock"]) expect(c.querySelector(`[data-slate-icon="${name}"] , svg[data-slate-icon="${name}"]`), name).not.toBeNull();
+    // A number's trend is a sparkline's job; the stat cell draws its figure alone.
+    expect(grid.querySelector("[data-slate-sparkline]")).toBeNull();
+    // A head, a figure's label and a tag draw no icon: wsp draws icons in buttons and glyph frames only.
+    for (const name of ["gauge", "zap", "arrow-down", "arrow-up", "activity", "clock"]) expect(c.querySelector(`[data-slate-icon="${name}"]`), name).toBeNull();
+    expect(c.querySelector("[data-slate-strip]")).not.toBeNull();
     const section = c.querySelector<HTMLElement>("[data-slate-section]")!;
-    expect(section.querySelector(".bg-card\\/40")).not.toBeNull();
-    expect(section.querySelector(".px-4")).not.toBeNull();
+    expect(section.querySelector("[data-slate-card]")!.className).toContain("bg-card/40");
     expect(c.querySelector("[data-slate-status=good]")!.textContent).toBe("Live");
-    expect(c.querySelector("[data-chip]")!.textContent).toBe("every minute");
+    expect(c.querySelector("[data-slate-chip]")!.textContent).toBe("every minute");
     expect(screen.getByRole("meter", { name: "Last hour" }).getAttribute("aria-valuenow")).toBe("3");
     expect(screen.getByRole("meter", { name: "Last hour" }).textContent).toContain("3/60");
     const chart = c.querySelector<HTMLElement>("[data-slate-chart]")!;
-    expect(chart.querySelector("figcaption")!.textContent).toBe("Per ounce, last hour");
+    expect(chart.querySelector("figcaption")!.textContent).toBe("Per ouncelast hour");
     expect(chart.querySelector("svg[role=img] polyline")!.getAttribute("points")!.split(" ")).toHaveLength(3);
     expect(chart.querySelector("[data-k=y-axis]")!.textContent).toContain("$");
   });
 
   it("says not read yet before the history has two points", () => {
     const { view } = draw(example("a live figure with an hour of history"));
-    expect(view.container.querySelector("[data-slate-chart]")!.textContent).toContain("not read yet");
+    expect(view.container.querySelector("[data-slate-chart]")!.textContent).toContain("Not read yet");
     expect(view.container.querySelector("[data-slate-status=muted]")!.textContent).toBe("Waiting");
   });
 
@@ -107,7 +110,7 @@ describe("the richer kit in the renderer", () => {
     });
   });
 
-  it("never wraps a figure or mono column: 524 MB stays on one line, a long command truncates with its text on hover", () => {
+  it("never wraps a figure: 524 MB stays on one line, and a long command wraps rather than being cut", () => {
     const doc = compiled(`<slate><value name="procs" start={[{ name: "node server", pid: 4120, mem: 524, cmd: "node /usr/local/lib/node_modules/some/long/path/server.js --port 3000" }]} /><column>
       <table items={$procs}>
         <col title="Name" value={item.name} />
@@ -117,17 +120,16 @@ describe("the richer kit in the renderer", () => {
       </table>
     </column></slate>`);
     const { view } = draw(doc);
-    const cells = [...view.container.querySelectorAll<HTMLElement>("tbody td")];
-    const heads = [...view.container.querySelectorAll<HTMLElement>("thead th")];
+    const cells = [...view.container.querySelectorAll<HTMLElement>("[role=cell]")];
+    const heads = [...view.container.querySelectorAll<HTMLElement>("[role=columnheader]")];
     expect(cells.map(c => c.textContent)).toEqual(["node server", "4120", "524 MB", "node /usr/local/lib/node_modules/some/long/path/server.js --port 3000"]);
-    expect(cells.map(c => c.classList.contains("whitespace-nowrap"))).toEqual([false, true, true, true]);
-    expect(heads.map(c => c.classList.contains("whitespace-nowrap"))).toEqual([false, true, true, true]);
+    expect(cells.map(c => c.classList.contains("whitespace-nowrap"))).toEqual([false, true, true, false]);
+    expect(heads.map(c => c.classList.contains("whitespace-nowrap"))).toEqual([false, true, true, false]);
     expect(cells[2]!.className).toContain("font-mono");
     expect(cells[2]!.className).toContain("text-right");
-    const clip = cells[3]!.querySelector<HTMLElement>("[data-k=clip]")!;
-    expect(clip.className).toContain("truncate");
-    expect(clip.title).toBe("node /usr/local/lib/node_modules/some/long/path/server.js --port 3000");
-    expect(cells[1]!.querySelector("[data-k=clip]")).toBeNull();
+    expect(cells[3]!.className).toContain("font-mono");
+    expect(cells[3]!.className).toContain("break-all");
+    expect(view.container.querySelector("[data-k=clip]")).toBeNull();
   });
 
   it("writes a pick from choices and marks the answer once picked", async () => {
@@ -160,17 +162,18 @@ describe("the richer kit in the renderer", () => {
   it("lines a group up only when align says so, and pads and insets on request", () => {
     const doc = compiled(`<slate><column><section id="s" title="A" align="center" pad="loose"><text>x</text></section><section id="plain" title="B"><text>y</text></section><column id="inset" surface="inset"><text>z</text></column><grid id="g" columns={2} align="end"><text>1</text><text>2</text></grid></column></slate>`);
     const c = draw(doc).view.container;
-    const inner = (id: string) => piece(c, id).querySelector<HTMLElement>("[data-slate-section] > div:last-child, [data-slate-grid] > div")!;
-    expect(inner("s").className).toContain("items-center");
-    expect(inner("s").className).toContain("px-5");
-    expect(inner("plain").className).not.toMatch(/items-|px-|bg-card/);
-    expect(piece(c, "inset").firstElementChild!.className).toContain("bg-card/40");
-    expect(piece(c, "inset").firstElementChild!.className).toContain("px-4");
+    const inner = (id: string) => piece(c, id).querySelector<HTMLElement>("[data-slate-card], [data-slate-grid] > div")!;
+    // A section's rows are a settings card whatever align, pad or surface it names: its rows take the card's inset.
+    expect(inner("s").className).toContain("[&>:not([data-slate-rows])]:px-(--settings-inset,20px)");
+    expect(inner("s").className).not.toMatch(/items-center|px-5/);
+    expect(inner("plain").className).toContain("bg-card/40");
+    // A column standing among the cards takes no surface of its own: its text is a row of a card like any other.
+    expect(piece(c, "inset").querySelector("[data-slate-card]")).not.toBeNull();
     expect(inner("g").className).toContain("justify-items-end");
     expect(c.querySelector("[data-slate-piece=s]")!.textContent).toContain("A");
   });
 
-  it("draws bars, a status, a chip with its icon, and an icon on a button, text, a fact and a section title", () => {
+  it("draws bars, a status word with no dot, a chip as plain words, and no icon on a button, a text, a fact or a section head", () => {
     const doc = compiled(`<slate><value name="n" start={0} /><column>
       <bars label="Busiest" items={[{ n: 'web', v: 4 }, { n: 'host', v: 2 }]} name={item.n} value={item.v} />
       <status tone="bad">Down</status>
@@ -183,10 +186,12 @@ describe("the richer kit in the renderer", () => {
     const c = draw(doc).view.container;
     expect([...c.querySelectorAll("[data-slate-bar]")].map(b => b.textContent)).toEqual(["web4", "host2"]);
     expect(c.querySelector("[data-slate-status=bad]")!.textContent).toBe("Down");
-    expect(c.querySelector("[data-chip] [data-slate-icon=git-branch]")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Go" }).querySelector("[data-slate-icon=play]")).not.toBeNull();
-    expect(c.querySelector("[data-slate-type=text] [data-slate-icon=clock]")).not.toBeNull();
-    expect(c.querySelector("[data-slate-type=facts] [data-slate-icon=git-branch]")).not.toBeNull();
-    expect(c.querySelector("[data-slate-section] [data-slate-icon=activity]")).not.toBeNull();
+    expect(c.querySelector("[data-slate-status=bad]")!.querySelector(".rounded-full")).toBeNull();
+    expect(c.querySelector("[data-slate-chip]")!.textContent).toBe("main");
+    expect(c.querySelector("[data-slate-chip] [data-slate-icon]")).toBeNull();
+    expect(screen.getByRole("button", { name: "Go" }).querySelector("[data-slate-icon]")).toBeNull();
+    expect(c.querySelector("[data-slate-type=text] [data-slate-icon]")).toBeNull();
+    expect(c.querySelector("[data-slate-type=facts] [data-slate-icon]")).toBeNull();
+    expect(c.querySelector("[data-slate-section] [data-slate-icon=activity]")).toBeNull();
   });
 });

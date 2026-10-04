@@ -8,6 +8,7 @@ import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
 import { Kbd } from "../../components/ui/kbd.js";
 import { Textarea } from "../../components/ui/textarea.js";
+import { ROW_FIELD } from "../../settings/layout.js";
 import { cn, isMacPlatform } from "../../lib/utils.js";
 import type { Held } from "../engine.js";
 import type { PieceView, PieceViewProps } from "../SlateView.js";
@@ -18,6 +19,11 @@ import { twoWayPath, usePress } from "./press.js";
 import { getOwn } from "../paths.js";
 
 const asText = (value: SlateJson | undefined): string => (value === undefined || value === null ? "" : typeof value === "string" ? value : String(value));
+
+/** A settings line: the label at the left, a one-line field in the slot at the right, under the label where narrow. */
+const LINE = "flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1.5";
+const LABEL = "min-w-0 text-sm leading-5 text-foreground";
+const SLOT_FIELD = cn(ROW_FIELD, "w-40 max-w-full");
 
 /** A secret's field: a password field whatever `kind` says. The text lives in the field until the host takes it,
  * then the field is empty again and draws the handle's dots (08). Emptying a filled field clears the secret. */
@@ -44,12 +50,14 @@ function SecretInput({ path, label, props, slate, sender }: { path: string; labe
   };
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <label htmlFor={fieldId} className="text-[13px] leading-5 text-foreground">
+      <div className={LINE}>
+      <label htmlFor={fieldId} className={LABEL}>
         {label}
       </label>
       <Input
         id={fieldId}
         nativeInput
+        className={SLOT_FIELD}
         type="password"
         autoComplete="off"
         data-slate-secret={path}
@@ -68,6 +76,7 @@ function SecretInput({ path, label, props, slate, sender }: { path: string; labe
           send();
         }}
       />
+      </div>
       <Outcome said={undefined} refused={refused} />
     </div>
   );
@@ -116,7 +125,7 @@ function TextInput({ piece, props, slate, sender, raise, path }: PieceViewProps 
     placeholder: str(props["placeholder"]),
     disabled: held !== undefined,
     title: held,
-    className: cn(props["mono"] === true && "font-mono"),
+    className: cn(lines > 1 ? "w-full" : SLOT_FIELD, props["mono"] === true && "font-mono"),
     onFocus: () => {
       if (path !== undefined) slate.focus(path);
       setDraft(text);
@@ -132,17 +141,16 @@ function TextInput({ piece, props, slate, sender, raise, path }: PieceViewProps 
   };
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <div className="flex min-w-0 items-baseline gap-2">
-        <label htmlFor={fieldId} className="min-w-0 flex-1 text-[13px] leading-5 text-foreground">
-          {label}
-        </label>
-        {piece.on?.submit !== undefined && held === undefined ? <SubmitHint label={str(props["submit"]) ?? "Send"} withMod={lines > 1} busy={submit.busy} /> : null}
+      <div className={LINE}>
+        <span className="flex min-w-0 flex-1 items-baseline gap-2">
+          <label htmlFor={fieldId} className={cn(LABEL, "flex-1")}>
+            {label}
+          </label>
+          {piece.on?.submit !== undefined && held === undefined ? <SubmitHint label={str(props["submit"]) ?? "Send"} withMod={lines > 1} busy={submit.busy} /> : null}
+        </span>
+        {lines > 1 ? null : <Input {...field} nativeInput type={numeric ? "number" : props["kind"] === "password" ? "password" : "text"} onChange={event => write(event.target.value)} />}
       </div>
-      {lines > 1 ? (
-        <Textarea {...field} rows={lines} onChange={event => write(event.target.value)} />
-      ) : (
-        <Input {...field} nativeInput type={numeric ? "number" : props["kind"] === "password" ? "password" : "text"} onChange={event => write(event.target.value)} />
-      )}
+      {lines > 1 ? <Textarea {...field} rows={lines} onChange={event => write(event.target.value)} /> : null}
       {conflict !== undefined && path !== undefined ? (
         <div data-slate-conflict className="flex flex-wrap items-center gap-2 text-xs leading-4 text-muted-foreground">
           <span>The agent changed this while you were typing</span>

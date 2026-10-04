@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Rows from a list, one template of columns over them: one header row in the group heading grammar, no line
-// between rows, numbers end-aligned in mono. Rows are keyed by the piece's `key`, else their index.
+// Rows from a list in the settings list grammar: a header over the card whose first cell names the list, the rows in
+// the card on one column template shared with the tables beside it, the first text column the row's name taking the
+// room, figures 12 px mono at the end, words 13 px muted. With more than two text columns a row folds to its title
+// over a note of the rest. One action that every row takes makes the row open, ending in a chevron. Nothing is cut:
+// long text wraps and the row grows. Rows are keyed by the piece's `key`, else their index.
 import type { SlateJson, SlatePropValue } from "@wsp/protocol";
 import type { SlateStep } from "../model.js";
 import { Button } from "../../components/ui/button.js";
-import { GROUP_LABEL } from "../../lib/microLabel.js";
+import { ChevronRight } from "lucide-react";
+import type { ReactNode } from "react";
+import { SECTION_HEAD } from "../../settings/layout.js";
 import { cn } from "../../lib/utils.js";
 import type { SlateEngine } from "../engine.js";
 import type { PieceViewProps, PieceView } from "../SlateView.js";
 import { truthy } from "../actions.js";
-import { isSentence, present, str, TONE_INK, toneOf } from "./look.js";
+import { placeOf } from "./runs.js";
+import { CARD_SURFACE } from "../../settings/rows.js";
+import { isSentence, NOTE, present, str, TONE_INK, toneOf } from "./look.js";
 import { Outcome } from "./outcome.js";
 import { usePress } from "./press.js";
 import { pressTitle } from "./button.js";
@@ -42,11 +49,11 @@ function RowAction({ id, template, at, row, slate, raise }: Pick<PieceViewProps,
   );
 }
 
-/** The widest a clipped cell draws, in characters of the mono face (max-w-48 at text-xs). */
-const CLIP_CH = 26;
+/** The widest a column stays on one line, in characters of the mono face; anything longer wraps. */
+const TIGHT_CH = 26;
 
 /** Each column's tight width in characters, or undefined for a column that wraps: a mono column with no sentence in
- * it, or one whose every cell is a figure. */
+ * it, or one whose every cell is a figure, as long as its widest cell fits on one line. */
 function tightWidths(slate: SlateEngine, id: string): (number | undefined)[] {
   const piece = slate.piece(id);
   if (piece === undefined) return [];
@@ -59,7 +66,7 @@ function tightWidths(slate: SlateEngine, id: string): (number | undefined)[] {
     const mono = column["mono"] === true && !cells.some(isSentence);
     if (!mono && (cells.length === 0 || !cells.every(isFigure))) return undefined;
     const widest = Math.max(str(slate.resolve(column["title"]))?.length ?? 0, ...cells.map(cell => str(cell)?.length ?? 0));
-    return Math.min(widest, CLIP_CH);
+    return widest > TIGHT_CH ? undefined : widest;
   });
 }
 
@@ -76,6 +83,27 @@ function rowKey(slate: SlateEngine, key: SlatePropValue | undefined, row: Row): 
   return value === undefined || value === null ? `#${row.index}` : typeof value === "string" ? value : JSON.stringify(value);
 }
 
+const NAME = "text-sm leading-5 text-foreground";
+const WORD = "text-[13px] leading-5 text-muted-foreground";
+const MONO = "font-mono text-xs leading-5 tabular-nums";
+const INSET = "px-(--settings-inset,20px)";
+const ROW = "min-h-11 py-3 transition-colors duration-150";
+const OPENS = "w-full cursor-pointer text-left hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-default";
+
+/** A row that opens: the whole row presses the one action every row takes. */
+function OpenRow({ id, template, row, raise, className, label, children }: Pick<PieceViewProps, "id" | "raise"> & { template: Template; row: Row; className: string; label: string; children: ReactNode }) {
+  const on = template["on"] as unknown as { press?: SlateStep | SlateStep[] } | undefined;
+  const { busy, said, refused, press } = usePress(() => raise("press", { row, rowAction: 0, ...(on?.press !== undefined ? { actions: on.press } : {}) }));
+  return (
+    <div role="row" className="col-span-full grid grid-cols-subgrid">
+      <button type="button" data-slate-row-open={`${id}:${row.index}`} disabled={busy} title={pressTitle(on?.press)} aria-label={label} onClick={press} className={cn(className, OPENS)}>
+        {children}
+      </button>
+      {said === undefined && refused === undefined ? null : <span className={cn("col-span-full pb-2", INSET)}><Outcome said={said} refused={refused} /></span>}
+    </div>
+  );
+}
+
 export const table: PieceView = {
   type: "table",
   rowScoped: ["columns", "rowActions", "key"],
@@ -85,76 +113,152 @@ export const table: PieceView = {
     const actions = records(piece.props?.["rowActions"]).slice(0, 3);
     const cap = typeof props["rows"] === "number" ? Math.max(0, Math.floor(props["rows"])) : items.length;
     const shown = items.slice(0, cap);
-    const end = (column: Template) => column["align"] === "end";
-    // A mono or figure column never wraps: it takes its widest cell, or the widest of the tables beside it, and the
-    // text columns wrap around it.
+    const place = placeOf(slate, id);
+    const inset = place === "inside" ? "" : INSET;
+    const card = place === "inside" ? "" : CARD_SURFACE;
     const widths = sharedWidths(slate, id, tightWidths(slate, id));
-    const tight = widths.map(width => width !== undefined);
-    // Only a text column can take spare width, and only tables beside others need it to line up; any other table is
-    // as wide as what it holds, so its figures stay under their titles.
-    const fills = tight.includes(false) && slate.tablesBeside(id).length > 1;
-    const figures = columns.map(column => shown.length > 0 && shown.every((item, index) => isFigure(slate.resolve(column["value"], { item, index }))));
+    const text = widths.flatMap((width, at) => (width === undefined ? [at] : []));
+    const cellsOf = (at: number) => shown.map((item, index) => slate.resolve(columns[at]?.["value"], { item, index }));
+    const figures = columns.map((_, at) => shown.length > 0 && cellsOf(at).every(isFigure));
+    // The row's name: the first text column, or the one most of whose cells are sentences; else the first column.
+    const sentences = text.find(at => cellsOf(at).filter(isSentence).length * 2 > shown.length);
+    const title = sentences ?? text[0] ?? 0;
+    const opens = actions.length === 1 && actions[0]!["when"] === undefined;
+    const end = (column: Template, at: number) => at !== title && (column["align"] === "end" || (figures[at] === true && column["align"] === undefined));
+    const header = (at: number) => str(slate.resolve(columns[at]?.["title"]));
+    const tone = (column: Template, row: Row) => {
+      const named = slate.resolve(column["tone"], row);
+      return named === undefined ? undefined : TONE_INK[toneOf(named, slate, id)];
+    };
+    const actionCell = (row: Row) =>
+      opens ? (
+        <ChevronRight aria-hidden className="size-3.5 shrink-0 self-center text-muted-foreground" />
+      ) : actions.length === 0 ? null : (
+        <span role="cell" className="inline-flex justify-end gap-1 self-center">
+          {actions.map((template, at) =>
+            template["when"] !== undefined && !truthy(slate.resolve({ bind: String(template["when"]) }, row)) ? null : <RowAction key={at} id={id} template={template} at={at} row={row} slate={slate} raise={raise} />,
+          )}
+        </span>
+      );
+    const below = (
+      <>
+        {items.length === 0 ? <p className={cn("flex min-h-11 items-center py-3", WORD, inset, card)}>{str(props["empty"]) ?? "Nothing here"}</p> : null}
+        {items.length > shown.length ? <p className={NOTE}>and {items.length - shown.length} more</p> : null}
+      </>
+    );
+    // The note says the words first, then the figures and dates.
+    const noteOrder = [...text, ...columns.map((_, at) => at).filter(at => !text.includes(at))];
+    if (text.length > 2) {
+      // Folded: the name over a note of every other cell, figures and dates in mono, 12 px apart; a section's head names
+      // the list, so the column's own header stands only where there is none.
+      return (
+        <div role="table" aria-label={header(title)} data-slate-folded className="flex min-w-0 flex-col gap-2.5">
+          {header(title) === undefined || slate.parent(id)?.type === "section" ? null : <span className={SECTION_HEAD}>{header(title)}</span>}
+          {shown.length === 0 ? null : (
+            <div className={cn("grid min-w-0 grid-cols-[minmax(0,1fr)_auto] [&>*+*]:border-t [&>*+*]:border-border/50", card)}>
+              {shown.map((item, index) => {
+                const row = { item, index };
+                const name = str(slate.resolve(columns[title]?.["value"], row)) ?? "";
+                const body = (
+                  <>
+                    <span role="cell" className="flex min-w-0 flex-col gap-1">
+                      <span className={cn(NAME, "break-words", tone(columns[title]!, row))}>{name}</span>
+                      <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+                        {noteOrder.map(at => {
+                          const column = columns[at]!;
+                          if (at === title) return null;
+                          const value = slate.resolve(column["value"], row);
+                          const shownValue = str(value);
+                          if (shownValue === undefined || shownValue === "") return null;
+                          const mono = (column["mono"] === true && !isSentence(value)) || isFigure(value);
+                          return (
+                            <span key={at} className={cn("min-w-0 break-words", mono ? cn(MONO, "leading-4 text-muted-foreground") : "text-xs leading-4 text-muted-foreground", tone(column, row))}>
+                              {shownValue}
+                            </span>
+                          );
+                        })}
+                      </span>
+                    </span>
+                    {actionCell(row)}
+                  </>
+                );
+                const className = cn("col-span-full grid grid-cols-subgrid items-start gap-x-4", ROW, inset);
+                return opens ? (
+                  <OpenRow key={rowKey(slate, piece.props?.["key"], row)} id={id} template={actions[0]!} row={row} raise={raise} className={className} label={`${str(slate.resolve(actions[0]!["label"], row)) ?? ""}, ${name}`}>
+                    {body}
+                  </OpenRow>
+                ) : (
+                  <div key={rowKey(slate, piece.props?.["key"], row)} role="row" className={className}>
+                    {body}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {below}
+        </div>
+      );
+    }
+    // A grid: the header over the card and every row on one template, the name's column taking the room. The template
+    // reads ch in the mono face, so a figure column is as wide as its widest figure.
+    // The rows' inset lands on the edge tracks, so a fixed last track carries it on top of its figures.
+    const edge = place === "inside" || opens || actions.length > 0 ? "" : " + var(--settings-inset,20px)";
+    const tracks = [
+      ...columns.map((_, at) => (at === title ? "minmax(0,1fr)" : widths[at] !== undefined ? `calc(${widths[at]}ch${at === columns.length - 1 ? edge : ""})` : "fit-content(40%)")),
+      ...(opens || actions.length > 0 ? ["auto"] : []),
+    ];
     return (
-      <div className="min-w-0 overflow-x-auto">
-        <table data-fills={fills} className={cn("border-collapse text-left", fills ? "w-full" : "w-auto max-w-full")}>
-          <colgroup>
-            {widths.map((width, at) => (
-              <col key={at} data-ch={width} className="font-mono text-xs" style={width === undefined ? undefined : { width: `calc(${width}ch + 1rem)` }} />
-            ))}
-            {actions.length > 0 ? <col /> : null}
-          </colgroup>
-          <thead>
-            <tr className={cn("text-muted-foreground", GROUP_LABEL)}>
-              {columns.map((column, at) => (
-                <th key={at} scope="col" className={cn("pb-1 pr-4 font-normal last:pr-0", (end(column) || (figures[at] && column["align"] === undefined)) && "text-right", tight[at] && "whitespace-nowrap")}>
-                  {str(slate.resolve(column["title"]))}
-                </th>
-              ))}
-              {actions.length > 0 ? <th aria-label="Actions" className="pb-1" /> : null}
-            </tr>
-          </thead>
-          <tbody>
+      <div role="table" className={cn("grid min-w-0 gap-x-4", MONO)} style={{ gridTemplateColumns: tracks.join(" ") }}>
+        {columns.every((_, at) => (header(at) ?? "") === "") ? null : <div role="row" data-slate-head className={cn("col-span-full grid min-h-7 grid-cols-subgrid items-center pb-2.5", place === "inside" ? "" : "pr-(--settings-inset,20px)")}>
+          {columns.map((column, at) => (
+            <span key={at} role="columnheader" data-ch={widths[at]} className={cn(at === 0 ? SECTION_HEAD : WORD, "font-sans", end(column, at) && "text-right", widths[at] !== undefined && at !== title && "whitespace-nowrap")}>
+              {header(at)}
+            </span>
+          ))}
+          {opens || actions.length > 0 ? <span aria-hidden /> : null}
+        </div>}
+        {shown.length === 0 ? null : (
+          <div className={cn("col-span-full grid grid-cols-subgrid [&>*+*]:border-t [&>*+*]:border-border/50", card)}>
             {shown.map((item, index) => {
               const row = { item, index };
-              return (
-                <tr key={rowKey(slate, piece.props?.["key"], row)} className="align-top transition-colors duration-150 hover:bg-accent">
+              const body = (
+                <>
                   {columns.map((column, at) => {
                     const value = slate.resolve(column["value"], row);
                     const mono = (column["mono"] === true && !isSentence(value)) || isFigure(value);
-                    const text = str(value);
                     return (
-                      <td
+                      <span
                         key={at}
+                        role="cell"
                         className={cn(
-                          "py-1 pr-4 last:pr-0",
-                          mono ? "font-mono text-xs leading-5 tabular-nums" : "text-[13px] leading-5",
-                          tight[at] && "whitespace-nowrap",
-                          TONE_INK[toneOf(slate.resolve(column["tone"], row), slate, id)],
-                          (end(column) || (isFigure(value) && column["align"] === undefined)) && "text-right",
+                          "min-w-0",
+                          mono ? cn(MONO, "text-foreground", widths[at] === undefined && "break-all") : cn(at === title ? NAME : WORD, "break-words font-sans"),
+                          widths[at] !== undefined && at !== title && "whitespace-nowrap",
+                          tone(column, row),
+                          end(column, at) && "text-right",
                         )}
                       >
-                        {tight[at] && !isFigure(value) ? <span data-k="clip" title={text} className="block max-w-48 truncate">{text}</span> : text}
-                      </td>
+                        {str(value)}
+                      </span>
                     );
                   })}
-                  {actions.length > 0 ? (
-                    <td className="py-1 text-right">
-                      <span className="inline-flex gap-1">
-                        {actions.map((template, at) =>
-                          template["when"] !== undefined && !truthy(slate.resolve({ bind: String(template["when"]) }, row)) ? null : (
-                            <RowAction key={at} id={id} template={template} at={at} row={row} slate={slate} raise={raise} />
-                          ),
-                        )}
-                      </span>
-                    </td>
-                  ) : null}
-                </tr>
+                  {actionCell(row)}
+                </>
+              );
+              const className = cn("col-span-full grid grid-cols-subgrid items-baseline", ROW, inset);
+              return opens ? (
+                <OpenRow key={rowKey(slate, piece.props?.["key"], row)} id={id} template={actions[0]!} row={row} raise={raise} className={className} label={`${str(slate.resolve(actions[0]!["label"], row)) ?? ""}, ${str(slate.resolve(columns[title]?.["value"], row)) ?? ""}`}>
+                  {body}
+                </OpenRow>
+              ) : (
+                <div key={rowKey(slate, piece.props?.["key"], row)} role="row" className={className}>
+                  {body}
+                </div>
               );
             })}
-          </tbody>
-        </table>
-        {items.length === 0 ? <p className="py-1 text-[13px] leading-5 text-muted-foreground">{str(props["empty"]) ?? "Nothing here"}</p> : null}
-        {items.length > shown.length ? <p className="py-1 text-xs leading-4 text-muted-foreground">and {items.length - shown.length} more</p> : null}
+          </div>
+        )}
+        <div className="col-span-full font-sans empty:hidden">{below}</div>
       </div>
     );
   },

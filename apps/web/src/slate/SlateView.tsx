@@ -30,6 +30,8 @@ export interface PieceView {
   component: ComponentType<PieceViewProps>;
   /** Props evaluated per row by the view, never resolved whole. */
   rowScoped?: readonly string[];
+  /** As a row of a section's card, the piece draws its own rows edge to edge rather than taking the row's inset. */
+  fills?: boolean | ((slate: SlateEngine, id: string) => boolean);
 }
 
 export type PieceViews = Readonly<Record<string, PieceView>>;
@@ -63,7 +65,8 @@ export function SlateView({ engine, views, runner, sender }: SlateScope) {
   if (doc === null) return null;
   return (
     <Scope.Provider value={scope}>
-      <div data-slate={engine.threadId} className="flex min-w-0 flex-col gap-2">
+      {/* The settings pages' locked look and a 16 px inset, so the cards and lines a slate borrows draw as they do there. */}
+      <div data-slate={engine.threadId} data-locked="" className="group/settings flex min-w-0 flex-col [--settings-inset:16px]">
         <PieceHost id={doc.root} />
       </div>
     </Scope.Provider>
@@ -96,8 +99,9 @@ function PieceBody({ id }: { id: string }) {
   const props: Record<string, SlateJson | undefined> = {};
   for (const [name, value] of Object.entries(piece.props ?? {})) if (!rowScoped.has(name)) props[name] = engine.resolve(value);
   const Component = view.component;
+  const fills = typeof view.fills === "function" ? view.fills(engine, id) : view.fills === true;
   return (
-    <div data-slate-piece={id} data-slate-type={piece.type} className="slate-piece min-w-0">
+    <div data-slate-piece={id} data-slate-type={piece.type} {...(fills ? { "data-slate-rows": "" } : {})} className="slate-piece min-w-0">
       <Component id={id} piece={piece} props={props} slate={engine} sender={sender} raise={(event, options) => runner.raise(id, event, options)} cancel={run => runner.cancel(run)}>
         {(piece.children ?? []).map(child => (
           <PieceHost key={child} id={child} />

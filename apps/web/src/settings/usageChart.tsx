@@ -126,7 +126,7 @@ function useThemeTick(): number {
   return tick;
 }
 
-export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGHT = CHART_HEIGHT, figure = fmtTokens, label = "Tokens over the range", axis }: {
+export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGHT = CHART_HEIGHT, figure = fmtTokens, label = "Tokens over the range", axis, small = false }: {
   steps: readonly number[];
   lines: readonly ChartLine[];
   stepWord: (t: number) => string;
@@ -138,6 +138,8 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   /** A fixed axis from the caller, its five figures drawn as plain text; without one it runs from 0 to a round top
    * and the figures roll. */
   axis?: { readonly from: number; readonly to: number };
+  /** The panel's size: the axis in a 40 px column 8 px off the plot, its figures and ticks at 11 px. */
+  small?: boolean;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -179,8 +181,8 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   }, []);
 
   return (
-    <div data-usage-chart="tokens" className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-3">
-      <div data-k="y-axis" aria-hidden className="relative font-mono text-xs leading-none text-muted-foreground tabular-nums" style={{ height: HEIGHT }}>
+    <div data-usage-chart="tokens" className={cn("grid gap-y-3", small ? "grid-cols-[40px_minmax(0,1fr)] gap-x-2" : "grid-cols-[auto_minmax(0,1fr)] gap-x-3")}>
+      <div data-k="y-axis" aria-hidden className={cn("relative font-mono leading-none text-muted-foreground tabular-nums", small ? "text-[11px]" : "text-xs")} style={{ height: HEIGHT }}>
         {[0, 1, 2, 3, 4].map(g => (
           <span key={g} data-k="y-tick" className="invisible block h-0 text-right">
             {figure(from + (top * g) / 4)}
@@ -246,7 +248,7 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
         </div>
       </div>
       <span aria-hidden />
-      <div className="relative h-4 font-mono text-xs leading-4 text-muted-foreground tabular-nums">
+      <div className={cn("relative h-4 font-mono leading-4 text-muted-foreground tabular-nums", small ? "text-[11px]" : "text-xs")}>
         {ticks.map(tick => (
           <span key={tick.at} data-k="tick" className={cn("absolute top-0", tick.at === 0 ? "" : tick.at === 1 ? "-translate-x-full" : "-translate-x-1/2")} style={{ left: `${tick.at * 100}%` }}>
             {tick.word}

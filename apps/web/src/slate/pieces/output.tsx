@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A run's output as it streams (05, "The output of a run"): its state as one word, the tail of its lines in a box of
-// `lines` rows that follows the end while it runs, a quiet Cancel while it runs, and why under it when held or failed.
+// A run's output as it streams (05, "The output of a run"): a row of the card with its label and its state as one word,
+// a quiet Cancel in the slot while it runs, then the tail of its lines as the next row in 12 px mono, `lines` rows
+// tall, following the end while it runs, no box of its own; why under them when held or failed.
 // A finished run keeps its last lines until it next starts; after the agent changed its command they read as stale.
 import { useEffect, useRef } from "react";
 import type { SlateJson } from "@wsp/protocol";
@@ -10,7 +11,9 @@ import { cn } from "../../lib/utils.js";
 import { isRunRecord, type SlateRunState } from "../model.js";
 import { ResultByShape } from "../shape.js";
 import type { PieceView } from "../SlateView.js";
+import { CARD_SURFACE } from "../../settings/rows.js";
 import { str } from "./look.js";
+import { placeOf } from "./runs.js";
 import { Quiet } from "./quiet.js";
 import { Refreshing } from "./refreshing.js";
 
@@ -47,6 +50,7 @@ const runName = (value: unknown): string | undefined => (typeof value === "strin
 export const output: PieceView = {
   type: "output",
   rowScoped: ["run"],
+  fills: true,
   component: function OutputPiece({ id, piece, props, slate, raise, cancel, sender }) {
     const run = runName(piece.props?.["run"]);
     const record = run === undefined ? undefined : slate.values[run];
@@ -67,11 +71,14 @@ export const output: PieceView = {
     const kind = slate.document?.runs?.[run]?.kind;
     const result = kind !== undefined && kind !== "cmd" && isRunRecord(record) && state !== "failed" ? (record.json ?? record.out) : undefined;
     const label = str(props["label"]);
+    const place = placeOf(slate, id);
+    const inset = place === "inside" ? "" : "px-(--settings-inset,20px)";
     return (
-      <div data-slate-output={run} className="flex min-w-0 flex-col gap-1.5">
-        <div className="flex h-6 min-w-0 items-center gap-2">
-          {label === undefined ? null : <span className="min-w-0 truncate text-[13px] text-foreground">{label}</span>}
-          <span data-slate-run-state={state} className={cn("inline-flex items-center gap-1.5 text-[13px]", refreshing ? "text-muted-foreground" : RUN_INK[state])}>
+      <div data-slate-output={run} className={cn("flex min-w-0 flex-col [&>*+*]:border-t [&>*+*]:border-border/50", place === "page" && CARD_SURFACE)}>
+        <div className={cn("flex min-h-11 min-w-0 items-center gap-3 py-3", inset)}>
+          {label === undefined ? null : <span className="min-w-0 truncate text-sm leading-5 text-foreground">{label}</span>}
+          <span className="flex-1" />
+          <span data-slate-run-state={state} className={cn("inline-flex shrink-0 items-center gap-1.5 text-[13px] leading-5 whitespace-nowrap", refreshing ? "text-muted-foreground" : RUN_INK[state], state === "failed" || state === "held" ? "font-medium" : "")}>
             {running ? <Crab className="text-status-working" /> : null}
             {refreshing ? <Refreshing /> : RUN_WORDS[state]}
           </span>
@@ -81,13 +88,13 @@ export const output: PieceView = {
             </span>
           ) : null}
           {running ? (
-            <Button data-slate-cancel={run} variant="ghost" size="xs" className="ml-auto" onClick={() => void cancel(run)}>
+            <Button data-slate-cancel={run} variant="outline" size="xs" onClick={() => void cancel(run)}>
               Cancel
             </Button>
           ) : null}
         </div>
         {result !== undefined ? (
-          <div data-slate-result={run} className="min-w-0">
+          <div data-slate-result={run} className={cn("min-w-0 py-3", inset)}>
             <ResultByShape value={result} shared={{ id, slate, raise, cancel, sender }} />
           </div>
         ) : lines.length === 0 && state === "idle" ? null : (
@@ -95,15 +102,15 @@ export const output: PieceView = {
             ref={box}
             role="log"
             aria-live={running ? "polite" : "off"}
-            className={cn("overflow-y-auto rounded-md bg-accent px-2 py-1.5 font-mono text-xs leading-4 tabular-nums", stale ? "text-muted-foreground" : "text-foreground", props["wrap"] === true ? "whitespace-pre-wrap break-words" : "whitespace-pre")}
-            style={{ maxHeight: `calc(${rows} * 1rem + 0.75rem)` }}
+            className={cn("overflow-y-auto py-2.5 font-mono text-xs leading-4 tabular-nums", inset, stale ? "text-muted-foreground" : "text-foreground", props["wrap"] === true ? "whitespace-pre-wrap break-words" : "whitespace-pre")}
+            style={{ maxHeight: `calc(${rows} * 1rem + 1.25rem)` }}
           >
             {lines.map((line, at) => (
               <div key={at}>{line === "" ? " " : line}</div>
             ))}
           </div>
         )}
-        {why === undefined ? null : <Quiet data-slate-why>{why}</Quiet>}
+        {why === undefined ? null : <Quiet data-slate-why className={cn("py-2.5", inset)}>{why}</Quiet>}
       </div>
     );
   },

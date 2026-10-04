@@ -71,9 +71,9 @@ describe("a tool run's result by its shape", () => {
     const json = { account: "admin", total: 2, unread: 1, emails: EMAILS };
     const c = draw(INBOX, { inbox: { state: "done", json, runs: 1 } }).container;
     const result = c.querySelector<HTMLElement>('[data-slate-result="inbox"]')!;
-    const facts = result.querySelector("dl")!;
-    expect([...facts.querySelectorAll("dt")].map(d => d.textContent)).toEqual(["Account", "Total", "Unread"]);
-    expect([...facts.querySelectorAll("dd")].map(d => d.textContent)).toEqual(["admin", "2", "1"]);
+    const facts = result.querySelector("[data-slate-facts]")!;
+    expect([...facts.querySelectorAll("[data-settings-label]")].map(d => d.textContent)).toEqual(["Account", "Total", "Unread"]);
+    expect([...facts.querySelectorAll("[data-settings-word]")].map(d => d.textContent)).toEqual(["admin", "2", "1"]);
     expect(within(result).getByText("Emails")).toBeTruthy();
     expect(within(result).getAllByRole("row")).toHaveLength(3);
   });

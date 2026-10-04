@@ -315,17 +315,17 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
     await waitFor(() => expect(slates.event).toHaveBeenCalledWith(tid(), expect.objectContaining({ piece: "ask", event: "submit" })));
   });
 
-  const version = () => document.querySelector("[data-slate-version]")?.textContent;
+  const version = () => document.querySelector("[data-slate-version]")?.getAttribute("data-slate-version");
 
   it("shows the document's version on the tab; values and run results never move it", async () => {
     openThread(host(record(APPENDIX_C, {}, { version: 3, revision: 10 })));
     await screen.findByText("Step 1 of 4");
-    expect(version()).toBe("v3");
+    expect(version()).toBe("3");
     push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 3, revision: 11, values: { $step: 2 } });
     push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 3, revision: 12, values: { $check: { state: "done", exit: 0, out: "ok", runs: 1 } } });
     flush();
     expect(screen.getByText("Step 2 of 4")).toBeTruthy();
-    expect(version()).toBe("v3");
+    expect(version()).toBe("3");
   });
 
   it("orders pushes by the data revision and drops one older than what it drew", async () => {
@@ -350,7 +350,7 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
     await act(async () => answer({ record: record(titled, { step: 2 }, { version: 2, revision: 7 }) }));
     flush();
     expect(await screen.findByText("Deploy setup, again")).toBeTruthy();
-    expect(version()).toBe("v2");
+    expect(version()).toBe("2");
     expect(screen.getByText("Step 3 of 4")).toBeTruthy();
     // A value the new document declared reaches the window with it.
     expect(slateBundle(tid()).engine.values["team"]).toBe("wsp");
