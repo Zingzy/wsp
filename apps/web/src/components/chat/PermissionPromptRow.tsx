@@ -40,14 +40,19 @@ export function PermissionPromptRow({
   permission,
   onAnswer,
   asker,
+  docked = false,
 }: {
   permission: PermissionPrompt;
   onAnswer: (sessionId: string, askId: string, optionId: string) => void;
   /** Who is asking, where the asker is not the thread's own agent; drawn above the prompt so a person answering
    * several running agents knows which one this is. */
   asker?: string;
+  /** The open prompt is answered in the dock where the composer stands; the row here says what is asked and
+   * offers nothing, so the same prompt is never two sets of buttons. */
+  docked?: boolean;
 }) {
-  const open = isPromptOpen(permission);
+  const open = isPromptOpen(permission) && !docked;
+  const waiting = isPromptOpen(permission) && docked;
   const answer = (optionId: string): void => onAnswer(permission.sessionId, permission.askId, optionId);
   const picked = pickedOptions(permission.options, permission.optionId ?? "");
   const named = picked === undefined || picked.length === 0 ? undefined : { label: picked.map(o => o.label).join(", "), effect: picked[0]!.effect };
@@ -66,6 +71,10 @@ export function PermissionPromptRow({
         {words.questions !== undefined ? (
           open ? (
             <QuestionPrompt onAnswer={answer} questions={words.questions} />
+          ) : waiting ? (
+            <span className="break-words whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground" data-permission-says="">
+              {words.says}
+            </span>
           ) : (
             <>
               <span className="break-words whitespace-pre-wrap text-sm leading-relaxed text-foreground/80" data-permission-says="">
@@ -78,24 +87,24 @@ export function PermissionPromptRow({
           )
         ) : null}
         {words.questions !== undefined ? null : words.code === undefined ? (
-          <span className="break-words whitespace-pre-wrap text-sm leading-relaxed text-foreground/80" data-permission-lead="" data-permission-says="">
+          <span className={`break-words whitespace-pre-wrap text-sm leading-relaxed ${waiting ? "text-muted-foreground" : "text-foreground/80"}`} data-permission-lead="" data-permission-says="">
             {words.says}
           </span>
         ) : (
           <div className="flex min-w-0 items-start gap-1.5" data-permission-lead="">
-            <span className="shrink-0 text-sm leading-relaxed text-foreground/80" data-permission-says="">
+            <span className={`shrink-0 text-sm leading-relaxed ${waiting ? "text-muted-foreground" : "text-foreground/80"}`} data-permission-says="">
               {words.says}
             </span>
             <code
               data-permission-code=""
-              className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-normal py-1 font-mono text-xs leading-4 text-foreground/80"
+              className={`min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-normal py-1 font-mono text-xs leading-4 ${waiting ? "text-muted-foreground" : "text-foreground/80"}`}
             >
               {commandParts(words.code).map(part => (typeof part === "string" ? part : <span key={part.at} className="whitespace-pre">{part.token}</span>))}
             </code>
           </div>
         )}
-        {words.rest === "" ? null : <span className="break-words whitespace-pre-wrap font-mono text-xs leading-4 text-muted-foreground">{words.rest}</span>}
-        {words.body === undefined ? null : (
+        {words.rest === "" || waiting ? null : <span className="break-words whitespace-pre-wrap font-mono text-xs leading-4 text-muted-foreground">{words.rest}</span>}
+        {words.body === undefined || waiting ? null : (
           <Collapsible>
             <CollapsibleTrigger
               data-permission-body-trigger=""
@@ -129,7 +138,7 @@ export function PermissionPromptRow({
               </Button>
             ))}
           </div>
-        ) : (
+        ) : waiting ? null : (
           <span className="text-xs leading-4 text-muted-foreground" data-permission-outcome={permission.outcome ?? undefined}>
             {permissionOutcomeLine(permission.outcome!, named)}
           </span>

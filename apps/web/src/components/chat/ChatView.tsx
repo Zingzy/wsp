@@ -47,11 +47,14 @@ export function ChatView({
   workspaceId,
   threadId = null,
   timestampFormat = DEFAULT_TIMESTAMP_FORMAT,
+  promptsDocked = false,
   children,
 }: {
   workspaceId: string;
   threadId?: string | null;
   timestampFormat?: TimestampFormat;
+  /** The open prompt is answered in the composer's slot, so the timeline's row keeps the record alone. */
+  promptsDocked?: boolean;
   children?: ((thread: ChatThreadHandle) => ReactNode) | undefined;
 }) {
   const workspace = useWorkspace(workspaceId);
@@ -255,6 +258,7 @@ export function ChatView({
             threadKey={threadId === null ? workspaceId : `${workspaceId}/${threadId}`}
             onImageExpand={noopImageExpand}
             onAnswerPermission={onAnswerPermission}
+            promptsDocked={promptsDocked}
             onOpenFile={onOpenFile}
             onIsAtEndChange={onIsAtEndChange}
             footer={footer}
