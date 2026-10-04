@@ -1320,18 +1320,33 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const settingNow = (record: PlaceRecord): string | undefined =>
     setting.has(record.id) || record.setup?.state === "running" ? placeProvisioningLine(record.name, record.setup?.steps.find(l => l.state === "running")?.step) : undefined;
   /** The computer whose setup's own folder step the running call belongs to: a project's clone there is the job's
-   * own work rather than a fork landing on a half set up computer, so the gate lets that call alone through. */
+   * own work rather than a fork landing on a half set up computer, so the gate lets that call alone through. Every
+   * call reached from the folder add carries the pass, so nothing reached from it may fork a workspace there. */
   const foldersOf = new AsyncLocalStorage<string>();
+
+  /** The read-then-write of a computer's record, one at a time per computer: the setup's writes and the folder
+   * add's first write of what that computer forks with run at once, and either would land over the other. */
+  const recordTurns = new Map<string, Promise<unknown>>();
+  const inRecordTurn = <T>(placeId: string, write: () => Promise<T>): Promise<T> => {
+    const run = (recordTurns.get(placeId) ?? Promise.resolve()).then(write);
+    const settled = run.catch(() => undefined);
+    recordTurns.set(placeId, settled);
+    void settled.then(() => {
+      if (recordTurns.get(placeId) === settled) recordTurns.delete(placeId);
+    });
+    return run;
+  };
 
   /** One write of a setup's state onto the record as it stands, since an attach's write of lastSeenAt goes on
    * beside it. */
-  const writeSetup = async (placeId: string, patch: Partial<Pick<PlaceRecord, "setup" | "applied" | "picks" | "recipe" | "sync">>): Promise<void> => {
-    const now = await recordOf(placeId);
-    if (now === undefined) return;
-    const next = { ...now, ...patch };
-    if ("sync" in patch && patch.sync === undefined) delete next.sync;
-    await keep(next);
-  };
+  const writeSetup = (placeId: string, patch: Partial<Pick<PlaceRecord, "setup" | "applied" | "picks" | "recipe" | "sync">>): Promise<void> =>
+    inRecordTurn(placeId, async () => {
+      const now = await recordOf(placeId);
+      if (now === undefined) return;
+      const next = { ...now, ...patch };
+      if ("sync" in patch && patch.sync === undefined) delete next.sync;
+      await keep(next);
+    });
 
   /** Which computers follow a recipe moved, or the recipe did, on the stream every client watches. */
   const recipesMoved = (slug: string): void => opts.onSetup?.({ type: "recipes.changed", slug });
@@ -2520,10 +2535,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // Onto the record as it stands rather than as it was when the frame went out, and only while the daemon
         // that answered is still the one running there: a computer that dialled back on another version while
         // this was out has a read of its own behind that attach, and this answer is not its facts any more.
-        const now = (await recordOf(placeId)) ?? record;
-        if (now.report.daemonVersion !== record.report.daemonVersion) return LinkBackend.of(linkTo(placeId), facts);
-        await keep({ ...now, backendFacts: facts });
-        return backendFrom(placeId, facts);
+        return inRecordTurn(placeId, async () => {
+          const now = (await recordOf(placeId)) ?? record;
+          if (now.report.daemonVersion !== record.report.daemonVersion) return LinkBackend.of(linkTo(placeId), facts);
+          await keep({ ...now, backendFacts: facts });
+          return backendFrom(placeId, facts);
+        });
       })().finally(() => asking.delete(placeId));
       asking.set(placeId, read);
       return read;

@@ -80,8 +80,9 @@ const FACTS = {
 };
 
 /** A computer that keeps the project checkouts it holds on a disk of its own, where an add clones in a short-lived
- * machine of its own; `created` waits before that machine is answered, for a test that holds the clone. */
-type Checkouts = { created?: Promise<void> };
+ * machine of its own; `created` waits before that machine is answered, for a test that holds the clone, and
+ * `answers` says whether this ask of what it forks with is answered or refused. */
+type Checkouts = { created?: Promise<void>; answers?: () => boolean };
 
 /** What the computer answers on its link: what it forks with, the machine an add clones in, and every command as
  * its daemon's exec would. */
@@ -90,7 +91,10 @@ function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number
     c.onFrame(async raw => {
       const frame = raw as unknown as Record<string, unknown>;
       const say = (payload: Record<string, unknown>): void => c.say({ id: frame["id"], ok: true, ...payload });
-      if (frame["op"] === "machine.backend") return say(checkouts === undefined ? FACTS : { ...FACTS, projects: "/wsp/projects" });
+      if (frame["op"] === "machine.backend") {
+        if (checkouts?.answers?.() === false) return void c.say({ id: frame["id"], ok: false, error: "not now" });
+        return say(checkouts === undefined ? FACTS : { ...FACTS, projects: "/wsp/projects" });
+      }
       if (frame["op"] === "machine.capacity") return say({ cores: 2, memMb: 7600, memRoomMb: 6000, machineMemMb: 4096, diskFreeBytes: 19 * 1024 ** 3, images: [], machines: { running: 0, paused: 0 } });
       if (checkouts !== undefined) {
         const machine = { machine: { id: "k1", kind: "sandbox", daemonSupervisor: "entrypoint", roads: { previewUrl: true, daemonAnswers: true, putBytes: true, describe: true, facts: true, metrics: true } } };
@@ -676,6 +680,35 @@ describe("a computer added with its picks", () => {
     clone();
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "installed" });
+  });
+
+  it("keeps what the computer forks with on its record when the folder add first reads it under a setup write in flight", async () => {
+    const { folder, seed } = seededFolder();
+    const store = memoryStore();
+    let letWrite = (): void => {};
+    const held = new Promise<void>(resolve => (letWrite = resolve));
+    let holding = false;
+    const put = store.put.bind(store);
+    // The setup's write of its folders line has read the record and is held before it lands.
+    store.put = async (collection, id, value) => {
+      const steps = (value as PlaceRecord).setup?.steps ?? [];
+      if (collection === "places" && !holding && steps.some(l => l.step === "folders" && l.state === "running")) {
+        holding = true;
+        await held;
+      }
+      return put(collection, id, value);
+    };
+    // The ask at the join goes unanswered, so the folder add is the first to read what the computer forks with.
+    let asked = 0;
+    await hosting({ provision: provisioner().wired, store, checkouts: { answers: () => ++asked > 1 }, seed });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: folder, keep: [] } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(() => holding && asked > 1);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    letWrite();
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "installed" });
+    expect(((await store.get("places", place.id)) as PlaceRecord).backendFacts).toMatchObject({ projects: "/wsp/projects" });
   });
 
   it("refuses a fork there while it runs, naming the step, and takes one once it is done", async () => {
