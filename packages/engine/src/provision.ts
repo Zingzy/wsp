@@ -15,7 +15,7 @@ import { installTools, type ToolResult } from "./golden-tools.js";
 import type { GoldenImport, ImportResult, PackFiles } from "./golden.js";
 import { applyMachineContext } from "./machine-context.js";
 import type { Machine } from "./machine.js";
-import { closeAgentFiles, oncePathsOf, provisionFiles, type OwnedPaths, type ProvisionLanding } from "./provision-files.js";
+import { closeAgentFiles, oncePathsOf, outsideAfterScript, outsideBeforeScript, provisionFiles, type OwnedPaths, type ProvisionLanding } from "./provision-files.js";
 import { provisionMcp } from "./provision-mcp.js";
 
 /** What the recipe comes to on a computer you own, in run order: the node step, the agents after it, the tools by
@@ -325,9 +325,24 @@ async function filesRound(machine: Machine, files: NonNullable<ProvisionPlan["fi
  * computer stopped answering, which is the one thing a step cannot report a row for. */
 export async function provisionStep(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: ProvisionOn): Promise<PlaceProvisionRow[]> {
   const marked: ProvisionStage = (detail, at, row) => stage(detail, at, row === undefined ? undefined : { ...row, step });
-  const rows = await stepRows(machine, plan, step, run, marked, on);
-  return rows.map(row => ({ ...row, step }));
+  // Only a plan with wsp's prefix runs on a computer somebody owns; an image is sealed whole and never left.
+  const outside = plan.prefix !== undefined && INSTALL_STEPS.has(step);
+  if (outside) await machine.exec(outsideBeforeScript(step), { timeoutMs: OUTSIDE_MS }).catch(() => undefined);
+  try {
+    const rows = await stepRows(machine, plan, step, run, marked, on);
+    return rows.map(row => ({ ...row, step }));
+  } finally {
+    // A step that stopped part way still wrote what it wrote.
+    if (outside) await machine.exec(outsideAfterScript(step), { timeoutMs: OUTSIDE_MS }).catch(() => undefined);
+  }
 }
+
+/** The steps that install, which are the ones that write outside the agents' homes. */
+const INSTALL_STEPS: ReadonlySet<EngineStep> = new Set(["floor", "agents", "clis", "github", "configs"]);
+
+/** How long the listing on either side of a step gets: a walk of /usr/local and /opt, and the digests of what the
+ * step made, which for Node and an agent is a few hundred megabytes. */
+const OUTSIDE_MS = 120_000;
 
 async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: ProvisionOn): Promise<PlaceProvisionRow[]> {
   switch (step) {

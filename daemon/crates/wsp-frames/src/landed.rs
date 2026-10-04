@@ -54,6 +54,58 @@ pub fn own_marks(stdout: &str) -> Vec<String> {
         .collect()
 }
 
+/// What the leave outside the home prints for one path it took, so no path of the computer's reads as its words.
+pub const OUTSIDE_MARK: &str = "wsp-outside";
+
+/// The leave outside the home, run as root before wsp's own folder goes: every path the list in that folder names
+/// that still stands as the setup left it under /usr/local or /opt, files and links removed and folders taken once
+/// empty. `root` is the folder those sit under, empty for this computer's own. The engine's outsideSweepScript is the
+/// text this renders, held to it byte for byte by the contract fixture.
+pub fn outside_sweep_script(root: &str) -> String {
+    [
+        "set -u".to_owned(),
+        format!("root={}; prefix=\"$root{}\"; ledger=\"$prefix/landed\"", shell_quote(root), crate::numbers::TOOL_PREFIX),
+        r#"[ -d "$prefix" ] && [ ! -L "$prefix" ] && [ -f "$ledger" ] && [ ! -L "$ledger" ] || exit 0"#.to_owned(),
+        format!("tab=$(printf \"{TAB}\")"),
+        "state() {".to_owned(),
+        r#"  if [ -L "$1" ]; then printf 'link:%s\n' "$(readlink "$1" | sha256sum | cut -c1-64)""#.to_owned(),
+        r#"  elif [ -d "$1" ]; then echo dir"#.to_owned(),
+        r#"  elif [ -f "$1" ]; then sha256sum < "$1" | cut -c1-64"#.to_owned(),
+        "  fi".to_owned(),
+        "}".to_owned(),
+        "under() {".to_owned(),
+        r#"  case "$1" in "$root/usr/local/"*|"$root/opt/"*) ;; *) return 1 ;; esac"#.to_owned(),
+        r#"  case "$1" in "$prefix"|"$prefix/"*) return 1 ;; esac"#.to_owned(),
+        r#"  case "$1/" in */../*|*/./*|*//*) return 1 ;; esac"#.to_owned(),
+        r#"  d=$(dirname "$1")"#.to_owned(),
+        r#"  [ "$(cd -P "$d" 2>/dev/null && pwd)" = "$d" ]"#.to_owned(),
+        "}".to_owned(),
+        format!(
+            "awk -F\"{TAB}\" '{{ s[substr($0, length($1) + 2)] = $1 }} END {{ for (p in s) print s[p] FS p }}' \"$ledger\" | LC_ALL=C sort -t\"$tab\" -k2 -r | while IFS=\"$tab\" read -r was p; do"
+        ),
+        r#"  under "$p" || continue"#.to_owned(),
+        r#"  if [ "$was" = dir ]; then"#.to_owned(),
+        format!("    [ -d \"$p\" ] && [ ! -L \"$p\" ] && rmdir \"$p\" 2>/dev/null && printf '{OUTSIDE_MARK}{TAB}%s{NL}' \"$p\""),
+        r#"  elif [ -n "$was" ] && [ "$(state "$p")" = "$was" ]; then"#.to_owned(),
+        format!("    rm -f \"$p\" && printf '{OUTSIDE_MARK}{TAB}%s{NL}' \"$p\""),
+        "  fi".to_owned(),
+        "done".to_owned(),
+        "exit 0".to_owned(),
+    ]
+    .join("\n")
+}
+
+/// The paths that leave answered with. A line that is not the mark's, or whose path is not absolute, is not one.
+pub fn outside_marks(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\t');
+            (fields.next() == Some(OUTSIDE_MARK)).then(|| fields.collect::<Vec<_>>().join("\t")).filter(|path| path.starts_with('/'))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +135,12 @@ mod tests {
         // Nothing outside the home is a path of wsp's, whatever a list on the computer says.
         assert!(own_marks(&format!("{OWN_MARK}\t/etc/hosts")).is_empty());
         assert!(own_marks(&format!("{OWN_MARK}\t../../etc/hosts")).is_empty());
+    }
+
+    #[test]
+    fn the_leave_outside_the_home_answers_only_its_marks_lines_each_an_absolute_path() {
+        let said = format!("{OUTSIDE_MARK}\t/usr/local/bin/claude\nsomething else\n{OUTSIDE_MARK}\trelative\n{OUTSIDE_MARK}\t\n");
+        assert_eq!(outside_marks(&said), ["/usr/local/bin/claude"]);
+        assert!(outside_sweep_script("").contains("root=''; prefix=\"$root/opt/wsp\""));
     }
 }

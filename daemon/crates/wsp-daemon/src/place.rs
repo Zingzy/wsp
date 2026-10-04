@@ -10,8 +10,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use sha2::{Digest as _, Sha256};
 use wsp_frames::{
-    is_under_path, landed_files_script, numbers, own_marks, place_daemon_paths, place_owned_paths, words, Base64Bytes, PlaceFile,
-    PlacePublicKey, PlaceReport, PlaceSignature, Platform, WorkspaceSize,
+    is_under_path, landed_files_script, numbers, outside_marks, outside_sweep_script, own_marks, place_daemon_paths, place_owned_paths,
+    words, Base64Bytes, PlaceFile, PlacePublicKey, PlaceReport, PlaceSignature, Platform, WorkspaceSize,
 };
 
 /// The place file as it stands, or nothing when this computer is no place: a file that is there and is not one
@@ -453,6 +453,14 @@ pub(crate) fn sweep_workspace_profile(profile: &Path, read: &dyn Fn(&str) -> Str
     let quoted = format!("'{}'", profile.to_string_lossy().replace('\'', r"'\''"));
     read(&format!("command -v apparmor_parser >/dev/null 2>&1 && apparmor_parser -R {quoted} 2>/dev/null; true"));
     std::fs::remove_file(profile).ok().map(|()| profile.to_string_lossy().into_owned())
+}
+
+/// Takes what the setup wrote outside the home off this computer, read off the list in wsp's install folder by the
+/// one leave script the host's own leave runs, so it goes before that folder does. `root` is the folder /usr/local
+/// and /opt sit under, empty for this computer's own. The bound is the host's own for that script: it hashes every
+/// binary the setup wrote, and one killed part way leaves the rest behind once the list goes with the folder.
+pub(crate) fn sweep_outside_home(root: &str) -> Vec<String> {
+    outside_marks(&sh_stdout_within(&outside_sweep_script(root), Duration::from_secs(60)))
 }
 
 /// Takes wsp's install folder off this computer: every link in the links folder whose own target is under the
@@ -1428,5 +1436,30 @@ mod tests {
         // A computer that never loaded one is asked nothing and says nothing.
         let never = |_: &str| -> String { panic!("nothing to unload") };
         assert_eq!(sweep_workspace_profile(&profile, &never), None);
+    }
+
+    #[test]
+    fn the_leave_outside_the_home_takes_what_the_list_names_as_wsp_left_it_and_nothing_else() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = std::fs::canonicalize(dir.path()).expect("canonical root");
+        let bin = root.join("usr/local/bin");
+        std::fs::create_dir_all(&bin).expect("bin");
+        std::fs::create_dir_all(root.join("opt/wsp")).expect("prefix");
+        std::fs::write(bin.join("claude"), "claude 2.1.280\n").expect("claude");
+        std::fs::write(bin.join("jq"), "the box's own jq\n").expect("jq");
+        std::fs::write(bin.join("gopls"), "the person's own gopls\n").expect("gopls");
+        // claude as wsp left it, gopls at bytes the person has written since; jq is on no line.
+        let ledger = format!(
+            "{}\t{}\n{}\t{}\n",
+            sha256_hex(b"claude 2.1.280\n"),
+            bin.join("claude").display(),
+            sha256_hex(b"gopls as wsp left it\n"),
+            bin.join("gopls").display()
+        );
+        std::fs::write(root.join("opt/wsp/landed"), ledger).expect("ledger");
+        let swept = sweep_outside_home(&root.to_string_lossy());
+        assert_eq!(swept, [bin.join("claude").to_string_lossy().into_owned()]);
+        assert!(!bin.join("claude").exists());
+        assert!(bin.join("jq").exists() && bin.join("gopls").exists());
     }
 }

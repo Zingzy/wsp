@@ -12,7 +12,7 @@ import { homedir, arch as osArch, platform, release, type as osType, uptime as u
 import { spawnRun } from "@wsp/collect";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS, configSum } from "@wsp/catalog";
-import { LOGIN_READ, SSH_STORE_VARS, landedFilesScript, writeConfigHere, localShape, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
+import { LOGIN_READ, SSH_STORE_VARS, landedFilesScript, writeConfigHere, localShape, outsideMarks, outsideSweepScript, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
 import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOwnedPaths, TOOL_LINKS_DIR, TOOL_PREFIX, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { apparmorOffStep, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
@@ -249,6 +249,9 @@ export interface PlaceSweepOptions {
   apparmorProfile?: string;
   /** wsp's install folder and the folder its commands are linked into; the protocol's unless a caller hands others. */
   tools?: ToolFolders;
+  /** The folder this computer's /usr/local and /opt sit under, for what the setup wrote outside the home: the
+   * computer's own unless a caller hands another. */
+  systemRoot?: string;
 }
 
 /** The folder every manager installs under on a computer somebody owns, and the folder its commands are linked into. */
@@ -356,8 +359,9 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
     sh(apparmorOffStep(profile).join("\n"));
     if (!there(profile)) removed.push(profile);
   }
-  // Only root's jobs install there, and only root can take it off.
-  if (root) removed.push(...sweepTools(opts.tools ?? { prefix: TOOL_PREFIX, links: TOOL_LINKS_DIR }));
+  // Only root's jobs install there, and only root can take it off. What the setup wrote outside the home goes
+  // first, since the list naming it sits in wsp's install folder.
+  if (root) removed.push(...outsideMarks(sh(outsideSweepScript(opts.systemRoot))), ...sweepTools(opts.tools ?? { prefix: TOOL_PREFIX, links: TOOL_LINKS_DIR }));
   const said = unsourced(sshDaemonPlace({ home, path: "" }), home);
   if (said !== undefined && "removed" in said) removed.push(said.removed);
   return { removed, kept: [placeKeptLine(workFolderIn(home)), ...(said !== undefined && "kept" in said ? [said.kept] : [])] };

@@ -20,6 +20,7 @@ import {
   provisionPackedLine,
   provisionShippedLine,
   shellQuote,
+  TOOL_PREFIX,
   type PlaceProvisionRow,
 } from "@wsp/protocol";
 import { CATALOG_AGENTS, MCP_AGENTS, skillsDirOf } from "@wsp/catalog";
@@ -559,6 +560,116 @@ export function ownMarks(stdout: string): string[] {
     const rel = words.slice(1).join("\t");
     if (words[0] !== OWN_MARK || rel === "" || rel.startsWith("/") || rel.split("/").includes("..")) return [];
     return [rel];
+  });
+}
+
+/** What the leave outside the home prints for one path it took, so no path of the computer's reads as its words. */
+export const OUTSIDE_MARK = "wsp-outside";
+
+/** The lines every script outside the home opens with: the computer's root (empty but in a test), wsp's own folder
+ * under /opt and the list in it. The list sits in that folder because nothing but wsp's own jobs writes there and no
+ * workspace can, while every workspace writes the home the other list sits in, and a line here names a file a
+ * leave run as root removes. */
+function outsideHead(root: string): string[] {
+  return ["set -u", `root=${shellQuote(root)}; prefix="$root${TOOL_PREFIX}"; ledger="$prefix/landed"`];
+}
+
+/** What a path stands as, which is what the list writes and the leave compares: a file's digest, a link's target's
+ * digest, `dir` for a folder, nothing for anything else. Read off stdin, since sha256sum escapes a name it prints. */
+const OUTSIDE_STATE = [
+  "state() {",
+  '  if [ -L "$1" ]; then printf \'link:%s\\n\' "$(readlink "$1" | sha256sum | cut -c1-64)"',
+  '  elif [ -d "$1" ]; then echo dir',
+  '  elif [ -f "$1" ]; then sha256sum < "$1" | cut -c1-64',
+  "  fi",
+  "}",
+];
+
+/** Every path under the folders a road writes outside the home, wsp's own folder left out, as it stands. A path with
+ * a newline in it is never listed, so it is never on the list and never taken. */
+const outsideFind = (tests: string): string =>
+  `find "$root/usr/local" "$root/opt" \\( -path "$prefix" -o -path "*$nl*" \\) -prune -o ${tests}-print 2>/dev/null | LC_ALL=C sort`;
+
+const NEWLINE_VAR = ["nl=$(printf '\\nx'); nl=${nl%x}"];
+
+/** The run before an install step on a computer somebody owns: the time it starts and every path under /usr/local
+ * and /opt as they stand, so the run after tells what the step made from what the computer had. A computer whose
+ * jobs cannot write wsp's folder can write neither of those, and this does nothing there. */
+export function outsideBeforeScript(step: string, root = ""): string {
+  return [
+    ...outsideHead(root),
+    `at="$prefix/.landing-${step}"`,
+    ...NEWLINE_VAR,
+    '[ ! -L "$prefix" ] && mkdir -p "$prefix" 2>/dev/null || exit 0',
+    ': > "$at.mark" || exit 0',
+    `${outsideFind("")} > "$at.before"`,
+    "exit 0",
+  ].join("\n");
+}
+
+/** The run after it: every path the step made, and every path on the list the step wrote again, written down at
+ * what it stands as now. A path the computer had before wsp and the step wrote over is on neither and stays the
+ * computer's, and a path a package put there is dpkg's: a leave that took it would leave dpkg naming a file that is
+ * gone. Lines are only appended, each in one write, so two steps closing at once lose none; the leave reads the
+ * last line a path has. */
+export function outsideAfterScript(step: string, root = ""): string {
+  return [
+    ...outsideHead(root),
+    `at="$prefix/.landing-${step}"`,
+    ...NEWLINE_VAR,
+    '[ -f "$at.before" ] && [ -f "$at.mark" ] || exit 0',
+    ...OUTSIDE_STATE,
+    `${outsideFind("")} > "$at.after"`,
+    '{ [ ! -f "$ledger" ] || cut -f2- "$ledger"; } | LC_ALL=C sort -u > "$at.owned"',
+    `cat "$root"/var/lib/dpkg/info/*.list 2>/dev/null | awk -v r="$root" '{ print r $0 }' | LC_ALL=C sort -u > "$at.dpkg"`,
+    "{",
+    '  LC_ALL=C comm -13 "$at.before" "$at.after"',
+    `  ${outsideFind('-cnewer "$at.mark" ')} | LC_ALL=C comm -12 - "$at.owned"`,
+    '} | LC_ALL=C sort -u | LC_ALL=C comm -23 - "$at.dpkg" | while IFS= read -r p; do',
+    '  s=$(state "$p")',
+    `  [ -z "$s" ] || printf "%s${TAB}%s${NL}" "$s" "$p" >> "$ledger"`,
+    "done",
+    'rm -f "$at.mark" "$at.before" "$at.after" "$at.owned" "$at.dpkg"',
+    "exit 0",
+  ].join("\n");
+}
+
+/** The leave outside the home, run as root on the computer being left before wsp's folder goes: every path the list
+ * names that still stands as wsp left it, files and links removed and folders taken once empty, children before
+ * their folder. A path not under /usr/local or /opt, under wsp's own folder, or reached through a folder that is a
+ * link is taken by no line. The daemon runs this same text through sh: its twin is held to it by the contract
+ * fixture. */
+export function outsideSweepScript(root = ""): string {
+  return [
+    ...outsideHead(root),
+    '[ -d "$prefix" ] && [ ! -L "$prefix" ] && [ -f "$ledger" ] && [ ! -L "$ledger" ] || exit 0',
+    `tab=$(printf "${TAB}")`,
+    ...OUTSIDE_STATE,
+    "under() {",
+    '  case "$1" in "$root/usr/local/"*|"$root/opt/"*) ;; *) return 1 ;; esac',
+    '  case "$1" in "$prefix"|"$prefix/"*) return 1 ;; esac',
+    '  case "$1/" in */../*|*/./*|*//*) return 1 ;; esac',
+    '  d=$(dirname "$1")',
+    '  [ "$(cd -P "$d" 2>/dev/null && pwd)" = "$d" ]',
+    "}",
+    `awk -F"${TAB}" '{ s[substr($0, length($1) + 2)] = $1 } END { for (p in s) print s[p] FS p }' "$ledger" | LC_ALL=C sort -t"$tab" -k2 -r | while IFS="$tab" read -r was p; do`,
+    '  under "$p" || continue',
+    '  if [ "$was" = dir ]; then',
+    `    [ -d "$p" ] && [ ! -L "$p" ] && rmdir "$p" 2>/dev/null && printf '${OUTSIDE_MARK}${TAB}%s${NL}' "$p"`,
+    '  elif [ -n "$was" ] && [ "$(state "$p")" = "$was" ]; then',
+    `    rm -f "$p" && printf '${OUTSIDE_MARK}${TAB}%s${NL}' "$p"`,
+    "  fi",
+    "done",
+    "exit 0",
+  ].join("\n");
+}
+
+/** The paths that leave answered with. A line that is not the mark's, or whose path is not absolute, is not one. */
+export function outsideMarks(stdout: string): string[] {
+  return stdout.split("\n").flatMap(line => {
+    const words = line.split("\t");
+    const path = words.slice(1).join("\t");
+    return words[0] === OUTSIDE_MARK && path.startsWith("/") ? [path] : [];
   });
 }
 
