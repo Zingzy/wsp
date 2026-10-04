@@ -607,3 +607,15 @@ describe("the slate v2 host, round 4", () => {
     expect(ask.text).not.toMatch(/held/);
   }, 30_000);
 });
+
+describe("a slate's files on the host", () => {
+  it("slate read shows each file's text in the printed slate and its size in the sketch, and a patch replaces it", async () => {
+    const { rt, asThread } = await threadOn("wsp-slates-files-");
+    const wrote = await rt.slates.write({ text: `<slate>\n  <run name="hits" cmd='python3 "$SLATE_DIR/hits.py"' />\n  <column />\n  <file name="hits.py">{\`print(1)\`}</file>\n</slate>` }, asThread);
+    expect(wrote.text).toContain("files in $SLATE_DIR: hits.py (8 B)");
+    const read = await rt.slates.read({}, asThread);
+    expect(read.text).toContain('<file name="hits.py">{`\n    print(1)\n  `}</file>');
+    await rt.slates.write({ text: '<file name="hits.py">{`print(22)`}</file>' }, asThread);
+    expect((await rt.slates.read({}, asThread)).text).toContain("    print(22)\n");
+  }, 30_000);
+});
