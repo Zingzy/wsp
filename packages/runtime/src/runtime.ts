@@ -9131,7 +9131,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         bus.emit({ type: "thread.marked", workspaceId, threadIds: undone });
       }
       // The slate's snapshot is keyed by the turn and never waits on the machine, so every turn that ends has one.
-      void slates.turnEnded({ threadId, turnId, workspaceId }).catch((e: unknown) => console.warn(`the slate of thread ${threadWord(threadId)} was not kept at the end of turn ${turnId}: ${e instanceof Error ? e.message : String(e)}`));
+      void slates.turnEnded({ threadId, turnId }).catch((e: unknown) => console.warn(`the slate of thread ${threadWord(threadId)} was not kept at the end of turn ${turnId}: ${e instanceof Error ? e.message : String(e)}`));
       const kept = keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(anchor !== undefined ? { anchor } : {}), ...(keptWhy !== undefined ? { kept: keptWhy } : {}) });
       checkpointsLanding.set(threadId, kept);
       void kept.finally(() => {
@@ -10395,14 +10395,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
       if (opts.undo === true) {
         const rewound = held?.rewound;
-        // A rewind that moved only the conversation and the slate is undone for the slate alone.
-        if (rewound === undefined && !(await slates.hasRewound(threadId))) throw conflict(REWIND_NO_UNDO_LINE);
+        if (rewound === undefined) throw conflict(REWIND_NO_UNDO_LINE);
         besideRunning();
-        const back = rewound === undefined ? undefined : await restore(rewound.before);
-        if (held !== undefined) delete held.rewound;
-        await slates.undoRewind(threadId);
+        const back = await restore(rewound.before);
+        delete held!.rewound;
+        // The slate follows the conversation, which undo never puts back: it stays as the rewind left it.
         await done();
-        return { turns: 0, ...(back !== undefined ? { files: Number(back["files"] ?? 0) } : {}) };
+        return { turns: 0, files: Number(back["files"] ?? 0) };
       }
 
       // A copy, read for the turns and their checkpoints alone: the cut below takes its own copy inside the queue.

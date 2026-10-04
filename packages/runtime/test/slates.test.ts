@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import type { AdapterEvent, Caller, EventUnion, SlateView, TurnResult } from "@wsp/protocol";
+import { REWIND_NO_UNDO_LINE, type AdapterEvent, type Caller, type EventUnion, type SlateView, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -211,7 +211,7 @@ describe("the slate v2 host", () => {
     expect((await third.slates.get(threadId))!.values["fired"]).toBe(1);
   }, 60_000);
 
-  it("a rewind restores the turn's snapshot, cancels a run in flight with no reaction, and undo rewind puts the slate back", async () => {
+  it("a rewind restores the turn's snapshot, cancels a run in flight with no reaction, and leaves nothing for undo", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "wsp-slates-")));
     roots.push(root);
     const folder = join(root, "plain");
@@ -245,17 +245,14 @@ describe("the slate v2 host", () => {
     expect(rewound.values["project"]).toBe("");
     expect(rewound.values["slow"]).toMatchObject({ state: "cancelled", why: "the thread was rewound" });
     expect(rewound.values["fired"]).toBe(0);
-    expect(rewound.rewound).toBe(true);
     // The killed command's end is dropped: nothing fires after the restore either.
     await new Promise(r => setTimeout(r, 300));
     await rt.slates.settled();
     expect((await rt.slates.get(threadId))!.values["fired"]).toBe(0);
 
-    await rt.sessions.rewind(threadId, { undo: true });
-    await rt.slates.settled();
-    const back = (await rt.slates.get(threadId))!;
-    expect(back.values["project"]).toBe("later");
-    expect(back.values["slow"]).toMatchObject({ state: "cancelled" });
+    // A rewind of the conversation alone leaves nothing to undo, the slate included.
+    await expect(rt.sessions.rewind(threadId, { undo: true })).rejects.toThrow(REWIND_NO_UNDO_LINE);
+    expect((await rt.slates.get(threadId))!.values["project"]).toBe("");
 
     // A rewind to the turn before the slate existed empties it, keeping approvals.
     await rt.sessions.rewind(threadId, { turnId: first.turnId, files: false });

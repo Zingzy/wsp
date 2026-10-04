@@ -215,7 +215,7 @@ describe("in the Slate tab", () => {
   const row: SessionView = { id: "s1", workspaceId: "ws", harness: "claude", status: "completed", threadId: "m0" };
   const record = (doc: SlateDoc, values: Record<string, SlateJson>, over: Partial<SlateRecord> = {}): SlateRecord => ({
     threadId: row.threadId!, workspaceId: "ws", version: 1, revision: 1, document: doc, values: { ...slateStartValues(doc), ...values },
-    comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over,
+    comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, updatedAt: 1, ...over,
   });
   function open(first: SlateRecord, over: Partial<SlateApi> = {}) {
     const slates: SlateApi = {

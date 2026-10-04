@@ -21,7 +21,7 @@ const HANDLE = { secret: true, set: true, len: 24, at: 1 };
 const TOKEN = "tok_9f8e7d6c5b4a39281706f5e4";
 
 function record(doc: SlateDoc, values: Record<string, SlateJson> = {}, over: Partial<SlateRecord> = {}): SlateRecord {
-  return { threadId: tid(), workspaceId: "ws", version: 1, revision: 1, document: doc, values: { ...slateStartValues(doc), ...values }, comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over };
+  return { threadId: tid(), workspaceId: "ws", version: 1, revision: 1, document: doc, values: { ...slateStartValues(doc), ...values }, comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, updatedAt: 1, ...over };
 }
 
 function host(first: SlateRecord, over: Partial<SlateApi> = {}): SlateApi {
