@@ -32,7 +32,8 @@ export interface StepLine {
 }
 
 /** A setup frame onto the setup the record held: a step's line where it stands, every step the frame names running
- * marked running, a sign-in's wait in or out, the end's state. Frames for another run leave the record as it was. */
+ * marked running, a sign-in's wait in, a landed row's wait out, the end's state. Frames for another run leave the
+ * record as it was. */
 export function foldSetup(setup: PlaceSetup | undefined, e: PlaceSetupEvent): PlaceSetup | undefined {
   if (setup === undefined || setup.addId !== e.addId) return setup;
   let next = setup;
@@ -46,34 +47,20 @@ export function foldSetup(setup: PlaceSetup | undefined, e: PlaceSetupEvent): Pl
     next = { ...next, steps: held === undefined ? [...next.steps, { step, state: "running" }] : next.steps.map(s => (s === held ? { step, state: "running" } : s)) };
   }
   if (e.wait !== undefined) next = { ...next, waiting: [...next.waiting.filter(w => w.row !== e.wait!.row), e.wait] };
+  if (e.landed !== undefined && next.waiting.some(w => w.row === e.landed)) next = { ...next, waiting: next.waiting.filter(w => w.row !== e.landed) };
   if (e.end !== undefined) next = { ...next, state: e.end === "failed" ? "failed" : "done", ...(e.end === "failed" && e.said !== undefined ? { said: e.said } : {}) };
   return next;
 }
 
-/** When this window first saw each step of a run running, by run and step: the host stamps a step's time only once
- * it ends. A step's entry goes when it ends and a run's when the run does. */
-const SINCE = new Map<string, number>();
-
-/** A setup frame onto the times its steps started. */
-export function noteRunning(e: PlaceSetupEvent, at = Date.now()): void {
-  if (e.end !== undefined) {
-    for (const key of SINCE.keys()) if (key.startsWith(`${e.addId}/`)) SINCE.delete(key);
-    return;
-  }
-  if (e.line !== undefined && e.line.state !== "running") SINCE.delete(`${e.addId}/${e.line.step}`);
-  for (const step of [...(e.running ?? []), ...(e.line?.state === "running" ? [e.line.step] : [])]) if (!SINCE.has(`${e.addId}/${step}`)) SINCE.set(`${e.addId}/${step}`, at);
+/** How long a running step has run as of `now`, from when the host started it. */
+export function runningMs(setup: PlaceSetup | undefined, step: string, now: number): number | undefined {
+  const at = setup?.steps.find(s => s.step === step)?.startedAt;
+  return at === undefined ? undefined : Math.max(0, now - Date.parse(at));
 }
 
-/** How long a step has run as of `now`, from when this window first saw it running. */
-export function runningMs(addId: string, step: string, now: number): number {
-  const key = `${addId}/${step}`;
-  const at = SINCE.get(key) ?? now;
-  if (!SINCE.has(key)) SINCE.set(key, at);
-  return Math.max(0, now - at);
-}
-
-/** Whether a frame ends something the places list carries more of than the frame does: a step's rows, the end. */
-export const frameEndsStep = (e: PlaceSetupEvent): boolean => e.end !== undefined || (e.line !== undefined && e.line.state !== "running");
+/** Whether a frame ends something the places list carries more of than the frame does: a step's rows, a row that
+ * landed late, the end. */
+export const frameEndsStep = (e: PlaceSetupEvent): boolean => e.end !== undefined || e.landed !== undefined || (e.line !== undefined && e.line.state !== "running");
 
 /** What a running step is doing, off the picks: the verb, each picked row by its key and the name a person reads, and
  * for a step of many like rows the noun they are counted by rather than named. */

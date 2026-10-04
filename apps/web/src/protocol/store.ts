@@ -16,7 +16,7 @@ import { claimKept, claiming, claimsAnswered, keepCreations, keptCreations, letG
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
 import { applyAddStage, takeAdds } from "../settings/adds.js";
-import { foldSetup, frameEndsStep, noteRunning } from "../settings/add/setup.js";
+import { foldSetup, frameEndsStep } from "../settings/add/setup.js";
 import { WHERE_WORDS } from "../settings/format.js";
 import { absenceOf, placeName, placeNamed } from "../settings/places.js";
 import { sameAt, useSettingsStore, type SettingsAt } from "../settings/settingsStore.js";
@@ -1172,7 +1172,6 @@ export const useStore = create<State>((set, get) => {
           applyAddStage(get().api, e);
           return;
         case "place.setup": {
-          noteRunning(e);
           set(s => {
             const at = s.places.find(p => p.id === e.placeId);
             const setup = at === undefined ? undefined : foldSetup(at.setup, e);
