@@ -232,25 +232,20 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
   const diskAsk: SlateAsk = { ...CHECK_ASK, key: "k-disk", run: "disk", cmd: "df -h .", env: {} };
   const held = { state: "held", why: "needs your approval", runs: 0 };
 
-  it("opens the sheet for a timer's held run when the tab shows it, one command at a time, saying how often and whether hidden", async () => {
+  it("opens one sheet for the timers' held runs when the tab shows it, saying how often and whether hidden for each", async () => {
     const slates = host(record(TIMERS, { spot: held, disk: held }, { asks: [spotAsk, diskAsk] }));
     openThread(slates);
-    const first = await screen.findByRole("dialog");
-    expect(first.querySelector("[data-slate-consent]")?.getAttribute("data-slate-consent")).toBe("spot");
-    expect(first.querySelector("[data-slate-consent-cadence]")?.textContent).toBe("Runs every 60 s, also while this slate is not on screen");
-    expect(first.querySelector("[data-slate-consent-more]")?.textContent).toBe("1 more command waits after this one");
+    const sheet = await screen.findByRole("dialog", { name: "Run these 2 commands?" });
+    const rows = [...sheet.querySelectorAll<HTMLElement>("[data-slate-approval]")];
+    expect(rows.map(r => r.dataset["slateApproval"])).toEqual(["k-spot", "k-disk"]);
+    expect(rows.map(r => r.querySelector("[data-slate-consent-cadence]")?.textContent)).toEqual([
+      "Runs every 60 s, also while this slate is not on screen",
+      "Runs every 30 s, only while this slate is on screen",
+    ]);
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    await act(async () => fireEvent.click(within(first).getByRole("button", { name: "Run once" })));
+    await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Run once" })));
     expect(slates.approve).toHaveBeenCalledWith(tid(), "k-spot", "once");
-    const second = await waitFor(() => {
-      const sheet = screen.getByRole("dialog");
-      expect(sheet.querySelector("[data-slate-consent]")?.getAttribute("data-slate-consent")).toBe("disk");
-      return sheet;
-    });
-    expect(second.querySelector("[data-slate-consent-cadence]")?.textContent).toBe("Runs every 30 s, only while this slate is on screen");
-    expect(second.querySelector("[data-slate-consent-more]")).toBeNull();
-    await act(async () => fireEvent.click(within(second).getByRole("button", { name: "Always in this thread" })));
-    expect(slates.approve).toHaveBeenCalledWith(tid(), "k-disk", "thread");
+    expect(slates.approve).toHaveBeenCalledWith(tid(), "k-disk", "once");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
