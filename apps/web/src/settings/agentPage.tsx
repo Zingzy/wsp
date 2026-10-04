@@ -241,10 +241,13 @@ function ModelsCard({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsCo
     write([...shown.map(v => byValue.get(v)!), ...items.filter(m => !m.shown)], custom, true);
   };
   const shownIds = items.filter(m => m.shown).map(m => m.value);
+  // The host orders the current and the legacy list each on its own, so a move across them would not hold.
+  const legacy = new Set((shaped.legacyModels ?? []).map(m => m.value));
+  const sameList = (a: string, b: string): boolean => legacy.has(a) === legacy.has(b);
   const step = (value: string, by: -1 | 1): void => {
     const at = shownIds.indexOf(value);
     const to = at + by;
-    if (at < 0 || to < 0 || to >= shownIds.length) return;
+    if (at < 0 || to < 0 || to >= shownIds.length || !sameList(value, shownIds[to]!)) return;
     const next = [...shownIds];
     next.splice(at, 1);
     next.splice(to, 0, value);
@@ -275,11 +278,11 @@ function ModelsCard({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsCo
                   setDragged(m.value);
                 },
                 onDragOver: (event: DragEvent<HTMLElement>) => {
-                  if (dragged !== null) event.preventDefault();
+                  if (dragged !== null && sameList(dragged, m.value)) event.preventDefault();
                 },
                 onDrop: (event: DragEvent<HTMLElement>) => {
                   event.preventDefault();
-                  if (dragged !== null && dragged !== m.value) reorder(movedBefore(shownIds, dragged, m.value));
+                  if (dragged !== null && dragged !== m.value && sameList(dragged, m.value)) reorder(movedBefore(shownIds, dragged, m.value));
                   setDragged(null);
                 },
                 onDragEnd: () => setDragged(null),

@@ -300,6 +300,32 @@ describe("an agent's page", () => {
     expect(written(made.sets)).toEqual({ hide: HIDDEN, custom: ["claude-opus-6-preview"] });
   });
 
+  it("moves a model only within its own list: a drop or a step across to the other list writes nothing", async () => {
+    const HIDDEN = ["claude-opus-4-8", "claude-sonnet-4-5"];
+    const rowOfModel = (id: string): HTMLElement => page().querySelector<HTMLElement>(`[data-settings-card='agent-models'] [data-model='${id}']`)!;
+    const dataTransfer = { setData: () => {}, effectAllowed: "move" };
+    /** Whether the row dragged onto took the drop, after the drag runs to its end. */
+    const drag = async (from: string, onto: string): Promise<boolean> => {
+      let taken = false;
+      await act(async () => void fireEvent.dragStart(rowOfModel(from), { dataTransfer }));
+      await act(async () => void (taken = !fireEvent.dragOver(rowOfModel(onto), { dataTransfer })));
+      await act(async () => void fireEvent.drop(rowOfModel(onto), { dataTransfer }));
+      await act(async () => void fireEvent.dragEnd(rowOfModel(from), { dataTransfer }));
+      return taken;
+    };
+    const { api, sets } = agentsApi();
+    await mount(api, atClaude);
+
+    expect(await drag("claude-opus-5", "claude-sonnet-5")).toBe(false);
+    expect(await drag("claude-haiku-4-5-20251001", "claude-sonnet-4-6")).toBe(false);
+    await act(async () => void fireEvent.keyDown(rowOfModel("claude-opus-5").querySelector("[data-k=model-grip]")!, { key: "ArrowUp" }));
+    await act(async () => void fireEvent.keyDown(rowOfModel("claude-haiku-4-5-20251001").querySelector("[data-k=model-grip]")!, { key: "ArrowDown" }));
+    expect(sets).toEqual([]);
+
+    expect(await drag("claude-sonnet-4-6", "claude-opus-5")).toBe(true);
+    expect((sets.at(-1) as { agentDefaults: { claude: { models: unknown } } }).agentDefaults.claude.models).toEqual({ hide: HIDDEN, order: ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-5"] });
+  });
+
   it("hides two models pressed within one round trip, the second write keeping the first hidden", async () => {
     // The host answers nothing until both presses are in, as a slow round trip would.
     const answers: Array<() => void> = [];

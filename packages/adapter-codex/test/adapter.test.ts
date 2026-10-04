@@ -821,6 +821,10 @@ describe("a subagent's frames on its lead's stream", () => {
       title: "Sleep 20 s and say done.",
     });
     expect(subagents(events).at(-1)).toMatchObject({ task: CHILD, state: "running", depth: 1 });
+    expect(deltasOf(events).filter(d => d.toolUseId === SPAWN)).toEqual([
+      { type: "turn.delta", sessionId: THREAD_ID, kind: "tool_use", text: JSON.stringify({ prompt: "Sleep 20 s and say done.\nEnd without waiting." }), toolName: "spawn_agent", toolUseId: SPAWN },
+      { type: "turn.delta", sessionId: THREAD_ID, kind: "tool_result", text: "", toolUseId: SPAWN, isError: false },
+    ]);
 
     live.wires[0]!.push(childSays("done"), childEnded("completed"));
     const result = await session.finished;
@@ -889,6 +893,7 @@ describe("a subagent's frames on its lead's stream", () => {
     const { events, onEvent } = collect();
     expect(await adapterOver(live).start({ prompt: "x", onEvent }).finished).toMatchObject({ status: "completed", text: "could not spawn" });
     expect(subagents(events)).toEqual([]);
+    expect(deltasOf(events).filter(d => d.toolUseId === SPAWN)).toEqual([{ type: "turn.delta", sessionId: THREAD_ID, kind: "tool_result", text: "", toolUseId: SPAWN, isError: true }]);
   });
 
   it("knows a child whose only sign is its own turn starting, and holds the lead for it", async () => {
@@ -1013,6 +1018,10 @@ describe("a recorded Codex turn whose lead spawned an agent and ended first", ()
     expect(events.flatMap(e => (e.type === "turn.tasks" ? [e.running] : []))).toEqual([1, 0]);
     expect(result).toMatchObject({ status: "completed", text: "spawned", tokens: { input: 77_535 + 19_515, window: 258_400 } });
     expect(deltasOf(events).map(d => d.text)).not.toContain("done");
+    expect(deltasOf(events).filter(d => d.toolUseId === said[0]!.parentToolUseId).map(d => [d.kind, d.toolName, d.text])).toEqual([
+      ["tool_use", "spawn_agent", JSON.stringify({ prompt: "Reply with the single word done and nothing else." })],
+      ["tool_result", undefined, ""],
+    ]);
     expect(launch.wires[0]!.closed).toBe(true);
     expect(events.at(-1)).toMatchObject({ type: "session.end", sessionId: LEAD, sawResult: true });
   });
