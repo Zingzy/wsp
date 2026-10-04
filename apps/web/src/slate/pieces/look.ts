@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The meaning words a slate may say, drawn in the app's own tokens (05-styling). The agent picks a word; this file
 // is the whole of how each one looks, in every theme, since every class reads a theme token.
-import { fmtBytes, fmtCost, fmtDuration, fmtTokens, type SlateJson } from "@wsp/protocol";
+import { fmtBytes, fmtCost, fmtDuration, fmtTokens, type SlateJson, type SlatePropValue } from "@wsp/protocol";
 import { CARD_SURFACE } from "../../settings/rows.js";
 import type { SlateEngine } from "../engine.js";
+import { truthy } from "../actions.js";
+import { whenOf } from "../paths.js";
 
 export type Tone = "default" | "muted" | "good" | "warning" | "bad" | "info" | "accent";
 const TONES: ReadonlySet<string> = new Set(["default", "muted", "good", "warning", "bad", "info", "accent"]);
@@ -53,6 +55,11 @@ export const str = (value: SlateJson | undefined): string | undefined =>
 /** The sentence a control is held by: a non-empty text holds it, anything else (null, false, "") lets it go. */
 export const heldBy = (value: SlateJson | undefined): string | undefined => (typeof value === "string" && value.trim() !== "" ? value : undefined);
 
+const WORD = /^[A-Za-z][a-z'’]*[,.;:!?]?$/;
+/** Text that reads as a sentence, three plain words or more, rather than a figure, an id, a time or a path: mono on
+ * it draws in the normal face. */
+export const isSentence = (value: SlateJson | undefined): boolean => typeof value === "string" && value.trim().split(/\s+/).filter(word => WORD.test(word)).length >= 3;
+
 export const num = (value: SlateJson | undefined): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 
 /** A figure through the formatter its word names; a word this build does not know reads plain. */
@@ -86,4 +93,14 @@ export function groupLook(props: Readonly<Record<string, SlateJson | undefined>>
   const inset = props["surface"] === "inset";
   const pad = typeof props["pad"] === "string" ? props["pad"] : inset ? "normal" : "none";
   return [PAD[pad] ?? "", inset ? CARD_SURFACE : "", typeof props["align"] === "string" ? (PLACE[props["align"]] ?? "") : ""].filter(Boolean).join(" ");
+}
+
+/** The items of a list prop the document wrote out whose when holds, as the view resolved them; a list from a value
+ * has no when of its own and comes whole. */
+export function present<T>(slate: SlateEngine, raw: SlatePropValue | undefined, resolved: readonly T[]): T[] {
+  if (!Array.isArray(raw) || raw.length !== resolved.length) return [...resolved];
+  return resolved.filter((_, at) => {
+    const when = whenOf(raw[at]);
+    return when === undefined || truthy(slate.evaluate(when));
+  });
 }

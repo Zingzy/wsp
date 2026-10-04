@@ -9,7 +9,7 @@ import { cn } from "../../lib/utils.js";
 import type { SlateEngine } from "../engine.js";
 import type { PieceViewProps, PieceView } from "../SlateView.js";
 import { truthy } from "../actions.js";
-import { str, TONE_INK, toneOf } from "./look.js";
+import { isSentence, present, str, TONE_INK, toneOf } from "./look.js";
 import { Outcome } from "./outcome.js";
 import { usePress } from "./press.js";
 import { pressTitle } from "./button.js";
@@ -19,6 +19,9 @@ const records = (value: SlatePropValue | undefined): Template[] =>
   Array.isArray(value) ? value.filter((entry): entry is Template => entry !== null && typeof entry === "object" && !Array.isArray(entry)) : [];
 
 type Row = { item: SlateJson; index: number };
+
+/** The columns whose when holds, eight at most. */
+const shownColumns = (slate: SlateEngine, raw: SlatePropValue | undefined): Template[] => present(slate, raw, records(raw)).slice(0, 8);
 
 /** A figure as a cell shows it: a number, or text like 524 MB, 12%, $4.20 or 3 days. */
 const FIGURE = /^[-+]?[$€£]?\d[\d,]*(\.\d+)?\s?(%|[A-Za-z]{1,5}(\/s)?)?$/;
@@ -39,6 +42,35 @@ function RowAction({ id, template, at, row, slate, raise }: Pick<PieceViewProps,
   );
 }
 
+/** The widest a clipped cell draws, in characters of the mono face (max-w-48 at text-xs). */
+const CLIP_CH = 26;
+
+/** Each column's tight width in characters, or undefined for a column that wraps: a mono column with no sentence in
+ * it, or one whose every cell is a figure. */
+function tightWidths(slate: SlateEngine, id: string): (number | undefined)[] {
+  const piece = slate.piece(id);
+  if (piece === undefined) return [];
+  const items = slate.resolve(piece.props?.["items"]);
+  const list = Array.isArray(items) ? items : [];
+  const cap = slate.resolve(piece.props?.["rows"]);
+  const shown = typeof cap === "number" ? list.slice(0, Math.max(0, Math.floor(cap))) : list;
+  return shownColumns(slate, piece.props?.["columns"]).map(column => {
+    const cells = shown.map((item, index) => slate.resolve(column["value"], { item, index }));
+    const mono = column["mono"] === true && !cells.some(isSentence);
+    if (!mono && (cells.length === 0 || !cells.every(isFigure))) return undefined;
+    const widest = Math.max(str(slate.resolve(column["title"]))?.length ?? 0, ...cells.map(cell => str(cell)?.length ?? 0));
+    return Math.min(widest, CLIP_CH);
+  });
+}
+
+/** The widths this table's tight columns take so the tables beside it with as many columns line up: each column
+ * the widest any of them needs. */
+function sharedWidths(slate: SlateEngine, id: string, own: (number | undefined)[]): (number | undefined)[] {
+  const fellows = slate.tablesBeside(id).filter(other => other !== id).map(other => tightWidths(slate, other)).filter(widths => widths.length === own.length);
+  if (fellows.length === 0) return own;
+  return own.map((width, at) => (width === undefined ? undefined : Math.max(width, ...fellows.map(widths => widths[at] ?? 0))));
+}
+
 function rowKey(slate: SlateEngine, key: SlatePropValue | undefined, row: Row): string {
   const value = key === undefined ? undefined : slate.resolve(key, row);
   return value === undefined || value === null ? `#${row.index}` : typeof value === "string" ? value : JSON.stringify(value);
@@ -49,16 +81,24 @@ export const table: PieceView = {
   rowScoped: ["columns", "rowActions", "key"],
   component: function TablePiece({ id, piece, props, slate, raise }) {
     const items = Array.isArray(props["items"]) ? props["items"] : [];
-    const columns = records(piece.props?.["columns"]).slice(0, 8);
+    const columns = shownColumns(slate, piece.props?.["columns"]);
     const actions = records(piece.props?.["rowActions"]).slice(0, 3);
     const cap = typeof props["rows"] === "number" ? Math.max(0, Math.floor(props["rows"])) : items.length;
     const shown = items.slice(0, cap);
     const end = (column: Template) => column["align"] === "end";
-    // A mono or figure column never wraps: it takes its widest cell and the text columns wrap around it.
-    const tight = columns.map(column => column["mono"] === true || (shown.length > 0 && shown.every((item, index) => isFigure(slate.resolve(column["value"], { item, index })))));
+    // A mono or figure column never wraps: it takes its widest cell, or the widest of the tables beside it, and the
+    // text columns wrap around it.
+    const widths = sharedWidths(slate, id, tightWidths(slate, id));
+    const tight = widths.map(width => width !== undefined);
     return (
       <div className="min-w-0 overflow-x-auto">
         <table className="w-full border-collapse text-left">
+          <colgroup>
+            {widths.map((width, at) => (
+              <col key={at} data-ch={width} className="font-mono text-xs" style={width === undefined ? undefined : { width: `calc(${width}ch + 1rem)` }} />
+            ))}
+            {actions.length > 0 ? <col /> : null}
+          </colgroup>
           <thead>
             <tr className={cn("text-muted-foreground", GROUP_LABEL)}>
               {columns.map((column, at) => (
@@ -76,7 +116,7 @@ export const table: PieceView = {
                 <tr key={rowKey(slate, piece.props?.["key"], row)} className="align-top transition-colors duration-150 hover:bg-accent">
                   {columns.map((column, at) => {
                     const value = slate.resolve(column["value"], row);
-                    const mono = column["mono"] === true || isFigure(value);
+                    const mono = (column["mono"] === true && !isSentence(value)) || isFigure(value);
                     const text = str(value);
                     return (
                       <td

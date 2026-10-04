@@ -78,6 +78,7 @@ export class SlateEngine {
   #readsListeners = new Set<() => void>();
   #readsDirty = false;
   #loud = new Map<Loud, string>();
+  #parents = new Map<string, string>();
   /** Lines streamed by each run since it last started, ahead of the record's own. */
   #lines = new Map<string, string[]>();
   /** Runs refreshing whose streamed lines are still the last result's. */
@@ -129,13 +130,20 @@ export class SlateEngine {
       this.#reads.delete(id);
       this.#revisions.set(id, (this.#revisions.get(id) ?? 0) + 1);
     }
+    this.#parents = parentsOf(doc);
+    // A piece draws by its place too (a text in a header row, a table beside others): a group that changed redraws
+    // its children, and a table reads what the tables beside it read.
+    const placed = new Set(changed);
+    for (const id of changed) for (const child of doc?.pieces[id]?.children ?? []) placed.add(child);
+    for (const id of placed) if (doc?.pieces[id]?.type === "table") for (const other of this.tablesBeside(id)) placed.add(other);
+    for (const id of placed) this.#reads.delete(id);
     if (before?.root !== doc?.root || before?.title !== doc?.title || (before === null) !== (doc === null)) changed.add(DOC);
     this.#loud = loudOf(doc);
     if (!stale) this.#revision = revision;
     // Pushes arrive in order, so the window's own copy is newer for every key it holds; the record adds only the
     // values its document declared since.
     const moved = this.#replaceRemote(stale ? { ...values, ...this.#remote } : values).map(key => `$${key}`);
-    for (const id of changed) if (this.#mounted.has(id)) this.#dirty.add(id);
+    for (const id of placed) if (this.#mounted.has(id)) this.#dirty.add(id);
     this.#markReading(moved);
     this.#runsMoved(moved);
     if (changed.size > 0) this.#readsChanged();
@@ -403,12 +411,39 @@ export class SlateEngine {
     this.#readsChanged();
   }
 
+  /** The group a piece is drawn in. */
+  parent(id: string): SlatePiece | undefined {
+    const parent = this.#parents.get(id);
+    return parent === undefined ? undefined : this.piece(parent);
+  }
+
+  /** The tables drawn in the same section as this one (the slate's root where there is none), itself included,
+   * so stacked tables can share their column widths. */
+  tablesBeside(id: string): string[] {
+    let group = this.#parents.get(id);
+    while (group !== undefined && this.piece(group)?.type !== "section" && this.#parents.has(group)) group = this.#parents.get(group);
+    if (group === undefined) return [id];
+    const out: string[] = [];
+    const visit = (at: string) => {
+      const piece = this.piece(at);
+      if (piece === undefined) return;
+      if (piece.type === "table") out.push(at);
+      if (at === group || piece.type !== "section") for (const child of piece.children ?? []) visit(child);
+    };
+    visit(group);
+    return out;
+  }
+
   #readsOf(id: string): { when: string[]; props: string[] } {
     let reads = this.#reads.get(id);
     if (reads === undefined) {
       const piece = this.piece(id);
       const derived = this.#doc?.derived ?? {};
-      const own = piece === undefined ? { when: [], props: [] } : pieceReads(piece);
+      let own = piece === undefined ? { when: [], props: [] } : pieceReads(piece);
+      if (piece?.type === "table") {
+        const beside = this.tablesBeside(id).flatMap(other => (other === id ? [] : pieceReads(this.piece(other)!).props));
+        own = { when: own.when, props: [...new Set([...own.props, ...beside])] };
+      }
       reads = { when: expandDerived(own.when, derived), props: expandDerived(own.props, derived) };
       this.#reads.set(id, reads);
     }
@@ -521,6 +556,12 @@ function walkFrom(item: SlateJson, rest: string): SlateJson | undefined {
     }
   }
   return at;
+}
+
+function parentsOf(doc: SlateDoc | null): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [id, piece] of Object.entries(doc?.pieces ?? {})) for (const child of piece.children ?? []) if (!out.has(child)) out.set(child, id);
+  return out;
 }
 
 /** The first piece in display order to ask for each loud thing with a literal. */

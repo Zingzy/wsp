@@ -4,7 +4,7 @@ import type { SlateJson } from "@wsp/protocol";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../components/ui/select.js";
 import type { PieceView } from "../SlateView.js";
 import { getOwn } from "../paths.js";
-import { str, heldBy } from "./look.js";
+import { heldBy, present, str } from "./look.js";
 import { twoWayPath } from "./press.js";
 
 function optionsOf(value: SlateJson | undefined): { value: string; label: string }[] {
@@ -21,7 +21,7 @@ export const select: PieceView = {
   type: "select",
   component: function SelectPiece({ piece, props, slate, sender, raise }) {
     const path = twoWayPath(piece.props?.["value"]);
-    const options = optionsOf(props["options"]);
+    const options = optionsOf(Array.isArray(props["options"]) ? present(slate, piece.props?.["options"], props["options"]) : undefined);
     const current = str(path === undefined ? props["value"] : getOwn(slate.values, path)) ?? null;
     const label = str(props["label"]) ?? "";
     const held = heldBy(props["held"]);
