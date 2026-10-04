@@ -11,7 +11,7 @@ import { markersOf, pagedReads } from "./exec-detached.js";
 import { baseInstalls, installBase } from "./golden-base.js";
 import { TOOLS_PATH, agentSteps, pathLine, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import type { McpPlan } from "./golden-mcp.js";
-import { installTools, type ToolResult } from "./golden-tools.js";
+import { diskUse, installTools, ownedFloorBytes, type ToolResult } from "./golden-tools.js";
 import type { GoldenImport, ImportResult, PackFiles } from "./golden.js";
 import { applyMachineContext } from "./machine-context.js";
 import type { Machine } from "./machine.js";
@@ -281,6 +281,7 @@ async function toolsStep(machine: Machine, plan: ProvisionPlan, steps: readonly 
   /** What each row read as the loop reached it, so a row the checks corrected after the loop is said again rather
    * than standing in the log on that computer as it first read. */
   const said = new Map<string, string>();
+  const disk = await diskUse(machine);
   const tools = await installTools(
     machine,
     steps,
@@ -291,6 +292,7 @@ async function toolsStep(machine: Machine, plan: ProvisionPlan, steps: readonly 
     {
       present: new Set(present.keys()),
       caches: "keep",
+      floor: ownedFloorBytes(disk.kind === "use" ? disk.sizeBytes : undefined),
       path: plan.path,
       ...(plan.prefix !== undefined ? { prefix: plan.prefix } : {}),
       onTool: result => {

@@ -287,6 +287,10 @@ export function recipeShelf(o: { statePath: string; home: string; options?: () =
       const resolved = await resolveRecipe(held.file, reading);
       return { file: held.file, items: resolved.items, hash: recipeHash(resolved) };
     },
+    resolveFile: async file => {
+      const resolved = await resolveRecipe(file, reading);
+      return { file, items: resolved.items, hash: recipeHash(resolved) };
+    },
   };
 }
 

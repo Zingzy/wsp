@@ -116,6 +116,8 @@ const RECIPES: RecipeView[] = [
 ];
 
 const s = (n: number): number => n * 1000;
+/** A running step's start, that many seconds before the page drew it, so its time reads as it would mid-run. */
+const since = (n: number): string => new Date(Date.now() - n * 1000).toISOString();
 const row = (step: PlaceApplied["rows"][number]["step"], id: string, label: string, outcome: "installed" | "present" | "failed" = "installed", note?: string): PlaceApplied["rows"][number] => ({ id, label, outcome, step, ...(note === undefined ? {} : { note }) });
 const LANDED: PlaceApplied["rows"] = [
   row("floor", "floor/git", "git"),
@@ -155,7 +157,7 @@ const ALL_LANDED: PlaceApplied["rows"] = [
 ];
 const SETUPS: Record<string, { setup: PlaceSetup; applied: PlaceApplied }> = {
   running: {
-    setup: setupOf("running", [{ step: "floor", state: "done", ms: s(72) }, { step: "agents", state: "done", ms: s(53) }, { step: "signins", state: "done" }, { step: "mcp", state: "running" }, { step: "clis", state: "running" }, { step: "skills", state: "running" }, { step: "plugins", state: "running" }, { step: "github", state: "done", ms: 400 }, { step: "folders", state: "running" }, { step: "configs", state: "done", ms: s(3) }], [CODEX_WAIT]),
+    setup: setupOf("running", [{ step: "floor", state: "done", ms: s(72) }, { step: "agents", state: "done", ms: s(53) }, { step: "signins", state: "done" }, { step: "mcp", state: "running", startedAt: since(14) }, { step: "clis", state: "running", startedAt: since(64) }, { step: "skills", state: "running", startedAt: since(6) }, { step: "plugins", state: "running", startedAt: since(22) }, { step: "github", state: "done", ms: 400 }, { step: "folders", state: "running", startedAt: since(31) }, { step: "configs", state: "done", ms: s(3) }], [CODEX_WAIT]),
     applied: { hash: "h", at: AT, rows: [...LANDED, row("github", "github", "GitHub", "present"), row("configs", "configs/git", "git"), row("configs", "configs/shell", "shell")] },
   },
   "running-failed": {

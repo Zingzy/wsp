@@ -411,7 +411,14 @@ export interface InstallToolsOptions {
   /** The folder of wsp's own the managers install under on a computer somebody owns, whose knobs ride the line
    * beside that PATH; absent on a machine wsp forked, where each manager keeps its own folder under the home. */
   prefix?: string;
+  /** What the loop keeps free on the disk, TOOLS_DISK_FLOOR unless the caller holds more back. */
+  floor?: number;
 }
+
+/** What a run keeps free on a computer somebody owns: the floor, or a tenth of its disk where that is more, since
+ * the computer runs other things that write to the same disk (a full disk stopped a production queue's saves,
+ * 2026-10-04). */
+export const ownedFloorBytes = (sizeBytes: number | undefined): number => Math.max(TOOLS_DISK_FLOOR, Math.floor((sizeBytes ?? 0) / 10));
 
 /** Runs the plan's installs one at a time. Each tool fails alone and is named in the stage detail;
  * one that waits on an install that failed is skipped with that install's name. At the first reading
@@ -422,6 +429,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
   const stage = (detail: string, step?: GoldenStep): void => onStage(at, detail, step);
   const present = opts.present ?? new Set<string>();
   const path = opts.path ?? TOOLS_PATH;
+  const keep = opts.floor ?? TOOLS_DISK_FLOOR;
   /** Nothing on a machine whose caches are the person's own; the phrase where they are this run's to sweep. */
   const sweep = async (): Promise<string | undefined> => (opts.caches === "keep" ? undefined : await sweepCaches(machine, path));
   await machine.exec(SWEEP_TMP_CMD, { timeoutMs: INLINE_EXEC_MS });
@@ -439,11 +447,11 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
   let cleanedAtFloor = false;
   /** Nothing touches the disk between the read after an install and the next tool's turn, so that read serves both. */
   let reading: FreeDisk | undefined;
-  const floorNote = (reading: string): string => `${reading}, keeping ${fmtBytes(TOOLS_DISK_FLOOR)} free`;
-  const cleanupAtFloor = async (low: number): Promise<FreeDisk | undefined> => {
+  const floorNote = (reading: string): string => `${reading}, keeping ${fmtBytes(keep)} free`;
+  const cleanupAtFloor = async (why: string): Promise<FreeDisk | undefined> => {
     if (cleanedAtFloor) return undefined;
     cleanedAtFloor = true;
-    stage(`${fmtBytes(low)} free, under the ${fmtBytes(TOOLS_DISK_FLOOR)} floor; cleaning up before skipping`);
+    stage(`${why}; cleaning up before skipping`);
     const brew = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run, path) : undefined;
     const swept = await sweep();
     const after = await freeBytes(machine);
@@ -471,16 +479,28 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     reading = undefined;
     if (free.kind === "unknown" && !dfWarned) {
       dfWarned = true;
-      stage(`free disk unknown (${free.reason}); installing without the ${fmtBytes(TOOLS_DISK_FLOOR)} floor`);
-    } else if (free.kind === "free" && free.bytes < TOOLS_DISK_FLOOR) {
-      const after = await cleanupAtFloor(free.bytes);
-      if (after === undefined || after.kind === "unknown" || after.bytes < TOOLS_DISK_FLOOR) {
+      stage(`free disk unknown (${free.reason}); installing without the ${fmtBytes(keep)} floor`);
+    } else if (free.kind === "free" && free.bytes < keep) {
+      const after = await cleanupAtFloor(`${fmtBytes(free.bytes)} free, under the ${fmtBytes(keep)} floor`);
+      if (after === undefined || after.kind === "unknown" || after.bytes < keep) {
         const words = after === undefined ? `${fmtBytes(free.bytes)} free` : after.kind === "free" ? `${fmtBytes(after.bytes)} free after cleanup` : `${fmtBytes(free.bytes)} free before cleanup and unknown after (${after.reason})`;
         floor = floorNote(words);
         landed({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
         continue;
       }
       free = after;
+    }
+    // A free reading over the floor says nothing about an install that takes more than the room left above it: one
+    // started 3 GB over the floor pulled 2.4 GB of LLVM and took the disk to nothing (2026-10-04). It is skipped
+    // alone, and what comes after it still gets its turn.
+    if (free.kind === "free" && tool.bytes !== undefined && free.bytes - tool.bytes < keep) {
+      const after = await cleanupAtFloor(`${tool.label} needs about ${fmtBytes(tool.bytes)} with ${fmtBytes(free.bytes)} free above a ${fmtBytes(keep)} floor`);
+      if (after?.kind === "free" && after.bytes - tool.bytes >= keep) free = after;
+    }
+    if (free.kind === "free" && tool.bytes !== undefined && free.bytes - tool.bytes < keep) {
+      reading = free;
+      landed({ id: tool.id, label: tool.label, outcome: "skipped", note: floorNote(`needs about ${fmtBytes(tool.bytes)}, ${fmtBytes(free.bytes)} free`) });
+      continue;
     }
     const step: GoldenStep = { label: tool.label, command: tool.shown ?? tool.cmd };
     const limit = roadLimitS(tool.manager);

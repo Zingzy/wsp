@@ -501,9 +501,9 @@ export interface Api {
   /** Takes a computer or a provider back out: the host sweeps wsp off it over its link where it is connected, drops
    * the workspaces standing on it and the record. */
   removePlace?(placeId: string): Promise<PlaceRemoved>;
-  /** Puts this wsp's daemon on the computer where that computer runs an older one, then runs the recipe on it
-   * again. Answers what the daemon half came to where it ran, the recipe job as it stands when the reply goes out
-   * and, where no job started, why. A client without it holds Update rather than offering one that asks nobody. */
+  /** Puts this wsp's daemon on the computer where that computer runs an older one; what it was set up with stays.
+   * Answers what the daemon half came to where it ran. A client without it holds Update rather than offering one
+   * that asks nobody. */
   placesUpdate?(placeId: string): Promise<PlaceUpdateReply>;
   /** Sets what a person may set on one place, a word under `reset` taking that one back to its default, and answers
    * the row as it now reads. A client without it draws the settings as words with no control. */

@@ -362,8 +362,11 @@ function useNow(on: boolean): number {
 function RunningView({ place }: { place: PlaceView }) {
   const drawn = setupRows(place, placeName(place));
   const now = useNow(drawn.some(row => row.state === "working"));
-  const addId = place.setup?.addId;
-  const rows = drawn.map(row => (row.state !== "working" || addId === undefined ? row : { ...row, ms: runningMs(addId, row.id, now), ticking: true as const }));
+  const rows = drawn.map(row => {
+    if (row.state !== "working") return row;
+    const ms = runningMs(place.setup, row.id, now);
+    return { ...row, ticking: true as const, ...(ms === undefined ? {} : { ms }) };
+  });
   const asks = rows.find(row => row.state === "needs-you" || row.state === "failed")?.id;
   const shown = useRef(false);
   // The list opens on the first row that waits on the person, once, when it first appears, so a long run never hides

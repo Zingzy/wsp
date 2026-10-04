@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RecipeFile, type EventUnion, type PendingComputer, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceSetupStep, type PlaceView } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { checkRows, foldSetup, setupCount, setupRows, setupStanding } from "../src/settings/add/setup.js";
+import { checkRows, foldSetup, runningMs, setupCount, setupRows, setupStanding } from "../src/settings/add/setup.js";
 import { caps } from "./caps.js";
 import { resetSettings, settingsApi, settle } from "./settings-harness.js";
 
@@ -51,6 +51,29 @@ describe("a setup's frames in the store", () => {
     expect(useStore.getState().pending).toEqual([{ ...choosing, recipe: "builders" }]);
     push({ type: "place.pending", id: "a_2" } as EventUnion);
     expect(useStore.getState().pending).toEqual([]);
+  });
+
+  it("takes a sign-in's wait off when its row lands after its step ended, before the list read again answers", async () => {
+    const wait = { row: "signins/codex", label: "Codex", code: "4F2K-9QJM", url: "https://auth.openai.com/device", expiresAt: "2026-10-03T10:10:00.000Z", state: "waiting" as const };
+    const signing: PlaceView = { ...studio, setup: { ...RUNNING, steps: [{ step: "signins", state: "done", ms: 40 }, { step: "clis", state: "running" }], waiting: [wait] } };
+    let asked = 0;
+    const { push } = bound({ placesList: () => (asked++ === 0 ? Promise.resolve({ places: [signing], adds: [], pending: [] }) : new Promise(() => {})) } as Partial<Api>);
+    await settle();
+    expect(useStore.getState().places[0]?.setup?.waiting).toEqual([wait]);
+    push({ type: "place.setup", addId: "a_1", placeId: "p_studio", landed: "signins/codex" } as EventUnion);
+    expect(useStore.getState().places[0]?.setup?.waiting).toEqual([]);
+    expect(useStore.getState().places[0]?.setup?.steps).toEqual(signing.setup!.steps);
+  });
+
+  it("counts a running step's time from when the host started it, in a window that first sees the step mid-run", async () => {
+    const now = Date.parse("2026-10-03T10:05:00.000Z");
+    const midway: PlaceView = { ...studio, setup: { ...RUNNING, steps: [{ step: "floor", state: "done", ms: 72_000 }, { step: "clis", state: "running", startedAt: "2026-10-03T10:00:00.000Z" }] } };
+    const { push } = bound({ placesList: async () => ({ places: [midway], adds: [], pending: [] }) } as Partial<Api>);
+    await settle();
+    expect(runningMs(useStore.getState().places[0]?.setup, "clis", now)).toBe(300_000);
+    push({ type: "place.setup", addId: "a_1", placeId: "p_studio", line: { step: "skills", state: "running", startedAt: "2026-10-03T10:04:00.000Z" }, running: ["clis", "skills"] } as EventUnion);
+    expect(runningMs(useStore.getState().places[0]?.setup, "clis", now)).toBe(300_000);
+    expect(runningMs(useStore.getState().places[0]?.setup, "skills", now)).toBe(60_000);
   });
 
   it("leaves a setup alone for a frame of another run", () => {

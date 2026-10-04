@@ -1656,6 +1656,37 @@ describe("dialling a computer that stopped answering", () => {
     expect((answer["place"] as PlaceView).present).toBe(false);
   });
 
+  it("keeps a login that landed on that computer while the dial was out", async () => {
+    const hostKey = newPlaceKeyPair();
+    let box: WsClient | undefined;
+    let answer: (() => void) | undefined;
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async (req, stage) => {
+          stage("connect", "done", "Ubuntu 24.04");
+          box = (await join(hostKey, { code: readJoinToken(req.code).code, name: "vps", report: report("vps", { agents: ["codex"], logins: [] }) })).client;
+          return { name: "vps", ssh: "root@65.21.4.12" };
+        },
+        dial: () => new Promise<void>(done => (answer = done)),
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const added = await runtime.places!.add({ address: "root@65.21.4.12", hostUrls: DOOR }, Date.now());
+    box?.close();
+    await until(async () => (await placesOf()).find(p => p.id === added.place.id)!.present === false);
+    const dialling = dialled(added.place.id);
+    await until(() => answer !== undefined);
+    await runtime.places!.loginLanded(added.place.id, "codex");
+    expect(runtime.places!.signInsAt(added.place.id)).toEqual({ codex: "signed-in" });
+    answer!();
+    expect(((await dialling)["place"] as PlaceView).signIns).toEqual({ codex: "signed-in" });
+    expect(runtime.places!.signInsAt(added.place.id)).toEqual({ codex: "signed-in" });
+  });
+
   it("dials with the key file the add was given, since every ssh child runs with BatchMode on", async () => {
     const hostKey = newPlaceKeyPair();
     const logins: PlaceLogin[] = [];
@@ -4930,8 +4961,10 @@ describe("the forward a computer dials back through", () => {
     back.holds[0]!.moved!({ boxPort: 23456 });
     await new Promise(r => setTimeout(r, 10));
     gate = undefined;
-    await runtime!.places!.remove(placeId);
+    const removing = runtime!.places!.remove(placeId);
+    await new Promise(r => setTimeout(r, 10));
     open();
+    await removing;
     await new Promise(r => setTimeout(r, 30));
     expect(await inner.get("places", placeId)).toBeUndefined();
   });

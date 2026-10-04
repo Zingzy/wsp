@@ -371,6 +371,9 @@
                       "ms": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "startedAt": {
+                        "$ref": "#/properties/computer/properties/setup/properties/finishedAt"
                       }
                     },
                     "required": [
@@ -1259,6 +1262,9 @@
                       "ms": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "startedAt": {
+                        "$ref": "#/properties/computer/properties/setup/properties/finishedAt"
                       }
                     },
                     "required": [
