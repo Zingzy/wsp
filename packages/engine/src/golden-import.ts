@@ -675,6 +675,9 @@ export interface ToolInstall {
   note?: string;
   /** How the row's pin is read once it is on the machine, and whether a copy gets the version read: absent for a step no recipe row stands behind. */
   pin?: PinRead;
+  /** What the install is expected to put on the disk, where the catalog measured it or Homebrew's closure says: the
+   * loop keeps that much free above its floor before it starts the install. */
+  bytes?: number;
 }
 
 /** What a step says about its pin: the line that prints the installed version (absent for a road whose install line
