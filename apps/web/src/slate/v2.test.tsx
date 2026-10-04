@@ -4,7 +4,7 @@
 // secret's text never stays in the window once the host has it.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SLATE_PIECES, type SessionView, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { SLATE_PIECES, slateStartValues, type SessionView, type SlateDoc, type SlateJson } from "@wsp/protocol";
 import type { Api, ProtocolEvent } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -13,7 +13,7 @@ import type { SlateAsk } from "./model";
 import { SLATE_VIEWS } from "./pieces";
 import { SlateSurface } from "./SlateSurface";
 import { slateBundle, useSlateStore } from "./store";
-import { slate, startsOf } from "./testing";
+import { slate } from "./testing";
 import type { SlateApi, SlateRecord } from "./wire";
 
 const ROW: SessionView = { id: "s1", workspaceId: "ws", harness: "claude", status: "completed", threadId: "t1" };
@@ -21,7 +21,7 @@ const HANDLE = { secret: true, set: true, len: 24, at: 1 };
 const TOKEN = "tok_9f8e7d6c5b4a39281706f5e4";
 
 function record(doc: SlateDoc, values: Record<string, SlateJson> = {}, over: Partial<SlateRecord> = {}): SlateRecord {
-  return { threadId: tid(), workspaceId: "ws", version: 1, document: doc, values: { ...startsOf(doc), ...values }, comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over };
+  return { threadId: tid(), workspaceId: "ws", version: 1, document: doc, values: { ...slateStartValues(doc), ...values }, comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over };
 }
 
 function host(first: SlateRecord, over: Partial<SlateApi> = {}): SlateApi {

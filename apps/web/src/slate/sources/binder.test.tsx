@@ -4,9 +4,9 @@
 // while time.now is drawn, and host holds taken while bound and given back after.
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AccountRow, SessionView, SlateDoc, SlateJson, WorkspaceStatus } from "@wsp/protocol";
+import { slateStartValues, type AccountRow, type SessionView, type SlateDoc, type SlateJson, type WorkspaceStatus } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "../actions";
-import { fakeLink, slate, startsOf } from "../testing";
+import { fakeLink, slate } from "../testing";
 import { SlateEngine, type Scheduler } from "../engine";
 import { SLATE_VIEWS } from "../pieces";
 import { SlateView } from "../SlateView";
@@ -79,7 +79,7 @@ function fakeHost(values: Record<string, SlateJson>): SlateApi {
 
 function drawBound(doc: SlateDoc, app: ReturnType<typeof fakeApp>, api: SlateApi) {
   const engine = new SlateEngine("t1", () => undefined, immediate);
-  engine.setRecord(doc, startsOf(doc), 1);
+  engine.setRecord(doc, slateStartValues(doc), 1);
   const link = fakeLink();
   const sender = new StateSender(engine, () => link);
   const unbind = bindSources(engine, "t1", {

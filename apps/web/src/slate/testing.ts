@@ -2,7 +2,7 @@
 // What the renderer's tests share: a schema 2 document from its parts, a fake link to the host, and a scheduler
 // whose frames run when the test says.
 import { vi } from "vitest";
-import type { SlateDoc, SlateJson } from "@wsp/protocol";
+import type { SlateDoc } from "@wsp/protocol";
 import type { SlateLink } from "./actions.js";
 import type { Scheduler } from "./engine.js";
 
@@ -33,8 +33,6 @@ export function slate(parts: Partial<SlateDoc> & Pick<SlateDoc, "root" | "pieces
   return { schema: 2, values: {}, derived: {}, runs: {}, reactions: [], ...parts };
 }
 
-/** The live values a fresh slate starts with: each declared value's start. */
-export const startsOf = (doc: SlateDoc): Record<string, SlateJson> => Object.fromEntries(Object.entries(doc.values).map(([name, decl]) => [name, decl.start]));
 
 export function fakeLink(over: Partial<SlateLink> = {}): SlateLink {
   return {

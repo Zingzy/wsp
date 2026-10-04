@@ -4,10 +4,10 @@
 // and a press raises slates.event with the host's params.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SlateDoc, SlateJson } from "@wsp/protocol";
+import { slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender, type SlateLink } from "./actions";
 import { SlateEngine } from "./engine";
-import { fakeLink, manualScheduler, slate, startsOf } from "./testing";
+import { fakeLink, manualScheduler, slate } from "./testing";
 import { SLATE_VIEWS } from "./pieces";
 import { SlateView, type PieceView, type PieceViews } from "./SlateView";
 
@@ -32,7 +32,7 @@ function counted(views: PieceViews): { views: PieceViews; renders: Map<string, n
 function draw(doc: SlateDoc, values: Record<string, SlateJson>, opts: { views?: PieceViews; link?: Partial<SlateLink>; state?: Record<string, SlateJson> } = {}) {
   const scheduler = manualScheduler();
   const engine = new SlateEngine("t1", path => values[path], scheduler);
-  engine.setRecord(doc, opts.state ?? startsOf(doc), 3);
+  engine.setRecord(doc, opts.state ?? slateStartValues(doc), 3);
   const link = fakeLink(opts.link);
   const sender = new StateSender(engine, () => link);
   const runner = new ActionRunner(engine, () => link);
