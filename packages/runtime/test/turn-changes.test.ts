@@ -85,6 +85,7 @@ async function workspaceWith(daemon: ReturnType<typeof fakeDaemon>, adapter: Har
   const backend = stubBackend();
   backend.execImpl = tokenGuest;
   const snapshotWait = turnSnapshotMs !== undefined ? { turnSnapshotMs } : {};
+  const store = memoryStore();
   let ws: Awaited<ReturnType<typeof createOn>>;
   if (here) {
     const root = mkdtempSync(join(tmpdir(), "wsp-turn-changes-"));
@@ -93,10 +94,10 @@ async function workspaceWith(daemon: ReturnType<typeof fakeDaemon>, adapter: Har
     mkdirSync(folder, { recursive: true });
     execFileSync("git", ["init", "-q", folder]);
     const local = { ...fakeLocal(root), daemonRoad: async () => ({ url: "http://127.0.0.1:7070", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: DAEMON_TOKEN }) };
-    rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: adapter }, local, daemonToken: DAEMON_TOKEN, daemonChannel: daemon.open, ...snapshotWait });
+    rt = createRuntime({ backend, store, adapters: { claude: adapter }, local, daemonToken: DAEMON_TOKEN, daemonChannel: daemon.open, ...snapshotWait });
     ws = await createOn(rt, { on: HERE_PLACE_ID, name: "changes", project: (await projectOn(rt, HERE_PLACE_ID, realpathSync(folder))).id });
   } else {
-    rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: adapter }, daemonToken: DAEMON_TOKEN, daemonChannel: daemon.open, ...snapshotWait });
+    rt = createRuntime({ backend, store, adapters: { claude: adapter }, daemonToken: DAEMON_TOKEN, daemonChannel: daemon.open, ...snapshotWait });
     ws = await createOn(rt, { golden: "snap_g", name: "changes" });
     backend.machines[0]!.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
   }
@@ -107,7 +108,7 @@ async function workspaceWith(daemon: ReturnType<typeof fakeDaemon>, adapter: Har
     if (e.type === "session.changes") events.push(e);
     if (e.type === "session.start" && e.prompt !== undefined && e.turnId !== undefined) turnOf.set(e.prompt, e.turnId);
   });
-  return { ws, events, turnOf };
+  return { ws, events, turnOf, store };
 }
 
 async function until(ready: () => boolean): Promise<void> {
@@ -153,6 +154,22 @@ describe("what a turn changed", () => {
     await handle.finished;
     await until(() => events.length > 0);
     expect(events).toEqual([expect.objectContaining({ type: "session.changes", from: sha(1), to: sha(2), files })]);
+  });
+
+  it("on this computer writes the launch's snapshot onto the running row once it is in, after the agent started", async () => {
+    const daemon = fakeDaemon({ hold: true });
+    const agent = gated({ waitsForPrompt: true });
+    const { ws, store } = await workspaceWith(daemon, agent.factory, undefined, true);
+    const handle = await rt!.sessions.start(ws.id, { prompt: "edit the readme" });
+    const stored = async () => ((await store.get("sessions", ws.id)) as { sessions: { status: string; snapshot?: string }[] }).sessions;
+    await expect.poll(stored).toEqual([expect.objectContaining({ status: "running" })]);
+    expect((await stored())[0]).not.toHaveProperty("snapshot");
+    daemon.letGo();
+    await expect.poll(stored).toEqual([expect.objectContaining({ status: "running", snapshot: sha(1) })]);
+    agent.release(0);
+    await handle.finished;
+    await expect.poll(stored).toEqual([expect.objectContaining({ status: "completed" })]);
+    expect((await stored())[0]).not.toHaveProperty("snapshot");
   });
 
   it("on this computer hands an agent that takes its prompt late the prompt at the cap when the daemon never answers, and records nothing", async () => {
@@ -234,6 +251,80 @@ describe("what a turn changed", () => {
     const byTurn = new Map(events.map(e => [e.turnId, e]));
     expect(byTurn.get(turnOf.get("one"))).toMatchObject({ shared: true });
     expect(byTurn.get(turnOf.get("two"))).toMatchObject({ shared: true });
+  });
+
+  /** One run on a box that outlives the host that launched it: each host the case starts re-opens it by its handle. */
+  const RUN = "/tmp/wsp-run/000000000001";
+  const restartable = (daemon: ReturnType<typeof fakeDaemon>) => {
+    const runs = new Map<string, { onEvent: (event: AdapterEvent) => void; settle: (result: TurnResult) => void }>();
+    const session = (run: string, localId: string, onEvent: (event: AdapterEvent) => void) => {
+      const finished = new Promise<TurnResult>(settle => runs.set(run, { onEvent, settle }));
+      return { localId, run, finished, interrupt: async () => {} };
+    };
+    const factory: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: o => {
+        const opened = session(RUN, "sess-1", o.onEvent);
+        queueMicrotask(() => o.onEvent({ type: "session.start", sessionId: "sess-1" } as AdapterEvent));
+        return opened;
+      },
+      attach: async o => (runs.has(o.run) ? session(o.run, o.sessionId, o.onEvent) : "gone"),
+    });
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const store = memoryStore();
+    const host = () => createRuntime({ backend, store, adapters: { claude: factory }, daemonToken: DAEMON_TOKEN, daemonChannel: daemon.open });
+    const begin = async (prompt: string) => {
+      rt = host();
+      const ws = await createOn(rt, { golden: "snap_g", name: "changes" });
+      backend.machines[0]!.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
+      const handle = await rt.sessions.start(ws.id, { prompt });
+      const stored = async () => ((await store.get("sessions", ws.id)) as { sessions: { status: string; run?: string; snapshot?: string }[] }).sessions;
+      await expect.poll(stored).toEqual([expect.objectContaining({ status: "running", run: RUN })]);
+      return { ws, cwd: handle.view().cwd!, stored };
+    };
+    return { run: () => runs.get(RUN)!, host, begin };
+  };
+  const reply = { status: "completed", text: "done" } as const;
+
+  it("keeps the card of a turn a host restart re-opened, read against the snapshot its launch took", async () => {
+    const files = [{ path: "src/fix.ts", kind: "modified", additions: 4, deletions: 1 }];
+    const daemon = fakeDaemon({ files });
+    const box = restartable(daemon);
+    const { ws, cwd, stored } = await box.begin("fix it");
+    await rt!.close();
+
+    rt = box.host();
+    const events: SessionEvent[] = [];
+    rt.events.on("*", e => void (e.type === "session.changes" && events.push(e)));
+    expect((await rt.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    box.run().onEvent({ type: "turn.done", sessionId: "sess-1", result: reply });
+    box.run().onEvent({ type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    box.run().settle(reply);
+    await until(() => events.length > 0);
+    expect(daemon.frames.filter(f => f["op"] === "git.turn")).toEqual([{ op: "git.turn", cwd, from: sha(1), to: sha(2) }]);
+    expect(events).toEqual([expect.objectContaining({ type: "session.changes", from: sha(1), to: sha(2), files })]);
+    await expect.poll(stored).toEqual([expect.not.objectContaining({ snapshot: expect.anything() })]);
+  });
+
+  it("writes one card for a turn whose card was recorded before the restart that re-opened it", async () => {
+    const daemon = fakeDaemon({ files: [{ path: "src/fix.ts", kind: "modified", additions: 4, deletions: 1 }] });
+    const box = restartable(daemon);
+    const { ws } = await box.begin("fix it");
+    box.run().onEvent({ type: "turn.done", sessionId: "sess-1", result: reply });
+    await until(() => daemon.frames.some(f => f["op"] === "git.turn"));
+    await expect.poll(async () => (await rt!.sessions.history(ws.id)).filter(e => e.type === "session.changes")).toHaveLength(1);
+    await rt!.close();
+
+    rt = box.host();
+    expect((await rt.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    box.run().onEvent({ type: "turn.done", sessionId: "sess-1", result: reply });
+    box.run().onEvent({ type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    box.run().settle(reply);
+    await expect.poll(async () => (await rt!.sessions.list(ws.id))[0]!.status).toBe("completed");
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect((await rt.sessions.history(ws.id)).filter(e => e.type === "session.changes")).toEqual([expect.objectContaining({ from: sha(1), to: sha(2) })]);
+    expect(daemon.frames.filter(f => f["op"] === "git.turn")).toHaveLength(1);
   });
 
   it("takes a snapshot of the project folder a turn runs in, and none of a folder git holds no repo in", async () => {
