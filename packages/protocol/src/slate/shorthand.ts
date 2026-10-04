@@ -379,7 +379,7 @@ function splitLines(src: string): { lines: Line[]; errors: SlateProblem[] } {
 }
 
 /** The shorthand as a document, before validation; errors are P codes and the T and A codes a line alone shows. */
-function compileLines(src: string): { document?: Slate; errors: SlateProblem[]; pieceLine: Map<string, number> } {
+export function compileLines(src: string): { document?: Slate; errors: SlateProblem[]; pieceLine: Map<string, number> } {
   const { lines, errors } = splitLines(src);
   const b = new Builder(src.split(/\r?\n/));
   b.errors.push(...errors);

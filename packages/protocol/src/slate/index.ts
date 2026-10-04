@@ -7,6 +7,7 @@ export { SLATE_CODES, SLATE_WARNINGS, slateProblem, nearest as slateNearest, typ
 export { getSlateState, setSlateState, parseSlateStatePath, slateStep } from "./state.js";
 export { parseSlateExpression, evaluateSlateExpression, evaluateSlateFormat, slateDependencies, slatePropDependencies, resolveSlateProp, parseSlateFormat, checkSlateExpression, slateTruthy, slateText, slatePathText, SLATE_FUNCTIONS, type SlateFormatPart, type SlateCheckScope, type SlateType } from "./expr.js";
 export { compileSlate, compileSlatePatch, printSlate } from "./shorthand.js";
+export { compileSlateJsx, printSlateJsx } from "./jsx.js";
 export { validateSlate } from "./validate.js";
 export { applySlatePatch } from "./patch.js";
 export { sketchSlate, type SlateSketchOptions } from "./sketch.js";
