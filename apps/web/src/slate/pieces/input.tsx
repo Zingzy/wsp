@@ -83,96 +83,96 @@ export const input: PieceView = {
 };
 
 function TextInput({ piece, props, slate, sender, raise, path }: PieceViewProps & { path: string | undefined }) {
-    const fieldId = useId();
-    const numeric = props["kind"] === "number";
-    const lines = typeof props["lines"] === "number" ? Math.max(1, Math.min(20, Math.floor(props["lines"]))) : 1;
-    const label = str(props["label"]) ?? "";
-    const held = str(props["held"]);
-    // While the person types, the field draws its own text; the slate's copy follows a frame behind.
-    const [draft, setDraft] = useState<string | null>(null);
-    const [conflict, setConflict] = useState<Held | undefined>(undefined);
-    const stored = path === undefined ? props["value"] : getOwn(slate.values, path);
-    const text = draft ?? asText(stored);
-    const submit = usePress(async () => {
-      if (path !== undefined) await sender.flush(path);
-      return raise("submit");
-    });
-    const write = (next: string) => {
-      setDraft(next);
+  const fieldId = useId();
+  const numeric = props["kind"] === "number";
+  const lines = typeof props["lines"] === "number" ? Math.max(1, Math.min(20, Math.floor(props["lines"]))) : 1;
+  const label = str(props["label"]) ?? "";
+  const held = str(props["held"]);
+  // While the person types, the field draws its own text; the slate's copy follows a frame behind.
+  const [draft, setDraft] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<Held | undefined>(undefined);
+  const stored = path === undefined ? props["value"] : getOwn(slate.values, path);
+  const text = draft ?? asText(stored);
+  const submit = usePress(async () => {
+    if (path !== undefined) await sender.flush(path);
+    return raise("submit");
+  });
+  const write = (next: string) => {
+    setDraft(next);
+    if (path === undefined) return;
+    const value: SlateJson = numeric ? (next.trim() === "" || !Number.isFinite(Number(next)) ? null : Number(next)) : next;
+    sender.type(path, value);
+  };
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== "Enter" || piece.on?.submit === undefined) return;
+    if (lines > 1 && !(event.metaKey || event.ctrlKey)) return;
+    event.preventDefault();
+    submit.press();
+  };
+  const field = {
+    id: fieldId,
+    value: text,
+    placeholder: str(props["placeholder"]),
+    disabled: held !== undefined,
+    title: held,
+    className: cn(props["mono"] === true && "font-mono"),
+    onFocus: () => {
+      if (path !== undefined) slate.focus(path);
+      setDraft(text);
+    },
+    onBlur: () => {
+      setDraft(null);
       if (path === undefined) return;
-      const value: SlateJson = numeric ? (next.trim() === "" || !Number.isFinite(Number(next)) ? null : Number(next)) : next;
-      sender.type(path, value);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Enter" || piece.on?.submit === undefined) return;
-      if (lines > 1 && !(event.metaKey || event.ctrlKey)) return;
-      event.preventDefault();
-      submit.press();
-    };
-    const field = {
-      id: fieldId,
-      value: text,
-      placeholder: str(props["placeholder"]),
-      disabled: held !== undefined,
-      title: held,
-      className: cn(props["mono"] === true && "font-mono"),
-      onFocus: () => {
-        if (path !== undefined) slate.focus(path);
-        setDraft(text);
-      },
-      onBlur: () => {
-        setDraft(null);
-        if (path === undefined) return;
-        setConflict(slate.blur(path));
-        void sender.flush(path);
-        if (piece.on?.change !== undefined) void raise("change");
-      },
-      onKeyDown,
-    };
-    return (
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <label htmlFor={fieldId} className="text-[13px] leading-5 text-foreground">
-          {label}
-        </label>
-        <div className="flex min-w-0 items-start gap-2">
-          {lines > 1 ? (
-            <Textarea {...field} rows={lines} onChange={event => write(event.target.value)} />
-          ) : (
-            <Input {...field} nativeInput type={numeric ? "number" : "text"} onChange={event => write(event.target.value)} />
-          )}
-          {piece.on?.submit !== undefined ? (
-            <Button variant="outline" disabled={submit.busy || held !== undefined} onClick={submit.press}>
-              {str(props["submit"]) ?? "Send"}
-            </Button>
-          ) : null}
-        </div>
-        {conflict !== undefined && path !== undefined ? (
-          <div data-slate-conflict className="flex flex-wrap items-center gap-2 text-xs leading-4 text-muted-foreground">
-            <span>The agent changed this while you were typing</span>
-            <Button
-              variant="outline"
-              size="xs"
-              onClick={() => {
-                const mine = slate.keepMine(path);
-                if (mine !== undefined) void sender.now(path, mine);
-                setConflict(undefined);
-              }}
-            >
-              Keep mine
-            </Button>
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => {
-                slate.takeTheirs(path);
-                setConflict(undefined);
-              }}
-            >
-              Take theirs
-            </Button>
-          </div>
+      setConflict(slate.blur(path));
+      void sender.flush(path);
+      if (piece.on?.change !== undefined) void raise("change");
+    },
+    onKeyDown,
+  };
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <label htmlFor={fieldId} className="text-[13px] leading-5 text-foreground">
+        {label}
+      </label>
+      <div className="flex min-w-0 items-start gap-2">
+        {lines > 1 ? (
+          <Textarea {...field} rows={lines} onChange={event => write(event.target.value)} />
+        ) : (
+          <Input {...field} nativeInput type={numeric ? "number" : props["kind"] === "password" ? "password" : "text"} onChange={event => write(event.target.value)} />
+        )}
+        {piece.on?.submit !== undefined ? (
+          <Button variant="outline" disabled={submit.busy || held !== undefined} onClick={submit.press}>
+            {str(props["submit"]) ?? "Send"}
+          </Button>
         ) : null}
-        <Outcome said={submit.said} refused={submit.refused} />
       </div>
-    );
+      {conflict !== undefined && path !== undefined ? (
+        <div data-slate-conflict className="flex flex-wrap items-center gap-2 text-xs leading-4 text-muted-foreground">
+          <span>The agent changed this while you were typing</span>
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => {
+              const mine = slate.keepMine(path);
+              if (mine !== undefined) void sender.now(path, mine);
+              setConflict(undefined);
+            }}
+          >
+            Keep mine
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => {
+              slate.takeTheirs(path);
+              setConflict(undefined);
+            }}
+          >
+            Take theirs
+          </Button>
+        </div>
+      ) : null}
+      <Outcome said={submit.said} refused={submit.refused} />
+    </div>
+  );
 }

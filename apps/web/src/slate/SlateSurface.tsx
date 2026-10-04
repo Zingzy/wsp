@@ -26,7 +26,7 @@ export const SHOWN_HOLD = "slate";
 export const SLATE_WORDS = {
   noThread: "Pick a thread to see its slate.",
   nothing: "Nothing here yet",
-  ask: "The agent builds this panel when there is something to watch, track or press. Ask for one.",
+  ask: "The agent builds this panel when there is something to watch, track, fill in or press. Ask for one.",
   askButton: "Ask for one",
   askPrompt: "Build a slate for this thread that shows ",
   cleared: "Cleared",
