@@ -276,7 +276,7 @@ function PlaceState({ place, cell, onSignIn, className }: { place: PlaceView; ce
   return <StateCell word={cell.word} {...why} {...(className === undefined ? {} : { className })} />;
 }
 
-/** Update: puts this wsp's daemon on the computer and runs the recipe there again. One word in both states, held
+/** Update: puts this wsp's daemon on the computer; what it was set up with stays. One word in both states, held
  * and dimmed while it runs. */
 function UpdateControl({ place }: { place: PlaceView }) {
   const updatePlace = useStore(s => s.updatePlace);

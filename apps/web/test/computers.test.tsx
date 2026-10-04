@@ -259,11 +259,14 @@ describe("the Computers list", () => {
     expect(pageAt()).toBe("computer:p_sign");
   });
 
-  it("offers Update in the cell of a computer behind this wsp's daemon, puts it there on a press, and reads the job in the cell after", async () => {
+  it("offers Update in the cell of a computer behind this wsp's daemon, puts it there on a press, runs no setup, and reads the row again after", async () => {
     const asked: string[] = [];
-    const setup: PlaceSetup = { state: "running", addId: "a_2", startedAt: AT, steps: [{ step: "floor", state: "running" }], waiting: [] };
     const behind: PlaceView = { ...box, daemonVersion: 1 };
-    const api = computersApi({ placesUpdate: async (placeId: string) => (asked.push(placeId), { name: "hetzner", setup }) } as unknown as Partial<Api>).api;
+    let landed = false;
+    const api = computersApi({
+      placesUpdate: async (placeId: string) => (asked.push(placeId), (landed = true), { name: "hetzner" }),
+      placesList: async () => ({ places: [here, landed ? box : behind], adds: [], pending: [] }),
+    } as unknown as Partial<Api>).api;
     useStore.setState({ places: [here, behind] });
     await mountComputers(api);
     const update = listRow("p_2").querySelector<HTMLElement>("[data-k='update']")!;
@@ -272,7 +275,8 @@ describe("the Computers list", () => {
     await waitFor(() => expect(asked).toEqual(["p_2"]));
     // The press is the button's own: the row does not open the page under it.
     expect(pageAt()).toBe("computers");
-    await waitFor(() => expect(useStore.getState().places.find(place => place.id === "p_2")?.setup).toEqual(setup));
+    await waitFor(() => expect(useStore.getState().places.find(place => place.id === "p_2")?.daemonVersion).toBe(box.daemonVersion));
+    expect(useStore.getState().places.find(place => place.id === "p_2")?.setup).toEqual(box.setup);
   });
 
   it("draws Add a computer under the computers, opening its dialog, and Add a cloud under the clouds, opening the cloud's panel, and a row opens its page", async () => {
