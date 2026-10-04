@@ -5,7 +5,7 @@ import { str, TEXT_SIZE, TONE_INK, toneOf } from "./look.js";
 
 export const text: PieceView = {
   type: "text",
-  component: ({ id, piece, props, slate }) => {
+  component: ({ id, props, slate }) => {
     const value = str(props["value"]);
     const placeholder = str(props["placeholder"]);
     if (value === undefined || value === "") {
@@ -17,7 +17,7 @@ export const text: PieceView = {
     const lines = typeof props["lines"] === "number" ? props["lines"] : undefined;
     return (
       <p
-        {...(piece.announce === true ? { "aria-live": "polite" as const } : {})}
+       
         title={lines !== undefined ? value : undefined}
         className={cn(
           "min-w-0 whitespace-pre-wrap break-words",

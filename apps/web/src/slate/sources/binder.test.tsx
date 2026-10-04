@@ -4,8 +4,9 @@
 // while time.now is drawn, and host holds taken while bound and given back after.
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AccountRow, SessionView, Slate, SlateJson, WorkspaceStatus } from "@wsp/protocol";
-import { ActionRunner, StateSender, type SlateLink } from "../actions";
+import { slateStartValues, type AccountRow, type SessionView, type SlateDoc, type SlateJson, type WorkspaceStatus } from "@wsp/protocol";
+import { ActionRunner, StateSender } from "../actions";
+import { fakeLink, slate } from "../testing";
 import { SlateEngine, type Scheduler } from "../engine";
 import { SLATE_VIEWS } from "../pieces";
 import { SlateView } from "../SlateView";
@@ -66,7 +67,7 @@ function fakeHost(values: Record<string, SlateJson>): SlateApi {
   return {
     get: vi.fn(),
     state: vi.fn(),
-    act: vi.fn(),
+    event: vi.fn(),
     shown: vi.fn(),
     undo: vi.fn(),
     clear: vi.fn(),
@@ -76,10 +77,10 @@ function fakeHost(values: Record<string, SlateJson>): SlateApi {
   } as unknown as SlateApi;
 }
 
-function drawBound(doc: Slate, app: ReturnType<typeof fakeApp>, api: SlateApi) {
+function drawBound(doc: SlateDoc, app: ReturnType<typeof fakeApp>, api: SlateApi) {
   const engine = new SlateEngine("t1", () => undefined, immediate);
-  engine.setRecord(doc, doc.state ?? {}, 1);
-  const link: SlateLink = { act: vi.fn(), writeState: vi.fn(async () => ({})), fill: vi.fn() };
+  engine.setRecord(doc, slateStartValues(doc), 1);
+  const link = fakeLink();
   const sender = new StateSender(engine, () => link);
   const unbind = bindSources(engine, "t1", {
     app: app.get,
@@ -88,7 +89,7 @@ function drawBound(doc: Slate, app: ReturnType<typeof fakeApp>, api: SlateApi) {
     subscribeSlates: () => () => {},
     api: () => api,
   });
-  const view = render(<SlateView engine={engine} views={SLATE_VIEWS} runner={new ActionRunner(engine, () => link, sender)} sender={sender} />);
+  const view = render(<SlateView engine={engine} views={SLATE_VIEWS} runner={new ActionRunner(engine, () => link)} sender={sender} />);
   return { engine, unbind, view };
 }
 
@@ -98,8 +99,7 @@ describe("the window's sources", () => {
   it("reads pr, git, cost and the thread off the store, and holds pr and git on the host while drawn", async () => {
     const app = fakeApp();
     const api = fakeHost({});
-    const doc: Slate = {
-      schema: 1,
+    const doc = slate({
       root: "root",
       pieces: {
         root: { type: "column", children: ["a", "b", "c", "d"] },
@@ -108,7 +108,7 @@ describe("the window's sources", () => {
         ...text("c", "spent ${cost.accruedUsd} and ${thread.cost.usd} by ${thread.agent}"),
         ...text("d", "state ${pr.checks[0].state}"),
       },
-    };
+    });
     const { unbind } = drawBound(doc, app, api);
     expect(await screen.findByText("#7 checks running, 1 check")).toBeTruthy();
     expect(screen.getByText("on feat/login, 3 changed")).toBeTruthy();
@@ -128,14 +128,14 @@ describe("the window's sources", () => {
     const app = fakeApp();
     const statuses = app.get().statuses;
     app.set({ statuses: { ws: { ...statuses["ws"]!, pr: undefined } as WorkspaceStatus } });
-    const doc: Slate = { schema: 1, root: "none", pieces: { none: { type: "empty", props: { title: "No pull request yet" }, when: "pr.number == null" } } };
+    const doc = slate({ root: "none", pieces: { none: { type: "empty", props: { title: "No pull request yet" }, when: "pr.number == null" } } });
     drawBound(doc, app, fakeHost({}));
     expect(await screen.findByText("No pull request yet")).toBeTruthy();
   });
 
   it("asks the host for the turn figures and draws them as they come", async () => {
     const api = fakeHost({ "thread.context.used": 164_000, "thread.context.window": 1_000_000 });
-    const doc: Slate = { schema: 1, root: "m", pieces: { m: { type: "meter", props: { label: "Context", value: { bind: "thread.context.used" }, max: { bind: "thread.context.window" }, format: "tokens" } } } };
+    const doc = slate({ root: "m", pieces: { m: { type: "meter", props: { label: "Context", value: { bind: "thread.context.used" }, max: { bind: "thread.context.window" }, format: "tokens" } } } });
     drawBound(doc, fakeApp(), api);
     expect(screen.getByText("not read yet")).toBeTruthy();
     await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
@@ -146,7 +146,7 @@ describe("the window's sources", () => {
   it("reads usage off the account the host names, and moves with a usage.account push", async () => {
     const app = fakeApp();
     const api = fakeHost({ "usage.account.key": "acct-1" });
-    const doc: Slate = { schema: 1, root: "w", pieces: { w: { type: "meter", props: { label: "Weekly", value: { bind: "usage.week.percent" } } } } };
+    const doc = slate({ root: "w", pieces: { w: { type: "meter", props: { label: "Weekly", value: { bind: "usage.week.percent" } } } } });
     drawBound(doc, app, api);
     await act(async () => {});
     expect(app.get().loadUsageAccounts).toHaveBeenCalled();
@@ -161,7 +161,7 @@ describe("the window's sources", () => {
   it("ticks the clock once a second only while a drawn piece reads time.now", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"] });
     vi.setSystemTime(new Date("2026-10-04T09:00:00Z"));
-    const doc: Slate = { schema: 1, root: "t", pieces: { t: { type: "text", props: { value: { bind: "time.now" } } } } };
+    const doc = slate({ root: "t", pieces: { t: { type: "text", props: { value: { bind: "time.now" } } } } });
     drawBound(doc, fakeApp(), fakeHost({}));
     await act(async () => {});
     const first = Number(screen.getByText(/^\d+$/).textContent);

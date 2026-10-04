@@ -22,7 +22,7 @@ function meterFigure(value: number, max: number, format: string): string | undef
 
 export const meter: PieceView = {
   type: "meter",
-  component: ({ id, piece, props, slate }) => {
+  component: ({ id, props, slate }) => {
     const label = str(props["label"]) ?? "";
     const value = num(props["value"]);
     const max = num(props["max"]) ?? 100;
@@ -36,7 +36,7 @@ export const meter: PieceView = {
         aria-valuemin={0}
         aria-valuemax={max}
         {...(value !== undefined ? { "aria-valuenow": value } : {})}
-        {...(piece.announce === true ? { "aria-live": "polite" as const } : {})}
+       
         className="flex min-w-0 flex-col gap-1"
       >
         <div className="flex items-baseline justify-between gap-3">

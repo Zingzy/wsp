@@ -6,14 +6,14 @@ import { figure, str, TONE_INK, toneOf } from "./look.js";
 
 export const number: PieceView = {
   type: "number",
-  component: ({ id, piece, props, slate }) => {
+  component: ({ id, props, slate }) => {
     const label = str(props["label"]);
     const shown = figure(props["value"], props["format"]);
     const unit = str(props["unit"]);
     const note = str(props["note"]);
     const large = props["size"] === "large" && slate.isLoud("large", id);
     return (
-      <div className="flex min-w-0 flex-col" {...(piece.announce === true ? { "aria-live": "polite" as const } : {})}>
+      <div className="flex min-w-0 flex-col">
         <span className="text-[13px] leading-5 text-muted-foreground">{label}</span>
         <span className={cn("min-h-5 font-mono tabular-nums", large ? "text-lg leading-7 tracking-[-0.01em]" : "text-sm leading-5", TONE_INK[toneOf(props["tone"], slate, id)])}>
           {shown === undefined ? null : (

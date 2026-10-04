@@ -1,19 +1,36 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { SlateAction } from "@wsp/protocol";
+import { stepsOf, type SlateStep } from "../model.js";
 import { Button, DANGER_BUTTON } from "../../components/ui/button.js";
 import type { PieceView } from "../SlateView.js";
 import { str } from "./look.js";
 import { Outcome } from "./outcome.js";
 import { usePress } from "./press.js";
 
-/** The hover title a press shows before it is pressed: the literal text it sends and the paths it carries. */
-export function pressTitle(actions: SlateAction | SlateAction[] | undefined): string | undefined {
-  const list = actions === undefined ? [] : Array.isArray(actions) ? actions : [actions];
-  const lines = list.flatMap(action =>
-    action.do === "send" || action.do === "steer" || action.do === "queue" || action.do === "fill"
-      ? [`${action.text}${action.with !== undefined && action.with.length > 0 ? ` (with ${action.with.join(", ")})` : ""}`]
-      : [],
-  );
+/** The hover title a press shows before it is pressed: what each step does, a send's literal text and the paths it
+ * carries (05, "button"). */
+export function pressTitle(steps: SlateStep | SlateStep[] | undefined): string | undefined {
+  const lines = stepsOf(steps).map(step => {
+    switch (step.do) {
+      case "send":
+      case "steer":
+      case "queue":
+      case "fill":
+        return `${step.text}${step.with !== undefined && step.with.length > 0 ? ` (with ${step.with.join(", ")})` : ""}`;
+      case "start":
+        return `Runs ${step.run}`;
+      case "cancel":
+        return `Stops ${step.run}`;
+      case "set":
+      case "toggle":
+        return `Changes ${step.path}`;
+      case "open":
+        return "Opens a link";
+      case "copy":
+        return "Copies";
+      case "pane":
+        return `Opens ${step.kind}`;
+    }
+  });
   return lines.length === 0 ? undefined : lines.join("\n");
 }
 

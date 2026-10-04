@@ -3,10 +3,11 @@
 // again on every session.slate and after a gap, and folded in place on slate.state. Each thread's engine lives for
 // the window's life, so switching threads and back keeps a section's fold and a field's unsent text.
 import { create } from "zustand";
-import { type Slate, type SlateJson, type SlateView as SlateRecord, type TurnResult } from "@wsp/protocol";
+import type { SlateJson, TurnResult } from "@wsp/protocol";
 import { ActionRunner, StateSender, type SlateLink } from "./actions.js";
 import { SlateEngine } from "./engine.js";
-import type { SlateApi } from "./wire.js";
+import { isRunRecord, type SlateAsk, type SlateDoc } from "./model.js";
+import type { SlateApi, SlateRecord } from "./wire.js";
 
 /** What the tab draws for a thread: nothing asked yet, the host's record, or no slate at all. */
 export interface SlateEntry {
@@ -15,13 +16,24 @@ export interface SlateEntry {
   readonly newer?: number;
 }
 
+/** The consent sheet a thread's tab shows: the held run, and the host's ask where a press brought one. */
+export interface SlateAsking {
+  readonly run: string;
+  readonly ask?: SlateAsk;
+}
+
 interface SlateStoreState {
   byThread: Record<string, SlateEntry | undefined>;
+  asking: Record<string, SlateAsking | undefined>;
   /** Each thread's latest ended turn as session.done carried it, for thread.context, thread.lastTurn and tokens. */
   lastTurn: Record<string, TurnResult | undefined>;
 }
 
-export const useSlateStore = create<SlateStoreState>(() => ({ byThread: {}, lastTurn: {} }));
+export const useSlateStore = create<SlateStoreState>(() => ({ byThread: {}, asking: {}, lastTurn: {} }));
+
+export function askConsent(threadId: string, asking: SlateAsking | undefined): void {
+  useSlateStore.setState(s => ({ asking: { ...s.asking, [threadId]: asking } }));
+}
 
 /** Where the window's slate roads lead: the api once bound, and the thread the centre shows with its panel's key. */
 export interface SlateHost {
@@ -51,7 +63,10 @@ function linkFor(threadId: string): SlateLink {
   const api = host?.api() ?? null;
   const gone = () => Promise.reject(new Error("Not connected to wsp. The slate will catch up when it is."));
   return {
-    act: ask => (api === null ? gone() : api.act(threadId, ask)),
+    event: ask => (api === null ? gone() : api.event(threadId, ask)),
+    approve: (key, scope) => (api === null ? gone() : api.approve(threadId, key, scope)),
+    cancel: run => (api === null ? gone() : api.cancel(threadId, run)),
+    consent: ask => askConsent(threadId, { run: ask.run, ask }),
     writeState: async values => {
       if (api === null) return gone();
       const answer = await api.state(threadId, values);
@@ -71,7 +86,7 @@ export function slateBundle(threadId: string): SlateBundle {
     const engine = new SlateEngine(threadId);
     const link = () => linkFor(threadId);
     const sender = new StateSender(engine, link);
-    bundle = { engine, sender, runner: new ActionRunner(engine, link, sender) };
+    bundle = { engine, sender, runner: new ActionRunner(engine, link) };
     bundles.set(threadId, bundle);
     const entry = useSlateStore.getState().byThread[threadId];
     if (entry !== undefined) applyRecord(bundle.engine, entry);
@@ -79,12 +94,17 @@ export function slateBundle(threadId: string): SlateBundle {
   return bundle;
 }
 
-function documentOf(entry: SlateEntry): Slate | null {
+/** The link a thread's consent sheet approves through. */
+export function slateLink(threadId: string): SlateLink {
+  return linkFor(threadId);
+}
+
+function documentOf(entry: SlateEntry): SlateDoc | null {
   return entry.newer !== undefined ? null : (entry.record?.document ?? null);
 }
 
 function applyRecord(engine: SlateEngine, entry: SlateEntry): void {
-  engine.setRecord(documentOf(entry), (entry.record?.state ?? {}) as Record<string, SlateJson>, entry.record?.version ?? 0);
+  engine.setRecord(documentOf(entry), entry.record?.values ?? {}, entry.record?.version ?? 0);
 }
 
 const inFlight = new Map<string, Promise<SlateEntry | undefined>>();
@@ -130,7 +150,8 @@ export function showOnce(threadId: string, entry: SlateEntry | undefined): void 
 export function slateEvent(
   e:
     | { type: "session.slate"; threadId: string; by: string }
-    | { type: "slate.state"; threadId: string; version: number; values: Record<string, unknown> }
+    | { type: "slate.values"; threadId: string; version: number; values: Record<string, unknown> }
+    | { type: "slate.run"; threadId: string; run: string; lines: readonly string[] }
     | { type: "session.done"; threadId?: string | undefined; result: TurnResult },
 ): void {
   switch (e.type) {
@@ -143,11 +164,19 @@ export function slateEvent(
       });
       return;
     }
-    case "slate.state": {
+    case "slate.values": {
+      // Values off the wire are JSON the host's batch wrote.
       const values = e.values as Record<string, SlateJson>;
       bundles.get(e.threadId)?.engine.applyValues(values, e.version);
+      // A run newly held is a sheet the record does not carry yet: the header row and Review read it from there.
+      const asks = useSlateStore.getState().byThread[e.threadId]?.record?.asks ?? [];
+      const held = Object.entries(values).some(([path, value]) => /^\$[a-zA-Z_]\w*$/.test(path) && isRunRecord(value) && value.state === "held" && !asks.some(ask => `$${ask.run}` === path));
+      if (held) void loadSlate(e.threadId);
       return;
     }
+    case "slate.run":
+      bundles.get(e.threadId)?.engine.appendLines(e.run, e.lines);
+      return;
     case "session.done":
       if (e.threadId === undefined) return;
       useSlateStore.setState(s => ({ lastTurn: { ...s.lastTurn, [e.threadId!]: e.result } }));

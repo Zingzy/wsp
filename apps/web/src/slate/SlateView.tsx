@@ -3,11 +3,12 @@
 // `when`, resolves its props and hands them to the view its type registers. A piece that throws draws one quiet line
 // in its place; a type this build does not know draws its fallback.
 import { createContext, memo, useContext, useMemo, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
-import type { SlateEventName, SlateJson, SlatePiece } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol";
 import { RenderErrorBoundary } from "../components/RenderErrorBoundary.js";
 import { DOC, type SlateEngine } from "./engine.js";
 import type { ActionRunner, RaiseOptions, RaiseResult, StateSender } from "./actions.js";
 import { truthy } from "./actions.js";
+import type { SlateEventName, SlatePiece } from "./model.js";
 import { Quiet } from "./pieces/quiet.js";
 
 export interface PieceViewProps {
@@ -19,6 +20,8 @@ export interface PieceViewProps {
   children: ReactNode;
   slate: SlateEngine;
   raise(event: SlateEventName, options?: RaiseOptions): Promise<RaiseResult>;
+  /** Cancels one of the slate's runs; only the output piece and the menu stop a run. */
+  cancel(run: string): Promise<unknown>;
   sender: StateSender;
 }
 
@@ -84,7 +87,7 @@ function PieceBody({ id }: { id: string }) {
   const { engine, views, runner, sender } = useScope();
   const piece = engine.piece(id);
   if (piece === undefined) return null;
-  const shown = piece.when === undefined || truthy(engine.resolve({ bind: piece.when }));
+  const shown = piece.when === undefined || truthy(engine.evaluate(piece.when));
   engine.setShown(id, shown);
   if (!shown) return null;
   const view = views[piece.type];
@@ -95,7 +98,7 @@ function PieceBody({ id }: { id: string }) {
   const Component = view.component;
   return (
     <div data-slate-piece={id} data-slate-type={piece.type} className="slate-piece min-w-0">
-      <Component id={id} piece={piece} props={props} slate={engine} sender={sender} raise={(event, options) => runner.raise(id, event, options)}>
+      <Component id={id} piece={piece} props={props} slate={engine} sender={sender} raise={(event, options) => runner.raise(id, event, options)} cancel={run => runner.cancel(run)}>
         {(piece.children ?? []).map(child => (
           <PieceHost key={child} id={child} />
         ))}

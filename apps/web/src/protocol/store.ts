@@ -1390,7 +1390,8 @@ export const useStore = create<State>((set, get) => {
           if (preferenceSetsInFlight === 0) preferencesLanded(e.preferences, get().preferences);
           return;
         case "session.slate":
-        case "slate.state":
+        case "slate.values":
+        case "slate.run":
           slateEvent(e);
           return;
         case "usage.account":

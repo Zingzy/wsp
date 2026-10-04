@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One slate on screen: its document and live state, what each drawn piece reads, and the scheduler that redraws a
+// One slate on screen: its document and live values, what each drawn piece reads, and the scheduler that redraws a
 // piece only when something it reads moved. Pieces are keyed by id, so a new document redraws the pieces whose JSON
 // changed and nothing else; a binding change marks the pieces whose dependency set holds the path and redraws them
 // on the next frame, at most ten times a second. Nothing here knows React; the views subscribe by piece id.
-import { getSlateState, resolveSlateProp, setSlateState, type Slate, type SlateEvalContext, type SlateJson, type SlatePiece, type SlatePropValue } from "@wsp/protocol";
-import { pieceReads, touches } from "./paths.js";
+import type { SlateJson, SlatePropValue } from "@wsp/protocol";
+import { evaluate, resolveProp, type Resolve, type Row } from "./expr.js";
+import type { SlateDoc, SlatePiece } from "./model.js";
+import { expandDerived, getOwn, ownPath, pieceReads, setOwn, touches, walk } from "./paths.js";
 
 /** Reads a source path ("pr.checks", "time.now") off whatever the window holds; undefined is not there yet. */
 export type SourceReader = (path: string) => SlateJson | undefined;
@@ -37,6 +39,10 @@ export const browserScheduler: Scheduler = {
 const MIN_FLUSH_GAP_MS = 100;
 /** The document's own listeners: the root, the title, the version. */
 export const DOC = "";
+/** Listeners on any run's record: the held-run rows under the header. */
+export const RUNS = "#runs";
+/** The lines a streaming run keeps (07, "Timeouts, output, streaming, cancel"). */
+const LINES_KEPT = 500;
 
 type Loud = "primary" | "large" | "accent";
 
@@ -47,7 +53,7 @@ export interface Held {
 
 export class SlateEngine {
   readonly threadId: string;
-  #doc: Slate | null = null;
+  #doc: SlateDoc | null = null;
   #version = 0;
   #remote: Record<string, SlateJson> = {};
   /** Values typed here that the host has not taken yet, or that a focused field holds against a newer write. */
@@ -70,7 +76,9 @@ export class SlateEngine {
   #readsListeners = new Set<() => void>();
   #readsDirty = false;
   #loud = new Map<Loud, string>();
-  /** Section folds that name no state path, kept for the window's life by piece id. */
+  /** Lines streamed by each run since it last started, ahead of the record's own. */
+  #lines = new Map<string, string[]>();
+  /** Section folds that name no value, kept for the window's life by piece id. */
   readonly folds = new Map<string, boolean>();
   #read: SourceReader;
   readonly #scheduler: Scheduler;
@@ -81,7 +89,7 @@ export class SlateEngine {
     this.#scheduler = scheduler;
   }
 
-  get document(): Slate | null {
+  get document(): SlateDoc | null {
     return this.#doc;
   }
   get version(): number {
@@ -104,8 +112,8 @@ export class SlateEngine {
   }
 
   /** The host's record: a new document diffs against the old by id, so a piece that kept its id and its JSON is
-   * not redrawn, and the state's keys that moved redraw what reads them. */
-  setRecord(doc: Slate | null, state: Record<string, SlateJson>, version: number): void {
+   * not redrawn, and the values that moved redraw what reads them. */
+  setRecord(doc: SlateDoc | null, values: Record<string, SlateJson>, version: number): void {
     const before = this.#doc;
     this.#doc = doc;
     this.#version = version;
@@ -121,38 +129,73 @@ export class SlateEngine {
     }
     if (before?.root !== doc?.root || before?.title !== doc?.title || (before === null) !== (doc === null)) changed.add(DOC);
     this.#loud = loudOf(doc);
-    const moved = this.#replaceRemote(state);
+    const moved = this.#replaceRemote(values).map(key => `$${key}`);
     for (const id of changed) if (this.#mounted.has(id)) this.#dirty.add(id);
-    this.#markReading(moved.map(key => `state.${key}`));
+    this.#markReading(moved);
+    this.#runsMoved(moved);
     if (changed.size > 0) this.#readsChanged();
     this.#schedule();
     this.#bump(DOC);
   }
 
-  /** The values a slate.state push or an answer carried, by state path. */
+  /** The values a slate.values push carried, by own path ("$check", "$steps[2].done"). */
   applyValues(values: Record<string, SlateJson>, version?: number): void {
     if (version !== undefined && version > this.#version) this.#version = version;
     const paths: string[] = [];
     for (const [path, value] of Object.entries(values)) {
-      this.#remote = setSlateState(this.#remote, path, value);
+      if (ownPath(path) === undefined) continue;
+      this.#restarted(path, value);
+      this.#remote = setOwn(this.#remote, path, value);
       this.#hold(path, value);
       paths.push(path);
     }
     this.#view = null;
     this.invalidate(paths);
+    this.#runsMoved(paths);
   }
 
-  #replaceRemote(state: Record<string, SlateJson>): string[] {
+  #replaceRemote(values: Record<string, SlateJson>): string[] {
     const moved: string[] = [];
-    const keys = new Set([...Object.keys(this.#remote), ...Object.keys(state)]);
-    for (const key of keys) if (JSON.stringify(this.#remote[key]) !== JSON.stringify(state[key])) moved.push(key);
-    this.#remote = state;
+    const keys = new Set([...Object.keys(this.#remote), ...Object.keys(values)]);
+    for (const key of keys) if (JSON.stringify(this.#remote[key]) !== JSON.stringify(values[key])) moved.push(key);
+    for (const key of moved) this.#restarted(`$${key}`, values[key]);
+    this.#remote = values;
     for (const path of this.#mine.keys()) {
-      const theirs = getSlateState(state, path);
+      const theirs = getOwn(values, path);
       if (theirs !== undefined) this.#hold(path, theirs);
     }
     this.#view = null;
     return moved;
+  }
+
+  /** A run that starts again begins its streamed lines afresh; a finished one keeps its last until then (11). */
+  #restarted(path: string, value: SlateJson | undefined): void {
+    const name = ownPath(path)?.name;
+    if (name === undefined || path !== `$${name}` || this.#doc?.runs?.[name] === undefined) return;
+    if (walk(value, ["state"]) === "running" && walk(this.#remote[name], ["state"]) !== "running") this.#lines.delete(name);
+  }
+
+  #runsMoved(paths: readonly string[]): void {
+    const runs = this.#doc?.runs ?? {};
+    if (paths.some(path => Object.prototype.hasOwnProperty.call(runs, ownPath(path)?.name ?? ""))) this.#bump(RUNS);
+  }
+
+  /** New lines of a streaming run, as slate.run carried them. */
+  appendLines(run: string, lines: readonly string[]): void {
+    const kept = [...(this.#lines.get(run) ?? []), ...lines].slice(-LINES_KEPT);
+    this.#lines.set(run, kept);
+    this.invalidate([`$${run}.lines`]);
+  }
+
+  /** The run's lines as the window has them: what streamed here, else the record's own. */
+  lines(run: string): readonly string[] | undefined {
+    return this.#lines.get(run);
+  }
+
+  /** A secret's path: the person types it, the host keeps it, the window holds only its handle (08). */
+  isSecret(path: string): boolean {
+    const name = ownPath(path)?.name;
+    return name !== undefined && this.#doc?.values?.[name]?.secret === true;
   }
 
   /** A write from elsewhere onto a path this window holds a value for: its own echo is dropped, a focused field
@@ -169,11 +212,11 @@ export class SlateEngine {
     }
   }
 
-  /** The live state as this window draws it: the host's copy under what was typed here. */
-  get state(): Record<string, SlateJson> {
+  /** The live values as this window draws them: the host's copy under what was typed here. */
+  get values(): Record<string, SlateJson> {
     if (this.#view === null) {
       let view = this.#remote;
-      for (const [path, value] of this.#mine) view = setSlateState(view, path, value);
+      for (const [path, value] of this.#mine) view = setOwn(view, path, value);
       this.#view = view;
     }
     return this.#view;
@@ -195,7 +238,7 @@ export class SlateEngine {
 
   /** The host took the value. */
   settle(path: string, value: SlateJson): void {
-    this.#remote = setSlateState(this.#remote, path, value);
+    this.#remote = setOwn(this.#remote, path, value);
     if (!this.#focused.has(path) && same(this.#mine.get(path), value)) {
       this.#mine.delete(path);
       this.#sent.delete(path);
@@ -228,7 +271,7 @@ export class SlateEngine {
     this.#held.delete(path);
     this.#mine.delete(path);
     this.#sent.delete(path);
-    if (theirs !== undefined) this.#remote = setSlateState(this.#remote, path, theirs);
+    if (theirs !== undefined) this.#remote = setOwn(this.#remote, path, theirs);
     this.#view = null;
     this.invalidate([path]);
   }
@@ -240,10 +283,23 @@ export class SlateEngine {
     return this.#mine.get(path);
   }
 
-  /** The context every expression in this slate evaluates in. */
-  context(row?: { item: SlateJson; index: number }): SlateEvalContext {
-    const read = (path: string): SlateJson | undefined => {
-      if (path === "state" || path.startsWith("state.") || path.startsWith("state[")) return path === "state" ? this.state : getSlateState(this.state, path);
+  /** Reads any path an expression in this slate names: an own value, a derived value evaluated now, the row,
+   * or a source. A derived value that reads itself through others is missing, never a loop. */
+  reader(row?: Row): Resolve {
+    const evaluating = new Set<string>();
+    const read: Resolve = path => {
+      const own = ownPath(path);
+      if (own !== undefined) {
+        const formula = this.#doc?.derived?.[own.name];
+        if (formula === undefined) return walk(this.values[own.name], own.steps);
+        if (evaluating.has(own.name)) return undefined;
+        evaluating.add(own.name);
+        try {
+          return walk(evaluate(formula, read, undefined, this.#scheduler.now()), own.steps);
+        } finally {
+          evaluating.delete(own.name);
+        }
+      }
       if (row !== undefined) {
         if (path === "index") return row.index;
         if (path === "item") return row.item;
@@ -251,17 +307,18 @@ export class SlateEngine {
       }
       return this.#read(path);
     };
-    return { resolve: read, ...(row !== undefined ? { row } : {}), now: this.#scheduler.now() };
+    return read;
+  }
+
+  /** One expression's value; anything that fails to evaluate is missing. */
+  evaluate(expr: string, row?: Row): SlateJson | undefined {
+    return evaluate(expr, this.reader(row), row, this.#scheduler.now());
   }
 
   /** One prop's value; anything that fails to evaluate is missing, and the piece draws its quiet placeholder. */
-  resolve(value: SlatePropValue | undefined, row?: { item: SlateJson; index: number }): SlateJson | undefined {
+  resolve(value: SlatePropValue | undefined, row?: Row): SlateJson | undefined {
     if (value === undefined) return undefined;
-    try {
-      return resolveSlateProp(value, this.context(row));
-    } catch {
-      return undefined;
-    }
+    return resolveProp(value, this.reader(row), row, this.#scheduler.now());
   }
 
   // Subscriptions, one per drawn piece.
@@ -270,13 +327,14 @@ export class SlateEngine {
     let set = this.#listeners.get(id);
     if (set === undefined) this.#listeners.set(id, (set = new Set()));
     set.add(listener);
-    if (id !== DOC) {
+    const piece = id !== DOC && id !== RUNS;
+    if (piece) {
       this.#mounted.set(id, (this.#mounted.get(id) ?? 0) + 1);
       this.#readsChanged();
     }
     return () => {
       set.delete(listener);
-      if (id === DOC) return;
+      if (!piece) return;
       const left = (this.#mounted.get(id) ?? 1) - 1;
       if (left <= 0) {
         this.#mounted.delete(id);
@@ -306,7 +364,9 @@ export class SlateEngine {
     let reads = this.#reads.get(id);
     if (reads === undefined) {
       const piece = this.piece(id);
-      reads = piece === undefined ? { when: [], props: [] } : pieceReads(piece);
+      const derived = this.#doc?.derived ?? {};
+      const own = piece === undefined ? { when: [], props: [] } : pieceReads(piece);
+      reads = { when: expandDerived(own.when, derived), props: expandDerived(own.props, derived) };
       this.#reads.set(id, reads);
     }
     return reads;
@@ -421,7 +481,7 @@ function walkFrom(item: SlateJson, rest: string): SlateJson | undefined {
 }
 
 /** The first piece in display order to ask for each loud thing with a literal. */
-function loudOf(doc: Slate | null): Map<Loud, string> {
+function loudOf(doc: SlateDoc | null): Map<Loud, string> {
   const out = new Map<Loud, string>();
   if (doc === null) return out;
   const seen = new Set<string>();

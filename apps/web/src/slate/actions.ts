@@ -1,25 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What a press, a submit or a change does. set, toggle and fill run here; send, steer and queue leave the window
-// through slates.act, which resolves the action off the host's own stored version and answers an outcome. The
-// person's state writes go to the host through one sender per slate, typing debounced and every other change at once.
-import { getSlateState, type SlateAction, type SlateEventName, type SlateJson } from "@wsp/protocol";
+// What a press, a submit or a change does. The host runs set, toggle, start, cancel and the sends off its own stored
+// version through slates.event, and answers an outcome, with the consent sheet's content when it held a run; fill,
+// open, copy and pane run here (02-model, "Reactions"). The person's value writes go to the host through one sender
+// per slate, typing debounced and every other change at once; a secret's text goes once and is not kept.
+import type { SlateJson } from "@wsp/protocol";
 import type { SlateEngine } from "./engine.js";
+import { isHostStep, stepsOf, type SlateApproval, type SlateAsk, type SlateEventName, type SlateStep } from "./model.js";
+import { getOwn } from "./paths.js";
 
-/** The window's roads out for one slate, so a test draws a slate against a fake. */
-export interface SlateLink {
-  act(ask: SlateActAsk): Promise<{ outcome: string; said?: string }>;
-  writeState(values: Record<string, SlateJson>): Promise<unknown>;
-  fill(text: string): void;
-  /** Opens or focuses a right panel pane; false where the pane cannot open here. */
-  pane?(kind: string): boolean;
-  open?(href: string): void;
-}
-
-export interface SlateActAsk {
+export interface SlateEventAsk {
   version: number;
   piece: string;
   event: SlateEventName;
-  action: number;
   requestId: string;
   /** The row of a repeating piece the press came from. */
   scope?: { item: SlateJson; index: number };
@@ -27,9 +19,30 @@ export interface SlateActAsk {
   rowAction?: number;
 }
 
+export interface SlateEventAnswer {
+  outcome: string;
+  said?: string;
+  ask?: SlateAsk;
+}
+
+/** The window's roads out for one slate, so a test draws a slate against a fake. */
+export interface SlateLink {
+  event(ask: SlateEventAsk): Promise<SlateEventAnswer>;
+  writeState(values: Record<string, SlateJson>): Promise<unknown>;
+  /** Answers a held run's sheet by its approval key. */
+  approve(key: string, scope: SlateApproval): Promise<unknown>;
+  cancel(run: string): Promise<unknown>;
+  /** Opens the consent sheet on a run a press held. */
+  consent(ask: SlateAsk): void;
+  fill(text: string): void;
+  /** Opens or focuses a right panel pane; false where the pane cannot open here. */
+  pane?(kind: string): boolean;
+  open?(href: string): void;
+}
+
 export interface RaiseOptions {
-  /** A row action carries its own list; anything else runs the piece's `on`. */
-  actions?: SlateAction | SlateAction[];
+  /** A row action carries its own list; anything else runs the piece's own handler. */
+  actions?: SlateStep | SlateStep[];
   row?: { item: SlateJson; index: number };
   rowAction?: number;
 }
@@ -40,20 +53,18 @@ export interface RaiseResult {
   refused?: string;
 }
 
-/** Each outcome the runtime answers, in the copy voice (09-actions, outcomes). */
+/** The send outcomes, in the copy voice (09-events, "Delivery"); any other outcome says nothing. */
 const OUTCOME_WORDS: Record<string, string> = {
   started: "Sent",
   sent: "Sent",
   steered: "Sent into the running turn",
   queued: "Waiting for the turn to end",
-  next: "Nothing was running, so it was sent as the next message",
 };
-export const outcomeWord = (outcome: string): string => OUTCOME_WORDS[outcome] ?? outcome;
+export const outcomeWord = (outcome: string): string | undefined => OUTCOME_WORDS[outcome];
 
 const DEBOUNCE_MS = 300;
-const NOT_HERE = "This action is not in this build of the slate.";
 
-/** The person's writes to one slate's state: typing waits 300 ms for the next keystroke, the rest go at once. */
+/** The person's value writes to one slate: typing waits 300 ms for the next keystroke, the rest go at once. */
 export class StateSender {
   readonly #engine: SlateEngine;
   readonly #link: () => SlateLink;
@@ -82,8 +93,16 @@ export class StateSender {
     if (timer === undefined) return Promise.resolve();
     clearTimeout(timer);
     this.#timers.delete(path);
-    const value = getSlateState(this.#engine.state, path);
+    const value = getOwn(this.#engine.values, path);
     return value === undefined ? Promise.resolve() : this.#send(path, value);
+  }
+
+  /** A secret's text, sent once and never written into the window's values: once the host has it, the window
+   * holds the handle alone (08, "Where the plaintext lives"). An empty text clears it. */
+  async secret(path: string, text: string): Promise<void> {
+    await this.#link().writeState({ [path]: text });
+    this.#engine.settle(path, { secret: true, set: text !== "", len: text.length, at: Date.now() });
+    this.#engine.invalidate([path]);
   }
 
   async #send(path: string, value: SlateJson): Promise<void> {
@@ -103,87 +122,78 @@ export class StateSender {
   }
 }
 
-/** Runs a piece's actions for one event in order; the first refusal stops the list. */
+/** Runs one event's steps: the host's part as one slates.event, then the window's own in order. */
 export class ActionRunner {
   readonly #engine: SlateEngine;
   readonly #link: () => SlateLink;
-  readonly #sender: StateSender;
   #counter = 0;
 
-  constructor(engine: SlateEngine, link: () => SlateLink, sender: StateSender) {
+  constructor(engine: SlateEngine, link: () => SlateLink) {
     this.#engine = engine;
     this.#link = link;
-    this.#sender = sender;
   }
 
   async raise(pieceId: string, event: SlateEventName, options: RaiseOptions = {}): Promise<RaiseResult> {
-    const piece = this.#engine.piece(pieceId);
-    const declared = options.actions ?? piece?.on?.[event];
-    const list = declared === undefined ? [] : Array.isArray(declared) ? declared : [declared];
+    const steps = stepsOf(options.actions ?? this.#engine.piece(pieceId)?.on?.[event]);
     let said: string | undefined;
-    for (const [index, action] of list.entries()) {
-      const result = await this.#run(pieceId, event, index, action, options);
+    if (steps.some(isHostStep)) {
+      const engine = this.#engine;
+      this.#counter += 1;
+      const ask: SlateEventAsk = {
+        version: engine.version,
+        piece: pieceId,
+        event,
+        requestId: `${engine.threadId}:${engine.version}:${pieceId}:${this.#counter}`,
+        ...(options.row !== undefined ? { scope: options.row } : {}),
+        ...(options.rowAction !== undefined ? { rowAction: options.rowAction } : {}),
+      };
+      try {
+        const answer = await this.#link().event(ask);
+        if (answer.ask !== undefined) this.#link().consent(answer.ask);
+        said = answer.said ?? outcomeWord(answer.outcome);
+      } catch (error) {
+        return { refused: error instanceof Error ? error.message : String(error) };
+      }
+    }
+    for (const step of steps) {
+      if (isHostStep(step)) continue;
+      const result = await this.#window(step, options);
       if (result.refused !== undefined) return result;
       if (result.said !== undefined) said = result.said;
     }
     return said === undefined ? {} : { said };
   }
 
-  async #run(pieceId: string, event: SlateEventName, index: number, action: SlateAction, options: RaiseOptions): Promise<RaiseResult> {
+  cancel(run: string): Promise<unknown> {
+    return this.#link().cancel(run);
+  }
+
+  async #window(step: SlateStep, options: RaiseOptions): Promise<RaiseResult> {
     const engine = this.#engine;
-    switch (action.do) {
-      case "set": {
-        if (!action.path.startsWith("state.")) return { refused: "set writes state paths only. Name a path under state." };
-        await this.#sender.now(action.path, engine.resolve(action.value, options.row) ?? null);
-        return {};
-      }
-      case "toggle": {
-        if (!action.path.startsWith("state.")) return { refused: "toggle writes state paths only. Name a path under state." };
-        await this.#sender.now(action.path, !truthy(getSlateState(engine.state, action.path)));
-        return {};
-      }
+    switch (step.do) {
       case "fill": {
-        const carried = (action.with ?? []).map(path => `${path}: ${JSON.stringify(engine.context(options.row).resolve(path) ?? null)}`);
-        this.#link().fill(carried.length === 0 ? action.text : `${action.text}\n\n${carried.map(line => `> ${line}`).join("\n")}`);
+        const read = engine.reader(options.row);
+        const carried = (step.with ?? []).map(path => `${path}: ${JSON.stringify(read(path) ?? null)}`);
+        this.#link().fill(carried.length === 0 ? step.text : `${step.text}\n\n${carried.map(line => `> ${line}`).join("\n")}`);
         return {};
-      }
-      case "send":
-      case "steer":
-      case "queue": {
-        this.#counter += 1;
-        const ask: SlateActAsk = {
-          version: engine.version,
-          piece: pieceId,
-          event,
-          action: index,
-          requestId: `${engine.threadId}:${engine.version}:${pieceId}:${this.#counter}`,
-          ...(options.row !== undefined ? { scope: options.row } : {}),
-          ...(options.rowAction !== undefined ? { rowAction: options.rowAction } : {}),
-        };
-        try {
-          const answer = await this.#link().act(ask);
-          return { said: answer.said ?? outcomeWord(answer.outcome) };
-        } catch (error) {
-          return { refused: error instanceof Error ? error.message : String(error) };
-        }
       }
       case "pane": {
-        const opened = this.#link().pane?.(action.kind) ?? false;
+        const opened = this.#link().pane?.(step.kind) ?? false;
         return opened ? {} : { refused: "That pane is not available here." };
       }
       case "open": {
-        const href = engine.resolve(action.href, options.row);
-        if (typeof href !== "string" || !/^https?:\/\//.test(href)) return { refused: "Only http and https links open from a slate." };
+        const href = engine.resolve(step.target, options.row);
+        if (typeof href !== "string" || !/^(https?:\/\/|mailto:)/.test(href)) return { refused: "Only http, https and mailto links open from a slate." };
         this.#link().open?.(href);
         return {};
       }
       case "copy": {
-        const text = engine.resolve(action.text, options.row);
+        const text = engine.resolve(step.text, options.row);
         await navigator.clipboard?.writeText(typeof text === "string" ? text : JSON.stringify(text ?? ""));
         return { said: "Copied" };
       }
       default:
-        return { refused: NOT_HERE };
+        return {};
     }
   }
 }
