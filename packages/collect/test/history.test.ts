@@ -379,6 +379,38 @@ describe("what each agent's own logs say was used", () => {
     ]);
   });
 
+  it("counts a session once when two project folders hold its files, by the folder whose newest message is latest", async () => {
+    const at = (m: number) => `2026-09-06T10:${String(m).padStart(2, "0")}:00.000Z`;
+    const msg = (id: string, m: number, cwd: string, input: number) => usageLine({ id, session: "s1", at: at(m), model: "claude-opus-5", cwd, usage: { input_tokens: input, output_tokens: 1 } });
+    const HOME = "/Users/dev/wsp";
+    // An export rewrites cwd on every line it copies, so a copy is longer than the lines it came from.
+    const COPY = "/private/tmp/wsp-test/export-dev/wsp";
+    const copied = (cwd: string) => Array.from({ length: 30 }, (_, i) => msg(`msg_${i + 1}`, i + 1, cwd, 100));
+    const original = [...copied(HOME), msg("msg_grown", 50, HOME, 1_000)].join("\n");
+    const copy = copied(COPY).join("\n");
+    expect(copy.length).toBeGreaterThan(original.length);
+    const host = fakeHost({
+      files: {
+        "~/.claude/projects/-Users-dev-wsp/s1.jsonl": original,
+        "~/.claude/projects/-Users-dev-wsp/s1/subagents/agent-a.jsonl": msg("msg_sub", 31, HOME, 5),
+        "~/.claude/projects/-private-tmp-wsp-test-export-dev-wsp/s1.jsonl": copy,
+        "~/.claude/projects/-private-tmp-wsp-test-export-dev-wsp/s1/subagents/agent-a.jsonl": msg("msg_sub", 31, COPY, 5),
+        "~/.claude/projects/-private-tmp-wsp-test-export-dev-wsp/s2.jsonl": usageLine({ id: "msg_9", session: "s2", at: at(5), model: "claude-opus-5", cwd: COPY, usage: { input_tokens: 7, output_tokens: 1 } }),
+      },
+    });
+    const read = await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "claude"), { day: d => new Date(d).toISOString().slice(0, 10) });
+    const summed = new Map<string, [string, string | undefined, number, number]>();
+    for (const r of read) {
+      const key = `${r.session} ${r.folder}`;
+      const [, , input, output] = summed.get(key) ?? [r.session, r.folder, 0, 0];
+      summed.set(key, [r.session, r.folder, input + r.tokens.input, output + r.tokens.output]);
+    }
+    expect([...summed.values()]).toEqual([
+      ["s1", HOME, 4_005, 32],
+      ["s2", COPY, 7, 1],
+    ]);
+  });
+
   it("reads a Codex rollout's last total under the thread id its session_meta names, with its model and folder", async () => {
     const tc = (at: string, input: number, output: number) =>
       line({ timestamp: at, type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: input, cached_input_tokens: 400, output_tokens: output, reasoning_output_tokens: 7, total_tokens: input + output }, last_token_usage: {}, model_context_window: 258_400 }, rate_limits: {} } });
