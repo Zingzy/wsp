@@ -438,12 +438,12 @@ describe("the header row", () => {
     act(() => useStore.getState().select("ws_a", "thr_1"));
     const crumb = () => banner().querySelector("[data-thread-breadcrumb]")!;
     expect(crumb().textContent).toBe("add a health route");
-    act(() => useStore.setState({ sessions: rows("Run: wsp --version") }));
-    expect(crumb().textContent).toBe("add a health routeNeeds you");
-    // The whole sentence is the hover text; the header shows the word alone.
-    expect(crumb().querySelector("[title]")!.getAttribute("title")).toBe("Run: wsp --version");
-    act(() => useStore.setState({ sessions: rows() }));
+    act(() => useStore.setState({ sessions: rows("Run a command: wsp --version") }));
+    // The header shows the state as its glyph alone, the word for a screen reader; the sentence rides the hover.
     expect(crumb().textContent).toBe("add a health route");
+    expect(crumb().querySelector("[data-breadcrumb-waiting]")!.getAttribute("aria-label")).toBe("Needs you");
+    act(() => useStore.setState({ sessions: rows() }));
+    expect(crumb().querySelector("[data-breadcrumb-waiting]")).toBeNull();
   });
 
   it("the compose glyph sits in the search row and opens New thread on the selected workspace's project rather than inside it, and stays live on New thread itself", async () => {

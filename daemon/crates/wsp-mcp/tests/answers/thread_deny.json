@@ -89,10 +89,172 @@
       },
       "replies": {
         "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
-        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.permission\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"turnId\":\"turn-2\",\"askId\":\"ask-1\",\"toolName\":\"Edit\",\"input\":\"{\\\"file_path\\\":\\\"a\\\"}\",\"options\":[{\"id\":\"opt-allow\",\"label\":\"Allow\",\"effect\":\"allow\"},{\"id\":\"opt-mode\",\"label\":\"Allow all edits\",\"effect\":\"mode\"},{\"id\":\"opt-deny\",\"label\":\"Deny\",\"effect\":\"deny\"}]}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.permission\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"turnId\":\"turn-2\",\"askId\":\"ask-1\",\"toolName\":\"Read\",\"input\":\"{\\\"file_path\\\":\\\"a\\\"}\",\"options\":[{\"id\":\"opt-allow\",\"label\":\"Allow\",\"effect\":\"allow\"},{\"id\":\"opt-mode\",\"label\":\"Allow all edits\",\"effect\":\"mode\"},{\"id\":\"opt-deny\",\"label\":\"Deny\",\"effect\":\"deny\"}]}]}",
         "sessions.answer": "{\"id\":1,\"ok\":true,\"outcome\":\"answered\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"denied on thread thread-7: Permission for Edit\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"askId\":\"ask-1\",\"optionId\":\"opt-deny\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"denied on thread thread-7: Permission for Read\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"askId\":\"ask-1\",\"optionId\":\"opt-deny\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.answer",
+          "sessionId": "sess-2",
+          "askId": "ask-1",
+          "optionId": "opt-deny"
+        }
+      ]
+    },
+    {
+      "case": "an edit",
+      "arguments": {
+        "thread": "thread-7f3a9c21e4b5"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.permission\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"turnId\":\"turn-2\",\"askId\":\"ask-1\",\"toolName\":\"Edit\",\"input\":\"{\\\"file_path\\\":\\\"/root/api/src/health.ts\\\",\\\"old_string\\\":\\\"a\\\",\\\"new_string\\\":\\\"b\\\"}\",\"options\":[{\"id\":\"opt-allow\",\"label\":\"Allow\",\"effect\":\"allow\"},{\"id\":\"opt-mode\",\"label\":\"Allow all edits\",\"effect\":\"mode\"},{\"id\":\"opt-deny\",\"label\":\"Deny\",\"effect\":\"deny\"}]}]}",
+        "sessions.answer": "{\"id\":1,\"ok\":true,\"outcome\":\"answered\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"denied on thread thread-7: Edit health.ts in src\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"askId\":\"ask-1\",\"optionId\":\"opt-deny\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.answer",
+          "sessionId": "sess-2",
+          "askId": "ask-1",
+          "optionId": "opt-deny"
+        }
+      ]
+    },
+    {
+      "case": "several edits",
+      "arguments": {
+        "thread": "thread-7f3a9c21e4b5"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.permission\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"turnId\":\"turn-2\",\"askId\":\"ask-1\",\"toolName\":\"MultiEdit\",\"input\":\"{\\\"file_path\\\":\\\"health.ts\\\",\\\"edits\\\":[{\\\"old_string\\\":\\\"a\\\",\\\"new_string\\\":\\\"b\\\"},{\\\"old_string\\\":\\\"c\\\",\\\"new_string\\\":\\\"d\\\"},{\\\"old_string\\\":\\\"e\\\",\\\"new_string\\\":\\\"f\\\"}]}\",\"options\":[{\"id\":\"opt-allow\",\"label\":\"Allow\",\"effect\":\"allow\"},{\"id\":\"opt-mode\",\"label\":\"Allow all edits\",\"effect\":\"mode\"},{\"id\":\"opt-deny\",\"label\":\"Deny\",\"effect\":\"deny\"}]}]}",
+        "sessions.answer": "{\"id\":1,\"ok\":true,\"outcome\":\"answered\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"denied on thread thread-7: Edit health.ts (3 places)\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"askId\":\"ask-1\",\"optionId\":\"opt-deny\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.answer",
+          "sessionId": "sess-2",
+          "askId": "ask-1",
+          "optionId": "opt-deny"
+        }
+      ]
+    },
+    {
+      "case": "a fetch",
+      "arguments": {
+        "thread": "thread-7f3a9c21e4b5"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.permission\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"turnId\":\"turn-2\",\"askId\":\"ask-1\",\"toolName\":\"WebFetch\",\"input\":\"{\\\"url\\\":\\\"https://example.com/é\\\",\\\"prompt\\\":\\\"read it\\\"}\",\"options\":[{\"id\":\"opt-allow\",\"label\":\"Allow\",\"effect\":\"allow\"},{\"id\":\"opt-mode\",\"label\":\"Allow all edits\",\"effect\":\"mode\"},{\"id\":\"opt-deny\",\"label\":\"Deny\",\"effect\":\"deny\"}]}]}",
+        "sessions.answer": "{\"id\":1,\"ok\":true,\"outcome\":\"answered\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"denied on thread thread-7: Fetch a page: https://example.com/é\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"askId\":\"ask-1\",\"optionId\":\"opt-deny\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.answer",
+          "sessionId": "sess-2",
+          "askId": "ask-1",
+          "optionId": "opt-deny"
+        }
+      ]
+    },
+    {
+      "case": "a codex command",
+      "arguments": {
+        "thread": "thread-7f3a9c21e4b5"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.permission\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"turnId\":\"turn-2\",\"askId\":\"ask-1\",\"toolName\":\"command_execution\",\"input\":\"{\\\"command\\\":\\\"touch hi.txt\\\",\\\"cwd\\\":\\\"/w\\\"}\",\"options\":[{\"id\":\"opt-allow\",\"label\":\"Allow\",\"effect\":\"allow\"},{\"id\":\"opt-mode\",\"label\":\"Allow all edits\",\"effect\":\"mode\"},{\"id\":\"opt-deny\",\"label\":\"Deny\",\"effect\":\"deny\"}],\"detail\":\"Allow me to create hi.txt?\"}]}",
+        "sessions.answer": "{\"id\":1,\"ok\":true,\"outcome\":\"answered\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"denied on thread thread-7: Run a command: touch hi.txt\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"askId\":\"ask-1\",\"optionId\":\"opt-deny\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.answer",
+          "sessionId": "sess-2",
+          "askId": "ask-1",
+          "optionId": "opt-deny"
+        }
+      ]
+    },
+    {
+      "case": "a codex file change",
+      "arguments": {
+        "thread": "thread-7f3a9c21e4b5"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.permission\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"turnId\":\"turn-2\",\"askId\":\"ask-1\",\"toolName\":\"file_change\",\"input\":\"{\\\"changes\\\":[{\\\"path\\\":\\\"/w/src/a.rs\\\",\\\"kind\\\":\\\"update\\\"}]}\",\"options\":[{\"id\":\"opt-allow\",\"label\":\"Allow\",\"effect\":\"allow\"},{\"id\":\"opt-mode\",\"label\":\"Allow all edits\",\"effect\":\"mode\"},{\"id\":\"opt-deny\",\"label\":\"Deny\",\"effect\":\"deny\"}]}]}",
+        "sessions.answer": "{\"id\":1,\"ok\":true,\"outcome\":\"answered\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"denied on thread thread-7: Change a.rs in src\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"askId\":\"ask-1\",\"optionId\":\"opt-deny\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.answer",
+          "sessionId": "sess-2",
+          "askId": "ask-1",
+          "optionId": "opt-deny"
+        }
+      ]
+    },
+    {
+      "case": "several codex file changes",
+      "arguments": {
+        "thread": "thread-7f3a9c21e4b5"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.permission\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"turnId\":\"turn-2\",\"askId\":\"ask-1\",\"toolName\":\"file_change\",\"input\":\"{\\\"changes\\\":[{\\\"path\\\":\\\"/w/a.rs\\\",\\\"kind\\\":\\\"update\\\"},{\\\"path\\\":\\\"b.rs\\\",\\\"kind\\\":\\\"add\\\"}]}\",\"options\":[{\"id\":\"opt-allow\",\"label\":\"Allow\",\"effect\":\"allow\"},{\"id\":\"opt-mode\",\"label\":\"Allow all edits\",\"effect\":\"mode\"},{\"id\":\"opt-deny\",\"label\":\"Deny\",\"effect\":\"deny\"}]}]}",
+        "sessions.answer": "{\"id\":1,\"ok\":true,\"outcome\":\"answered\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"denied on thread thread-7: Change 2 files: a.rs, b.rs\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"askId\":\"ask-1\",\"optionId\":\"opt-deny\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "sessions.list"

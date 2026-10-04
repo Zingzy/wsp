@@ -19,7 +19,7 @@
 // here; the tiles are ThreadTile beside this file. The surface itself is the
 // shell's sidebar-glass: nothing here paints a background.
 import { openProjectSettings } from "../settings/openAt.js";
-import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
+import { ChevronDownIcon, CopyIcon, MessageCircleQuestionIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { HOST_ASLEEP_LINE, SETTLE_MS, modelOf, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
@@ -68,6 +68,8 @@ import { SettingUpSection } from "./SettingUpSection.js";
 type Fold = SidebarSection | "settled" | "setting-up";
 /** The folds a head can make: the one list has no head, so it never folds. */
 const FOLDS: readonly Fold[] = ["pinned", "needs-you", "settled", "setting-up"];
+/** The Needs you head says its state as the tiles under it do: the question glyph in the input ink, the word on hover. */
+const NEEDS_YOU_HEAD = { Icon: MessageCircleQuestionIcon, ink: "text-status-input" };
 /** The sections a person has folded by their heads. Settled starts folded, since it holds the tiles a person has
  * stopped looking at; every live section starts open. */
 const FOLDED_KEY = "wsp:sidebar-folded";
@@ -562,6 +564,7 @@ export function WorkspaceSidebar() {
                 {section.id === "threads" ? null : (
                   <SectionRow
                     label={SECTION_WORDS[section.id]}
+                    glyph={section.id === "needs-you" ? NEEDS_YOU_HEAD : undefined}
                     count={section.roots.reduce((sum, node) => sum + tileCount(node), 0) + madeIn(section.id).length}
                     collapsed={folded.includes(section.id)}
                     onToggle={() => toggleFold(section.id)}

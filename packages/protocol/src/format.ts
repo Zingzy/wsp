@@ -689,8 +689,8 @@ function askedOptions(raw: unknown, question: number): AskedOption[] {
 }
 
 /** The questions a call to the question tool carries, in the order it asked them; nothing for every other call and
- * for a question whose input has not finished arriving. A question with no choices is left out: there is no button
- * to draw for it and no pick to send back. */
+ * for a question whose input has not finished arriving. A question with no choices stays: it draws as the one field
+ * a typed answer goes into. */
 export function askedQuestions(toolName: string, input: string): readonly AskedQuestion[] | undefined {
   const fields = toolInput(input);
   return fields === undefined ? undefined : permissionWords(toolName).questions?.(fields);
@@ -705,7 +705,6 @@ function questionsIn(fields: ToolInput): readonly AskedQuestion[] | undefined {
     const text = q === undefined ? undefined : toolField(q, "question");
     if (q === undefined || text === undefined) continue;
     const options = askedOptions(q["options"], at);
-    if (options.length === 0) continue;
     questions.push({ key: text, header: toolField(q, "header") ?? "", question: text, options, multiSelect: q["multiSelect"] === true });
   }
   return questions.length === 0 ? undefined : questions;
@@ -750,7 +749,7 @@ export function questionAnswerInput(toolName: string, input: string, picked: rea
 const questionRow: ToolRow = {
   line: input => {
     const first = questionsIn(input)?.[0];
-    return first === undefined ? undefined : `asked: ${first.question}`;
+    return first === undefined ? undefined : first.question;
   },
   // No detail: the prompt under this row is the question, whole, and a row that repeated it would put the same
   // sentence on the screen twice.
@@ -3047,6 +3046,15 @@ interface PermissionWords {
   /** Fields the lead says itself, left out of the values shown under it so nothing is read twice. */
   readonly named: readonly string[];
   readonly body?: string;
+  /** A sentence the agent wrote about the call, prose a client draws in the sentence face: the harness's own
+   * reason for a Codex command, the prompt a fetch is read with. Absent on a kind with none. */
+  readonly note?: (input: ToolInput, detail: string | undefined) => string | undefined;
+}
+
+/** A file's name and its folder as a person says them: `health.ts in src`, or the name alone at the root. */
+function fileInFolder(path: string): string {
+  const folder = parentFolderName(path);
+  return `${folderName(path)}${folder === "" ? "" : ` in ${folder}`}`;
 }
 
 const writeAsk: PermissionWords = {
@@ -3062,12 +3070,57 @@ const writeAsk: PermissionWords = {
   body: "content",
 };
 
+/** Claude's Edit and MultiEdit: the file, and how many places change where there are several. The strings that
+ * go and come are the client's to draw as lines; they are never dumped under the lead. */
+const editAsk: PermissionWords = {
+  lead: input => {
+    const path = toolField(input, "file_path");
+    if (path === undefined) return undefined;
+    const edits = input["edits"];
+    const count = Array.isArray(edits) && edits.length > 1 ? ` (${edits.length} places)` : "";
+    return { says: `Edit ${fileInFolder(path)}${count}` };
+  },
+  named: ["file_path", "old_string", "new_string", "replace_all", "edits"],
+};
+
 const commandAsk: PermissionWords = {
   lead: input => {
     const command = toolField(input, "command");
-    return command === undefined ? undefined : { says: "Run:", code: command };
+    return command === undefined ? undefined : { says: "Run a command:", code: command };
   },
   named: ["command", "description"],
+};
+
+/** Codex's command approval: the command and the folder it runs in, with the model's own reason as the note. */
+const codexCommandAsk: PermissionWords = {
+  lead: input => {
+    const command = toolField(input, "command");
+    return command === undefined ? undefined : { says: "Run a command:", code: command };
+  },
+  named: ["command", "cwd"],
+  note: (_input, detail) => (detail === undefined || detail === "" ? undefined : detail),
+};
+
+/** Codex's file-change approval: the files by name, since the wire carries their paths and kinds and no diff. */
+const fileChangeAsk: PermissionWords = {
+  lead: input => {
+    const changes = input["changes"];
+    if (!Array.isArray(changes)) return undefined;
+    const paths = changes.map(c => (typeof c === "object" && c !== null ? toolField(c as ToolInput, "path") : undefined)).filter((p): p is string => p !== undefined);
+    if (paths.length === 0) return undefined;
+    return { says: paths.length === 1 ? `Change ${fileInFolder(paths[0]!)}` : `Change ${paths.length} files: ${paths.map(folderName).join(", ")}` };
+  },
+  named: ["changes"],
+};
+
+/** A page fetched from the web: the address as code, and what the agent will read it for as the note. */
+const fetchAsk: PermissionWords = {
+  lead: input => {
+    const url = toolField(input, "url");
+    return url === undefined ? undefined : { says: "Fetch a page:", code: url };
+  },
+  named: ["url", "prompt"],
+  note: input => toolField(input, "prompt"),
 };
 
 const skillAsk: PermissionWords = {
@@ -3081,7 +3134,7 @@ const skillAsk: PermissionWords = {
 const serverAsk: PermissionWords = {
   lead: (_input, toolName) => {
     const lent = serverTool(toolName);
-    return lent === undefined ? undefined : { says: `Use the ${lent.server} tools: ${lent.tool.replace(/_/g, " ")}` };
+    return lent === undefined ? undefined : { says: `Use ${lent.server}'s ${lent.tool.replace(/_/g, " ")}` };
   },
   named: [],
 };
@@ -3094,9 +3147,15 @@ const plainAsk: PermissionWords = { lead: () => undefined, named: [] };
  * else. A name no row matches is a server's tool where its name carries one, else the plain row. */
 const PERMISSION_ASKS: ReadonlyMap<string, PermissionWords> = new Map<string, PermissionWords>([
   ["Write", writeAsk],
+  ["Edit", editAsk],
+  ["MultiEdit", editAsk],
   ["Bash", commandAsk],
+  ["WebFetch", fetchAsk],
   ["Skill", skillAsk],
   [QUESTION_TOOL, questionAsk],
+  // Codex's two approvals, under the names its adapter gives them.
+  ["command_execution", codexCommandAsk],
+  ["file_change", fileChangeAsk],
 ]);
 
 function permissionWords(toolName: string): PermissionWords {
@@ -3126,7 +3185,8 @@ export function permissionAskLine(toolName: string, input: string, detail?: stri
 
 /** One value as the row reads it: its own whitespace collapsed, so a field holding a paragraph is one line rather
  * than a wall, while the fields stay apart under their separator. */
-const restValue = (value: unknown): string => (typeof value === "string" ? value : JSON.stringify(value) ?? "").replace(/\s+/g, " ").trim();
+const restValue = (value: unknown): string =>
+  (typeof value === "string" ? value : Array.isArray(value) && value.every(v => typeof v === "string" || typeof v === "number") ? value.join(", ") : (JSON.stringify(value) ?? "")).replace(/\s+/g, " ").trim();
 
 /** The whole of a relayed permission prompt as a client draws it: the lead in its two parts, the input values that
  * lead does not already carry, and the file body folded away behind its own disclosure. Nothing here is cut, since
@@ -3141,6 +3201,8 @@ export interface PermissionPromptWords {
   readonly code?: string;
   readonly rest: string;
   readonly body?: { readonly label: string; readonly text: string };
+  /** A sentence the agent wrote about the call, drawn in the sentence face under the lead; absent where there is none. */
+  readonly note?: string;
   /** Set only on a call that asks the person something: the row draws these and nothing else, since a question's
    * whole input is the question. */
   readonly questions?: readonly AskedQuestion[];
@@ -3156,11 +3218,12 @@ export function permissionPromptWords(toolName: string, input: string, detail?: 
   const words = permissionWords(toolName);
   const named = new Set(words.named);
   const body = words.body === undefined ? undefined : toolField(fields, words.body);
+  const note = words.note?.(fields, detail);
   const rest = Object.entries(fields)
     .filter(([key]) => !named.has(key))
     .map(([key, value]) => `${key}: ${restValue(value)}`)
     .join("\n");
-  return { ...parts, rest, ...(body === undefined ? {} : { body: { label: BODY_LABEL, text: body } }) };
+  return { ...parts, rest, ...(body === undefined ? {} : { body: { label: BODY_LABEL, text: body } }), ...(note === undefined ? {} : { note }) };
 }
 
 /** That lead taken off the prompt itself, which is what a thread's row says it is waiting on and what the app says

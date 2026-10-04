@@ -55,7 +55,7 @@ describe.skipIf(renderSkipped !== undefined)("the relayed permission prompt row 
     // The open prompt: what the call does in words, the command itself beside them, and every option the harness
     // offered as a plain button.
     expect(await page!.locator(open).getAttribute("data-permission-open")).toBe("true");
-    expect(await page!.locator(`${open} [data-permission-says]`).textContent()).toBe("Run:");
+    expect(await page!.locator(`${open} [data-permission-says]`).textContent()).toBe("Run a command:");
     expect(await page!.locator(`${open} [data-permission-code]`).textContent()).toBe(COMMAND);
     expect(await page!.locator(`${open} [data-permission-option]`).allTextContents()).toEqual(["Allow", "Deny", "Allow, then Accept edits"]);
 

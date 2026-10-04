@@ -63,14 +63,21 @@
     "no-option": "the prompt carries no option by that id"
   },
   "asks": {
-    "command": "Run: {command}",
+    "command": "Run a command: {command}",
     "skill": "Run the skill {skill}",
-    "server": "Use the {server} tools: {tool}",
+    "server": "Use {server}'s {tool}",
     "plain": "Permission for {tool}",
     "plainDetail": "Permission for {tool}: {detail}",
     "write": "Write {name}",
     "writeIn": " in {folder}",
-    "writeSize": " ({size})"
+    "writeSize": " ({size})",
+    "edit": "Edit {name}",
+    "editIn": " in {folder}",
+    "editPlaces": " ({count} places)",
+    "fetch": "Fetch a page: {url}",
+    "change": "Change {name}",
+    "changeIn": " in {folder}",
+    "changes": "Change {count} files: {names}"
   },
   "finished": "thread {thread} finished ({facts}): {body}",
   "finishedBare": "thread {thread} finished ({facts})",

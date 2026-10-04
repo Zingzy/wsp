@@ -275,14 +275,20 @@ fn parent_folder_name(path: &str) -> &str {
     }
 }
 
-/// The first question a question call puts, where it carries one with a choice to pick.
+/// The first question a question call puts. One with no choice to pick counts: it draws as the one field a typed
+/// answer goes into.
 fn first_question(fields: &Map<String, Value>) -> Option<String> {
-    fields.get("questions")?.as_array()?.iter().find_map(|entry| {
-        let q = entry.as_object()?;
-        let text = field(q, "question")?;
-        let labelled = q.get("options")?.as_array()?.iter().any(|o| o.as_object().and_then(|o| field(o, "label")).is_some());
-        labelled.then(|| text.to_owned())
-    })
+    fields.get("questions")?.as_array()?.iter().find_map(|entry| field(entry.as_object()?, "question").map(str::to_owned))
+}
+
+/// A file's name and its folder as a person says them, in the kind's own templates: `health.ts in src`.
+fn file_in_folder(asks_name: &str, asks_in: &str, path: &str) -> String {
+    let folder = parent_folder_name(path);
+    let mut says = fill(asks_name, &[("name", folder_name(path))]);
+    if !folder.is_empty() {
+        says.push_str(&fill(asks_in, &[("folder", folder)]));
+    }
+    says
 }
 
 /// The prompt's lead as one line, in the words its kind of call is put to a person in, as
@@ -292,17 +298,29 @@ fn asking_line(tool: &str, input: &str, detail: Option<&str>) -> String {
     let fields = serde_json::from_str::<Value>(input).ok().and_then(|v| v.as_object().cloned());
     let lead = fields.as_ref().and_then(|fields| match tool {
         "Write" => field(fields, "file_path").map(|path| {
-            let folder = parent_folder_name(path);
-            let mut says = fill(&asks.write, &[("name", folder_name(path))]);
-            if !folder.is_empty() {
-                says.push_str(&fill(&asks.write_in, &[("folder", folder)]));
-            }
+            let mut says = file_in_folder(&asks.write, &asks.write_in, path);
             if let Some(content) = fields.get("content").and_then(Value::as_str) {
                 says.push_str(&fill(&asks.write_size, &[("size", &fmt_bytes(content.len() as f64))]));
             }
             says
         }),
-        "Bash" => field(fields, "command").map(|command| fill(&asks.command, &[("command", command)])),
+        "Edit" | "MultiEdit" => field(fields, "file_path").map(|path| {
+            let mut says = file_in_folder(&asks.edit, &asks.edit_in, path);
+            if let Some(edits) = fields.get("edits").and_then(Value::as_array).filter(|edits| edits.len() > 1) {
+                says.push_str(&fill(&asks.edit_places, &[("count", &edits.len().to_string())]));
+            }
+            says
+        }),
+        "Bash" | "command_execution" => field(fields, "command").map(|command| fill(&asks.command, &[("command", command)])),
+        "WebFetch" => field(fields, "url").map(|url| fill(&asks.fetch, &[("url", url)])),
+        "file_change" => fields.get("changes").and_then(Value::as_array).and_then(|changes| {
+            let paths: Vec<&str> = changes.iter().filter_map(|c| field(c.as_object()?, "path")).collect();
+            match paths.as_slice() {
+                [] => None,
+                [one] => Some(file_in_folder(&asks.change, &asks.change_in, one)),
+                many => Some(fill(&asks.changes, &[("count", &many.len().to_string()), ("names", &many.iter().map(|p| folder_name(p)).collect::<Vec<_>>().join(", "))])),
+            }
+        }),
         "Skill" => field(fields, "skill").map(|skill| fill(&asks.skill, &[("skill", skill)])),
         "AskUserQuestion" => first_question(fields),
         _ => {
@@ -350,9 +368,19 @@ mod tests {
     }
 
     #[test]
-    fn a_question_leads_with_its_first_question_that_has_a_choice() {
-        let input = json!({ "questions": [{ "question": "skip?", "options": [] }, { "question": "Which one?", "options": [{ "label": " " }, { "label": "A" }] }] });
-        assert_eq!(asking_line("AskUserQuestion", &input.to_string(), None), "Which one?");
+    fn a_question_leads_with_its_first_question_choices_or_not() {
+        // A question with no choices stands, as `questionsIn` keeps it: it is the one field a typed answer goes into.
+        let input = json!({ "questions": [{ "question": "A name?", "options": [] }, { "question": "Which one?", "options": [{ "label": " " }, { "label": "A" }] }] });
+        assert_eq!(asking_line("AskUserQuestion", &input.to_string(), None), "A name?");
+        let choices = json!({ "questions": [{ "question": "Which one?", "options": [{ "label": "A" }] }] });
+        assert_eq!(asking_line("AskUserQuestion", &choices.to_string(), None), "Which one?");
+        // The new rows word their calls as the protocol's table does, folder and count included.
+        assert_eq!(asking_line("Edit", &json!({ "file_path": "/w/src/a.ts" }).to_string(), None), "Edit a.ts in src");
+        assert_eq!(asking_line("MultiEdit", &json!({ "file_path": "a.ts", "edits": [{}, {}, {}] }).to_string(), None), "Edit a.ts (3 places)");
+        assert_eq!(asking_line("WebFetch", &json!({ "url": "https://x.y/z" }).to_string(), None), "Fetch a page: https://x.y/z");
+        assert_eq!(asking_line("command_execution", &json!({ "command": "ls", "cwd": "/w" }).to_string(), Some("why")), "Run a command: ls");
+        assert_eq!(asking_line("file_change", &json!({ "changes": [{ "path": "/w/a.rs" }] }).to_string(), None), "Change a.rs in w");
+        assert_eq!(asking_line("file_change", &json!({ "changes": [{ "path": "/w/a.rs" }, { "path": "b.rs" }] }).to_string(), None), "Change 2 files: a.rs, b.rs");
         assert_eq!(folder_name("/a/b/"), "b");
         assert_eq!(parent_folder_name("b"), "");
     }

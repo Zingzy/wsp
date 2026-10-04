@@ -1743,15 +1743,15 @@ describe("the words a relayed permission prompt shows", () => {
   it("words a command as the whole command, kept apart from the words so a client can draw it as code", () => {
     // A command goes in whole, its later lines and its length alike: one cut anywhere is one nobody can judge.
     const long = `cat > out.py <<'PY'\nprint(${"1 + ".repeat(60)}1)\nPY`;
-    expect(permissionAskLine("Bash", JSON.stringify({ command: long, description: "Write and run a sum" }))).toBe(`Run: ${long}`);
+    expect(permissionAskLine("Bash", JSON.stringify({ command: long, description: "Write and run a sum" }))).toBe(`Run a command: ${long}`);
     // The two parts are apart, so a face that blurs two hyphens into one dash never draws the command.
     const gate = "pnpm exec vitest run --minWorkers=1 --maxWorkers=1";
-    expect(permissionPromptWords("Bash", JSON.stringify({ command: gate }))).toMatchObject({ says: "Run:", code: gate, lead: `Run: ${gate}` });
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: gate }))).toMatchObject({ says: "Run a command:", code: gate, lead: `Run a command: ${gate}` });
   });
 
   it("words a tool a server lends as the server and the tool, and never the server's own paragraph", () => {
-    expect(permissionAskLine("mcp__wsp__workspaces", "{}", "wsp runs cloud machines called workspaces, forked in seconds")).toBe("Use the wsp tools: workspaces");
-    expect(permissionAskLine("mcp__wsp__run", "{}")).toBe("Use the wsp tools: run");
+    expect(permissionAskLine("mcp__wsp__workspaces", "{}", "wsp runs cloud machines called workspaces, forked in seconds")).toBe("Use wsp's workspaces");
+    expect(permissionAskLine("mcp__wsp__run", "{}")).toBe("Use wsp's run");
     expect(permissionPromptWords("mcp__wsp__workspaces", "{}", "wsp runs cloud machines").code).toBeUndefined();
   });
 
@@ -1847,7 +1847,7 @@ describe("the words a relayed permission prompt shows", () => {
     expect(words.body).toBeUndefined();
     expect(words.lead).toBe("This working directory is not a repository. What should I do?");
     // The call itself reads as the question too: the tool's own name is no word a person knows.
-    expect(toolActivityLine(QUESTION_TOOL, input)).toBe("asked: This working directory is not a repository. What should I do?");
+    expect(toolActivityLine(QUESTION_TOOL, input)).toBe("This working directory is not a repository. What should I do?");
     expect(toolActivityLine(QUESTION_TOOL, input)).not.toContain(QUESTION_TOOL);
     // And the transcript's own row for it reads the same way: words a person knows, then the question under them.
     const facts = toolCallFacts(QUESTION_TOOL, input);

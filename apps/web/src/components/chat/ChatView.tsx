@@ -47,14 +47,15 @@ export function ChatView({
   workspaceId,
   threadId = null,
   timestampFormat = DEFAULT_TIMESTAMP_FORMAT,
-  promptsDocked = false,
+  docked,
   children,
 }: {
   workspaceId: string;
   threadId?: string | null;
   timestampFormat?: TimestampFormat;
-  /** The open prompt is answered in the composer's slot, so the timeline's row keeps the record alone. */
-  promptsDocked?: boolean;
+  /** The prompt the composer's slot is answering, by ask id, read off the thread it is shown for; that prompt's
+   * timeline row then keeps the record alone. Absent, or null for a thread, and every row keeps its buttons. */
+  docked?: ((thread: ChatThreadHandle) => string | null) | undefined;
   children?: ((thread: ChatThreadHandle) => ReactNode) | undefined;
 }) {
   const workspace = useWorkspace(workspaceId);
@@ -258,7 +259,7 @@ export function ChatView({
             threadKey={threadId === null ? workspaceId : `${workspaceId}/${threadId}`}
             onImageExpand={noopImageExpand}
             onAnswerPermission={onAnswerPermission}
-            promptsDocked={promptsDocked}
+            dockedAskId={docked?.(thread) ?? null}
             onOpenFile={onOpenFile}
             onIsAtEndChange={onIsAtEndChange}
             footer={footer}

@@ -8,7 +8,7 @@
 // ?typed=words types into its open field, ?write=1 presses Write a message
 // instead, and ?hover=tile rests the pointer on the waiting tile.
 import { createRoot } from "react-dom/client";
-import { DEFAULT_PREFERENCES, type HarnessCatalog, type PlaceView, type ProjectView, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { askingLine as askingLineOf, DEFAULT_PREFERENCES, type HarnessCatalog, type PlaceView, type ProjectView, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
@@ -60,6 +60,8 @@ const POWERS = {
     { label: "Super strength", description: "Lifts the whole monorepo." },
   ],
 };
+/** A question with nothing to pick from: the harness asked for words alone. */
+const NAME = { question: "What should the mascot be called?", header: "Name", multiSelect: false, options: [] as { label: string; description: string }[] };
 const LOOK = {
   question: "If the mascot were a spider, which look?",
   header: "Look",
@@ -87,36 +89,16 @@ const codexOptions = [
   { id: "allow", label: "Allow", effect: "allow" as const },
   { id: "deny", label: "Deny", effect: "deny" as const },
 ];
-const planOptions = [
-  { id: "mode:acceptEdits", label: "Approve, then Accept edits", effect: "mode" as const, mode: "acceptEdits" },
-  { id: "allow", label: "Approve", effect: "allow" as const },
-  { id: "deny", label: "Keep planning", effect: "deny" as const },
-];
 const EDIT_OLD = `  const recede = !active && (status === RESTING || status.id === "working");
   const card = tileCardLines({`;
 const EDIT_NEW = `  // A row that waits on the person keeps the foreground ink, whatever else it is doing.
   const recede = !active && thread.asking === null && (status === RESTING || status.id === "working");
   const card = tileCardLines({`;
-const PLAN = `# Prompts where the composer stands
-
-## What changes
-1. A \`PromptDock\` takes the composer's slot while the latest turn is stopped on a prompt.
-2. The timeline's prompt row keeps the record alone: no second set of buttons.
-3. Arrows move, digits pick, Enter answers, Space ticks a multi-select.
-
-## What stays
-- The composer, keyed by workspace, comes back the moment the prompt closes.
-- \`sessions.answer\` is the one call either road makes.
-
-## Files
-- \`apps/web/src/components/chat/PromptDock.tsx\` (new)
-- \`apps/web/src/shell/WorkspaceThread.tsx\`
-- \`apps/web/src/components/chat/PermissionPromptRow.tsx\``;
-
 const PROMPTS: Record<string, { toolName: string; input: string; detail?: string; toolUseId?: string; options: { id: string; label: string; effect: "allow" | "deny" | "mode" | "answer"; mode?: string }[] }> = {
   single: question([SPIDER]),
   multi: question([POWERS]),
   form: question([SPIDER, POWERS, LOOK]),
+  "text-only": question([NAME]),
   bash: {
     toolName: "Bash",
     toolUseId: "toolu_b",
@@ -129,10 +111,9 @@ const PROMPTS: Record<string, { toolName: string; input: string; detail?: string
   mcp: { toolName: "mcp__github__create_issue", toolUseId: "toolu_m", input: JSON.stringify({ owner: "Zingzy", repo: "wsp-map", title: "Prompts where the composer stands", labels: ["design"] }), options: consentOptions },
   fetch: { toolName: "WebFetch", toolUseId: "toolu_f", input: JSON.stringify({ url: "https://code.claude.com/docs/en/agent-sdk/permissions", prompt: "List the PermissionUpdate destinations" }), options: consentOptions },
   codex: { toolName: "command_execution", toolUseId: "exec-267f4a9f", input: JSON.stringify({ command: "/bin/zsh -lc 'touch hi.txt'", cwd: "/Users/zingzy/wsp" }), detail: "Allow me to create hi.txt in the current folder?", options: codexOptions },
-  plan: { toolName: "ExitPlanMode", toolUseId: "toolu_p", input: JSON.stringify({ plan: PLAN }), options: planOptions },
 };
 const promptFor = (name: string) => PROMPTS[name] ?? PROMPTS["single"]!;
-const KIND: Record<string, string> = { other: "single", deny: "bash", answered: "single", collapsed: "single", tile: "single", threads: "single", "multi-ticked": "multi", "form-step2": "form", "single-hl": "single" };
+const KIND: Record<string, string> = { other: "single", "other-multi": "multi", deny: "bash", answered: "single", collapsed: "single", tile: "single", threads: "single", "form-step2": "form" };
 const kind = KIND[screen] ?? screen;
 const prompt = promptFor(kind);
 /** The prompt is closed: on answered the agent is back at work with the composer returned, on threads the turn is over. */
@@ -157,7 +138,7 @@ const history: SessionEvent[] = [
     : []),
 ];
 
-const askingLine = kind === "bash" ? "Run: pnpm exec vitest run --minWorkers=1 --maxWorkers=2 apps/web/test/thread-rows.test.tsx apps/web/test/needs-you.test.tsx" : kind === "edit" ? "Permission for Edit: ThreadTile.tsx" : kind === "plan" ? "Permission for ExitPlanMode" : "asked: Which Spider-Man is the real one?";
+const askingLine = askingLineOf(prompt);
 const lead: SessionView = { id: "s_ask", threadId: "thr_ask", workspaceId: MAC.id, harness: "claude", status: over ? "completed" : "running", prompt: "Quiz builder with images", harnessTitle: "Quiz builder with images", startedBy: "person", startedAt: ago(12), ...(over ? { endedAt: ago(1) } : settled ? {} : { asking: askingLine }) } as SessionView;
 const others: SessionView[] = [
   { id: "s_work", threadId: "thr_work", workspaceId: MAC.id, harness: "codex", status: "running", prompt: "Review 1605: the switcher after the sidebar's three parts", harnessTitle: "Review 1605: the switcher after the sidebar's three parts", startedBy: "cli", startedAt: ago(41) } as SessionView,
@@ -262,7 +243,7 @@ useRightPanelStore.setState({ byWorkspaceId: {} });
 useRightPanelStore.getState().close(MAC.id);
 
 /** The keys the query names, as the person would press them, sent to the dock once it is on the page. */
-const KEYS: Record<string, string> = { down: "ArrowDown", up: "ArrowUp", enter: "Enter", space: " " };
+const KEYS: Record<string, string> = { down: "ArrowDown", up: "ArrowUp", enter: "Enter", space: " ", esc: "Escape" };
 function drive(): void {
   const dock = document.querySelector<HTMLElement>("[data-prompt-dock] [role=listbox]");
   if (dock === null) {
@@ -296,7 +277,6 @@ function type(): void {
       field.dispatchEvent(new Event("input", { bubbles: true }));
     }
   }
-  if (params.get("write") === "1") document.querySelector<HTMLButtonElement>("[data-prompt-write]")?.click();
 }
 if (!settled) setTimeout(drive, 150);
 

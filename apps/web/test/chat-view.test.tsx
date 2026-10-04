@@ -837,7 +837,7 @@ describe("ChatView", () => {
     expect(within(waited).getByText("Nobody answered; denied")).toBeDefined();
     // A command is the whole command on the lead, with no code name in front of it, and it is drawn as code beside
     // the words rather than inside them, so the sentence face never closes two hyphens into one dash.
-    expect(waited.querySelector("[data-permission-says]")!.textContent).toBe("Run:");
+    expect(waited.querySelector("[data-permission-says]")!.textContent).toBe("Run a command:");
     const command = waited.querySelector<HTMLElement>("[data-permission-code]")!;
     expect(command.textContent).toBe("rm -rf build");
     expect(command.className).toContain("font-mono");
