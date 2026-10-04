@@ -232,7 +232,7 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
-import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
+import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
 import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
@@ -722,6 +722,8 @@ export interface RecipeShelf {
   /** One recipe by its slug as this computer has it now: what it holds for each row, and the hash a computer that
    * follows it is held against. */
   resolve(slug: string): Promise<{ file: RecipeFile; items: Record<string, string>; hash: string }>;
+  /** Picks saved under no name, resolved the same way, so a computer set up from them is held row by row too. */
+  resolveFile(file: RecipeFile): Promise<{ file: RecipeFile; items: Record<string, string>; hash: string }>;
 }
 
 /** One agent's result with its catalog name, for the sentence the runtime says about it. */
@@ -2177,6 +2179,8 @@ interface TurnWritten {
   subagents: number;
   reply?: TurnResult["status"];
   started: boolean;
+  /** Its card is written, so a host that re-opens it writes no second one, as a reply already written stands. */
+  changes: boolean;
 }
 const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritten => {
   const lastOf = <T extends SessionEvent["type"]>(type: T): Extract<SessionEvent, { type: T }> | undefined => {
@@ -2194,7 +2198,7 @@ const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritt
   const reply = lastOf("session.done")?.result.status;
   // A turn with a line or a reply already written had its start written too, whether or not the cap still holds it:
   // a second start row at the tail of the transcript would sit after the work it opened.
-  return { lines, subagents, ...(reply !== undefined ? { reply } : {}), started: lines > 0 || subagents > 0 || reply !== undefined || lastOf("session.start") !== undefined };
+  return { lines, subagents, ...(reply !== undefined ? { reply } : {}), started: lines > 0 || subagents > 0 || reply !== undefined || lastOf("session.start") !== undefined, changes: lastOf("session.changes") !== undefined };
 };
 
 /** An index as its file holds it, with the mark of the transcript file it was read off: an index whose transcript
@@ -2220,7 +2224,8 @@ function snippetAround(text: string, at: number, length: number): string {
   const to = Math.min(text.length, at + length + 80);
   return `${from > 0 ? "…" : ""}${text.slice(from, to).replace(/\s+/g, " ").trim()}${to < text.length ? "…" : ""}`;
 }
-/** Index rows kept per workspace; the oldest finished rows fall off, a running one never does. */
+/** Index rows kept per workspace; the oldest finished rows fall off, a running one never does. A row that falls off
+ * still holding its launch's commit takes its unread card with it. */
 const SESSION_INDEX_CAP = 200;
 /** A turn boundary waits this long for more before the transcript is written; measured at one put per
  * event, 5000 events cost 4 s of memory-store clones and 6.6 s of file rewrites after the last turn. */
@@ -2301,8 +2306,10 @@ interface SessionIndexRecord {
   /** reply is the held status of a turn whose result landed while its process still ran, on a row still running;
    * run is where that turn is on its machine, so a host that comes back re-opens it rather than failing it, and
    * turnToken is what that surviving process still has in its environment, so the host that re-opens it can answer
-   * for it. All three are written for a running row alone. */
-  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; run?: string; turnToken?: string; scopeDeviceId?: string })[];
+   * for it. All three are written for a running row alone. snapshot is the commit the turn's launch took of its
+   * folder, which the turn's changes are read against wherever it ends; written while the turn runs and until that
+   * read is in. */
+  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; run?: string; turnToken?: string; scopeDeviceId?: string; snapshot?: string })[];
   /** Every thread of the workspace by its runtime id; absent on a document from before threads had a record. */
   threads?: Record<string, ThreadRecord>;
 }
@@ -3072,11 +3079,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * its threads spawned rather than leaving a copy of the old answer standing on every machine under it. A root
    * whose workspace this host no longer holds governs nothing, so the tree under it spawns nothing more. A switch
    * nobody set on the workspace reads as its place's, and one set on neither as the default. */
-  const agentsOf = (record: WorkspaceRecord): WorkspaceAgents | undefined => {
-    if (record.rootThreadId === undefined) return agentsHeld(record);
+  const agentsRecordOf = (record: WorkspaceRecord): WorkspaceRecord | undefined => {
+    if (record.rootThreadId === undefined) return record;
     const at = rowsOn(record.rootThreadId)[0]?.workspaceId;
-    const root = at === undefined ? undefined : live.get(at)?.record;
-    return root === undefined ? undefined : agentsHeld(root);
+    return at === undefined ? undefined : live.get(at)?.record;
+  };
+  const agentsOf = (record: WorkspaceRecord): WorkspaceAgents | undefined => {
+    const held = agentsRecordOf(record);
+    return held === undefined ? undefined : agentsHeld(held);
+  };
+  /** Where the switch a record runs under is held, as the depth refusal names the setting to raise. */
+  const agentsHeldAt = (record: WorkspaceRecord): { computer: string } | { workspace: string } => {
+    const held = agentsRecordOf(record) ?? record;
+    if (held.agents !== undefined) return { workspace: held.name };
+    const placeId = placeIdOf(held) ?? HERE_PLACE_ID;
+    return { computer: placeDoor?.nameOf(placeId) ?? placeId };
   };
   /** The tree a thread sits in, read off the rows: its parent, then its parent's, up to the thread a person opened.
    * The walk is bounded by the rows there are, since a chain that somehow looped would otherwise never end. */
@@ -3113,13 +3130,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const own = live.get(scope.workspaceId)?.record;
     const policy = own === undefined ? undefined : agentsOf(own);
     // Read at the act and not at the mint: a person who turns the switch off while a turn runs has turned it off.
-    if (policy?.spawn !== true) throw new Error(agentsOffRefusal(own?.name ?? scope.workspaceId, act));
+    if (own === undefined || policy?.spawn !== true) throw new Error(agentsOffRefusal(own?.name ?? scope.workspaceId, act));
     if (!SPAWN_ACTS_ALLOWED.includes(act)) throw new Error(spawnActRefusal(scope.threadId, act));
     // The depth cap counts what a thread starts under itself; a send and a bring back start nothing, so a thread
     // at the cap still talks to its tree and still gets its work out.
     if (act === "send" || act === "bring_back") return free;
     const depth = depthUnderRoot(scope.threadId);
-    if (depth >= policy.maxDepth) throw new Error(spawnDepthRefusal(scope.threadId, depth, policy.maxDepth));
+    if (depth >= policy.maxDepth) throw new Error(spawnDepthRefusal(scope.threadId, depth, policy.maxDepth, agentsHeldAt(own)));
     if (act !== "fork") return free;
     // Counted off the records rather than kept as a number, so a machine deleted, forgotten or gone frees its place
     // without anything having to remember to give it back, plus the slots forks still landing hold. A record
@@ -3242,6 +3259,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const standing = [...live.values()].map(e => ({ ...e.record, provider: providerOf(e.record) }));
           return runningOnPlace(placeId, rows, standing, foldThreads([...sessions.values()].map(s => s.view)));
         },
+        signInLine: (placeId, agent) => agentsRead.signInLine({ placeId }, { agent }),
         // The app's own sign-in road on that computer, read as a setup's row waiting on the person.
         signIn: async (placeId, agent, emit) => {
           const handle = await agentsRead.signIn({ placeId }, { agent }, emit);
@@ -3409,7 +3427,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
    * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
    * takes the row, since a restart could re-open nothing from it. */
-  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> }>();
+  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> }>();
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
@@ -3693,6 +3711,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // Beside the turn token and for the same reason: the process out there still holds this device, so a host
         // that re-opens the turn has to know which one to take away when it ends.
         ...(s.view.status === "running" && s.scopeDeviceId !== undefined ? { scopeDeviceId: s.scopeDeviceId } : {}),
+        ...(s.snapshot !== undefined ? { snapshot: s.snapshot } : {}),
       }));
     const threads: Record<string, ThreadRecord> = {};
     for (const [threadId, { workspaceId: on, ...held }] of threadRecords) if (on === workspaceId) threads[threadId] = held;
@@ -3794,8 +3813,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** What the person set on the place a workspace, or a workspace about to land, stands on. */
   const settingsAt = (placeId: string | undefined): PlaceSettings | undefined => (placeId === undefined ? undefined : placeDoor?.settingsAt(placeId));
   /** The switch a workspace runs under, read off its own record alone and never its tree's root. */
-  const agentsHeld = (r: WorkspaceRecord): WorkspaceAgents => settingFor(r.agents, settingsAt(placeIdOf(r))?.spawn, AGENTS_ON);
-  const spawnAt = (placeId: string | undefined): WorkspaceAgents => settingFor(undefined, settingsAt(placeId)?.spawn, AGENTS_ON);
+  const agentsHeld = (r: WorkspaceRecord): WorkspaceAgents => r.agents ?? spawnAt(placeIdOf(r));
+  /** The switch a place gives its workspaces: the parts the person set there over the default as it reads now. */
+  const spawnAt = (placeId: string | undefined): WorkspaceAgents => agentsFrom(undefined, settingsAt(placeId)?.spawn ?? {});
 
   /** The project a record names. A record whose project this host does not hold is the one shape the boot refuses,
    * so every read after the boot has one. */
@@ -4869,28 +4889,44 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     daemonNotes.delete(entry.record.id);
   };
 
+  /** The writes of each machine's roots file, one at a time: each writes the whole file, so two at once can land in
+   * either order. */
+  const rootsWrites = new Map<string, Promise<unknown>>();
+  const rootsWrite = <T>(machineId: string, work: () => Promise<T>): Promise<T> => {
+    const done = (rootsWrites.get(machineId) ?? Promise.resolve()).then(work);
+    const tail = done.catch(() => {});
+    rootsWrites.set(machineId, tail);
+    void tail.then(() => {
+      if (rootsWrites.get(machineId) === tail) rootsWrites.delete(machineId);
+    });
+    return done;
+  };
+
   /** The folders the record says this machine's daemon may browse beside its home. Derived state: the record is the
    * one place, and the file follows it on every connect, so a project that landed before the daemon read that file
-   * is browsable without a second import. Non-fatal: an update or a turn must not fail on it. */
-  const writeDaemonRoots = async (entry: LiveWorkspace): Promise<void> => {
-    // A host that has closed writes nothing more on a machine: the boot fires this at every running workspace
-    // without waiting for it, and a write that landed after the close would be this process touching a computer
-    // it has let go of.
-    if (closed) return;
-    // And nothing is written inside a workspace whose computer serves its daemon: that daemon reads the path off
-    // the frame and browses the workspace's own rootfs, so a list of folders inside it says nothing to anybody.
-    if (servedByItsComputer(entry) !== undefined) return;
-    // Every checkout the daemon serving this machine has to browse, not this workspace's alone: the file is that
-    // daemon's one list and is written whole, and on the computer the host runs on one daemon serves every
-    // workspace here, each in a copy of the project folder at a path of its own.
-    const sharing = [...live.values()].filter(e => e.record.machineId === entry.record.machineId);
-    const dests = [...new Set(sharing.flatMap(e => [projectHeld(e.record.project).path, checkoutOf(e.record)]))];
-    // Through the kind, which is what knows where that machine's daemon looks; the import road writes the same
-    // file through the same call, so a folder is browsable at the same path whichever of the two got there first.
-    await moduleOf(entry.record.kind)
-      .roots(entry, dests)
-      .catch((e: unknown) => console.warn(`browsable folders for ${entry.record.id} not written on ${entry.machine.id}: ${(e instanceof Error ? e.message : String(e)).slice(-200)}`));
-  };
+   * is browsable without a second import. Non-fatal: an update or a turn must not fail on it. `entry` names the
+   * machine and may be a record already gone from it, whose folders the write then leaves out. */
+  const writeDaemonRoots = (entry: LiveWorkspace): Promise<void> =>
+    rootsWrite(entry.record.machineId, async () => {
+      // A host that has closed writes nothing more on a machine: the boot fires this at every running workspace
+      // without waiting for it, and a write that landed after the close would be this process touching a computer
+      // it has let go of.
+      if (closed) return;
+      // And nothing is written inside a workspace whose computer serves its daemon: that daemon reads the path off
+      // the frame and browses the workspace's own rootfs, so a list of folders inside it says nothing to anybody.
+      if (servedByItsComputer(entry) !== undefined) return;
+      // Every checkout the daemon serving this machine has to browse, not this workspace's alone: the file is that
+      // daemon's one list and is written whole, and on the computer the host runs on one daemon serves every
+      // workspace here, each in a copy of the project folder at a path of its own. Read once the write before has
+      // landed, so a write never puts back a list older than the one already there.
+      const sharing = [...live.values()].filter(e => e.record.machineId === entry.record.machineId);
+      const dests = [...new Set(sharing.flatMap(e => [projectHeld(e.record.project).path, checkoutOf(e.record)]))];
+      // Through the kind, which is what knows where that machine's daemon looks; the import road writes the same
+      // file through the same call, so a folder is browsable at the same path whichever of the two got there first.
+      await moduleOf(entry.record.kind)
+        .roots(entry, dests)
+        .catch((e: unknown) => console.warn(`browsable folders for ${entry.record.id} not written on ${entry.machine.id}: ${(e instanceof Error ? e.message : String(e)).slice(-200)}`));
+    });
 
   /** Settles once no turn is running on the workspace: at once when none is, else when the last one ends. Replacing
    * the daemon ends the ptys under it, so the work a person or an agent started finishes first. */
@@ -5508,6 +5544,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         .catch((e: unknown) => console.warn(`${going.record.name}'s machine ${going.machine.id} kept something of this host's: ${e instanceof Error ? e.message : String(e)}`));
     }
     live.delete(id);
+    // A folder on this computer goes from its daemon's roots file with its record, since the computer and the
+    // folder both stay; a fork's machine goes with its record and takes its file along.
+    if (going !== undefined && copiesFolder(going.record.kind)) await writeDaemonRoots(going);
     revivedAt.delete(id);
     unreadAt.delete(id);
     unreached.delete(id);
@@ -6057,7 +6096,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       await Promise.all(moved.map(id => store.delete(TRANSCRIPTS, id)));
       for (const id of await store.keys(WORKSPACES)) if (!transcriptIndex.has(id)) await loadIndex(id);
-      const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }[] = [];
+      const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string; snapshot?: string }[] = [];
+      /** Turns that ended while their card was still being read: the commit stayed on the row for this host to read. */
+      const unread: { view: SessionView; turnId: string; snapshot?: string }[] = [];
       for (const raw of await store.list(SESSIONS)) {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
@@ -6084,7 +6125,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
           continue;
         }
-        for (const { turnId, notify, notifyBy, notifyRoad, reply, run, turnToken, scopeDeviceId, ...view } of index.sessions) {
+        for (const { turnId, notify, notifyBy, notifyRoad, reply, run, turnToken, scopeDeviceId, snapshot, ...view } of index.sessions) {
           const by = readScope(notifyBy);
           const road = readRoad(notifyRoad);
           const row: {
@@ -6097,6 +6138,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             run?: string;
             turnToken?: string;
             scopeDeviceId?: string;
+            snapshot?: string;
             end?: (reason: string) => void;
           } = {
             view,
@@ -6112,6 +6154,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ...(run !== undefined ? { run } : {}),
             ...(turnToken !== undefined ? { turnToken } : {}),
             ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}),
+            ...(snapshot !== undefined ? { snapshot } : {}),
           };
           // A row left running because nothing answered about its run has no harness of its own to end, and the poll
           // that finds its machine gone must still be able to settle it.
@@ -6121,6 +6164,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             void persistSessions(row.view.workspaceId);
           };
           if (view.status === "running") left.push(row);
+          else if (row.snapshot !== undefined) unread.push(row);
           sessions.set(view.id, row);
         }
       }
@@ -6135,6 +6179,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         else if (answer === "gone") settleCut(row, RUN_GONE_LINE, () => RUN_GONE_LINE);
       }
       for (const workspaceId of new Set(left.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
+      for (const row of unread) {
+        const { workspaceId, threadId, cwd, claudeSessionId, id, startedAt } = row.view;
+        const entry = live.get(workspaceId)!;
+        const from = row.snapshot!;
+        void (async () => {
+          const read =
+            threadId === undefined ||
+            cwd === undefined ||
+            turnWritten(await openTranscript(workspaceId), row.turnId).changes ||
+            (await readTurnChanges(entry, { sessionId: claudeSessionId ?? id, turnId: row.turnId, threadId, cwd, from, startedAt: startedAt ?? Date.now() }));
+          delete row.snapshot;
+          if (read || !closing) await persistSessions(workspaceId);
+        })().catch((e: unknown) => console.warn(`what ${row.turnId} changed was not read: ${e instanceof Error ? e.message : String(e)}`));
+      }
       // The re-attach above has settled the rows the machines no longer hold, so a sync waiting out a running turn reads rows that are in.
       for (const entry of toSync) void syncDaemon(entry);
       void Promise.all([...live.keys()].map(id => rereadHeld(id, "record load").catch((e: unknown) => console.warn(`workspace ${id} was not read again: ${e instanceof Error ? e.message : String(e)}`))));
@@ -6556,9 +6614,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     attach(record, machine);
     await persist(record);
-    // A worktree under the host's own folder sits outside the daemon's home root on a host serving another state
-    // file, so the daemon is told about it before a pane asks; the project folder is listed already.
-    if (worktree !== undefined) await writeDaemonRoots(live.get(id)!);
+    // A project folder outside the person's home, or a worktree under the host's own folder, is outside the daemon's
+    // home root, and the host's start lists only the records it found, so the file is written before a turn's snapshot.
+    await writeDaemonRoots(live.get(id)!);
     if (worktree?.made === true) armSweep();
     bus.emit({ type: "workspace.created", workspace: view(record) });
     return live.get(id)!;
@@ -8780,8 +8838,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Settles a running row whose process the runtime ended or lost before the harness's own session.end: to the reply
    * it held, whose line already went, or failed with `cutLine` as the parent's word when it never replied. The
    * session.end carries `reason` either way. The one rule for both roads, the runtime's end() and the restart load. */
-  const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive }, reason: string, cutLine: (endedAt: number) => string): void => {
+  const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string }, reason: string, cutLine: (endedAt: number) => string): void => {
     const reply = s.turnLive?.reply;
+    delete s.snapshot;
     const endedAt = Date.now();
     s.view.status = reply ?? "failed";
     s.view.endedAt = endedAt;
@@ -8871,6 +8930,29 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const sharedFolder = (workspaceId: string, threadId: string, cwd: string, from: number, to: number): boolean =>
     [...sessions.values()].some(({ view }) => view.workspaceId === workspaceId && view.threadId !== threadId && view.cwd === cwd && (view.startedAt ?? 0) <= to && (view.endedAt ?? to) >= from);
 
+  /** What a turn changed in its folder: a snapshot now, the range from the commit its launch took, and the files in it
+   * recorded under the turn. True once the range is read, whether or not it held anything; a turn that changed nothing
+   * records nothing. */
+  const readTurnChanges = async (entry: LiveWorkspace, turn: { sessionId: string; turnId: string; threadId: string; cwd: string; from: string; startedAt: number }): Promise<boolean> => {
+    const { sessionId, turnId, threadId, cwd, from, startedAt } = turn;
+    const workspaceId = entry.record.id;
+    const to = await snapshotOf(entry, cwd);
+    if (to === undefined) return false;
+    const range = await withDaemon(entry, ask => ask({ op: "git.turn", cwd, from, to })).catch((e: unknown) => {
+      console.warn(`what ${turnId} changed in ${cwd} was not read: ${e instanceof Error ? e.message : String(e)}`);
+      return undefined;
+    });
+    const read = GitDiffReply.safeParse(range);
+    if (!read.success) return false;
+    const files = read.data.files.map(({ path, kind, additions, deletions }) => ({ path, kind, additions, deletions }));
+    const moved = read.data.moved;
+    // A turn that only moved HEAD (a checkout or pull with no edit of its own) still records its line.
+    if (files.length === 0 && moved.length === 0) return true;
+    const shared = sharedFolder(workspaceId, threadId, cwd, startedAt, Date.now());
+    record({ type: "session.changes", workspaceId, sessionId, turnId, threadId, from, to, files, moved, ...(shared ? { shared: true as const } : {}) });
+    return true;
+  };
+
   /** What a turn is once its harness session exists: the one road from the harness's events to the transcript, the
    * index, the bus and the row, whether the session was launched here or re-opened on the machine after a restart.
    * A re-opened turn's run is read from its first byte, so what the transcript already holds for this turn is
@@ -8942,8 +9024,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** The folder this turn's images landed in on the machine, removed when the turn ends however it ends; absent on
      * a turn that landed none, whose harness read them inline or which carried none at all. */
     imagesDir?: string;
-    /** The snapshot of the turn's folder taken as it launched, which the range of what it changed starts from. */
-    snapshot?: { from: Promise<string | undefined>; cwd: string };
+    /** The snapshot of the turn's folder taken as it launched, which the range of what it changed starts from: the
+     * commit itself where it is known as the turn is handed over, a launch's already in or a re-opened turn's off
+     * its row. */
+    snapshot?: { from: Promise<string | undefined> | string; cwd: string };
     /** The box the turn's own exec stream reads to know it is waiting on something outside its own process: flipped
      * while a permission prompt of this turn stands open, and while its harness reports a command or a subagent it
      * started still running, so the turn's idle clock does not run out under a question nobody has answered yet nor
@@ -8953,33 +9037,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   }): SessionHandle => {
     const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, notifyRoad, turnToken, scopeDeviceId } = t;
     const workspaceId = entry.record.id;
-    const { lines: deltasWritten, subagents: subagentsWritten, reply: recordedReply, started: startWritten } = t.written ?? { lines: 0, subagents: 0, started: false };
-    /** What the turn changed, read once at the first of its reply and its exit: a second snapshot, the range from the
-     * launch's, and the files in it recorded under the turn. A turn that changed nothing records nothing. */
-    let changesRead = false;
+    const { lines: deltasWritten, subagents: subagentsWritten, reply: recordedReply, started: startWritten, changes: changesWritten } = t.written ?? { lines: 0, subagents: 0, started: false, changes: false };
+    /** What the turn changed, read once at the first of its reply and its exit. */
+    let changesRead = changesWritten;
+    /** While the read is out the turn's ending keeps the launch's commit on its row, so a host that goes before the
+     * card is in leaves the read to the next host. Once that ending is on disk (endWritten), a read that lands after
+     * it writes the row again to take the commit off. */
+    let changesOut = false;
+    let endWritten = false;
     const readChanges = (sessionId: string): void => {
       if (changesRead || t.snapshot === undefined) return;
       changesRead = true;
+      changesOut = true;
       const { from: taken, cwd } = t.snapshot;
       const startedAt = view.startedAt ?? Date.now();
       void (async () => {
         const from = await taken;
-        if (from === undefined) return;
-        const to = await snapshotOf(entry, cwd);
-        if (to === undefined) return;
-        const range = await withDaemon(entry, ask => ask({ op: "git.turn", cwd, from, to })).catch((e: unknown) => {
-          console.warn(`what ${turnId} changed in ${cwd} was not read: ${e instanceof Error ? e.message : String(e)}`);
-          return undefined;
-        });
-        const read = GitDiffReply.safeParse(range);
-        if (!read.success) return;
-        const files = read.data.files.map(({ path, kind, additions, deletions }) => ({ path, kind, additions, deletions }));
-        const moved = read.data.moved;
-        // A turn that only moved HEAD (a checkout or pull with no edit of its own) still records its line.
-        if (files.length === 0 && moved.length === 0) return;
-        const shared = sharedFolder(workspaceId, threadId, cwd, startedAt, Date.now());
-        record({ type: "session.changes", workspaceId, sessionId, turnId, threadId, from, to, files, moved, ...(shared ? { shared: true as const } : {}) });
-      })();
+        return from !== undefined && (await readTurnChanges(entry, { sessionId, turnId, threadId, cwd, from, startedAt }));
+      })().then(read => {
+        changesOut = false;
+        const row = sessions.get(rowId);
+        if (!endWritten || row?.turnId !== turnId || row.snapshot === undefined) return;
+        delete row.snapshot;
+        // A closing host's read fails as its daemon channel shuts, and leaves the commit on disk for the next host.
+        if (read || !closing) void persistSessions(workspaceId);
+      });
     };
     // The reply and its line to the parent go together, so one gate stands for both.
     let replyRecorded = recordedReply !== undefined;
@@ -9392,6 +9474,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // be dropped, so the rows and the waits are ended here.
       closeOpenAsks();
       ended = true;
+      const row = sessions.get(rowId);
+      if (row?.turnId === turnId) delete row.snapshot;
       settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive }, reason, () => reason);
       void persistSessions(workspaceId);
       void started.interrupt().catch(() => {});
@@ -9399,13 +9483,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
     if (turnId !== rowId) sessions.delete(turnId);
-    sessions.set(rowId, { view, turnId, calls, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
+    sessions.set(rowId, { view, turnId, calls, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(typeof t.snapshot?.from === "string" ? { snapshot: t.snapshot.from } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
     void persistSessions(workspaceId);
+    // A launch that hands its prompt over late resolves its snapshot after the row exists; the row takes it then.
+    const taking = t.snapshot?.from;
+    if (taking instanceof Promise) {
+      void taking.then(commit => {
+        const row = sessions.get(rowId);
+        if (commit === undefined || row === undefined || row.turnId !== turnId || row.view.status !== "running") return;
+        row.snapshot = commit;
+        void persistSessions(workspaceId);
+      });
+    }
     /** The turn's process is over: its status settles, its token stops naming anything, and the harness's own title
      * for the session is read again, since it writes one as the turn settles. */
     const settled = (status: TurnStatus): void => {
       const row = sessions.get(rowId);
       if (row !== undefined && row.turnToken === turnToken) delete row.turnToken;
+      if (row?.turnId === turnId && !changesOut) delete row.snapshot;
       // The process is gone, so the token in its environment names nothing that can be asked for anything: it is
       // taken away here, the one exit both the reply road and the failure road reach.
       if (scopeDeviceId !== undefined) {
@@ -9422,6 +9517,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       calls.clear();
       leadAsks.delete(threadId);
       void persistSessions(workspaceId);
+      endWritten = true;
       // Only a turn that ended on its own: a turn this host ended is one whose workspace is going away under it,
       // and the harness's own store for it goes with the machine, so the read would reach a machine that is being
       // taken down and say so in the log for every thread on it.
@@ -9485,7 +9581,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * `cannot` covers a row with no run recorded (a host from before this road, or a harness whose runs die with it),
    * no workspace or no machine running under it, no adapter for its harness in this process, and a handle that is
    * not one this host could have launched. */
-  const reattach = async (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }): Promise<Reopened> => {
+  const reattach = async (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string; snapshot?: string }): Promise<Reopened> => {
     const { view, run } = s;
     const threadId = view.threadId;
     const entry = live.get(view.workspaceId);
@@ -9550,6 +9646,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // answers for it takes it back and its exit is what hands it over.
         ...(s.scopeDeviceId !== undefined ? { scopeDeviceId: s.scopeDeviceId } : {}),
         ...(s.turnLive !== undefined ? { turnLive: s.turnLive } : {}),
+        ...(s.snapshot !== undefined && view.cwd !== undefined ? { snapshot: { from: s.snapshot, cwd: view.cwd } } : {}),
         outcome: "started",
         waiting,
         opening: { prompt: view.prompt ?? "" },
@@ -9776,7 +9873,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Every send takes one trip before its launch: its files land and its folder's snapshot is taken, or only started
       // where the agent takes its prompt late.
       let landed = false;
-      let snapshot: { from: Promise<string | undefined>; cwd: string } | undefined;
+      let snapshot: { from: Promise<string | undefined> | string; cwd: string } | undefined;
       // This send's own folder on the machine, named by the request id it minted: the landing runs before any turn is
       // registered, so two sends arriving together both pass the wait, and a folder they shared would leave the first
       // turn holding the second's picture.
@@ -9841,9 +9938,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             const landing = runsIn(entry, resume === undefined ? undefined : folderOf(workspaceId, resume), folder);
             filePaths = await landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, randomUUID()), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
             if (filePaths.length > 0) filesFolder = landing;
-            const from = snapshotOf(entry, landing);
-            if (!promptsLate) await from;
-            snapshot = { from, cwd: landing };
+            const taken = promptsLate ? snapshotOf(entry, landing) : await snapshotOf(entry, landing);
+            snapshot = taken === undefined ? undefined : { from: taken, cwd: landing };
             refuse();
             continue;
           }
@@ -9912,7 +10008,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(images.length > 0 ? { images } : {}),
               ...(mcpServers !== undefined ? { mcpServers } : {}),
               ...(limitDetails ? { limitDetails: true as const } : {}),
-              ...(promptsLate && snapshot !== undefined ? { promptAfter: snapshot.from.then(() => {}) } : {}),
+              ...(promptsLate && snapshot?.from instanceof Promise ? { promptAfter: snapshot.from.then(() => {}) } : {}),
               ...(catalog?.source === "harness" && catalog.version !== null ? { version: catalog.version } : {}),
               // The thread's earlier turns as its transcript holds them, this one left out since its message follows.
               ...(resume !== undefined ? { seed: async () => threadSeed(threadMessages((await openTranscript(workspaceId)).filter(e => e.turnId !== turnId), threadId)) } : {}),
@@ -10462,6 +10558,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Marks the record as this process's, now; the sweep and the heartbeat timer refresh it and close() clears it. */
   let beat: (() => void) | undefined;
   let closed = false;
+  /** Set as close() starts, before it shuts the daemon channels a card read still out goes over. */
+  let closing = false;
   let ticking: Promise<void> | undefined;
   const arm = (): void => {
     if (closed || beat !== undefined) return;
@@ -11931,7 +12029,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const landed = await kind.import(entry, o, report);
         // The workspace's own project is its record's; a folder landed beside it is browsable too, and neither is
         // written onto the record, which names one project and nothing else.
-        await kind.roots(entry, [...new Set([projectHeld(entry.record.project).path, landed.result.dest])]);
+        await rootsWrite(entry.record.machineId, () => kind.roots(entry, [...new Set([projectHeld(entry.record.project).path, landed.result.dest])]));
         report("done", landed.done);
         return landed.result;
       } catch (e) {
@@ -12571,6 +12669,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     },
     close: async () => {
+      closing = true;
       await copiesMoving;
       sweepStopped = true;
       sweepTimer?.();

@@ -5,7 +5,9 @@
 // (?theme=light). ?screen=closing is the moment after the dialog is put away
 // mid-setup, and ?screen=sidebar the Setting up section. Every screen is drawn by the product's own components from
 // the host's shapes, so a screenshot of one is what the app draws for that
-// record. ?scroll=bottom scrolls the dialog's panel to its end.
+// record. ?scroll=bottom scrolls the dialog's panel to its end; ?open=<step>
+// opens that step's row on its output; ?screen=clis-loading is a step whose
+// list the host has not answered yet.
 import { createRoot } from "react-dom/client";
 import { DAEMON_VERSION, type AgentRow, type AgentsReport, DEFAULT_PREFERENCES, PLACE_HOST_KEY_KIND, RecipeFile, hostKeyUnconfirmedRefusal, setupRowFix, type PendingComputer, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
@@ -54,13 +56,13 @@ const OPTIONS: RecipeOptions = {
     { name: "excalidraw", agents: ["claude"], kind: "none" },
   ],
   clis: [
-    { name: "gh", via: "apt", version: "2.86.0", bytes: 40 * MB },
-    { name: "ripgrep", via: "apt", version: "15.1.0", bytes: 6 * MB },
-    { name: "jq", via: "apt", version: "1.8.1", bytes: 1 * MB },
-    { name: "fd", via: "apt", version: "10.3.0", bytes: 4 * MB },
-    { name: "uv", via: "installer", version: "0.9.2", bytes: 38 * MB },
-    { name: "pnpm", via: "npm", version: "11.9.0", bytes: 20 * MB },
-    { name: "bun", via: "npm", version: "1.3.1", bytes: 90 * MB },
+    { name: "gh", via: "apt", version: "2.86.0", bytes: 40 * MB, calls: 49_385 },
+    { name: "agent-browser", via: "npm", version: "0.9.4", bytes: 12 * MB, calls: 7_627 },
+    { name: "wrangler", via: "npm", version: "4.42.0", bytes: 64 * MB, calls: 1_108 },
+    { name: "ffmpeg", via: "apt", version: "7.1.1", bytes: 210 * MB, calls: 412 },
+    { name: "hyperfine", via: "apt", version: "1.19.0", bytes: 3 * MB, calls: 6 },
+    { name: "pnpm", via: "npm", version: "11.9.0", bytes: 20 * MB, calls: 36_669 },
+    { name: "bun", via: "npm", version: "1.3.1", bytes: 90 * MB, calls: 1 },
     { name: "go", via: "apt", version: "1.25.1", bytes: 517 * MB },
     { name: "cargo-nextest", via: "cargo", version: "0.9.98", needs: ["build-essential"], bytes: 30 * MB },
     { name: "yq", via: "apt", version: "4.47.1", bytes: 10 * MB },
@@ -114,6 +116,8 @@ const RECIPES: RecipeView[] = [
 ];
 
 const s = (n: number): number => n * 1000;
+/** A running step's start, that many seconds before the page drew it, so its time reads as it would mid-run. */
+const since = (n: number): string => new Date(Date.now() - n * 1000).toISOString();
 const row = (step: PlaceApplied["rows"][number]["step"], id: string, label: string, outcome: "installed" | "present" | "failed" = "installed", note?: string): PlaceApplied["rows"][number] => ({ id, label, outcome, step, ...(note === undefined ? {} : { note }) });
 const LANDED: PlaceApplied["rows"] = [
   row("floor", "floor/git", "git"),
@@ -140,10 +144,12 @@ const DONE_STEPS: PlaceSetup["steps"] = [
 const ALL_LANDED: PlaceApplied["rows"] = [
   ...LANDED,
   row("signins", "signins/codex", "Codex", "installed", "Signed in on studio."),
-  ...OPTIONS.mcp.slice(0, 7).map(m => row("mcp", `mcp/${m.name}`, m.name)),
+  ...OPTIONS.mcp.slice(0, 7).map(m => row("mcp", `agents/mcp/claude/${m.name}`, m.name)),
+  row("mcp", "agents/claude/CLAUDE.md", "Claude Code /root/.claude-cfg/CLAUDE.md"),
+  row("mcp", "agents/codex/AGENTS.md", "Codex /root/.codex/AGENTS.md"),
   ...OPTIONS.clis.slice(0, 9).map(c => row("clis", `clis/${c.name}`, c.name)),
-  row("skills", "skills/all", "77 skills"),
-  row("plugins", "plugins/all", "8 plugins"),
+  ...OPTIONS.skills.map(k => row("skills", `skills/${k.name}`, k.name)),
+  ...OPTIONS.plugins.slice(0, 7).map(p => row("plugins", `plugins/${p.name}`, p.name)),
   row("github", "github", "GitHub", "present"),
   row("folders", "folders/portfolio", "portfolio"),
   row("configs", "configs/git", "git"),
@@ -151,7 +157,7 @@ const ALL_LANDED: PlaceApplied["rows"] = [
 ];
 const SETUPS: Record<string, { setup: PlaceSetup; applied: PlaceApplied }> = {
   running: {
-    setup: setupOf("running", [{ step: "floor", state: "done", ms: s(72) }, { step: "agents", state: "done", ms: s(53) }, { step: "signins", state: "done" }, { step: "mcp", state: "running" }, { step: "clis", state: "running" }, { step: "skills", state: "running" }, { step: "plugins", state: "running" }, { step: "github", state: "done", ms: 400 }, { step: "folders", state: "running" }, { step: "configs", state: "done", ms: s(3) }], [CODEX_WAIT]),
+    setup: setupOf("running", [{ step: "floor", state: "done", ms: s(72) }, { step: "agents", state: "done", ms: s(53) }, { step: "signins", state: "done" }, { step: "mcp", state: "running", startedAt: since(14) }, { step: "clis", state: "running", startedAt: since(64) }, { step: "skills", state: "running", startedAt: since(6) }, { step: "plugins", state: "running", startedAt: since(22) }, { step: "github", state: "done", ms: 400 }, { step: "folders", state: "running", startedAt: since(31) }, { step: "configs", state: "done", ms: s(3) }], [CODEX_WAIT]),
     applied: { hash: "h", at: AT, rows: [...LANDED, row("github", "github", "GitHub", "present"), row("configs", "configs/git", "git"), row("configs", "configs/shell", "shell")] },
   },
   "running-failed": {
@@ -198,8 +204,9 @@ const ADD_STEPS: Record<string, PlaceAddJob> = {
 };
 
 const PICK_STEPS: AddStep[] = ["startfrom", "agents", "mcp", "clis", "skills", "plugins", "github", "projects", "other", "summary"];
+const LOADING = screen === "clis-loading";
 const RUNNING_SCREENS = ["running", "running-failed", "running-blocked", "running-done", "ready"];
-const SIDEBAR_SCREENS = ["sidebar"];
+const SIDEBAR_SCREENS = ["sidebar", "sidebar-four"];
 const SETTINGS_PAGES: Record<string, () => void> = {
   computers: () => useSettingsStore.getState().go({ kind: "group", group: "computers" }),
   computer: () => useSettingsStore.getState().go({ kind: "computer", id: STUDIO.id }),
@@ -214,6 +221,7 @@ const sidebarPlaces = [
   { ...STUDIO, setup: setupOf("running", [{ step: "floor", state: "done" }, { step: "agents", state: "done" }, { step: "signins", state: "done" }, { step: "mcp", state: "done" }, { step: "clis", state: "done" }, { step: "skills", state: "running" }]) },
   { ...MONGO, setup: setupOf("done", [{ step: "floor", state: "done" }, { step: "agents", state: "done" }, { step: "signins", state: "done" }, { step: "mcp", state: "done" }], [CODEX_WAIT]) },
   { ...DISHA, setup: setupOf("failed", [{ step: "floor", state: "failed" }], [], "base packages did not install") },
+  ...(screen === "sidebar-four" ? [{ ...BOAT, present: true, setup: setupOf("running", [{ step: "floor", state: "running" }]) }] : []),
 ];
 const listPlaces = [HERE, SPOO, { ...STUDIO, setup: sidebarPlaces[0]!.setup }, sidebarPlaces[1]!, sidebarPlaces[2]!, BOAT];
 const places = SIDEBAR_SCREENS.includes(screen) ? [HERE, SPOO, ...sidebarPlaces] : screen === "computers" || screen === "closing" ? listPlaces : screen === "computer" ? listPlaces.map(p => (p.id === STUDIO.id ? studio : p)) : [HERE, SPOO, studio];
@@ -228,7 +236,7 @@ const { api } = settingsApi({
     { alias: "jumpbox", hostName: "jump.zingzy.dev", user: "ubuntu", from: "config" },
     { alias: "dishapc", hostName: "192.168.1.24", user: "disha", from: "config" },
   ],
-  recipesOptions: async () => OPTIONS,
+  recipesOptions: () => (LOADING ? new Promise<RecipeOptions>(() => {}) : Promise.resolve(OPTIONS)),
   recipesList: async () => (screen === "recipes-empty" ? [] : RECIPES),
   placesChoose: async () => pending[0]!,
   agentsRead: async () => HERE_AGENTS,
@@ -236,6 +244,12 @@ const { api } = settingsApi({
   placesSkip: async () => studio,
   placesSetupLog: async () => [
     "2026-10-03T10:02:05Z [mcp] copying wsp, context7, gsc",
+    "2026-10-03T10:01:58Z [floor] Reading package lists...",
+    "2026-10-03T10:01:59Z [floor] E: Unable to locate package nodejs",
+    "2026-10-03T10:02:01Z [clis] apt-get install -y gh ffmpeg hyperfine",
+    "2026-10-03T10:02:03Z [clis] Setting up ffmpeg (7:7.1.1-1) ...",
+    "2026-10-03T10:02:04Z [clis] Setting up gh (2.86.0) ...",
+    "2026-10-03T10:02:05Z [clis] npm install -g pnpm@11.9.0 bun@1.3.1",
     "2026-10-03T10:02:06Z [clis] apt-get install -y golang-go",
     "2026-10-03T10:02:07Z [skills] copying 78 skills",
     "2026-10-03T10:02:08Z [plugins] claude plugin install frontend-design@claude-plugins-official",
@@ -266,16 +280,27 @@ const job = ADD_STEPS[screen];
 if (job !== undefined) useAdds.setState({ jobs: { [job.addId]: job } });
 if (screen === "where") useAddFlow.setState({ open: true, step: "where", address: "studio" });
 else if (job !== undefined) useAddFlow.setState({ open: true, step: "checks", address: job.address, addId: job.addId });
-else if (PICK_STEPS.includes(screen as AddStep) || screen === "projects-taken" || screen === "projects-nogithub" || screen === "summary-disk") {
-  const step = (screen.startsWith("projects") ? "projects" : screen === "summary-disk" ? "summary" : screen) as AddStep;
-  const picks = screen === "projects-nogithub" ? { ...PICKS, configs: { ...PICKS.configs, github: { signin: "skip" as const } } } : PICKS;
-  useAddFlow.setState({ open: true, step, address: "studio", placeId: STUDIO.id, pendingId: "a_add", picks, from: "here", options: OPTIONS, saveAs: { on: true, name: "Builders", icon: "rocket" } });
+else if (PICK_STEPS.includes(screen as AddStep) || screen === "projects-taken" || screen === "projects-nogithub" || screen === "summary-disk" || LOADING) {
+  const step = (screen.startsWith("projects") ? "projects" : screen === "summary-disk" ? "summary" : LOADING ? "clis" : screen) as AddStep;
+  // The CLIs step as a first pass draws it: everything picked but the CLIs, which wait on the person.
+  const picks = screen === "projects-nogithub" ? { ...PICKS, configs: { ...PICKS.configs, github: { signin: "skip" as const } } } : step === "clis" ? { ...PICKS, clis: {} } : PICKS;
+  useAddFlow.setState({ open: true, step, address: "studio", placeId: STUDIO.id, pendingId: "a_add", picks, from: "here", options: LOADING ? null : OPTIONS, saveAs: { on: true, name: "Builders", icon: "rocket" } });
 } else if (RUNNING_SCREENS.includes(screen)) useAddFlow.setState({ open: true, step: screen === "ready" ? "ready" : "running", placeId: STUDIO.id, address: "studio" });
 
 // The desktop shell's folder picker, which is what draws Add a folder on Import projects.
 if (screen.startsWith("projects")) window.wsp = { pickFolder: async () => undefined };
 
 if (screen === "closing") setTimeout(() => addNotice({ kind: "note", text: "Setup keeps going. wsp pings you when it needs you.", where: "studio", action: { word: "Open", run: () => {} } }), 50);
+
+const opened = params.get("open");
+if (opened !== null) {
+  const press = (): void => {
+    const toggle = document.querySelector<HTMLElement>(`[data-step-row='${CSS.escape(opened)}'] [data-k=step-toggle]`);
+    if (toggle === null) setTimeout(press, 50);
+    else toggle.click();
+  };
+  setTimeout(press, 200);
+}
 
 if (params.get("scroll") === "bottom") {
   const scroll = (): void => {

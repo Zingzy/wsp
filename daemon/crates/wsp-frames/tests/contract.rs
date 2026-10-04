@@ -11,14 +11,15 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    guest_wsp_shim, landed_files_script, numbers, place_owned_paths, probe_path, words, BackendFacts, CopyReport, DaemonAuthRequest,
-    DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitBranchCompareReply, GitBranchesReply, GitCheckpointDropReply,
-    GitCheckpointReply, GitCommitReply, GitDiscardReply, GitIssueReadReply, GitMergeInReply, GitPrCheckoutReply, GitPrDiffReply,
-    GitPrListReply, GitPrMergeReply, GitPrReactReply, GitPrReadReply, GitPrReply, GitPrReplyReply, GitPrResolveReply, GitPrReviewReply,
-    GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply, GitSnapshotReply, GitStartOnReply, GitUpdateReply,
-    GitWorktreesReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply, MachineExecReply, MachineHandleReply,
-    MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest,
-    PlaceCapacity, PlaceProveRequest, SshStartReply, SysHistoryReply, WorktreeRemoval, WorktreeReport, DAEMON_OPS, MACHINE_OPS,
+    guest_wsp_shim, landed_files_script, numbers, outside_sweep_script, place_owned_paths, probe_path, words, BackendFacts, CopyReport,
+    DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitBranchCompareReply, GitBranchesReply,
+    GitCheckpointDropReply, GitCheckpointReply, GitCommitReply, GitDiscardReply, GitIssueReadReply, GitMergeInReply, GitPrCheckoutReply,
+    GitPrDiffReply, GitPrListReply, GitPrMergeReply, GitPrReactReply, GitPrReadReply, GitPrReply, GitPrReplyReply, GitPrResolveReply,
+    GitPrReviewReply, GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply, GitSnapshotReply, GitStartOnReply,
+    GitUpdateReply, GitWorktreesReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply, MachineExecReply,
+    MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply,
+    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply, SysHistoryReply, WorktreeRemoval, WorktreeReport, DAEMON_OPS,
+    MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -398,6 +399,7 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("guestNoDaemon", words::guest_no_daemon_line("{port}"));
     m.insert("hostClosed", words::HOST_CLOSED.to_owned());
     m.insert("placeKeptForLink", words::place_kept_for_link("{path}"));
+    m.insert("placeOutsideLeft", words::place_outside_left("{prefix}"));
     m.insert("onBase", words::on_base_refusal("{base}"));
     m.insert("notOnABranch", words::NOT_ON_A_BRANCH.to_owned());
     m.insert("nothingAhead", words::nothing_ahead("{branch}", "{base}"));
@@ -569,6 +571,13 @@ fn the_ownership_read_matches_the_committed_fixture_byte_for_byte() {
         theirs,
         "landed-files.sh and landed_files_script are one script"
     );
+}
+
+#[test]
+fn the_leave_outside_the_home_matches_the_committed_fixture_byte_for_byte() {
+    let path = fixtures().join("landed-outside.sh");
+    let theirs = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(format!("{}\n", outside_sweep_script("{root}")), theirs, "landed-outside.sh and outside_sweep_script are one script");
 }
 
 #[test]

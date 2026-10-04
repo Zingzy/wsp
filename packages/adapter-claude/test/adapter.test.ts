@@ -485,18 +485,16 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(call.env.HOME).toBe("/Users/z");
   });
 
-  it("with promptAfter starts the CLI on an empty channel and writes the prompt once it settles, so the CLI starts up meanwhile", async () => {
+  it("with promptAfter starts the CLI at once and hands the exec its prompt as a seed held until promptAfter settles, so a host that goes meanwhile leaves the prompt with the run", async () => {
     const exec = manualExec();
-    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
-    let open: () => void = () => {};
-    const promptAfter = new Promise<void>((resolve) => (open = resolve));
+    let held: Promise<void> | undefined;
+    const factory: ExecStreamFactory = (command, options) => ((held = options.inputAfter), exec.factory(command, options));
+    const adapter = createClaudeAdapter({ exec: factory, configDir: "/root/.claude-cfg" });
+    const promptAfter = new Promise<void>(() => {});
     const session = adapter.start({ prompt: "say ok", promptAfter, onEvent: () => {} });
-    expect(exec.calls[0]?.input).toEqual([]);
-    await new Promise((r) => setTimeout(r, 5));
+    expect(exec.calls[0]?.input).toEqual([userMessageLine("say ok", session.localId)]);
+    expect(held).toBe(promptAfter);
     expect(exec.writes).toEqual([]);
-    open();
-    await until(() => exec.writes.length === 1);
-    expect(exec.writes).toEqual([userMessageLine("say ok", session.localId)]);
     expect(adapter.waitsForPrompt).toBe(true);
     exec.end(0);
     await session.finished;

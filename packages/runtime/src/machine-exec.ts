@@ -432,7 +432,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     return stream;
   };
 
-  const factory: ExecStreamFactory = (command, { env, input }) => {
+  const factory: ExecStreamFactory = (command, { env, input, inputAfter }) => {
     const base = `${runDir}/${randomBytes(6).toString("hex")}`;
 
     const exports = Object.entries(env)
@@ -450,8 +450,9 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     const files: GuestWrite[] = [{ path: `${base}.sh`, text: `${workScoreLine()}\n${exports}\n${run}` }];
     if (input !== undefined) files.push({ path: `${base}.in`, text: input.map(line => `${line}\n`).join("") });
 
-    // Spawn eagerly, like a local child process would.
-    const posted: Promise<ExecResult> = untilReached(
+    // Spawn eagerly, like a local child process would, unless the seed is held: a write here is one more exec trip, so
+    // the launch waits and carries the seed with it.
+    const posted: Promise<ExecResult> = Promise.resolve(inputAfter).then(() => untilReached(
       () =>
         putFiles(machine, files, {
           // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second
@@ -465,7 +466,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           timeoutMs: execTimeoutMs,
         }),
       { now, sleep },
-    );
+    ));
     const opened = posted.then(
       res => {
         if (res.exitCode !== 0 || !res.stdout.includes(HANDSHAKE.launched)) throw new Error(`remote launch failed on ${machine.id}: nothing came back saying ${HANDSHAKE.launched}, the word the guest prints once the run is up; ${machineAnswer(res)}`);

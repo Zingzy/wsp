@@ -30,13 +30,13 @@ export const folderOf = (project: Pick<ProjectView, "id" | "name" | "path">, loo
   keep: [],
 });
 
-/** Every row the options offer, each agent signing in the first way it can, and every project here. */
+/** Every row the options offer, each agent signing in the first way it can, and every project here. No CLI: each one
+ * is a person's pick, made from how often their agents ran it. */
 export function everything(name: string, options: RecipeOptions, projects: readonly Pick<ProjectView, "id" | "name" | "path">[], looks: Record<string, { icon?: ProjectIcon; hue?: ProjectHue }>): RecipeFile {
   return RecipeFile.parse({
     name: fileName(name),
     agents: Object.fromEntries(options.agents.map(a => [a.id, a.signins[0] === undefined ? {} : { signin: a.signins[0] }])),
     mcp: Object.fromEntries(options.mcp.map(s => [s.name, { agents: s.agents }])),
-    clis: Object.fromEntries(options.clis.map(c => [c.name, { via: c.via, ...(c.needs === undefined ? {} : { needs: c.needs }) }])),
     skills: Object.fromEntries(options.skills.map(s => [s.name, { from: s.from }])),
     plugins: Object.fromEntries(options.plugins.map(p => [p.name, {}])),
     folders: Object.fromEntries(projects.map(p => [folderKey(p.name), folderOf(p, looks[p.id])])),
@@ -59,6 +59,10 @@ export function tick(picks: RecipeFile, kind: Exclude<TickKind, "folders">, name
   else table[name] = {};
   return { ...picks, [kind]: table };
 }
+
+/** Every CLI the agents ran at least once ticked, on top of what the picks hold. */
+export const tickUsedClis = (picks: RecipeFile, options: RecipeOptions): RecipeFile =>
+  options.clis.filter(cli => (cli.calls ?? 0) > 0).reduce((next, cli) => tick(next, "clis", cli.name, true, options), picks);
 
 /** A folder ticked with its row, or taken out. */
 export function tickFolder(picks: RecipeFile, key: string, row: RecipeFile["folders"][string] | undefined): RecipeFile {

@@ -1352,6 +1352,9 @@ export interface ServeOptions {
   /** Filled with the loopback address a turn on this computer dials once the host binds. A caller that hands in its
    * own runtime hands in the cell that runtime's reach reads; absent, the host makes one for the runtime it builds. */
   here?: HereAt;
+  /** The wsp home this host reads and writes as its own, its device key, ssh door and account among it; the home
+   * WSP_HOME names, else the person's own, when absent. */
+  home?: string;
 }
 
 /** A host served inside the calling process, over wsp up's key reading: a computer with no provider key serves the
@@ -1442,6 +1445,8 @@ async function hostFor(
     ssh?: HostSsh;
     /** The cell the runtime's reach reads the loopback address from, filled once the host binds. */
     here?: HereAt;
+    /** The wsp home whose device key a linked host trusts; the person's own when absent. */
+    home?: string;
   },
   io: CliIO,
   run: RunningWsp = runningWsp(),
@@ -1491,6 +1496,7 @@ async function hostFor(
       ...(opts.advertise !== undefined ? { advertise: opts.advertise } : {}),
       ...(opts.here !== undefined ? { here: opts.here } : {}),
       ...(opts.ssh !== undefined ? { ssh: opts.ssh } : {}),
+      ...(opts.home !== undefined ? { home: opts.home } : {}),
       door: joined ? "open" : "closed",
       doorLine: line => io.log(line),
       ...(links.back !== undefined ? { back: links.back } : {}),
@@ -1537,7 +1543,7 @@ async function hostFor(
       linked && opts.relay !== false
         ? await startRelay({
             statePath: opts.statePath,
-            home: wspHome(),
+            home: opts.home ?? wspHome(),
             port: handle.port,
             log: line => io.log(line),
             admitted,

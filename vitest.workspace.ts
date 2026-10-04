@@ -2,10 +2,9 @@
 // Node packages + wspx use the root node config; apps/web carries its own
 // vite config (react plugin + jsdom) so React component tests get a DOM.
 import { readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TEST_ENV } from "./vitest.env.js";
+import { RUN_TMPDIR, TEST_ENV } from "./vitest.env.js";
 import { CLOUD_ENV } from "./packages/protocol/src/env.js";
 
 // Paths are pinned to this file, not the cwd, so a run started inside one package sees the same tree as a root run.
@@ -42,7 +41,7 @@ export default [
       include: ["packages/*/test/**/*.test.ts", "infra/*/test/**/*.test.ts", "apps/wspx/**/*.test.ts", "apps/desktop/test/**/*.test.ts"],
       environment: "node",
       // Anything a test writes to the OS-local config dir (the install id) lands here, never in the developer's own.
-      env: { XDG_CONFIG_HOME: join(tmpdir(), "wsp-test-config"), ...TEST_ENV },
+      env: { XDG_CONFIG_HOME: join(RUN_TMPDIR, "wsp-test-config"), ...TEST_ENV },
     },
   },
   {
@@ -73,7 +72,7 @@ export default [
         "provider-swap",
       ].map(name => `packages/host/test/${name}.test.ts`),
       environment: "node",
-      env: { XDG_CONFIG_HOME: join(tmpdir(), "wsp-test-config"), ...TEST_ENV, [CLOUD_ENV]: "1" },
+      env: { XDG_CONFIG_HOME: join(RUN_TMPDIR, "wsp-test-config"), ...TEST_ENV, [CLOUD_ENV]: "1" },
     },
   },
   here("./apps/web/vite.config.ts"),

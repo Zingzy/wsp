@@ -263,6 +263,20 @@ describe("machineExecStream", () => {
     expect(script.indexOf(`echo $? > '${base}'.exit`)).toBeLessThan(script.indexOf(`kill $(cat '${base}'.tail)`));
   });
 
+  it("with its seed held the launch waits until the seed is due and carries it, since a write is one more exec trip", async () => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, [{ append: '{"type":"result"}\n', exit: 0 }, {}]);
+    let due: () => void = () => {};
+    const inputAfter = new Promise<void>(resolve => (due = resolve));
+    const stream = machineExecStream(machine, { pollMs: 5 })("claude -p --input-format stream-json", { env: {}, input: ['{"type":"user","text":"go"}'], inputAfter });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(guest.calls).toEqual([]);
+    due();
+    for await (const _ of stream.lines) void _;
+    expect(await stream.exited).toBe(0);
+    expect(guest.getInput()).toBe('{"type":"user","text":"go"}\n');
+  });
+
   it("a seeded prompt over the cap goes up in pieces ahead of the launch, every exec body under the cap, and the input file decodes byte for byte", async () => {
     const prompt = `{"type":"user","text":${JSON.stringify(Array.from({ length: 520 }, (_, i) => `line ${i} it's ünïcödé ${"y".repeat(50)}`).join("\n"))}}`;
     expect(Buffer.byteLength(prompt)).toBeGreaterThan(40_000);

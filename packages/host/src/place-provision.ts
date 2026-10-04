@@ -17,6 +17,7 @@ import {
   newSetupRun,
   parseMcpId,
   provisionPlanOf,
+  toolSize,
   pathLine,
   provisionStep,
   tarOf,
@@ -339,7 +340,10 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
       const configTools = shellPackage(picks, manifest, path, prefix);
       const plugins = pluginsOf(picks, o.home);
       const github = githubTools(picks, path, prefix);
-      const plan = provisionPlanOf(imp, picks.name, path, prefix, {
+      // Each install carries what it is expected to take, so the loop on that computer keeps it free above its floor.
+      const sizes = new Map(rows.map(e => [e.id, toolSize(e, brew)?.bytes]));
+      const sized = { ...imp, tools: imp.tools.map(t => (sizes.get(t.id) === undefined ? t : { ...t, bytes: sizes.get(t.id)! })) };
+      const plan = provisionPlanOf(sized, picks.name, path, prefix, {
         compiler: Object.values(picks.clis).some(row => row.needs?.includes(COMPILER_ROW) === true),
         ...(skills.plan !== undefined ? { skills: skills.plan } : {}),
         ...(configs !== undefined ? { configs } : {}),

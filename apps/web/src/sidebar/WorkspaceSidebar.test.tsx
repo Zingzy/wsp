@@ -452,6 +452,23 @@ describe("the sidebar's list of thread tiles", () => {
     expect(document.querySelector("[data-setup-card='p_studio']")).toBeNull();
   });
 
+  it("pins Setting up to the sidebar's foot above the corner's icons, out of the list that scrolls, and drops it once no setup runs", async () => {
+    const setup = { state: "running", addId: "a_1", startedAt: "2026-10-03T10:00:00.000Z", steps: [{ step: "floor", state: "running" }], waiting: [] };
+    const box = { id: "p_studio", kind: "computer", name: "studio", default: false, present: true, setup } as PlaceView;
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [] }, { placesList: async () => ({ places: [MAC_ROW, box], adds: [] }) });
+    await act(async () => useStore.setState({ places: [MAC_ROW, box] }));
+    await waitFor(() => expect(document.querySelector("[data-setup-card='p_studio']")).not.toBeNull());
+    const card = document.querySelector("[data-setup-card='p_studio']")!;
+    const foot = document.querySelector("[data-slot=sidebar-footer]")!;
+    expect(foot.contains(card)).toBe(true);
+    expect(document.querySelector("[data-sidebar-tree]")!.contains(card)).toBe(false);
+    const corner = foot.querySelector("[data-sidebar-corner]")!;
+    expect(card.compareDocumentPosition(corner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await act(async () => useStore.setState({ places: [MAC_ROW, { ...box, setup: { ...setup, state: "done", steps: [{ step: "floor", state: "done" }] } } as PlaceView] }));
+    await waitFor(() => expect(document.querySelector("[data-section='setting-up']")).toBeNull());
+    expect(foot.querySelector("[data-sidebar-corner]")).not.toBeNull();
+  });
+
   it("a fold list saved before the sidebar lost a section is read without its old ids, and Settled folds and opens on a click", async () => {
     window.localStorage.setItem("wsp:sidebar-folded", JSON.stringify(["needs-you", "idle", "done"]));
     mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });

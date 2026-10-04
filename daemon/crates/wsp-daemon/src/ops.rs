@@ -238,6 +238,8 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
                     // root can take either off.
                     if nix::unistd::geteuid().is_root() {
                         swept.extend(crate::place::sweep_workspace_profile(&profile, &crate::place::sh_stdout));
+                        // The list naming what the setup wrote outside the home sits in the prefix, so it is read first.
+                        swept.extend(crate::place::sweep_outside_home(""));
                         swept.extend(crate::place::sweep_tool_prefix(
                             std::path::Path::new(wsp_frames::numbers::TOOL_PREFIX),
                             std::path::Path::new(wsp_frames::numbers::TOOL_LINKS_DIR),

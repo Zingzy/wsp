@@ -144,7 +144,7 @@ describe("project.import on a workspace", () => {
     // an import beside it adds no second one to it.
     const own = (await rt.workspaces.get(ws.id)).project.path;
     const browsable = machine.execLog.filter(c => c.includes("/root/.wsp/roots")).at(-1)!;
-    expect(browsable).toBe(`mkdir -p '/root/.wsp'\nprintf '%s\\n' '${own}' '/root/work/proj' > '/root/.wsp/roots.next'\nmv -f '/root/.wsp/roots.next' '/root/.wsp/roots'`);
+    expect(browsable).toBe(`next='/root/.wsp/roots.next.'$$\nmkdir -p '/root/.wsp'\nprintf '%s\\n' '${own}' '/root/work/proj' > "$next"\nmv -f "$next" '/root/.wsp/roots'`);
     expect(machine.execLog.indexOf(browsable)).toBeGreaterThan(machine.execLog.indexOf(landing));
   });
 

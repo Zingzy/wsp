@@ -7,7 +7,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { promisify } from "node:util";
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
-import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, relative, resolve } from "node:path";
@@ -34,13 +34,13 @@ import WebSocket from "ws";
 import { macKindOf, ALREADY_JOINED_LINE, DAEMON_VERSION, configHardLinkRefusal, backUrl, PLACE_LOGIN_REFUSED_KIND, PLACE_HOST_KEY_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoPicksLine, placeProvisioningLine, setupWord, RecipeFile, type PlaceProvisionRow, type PendingComputer, type PlaceSetup, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
-import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
+import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, outsideAfterScript, outsideBeforeScript, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine, noPlaceSystemLine } from "../src/daemon-binary.js";
 import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { computerLines, hostPlatform, placeLines, placeNames } from "../src/verbs.js";
-import { namesPlace, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { namesPlace, placeOutsideLeftLine, TOOL_PREFIX, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { pinnedDroppingPort, refusedPort } from "../../runtime/test/held-port.js";
 import {
   ADD_FLAGS_REFUSAL,
@@ -100,6 +100,7 @@ import {
   SIGN_IN_FLAGS_REFUSAL,
   placeNoLoginsLine,
   boxSignedInLine,
+  boxReplacesLine,
   joinUnansweredLine,
   addUndoneLine,
   addTakenLine,
@@ -121,14 +122,14 @@ runsFromItsOwnFolder();
 /** The leave as a case runs it: the workspace profile it takes off is one under the case's own home unless the case
  * names another, since a suite run as root otherwise takes the machine's own profile off it. */
 const sweepPlace = (opts: PlaceSweepOptions = {}): ReturnType<typeof sweepPlaceHere> =>
-  sweepPlaceHere({ ...(opts.home === undefined ? {} : { apparmorProfile: join(opts.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(opts.home) }), ...opts });
+  sweepPlaceHere({ ...(opts.home === undefined ? {} : { apparmorProfile: join(opts.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(opts.home), systemRoot: join(opts.home, "system") }), ...opts });
 
 /** wsp's install folder and the folder its commands are linked into, under a case's own home, for the same reason. */
 const toolsUnder = (home: string): { prefix: string; links: string } => ({ prefix: join(home, "opt-wsp"), links: join(home, "usr-local-bin") });
 
 /** `wsp leave` as a case runs it, with the same profile under the case's own home. */
 const leaveCommand = (io: Parameters<typeof leaveCommandHere>[0], args: readonly string[], deps: NonNullable<Parameters<typeof leaveCommandHere>[2]>): ReturnType<typeof leaveCommandHere> =>
-  leaveCommandHere(io, args, { apparmorProfile: join(deps.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(deps.home), ...deps });
+  leaveCommandHere(io, args, { apparmorProfile: join(deps.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(deps.home), systemRoot: join(deps.home, "system"), ...deps });
 
 /** The machine's own profile as the file found it, which every case leaves exactly as it was. */
 const MACHINES_PROFILE = existsSync(WSP_WORKSPACE_APPARMOR_PATH) ? readFileSync(WSP_WORKSPACE_APPARMOR_PATH) : undefined;
@@ -1286,6 +1287,55 @@ describe("taking wsp off the computer it is typed on", () => {
     const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, uid: 0 });
     expect(swept.removed).toContain(placeKeptForLinkLine(tools.prefix));
     expect(existsSync(join(elsewhere, "keep"))).toBe(true);
+  });
+
+  it("takes the binaries the setup wrote outside the home where the leave runs as root, and keeps the box's own", async () => {
+    const home = tmp("leave-outside");
+    const system = realpathSync(tmp("leave-outside-root"));
+    const sh = shWithSha256sum();
+    mkdirSync(join(system, "usr/local/bin"), { recursive: true });
+    writeFileSync(join(system, "usr/local/bin/jq"), "the box's own jq\n");
+    sh(outsideBeforeScript("agents", ["/usr/local/bin"], system));
+    writeFileSync(join(system, "usr/local/bin/claude"), "claude 2.1.280\n");
+    writeFileSync(join(system, "usr/local/bin/gopls"), "gopls\n");
+    writeFileSync(join(system, "usr/local/bin/jq"), "jq over the box's own\n");
+    sh(outsideAfterScript("agents", ["/usr/local/bin"], system));
+    const tools = { prefix: join(system, TOOL_PREFIX), links: join(system, "usr/local/bin") };
+    const other = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 1000, tools, systemRoot: system });
+    expect(other.removed).not.toContain(join(system, "usr/local/bin/claude"));
+    expect(existsSync(join(system, "usr/local/bin/claude"))).toBe(true);
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 0, tools, systemRoot: system });
+    expect(swept.removed).toEqual(expect.arrayContaining([join(system, "usr/local/bin/claude"), join(system, "usr/local/bin/gopls"), tools.prefix]));
+    expect(readdirSync(join(system, "usr/local/bin"))).toEqual(["jq"]);
+    expect(existsSync(tools.prefix)).toBe(false);
+  });
+
+  it("keeps wsp's install folder and its list when the leave outside the home was cut short, and says so", async () => {
+    const home = tmp("leave-outside-cut");
+    const system = realpathSync(tmp("leave-outside-cut-root"));
+    const whole = shWithSha256sum();
+    mkdirSync(join(system, "usr/local/bin"), { recursive: true });
+    whole(outsideBeforeScript("agents", ["/usr/local/bin"], system));
+    writeFileSync(join(system, "usr/local/bin/claude"), "claude 2.1.280\n");
+    whole(outsideAfterScript("agents", ["/usr/local/bin"], system));
+    // The shell running the leave killed part way, as a bound kills it; the read answers nothing, as the leave's own does.
+    const stub = tmp("leave-outside-cut-stub");
+    writeStub(join(stub, "xargs"), "#!/bin/sh\nkill -KILL $PPID\n");
+    const cut = (script: string): string => {
+      try {
+        return whole(`PATH=${shellQuote(stub)}:$PATH\n${script}`);
+      } catch {
+        return "";
+      }
+    };
+    const tools = { prefix: join(system, TOOL_PREFIX), links: join(system, "usr/local/bin") };
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: cut, uid: 0, tools, systemRoot: system });
+    expect(swept.removed).toContain(placeOutsideLeftLine(tools.prefix));
+    expect(existsSync(join(tools.prefix, "landed"))).toBe(true);
+    expect(existsSync(join(system, "usr/local/bin/claude"))).toBe(true);
+    const again = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: whole, uid: 0, tools, systemRoot: system });
+    expect(again.removed).toEqual(expect.arrayContaining([join(system, "usr/local/bin/claude"), tools.prefix]));
+    expect(existsSync(tools.prefix)).toBe(false);
   });
 
   it("says what the manager answered when the stop refused, and still takes the file", async () => {
@@ -3057,6 +3107,18 @@ describe("wsp add <place> --sign-in <agent>", () => {
     expect(io.errors.join("\n")).not.toContain(placeNoLoginsLine("spoo"));
   });
 
+  it("says the sign-in replaces the login standing there before it starts, and says nothing of it where none stands", async () => {
+    const io = captured();
+    const run = signingIn({ signedIn: true }, [{ ...spoo, signIns: { claude: "vault-key", codex: "signed-in" } }]);
+    expect(await addCommand(io, opts(tmp("signin-replaces")), ["spoo"], { signIn: "codex" }, run.deps)).toBe(0);
+    expect(io.lines[0]).toBe(boxReplacesLine("spoo", "codex"));
+    expect(boxReplacesLine("spoo", "codex")).toBe("Codex is signed in on spoo; this sign-in replaces that login.");
+    expect(run.asked).toHaveLength(1);
+    const fresh = captured();
+    expect(await addCommand(fresh, opts(tmp("signin-fresh")), ["spoo"], { signIn: "codex" }, signingIn({ signedIn: true }, [{ ...spoo, signIns: { codex: "none" } }]).deps)).toBe(0);
+    expect(fresh.lines.join("\n")).not.toContain("replaces that login");
+  });
+
   it("signs in an agent whose login is not shared too, as the host plans it, and says so without a shared login", async () => {
     const io = captured();
     const run = signingIn({ signedIn: true });
@@ -3141,8 +3203,7 @@ describe("wsp add <place> --update", () => {
     expect(await addCommand(io, opts(home), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
     expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
     // The id off the listing, never the word the person typed: two computers may share a name and the host keys by id.
-    // The stream the recipe's rows ride is minted here, so they are read from the first one.
-    expect(fake.asked[1]!.params).toEqual({ placeId: "p_1", addId: expect.stringMatching(/^a_[0-9a-f]{12}$/) });
+    expect(fake.asked[1]!.params).toEqual({ placeId: "p_1" });
     expect(io.lines.join("\n")).toContain(`spoo: daemon 27 to ${DAEMON_VERSION}, over the link`);
     expect(io.lines.join("\n")).toContain("/home/maya/.wsp/daemon/wsp-daemon");
     // Where the one it replaced was kept, which is the first thing to look at on a box that will not come up.
@@ -3203,38 +3264,12 @@ describe("wsp add <place> --update", () => {
   });
   const running = (listed: Pick<PlaceView, "setup">): PlaceSetup => ({ ...listed.setup!, state: "running" });
 
-  it("runs the setup again on a computer already running this daemon, saying so and then printing every step and the tally", async () => {
+  it("never runs a setup on a computer already running this daemon: says it is current and exits 0, reading nothing again", async () => {
     const io = captured();
-    const job = setupOf([
-      { id: "agents/node", label: "Node 22.23.2", outcome: "present" },
-      { id: "agents/codex", label: "Codex", outcome: "installed" },
-    ]);
-    const fake = recipeClient({ name: "spoo", setup: running(job) }, job);
-    expect(await addCommand(io, opts(tmp("update-recipe")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
-    const said = io.lines.join("\n");
-    // No daemon half in the reply: the computer is current, and the line says so rather than refusing the update.
-    expect(said).toContain(placeCurrentLine("spoo", DAEMON_VERSION));
-    expect(said).toContain("  · the agents (12s)");
-    expect(said).toContain("spoo: 1 installed: Codex, 1 already there");
-    expect(said).not.toContain("somebody else's row");
-    // The rows are read off the row the host keeps, which is what outlives the run.
-    expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update", "places.list"]);
-  });
-
-  it("exits 1 where a step that blocks stopped it, and 0 where it finished, a row that failed and can be retried among it", async () => {
-    const io = captured();
-    const failedRow = setupOf([
-      { id: "agents/codex", label: "Codex", outcome: "installed" },
-      { id: "tools/brew/gh", label: "gh", outcome: "failed", note: "brew answered 404" },
-    ]);
-    const fake = recipeClient({ name: "spoo", setup: running(failedRow) }, failedRow);
-    expect(await addCommand(io, opts(tmp("update-failed")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
-    expect(io.lines.join("\n")).toContain("x gh: brew answered 404");
-    const stopped = setupOf([{ id: "agents/codex", label: "Codex", outcome: "failed" }], "failed", "no agent installed: Codex");
-    const gone = recipeClient({ name: "spoo", setup: running(stopped) }, stopped);
-    const quiet = captured();
-    expect(await addCommand(quiet, opts(tmp("update-stopped")), ["spoo"], { update: true }, updateDeps(gone.dial))).toBe(1);
-    expect(quiet.lines.join("\n")).toContain("spoo: no agent installed: Codex");
+    const fake = updateClient({ name: "spoo" });
+    expect(await addCommand(io, opts(tmp("update-current")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
+    expect(io.lines.join("\n")).toContain(placeCurrentLine("spoo", DAEMON_VERSION));
+    expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
   });
 
   it("returns on a computer whose setup is already going on, in the one sentence, rather than waiting on a job it did not start", async () => {
@@ -3252,15 +3287,6 @@ describe("wsp add <place> --update", () => {
     expect(io.errors.join("\n")).toContain(busy);
     // Nothing of the running job's tally is printed: those rows are not this line's to say.
     expect(io.lines.join("\n")).not.toContain("installed: Codex");
-    expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
-  });
-
-  it("says what a computer that got no setup got, and exits 0: nothing failed", async () => {
-    const io = captured();
-    const fake = updateClient({ name: "spoo", said: placeNoPicksLine("spoo") });
-    expect(await addCommand(io, opts(tmp("update-norecipe")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
-    expect(io.lines.join("\n")).toContain("spoo has nothing picked to go on it");
-    // Nothing to follow, so nothing is read again.
     expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
   });
 

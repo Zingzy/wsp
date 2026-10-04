@@ -356,6 +356,9 @@
                       "ms": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "startedAt": {
+                        "$ref": "#/properties/computer/properties/setup/properties/finishedAt"
                       }
                     },
                     "required": [
@@ -807,11 +810,6 @@
                       "minimum": 1
                     }
                   },
-                  "required": [
-                    "spawn",
-                    "maxMachines",
-                    "maxDepth"
-                  ],
                   "additionalProperties": false
                 }
               },
@@ -831,10 +829,27 @@
               "type": "integer"
             },
             "spawn": {
-              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+              "type": "object",
+              "properties": {
+                "spawn": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/spawn"
+                },
+                "maxMachines": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/maxMachines"
+                },
+                "maxDepth": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/maxDepth"
+                }
+              },
+              "required": [
+                "spawn",
+                "maxMachines",
+                "maxDepth"
+              ],
+              "additionalProperties": false
             },
             "spawnDefault": {
-              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+              "$ref": "#/properties/computer/properties/spawn"
             },
             "running": {
               "type": "integer",
@@ -889,6 +904,9 @@
               },
               "ms": {
                 "$ref": "#/properties/computer/properties/setup/properties/steps/items/properties/ms"
+              },
+              "startedAt": {
+                "$ref": "#/properties/computer/properties/setup/properties/finishedAt"
               }
             },
             "required": [
@@ -1274,6 +1292,9 @@
                       "ms": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "startedAt": {
+                        "$ref": "#/properties/computer/properties/setup/properties/finishedAt"
                       }
                     },
                     "required": [
@@ -1725,11 +1746,6 @@
                       "minimum": 1
                     }
                   },
-                  "required": [
-                    "spawn",
-                    "maxMachines",
-                    "maxDepth"
-                  ],
                   "additionalProperties": false
                 }
               },
@@ -1749,10 +1765,27 @@
               "type": "integer"
             },
             "spawn": {
-              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+              "type": "object",
+              "properties": {
+                "spawn": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/spawn"
+                },
+                "maxMachines": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/maxMachines"
+                },
+                "maxDepth": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/maxDepth"
+                }
+              },
+              "required": [
+                "spawn",
+                "maxMachines",
+                "maxDepth"
+              ],
+              "additionalProperties": false
             },
             "spawnDefault": {
-              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+              "$ref": "#/properties/computer/properties/spawn"
             },
             "running": {
               "type": "integer",
@@ -1807,6 +1840,9 @@
               },
               "ms": {
                 "$ref": "#/properties/computer/properties/setup/properties/steps/items/properties/ms"
+              },
+              "startedAt": {
+                "$ref": "#/properties/computer/properties/setup/properties/finishedAt"
               }
             },
             "required": [

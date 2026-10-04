@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 117,
+  "daemonVersion": 118,
   "execBodyMax": 16384,
   "prReplyBodyMax": 65536,
   "guestMessageCapBytes": 4194304,

@@ -3345,12 +3345,13 @@ export const SETUP_STEP_WORDS: Record<PlaceSetupStep, string> = {
   context: "what the agents read about this computer",
 };
 
-/** One step of the job as it stands, with how long it took once it ended. */
+/** One step of the job as it stands: when it started while it runs, how long it took once it ended. */
 export const PlaceSetupLine = z.object({
   step: PlaceSetupStep,
   state: z.enum(["running", "done", "failed", "skipped"]),
   note: SETUP_NOTE,
   ms: SETUP_MS,
+  startedAt: SETUP_NOTE,
 });
 export type PlaceSetupLine = z.infer<typeof PlaceSetupLine>;
 
@@ -3405,13 +3406,16 @@ export const SetupEnd = z.enum(["ready", "needs-you", "failed"]);
 export type SetupEnd = z.infer<typeof SetupEnd>;
 
 /** One frame of the setup job on a computer, on the stream the add or the resume that started it named: a step's
- * line as it moves, a sign-in that waits on the person, or the end with how it came out. */
+ * line as it moves, a sign-in that waits on the person, a row that landed after its step ended, or the end with how
+ * it came out. */
 export const PlaceSetupEvent = z.object({
   type: z.literal("place.setup"),
   addId: SETUP_TEXT,
   placeId: SETUP_TEXT,
   line: PlaceSetupLine.optional(),
   wait: PlaceWait.optional(),
+  /** A row that landed after its step ended, a sign-in through or skipped: its wait is off, its outcome on the record. */
+  landed: SETUP_NOTE,
   /** On a step's line: every step running at that moment, since after the base tools several run at once. */
   running: z.array(PlaceSetupStep).optional(),
   end: SetupEnd.optional(),
@@ -3471,15 +3475,16 @@ export type PlaceCapSet = z.infer<typeof PlaceCapSet>;
  * `napMs` is how long a workspace there with no window of its own runs quiet before it naps; null never naps it. */
 export const PlaceSettings = PlaceCapSet.extend({
   napMs: z.number().int().min(60_000).max(NAP_AFTER_MAX_MS).nullable().optional(),
-  /** What the agents on a workspace there may ask of this host where the workspace holds no switch of its own. */
-  spawn: WorkspaceAgents.optional(),
+  /** What the agents on a workspace there may ask of this host where the workspace holds no switch of its own: only
+   * the parts the person set, so every other part follows AGENTS_ON as it reads now. */
+  spawn: WorkspaceAgents.partial().optional(),
 });
 export type PlaceSettings = z.infer<typeof PlaceSettings>;
-/** What a set asks for: the settings, with the agents switch as a patch over the one the place holds. */
-export const PlaceSettingsAsk = PlaceSettings.extend({ spawn: WorkspaceAgents.partial().optional() });
+/** What a set asks for: the settings, with the agents switch as a patch over the parts the place holds. */
+export const PlaceSettingsAsk = PlaceSettings;
 export type PlaceSettingsAsk = z.infer<typeof PlaceSettingsAsk>;
 /** A setting on a place by the word the command line and the tool name it with, which a reset takes. */
-export const PlaceSettingWord = z.enum(["threads", "machines", "spend", "nap", "spawn"]);
+export const PlaceSettingWord = z.enum(["threads", "machines", "spend", "nap", "spawn", "max-depth"]);
 export type PlaceSettingWord = z.infer<typeof PlaceSettingWord>;
 
 /** The Macs a computer's icon tells apart. */
@@ -3628,9 +3633,8 @@ export const PlaceDial = z.object({
 });
 export type PlaceDial = z.infer<typeof PlaceDial>;
 
-/** What places.update answers: the daemon half where the computer was behind and absent where it already ran this
- * wsp's daemon; the recipe job started after it, as it stands when the reply goes out; and, where no job started,
- * why. */
+/** What places.update answers: the daemon it moved the computer from and to where the computer was behind, absent
+ * where it already ran this wsp's daemon. */
 export const PlaceUpdateReply = z.object({
   name: z.string().min(1),
   daemon: z
@@ -3643,8 +3647,6 @@ export const PlaceUpdateReply = z.object({
       note: z.string().optional(),
     })
     .optional(),
-  setup: PlaceSetup.optional(),
-  said: z.string().optional(),
 });
 export type PlaceUpdateReply = z.infer<typeof PlaceUpdateReply>;
 
@@ -5079,6 +5081,7 @@ const DAEMON_CONTENTS = [
   "4076321ab3d83fb3893ad81b9222fc36b92dccec81e8e9bc4566cc64a412b299",
   "81b16217319586241e368d7cb84fa0383a11b8d056a03053c700140422ff5e71",
   "2d3c09680f6c9dca01d8915f8d7be7306ba0db7fc6e1734353a86bf5afaa4e4e",
+  "1557c21f49fe3ec9248ca8c405e450b0f201e9bc4fd3f552bfd0f36132272b17",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5409,7 +5412,10 @@ const DAEMON_CONTENTS = [
  * Version 115: Daemon port-file test times out on Linux CI about half the time.
  * Version 116: recipes and the add-a-computer setup job.
  * Version 117: A leave run as root takes wsp's install folder, /opt/wsp, off the computer with every link in
- * /usr/local/bin pointing under it, and nothing else of either; a prefix that is itself a link stays and is said. */
+ * /usr/local/bin pointing under it, and nothing else of either; a prefix that is itself a link stays and is said.
+ * Version 118: A leave run as root first takes what the setup wrote under /usr/local and /opt, read off the list in
+ * /opt/wsp: each path still as wsp left it, hashed in one pass, a folder once empty, and nothing the computer had
+ * before wsp; the list goes last, and while it still holds lines /opt/wsp stays and the leave says so. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5477,6 +5483,9 @@ export const placeCurrentLine = (name: string, version: number): string => `${na
 
 /** What a computer whose recipe is still being put on says to whoever asked for a workspace there, or for a second
  * run of the job: the row under way where the job has reached one, and the two roads to the rest of the answer. */
+/** The refusal a setup gets on a computer while a sync to its recipe runs there: the two would install over each other. */
+export const placeSyncingLine = (name: string): string => `${name} is syncing to its recipe; set it up again once that ends`;
+
 export const placeProvisioningLine = (name: string, step?: PlaceSetupStep): string =>
   `${name} is still being set up${step === undefined ? "" : ` (${SETUP_STEP_WORDS[step]})`}; wsp computers shows it, and a workspace there can be made once it is done`;
 
@@ -6489,10 +6498,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * every add over ssh still running and the last that finished. Answers `{ places: PlaceView[], adds: PlaceAddJob[] }`. */
   z.object({ id: reqId, op: z.literal("places.list") }),
   /** Puts the daemon this host deploys on one place where it is behind, over the link it holds or over the ssh road
-   * the install used, waits for that computer to dial back running it, and then runs the recipe on it. The
-   * workspaces on it are kept. `addId` is the stream the recipe's own steps ride, so a caller that minted one reads
-   * them from the first row. Answers a PlaceUpdateReply. */
-  z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string(), addId: z.string().optional() }),
+   * the install used, and waits for that computer to dial back running it. The workspaces on it and what it was set
+   * up with are kept. Answers a PlaceUpdateReply. */
+  z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string() }),
   /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
    * the place record. Answers `{ removed, swept, note? }`. */
   z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string() }),
@@ -7648,7 +7656,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceComputerName } from "./place-name.js";
 export { needsYouLine, subagentStateWord, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
-export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingKey, placeSettingsLine, placeTakes, settingFor, napMsOf, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
+export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingDropped, placeSettingNamed, placeSettingsLine, placeTakes, settingFor, napMsOf, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";

@@ -61,6 +61,13 @@ pub fn place_kept_for_link(path: impl std::fmt::Display) -> String {
     format!("nothing was removed at {path}: a folder on the way to it is a link")
 }
 
+/// Why wsp's install folder is still there after a leave: the list in it of what the setup wrote outside the home
+/// still has lines, which only a leave cut short leaves, and the folder holds that list for a leave that finishes.
+/// Said on both roads a leave runs on, and pinned to one text by the contract fixture.
+pub fn place_outside_left(prefix: impl std::fmt::Display) -> String {
+    format!("nothing was removed at {prefix}: the leave did not finish taking what the setup wrote outside the home, which {prefix}/landed still lists")
+}
+
 pub fn guest_no_daemon_line(port: impl std::fmt::Display) -> String {
     format!("this machine's wsp daemon is not answering on 127.0.0.1:{port}")
 }

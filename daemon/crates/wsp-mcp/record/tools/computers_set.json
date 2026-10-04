@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "computers_set",
-    "description": "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set); nap, the minutes a machine there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every machine there counts again from now and which the computer the app runs on does not take, since its threads run in folders; spawn, max_machines and max_depth, what the agents there may ask of this host where the folder or the machine they run in holds no switch of its own, as workspaces_agents names it for one (on, up to 3 machines and one level deep, until it is set), read at every ask so one made before the change follows it. A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
+    "description": "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set); nap, the minutes a machine there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every machine there counts again from now and which the computer the app runs on does not take, since its threads run in folders; spawn, max_machines and max_depth, what the agents there may ask of this host where the folder or the machine they run in holds no switch of its own, as workspaces_agents names it for one (on, up to 3 machines and 2 levels deep, until it is set), read at every ask so one made before the change follows it. A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -49,7 +49,8 @@
             "enum": [
               "threads",
               "nap",
-              "spawn"
+              "spawn",
+              "max-depth"
             ]
           },
           "description": "the settings to take back to their defaults, by the same words"
@@ -371,6 +372,9 @@
                       "ms": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "startedAt": {
+                        "$ref": "#/properties/computer/properties/setup/properties/finishedAt"
                       }
                     },
                     "required": [
@@ -822,11 +826,6 @@
                       "minimum": 1
                     }
                   },
-                  "required": [
-                    "spawn",
-                    "maxMachines",
-                    "maxDepth"
-                  ],
                   "additionalProperties": false
                 }
               },
@@ -846,10 +845,27 @@
               "type": "integer"
             },
             "spawn": {
-              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+              "type": "object",
+              "properties": {
+                "spawn": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/spawn"
+                },
+                "maxMachines": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/maxMachines"
+                },
+                "maxDepth": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/maxDepth"
+                }
+              },
+              "required": [
+                "spawn",
+                "maxMachines",
+                "maxDepth"
+              ],
+              "additionalProperties": false
             },
             "spawnDefault": {
-              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+              "$ref": "#/properties/computer/properties/spawn"
             },
             "running": {
               "type": "integer",
@@ -877,7 +893,7 @@
   },
   "cloudOn": {
     "name": "computers_set",
-    "description": "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set); nap, the minutes a machine there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every machine there counts again from now and which the computer the app runs on does not take, since its threads run in folders; spawn, max_machines and max_depth, what the agents there may ask of this host where the folder or the machine they run in holds no switch of its own, as workspaces_agents names it for one (on, up to 3 machines and one level deep, until it is set), read at every ask so one made before the change follows it; machines and spend on a cloud, how many machines may run there at once and the dollars a day it may spend before it starts no new machine (3 and $10 until they are set). A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
+    "description": "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set); nap, the minutes a machine there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every machine there counts again from now and which the computer the app runs on does not take, since its threads run in folders; spawn, max_machines and max_depth, what the agents there may ask of this host where the folder or the machine they run in holds no switch of its own, as workspaces_agents names it for one (on, up to 3 machines and 2 levels deep, until it is set), read at every ask so one made before the change follows it; machines and spend on a cloud, how many machines may run there at once and the dollars a day it may spend before it starts no new machine (3 and $10 until they are set). A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -937,7 +953,8 @@
               "machines",
               "spend",
               "nap",
-              "spawn"
+              "spawn",
+              "max-depth"
             ]
           },
           "description": "the settings to take back to their defaults, by the same words"
@@ -1259,6 +1276,9 @@
                       "ms": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "startedAt": {
+                        "$ref": "#/properties/computer/properties/setup/properties/finishedAt"
                       }
                     },
                     "required": [
@@ -1710,11 +1730,6 @@
                       "minimum": 1
                     }
                   },
-                  "required": [
-                    "spawn",
-                    "maxMachines",
-                    "maxDepth"
-                  ],
                   "additionalProperties": false
                 }
               },
@@ -1734,10 +1749,27 @@
               "type": "integer"
             },
             "spawn": {
-              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+              "type": "object",
+              "properties": {
+                "spawn": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/spawn"
+                },
+                "maxMachines": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/maxMachines"
+                },
+                "maxDepth": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/maxDepth"
+                }
+              },
+              "required": [
+                "spawn",
+                "maxMachines",
+                "maxDepth"
+              ],
+              "additionalProperties": false
             },
             "spawnDefault": {
-              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+              "$ref": "#/properties/computer/properties/spawn"
             },
             "running": {
               "type": "integer",

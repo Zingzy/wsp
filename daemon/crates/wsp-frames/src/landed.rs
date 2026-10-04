@@ -54,6 +54,75 @@ pub fn own_marks(stdout: &str) -> Vec<String> {
         .collect()
 }
 
+/// What the leave outside the home prints for one path it took, so no path of the computer's reads as its words.
+pub const OUTSIDE_MARK: &str = "wsp-outside";
+
+/// The leave outside the home, run as root before wsp's own folder goes: every path the list in that folder names
+/// that still stands as the setup left it under /usr/local or /opt, files and links removed in one pass and folders
+/// taken once empty, then the list itself, so a leave cut short leaves the list for one that finishes. `root` is the
+/// folder those sit under, empty for this computer's own. The engine's outsideSweepScript is the text this holds, with
+/// the root as its one hole, held to it byte for byte by the contract fixture.
+pub fn outside_sweep_script(root: &str) -> String {
+    OUTSIDE_SWEEP.replacen("'{root}'", &shell_quote(root), 1)
+}
+
+const OUTSIDE_SWEEP: &str = r#"set -u
+root='{root}'; prefix="$root/opt/wsp"; ledger="$prefix/landed"
+nl=$(printf '\nx'); nl=${nl%x}
+tab=$(printf "\t")
+[ -d "$prefix" ] && [ ! -L "$prefix" ] && [ -f "$ledger" ] && [ ! -L "$ledger" ] || exit 0
+at="$prefix/.leaving"
+states() {
+  : > "$1.files"
+  while IFS= read -r p; do
+    if [ -L "$p" ]; then printf 'link:%s\t%s\n' "$(readlink "$p" | sha256sum | cut -c1-64)" "$p"
+    elif [ -d "$p" ]; then printf 'dir\t%s\n' "$p"
+    elif [ -f "$p" ]; then printf '%s\000' "$p" >> "$1.files"
+    fi
+  done
+  [ ! -s "$1.files" ] || xargs -0 sha256sum -z -- < "$1.files" | tr '\000' '\n' | awk '{ print substr($0, 1, 64) "\t" substr($0, 67) }'
+  rm -f "$1.files"
+}
+still() {
+  find "$root/usr/local" "$root/opt" \( -path "$prefix" -o -path "*$nl*" \) -prune -o -type d -print > "$1.dirs" 2>/dev/null
+  wsp_root="$root" wsp_prefix="$prefix" awk -F"\t" 'NR == FNR { d[$0] = 1; next } { s[substr($0, length($1) + 2)] = $1 } END {
+    r = ENVIRON["wsp_root"]; px = ENVIRON["wsp_prefix"]
+    for (p in s) {
+      q = p; sub(/\/[^\/]*$/, "", q)
+      if (index(p, r "/usr/local/") != 1 && index(p, r "/opt/") != 1) continue
+      if (p == px || index(p, px "/") == 1 || index(p "/", "/./") || index(p "/", "/../") || index(p, "//") || !(q in d)) continue
+      print s[p] "\t" p
+    }
+  }' "$1.dirs" "$ledger" > "$1.latest"
+  cut -f2- "$1.latest" | states "$1" > "$1.now"
+  awk -F"\t" 'NR == FNR { s[substr($0, length($1) + 2)] = $1; next } { p = substr($0, length($1) + 2); if ((p in s) && s[p] == $1) print }' "$1.latest" "$1.now"
+  rm -f "$1.dirs" "$1.latest" "$1.now"
+}
+rm -f "$at".*
+still "$at.s" | LC_ALL=C sort -t"$tab" -k2 -r > "$at.take"
+: > "$at.files"; : > "$at.dirs"
+while IFS="$tab" read -r was p; do
+  if [ "$was" = dir ]; then printf '%s\000' "$p" >> "$at.dirs"; else printf '%s\000' "$p" >> "$at.files"; fi
+done < "$at.take"
+xargs -0 rm -f -- < "$at.files"
+xargs -0 rmdir -- < "$at.dirs" 2>/dev/null
+while IFS="$tab" read -r was p; do
+  [ -e "$p" ] || [ -L "$p" ] || printf 'wsp-outside\t%s\n' "$p"
+done < "$at.take"
+rm -f "$ledger" "$at".*
+exit 0"#;
+
+/// The paths that leave answered with. A line that is not the mark's, or whose path is not absolute, is not one.
+pub fn outside_marks(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\t');
+            (fields.next() == Some(OUTSIDE_MARK)).then(|| fields.collect::<Vec<_>>().join("\t")).filter(|path| path.starts_with('/'))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +152,12 @@ mod tests {
         // Nothing outside the home is a path of wsp's, whatever a list on the computer says.
         assert!(own_marks(&format!("{OWN_MARK}\t/etc/hosts")).is_empty());
         assert!(own_marks(&format!("{OWN_MARK}\t../../etc/hosts")).is_empty());
+    }
+
+    #[test]
+    fn the_leave_outside_the_home_answers_only_its_marks_lines_each_an_absolute_path() {
+        let said = format!("{OUTSIDE_MARK}\t/usr/local/bin/claude\nsomething else\n{OUTSIDE_MARK}\trelative\n{OUTSIDE_MARK}\t\n");
+        assert_eq!(outside_marks(&said), ["/usr/local/bin/claude"]);
+        assert!(outside_sweep_script("").contains("root=''; prefix=\"$root/opt/wsp\""));
     }
 }

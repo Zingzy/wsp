@@ -50,16 +50,16 @@ describe("threads at once", () => {
   });
 
   it("refuses a number the row's kind does not take, set or reset, a set with nothing in it, one key both set and reset, and counts below one", () => {
-    expect(placeSetRefusal({ kind: "computer", name: "spoo" }, { machines: 2 })).toBe("spoo takes threads at once and agents may start agents, not machines at once");
-    expect(placeSetRefusal({ kind: "provider", name: "solari", takesForks: true }, { threads: 2 })).toBe("solari takes machines at once, spend per day, nap after and agents may start agents, not threads at once");
-    expect(placeSetRefusal({ kind: "computer", name: "mac", takesForks: false }, { napMs: null })).toBe("mac takes threads at once and agents may start agents, not nap after");
+    expect(placeSetRefusal({ kind: "computer", name: "spoo" }, { machines: 2 })).toBe("spoo takes threads at once, agents may start agents and levels deep, not machines at once");
+    expect(placeSetRefusal({ kind: "provider", name: "solari", takesForks: true }, { threads: 2 })).toBe("solari takes machines at once, spend per day, nap after, agents may start agents and levels deep, not threads at once");
+    expect(placeSetRefusal({ kind: "computer", name: "mac", takesForks: false }, { napMs: null })).toBe("mac takes threads at once, agents may start agents and levels deep, not nap after");
     expect(placeSetRefusal({ kind: "computer", name: "spoo", takesForks: true }, { napMs: null })).toBeUndefined();
-    expect(placeSetRefusal({ kind: "computer", name: "spoo", takesForks: false }, {}, ["spend"])).toBe("spoo takes threads at once and agents may start agents, not spend per day");
+    expect(placeSetRefusal({ kind: "computer", name: "spoo", takesForks: false }, {}, ["spend"])).toBe("spoo takes threads at once, agents may start agents and levels deep, not spend per day");
     expect(placeSetRefusal({ kind: "computer", name: "spoo" }, { threads: 1 })).toBeUndefined();
     expect(placeSetRefusal({ kind: "provider", name: "solari", takesForks: true }, { spendPerDayUsd: 0 })).toBeUndefined();
     expect(placeSetRefusal({ kind: "computer", name: "spoo" }, {}, ["threads"])).toBeUndefined();
-    expect(placeSetRefusal({ kind: "computer", name: "spoo", takesForks: true }, {})).toBe("nothing to set on spoo: it takes threads at once, nap after and agents may start agents");
-    expect(placeSetRefusal({ kind: "provider", name: "solari", takesForks: true }, { machines: undefined }, [])).toBe("nothing to set on solari: it takes machines at once, spend per day, nap after and agents may start agents");
+    expect(placeSetRefusal({ kind: "computer", name: "spoo", takesForks: true }, {})).toBe("nothing to set on spoo: it takes threads at once, nap after, agents may start agents and levels deep");
+    expect(placeSetRefusal({ kind: "provider", name: "solari", takesForks: true }, { machines: undefined }, [])).toBe("nothing to set on solari: it takes machines at once, spend per day, nap after, agents may start agents and levels deep");
     expect(placeSetRefusal({ kind: "computer", name: "spoo" }, { threads: 2 }, ["threads"])).toBe("spoo: threads at once is both set and reset; name it once");
     expect(() => PlaceView.shape.cap.parse({ threads: 0 })).toThrow();
     expect(() => PlaceView.shape.cap.parse({ machines: 0, spendPerDayUsd: 10 })).toThrow();
@@ -79,8 +79,8 @@ describe("what a place's settings read as in a line", () => {
     expect(placeSettingsLine({ ...spoo, takesForks: true, napDefault: 60 * 60_000, capDefault: { threads: 2 }, napMs: 5 * 60_000, settings: { napMs: 5 * 60_000 } })).toBe("spoo: 2 threads at once (the default), naps after 5m (60m by default)");
     expect(placeSettingsLine({ ...solari, cap: { machines: 5, spendPerDayUsd: 2.5 }, capDefault: CLOUD_CAP_DEFAULT, settings: { machines: 5, spendPerDayUsd: 2.5 } })).toBe("solari: 5 machines at once (3 by default), $2.50 a day ($10 by default)");
     expect(NAP_AFTER_MS).toBe(20 * 60_000);
-    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, spawn: AGENTS_ON, spawnDefault: AGENTS_ON })).toBe("spoo: 2 threads at once (the default), agents may spawn: up to 3 workspaces (the default)");
-    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, spawn: { ...AGENTS_ON, spawn: false }, spawnDefault: AGENTS_ON, settings: { spawn: { ...AGENTS_ON, spawn: false } } })).toBe("spoo: 2 threads at once (the default), agents may not spawn (on, up to 3 by default)");
+    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, spawn: AGENTS_ON, spawnDefault: AGENTS_ON })).toBe("spoo: 2 threads at once (the default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)");
+    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, spawn: { ...AGENTS_ON, spawn: false }, spawnDefault: AGENTS_ON, settings: { spawn: { spawn: false } } })).toBe("spoo: 2 threads at once (the default), agents may not spawn (on, up to 3 by default), 2 levels deep (the default)");
   });
 });
 

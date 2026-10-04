@@ -351,7 +351,7 @@ describe("the agent contract on the command line and the tool door", () => {
     machine.previewUrl = noRoute;
     backend.execImpl = guestSoFar;
     expect(await last("workspaces agents", "workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "2")).toEqual({
-      workspace: expect.objectContaining({ name: "alpha", agents: { spawn: true, maxMachines: 2, maxDepth: 1 } }),
+      workspace: expect.objectContaining({ name: "alpha", agents: { spawn: true, maxMachines: 2, maxDepth: 2 } }),
     });
     await last("workspaces agents", "workspaces", "agents", "alpha", "--spawn", "off");
     await last("threads", "threads");

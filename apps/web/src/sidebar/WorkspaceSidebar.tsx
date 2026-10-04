@@ -593,7 +593,6 @@ export function WorkspaceSidebar() {
               </li>
             ) : null}
             {settledOpen ? tiles.settled.map(node => tileItem(node, 0, null, true)) : null}
-            <SettingUpSection collapsed={folded.includes("setting-up")} onToggle={() => toggleFold("setting-up")} />
             {ready && groups.length > 0 && launchItems.length + tiles.live.length + tiles.settled.length + made.length === 0 ? (
               <li data-thread-selection-safe>
                 <p data-k="no-workspaces" className="px-2 py-6 text-center text-[13px] text-muted-foreground">
@@ -620,6 +619,7 @@ export function WorkspaceSidebar() {
           <ForwardsList />
         </SidebarContent>
         <SidebarChromeFooter>
+          <SettingUpSection collapsed={folded.includes("setting-up")} onToggle={() => toggleFold("setting-up")} />
           <SidebarCorner />
         </SidebarChromeFooter>
       </div>

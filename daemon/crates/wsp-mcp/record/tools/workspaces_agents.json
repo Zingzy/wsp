@@ -25,7 +25,7 @@
         "max_depth": {
           "type": "integer",
           "minimum": 1,
-          "description": "how many levels deep the tree under a root thread may go while spawn is on; 1 is the root's own children and no further, which is the default"
+          "description": "how many levels deep the tree under a root thread may go while spawn is on, 2 by default; 1 stops at the root's own children"
         }
       },
       "required": [
@@ -567,7 +567,7 @@
         "max_depth": {
           "type": "integer",
           "minimum": 1,
-          "description": "how many levels deep the tree under a root thread may go while spawn is on; 1 is the root's own children and no further, which is the default"
+          "description": "how many levels deep the tree under a root thread may go while spawn is on, 2 by default; 1 stops at the root's own children"
         }
       },
       "required": [

@@ -319,6 +319,9 @@
                         "ms": {
                           "type": "integer",
                           "minimum": 0
+                        },
+                        "startedAt": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
                         }
                       },
                       "required": [
@@ -770,11 +773,6 @@
                         "minimum": 1
                       }
                     },
-                    "required": [
-                      "spawn",
-                      "maxMachines",
-                      "maxDepth"
-                    ],
                     "additionalProperties": false
                   }
                 },
@@ -794,10 +792,27 @@
                 "type": "integer"
               },
               "spawn": {
-                "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
+                "type": "object",
+                "properties": {
+                  "spawn": {
+                    "$ref": "#/properties/computers/items/properties/settings/properties/spawn/properties/spawn"
+                  },
+                  "maxMachines": {
+                    "$ref": "#/properties/computers/items/properties/settings/properties/spawn/properties/maxMachines"
+                  },
+                  "maxDepth": {
+                    "$ref": "#/properties/computers/items/properties/settings/properties/spawn/properties/maxDepth"
+                  }
+                },
+                "required": [
+                  "spawn",
+                  "maxMachines",
+                  "maxDepth"
+                ],
+                "additionalProperties": false
               },
               "spawnDefault": {
-                "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
+                "$ref": "#/properties/computers/items/properties/spawn"
               },
               "running": {
                 "type": "integer",
@@ -1238,6 +1253,9 @@
                         "ms": {
                           "type": "integer",
                           "minimum": 0
+                        },
+                        "startedAt": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
                         }
                       },
                       "required": [
@@ -1689,11 +1707,6 @@
                         "minimum": 1
                       }
                     },
-                    "required": [
-                      "spawn",
-                      "maxMachines",
-                      "maxDepth"
-                    ],
                     "additionalProperties": false
                   }
                 },
@@ -1713,10 +1726,27 @@
                 "type": "integer"
               },
               "spawn": {
-                "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
+                "type": "object",
+                "properties": {
+                  "spawn": {
+                    "$ref": "#/properties/computers/items/properties/settings/properties/spawn/properties/spawn"
+                  },
+                  "maxMachines": {
+                    "$ref": "#/properties/computers/items/properties/settings/properties/spawn/properties/maxMachines"
+                  },
+                  "maxDepth": {
+                    "$ref": "#/properties/computers/items/properties/settings/properties/spawn/properties/maxDepth"
+                  }
+                },
+                "required": [
+                  "spawn",
+                  "maxMachines",
+                  "maxDepth"
+                ],
+                "additionalProperties": false
               },
               "spawnDefault": {
-                "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
+                "$ref": "#/properties/computers/items/properties/spawn"
               },
               "running": {
                 "type": "integer",

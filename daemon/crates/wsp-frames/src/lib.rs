@@ -35,7 +35,7 @@ pub use enums::{
 pub use event::{DaemonEvent, ProcEntry, Usage};
 pub use guest::{GuestCliMessage, GuestKind, GuestOpen, GuestOpenReply, GuestStream};
 pub use id::RequestId;
-pub use landed::{landed_files_script, own_marks, OWN_MARK};
+pub use landed::{landed_files_script, outside_marks, outside_sweep_script, own_marks, OUTSIDE_MARK, OWN_MARK};
 pub use machine::{
     BackendFacts, BackendPricing, BaseTemplates, Bind, Capabilities, CopyWord, DaemonSupervisor, ExecResult, Lifecycle, LifecycleBudgets,
     MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply, MachineKind,

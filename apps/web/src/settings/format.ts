@@ -82,7 +82,7 @@ export const onName = (name: string): string => onceNamed(name, n => ` on ${n}`)
 export const WHERE_WORDS = {
   /** A place list the host refused, said where the list would stand. */
   notRead: (said: string) => `Computers not read: ${said}`,
-  /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
+  /** Puts this wsp's daemon on that computer; what it was set up with stays. One word in both states, held and
    * dimmed while it runs: a label that changed to Updating moved the button's own width. */
   update: "Update",
   default: "default",
@@ -128,7 +128,6 @@ export const ADD_COMPUTER_WORDS = {
   /** The dialog's sentences, each said once where the rows do not say it. */
   where: "A Linux box you have root on.",
   saved: "Saved, you can finish later",
-  canClose: "You can close this. Setup keeps going.",
   restDone: "Everything else is done.",
   keepsGoing: "Setup keeps going. wsp pings you when it needs you.",
   signInLater: "You can sign in later in Settings.",
@@ -535,7 +534,10 @@ export const COMPUTER_PAGE_WORDS = {
   napNever: "Never",
   threadsHere: "Threads here",
   spawnTitle: "Agents may start agents",
-  spawnLine: (machines: number, depth: number): string => `A thread here may open threads of its own: up to ${machines} ${machines === 1 ? "machine" : "machines"}, ${depth === 1 ? "one level deep" : `${depth} levels deep`}.`,
+  spawnLine: (depth: number, machines?: number): string =>
+    `A thread here may open threads of its own, up to ${machines === undefined ? "" : `${machines} ${machines === 1 ? "machine" : "machines"} and `}${depth === 1 ? "one level deep" : `${depth} levels deep`}.`,
+  levelsTitle: "Levels deep",
+  levelsLine: "1 lets the thread you start open threads, 2 lets those open their own.",
 } as const;
 
 /** The Limits tab's banked resets line: what is banked, and the one act that spends one after asking. */

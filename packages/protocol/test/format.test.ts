@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  spawnDepthRefusal,
   HOST_BEAT_MS,
   ADDRESS_NEXT_START,
   NOT_UP_YET,
@@ -476,6 +477,21 @@ describe("fmtDuration, fmtElapsed and fmtCost", () => {
 
   it("fmtCost reads cents at every size, so two figures in one thread are never in two shapes", () => {
     expect([1.94, 0.22, 0.01, 0.0042, 0].map(fmtCost)).toEqual(["$1.94", "$0.22", "$0.01", "$0.00", "$0.00"]);
+  });
+});
+
+describe("the depth refusal", () => {
+  it("names the computer's cap and both ways to raise it, quoting a name the shell would split", () => {
+    expect(spawnDepthRefusal("th_0123456789", 2, 2, { computer: "spoo" })).toBe(
+      "thread th_01234 is 2 deep under its root and this computer allows 2, so a thread this deep may not spawn; raise Levels deep in Settings > Computers or run wsp computers set spoo --max-depth 3",
+    );
+    expect(spawnDepthRefusal("th_0123456789", 2, 2, { computer: "my box" })).toContain("wsp computers set 'my box' --max-depth 3");
+  });
+
+  it("names a workspace's own switch where that holds the cap", () => {
+    expect(spawnDepthRefusal("th_0123456789", 1, 1, { workspace: "lead" })).toBe(
+      "thread th_01234 is 1 deep under its root and its workspace allows 1, so a thread this deep may not spawn; raise it with wsp workspaces agents lead --max-depth 2",
+    );
   });
 });
 

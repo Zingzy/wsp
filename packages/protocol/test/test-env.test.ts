@@ -6,11 +6,12 @@
 // into the code under test, and the only wsp variables a test may read off its
 // own process are the gates that decide whether the file runs at all.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as protocol from "../src/index.js";
 import { ROOT, sourceFiles, testFiles } from "./source-files.js";
-import { GATES, TEST_ENV } from "../../../vitest.env.js";
+import { GATES, RUN_TMPDIR, TEST_ENV } from "../../../vitest.env.js";
 
 /** Every WSP_ variable a package names, by the constant it is exported as, so a read written as
  * process.env[TURN_TOKEN_ENV] is caught as the read of WSP_TURN that it is: the protocol's exports, and every constant
@@ -99,6 +100,12 @@ describe("a test reads no wsp variable off the process running it", () => {
 describe("the environment every test runs under", () => {
   it("turns the release check off, so no host a test starts asks GitHub", () => {
     expect(TEST_ENV[protocol.UPDATE_CHECK_ENV]).toBe("0");
+  });
+
+  it("makes every folder under the run's own temp folder, the one the Claude Code store guard watches", () => {
+    expect(basename(tmpdir())).toMatch(/^wsp-run-\d+$/);
+    expect(existsSync(tmpdir())).toBe(true);
+    expect(RUN_TMPDIR).toBe(tmpdir());
   });
 
   it("leaves no launch pair, home, named host, cloud, labs or person's home to a test, since none of them is a gate", () => {

@@ -7,7 +7,7 @@
 // that adds another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, setupWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
@@ -259,11 +259,14 @@ describe("the Computers list", () => {
     expect(pageAt()).toBe("computer:p_sign");
   });
 
-  it("offers Update in the cell of a computer behind this wsp's daemon, puts it there on a press, and reads the job in the cell after", async () => {
+  it("offers Update in the cell of a computer behind this wsp's daemon, puts it there on a press, runs no setup, and reads the row again after", async () => {
     const asked: string[] = [];
-    const setup: PlaceSetup = { state: "running", addId: "a_2", startedAt: AT, steps: [{ step: "floor", state: "running" }], waiting: [] };
     const behind: PlaceView = { ...box, daemonVersion: 1 };
-    const api = computersApi({ placesUpdate: async (placeId: string) => (asked.push(placeId), { name: "hetzner", setup }) } as unknown as Partial<Api>).api;
+    let landed = false;
+    const api = computersApi({
+      placesUpdate: async (placeId: string) => (asked.push(placeId), (landed = true), { name: "hetzner" }),
+      placesList: async () => ({ places: [here, landed ? box : behind], adds: [], pending: [] }),
+    } as unknown as Partial<Api>).api;
     useStore.setState({ places: [here, behind] });
     await mountComputers(api);
     const update = listRow("p_2").querySelector<HTMLElement>("[data-k='update']")!;
@@ -272,7 +275,8 @@ describe("the Computers list", () => {
     await waitFor(() => expect(asked).toEqual(["p_2"]));
     // The press is the button's own: the row does not open the page under it.
     expect(pageAt()).toBe("computers");
-    await waitFor(() => expect(useStore.getState().places.find(place => place.id === "p_2")?.setup).toEqual(setup));
+    await waitFor(() => expect(useStore.getState().places.find(place => place.id === "p_2")?.daemonVersion).toBe(box.daemonVersion));
+    expect(useStore.getState().places.find(place => place.id === "p_2")?.setup).toEqual(box.setup);
   });
 
   it("draws Add a computer under the computers, opening its dialog, and Add a cloud under the clouds, opening the cloud's panel, and a row opens its page", async () => {
@@ -329,7 +333,7 @@ describe("a computer's own page", () => {
   it("sets threads at once, the nap window and the agents switch through the host, takes a set one back, and offers an older daemon its update", async () => {
     const asked: Array<[string, unknown, readonly string[]]> = [];
     const updated: string[] = [];
-    const agents = { spawn: true, maxMachines: 3, maxDepth: 1 };
+    const agents = { spawn: true, maxMachines: 3, maxDepth: 2 };
     const row: PlaceView = { ...box, cap: { threads: 2 }, capDefault: { threads: 2 }, settings: { napMs: 30 * 60_000 }, napMs: 30 * 60_000, napDefault: 20 * 60_000, spawn: agents, spawnDefault: agents, daemonVersion: 1, behind: { word: "daemon 1", fix: "wsp add hetzner --update", act: "update" } };
     useStore.setState({ places: [here, row] });
     const api = computersApi({
@@ -355,7 +359,7 @@ describe("a computer's own page", () => {
     expect(threads.querySelector("[data-k=threads-at-once-value]")?.textContent).toBe("2");
     expect(threads.querySelector("[data-settings-description]")?.textContent).toBe(COMPUTER_PAGE_WORDS.threadsLine(2, "hetzner", fmtMemGb(4096)));
     expect(threads.querySelector("[data-k=row-reset]")).toBeNull();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: COMPUTER_PAGE_WORDS.more })));
+    await act(async () => fireEvent.click(threads.querySelector(`[aria-label="${COMPUTER_PAGE_WORDS.more}"]`)!));
     await settle();
     expect(asked.at(-1)).toEqual(["p_2", { threads: 3 }, []]);
     expect(page.querySelector("[data-k=threads-at-once-value]")?.textContent).toBe("3");
@@ -365,6 +369,53 @@ describe("a computer's own page", () => {
     expect(asked.at(-1)).toEqual(["p_2", {}, ["nap"]]);
     await act(async () => fireEvent.click(page.querySelector("[data-k=agents-start-agents]")!));
     expect(asked.at(-1)).toEqual(["p_2", { spawn: { spawn: false } }, []]);
+  });
+
+  it("steps Levels deep under the agents switch while it is on, takes a set depth back to the default, and names machines only where the computer forks them", async () => {
+    const asked: Array<[string, unknown, readonly string[]]> = [];
+    const agents = { spawn: true, maxMachines: 3, maxDepth: 2 };
+    const row: PlaceView = { ...box, spawn: agents, spawnDefault: agents };
+    let stored: PlaceSettings = {};
+    useStore.setState({ places: [here, row] });
+    const api = computersApi({
+      agentsRead: async () => AGENTS_REPORT,
+      placesSet: async (placeId, ask, reset = []) => {
+        asked.push([placeId, ask, reset]);
+        const settings = reset.reduce((at, word) => placeSettingDropped(at, word), { spawn: { ...stored.spawn, ...ask.spawn } } as PlaceSettings);
+        stored = settings;
+        return { ...row, spawn: { ...agents, ...settings.spawn }, settings };
+      },
+    }).api;
+    await mountComputers(api, { kind: "computer", id: "p_2" });
+    const page = document.querySelector("[data-settings-page]")!;
+    expect(descriptionOf("agents-start-agents")).toBe("A thread here may open threads of its own, up to 3 machines and 2 levels deep.");
+    const levels = page.querySelector("[data-settings-row=levels-deep]")!;
+    expect(levels.closest("[data-settings-card]")?.getAttribute("data-settings-card")).toBe("computer-spawn");
+    expect(levels.querySelector("[data-settings-title]")?.textContent).toBe("Levels deep");
+    expect(levels.querySelector("[data-k=levels-deep-value]")?.textContent).toBe("2");
+    expect(levels.querySelector("[data-k=row-reset]")).toBeNull();
+    await act(async () => fireEvent.click(levels.querySelector(`[aria-label="${COMPUTER_PAGE_WORDS.more}"]`)!));
+    await settle();
+    expect(asked.at(-1)).toEqual(["p_2", { spawn: { maxDepth: 3 } }, []]);
+    expect(page.querySelector("[data-k=levels-deep-value]")?.textContent).toBe("3");
+    expect(descriptionOf("agents-start-agents")).toBe("A thread here may open threads of its own, up to 3 machines and 3 levels deep.");
+    await act(async () => fireEvent.click(page.querySelector("[data-settings-row=levels-deep] [data-k=row-reset]")!));
+    await settle();
+    expect(asked.at(-1)).toEqual(["p_2", {}, ["max-depth"]]);
+    expect(stored).toEqual({});
+    expect(page.querySelector("[data-k=levels-deep-value]")?.textContent).toBe("2");
+    expect(page.querySelector("[data-settings-row=levels-deep] [data-k=row-reset]")).toBeNull();
+
+    await act(async () => fireEvent.click(page.querySelector("[data-k=agents-start-agents]")!));
+    await settle();
+    expect(asked.at(-1)).toEqual(["p_2", { spawn: { spawn: false } }, []]);
+    expect(page.querySelector("[data-settings-row=levels-deep]")).toBeNull();
+
+    // A computer that forks no machines says depth alone.
+    cleanup();
+    useStore.setState({ places: [here, { ...row, takesForks: false }] });
+    await mountComputers(api, { kind: "computer", id: "p_2" });
+    expect(descriptionOf("agents-start-agents")).toBe("A thread here may open threads of its own, up to 2 levels deep.");
   });
 
   it("steps threads at once off the number it last sent while the host has not answered, so two quick presses land two up", async () => {

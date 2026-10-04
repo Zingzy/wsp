@@ -34,6 +34,23 @@ export const STEP_TITLES: Record<Exclude<AddStep, "running" | "ready">, string> 
   summary: "Summary",
 };
 
+/** The line under each step's title: what the step does and why, `box` the computer being added and `here` the one
+ * the host runs on. */
+export const stepLine = (step: Exclude<AddStep, "where" | "running" | "ready">, box: string, here: string): string =>
+  ({
+    checks: `Making sure wsp can reach ${box} and run there.`,
+    startfrom: `Begin with everything on ${here}, a saved recipe, or nothing.`,
+    agents: `The coding agents to install on ${box}, signed in so threads run there.`,
+    mcp: `The tool servers your agents use, set up for them on ${box}.`,
+    clis: `The command-line tools your agents run, to install on ${box}. Most used first.`,
+    skills: `Your agents' skills, copied so they work the same on ${box}.`,
+    plugins: `Claude Code plugins to install on ${box}.`,
+    github: `How ${box} signs in to GitHub to clone and push your repos.`,
+    projects: `Projects on ${here} to clone onto ${box}.`,
+    other: `Your git and shell settings, so ${box} behaves like ${here}.`,
+    summary: `What goes on ${box}, before it starts.`,
+  })[step];
+
 /** The first step past the install: Start from where a recipe is saved, else Agents. */
 export const firstPick = (recipes: number): AddStep => (recipes > 0 ? "startfrom" : "agents");
 
@@ -76,6 +93,10 @@ const CLOSED: AddFlowState = { open: false, step: "where", address: "", addId: n
 
 export const useAddFlow = create<AddFlowState>(() => CLOSED);
 
+/** The dialog closed or opened afresh, the options it read kept: a step drawn again never stands blank while the host
+ * answers once more. */
+const fresh = (): AddFlowState => ({ ...CLOSED, options: useAddFlow.getState().options });
+
 const REACHED_KEY = "wsp:add-reached";
 
 /** The record last parsed and the text it was parsed from, so a render reads a string and parses only a change. */
@@ -113,28 +134,28 @@ function keepReached(pendingId: string, step: AddStep | null): void {
 }
 
 export function openAdd(): void {
-  useAddFlow.setState({ ...CLOSED, open: true });
+  useAddFlow.setState({ ...fresh(), open: true });
 }
 
 /** A pending add opened again: where it was left, with its picks. An add that never joined opens at Where. */
 export function openPending(pending: PendingComputer, recipes: number): void {
   if (pending.placeId === undefined) {
-    useAddFlow.setState({ ...CLOSED, open: true, address: pending.address, pendingId: pending.id });
+    useAddFlow.setState({ ...fresh(), open: true, address: pending.address, pendingId: pending.id });
     return;
   }
   const step = reachedSteps()[pending.id] ?? firstPick(recipes);
-  useAddFlow.setState({ ...CLOSED, open: true, address: pending.address, placeId: pending.placeId, pendingId: pending.id, picks: pending.choices, from: pending.recipe ?? "here", step: step === "startfrom" && recipes === 0 ? "agents" : step });
+  useAddFlow.setState({ ...fresh(), open: true, address: pending.address, placeId: pending.placeId, pendingId: pending.id, picks: pending.choices, from: pending.recipe ?? "here", step: step === "startfrom" && recipes === 0 ? "agents" : step });
 }
 
 /** A computer being set up, opened on its running steps. */
 export function openSetup(placeId: string): void {
-  useAddFlow.setState({ ...CLOSED, open: true, placeId, step: "running" });
+  useAddFlow.setState({ ...fresh(), open: true, placeId, step: "running" });
 }
 
 /** Closes the dialog: picks not yet kept are kept now, and the next open starts from what it opens on. */
 export function closeAdd(): void {
   keepNow();
-  useAddFlow.setState(CLOSED);
+  useAddFlow.setState(fresh());
 }
 
 export function go(step: AddStep): void {
@@ -152,9 +173,10 @@ export function connect(api: Api, address: string, hostKey?: string): void {
 /** The key a computer this one never dialled answered with, on an add refused for it, for the person to trust. */
 export const askedHostKey = (job: PlaceAddJob | undefined): string | undefined => (job?.state === "failed" && job.kind === PLACE_HOST_KEY_KIND ? job.hostKey : undefined);
 
-/** Reads what the picks can be made from, once per dialog. */
+/** Reads what the picks can be made from on every open: the host answers what it last read at once and reads again
+ * behind it. Options already here stand through a refusal, which is said only where there is nothing to draw. */
 export function readOptions(api: Api): void {
-  if (api.recipesOptions === undefined || useAddFlow.getState().options !== null) return;
+  if (api.recipesOptions === undefined) return;
   void api.recipesOptions().then(
     options => useAddFlow.setState({ options, optionsRefused: null }),
     (e: unknown) => useAddFlow.setState({ optionsRefused: failureOf(e) }),
