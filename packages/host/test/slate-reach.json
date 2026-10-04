@@ -1,0 +1,14 @@
+[
+  { "prompt": "put it on the slate", "intent": ["slate"] },
+  { "prompt": "make me a dashboard for this", "intent": ["dashboard"] },
+  { "prompt": "give me a checklist for the release", "intent": ["checklist"] },
+  { "prompt": "let me fill in the token myself", "intent": ["fill in"] },
+  { "prompt": "I wanna see live traffic data", "intent": ["see", "live", "traffic"] },
+  { "prompt": "I wanna see this data live", "intent": ["see", "live"] },
+  { "prompt": "no live here itself", "intent": ["live", "here"] },
+  { "prompt": "keep an eye on my PR while you work", "intent": ["keep an eye on", "PR", "while you work"] },
+  { "prompt": "show me the gold price", "intent": ["show", "price"] },
+  { "prompt": "watch the deploy logs for me", "intent": ["watch", "logs"] },
+  { "prompt": "monitor the error rate and the progress of the migration", "intent": ["monitor", "progress"] },
+  { "prompt": "track these metrics as they change", "intent": ["metrics"] }
+]

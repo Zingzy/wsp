@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "slate_catalog",
-    "description": "What a slate can hold; read it before slate_write.",
+    "description": "What a slate can hold: the pieces for a live dashboard, metrics, logs, progress, a form or a checklist, and the runs that keep it fresh. Read it before slate_write whenever the person wants to see, watch or monitor something here.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -31,7 +31,7 @@
   },
   "cloudOn": {
     "name": "slate_catalog",
-    "description": "What a slate can hold; read it before slate_write.",
+    "description": "What a slate can hold: the pieces for a live dashboard, metrics, logs, progress, a form or a checklist, and the runs that keep it fresh. Read it before slate_write whenever the person wants to see, watch or monitor something here.",
     "inputSchema": {
       "type": "object",
       "properties": {

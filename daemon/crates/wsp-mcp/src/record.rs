@@ -31,12 +31,15 @@ pub struct Server {
     pub reads_here: Vec<String>,
 }
 
-/// What the server greets with, with WSP_CLOUD off and on: the TypeScript server words it for the state it runs in.
+/// What the server greets with, with WSP_CLOUD off and on, and a thread's own server's, which opens with its slate:
+/// the TypeScript server words it for the state it runs in.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Instructions {
     pub cloud_off: String,
     pub cloud_on: String,
+    pub scoped_cloud_off: String,
+    pub scoped_cloud_on: String,
 }
 
 pub fn server() -> Server {
