@@ -56,7 +56,7 @@ export function editDistance(a: string, b: string, cap = 3): number {
 }
 
 /** The option closest to word within max edits, ties to the first listed; undefined when none is close. */
-export function nearest(word: string, options: Iterable<string>, max = 2): string | undefined {
+export function nearest(word: string, options: Iterable<string>, max = word.length >= 7 ? 3 : 2): string | undefined {
   let found: string | undefined;
   let best = max + 1;
   for (const option of options) {
