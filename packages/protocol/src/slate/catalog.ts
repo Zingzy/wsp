@@ -143,17 +143,17 @@ function sourceEntry(name: string): string {
 const RUNS = `runs: a command the slate starts with no turn of yours.
 <run name="check" cmd='gh api "repos/$REPO/issues/$ID"' env={{ REPO: $repo, ID: $id }} />
 <run name="py">{\`python3 -c "print('both quotes, $HOME')"\`}</run>
-Quoted cmd takes no escapes; the block above takes any text as written.
+A quoted cmd takes no escapes; the block takes any text.
 <run name="ci" cmd='gh secret set TOKEN --repo "$REPO"' stdin={$token} env={{ REPO: $repo }} on="host" />
-The command is literal, run by bash -c in the thread's folder; values reach it only as env ($ID), args ($1) or stdin. A secret goes only on stdin or in the program's own env, never after a flag (W011).
+The command is literal, run by bash -c in the thread's folder; values reach it only as env ($ID), args ($1) or stdin. A secret goes only on stdin or in the program's own env, never after a flag.
 on: host, else the thread. timeout: seconds, default 60, at most 600. every={60}: seconds, at least 10, while shown; always ticks hidden too. once: no restart while running.
-start($run) in a handler or <when>. The person approves each command once; until then it reads held. confirm="Stop it?" or confirm={\`Kill \${$name}?\`} asks every start.
-$run reads ${SLATE_RUN_FIELDS.join(" ")}; state is idle held running done failed cancelled; output is scrubbed of secrets.
+start($run) in a handler or <when>. The person allows each command once on the slate; until then it reads held, an every= run from the write, and starts once allowed. slate_state start runs only what they allowed "Always in this thread". confirm="Stop it?", or a formula, asks every start.
+$run reads ${SLATE_RUN_FIELDS.join(" ")}; state is idle (never started) held running done failed cancelled; output is scrubbed of secrets.
 Chain: <when done={$check} do={set($ok, $check.exit == 0)} />; done fires on any outcome.
-Code written only for the slate goes in a <file name="x.py"> and runs as "$SLATE_DIR/x.py"; code the project already has is called where it is.
-<run name="list" tool="server.tool" args={{ id: $id }} /> calls an MCP tool; resource="server:uri" reads one. slate_catalog <server> lists its tools. json is its structured result, else its text parsed. The person allows a server once per thread; a destructive tool asks every start. A secret in args returns as [secret:name].
-A tool slate_catalog marks text only answers prose: json stays empty unless the text is JSON, and out draws as one block.
-then='python3 inbox.py' on any run pipes its raw result (structured as JSON, else text) to that literal command; its stdout, as JSON, becomes json; out stays raw. Approved with the run; its failure fails the run.`;
+Code only the slate uses goes in <file name="x.py"> and runs as $SLATE_DIR/x.py; project code runs where it is.
+<run name="list" tool="server.tool" args={{ id: $id }} /> calls an MCP tool; resource="server:uri" reads one; slate_catalog <server> lists its tools. json is its structured result, else its text parsed. The person allows a server once per thread, a destructive tool every start. A secret in args returns as [secret:name].
+A tool marked text only: json stays empty unless its text is JSON; out draws as one block.
+then='python3 inbox.py' pipes any run's raw result (JSON, else text) to that literal command; its stdout as JSON becomes json, out stays raw. Approved with the run; its failure fails the run.`;
 
 function functionsEntry(): string {
   const shown = new Set(["percent", "pct", "tokens", "usd", "duration", "ago", "until", "date", "plural", "word", "short", "num", "json", "contains", "orElse", "len", "first", "pluck"]);

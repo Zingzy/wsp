@@ -349,6 +349,22 @@ describe("the slate v2 host", () => {
     release();
   }, 30_000);
 
+  it("a timed run the person has not allowed reads held from the write, and the write's sketch says it waits on them", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-timed-held-");
+    const wrote = await rt.slates.write({ text: TICKER }, asThread);
+    const waits = "$tick waits for the person to allow it on the slate, which asks them; it starts once they do";
+    expect(wrote.problems).toContainEqual(expect.objectContaining({ code: "R913", message: waits }));
+    expect(wrote.text).toContain(`R913 slate: ${waits}`);
+    expect(wrote.text).toContain("$tick: held needs your approval");
+    const view = (await rt.slates.get(threadId))!;
+    expect(view.values["tick"]).toMatchObject({ state: "held" });
+    expect(view.asks.map(a => a.run)).toEqual(["tick"]);
+    const read = await rt.slates.read({}, asThread);
+    expect(read.runs).toMatchObject({ $tick: { state: "held" } });
+    const again = await rt.slates.state({ start: ["tick"] }, asThread);
+    expect(again.problems).toContainEqual(expect.objectContaining({ code: "R913", message: "$tick was not started: it already waits for the person to allow it on the slate, and starts once they do" }));
+  });
+
   it("a read answers the JSX-like form by default and the JSON document only when asked", async () => {
     const { rt, asThread } = await threadOn("wsp-slates-read-");
     await rt.slates.write({ text: TICKER }, asThread);
@@ -567,7 +583,7 @@ describe("the slate v2 host, round 4", () => {
     await rt.slates.write({ text: PROBE }, asThread);
 
     const before = await rt.slates.state({ start: ["probe"] }, asThread);
-    expect(before.problems).toContainEqual(expect.objectContaining({ code: "R913", message: `$probe was not started: it starts from here once the person says "Always in this thread" to it` }));
+    expect(before.problems).toContainEqual(expect.objectContaining({ code: "R913", message: `$probe was not started: you start only a run the person allowed "Always in this thread"; a press, a <when> or every= starts it and the slate asks them` }));
     const untouched = (await rt.slates.get(threadId))!;
     expect(untouched.values["probe"]).toMatchObject({ state: "idle" });
     expect(untouched.asks).toEqual([]);
@@ -596,7 +612,7 @@ describe("the slate v2 host, round 4", () => {
 
     // A run that asks every time waits for the person whoever starts it.
     const ask = await rt.slates.state({ start: ["ask"] }, asThread);
-    expect(ask.problems.map(p => p.code)).toContain("R913");
+    expect(ask.problems).toContainEqual(expect.objectContaining({ code: "R913", message: "$ask was not started: it has confirm, so it asks the person every start and only a press or a <when> starts it" }));
     expect((await rt.slates.get(threadId))!.values["ask"]).toMatchObject({ state: "idle" });
 
     // A held that reads false holds nothing, and the sketch says nothing of it.

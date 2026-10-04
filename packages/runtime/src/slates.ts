@@ -549,7 +549,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   const scrub = (r: SlateRecord, text: string): string => runs.secrets.scrub(r.threadId, text);
 
   const sketched = (r: SlateRecord, views: ReadonlyMap<string, SlateJson | undefined>, check = false): string => {
-    const text = sketchSlate(r.document, r.values, { ...contextOf(r, views), version: r.version, ...(check ? { check: true } : {}) });
+    const text = sketchSlate(r.document, r.values, { ...contextOf(r, views), version: r.version, ...(check ? { check: true } : { problems: problemsOf(r, views) }) });
     return scrub(r, /^slate v\d/.test(text) ? text : text.replace(/^slate\b/, `slate v${r.version}`));
   };
   const sketchOf = async (r: SlateRecord): Promise<string> => sketched(r, await viewsFor(r));
@@ -583,7 +583,9 @@ export function createSlates(deps: SlatesDeps): Slates {
       for (const path of boundPaths(r.document)) if (!path.startsWith("$") && resolveIn(views, path) === undefined) found.push(problem("R900", "data-missing", `${path} has no value yet`));
       for (const name of Object.keys(r.document.runs)) {
         const rec = r.values[name];
-        if (isRunRecord(rec) && rec.state === "held") found.push(problem("R913", "run-held", `$${name} waits: ${rec.why ?? HELD_APPROVAL}`));
+        if (!isRunRecord(rec) || rec.state !== "held") continue;
+        const why = rec.why ?? HELD_APPROVAL;
+        found.push(problem("R913", "run-held", why === HELD_APPROVAL || why === HELD_CONFIRM ? `$${name} waits for the person to allow it on the slate, which asks them; it starts once they do` : `$${name} waits: ${why}`));
       }
     }
     return found;
@@ -955,6 +957,14 @@ export function createSlates(deps: SlatesDeps): Slates {
     r.revision += 1;
     records.set(r.threadId, r);
     armTimers(r);
+    if (next !== null) {
+      // A timed run the person has not allowed asks now, shown or not, so this answer and their slate both say it waits.
+      const asking = await viewsFor(r);
+      for (const [run, decl] of Object.entries(next.runs)) {
+        const rec = r.values[run];
+        if (decl.every !== undefined && isRunRecord(rec) && rec.state === "idle" && provisional(r, run).state === "held") r.values[run] = asJson(startNow(r, run, "timer", asking).record);
+      }
+    }
     await save(r);
     announce(r, cause, by, pieces);
     if (next !== null && /\bpr\.checks\b/.test(JSON.stringify(next))) deps.watchPr?.(r.workspaceId);
@@ -1065,8 +1075,12 @@ export function createSlates(deps: SlatesDeps): Slates {
             const near = slateNearest(run, Object.keys(doc.runs));
             throw invalid([problem("K702", "run-name", `$${run} is not a run`, near !== undefined ? { fix: `$${near}` } : {})], []);
           }
+          const decl = doc.runs[run]!;
+          const rec = r.values[run];
           if (approvedAlways(r, run)) starts.push({ run, by: by === "agent" ? "agent" : "person" });
-          else held.push(problem("R913", "run-held", `$${run} was not started: it starts from here once the person says "Always in this thread" to it`));
+          else if (isRunRecord(rec) && rec.state === "held") held.push(problem("R913", "run-held", `$${run} was not started: it already waits for the person to allow it on the slate, and starts once they do`));
+          else if (decl.kind !== "resource" && decl.confirm !== undefined) held.push(problem("R913", "run-held", `$${run} was not started: it has confirm, so it asks the person every start and only a press or a <when> starts it`));
+          else held.push(problem("R913", "run-held", `$${run} was not started: you start only a run the person allowed "Always in this thread"; a press, a <when> or every= starts it and the slate asks them`));
         }
         const input: { path: string; value: SlateJson }[] = [];
         for (const [written, value] of Object.entries(p.values ?? {})) {
