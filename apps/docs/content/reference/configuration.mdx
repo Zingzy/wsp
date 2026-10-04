@@ -38,7 +38,7 @@ The app keeps its own preferences in the browser: sidebar width, right panel sta
 | `0.0.0.0:7070` on the machine | the helper |
 | `localhost:<port>` on your computer | a forward: a link the machine printed, or a sign-in callback; 1024 and up |
 
-The host port binds loopback only. Port `0` picks a free one. The desktop app reads `WSP_PORT`.
+The host port binds loopback only. Port `0` picks a free one. The desktop app opens on whichever port the running host holds.
 
 ## On a machine
 
@@ -69,7 +69,6 @@ The `PATH` every shell gets, in order: `/root/.local/bin`, `/usr/local/sbin`, `/
 | `SOLARI_API_KEY` | your computer | the provider key |
 | `ANTHROPIC_API_KEY` | your computer, then the machine at create | Claude Code by the token |
 | `WSP_HOME` | your computer | moves `~/.wsp` |
-| `WSP_PORT` | the desktop app | the port it serves on |
 | `WSP_LIVE=1` | the repository | runs the live tests that create real machines |
 | `BROWSER=/usr/local/bin/wsp-open` | the machine | routes sign-in pages through wsp |
 | `CLAUDE_CONFIG_DIR=/root/.claude-cfg` | the machine | Claude Code's config home |
