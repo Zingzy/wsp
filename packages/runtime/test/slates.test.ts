@@ -365,6 +365,18 @@ describe("the slate v2 host", () => {
     expect(again.problems).toContainEqual(expect.objectContaining({ code: "R913", message: "$tick was not started: it already waits for the person to allow it on the slate, and starts once they do" }));
   });
 
+  it("a read asked for a run or a value without its $ says where it is, and one that names no source says so", async () => {
+    const { rt, asThread } = await threadOn("wsp-slates-misread-");
+    await rt.slates.write({ text: TICKER }, asThread);
+    const read = await rt.slates.read({ values: ["tick", "ticks", "spot.json", "time.now", "$ticks", "len(git.changed)"] }, asThread);
+    expect(read.problems.filter(p => p.code === "X401")).toEqual([
+      { code: "X401", name: "path-unknown", message: "tick is not a source: $tick is a run, read as $tick; its record is also under runs.$tick", fix: "$tick" },
+      { code: "X401", name: "path-unknown", message: "ticks is not a source: $ticks is a value, read as $ticks", fix: "$ticks" },
+      { code: "X401", name: "path-unknown", message: "spot is not a source and not this slate's; a slate's own names start with $" },
+    ]);
+    expect(read.text).toContain("X401 slate: tick is not a source");
+  });
+
   it("a read answers the JSX-like form by default and the JSON document only when asked", async () => {
     const { rt, asThread } = await threadOn("wsp-slates-read-");
     await rt.slates.write({ text: TICKER }, asThread);

@@ -23,6 +23,7 @@ import {
   slateDependencies,
   slateEqual,
   slateNearest,
+  SLATE_SOURCES,
   slateStep,
   slateText,
   threadWord,
@@ -181,6 +182,16 @@ const HELD_APPROVAL = "needs your approval";
 export const SLATE_SEND_KEY = "send";
 
 const problem = (code: string, name: string, message: string, extra: Partial<SlateProblem> = {}): SlateProblem => ({ code, name, message, ...extra });
+
+/** A path a read named that can only read null: one of the slate's own names without its $, or no source at all. */
+function misread(doc: SlateDoc | null, path: string): SlateProblem[] {
+  if (!/^[A-Za-z_]\w*(\.\w+|\[\d+\])*$/.test(path)) return [];
+  const root = path.split(/[.[]/)[0]!;
+  if (doc?.runs[root] !== undefined) return [problem("X401", "path-unknown", `${path} is not a source: $${root} is a run, read as $${path}; its record is also under runs.$${root}`, { fix: `$${path}` })];
+  if (doc?.values[root] !== undefined || doc?.derived[root] !== undefined) return [problem("X401", "path-unknown", `${path} is not a source: $${root} is a value, read as $${path}`, { fix: `$${path}` })];
+  if (SLATE_SOURCES[root] === undefined) return [problem("X401", "path-unknown", `${root} is not a source and not this slate's; a slate's own names start with $`)];
+  return [];
+}
 
 /** A refusal for a reason other than what was written: the version moved, too fast, nothing to undo. */
 const refused = (p: SlateProblem, kind: string): Error => Object.assign(new Error(`${p.code} ${p.name}: ${p.message}`), { kind, code: p.code });
@@ -548,8 +559,8 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   const scrub = (r: SlateRecord, text: string): string => runs.secrets.scrub(r.threadId, text);
 
-  const sketched = (r: SlateRecord, views: ReadonlyMap<string, SlateJson | undefined>, check = false): string => {
-    const text = sketchSlate(r.document, r.values, { ...contextOf(r, views), version: r.version, ...(check ? { check: true } : { problems: problemsOf(r, views) }) });
+  const sketched = (r: SlateRecord, views: ReadonlyMap<string, SlateJson | undefined>, check = false, asked: SlateProblem[] = []): string => {
+    const text = sketchSlate(r.document, r.values, { ...contextOf(r, views), version: r.version, ...(check ? { check: true } : { problems: [...asked, ...problemsOf(r, views)] }) });
     return scrub(r, /^slate v\d/.test(text) ? text : text.replace(/^slate\b/, `slate v${r.version}`));
   };
   const sketchOf = async (r: SlateRecord): Promise<string> => sketched(r, await viewsFor(r));
@@ -1125,7 +1136,8 @@ export function createSlates(deps: SlatesDeps): Slates {
       const ctx = contextOf(r, views);
       const doc = r.document;
       const clean = (v: SlateJson): SlateJson => mapStrings(v, s => scrub(r, s));
-      const sketch = p.sketch !== false ? sketched(r, views) : `slate v${r.version}`;
+      const misreads = paths.flatMap(path => misread(doc, path));
+      const sketch = p.sketch !== false ? sketched(r, views, false, misreads) : `slate v${r.version}`;
       return {
         version: r.version,
         text: [sketch, ...(p.text !== false && doc !== null ? ["", printSlate(doc)] : [])].join("\n"),
@@ -1134,7 +1146,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         state: Object.fromEntries(Object.entries(r.values).filter(([name]) => doc?.runs[name] === undefined).map(([name, v]) => [`$${name}`, clean(v)])),
         derived: Object.fromEntries(Object.keys(doc?.derived ?? {}).map(name => [`$${name}`, clean(ctx.resolve(`$${name}`) ?? null)])),
         runs: Object.fromEntries(Object.keys(doc?.runs ?? {}).map(name => [`$${name}`, clean(r.values[name] ?? null)])),
-        problems: problemsOf(r, views),
+        problems: [...misreads, ...problemsOf(r, views)],
         comments: r.comments,
         approvals: Object.fromEntries(Object.entries(r.approvals).map(([k, a]) => [k, a.state])),
       };
