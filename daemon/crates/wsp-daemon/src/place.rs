@@ -10,8 +10,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use sha2::{Digest as _, Sha256};
 use wsp_frames::{
-    is_under_path, landed_files_script, numbers, own_marks, place_daemon_paths, place_owned_paths, words, Base64Bytes, PlaceFile,
-    PlacePublicKey, PlaceReport, PlaceSignature, Platform, WorkspaceSize,
+    is_under_path, landed_files_script, numbers, outside_marks, outside_sweep_script, own_marks, place_daemon_paths, place_owned_paths,
+    words, Base64Bytes, PlaceFile, PlacePublicKey, PlaceReport, PlaceSignature, Platform, WorkspaceSize,
 };
 
 /// The place file as it stands, or nothing when this computer is no place: a file that is there and is not one
@@ -455,6 +455,14 @@ pub(crate) fn sweep_workspace_profile(profile: &Path, read: &dyn Fn(&str) -> Str
     std::fs::remove_file(profile).ok().map(|()| profile.to_string_lossy().into_owned())
 }
 
+/// Takes what the setup wrote outside the home off this computer, read off the list in wsp's install folder by the
+/// one leave script the host's own leave runs, so it goes before that folder does. `root` is the folder /usr/local
+/// and /opt sit under, empty for this computer's own. The bound is the host's own for that script: it hashes every
+/// binary the setup wrote, and one killed part way leaves the rest behind once the list goes with the folder.
+pub(crate) fn sweep_outside_home(root: &str) -> Vec<String> {
+    outside_marks(&sh_stdout_within(&outside_sweep_script(root), Duration::from_secs(60)))
+}
+
 /// Takes wsp's install folder off this computer: every link in the links folder whose own target is under the
 /// prefix, then the prefix whole. A link is read, never followed, so a command of the computer's own there and a
 /// link pointing anywhere else stay; a prefix that is itself a link stays too, since what it points at is not
@@ -463,6 +471,11 @@ pub(crate) fn sweep_tool_prefix(prefix: &Path, links: &Path) -> Vec<String> {
     let Ok(meta) = std::fs::symlink_metadata(prefix) else { return Vec::new() };
     if !meta.is_dir() {
         return vec![words::place_kept_for_link(prefix.to_string_lossy())];
+    }
+    // The list of what the setup wrote outside the home goes last in a leave that finished; one still holding lines
+    // is the only record of what a leave cut short left behind.
+    if std::fs::symlink_metadata(prefix.join("landed")).is_ok_and(|list| list.is_file() && list.len() > 0) {
+        return vec![words::place_outside_left(prefix.to_string_lossy())];
     }
     let mut removed = Vec::new();
     for entry in std::fs::read_dir(links).into_iter().flatten().flatten() {
@@ -1398,6 +1411,23 @@ mod tests {
     }
 
     #[test]
+    fn an_install_folder_whose_outside_list_still_has_lines_stays_with_its_links_and_is_said() {
+        let root = tempfile::tempdir().unwrap();
+        let prefix = root.path().join("opt-wsp");
+        let links = root.path().join("usr-local-bin");
+        std::fs::create_dir_all(prefix.join("go/bin")).unwrap();
+        std::fs::create_dir_all(&links).unwrap();
+        std::os::unix::fs::symlink(prefix.join("go/bin/x"), links.join("x")).unwrap();
+        std::fs::write(prefix.join("landed"), "dir\t/opt/gcloud\n").unwrap();
+        assert_eq!(sweep_tool_prefix(&prefix, &links), [words::place_outside_left(prefix.to_string_lossy())]);
+        assert!(prefix.join("landed").exists() && std::fs::symlink_metadata(links.join("x")).is_ok());
+        // A list the leave finished with is gone, and an empty one holds nothing back.
+        std::fs::write(prefix.join("landed"), "").unwrap();
+        assert!(sweep_tool_prefix(&prefix, &links).contains(&prefix.to_string_lossy().into_owned()));
+        assert!(!prefix.exists());
+    }
+
+    #[test]
     fn an_install_folder_that_is_a_link_stays_and_is_said() {
         let root = tempfile::tempdir().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
@@ -1428,5 +1458,31 @@ mod tests {
         // A computer that never loaded one is asked nothing and says nothing.
         let never = |_: &str| -> String { panic!("nothing to unload") };
         assert_eq!(sweep_workspace_profile(&profile, &never), None);
+    }
+
+    #[test]
+    fn the_leave_outside_the_home_takes_what_the_list_names_as_wsp_left_it_and_nothing_else() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = std::fs::canonicalize(dir.path()).expect("canonical root");
+        let bin = root.join("usr/local/bin");
+        std::fs::create_dir_all(&bin).expect("bin");
+        std::fs::create_dir_all(root.join("opt/wsp")).expect("prefix");
+        std::fs::write(bin.join("claude"), "claude 2.1.280\n").expect("claude");
+        std::fs::write(bin.join("jq"), "the box's own jq\n").expect("jq");
+        std::fs::write(bin.join("gopls"), "the person's own gopls\n").expect("gopls");
+        // claude as wsp left it, gopls at bytes the person has written since; jq is on no line.
+        let ledger = format!(
+            "{}\t{}\n{}\t{}\n",
+            sha256_hex(b"claude 2.1.280\n"),
+            bin.join("claude").display(),
+            sha256_hex(b"gopls as wsp left it\n"),
+            bin.join("gopls").display()
+        );
+        std::fs::write(root.join("opt/wsp/landed"), ledger).expect("ledger");
+        let swept = sweep_outside_home(&root.to_string_lossy());
+        assert_eq!(swept, [bin.join("claude").to_string_lossy().into_owned()]);
+        assert!(!bin.join("claude").exists());
+        assert!(bin.join("jq").exists() && bin.join("gopls").exists());
+        assert!(!root.join("opt/wsp/landed").exists(), "a leave that finished takes its list too");
     }
 }
