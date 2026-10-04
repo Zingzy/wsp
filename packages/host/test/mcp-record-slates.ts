@@ -47,6 +47,12 @@ export const SLATE_ANSWERED: Record<string, Case[]> = {
   slate_state: [
     { case: "a value set", arguments: { values: { "$steps[2].done": true, "$name": "wsp \u0085 landing" }, if_version: 7 }, env: TURN, replies: { "slates.state": reply({ version: 8, text: "slate v8, 3 pieces, 1 bound, 0 problems" }) } },
     { case: "behind", arguments: { values: { $x: 1 }, if_version: 1 }, replies: { "slates.state": refused({ error: "V750 version-behind: the slate is at v4: read it and write again" }) } },
+    {
+      case: "a run started and one held",
+      arguments: { start: ["check", "$deploy"] },
+      env: TURN,
+      replies: { "slates.state": reply({ version: 8, text: "slate v8, 3 pieces, 1 bound, 1 problem\nruns:\n  $check: running, refreshing (exit 0, 840 ms)", problems: [{ code: "R913", name: "run-held", message: "$deploy was not started: it starts from here once the person says \"Always in this thread\" to it" }] }) },
+    },
   ],
   slate_read: [
     {
