@@ -2222,7 +2222,8 @@ function snippetAround(text: string, at: number, length: number): string {
   const to = Math.min(text.length, at + length + 80);
   return `${from > 0 ? "…" : ""}${text.slice(from, to).replace(/\s+/g, " ").trim()}${to < text.length ? "…" : ""}`;
 }
-/** Index rows kept per workspace; the oldest finished rows fall off, a running one never does. */
+/** Index rows kept per workspace; the oldest finished rows fall off, a running one never does. A row that falls off
+ * still holding its launch's commit takes its unread card with it. */
 const SESSION_INDEX_CAP = 200;
 /** A turn boundary waits this long for more before the transcript is written; measured at one put per
  * event, 5000 events cost 4 s of memory-store clones and 6.6 s of file rewrites after the last turn. */
@@ -2303,8 +2304,9 @@ interface SessionIndexRecord {
   /** reply is the held status of a turn whose result landed while its process still ran, on a row still running;
    * run is where that turn is on its machine, so a host that comes back re-opens it rather than failing it, and
    * turnToken is what that surviving process still has in its environment, so the host that re-opens it can answer
-   * for it. All three are written for a running row alone, as is snapshot, the commit the turn's launch took of its
-   * folder, which the turn's changes are read against wherever it ends. */
+   * for it. All three are written for a running row alone. snapshot is the commit the turn's launch took of its
+   * folder, which the turn's changes are read against wherever it ends; written while the turn runs and until that
+   * read is in. */
   sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; run?: string; turnToken?: string; scopeDeviceId?: string; snapshot?: string })[];
   /** Every thread of the workspace by its runtime id; absent on a document from before threads had a record. */
   threads?: Record<string, ThreadRecord>;
@@ -3696,7 +3698,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // Beside the turn token and for the same reason: the process out there still holds this device, so a host
         // that re-opens the turn has to know which one to take away when it ends.
         ...(s.view.status === "running" && s.scopeDeviceId !== undefined ? { scopeDeviceId: s.scopeDeviceId } : {}),
-        ...(s.view.status === "running" && s.snapshot !== undefined ? { snapshot: s.snapshot } : {}),
+        ...(s.snapshot !== undefined ? { snapshot: s.snapshot } : {}),
       }));
     const threads: Record<string, ThreadRecord> = {};
     for (const [threadId, { workspaceId: on, ...held }] of threadRecords) if (on === workspaceId) threads[threadId] = held;
@@ -6081,6 +6083,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await Promise.all(moved.map(id => store.delete(TRANSCRIPTS, id)));
       for (const id of await store.keys(WORKSPACES)) if (!transcriptIndex.has(id)) await loadIndex(id);
       const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string; snapshot?: string }[] = [];
+      /** Turns that ended while their card was still being read: the commit stayed on the row for this host to read. */
+      const unread: { view: SessionView; turnId: string; snapshot?: string }[] = [];
       for (const raw of await store.list(SESSIONS)) {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
@@ -6146,6 +6150,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             void persistSessions(row.view.workspaceId);
           };
           if (view.status === "running") left.push(row);
+          else if (row.snapshot !== undefined) unread.push(row);
           sessions.set(view.id, row);
         }
       }
@@ -6160,6 +6165,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         else if (answer === "gone") settleCut(row, RUN_GONE_LINE, () => RUN_GONE_LINE);
       }
       for (const workspaceId of new Set(left.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
+      for (const row of unread) {
+        const { workspaceId, threadId, cwd, claudeSessionId, id, startedAt } = row.view;
+        const entry = live.get(workspaceId)!;
+        const from = row.snapshot!;
+        void (async () => {
+          const read =
+            threadId === undefined ||
+            cwd === undefined ||
+            turnWritten(await openTranscript(workspaceId), row.turnId).changes ||
+            (await readTurnChanges(entry, { sessionId: claudeSessionId ?? id, turnId: row.turnId, threadId, cwd, from, startedAt: startedAt ?? Date.now() }));
+          delete row.snapshot;
+          if (read || !closing) await persistSessions(workspaceId);
+        })().catch((e: unknown) => console.warn(`what ${row.turnId} changed was not read: ${e instanceof Error ? e.message : String(e)}`));
+      }
       // The re-attach above has settled the rows the machines no longer hold, so a sync waiting out a running turn reads rows that are in.
       for (const entry of toSync) void syncDaemon(entry);
       void Promise.all([...live.keys()].map(id => rereadHeld(id, "record load").catch((e: unknown) => console.warn(`workspace ${id} was not read again: ${e instanceof Error ? e.message : String(e)}`))));
@@ -8805,8 +8824,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Settles a running row whose process the runtime ended or lost before the harness's own session.end: to the reply
    * it held, whose line already went, or failed with `cutLine` as the parent's word when it never replied. The
    * session.end carries `reason` either way. The one rule for both roads, the runtime's end() and the restart load. */
-  const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive }, reason: string, cutLine: (endedAt: number) => string): void => {
+  const settleCut = (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; snapshot?: string }, reason: string, cutLine: (endedAt: number) => string): void => {
     const reply = s.turnLive?.reply;
+    delete s.snapshot;
     const endedAt = Date.now();
     s.view.status = reply ?? "failed";
     s.view.endedAt = endedAt;
@@ -8896,6 +8916,29 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const sharedFolder = (workspaceId: string, threadId: string, cwd: string, from: number, to: number): boolean =>
     [...sessions.values()].some(({ view }) => view.workspaceId === workspaceId && view.threadId !== threadId && view.cwd === cwd && (view.startedAt ?? 0) <= to && (view.endedAt ?? to) >= from);
 
+  /** What a turn changed in its folder: a snapshot now, the range from the commit its launch took, and the files in it
+   * recorded under the turn. True once the range is read, whether or not it held anything; a turn that changed nothing
+   * records nothing. */
+  const readTurnChanges = async (entry: LiveWorkspace, turn: { sessionId: string; turnId: string; threadId: string; cwd: string; from: string; startedAt: number }): Promise<boolean> => {
+    const { sessionId, turnId, threadId, cwd, from, startedAt } = turn;
+    const workspaceId = entry.record.id;
+    const to = await snapshotOf(entry, cwd);
+    if (to === undefined) return false;
+    const range = await withDaemon(entry, ask => ask({ op: "git.turn", cwd, from, to })).catch((e: unknown) => {
+      console.warn(`what ${turnId} changed in ${cwd} was not read: ${e instanceof Error ? e.message : String(e)}`);
+      return undefined;
+    });
+    const read = GitDiffReply.safeParse(range);
+    if (!read.success) return false;
+    const files = read.data.files.map(({ path, kind, additions, deletions }) => ({ path, kind, additions, deletions }));
+    const moved = read.data.moved;
+    // A turn that only moved HEAD (a checkout or pull with no edit of its own) still records its line.
+    if (files.length === 0 && moved.length === 0) return true;
+    const shared = sharedFolder(workspaceId, threadId, cwd, startedAt, Date.now());
+    record({ type: "session.changes", workspaceId, sessionId, turnId, threadId, from, to, files, moved, ...(shared ? { shared: true as const } : {}) });
+    return true;
+  };
+
   /** What a turn is once its harness session exists: the one road from the harness's events to the transcript, the
    * index, the bus and the row, whether the session was launched here or re-opened on the machine after a restart.
    * A re-opened turn's run is read from its first byte, so what the transcript already holds for this turn is
@@ -8981,32 +9024,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, notifyRoad, turnToken, scopeDeviceId } = t;
     const workspaceId = entry.record.id;
     const { lines: deltasWritten, subagents: subagentsWritten, reply: recordedReply, started: startWritten, changes: changesWritten } = t.written ?? { lines: 0, subagents: 0, started: false, changes: false };
-    /** What the turn changed, read once at the first of its reply and its exit: a second snapshot, the range from the
-     * launch's, and the files in it recorded under the turn. A turn that changed nothing records nothing. */
+    /** What the turn changed, read once at the first of its reply and its exit. */
     let changesRead = changesWritten;
+    /** While the read is out the turn's ending keeps the launch's commit on its row, so a host that goes before the
+     * card is in leaves the read to the next host. Once that ending is on disk (endWritten), a read that lands after
+     * it writes the row again to take the commit off. */
+    let changesOut = false;
+    let endWritten = false;
     const readChanges = (sessionId: string): void => {
       if (changesRead || t.snapshot === undefined) return;
       changesRead = true;
+      changesOut = true;
       const { from: taken, cwd } = t.snapshot;
       const startedAt = view.startedAt ?? Date.now();
       void (async () => {
         const from = await taken;
-        if (from === undefined) return;
-        const to = await snapshotOf(entry, cwd);
-        if (to === undefined) return;
-        const range = await withDaemon(entry, ask => ask({ op: "git.turn", cwd, from, to })).catch((e: unknown) => {
-          console.warn(`what ${turnId} changed in ${cwd} was not read: ${e instanceof Error ? e.message : String(e)}`);
-          return undefined;
-        });
-        const read = GitDiffReply.safeParse(range);
-        if (!read.success) return;
-        const files = read.data.files.map(({ path, kind, additions, deletions }) => ({ path, kind, additions, deletions }));
-        const moved = read.data.moved;
-        // A turn that only moved HEAD (a checkout or pull with no edit of its own) still records its line.
-        if (files.length === 0 && moved.length === 0) return;
-        const shared = sharedFolder(workspaceId, threadId, cwd, startedAt, Date.now());
-        record({ type: "session.changes", workspaceId, sessionId, turnId, threadId, from, to, files, moved, ...(shared ? { shared: true as const } : {}) });
-      })();
+        return from !== undefined && (await readTurnChanges(entry, { sessionId, turnId, threadId, cwd, from, startedAt }));
+      })().then(read => {
+        changesOut = false;
+        const row = sessions.get(rowId);
+        if (!endWritten || row?.turnId !== turnId || row.snapshot === undefined) return;
+        delete row.snapshot;
+        // A closing host's read fails as its daemon channel shuts, and leaves the commit on disk for the next host.
+        if (read || !closing) void persistSessions(workspaceId);
+      });
     };
     // The reply and its line to the parent go together, so one gate stands for both.
     let replyRecorded = recordedReply !== undefined;
@@ -9419,6 +9460,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // be dropped, so the rows and the waits are ended here.
       closeOpenAsks();
       ended = true;
+      const row = sessions.get(rowId);
+      if (row?.turnId === turnId) delete row.snapshot;
       settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive }, reason, () => reason);
       void persistSessions(workspaceId);
       void started.interrupt().catch(() => {});
@@ -9443,7 +9486,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const settled = (status: TurnStatus): void => {
       const row = sessions.get(rowId);
       if (row !== undefined && row.turnToken === turnToken) delete row.turnToken;
-      if (row?.turnId === turnId) delete row.snapshot;
+      if (row?.turnId === turnId && !changesOut) delete row.snapshot;
       // The process is gone, so the token in its environment names nothing that can be asked for anything: it is
       // taken away here, the one exit both the reply road and the failure road reach.
       if (scopeDeviceId !== undefined) {
@@ -9460,6 +9503,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       calls.clear();
       leadAsks.delete(threadId);
       void persistSessions(workspaceId);
+      endWritten = true;
       // Only a turn that ended on its own: a turn this host ended is one whose workspace is going away under it,
       // and the harness's own store for it goes with the machine, so the read would reach a machine that is being
       // taken down and say so in the log for every thread on it.
@@ -10500,6 +10544,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Marks the record as this process's, now; the sweep and the heartbeat timer refresh it and close() clears it. */
   let beat: (() => void) | undefined;
   let closed = false;
+  /** Set as close() starts, before it shuts the daemon channels a card read still out goes over. */
+  let closing = false;
   let ticking: Promise<void> | undefined;
   const arm = (): void => {
     if (closed || beat !== undefined) return;
@@ -12609,6 +12655,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     },
     close: async () => {
+      closing = true;
       await copiesMoving;
       sweepStopped = true;
       sweepTimer?.();

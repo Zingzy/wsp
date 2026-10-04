@@ -18,8 +18,9 @@ const DAEMON_TOKEN = "cafef00d".repeat(3);
 const sha = (n: number): string => String(n).repeat(40).slice(0, 40);
 
 /** A daemon whose snapshots count up and whose range answers what the case gives it; with hold, the first snapshot
- * answers when the case lets it. */
-function fakeDaemon(o: { files?: { path: string; kind: string; additions: number; deletions: number }[]; moved?: string[]; stall?: boolean; hold?: boolean } = {}) {
+ * (or the one numbered) answers when the case lets it, with stallAt that snapshot never answers, and with refuseAt
+ * it is refused. */
+function fakeDaemon(o: { files?: { path: string; kind: string; additions: number; deletions: number }[]; moved?: string[]; stall?: boolean; stallAt?: number; refuseAt?: number; hold?: boolean | number } = {}) {
   const frames: Record<string, unknown>[] = [];
   let snapshots = 0;
   let letGo: () => void = () => {};
@@ -27,10 +28,11 @@ function fakeDaemon(o: { files?: { path: string; kind: string; additions: number
   const answer = async (frame: Record<string, unknown>): Promise<DaemonResponse> => {
     frames.push(frame);
     if (frame["op"] === "git.snapshot") {
-      if (o.stall === true) return new Promise(() => {});
       snapshots += 1;
+      if (o.stall === true || snapshots === o.stallAt) return new Promise(() => {});
       const commit = sha(snapshots);
-      if (o.hold === true && snapshots === 1) await held;
+      if (snapshots === (o.hold === true ? 1 : o.hold)) await held;
+      if (snapshots === o.refuseAt) return { id: 1, ok: false, code: "unsupported", error: "the snapshot was refused" } as DaemonResponse;
       return { id: 1, ok: true, commit } as DaemonResponse;
     }
     if (frame["op"] === "git.turn") return Promise.resolve({ id: 1, ok: true, base: null, truncated: false, moved: o.moved ?? [], files: (o.files ?? []).map(f => ({ ...f, patch: "" })) } as DaemonResponse);
@@ -325,6 +327,59 @@ describe("what a turn changed", () => {
     await new Promise(resolve => setTimeout(resolve, 30));
     expect((await rt.sessions.history(ws.id)).filter(e => e.type === "session.changes")).toEqual([expect.objectContaining({ from: sha(1), to: sha(2) })]);
     expect(daemon.frames.filter(f => f["op"] === "git.turn")).toHaveLength(1);
+  });
+
+  it("reads the card of a turn whose host went after its agent exited and before the card was in, and once", async () => {
+    const files = [{ path: "src/fix.ts", kind: "modified", additions: 4, deletions: 1 }];
+    const daemon = fakeDaemon({ files, stallAt: 2 });
+    const box = restartable(daemon);
+    const { ws, cwd, stored } = await box.begin("fix it");
+    box.run().onEvent({ type: "turn.done", sessionId: "sess-1", result: reply });
+    box.run().onEvent({ type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    box.run().settle(reply);
+    await expect.poll(async () => (await rt!.sessions.list(ws.id))[0]!.status).toBe("completed");
+    await rt!.close();
+
+    const cards = async () => (await rt!.sessions.history(ws.id)).filter(e => e.type === "session.changes");
+    rt = box.host();
+    await expect.poll(cards).toEqual([expect.objectContaining({ from: sha(1), to: sha(3), files })]);
+    await expect.poll(stored).toEqual([expect.objectContaining({ status: "completed" })]);
+    expect((await stored())[0]).not.toHaveProperty("snapshot");
+    await rt.close();
+
+    rt = box.host();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(await cards()).toHaveLength(1);
+    expect(daemon.frames.filter(f => f["op"] === "git.turn")).toEqual([{ op: "git.turn", cwd, from: sha(1), to: sha(3) }]);
+  });
+
+  it("takes the commit off the row of a turn its card read failed on after the exit, so no later host reads it", async () => {
+    const daemon = fakeDaemon({ files: [{ path: "src/fix.ts", kind: "modified", additions: 4, deletions: 1 }], hold: 2, refuseAt: 2 });
+    const box = restartable(daemon);
+    const { ws, stored } = await box.begin("fix it");
+    box.run().onEvent({ type: "turn.done", sessionId: "sess-1", result: reply });
+    box.run().onEvent({ type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    box.run().settle(reply);
+    await expect.poll(stored).toEqual([expect.objectContaining({ status: "completed", snapshot: sha(1) })]);
+    daemon.letGo();
+    await expect.poll(stored).toEqual([expect.objectContaining({ status: "completed" })]);
+    await expect.poll(async () => (await stored())[0]).not.toHaveProperty("snapshot");
+    await rt!.close();
+
+    rt = box.host();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect((await rt.sessions.history(ws.id)).filter(e => e.type === "session.changes")).toEqual([]);
+    expect(daemon.frames.filter(f => f["op"] === "git.turn")).toEqual([]);
+  });
+
+  it("takes the commit off the row of a turn a pause cut, before its process is heard from again", async () => {
+    const daemon = fakeDaemon({ files: [{ path: "src/fix.ts", kind: "modified", additions: 4, deletions: 1 }] });
+    const box = restartable(daemon);
+    const { ws, stored } = await box.begin("fix it");
+    await expect.poll(stored).toEqual([expect.objectContaining({ status: "running", snapshot: sha(1) })]);
+    await rt!.workspaces.nap(ws.id);
+    await expect.poll(stored).toEqual([expect.not.objectContaining({ status: "running" })]);
+    expect((await stored())[0]).not.toHaveProperty("snapshot");
   });
 
   it("takes a snapshot of the project folder a turn runs in, and none of a folder git holds no repo in", async () => {
