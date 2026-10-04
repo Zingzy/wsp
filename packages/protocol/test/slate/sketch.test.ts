@@ -65,10 +65,21 @@ describe("the catalog", () => {
   });
 
   it("answers runs, functions, steps, handlers and examples within their budgets", () => {
-    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(590);
+    // A line for each run attribute, after small models guessed what always and once did, took it from 590 to 660.
+    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(660);
     for (const n of ["functions", "steps", "handlers"]) expect(slateTokens(slateCatalog(n)), n).toBeLessThan(600);
     expect(slateTokens(slateCatalog("examples"))).toBeLessThan(3500);
     for (const e of SLATE_EXAMPLES) expect(parseSlate(e.text).errors, e.title).toEqual([]);
+  });
+
+  it("the runs entry gives each run attribute a line of its own, and says what shown, a failed run, stale and a restart mean", () => {
+    const lines = slateCatalog("runs").split("\n");
+    for (const attr of ["name", "cmd", "env", "every", "always", "once", "timeout", "on", "confirm", "then", "tool"]) expect(lines.some(l => l.startsWith(`${attr}:`) || l.startsWith(`${attr}=`)), attr).toBe(true);
+    const text = slateCatalog("runs");
+    expect(text).toContain("while the Slate tab is on screen in the app");
+    expect(text).toContain("A failed run's out and json are its own, often empty");
+    expect(text).toContain("stale: the command changed since this result.");
+    expect(text).toContain("<value> state and each run's last result outlive an app or host restart.");
   });
 
   it("names the nearest entry for a wrong name", () => {
