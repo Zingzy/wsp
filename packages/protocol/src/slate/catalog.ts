@@ -23,7 +23,7 @@ export const SLATE_RULES: readonly string[] = [
   "prop=\"text\" is literal; prop={formula} reads live data or $values; a text child with {holes} fills a sentence. Nothing in braces is JavaScript.",
   "Props are meaning, never style. held on a button is a sentence that disables it: bind it to a condition.",
   "A list binds to items; item and index read the row.",
-  "A press reaches you only through send(\"literal text\", $path, ...). Chains run without you: <when change={$x} do={start($run)} />, and done={$run} as below.",
+  "A press reaches you only through send(\"literal text\", $path, ...). Chains run without you: <when change={$x} do={start($run)} />, <when done={$run} do={set($y, $run.json.z)} />.",
   "Write once, then patch by id: <props id=\"price\" value={$spot.json.v} /> changes one piece; never resend the whole slate.",
 ];
 
@@ -69,7 +69,7 @@ function index(): string {
     "Slate kit wsp/2, written as JSX-like text. Pieces (attributes; <items>):",
     ...core.map(pieceLine),
     "Every piece: id, when={cond}. tone: default muted good warning bad info accent. emphasis: normal strong quiet.",
-    "On section, column and grid: pad none tight normal loose; surface=\"inset\" sets the group on the app's card ground; align start center end lines children up across it (start when not set).",
+    "On section, column and grid: pad none tight normal loose; surface=\"inset\" sets the group on the app's card ground; align start center end lines children up across it; not set, they fill its width.",
     "icon=\"<lucide name>\" (slate_catalog icons). bars compare categories; time is a chart.",
     "Sources, read only:",
     ...["thread", "usage", "cost", "time", "git", "pr"].map(sourceLine),

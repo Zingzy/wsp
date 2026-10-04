@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import {
-  evaluateSlateExpression, parseSlate, printSlate, runSlateBatch, sketchSlate, slateCatalog, slateStartValues, validateSlate,
+  applySlatePatch, parseSlatePatch, evaluateSlateExpression, parseSlate, printSlate, runSlateBatch, sketchSlate, slateCatalog, slateStartValues, validateSlate,
   SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES, type SlateDoc, type SlateJson, type SlateValues,
 } from "../../src/slate/index.js";
 
@@ -153,5 +153,15 @@ describe("writing commands and fixes", () => {
     const sketch = sketchSlate(doc, { weather: { state: "done", exit: 0, ms: 812, runs: 1, stale: true } });
     expect(sketch).toContain("$weather: done (exit 0, 812 ms), stale: the command changed since it ran");
     expect(sketch).toContain("(hidden)");
+  });
+
+  it("applies the index's one-line patch by id", () => {
+    const line = /<props id="price"[^>]*\/>/.exec(slateCatalog())![0];
+    const doc = compiled(`<slate><run name="spot" cmd="true" /><column><number id="price" label="Price" value={1} /></column></slate>`);
+    const { patch, errors } = parseSlatePatch(line, doc);
+    expect(errors).toEqual([]);
+    const out = applySlatePatch(doc, slateStartValues(doc), patch!);
+    expect(out.errors).toEqual([]);
+    expect(out.document!.pieces.price!.props!.value).toEqual({ bind: "$spot.json.v" });
   });
 });
