@@ -18,6 +18,7 @@ import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime"
 import { serve, type CliIO } from "../src/cli.js";
 import { hereUrl } from "../src/pairing.js";
 import { writeRelayRecord } from "../src/relay-link.js";
+import { deviceKeyOf, readDeviceKeyPair, readRelayRecord } from "../src/account.js";
 import { spawn } from "node:child_process";
 import { addressLines } from "../src/host-lock.js";
 import { httpProbe } from "../src/service.js";
@@ -398,16 +399,25 @@ describe("the lock the host writes", () => {
 describe("a host on loopback that a relay carries traffic to", () => {
   /** A linked box serving its own loopback port, with the relay itself off: what decides here is what a request
    * carries, not whether the tunnel is up. */
-  async function linkedBox(tag: string): Promise<{ h: HostHandle; lines: string[]; runtime: Runtime }> {
+  async function linkedBox(tag: string): Promise<{ h: HostHandle; lines: string[]; runtime: Runtime; statePath: string; home: string }> {
     const dir = mkdtempSync(join(tmpdir(), `wsp-listen-${tag}-`));
     dirs.push(dir);
     const statePath = join(dir, "state.json");
+    const home = join(dir, "home");
+    mkdirSync(home);
     writeRelayRecord(statePath, { relayUrl: "http://127.0.0.1:1", hostId: "h1", token: "relay-token", name: "box", linkedAt: new Date().toISOString() });
     const lines: string[] = [];
     const runtime = testRuntime();
-    handle = await serve(quietIO(lines), { port: 0, statePath, webDir: fakeWebDir(), runtime });
-    return { h: handle, lines, runtime };
+    handle = await serve(quietIO(lines), { port: 0, statePath, webDir: fakeWebDir(), runtime, home });
+    return { h: handle, lines, runtime, statePath, home };
   }
+
+  it("records the key of the wsp home it was handed, minted there, on a record linked before it had one", async () => {
+    const { statePath, home } = await linkedBox("relay-key");
+    const minted = readDeviceKeyPair(home);
+    expect(minted).toBeDefined();
+    expect(readRelayRecord(statePath)?.deviceKey?.fingerprint).toBe(deviceKeyOf(minted!).fingerprint);
+  });
 
   it("serves its own computer's app the token's digest in the page, exactly as it did before it was linked", async () => {
     const { h } = await linkedBox("relay-here");

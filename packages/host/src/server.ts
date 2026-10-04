@@ -96,6 +96,8 @@ export interface HostOptions {
   release?: ReleaseWatch;
   /** How this host restarts itself for host.restart; absent, the op is refused. */
   restart?: RestartDoor;
+  /** The wsp home this host reads and writes as its own: the ssh door's files and the account; wspHome() when absent. */
+  home?: string;
 }
 
 /** The two readings the doctor's computer road needs of the host it runs on: what the vault holds right now, read
@@ -600,11 +602,11 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       folders: hostFolders(() => rt.workspaces.list()),
       terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) },
       editor: editorHost(),
-      ssh: opts.ssh ?? sshDoor(relay, sshFiles({ wspHome: wspHome(), personHome: homedir() }), () => proxyWsp(wspArgvOf(runningWsp()), opts.statePath)),
+      ssh: opts.ssh ?? sshDoor(relay, sshFiles({ wspHome: opts.home ?? wspHome(), personHome: homedir() }), () => proxyWsp(wspArgvOf(runningWsp()), opts.statePath)),
       sshHosts: async places => sshHostsIn(join(homedir(), ".ssh"), places),
       // Read at every ask rather than once at start: a sign-in taken at the terminal while the app stands open is
       // on the next read, and the read is two small files on this computer.
-      account: { read: async () => accountHere(opts.statePath, wspHome()) },
+      account: { read: async () => accountHere(opts.statePath, opts.home ?? wspHome()) },
       ...(opts.admitted !== undefined ? { admitted: opts.admitted } : {}),
       ...(opts.init !== undefined ? { init: opts.init } : {}),
       ...(doctor !== undefined ? { doctor } : {}),
