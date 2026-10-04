@@ -33,8 +33,8 @@ export type SlateBy = z.infer<typeof SlateBy>;
 export const SlateEmpty = z.enum(["none", "cleared", "rewound-before"]);
 export type SlateEmpty = z.infer<typeof SlateEmpty>;
 
-/** What the consent sheet shows for a held run (07, "Consent"): everything the person reads before approving. */
-export const SlateAsk = z.object({
+/** What the consent sheet shows for a held command (07, "Consent"): everything the person reads before approving. */
+export const SlateCmdAsk = z.object({
   /** The approval key: the hash of the declaration without its values. */
   key: z.string(),
   run: z.string(),
@@ -52,6 +52,46 @@ export const SlateAsk = z.object({
   /** Why it is held: "needs your approval", "started 12 times in a minute; press to run it again". */
   why: z.string(),
 });
+
+/** One tool of a server as the consent sheet lists it, its hints off the server's annotations. */
+export const SlateAskTool = z.object({
+  name: z.string(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  readOnly: z.boolean().optional(),
+  destructive: z.boolean().optional(),
+});
+
+/** The first tool or resource run on a server in a thread: one consent covers reading and calling that server. The
+ * key is `mcp:<server>`; "once" lets the held run go and asks again next time. */
+export const SlateServerAsk = z.object({
+  key: z.string(),
+  run: z.string(),
+  kind: z.literal("server"),
+  server: z.string(),
+  computer: z.string(),
+  why: z.string(),
+  tools: z.array(SlateAskTool),
+  /** The tool, or a resource run's uri, the held run calls. */
+  tool: z.string().optional(),
+  /** That call's evaluated arguments, a secret as dots with its length. */
+  args: z.record(z.string(), SlateWireJson).optional(),
+});
+
+/** A destructive tool, or a run that names confirm, asks on every start; "once" runs it, "refuse" drops the start. */
+export const SlateToolAsk = z.object({
+  key: z.string(),
+  run: z.string(),
+  kind: z.literal("tool"),
+  server: z.string(),
+  tool: z.string(),
+  computer: z.string(),
+  why: z.string(),
+  args: z.record(z.string(), SlateWireJson),
+  confirm: z.string().optional(),
+});
+
+export const SlateAsk = z.discriminatedUnion("kind", [SlateCmdAsk, SlateServerAsk, SlateToolAsk]);
 export type SlateAsk = z.infer<typeof SlateAsk>;
 
 /** An approval as a window or a read sees it: allowed or refused, never whether once or for the thread. */
@@ -116,7 +156,8 @@ export const SlatesReadParams = z.object({
   /** The stored JSON document too. */
   document: z.boolean().optional(),
 });
-export const SlatesCatalogParams = z.object({ name: z.string().optional() });
+/** With a thread, a name that is one of its agent's MCP servers answers that server's tools. */
+export const SlatesCatalogParams = z.object({ name: z.string().optional(), ...threadParams });
 export const SlatesEventParams = z.object({
   threadId: z.string(),
   /** The version the window drew; the host reads the piece off its own stored version all the same. */
