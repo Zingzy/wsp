@@ -1,13 +1,12 @@
 {
   "cloudOff": {
     "name": "slate_state",
-    "description": "Sets values on this thread's slate, like {\"$steps[2].done\": true}.",
+    "description": "Sets slate $values by path; reactions fire.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "thread": {
-          "type": "string",
-          "description": "a thread in your tree; absent is yours"
+          "type": "string"
         },
         "values": {
           "type": "object",
@@ -31,25 +30,28 @@
         },
         "text": {
           "type": "string"
-        }
+        },
+        "problems": {}
       },
       "required": [
         "version",
         "text"
       ],
-      "additionalProperties": {},
+      "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
     }
   },
   "cloudOn": {
     "name": "slate_state",
-    "description": "Sets values on this thread's slate, like {\"$steps[2].done\": true}.",
+    "description": "Sets slate $values by path; reactions fire.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "thread": {
-          "type": "string",
-          "description": "a thread in your tree; absent is yours"
+          "type": "string"
         },
         "values": {
           "type": "object",
@@ -73,14 +75,18 @@
         },
         "text": {
           "type": "string"
-        }
+        },
+        "problems": {}
       },
       "required": [
         "version",
         "text"
       ],
-      "additionalProperties": {},
+      "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
     }
   }
 }

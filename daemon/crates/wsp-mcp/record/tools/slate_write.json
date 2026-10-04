@@ -1,17 +1,15 @@
 {
   "cloudOff": {
     "name": "slate_write",
-    "description": "Writes this thread's slate, a panel the person sees: a <slate> or a patch.",
+    "description": "Writes this thread's slate, a live panel for the person.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "thread": {
-          "type": "string",
-          "description": "a thread in your tree; absent is yours"
+          "type": "string"
         },
         "text": {
-          "type": "string",
-          "description": "the JSX-like text"
+          "type": "string"
         },
         "document": {
           "type": "object",
@@ -35,29 +33,32 @@
         },
         "text": {
           "type": "string"
-        }
+        },
+        "warnings": {},
+        "problems": {}
       },
       "required": [
         "version",
         "text"
       ],
-      "additionalProperties": {},
+      "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
     }
   },
   "cloudOn": {
     "name": "slate_write",
-    "description": "Writes this thread's slate, a panel the person sees: a <slate> or a patch.",
+    "description": "Writes this thread's slate, a live panel for the person.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "thread": {
-          "type": "string",
-          "description": "a thread in your tree; absent is yours"
+          "type": "string"
         },
         "text": {
-          "type": "string",
-          "description": "the JSX-like text"
+          "type": "string"
         },
         "document": {
           "type": "object",
@@ -81,14 +82,19 @@
         },
         "text": {
           "type": "string"
-        }
+        },
+        "warnings": {},
+        "problems": {}
       },
       "required": [
         "version",
         "text"
       ],
-      "additionalProperties": {},
+      "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
     }
   }
 }

@@ -74,29 +74,11 @@ pub struct ReadIn {
     pub sketch: Option<bool>,
 }
 
-/// The catalog's answer: its text alone.
+/// The host's answer less its frame's own id and ok, every field in the bytes and the order the host wrote it, as
+/// `slateAsk` in packages/host/src/verbs.ts answers it; the shapes it is held to are below, under the tests.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
-pub struct CatalogOut {
-    pub text: String,
-}
-
-/// The shape a write, a state and a read answer is held to: the version and the sketch named, the rest open.
-#[cfg(test)]
-#[derive(schemars::JsonSchema)]
-#[allow(dead_code)]
-struct Shape {
-    version: i64,
-    text: String,
-    #[serde(flatten)]
-    rest: Map<String, Value>,
-}
-
-/// The host's answer less its frame's own id and ok, every field in the bytes and the order the host wrote it.
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(transparent)]
-pub struct Out(#[cfg_attr(test, schemars(with = "Shape"))] pub Answered);
+pub struct Out(pub Answered);
 
 #[derive(Debug, Default)]
 pub struct Answered(Vec<(String, Box<RawValue>)>);
@@ -167,12 +149,7 @@ async fn catalog(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let client = host.client().await?;
     let mut asked = Map::new();
     put(&mut asked, "name", name);
-    #[derive(Deserialize)]
-    struct Said {
-        text: String,
-    }
-    let said = client.request::<Said>("slates.catalog", asked).await?;
-    Ok(Answer::text(said.text.clone(), &CatalogOut { text: said.text }))
+    answered(&client, "slates.catalog", asked).await
 }
 
 async fn write(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
@@ -211,12 +188,51 @@ mod tests {
     use super::super::{entry_in, TOOLS};
     use super::*;
 
+    #[derive(schemars::JsonSchema)]
+    #[allow(dead_code)]
+    struct Catalog {
+        text: String,
+    }
+
+    #[derive(schemars::JsonSchema)]
+    #[allow(dead_code)]
+    struct Wrote {
+        version: i64,
+        text: String,
+        warnings: Option<Value>,
+        problems: Option<Value>,
+    }
+
+    #[derive(schemars::JsonSchema)]
+    #[allow(dead_code)]
+    struct Stated {
+        version: i64,
+        text: String,
+        problems: Option<Value>,
+    }
+
+    #[derive(schemars::JsonSchema)]
+    #[allow(dead_code)]
+    struct Read {
+        version: i64,
+        text: String,
+        document: Option<Value>,
+        values: Option<Value>,
+        derived: Option<Value>,
+        runs: Option<Value>,
+        state: Option<Value>,
+        problems: Option<Value>,
+        comments: Option<Value>,
+        approvals: Option<Value>,
+    }
+
+    /// Each answer passes through whole, so what is held is the shape the host's answer is read as.
     #[test]
     fn its_structs_are_the_recorded_schemas() {
-        to_the_record::<CatalogIn, CatalogOut>(CATALOG.listed);
-        to_the_record::<WriteIn, Out>(WRITE.listed);
-        to_the_record::<StateIn, Out>(STATE.listed);
-        to_the_record::<ReadIn, Out>(READ.listed);
+        to_the_record::<CatalogIn, Catalog>(CATALOG.listed);
+        to_the_record::<WriteIn, Wrote>(WRITE.listed);
+        to_the_record::<StateIn, Stated>(STATE.listed);
+        to_the_record::<ReadIn, Read>(READ.listed);
     }
 
     #[test]

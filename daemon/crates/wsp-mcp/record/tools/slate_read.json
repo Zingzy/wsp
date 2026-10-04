@@ -1,13 +1,12 @@
 {
   "cloudOff": {
     "name": "slate_read",
-    "description": "Reads a slate: sketch, document, values, runs, problems.",
+    "description": "Reads this thread's slate: values, runs, sketch.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "thread": {
-          "type": "string",
-          "description": "a thread in your tree; absent is yours"
+          "type": "string"
         },
         "values": {
           "type": "array",
@@ -33,25 +32,35 @@
         },
         "text": {
           "type": "string"
-        }
+        },
+        "document": {},
+        "values": {},
+        "derived": {},
+        "runs": {},
+        "state": {},
+        "problems": {},
+        "comments": {},
+        "approvals": {}
       },
       "required": [
         "version",
         "text"
       ],
-      "additionalProperties": {},
+      "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
     }
   },
   "cloudOn": {
     "name": "slate_read",
-    "description": "Reads a slate: sketch, document, values, runs, problems.",
+    "description": "Reads this thread's slate: values, runs, sketch.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "thread": {
-          "type": "string",
-          "description": "a thread in your tree; absent is yours"
+          "type": "string"
         },
         "values": {
           "type": "array",
@@ -77,14 +86,25 @@
         },
         "text": {
           "type": "string"
-        }
+        },
+        "document": {},
+        "values": {},
+        "derived": {},
+        "runs": {},
+        "state": {},
+        "problems": {},
+        "comments": {},
+        "approvals": {}
       },
       "required": [
         "version",
         "text"
       ],
-      "additionalProperties": {},
+      "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
     }
   }
 }
