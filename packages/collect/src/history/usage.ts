@@ -35,7 +35,13 @@ type Piece = z.infer<typeof Piece>;
 interface UsageReader {
   files(host: Host, root: string): Promise<HistoryFile[]>;
   pieces(host: Host, root: string, file: string): Promise<Piece[]>;
+  /** Where a session's files sit: Claude Code's project folder, else the file itself. One session id under two
+   * holders is one session's files copied, so only one holder's are counted. */
+  holder(root: string, file: string): string;
 }
+
+/** One session's pieces under one holder, and the newest moment any of them counted. */
+type Holding = { at: number; pieces: Piece[] };
 
 const HALF_HOUR = 1_800_000;
 const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0);
@@ -64,6 +70,7 @@ function folded(pieces: Iterable<Piece>): Piece[] {
  * counted once, by its id. input is everything the model read, the cached and the written part included. */
 const claudeUsage: UsageReader = {
   files: (host, root) => jsonlFiles(host, root, file => claudeSession(file.slice(root.length + 1))),
+  holder: (root, file) => file.slice(root.length + 1).split("/")[0]!,
   async pieces(host, root, file) {
     const session = claudeSession(file.slice(root.length + 1));
     if (session === undefined) return [];
@@ -99,6 +106,7 @@ const claudeUsage: UsageReader = {
  * is what wsp's own row keeps for a Codex thread. */
 const codexUsage: UsageReader = {
   files: (host, root) => jsonlFiles(host, root, stem),
+  holder: (_root, file) => file,
   async pieces(host, _root, file) {
     let session = stem(file);
     let folder: string | undefined;
@@ -149,6 +157,7 @@ const opencodeUsage: UsageReader = {
     const stamped = await stampOf(host, root);
     return stamped === undefined ? [] : [stamped];
   },
+  holder: (_root, file) => file,
   async pieces(host, _root, file) {
     const out = await host.exec.run("sqlite3", ["-readonly", "-json", file, OPENCODE_QUERY]);
     if (out === undefined) throw new Error(`${file} could not be read with sqlite3`);
@@ -226,7 +235,10 @@ export function fileUsageCache(path: string): UsageCache {
 }
 
 /** Every session's use each agent's store on this computer counted, by day in this computer's zone unless told
- * another. A store that is not there counts nothing; one that is there and does not read is skipped and said. */
+ * another. A store that is not there counts nothing; one that is there and does not read is skipped and said. A
+ * session whose files sit under two holders is counted from the holder whose newest message is latest, the first
+ * found on a tie: a copy stops where it was taken while the original goes on, and an export's copy rewrites the
+ * folder on every line, so neither its size nor its mtime says which is which. */
 export async function readLogUsage(host: Host, agents: readonly AgentEntry[] = CATALOG_AGENTS, opts: { day?: (at: number) => string; cache?: UsageCache } = {}): Promise<LogUsage[]> {
   const day = opts.day ?? ((at: number) => dayKeyOf(at));
   const out = new Map<string, LogUsage>();
@@ -240,6 +252,7 @@ export async function readLogUsage(host: Host, agents: readonly AgentEntry[] = C
     } catch {
       continue;
     }
+    const bySession = new Map<string, Map<string, Holding>>();
     for (const f of files) {
       let pieces = opts.cache?.get(f.path, f.stamp);
       if (pieces === undefined) {
@@ -251,7 +264,18 @@ export async function readLogUsage(host: Host, agents: readonly AgentEntry[] = C
         }
         opts.cache?.set(f.path, f.stamp, pieces);
       }
+      const holder = found.reader.holder(root, f.path);
       for (const p of pieces) {
+        const holders = bySession.get(p.session) ?? bySession.set(p.session, new Map()).get(p.session)!;
+        const h = holders.get(holder) ?? holders.set(holder, { at: p.at, pieces: [] }).get(holder)!;
+        h.at = Math.max(h.at, p.at);
+        h.pieces.push(p);
+      }
+    }
+    for (const holders of bySession.values()) {
+      let kept: Holding | undefined;
+      for (const h of holders.values()) if (kept === undefined || h.at > kept.at) kept = h;
+      for (const p of kept?.pieces ?? []) {
         const d = day(p.at);
         const key = [agent.id, p.session, d, Math.floor(p.at / HALF_HOUR), p.model, p.folder ?? ""].join("\u0000");
         const held = out.get(key);

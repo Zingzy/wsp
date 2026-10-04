@@ -451,7 +451,7 @@ describe("installing the MCP server for a local agent", () => {
     const temp = tmpdir();
     expect(thisComputersPath(`${temp}/cli-shims/abc:/usr/local/bin:/tmp/other/bin:/usr/bin`, [temp, "/tmp"])).toBe("/usr/local/bin:/usr/bin");
     // The temp folder itself, and nothing that merely begins with its letters.
-    expect(thisComputersPath(`${temp}:${temp}-keep/bin:/bin`, [temp, "/tmp"])).toBe(`${temp}-keep/bin:/bin`);
+    expect(thisComputersPath("/opt/t:/opt/t-keep/bin:/bin", ["/opt/t"])).toBe("/opt/t-keep/bin:/bin");
     expect(thisComputersPath("", [temp, "/tmp"])).toBe("");
   });
 

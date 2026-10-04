@@ -13,7 +13,8 @@ import { projectLander } from "../src/project-export.js";
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 
 // The lander's scratch home goes under the OS temp directory, which every process here shares; this file lists its own.
-const TEMP = mkdtempSync(join(tmpdir(), "wsp-export-test-"));
+// A ustar header holds a link target of 100 bytes and macOS's temp folder takes 48 of them, so the names stay short.
+const TEMP = mkdtempSync(join(tmpdir(), "wsp-x-"));
 process.env["TMPDIR"] = TEMP;
 afterAll(() => rmSync(TEMP, { recursive: true, force: true }));
 
@@ -22,7 +23,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 const scratch = (): string => {
-  const d = mkdtempSync(join(tmpdir(), "wsp-export-"));
+  const d = mkdtempSync(join(tmpdir(), "wsp-e-"));
   dirs.push(d);
   return d;
 };
