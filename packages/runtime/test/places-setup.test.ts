@@ -5,7 +5,7 @@
 // stops in the middle of any of it. The engine's steps are a fake here; what
 // is under test is the order, the state on the record and what resumes.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -38,10 +38,11 @@ import {
   type PlaceSyncEvent,
   type PlaceView,
   type PlaceReport,
+  type SeedPlan,
 } from "@wsp/protocol";
 import type { EngineStep, ProvisionPlan } from "@wsp/engine";
 import type { AgentsActs, SignInRun } from "../src/agents-read.js";
-import type { RecipeShelf } from "../src/runtime.js";
+import type { RecipeShelf, SeedWiring } from "../src/runtime.js";
 import { ADD_STOPPED_LINE, PlaceProvisioningError, type PlaceUndo, newPlaceKeyPair, type PlaceKeyPair, type PlaceProvisioner, type PlaceRecord, type PlaceUpdater, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
 import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -75,13 +76,31 @@ const FACTS = {
   lifecycle: { budgets: { wakeAttempts: 1, daemonAnswersMs: 30_000 } },
 };
 
-/** What the computer answers on its link: what it forks with, and every command as its daemon's exec would. */
-function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined) {
+/** A computer that keeps the project checkouts it holds on a disk of its own, where an add clones in a short-lived
+ * machine of its own; `created` waits before that machine is answered, for a test that holds the clone. */
+type Checkouts = { created?: Promise<void> };
+
+/** What the computer answers on its link: what it forks with, the machine an add clones in, and every command as
+ * its daemon's exec would. */
+function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined, checkouts?: Checkouts) {
   return (c: WsClient): void => {
-    c.onFrame(raw => {
+    c.onFrame(async raw => {
       const frame = raw as unknown as Record<string, unknown>;
-      if (frame["op"] === "machine.backend") return void c.say({ id: frame["id"], ok: true, ...FACTS });
-      if (frame["op"] === "machine.capacity") return void c.say({ id: frame["id"], ok: true, cores: 2, memMb: 7600, memRoomMb: 6000, machineMemMb: 4096, diskFreeBytes: 19 * 1024 ** 3, images: [], machines: { running: 0, paused: 0 } });
+      const say = (payload: Record<string, unknown>): void => c.say({ id: frame["id"], ok: true, ...payload });
+      if (frame["op"] === "machine.backend") return say(checkouts === undefined ? FACTS : { ...FACTS, projects: "/wsp/projects" });
+      if (frame["op"] === "machine.capacity") return say({ cores: 2, memMb: 7600, memRoomMb: 6000, machineMemMb: 4096, diskFreeBytes: 19 * 1024 ** 3, images: [], machines: { running: 0, paused: 0 } });
+      if (checkouts !== undefined) {
+        const machine = { machine: { id: "k1", kind: "sandbox", daemonSupervisor: "entrypoint", roads: { previewUrl: true, daemonAnswers: true, putBytes: true, describe: true, facts: true, metrics: true } } };
+        if (frame["op"] === "machine.create") {
+          await checkouts.created;
+          return say(machine);
+        }
+        if (frame["op"] === "machine.get") return say(machine);
+        if (frame["op"] === "machine.exec") return say({ result: { exitCode: 0, stdout: "", stderr: "" } });
+        if (frame["op"] === "machine.state") return say({ state: "running" });
+        if (frame["op"] === "machine.daemonAnswers") return say({ answers: true });
+        if (typeof frame["op"] === "string" && frame["op"].startsWith("machine.")) return say({});
+      }
       if (frame["op"] !== "exec") return;
       const cmd = String(frame["cmd"] ?? "");
       cmds.push(cmd);
@@ -184,15 +203,16 @@ function signIns() {
 }
 
 /** A host with the setup wired, serving, and the road an add takes onto a computer that joins over the link. */
-async function hosting(o: { provision: PlaceProvisioner; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
+async function hosting(o: { provision: PlaceProvisioner; checkouts?: Checkouts; seed?: SeedWiring; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
   const hostKey = o.hostKey ?? newPlaceKeyPair();
   const joined: { placeId: string; pair: PlaceKeyPair }[] = [];
   const store = o.store ?? memoryStore();
-  const answers = answersFor(o.cmds ?? [], o.answer);
+  const answers = answersFor(o.cmds ?? [], o.answer, o.checkouts);
   runtime = createRuntime({
     backend: stubBackend(),
     store,
     adapters: {},
+    ...(o.seed !== undefined ? { seed: o.seed } : {}),
     ...(o.clock !== undefined ? { clock: o.clock } : {}),
     ...(o.acts !== undefined ? { agentsActs: o.acts } : {}),
     ...(o.local === true ? { local: localWiring() } : {}),
@@ -268,6 +288,14 @@ const repos: string[] = [];
 afterEach(() => {
   for (const dir of repos.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+
+/** A folder on this computer, and the host's reader of it answering what a seed of it would carry. */
+function seededFolder(): { folder: string; seed: SeedWiring } {
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-setup-folder-")));
+  repos.push(folder);
+  const plan: SeedPlan = { source: folder, remote: "https://github.com/acme/app", branch: "main", defaultBranch: "main", unpushed: null, uncommitted: 0, memory: null, files: [], remembered: false };
+  return { folder, seed: { plan: async () => plan, pack: async () => ({ tar: Buffer.from("seed archive"), files: 0, bytes: 12, commits: 0, left: [] }) } };
+}
 
 /** Every sync frame the host running now put on its stream. */
 const syncs: PlaceSyncEvent[] = [];
@@ -514,6 +542,30 @@ describe("a computer added with its picks", () => {
     s.end("gh", { state: "failed", said: "gh refused" });
     await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")?.outcome === "failed");
     expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "failed", note: NEEDS_GITHUB_LINE, step: "folders" });
+  });
+
+  it("lands a recipe folder as a project on that computer, the setup's own clone let past the setup it runs in", async () => {
+    const { folder, seed } = seededFolder();
+    await hosting({ provision: provisioner().wired, checkouts: {}, seed });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: folder, keep: [] } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "installed", step: "folders" });
+    expect((await runtime!.projects.list()).map(p => [p.computer, p.source])).toEqual([[place.id, { kind: "folder", path: folder }]]);
+  });
+
+  it("refuses a fork there while its folders clone, the setup's own clone going on past it", async () => {
+    const { folder, seed } = seededFolder();
+    let clone = (): void => {};
+    const created = new Promise<void>(resolve => (clone = resolve));
+    await hosting({ provision: provisioner().wired, checkouts: { created }, seed });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: folder, keep: [] } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.steps.some(l => l.step === "folders" && l.state === "running") === true);
+    await expect(runtime!.places!.forkingBackend(place.id)).rejects.toThrow(placeProvisioningLine("spoo", "folders"));
+    clone();
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "installed" });
   });
 
   it("refuses a fork there while it runs, naming the step, and takes one once it is done", async () => {
@@ -980,6 +1032,19 @@ describe("a computer that follows a recipe", () => {
     await until(async () => (await rowOf(place.id)).applied?.hash === "h9");
     expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "folders/app")?.note).not.toBe(NEEDS_GITHUB_LINE);
     expect(cmds.some(c => c.includes("ls-remote"))).toBe(false);
+  });
+
+  it("lands a folder a sync adds as a project on that computer", async () => {
+    const { folder, seed } = seededFolder();
+    const r = shelf(V1, ITEMS);
+    await hosting({ provision: provisioner().wired, recipes: r.recipes, checkouts: {}, seed });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: V1, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    r.move({ ...V1, folders: { app: { from: folder, keep: [] } } }, ITEMS, "h10");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h10");
+    expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "folders/app")).toMatchObject({ outcome: "installed", step: "folders" });
+    expect((await runtime!.projects.list()).map(p => p.computer)).toEqual([place.id]);
   });
 
   it("runs a change that landed mid-sync once more at its end", async () => {

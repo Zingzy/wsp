@@ -9,6 +9,7 @@
 // (PlaceNonce, PlacePublicKey, PlaceSignature) and the bytes they sign come
 // from placeLinkTranscript, so this file holds the host's half of the
 // handshake and no rule of its own about how it is spelled.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, createPublicKey, randomBytes } from "node:crypto";
 import { createServer, type Server, type Socket } from "node:net";
 import {
@@ -1304,6 +1305,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * reading, so the start, the update and the gate a create passes cannot disagree about whether it is busy. */
   const settingNow = (record: PlaceRecord): string | undefined =>
     setting.has(record.id) || record.setup?.state === "running" ? placeProvisioningLine(record.name, record.setup?.steps.find(l => l.state === "running")?.step) : undefined;
+  /** The computer whose setup's own folder step the running call belongs to: a project's clone there is the job's
+   * own work rather than a fork landing on a half set up computer, so the gate lets that call alone through. */
+  const foldersOf = new AsyncLocalStorage<string>();
 
   /** One write of a setup's state onto the record as it stands, since an attach's write of lastSeenAt goes on
    * beside it. */
@@ -1592,8 +1596,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     /** One folder made a project there by the add's own road. */
     const addFolder = async (key: string, folder: RecipeFile["folders"][string]): Promise<PlaceProvisionRow> => {
       const label = folder.name ?? key;
-      if (recording.addFolder === undefined) return { id: `folders/${key}`, label, outcome: "failed", note: NO_FOLDER_ROAD };
-      return recording.addFolder(placeId, key, folder).catch((e: unknown): PlaceProvisionRow => ({ id: `folders/${key}`, label, outcome: "failed", note: firstLineOf(e) }));
+      const add = recording.addFolder;
+      if (add === undefined) return { id: `folders/${key}`, label, outcome: "failed", note: NO_FOLDER_ROAD };
+      return foldersOf.run(placeId, () => add(placeId, key, folder)).catch((e: unknown): PlaceProvisionRow => ({ id: `folders/${key}`, label, outcome: "failed", note: firstLineOf(e) }));
     };
 
     /** The folders, each a project on that computer. One whose repository needs GitHub there waits on the GitHub
@@ -2457,7 +2462,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // A computer whose setup is still going on is not forked into while it runs: the workspace would come up
       // without the agent the job is putting there. The running workspaces on it are untouched, since they read
       // backendOf and not this.
-      const busy = settingNow(record);
+      const busy = foldersOf.getStore() === placeId ? undefined : settingNow(record);
       if (busy !== undefined) throw new PlaceProvisioningError(busy);
       const made = door.backendOf(placeId);
       if (made !== undefined) return made;
