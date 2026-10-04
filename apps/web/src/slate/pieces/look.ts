@@ -17,7 +17,7 @@ export const TONE_INK: Record<Tone, string> = {
   warning: "text-warning",
   bad: "text-error-foreground",
   info: "text-status-input",
-  accent: "text-primary",
+  accent: "text-[var(--slate-accent,var(--primary))]",
 };
 
 /** A tone on a meter's fill: default is foreground at 55 percent on a 10 percent track. */
@@ -28,7 +28,7 @@ export const TONE_FILL: Record<Tone, string> = {
   warning: "bg-warning",
   bad: "bg-error-foreground",
   info: "bg-status-input",
-  accent: "bg-primary",
+  accent: "bg-[var(--slate-accent,var(--primary))]",
 };
 
 /** The tone a value names, with accent kept for the slate's one loud piece and the rest drawn default. */
