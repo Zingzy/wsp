@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { ADD_COMPUTER_WORDS, SETTINGS_WORDS } from "../../web/src/settings/format.js";
-import { workspaceRowId } from "../../web/src/sidebar/rowGrammar.js";
+import { threadRowId } from "../../web/src/sidebar/rowGrammar.js";
 import { FIRST_RUN_WORDS } from "../../web/src/sidebar/words.js";
 import { VERSION } from "../../../packages/host/src/version.js";
 import { builtExecutableHere } from "./packaged.js";
@@ -92,28 +92,13 @@ function seedLocalWorkspace(home: string): void {
     memoryDir: join(home, ".claude", "projects", folder.replace(/[^A-Za-z0-9]/g, "-"), "memory"),
     createdAt: LOCAL_WORKSPACE.createdAt,
   };
-  // The copy is a checkout on main with one commit, so the branch the host reads off it is the one its record names.
-  const copy = `${folder}-first`;
-  mkdirSync(copy, { recursive: true });
-  const git = (...args: string[]) => spawnSync("git", ["-c", "user.name=smoke", "-c", "user.email=smoke@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: copy, stdio: "ignore" });
+  // A thread here runs in the project's own folder, a checkout on main with one commit, so the branch the host reads
+  // off it is main; a record with a copy is one the host moves off at boot and drops.
+  const git = (...args: string[]) => spawnSync("git", ["-c", "user.name=smoke", "-c", "user.email=smoke@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: folder, stdio: "ignore" });
   git("init", "-q", "-b", "main");
   git("commit", "-q", "--allow-empty", "-m", "seeded");
-  const workspace = { ...LOCAL_WORKSPACE, copy: { road: "clonefile", path: copy, source: folder, base: "", branch: "main", carried: "deps-and-config" }, portBase: 3100 };
+  const workspace = { ...LOCAL_WORKSPACE, portBase: 3100 };
   writeFileSync(join(home, "state.json"), stateText({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
-}
-
-/** A second workspace of the same project on this computer, beside the seeded one. */
-const SECOND_WORKSPACE = { ...LOCAL_WORKSPACE, id: "ws_2", name: "seeded-second" };
-
-/** Both workspaces with the copies a turn in each works in on disk, which is what wsp new --local leaves. */
-function seedTwoLocalWorkspaces(home: string): void {
-  seedLocalWorkspace(home);
-  const statePath = join(home, "state.json");
-  const state = JSON.parse(readFileSync(statePath, "utf8")) as { workspaces: Record<string, { copy: { path: string } }> };
-  const first = state.workspaces[LOCAL_WORKSPACE.id]!;
-  state.workspaces[SECOND_WORKSPACE.id] = { ...first, ...SECOND_WORKSPACE, copy: { ...first.copy, path: join(home, "work", SECOND_WORKSPACE.name) } };
-  for (const ws of Object.values(state.workspaces)) mkdirSync(ws.copy.path, { recursive: true });
-  writeFileSync(statePath, JSON.stringify(state));
 }
 
 /** The project a fixture host's workspaces are copies of: a repo on the provider computer that host serves, which
@@ -135,6 +120,12 @@ function seedServingLock(home: string, at: { port: number; token: string }): voi
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: at.port, startedAt: new Date().toISOString() }));
   writeFileSync(join(home, "host-token"), `${at.token}\n`);
+}
+
+/** Waits for the window to open on the seeded project: a folder record no thread names draws no sidebar row, and the
+ * New thread composer names the project it starts in. */
+function openedOnSeeded(win: Page): Promise<void> {
+  return win.locator(`[data-new-thread-project='${LOCAL_WORKSPACE.project}']`).waitFor();
 }
 
 interface Launched {
@@ -445,11 +436,14 @@ function claudeStandIn(dir: string, gate: string, pidFile: string, o: { asks?: b
     join(dir, "claude"),
     [
       "#!/bin/bash",
-      `sid=""; while [ $# -gt 0 ]; do case "$1" in --session-id|--resume) sid="$2"; shift;; esac; shift; done`,
+      `sid=""; mode=bypassPermissions; while [ $# -gt 0 ]; do case "$1" in --session-id|--resume) sid="$2"; shift;; --permission-mode) mode="$2"; shift;; esac; shift; done`,
       // Anything that names no session is the catalog's probe, which a version line answers.
       `[ -z "$sid" ] && { echo "2.1.280 (Claude Code)"; exit 0; }`,
+      // The CLI reads its prompt before it says anything, and a turn whose prompt never reached it is one a restarted
+      // host ends, so the pid is the stand-in's word that its turn is under way.
+      "IFS= read -r prompt",
       `echo $$ >> ${JSON.stringify(pidFile)}`,
-      `printf '%s\\n' '{"type":"system","subtype":"init","cwd":"'"$PWD"'","session_id":"'"$sid"'","tools":[],"mcp_servers":[],"model":"claude-sonnet-4-5","permissionMode":"bypassPermissions","slash_commands":[],"apiKeySource":"none","uuid":"init"}'`,
+      `printf '%s\\n' '{"type":"system","subtype":"init","cwd":"'"$PWD"'","session_id":"'"$sid"'","tools":[],"mcp_servers":[],"model":"claude-sonnet-4-5","permissionMode":"'"$mode"'","slash_commands":[],"apiKeySource":"none","uuid":"init"}'`,
       say(1, "reading the ticket"),
       `while [ ! -f ${JSON.stringify(gate)} ]; do sleep 0.1; done`,
       // With asks, the gate raises a prompt for a Bash call over the CLI's own control channel, and the turn goes on
@@ -696,18 +690,16 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     // The one value the page ever says, whatever a pin before it was: no screen picks a side, so the frame and the
     // page cannot draw two.
     await vi.waitFor(async () => expect(await source()).toBe("system"));
-    // The page left on System draws the side the appearance under it takes, dark and then light, with nothing reloaded
-    // between, and the side the Mac itself is set to once the shell hands the appearance back to it.
+    // The page left on System draws the side the computer's appearance takes, dark and then light, with nothing
+    // reloaded between, and the side the Mac itself is set to once the emulation lets go. The appearance is emulated
+    // on the page: a pin on the shell's source is a second say over the page's own, and the page takes it back.
     const pageSide = () => win.evaluate(() => ({ media: window.matchMedia("(prefers-color-scheme: dark)").matches, dark: document.documentElement.classList.contains("dark") }));
     for (const side of ["dark", "light"] as const) {
-      await launched.app.evaluate(({ nativeTheme }, s) => {
-        nativeTheme.themeSource = s;
-      }, side);
+      await win.emulateMedia({ colorScheme: side });
       await vi.waitFor(async () => expect(await pageSide()).toEqual({ media: side === "dark", dark: side === "dark" }));
+      expect(await source()).toBe("system");
     }
-    await launched.app.evaluate(({ nativeTheme }) => {
-      nativeTheme.themeSource = "system";
-    });
+    await win.emulateMedia({ colorScheme: null });
     const macDark = await launched.app.evaluate(({ nativeTheme }) => nativeTheme.shouldUseDarkColors);
     await vi.waitFor(async () => expect(await pageSide()).toEqual({ media: macDark, dark: macDark }));
     await launched.app.evaluate(({ nativeTheme }) => {
@@ -727,43 +719,48 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await readPreview(win, "ws_b")).toBeUndefined();
   });
 
-  it("puts the picture of the workspace the person left on that workspace's switcher card", async () => {
-    // A host over the stub backend with two workspaces, serving the built web app, so the switcher has cards to
-    // draw. The app attaches to it rather than starting its own, so nothing here needs a provider key or a golden
-    // on disk, and the workspaces are made through the runtime's own road instead of written into the store.
-    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0 });
-    await seedProject(existing);
-    const api = await existing.createWorkspace("api");
-    const web = await existing.createWorkspace("web");
-    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
-    const win = await windowAt(launched.app, APP_URL);
-    await win.waitForSelector(`[data-row-id='ws:${api.id}']`);
-    await win.waitForSelector(`[data-row-id='ws:${web.id}']`);
+  it("puts the picture of the thread the person left on that thread's switcher card", async () => {
+    // The switcher holds one card per thread, so two turns stay working in the seeded project, live in the sidebar
+    // for the walk to land on.
+    const agents = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-agents-"));
+    const pidFile = join(agents, "claude.pids");
+    claudeStandIn(join(agents, "bin"), join(agents, "gate"), pidFile);
+    const env = { PATH: `${join(agents, "bin")}:${process.env["PATH"] ?? ""}` };
+    try {
+      launched = await launch(env, seedLocalWorkspace);
+      const { home } = launched;
+      const win = await windowAt(launched.app, APP_URL);
+      await openedOnSeeded(win);
+      for (const task of ["fix the cart", "fix the login"]) {
+        const ran = spawnSync(shimPath(home), ["run", LOCAL_WORKSPACE.name, "--agent", "claude", "--detach", task], { encoding: "utf8", env: { ...process.env, ...env, HOME: home, WSP_HOME: home }, cwd: join(home, "cwd"), timeout: 30_000 });
+        expect(ran.status, `${ran.stdout}${ran.stderr}`).toBe(0);
+      }
+      const rows = win.locator("[data-row-id^='thread:']");
+      await vi.waitFor(async () => expect(await rows.count()).toBe(2), { timeout: 30_000, interval: 100 });
+      const [opened] = await rows.evaluateAll(found => found.map(r => r.getAttribute("data-row-id")!.slice("thread:".length)));
+      await win.click(`[data-row-id='${threadRowId(opened!)}']`);
 
-    // A tap: the chord's step and its release, which is what asks for a picture of the workspace being left.
-    await win.keyboard.down("Control");
-    await win.keyboard.press("Tab");
-    await win.keyboard.up("Control");
-    await win.waitForSelector("[data-workspace-switcher]", { state: "detached" });
-    // The capture is an ipc round trip the tap only started, and the overlay reads the pictures once, when it
-    // opens. Which workspace the tap left is the sidebar's order to decide, so the picture names it.
-    const left = await vi.waitFor(
-      async () => {
-        for (const id of [api.id, web.id]) if ((await readPreview(win, id)) !== undefined) return id;
-        throw new Error("no picture yet");
-      },
-      { timeout: 30_000, interval: 100 },
-    );
+      // A tap: the chord's step and its release, which is what asks for a picture of the thread being left. The
+      // capture is an ipc round trip the tap only started, and the overlay reads the pictures once, when it opens.
+      await win.keyboard.down("Control");
+      await win.keyboard.press("Tab");
+      await win.keyboard.up("Control");
+      await win.waitForSelector("[data-workspace-switcher]", { state: "detached" });
+      await vi.waitFor(async () => expect(await readPreview(win, opened!)).toMatch(/^data:image\/png;base64,\w/), { timeout: 30_000, interval: 100 });
 
-    await win.keyboard.down("Control");
-    await win.keyboard.press("Tab");
-    await win.waitForSelector("[data-workspace-switcher]");
-    const shot = win.locator(`[data-workspace-card='${left}'] [data-card-preview] img`);
-    await shot.waitFor();
-    expect(await shot.getAttribute("src")).toMatch(/^data:image\/png;base64,\w/);
-    // The picture decodes off the main thread; its size is a fact only once it has.
-    expect(await shot.evaluate((img: HTMLImageElement) => img.decode().then(() => img.naturalWidth))).toBeGreaterThan(0);
-    await win.keyboard.up("Control");
+      await win.keyboard.down("Control");
+      await win.keyboard.press("Tab");
+      await win.waitForSelector("[data-workspace-switcher]");
+      const shot = win.locator(`[data-thread-card='${opened}'] [data-card-preview] img`);
+      await shot.waitFor();
+      expect(await shot.getAttribute("src")).toMatch(/^data:image\/png;base64,\w/);
+      // The picture decodes off the main thread; its size is a fact only once it has.
+      expect(await shot.evaluate((img: HTMLImageElement) => img.decode().then(() => img.naturalWidth))).toBeGreaterThan(0);
+      await win.keyboard.up("Control");
+    } finally {
+      for (const pid of existsSync(pidFile) ? readFileSync(pidFile, "utf8").trim().split("\n").map(Number) : []) if (alive(pid)) process.kill(pid, "SIGKILL");
+      rmSync(agents, { recursive: true, force: true });
+    }
   });
 
   it("first launch with no key: the welcome, then the agents found here ticked, Open wsp gives them the tools and opens the app on the first run, whose Add a project holds the door to another computer, and the shim runs", async () => {
@@ -860,15 +857,17 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await add.click();
     const door = win.locator("[role=dialog] [data-k=add-computer]");
     await door.click();
-    // The door closes the dialog and opens Settings on Computers, whose Add a computer stands on its first road.
-    await win.getByRole("dialog").waitFor({ state: "detached" });
-    const adding = win.locator("[data-settings-page] [data-k=add-computer]");
+    // The door closes Add a project and opens Settings on Computers under Add a computer, one dialog of its own.
+    const adding = win.locator("[role=dialog][data-add-computer]");
     await adding.waitFor();
-    await adding.locator("[data-k=road-ssh]").waitFor();
-    expect(await win.locator("[data-settings-page]").textContent()).toContain(ADD_COMPUTER_WORDS.title);
+    await vi.waitFor(async () => expect(await win.getByRole("dialog").count()).toBe(1));
+    await win.locator("[data-settings-page] [data-k=add-computer-button]").waitFor({ state: "attached" });
+    expect(await adding.textContent()).toContain(ADD_COMPUTER_WORDS.title);
     expect(await adding.textContent()).not.toMatch(/wsp init|terminal/i);
     await rest();
     shots.push(await photographPage(win, join(SHOTS, "app-add-computer.png")));
+    await win.keyboard.press("Escape");
+    await adding.waitFor({ state: "detached" });
     await win.keyboard.press("Escape");
     await win.locator("[data-settings-page]").waitFor({ state: "detached" });
     await win.locator("[data-k=first-run]").waitFor();
@@ -922,24 +921,19 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const win = await windowAt(launched.app, APP_URL);
     const boot = await bootOf(win);
     expect(boot.tokenHash).toMatch(DIGEST);
-    const row = win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`);
-    await row.waitFor();
-    expect(await row.locator("[data-thread-title]").textContent()).toBe(LOCAL_WORKSPACE.name);
-    // The tile's card names the branch the seeded copy stands on.
-    await row.hover();
-    const branch = win.locator("[data-tile-card] [data-tile-card-line=branch]");
-    await branch.waitFor();
-    expect(await branch.textContent()).toBe("main");
-    // The seeded record is the whole list: nothing was recorded on the way in.
-    expect(await win.locator("[data-row-id^='ws:']").count()).toBe(1);
+    await openedOnSeeded(win);
+    // The composer names the branch the seeded project folder stands on.
+    await win.locator("[data-composer-branch='main']").waitFor();
+    // Nothing was started on the way in.
+    expect(await win.locator("[data-row-id^='thread:']").count()).toBe(0);
     expect(appWindows(launched.app).filter(w => ONBOARDING_URL.test(w.url()))).toHaveLength(0);
     expect(existsSync(join(launched.home, ".env"))).toBe(false);
   });
 
-  it("turns on two workspaces of this computer outlive a SIGTERM to the service's host: the manager starts a new one, the next launch reads both working and both replies land", async () => {
+  it("two turns on this computer outlive a SIGTERM to the service's host: the manager starts a new one, the next launch reads both working and both replies land", async () => {
     // What wsp restart and a crash both come to: the host the manager started ends, and the manager starts it again.
     // The manager ends what is left of the job's own process group with it, so a turn outlives it only by leading a
-    // group of its own. Two workspaces, since the run folder is this computer's and every workspace on it shares it.
+    // group of its own. Two turns, since every turn on this computer shares its run folder.
     const agents = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-agents-"));
     const gate = join(agents, "gate");
     const pidFile = join(agents, "claude.pids");
@@ -947,16 +941,16 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const env = { PATH: `${join(agents, "bin")}:${process.env["PATH"] ?? ""}` };
     let claudes: number[] = [];
     try {
-      launched = await launch(env, seedTwoLocalWorkspaces);
+      launched = await launch(env, seedLocalWorkspace);
       const { home } = launched;
       const win = await windowAt(launched.app, APP_URL);
-      await win.locator(`[data-row-id='${workspaceRowId(SECOND_WORKSPACE.id)}']`).waitFor();
+      await openedOnSeeded(win);
       const wsp = (...args: string[]): string => {
         const ran = spawnSync(shimPath(home), args, { encoding: "utf8", env: { ...process.env, ...env, HOME: home, WSP_HOME: home }, cwd: join(home, "cwd") });
         expect(ran.status, `${ran.stdout}${ran.stderr}`).toBe(0);
         return ran.stdout;
       };
-      for (const ws of [LOCAL_WORKSPACE, SECOND_WORKSPACE]) wsp("run", ws.name, "--agent", "claude", "--detach", `fix ${ws.name}`);
+      for (const task of ["fix the cart", "fix the login"]) wsp("run", LOCAL_WORKSPACE.name, "--agent", "claude", "--detach", task);
       claudes = await vi.waitFor(
         () => {
           const pids = readFileSync(pidFile, "utf8").trim().split("\n").map(Number);
@@ -1009,7 +1003,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       launched = await launch({}, seedLocalWorkspace);
       const { app, statePath } = launched;
       const win = await windowAt(app, APP_URL);
-      await win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`).waitFor();
+      await openedOnSeeded(win);
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach(w => w.close()));
       await vi.waitFor(() => expect(appWindows(app)).toHaveLength(0), { timeout: 10_000, interval: 100 });
       const host = servingHost(statePath)!;
@@ -1053,7 +1047,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       launched = await launch({}, seedLocalWorkspace);
       const { app, statePath } = launched;
       const win = await windowAt(app, APP_URL);
-      await win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`).waitFor();
+      await openedOnSeeded(win);
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach(w => w.close()));
       await vi.waitFor(() => expect(appWindows(app)).toHaveLength(0), { timeout: 10_000, interval: 100 });
       const host = servingHost(statePath)!;
@@ -1075,14 +1069,14 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       launched = await launch({}, seedLocalWorkspace);
       const { app } = launched;
       const win = await windowAt(app, APP_URL);
-      await win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`).waitFor();
+      await openedOnSeeded(win);
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach(w => w.close()));
       await vi.waitFor(() => expect(appWindows(app)).toHaveLength(0), { timeout: 10_000, interval: 100 });
       await answerQuit(app, "Cancel");
       await app.evaluate(() => (globalThis as unknown as { wspTray: { pick(what: TrayAct): void } }).wspTray.pick({ kind: "quit" }));
       await app.evaluate(() => (globalThis as unknown as { wspTray: { pick(what: TrayAct): void } }).wspTray.pick({ kind: "openApp" }));
       const again = await windowAt(app, APP_URL);
-      await again.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`).waitFor();
+      await openedOnSeeded(again);
       expect(app.process().exitCode).toBeNull();
     },
     60_000,
@@ -1097,10 +1091,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       claudeStandIn(join(agents, "bin"), gate, pidFile, { asks: true });
       const env = { PATH: `${join(agents, "bin")}:${process.env["PATH"] ?? ""}` };
       try {
-        launched = await launch(env, seedTwoLocalWorkspaces);
+        launched = await launch(env, seedLocalWorkspace);
         const { app, home } = launched;
         const win = await windowAt(app, APP_URL);
-        await win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`).waitFor();
+        await openedOnSeeded(win);
         const appPid = app.process().pid!;
         await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach(w => w.close()));
         await vi.waitFor(() => expect(appWindows(app)).toHaveLength(0), { timeout: 10_000, interval: 100 });
@@ -1121,7 +1115,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
           const pids = ours();
           return spawnSync("pmset", ["-g", "assertions"], { encoding: "utf8", timeout: 20_000 }).stdout.split("\n").some(line => /NoIdleSleepAssertion|PreventUserIdleSystemSleep/.test(line) && pids.some(pid => line.includes(`pid ${pid}(`)));
         };
-        const thread = wsp("run", LOCAL_WORKSPACE.name, "--agent", "claude", "--detach", "print a line, then run sleep 5").trim().split(/\s+/).find(word => /^[0-9a-f]{8,}$/.test(word));
+        // At full access the host allows a tool's prompt itself, so the turn runs where a prompt reaches the person.
+        const thread = wsp("run", LOCAL_WORKSPACE.name, "--agent", "claude", "--access", "ask", "--detach", "print a line, then run sleep 5").trim().split(/\s+/).find(word => /^[0-9a-f]{8,}$/.test(word));
 
         // Working: the count reads 1 and this computer is held awake, which pmset names by the app's own pid.
         await vi
@@ -1171,10 +1166,21 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   it("no frame in the window registers a service worker on a loopback origin, and a host page loads into a session holding none", async () => {
     const served = await workerPage();
     standIn = served.server;
-    launched = await launch({}, seedLocalWorkspace);
+    // A workspace no thread names has no row and no actions, so one turn runs to its reply first and its thread is
+    // what the person opens.
+    const agents = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-agents-"));
+    const gate = join(agents, "gate");
+    writeFileSync(gate, "go\n");
+    claudeStandIn(join(agents, "bin"), gate, join(agents, "claude.pids"));
+    const env = { PATH: `${join(agents, "bin")}:${process.env["PATH"] ?? ""}` };
+    launched = await launch(env, seedLocalWorkspace);
     const win = await windowAt(launched.app, APP_URL);
-    const row = `[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`;
-    await win.click(row);
+    await openedOnSeeded(win);
+    const { home } = launched;
+    const ran = spawnSync(shimPath(home), ["run", LOCAL_WORKSPACE.name, "--agent", "claude", "fix the cart"], { encoding: "utf8", env: { ...process.env, ...env, HOME: home, WSP_HOME: home }, cwd: join(home, "cwd"), timeout: 30_000 });
+    rmSync(agents, { recursive: true, force: true });
+    expect(ran.status, `${ran.stdout}${ran.stderr}`).toBe(0);
+    await win.click("[data-row-id^='thread:']");
     // The preview pane on this computer's own workspace frames this computer's port, which is the pane a person types one into.
     await win.keyboard.press("Meta+k");
     await win.locator("[data-command-palette]").getByText(WORKSPACE_WORDS.openBrowser, { exact: true }).click();
