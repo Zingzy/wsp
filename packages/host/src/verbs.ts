@@ -3822,7 +3822,8 @@ const SLATE_VERBS: readonly Verb[] = [
     options: {},
     run: async ctx => {
       if (ctx.args.length > 1) throw usageRefusal("wsp slate catalog takes one name at most.", usageIs(ctx));
-      const read = await slateAsk<{ text: string }>(await ctx.client(), "slates.catalog", pick({ name: ctx.args[0] }));
+      const client = await ctx.client();
+      const read = await slateAsk<{ text: string }>(client, "slates.catalog", { ...(await slateTarget(client, undefined, ctx.env)), ...pick({ name: ctx.args[0] }) });
       ctx.out.emit(read, read.text);
       return 0;
     },
@@ -3831,7 +3832,8 @@ const SLATE_VERBS: readonly Verb[] = [
       input: { name: z.string().optional() },
       output: { text: z.string() },
       call: async ({ name }, deps) => {
-        const read = await slateAsk<{ text: string }>(await deps.client(), "slates.catalog", pick({ name }));
+        const client = await deps.client();
+        const read = await slateAsk<{ text: string }>(client, "slates.catalog", { ...(await slateTarget(client, undefined, deps.env)), ...pick({ name }) });
         return asText(read.text, read);
       },
     }),

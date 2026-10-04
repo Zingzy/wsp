@@ -157,7 +157,7 @@ async fn answered(client: &Client, op: &str, asked: Map<String, Value>) -> Resul
 async fn catalog(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let CatalogIn { name } = input("slate_catalog", arguments)?;
     let client = host.client().await?;
-    let mut asked = Map::new();
+    let mut asked = target(&host, &client, None).await?;
     put(&mut asked, "name", name);
     answered(&client, "slates.catalog", asked).await
 }
