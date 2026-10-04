@@ -215,6 +215,10 @@ export interface ExecStreamFactory {
       env: Record<string, string>;
       /** Present, the process's stdin is a line channel seeded with these lines; absent, the process gets no channel. */
       input?: readonly string[];
+      /** Present, the seed lines reach the channel only once this settles, and the process may start before it does;
+       * a rejection kills the run. Where runs outlive the host, the held lines wait beside the run, and a host that
+       * re-opens a run whose seed never reached it hands the seed over. */
+      inputAfter?: Promise<void>;
     },
   ): ExecStream;
   /** Asks the machine whether it still holds a run this factory launched in an earlier process, and reads it from

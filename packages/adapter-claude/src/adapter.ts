@@ -1124,9 +1124,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     });
     const launch = options.resume === undefined ? command : `${savedSpendCommand({ configDir: deps.configDir, sessionId: options.resume })}${command}`;
     const line = userMessageLine(options.prompt, localId, options.images);
-    const stream = deps.exec(launch, { env: { ...env }, input: options.promptAfter === undefined ? [line] : [] });
-    // A CLI whose prompt never reached it would wait on its channel until the idle cut, so it is ended instead.
-    if (options.promptAfter !== undefined) void options.promptAfter.then(() => stream.write(line)).catch(() => stream.kill());
+    const stream = deps.exec(launch, { env: { ...env }, input: [line], ...(options.promptAfter !== undefined ? { inputAfter: options.promptAfter } : {}) });
     return follow({ stream, localId, announced: false, fresh: options.resume === undefined, command: launch, onEvent: options.onEvent });
   };
 

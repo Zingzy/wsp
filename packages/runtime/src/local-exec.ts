@@ -223,8 +223,17 @@ async function reapRun(base: string, graceMs = RUN_STOP_MS): Promise<void> {
     for (let waited = 0; waited < graceMs && groupExists(pid); waited += GRACE_POLL_MS) await sleep(Math.min(GRACE_POLL_MS, graceMs - waited));
     signalGroup(pid, "SIGKILL");
   }
-  for (const suffix of ["sh", "log", "pid", "exit", "in", "fifo", "tail"]) rmSync(`${base}.${suffix}`, { force: true });
+  for (const suffix of ["sh", "log", "pid", "exit", "in", "held", "fifo", "tail"]) rmSync(`${base}.${suffix}`, { force: true });
   rmSync(`${base}.d`, { recursive: true, force: true });
+}
+
+/** Hands a run the seed its launch held back: into the channel where nothing reached it yet, then dropped. The
+ * channel's size is the check, so a host that went between the two steps leaves no road to a second copy. */
+function releaseHeld(base: string): void {
+  const held = readFile(`${base}.held`);
+  if (held === undefined) return;
+  if (existsSync(`${base}.d`) && existsSync(`${base}.in`) && statSync(`${base}.in`).size === 0) appendFileSync(`${base}.in`, held);
+  rmSync(`${base}.held`, { force: true });
 }
 
 /** One complete line at a time out of a growing byte stream: what precedes each newline is yielded, the tail waits
@@ -451,6 +460,8 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         // a reap in flight has taken the claim with the rest of the run.
         if (existsSync(`${base}.exit`) || !existsSync(`${base}.d`)) return "gone";
         try {
+          // Any line the channel takes goes after a seed still held, or the release would read the seed as handed over.
+          releaseHeld(base);
           appendFileSync(`${base}.in`, `${line}\n`);
         } catch {
           return "gone";
@@ -463,6 +474,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         if (!hasInput || inputClosed || finishCode !== undefined) return;
         inputClosed = true;
         try {
+          releaseHeld(base);
           appendFileSync(`${base}.in`, `${endMarker(base)}\n`);
         } catch {
           return;
@@ -472,7 +484,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     } satisfies ExecStream;
   };
 
-  const factory: ExecStreamFactory = (command, { env, input }) => {
+  const factory: ExecStreamFactory = (command, { env, input, inputAfter }) => {
     const base = join(runDir, randomBytes(6).toString("hex"));
     mkdirSync(runDir, { recursive: true, mode: OWNER_DIR });
     // The claim is the one path that says a run is on this computer, and mkdir is what makes it exist at once.
@@ -494,7 +506,10 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     // and the log holds everything the agent prints. The mode goes on at the open, never by a chmod after it: a
     // file that is readable for one moment has been read.
     writeOwned(`${base}.sh`, `${exports}\n${body}`);
-    if (input !== undefined) writeOwned(`${base}.in`, input.map(line => `${line}\n`).join(""));
+    const seed = input?.map(line => `${line}\n`).join("");
+    if (seed !== undefined) writeOwned(`${base}.in`, inputAfter === undefined ? seed : "");
+    // On disk rather than in this process, so a host that goes before the seed is due leaves it for the next one.
+    if (seed !== undefined && inputAfter !== undefined) writeOwned(`${base}.held`, seed);
     writeOwned(`${base}.log`, "");
     const log = openSync(`${base}.log`, "a");
     /** A launch node itself could not make: no bash on the PATH the turn runs under. Nothing wrote a log or an exit
@@ -519,7 +534,9 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     } finally {
       closeSync(log);
     }
-    return open(base, input !== undefined, { launch });
+    const stream = open(base, input !== undefined, { launch });
+    if (seed !== undefined && inputAfter !== undefined) void inputAfter.then(() => releaseHeld(base)).catch(() => stream.kill());
+    return stream;
   };
 
   factory.attach = async (run, { input, startedAt }) => {
@@ -527,6 +544,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     // The claim is what says the run is still here, and this computer's own answer is the only one there is: a
     // folder that is gone is a run that is gone, and nothing else may end one.
     if (!existsSync(`${run}.d`)) return "gone";
+    if (input) releaseHeld(run);
     // An empty channel is a launch whose host went before its prompt was written, and nothing will write it now.
     if (input && existsSync(`${run}.in`) && statSync(`${run}.in`).size === 0) {
       await reapRun(run);

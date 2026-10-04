@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -10,8 +10,10 @@ import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import { HERE_PLACE_ID, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import type { DaemonChannel } from "../src/daemon-channel.js";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime, type ForwardsSource } from "../src/serve.js";
@@ -1141,6 +1143,56 @@ describe("a local turn and a host restart", () => {
     writeFileSync(gate, "go\n");
     for (const ws of [api, web]) await until(async () => (await rt2.sessions.history(ws.id)).some(e => e.type === "session.delta" && e.text === "wrote the fix"), 20_000);
     for (const ws of [api, web]) expect((await rt2.sessions.list(ws.id))[0]!.status).toBe("running");
+    await rt2.close();
+  }, 30_000);
+
+  it("a Claude turn whose host went before its prompt reached the CLI gets that prompt from the next host, once", async () => {
+    const bin = join(root, "bin");
+    const heard = join(root, "heard");
+    const pidFile = join(root, "cli.pid");
+    mkdirSync(bin);
+    // Claude Code as a turn here meets it: it starts up, reads its first message, says its init and its reply, and
+    // keeps every later line it is handed, so a prompt written twice shows as two lines.
+    writeStub(
+      join(bin, "claude"),
+      [
+        "#!/bin/bash",
+        `sid=""; while [ $# -gt 0 ]; do case "$1" in --session-id|--resume) sid="$2"; shift;; esac; shift; done`,
+        `[ -z "$sid" ] && { echo "2.1.280 (Claude Code)"; exit 0; }`,
+        `echo $$ > ${pidFile}`,
+        `IFS= read -r first; printf '%s\\n' "$first" >> ${heard}`,
+        `printf '%s\\n' '{"type":"system","subtype":"init","cwd":"'"$PWD"'","session_id":"'"$sid"'","tools":[],"mcp_servers":[],"model":"claude-sonnet-4-5","permissionMode":"default","slash_commands":[],"apiKeySource":"none","uuid":"init"}'`,
+        `printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"duration_ms":10,"num_turns":1,"result":"built","session_id":"'"$sid"'","total_cost_usd":0,"usage":{"input_tokens":1,"output_tokens":1},"uuid":"r1"}'`,
+        `cat >> ${heard}`,
+        "",
+      ].join("\n"),
+    );
+    const token = "cafef00d".repeat(3);
+    // The first host's snapshot of the folder never answers, so the turn's prompt is still held when it goes.
+    const stalled = async (): Promise<DaemonChannel> => ({ send: () => new Promise(() => {}), close: () => {}, closed: new Promise(() => {}) });
+    const reading = new Set<() => void>();
+    const wiring = (held?: Set<() => void>): LocalWiring => ({
+      ...localWiring,
+      execStream: o => localExecStream({ root, runDir, ...o, ...(held !== undefined ? { reading: held } : {}) }),
+      env: () => ({ PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}` }),
+      daemonRoad: async () => ({ url: "http://127.0.0.1:7070", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: token }),
+    });
+    const host = (held?: Set<() => void>): Runtime =>
+      createRuntime({ backend: stubBackend(), store, adapters: { claude: HARNESS_ADAPTERS.claude }, local: wiring(held), daemonToken: token, daemonChannel: stalled, turnSnapshotMs: 60_000 });
+    const rt1 = host(reading);
+    const ws = await createOn(rt1, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt1, HERE_PLACE_ID, repoIn(root))).id });
+    await rt1.sessions.start(ws.id, { prompt: "build it" });
+    await grandchild(pidFile);
+    await rt1.close();
+    for (const drop of [...reading]) drop();
+    expect(existsSync(heard)).toBe(false);
+
+    const rt2 = host();
+    await until(async () => (await rt2.sessions.list(ws.id))[0]!.status !== "running", 20_000);
+    expect((await rt2.sessions.list(ws.id))[0]!.status).toBe("completed");
+    const said = readFileSync(heard, "utf8").trim().split("\n");
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain("build it");
     await rt2.close();
   }, 30_000);
 
