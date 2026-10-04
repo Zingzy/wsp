@@ -201,6 +201,7 @@ export function placeWiring(statePath: string, advertise?: string): PlaceWiring 
     log: placeLogReader(),
     update: placeUpdater(),
     leave: placeLeaver(),
+    runOver: placeRunner(),
     undo: placeUndoer(),
     githubToken: () => vaultGitHubToken(statePath),
     hostName: hostNameHere,
@@ -1104,6 +1105,17 @@ export function placeLeaver(deps: { transport?: SshTransport } = {}): PlaceLeave
     if (said.exitCode === SSH_REFUSED_EXIT) throw new PlaceLoginRefusedError(sshRefusalLine(said, reach));
     if (said.exitCode !== 0) throw new Error(placeLeaveFailedLine(req.name, said));
     return sweptSaid(said.stdout);
+  };
+}
+
+/** How one script runs on a computer this host holds no link to, for the host that wires the runtime: over the login
+ * the install used, as bash. Answers what it exited with; throws ssh's own line where the login would not stand. */
+export function placeRunner(deps: { transport?: SshTransport } = {}): NonNullable<PlaceWiring["runOver"]> {
+  return async (login, script, timeoutMs) => {
+    const reach = parseSshAddress(login.ssh, login.keyPath === undefined ? {} : { keyPath: login.keyPath });
+    const said = await (deps.transport ?? sshClient)(reach, shellLine(["bash", "-c", script]), { timeoutMs });
+    if (said.exitCode === SSH_REFUSED_EXIT) throw new PlaceLoginRefusedError(sshRefusalLine(said, reach));
+    return said;
   };
 }
 

@@ -54,6 +54,7 @@ import {
   placeProvisionPaths,
   placeProvisioningLine,
   pluginOffLine,
+  pluginsKeptLine,
   setupRowFix,
   ghStatusOf,
   projectLeftLine,
@@ -278,6 +279,9 @@ export interface PlaceWiring {
   /** Takes back what an add put on a computer before the host stopped mid-install, over the login that add used:
    * the script the installer left on the pending record for it. Throws the road's own sentence. */
   undo?(login: PlaceLogin, script: string): Promise<void>;
+  /** Runs one script on a computer over the login the install used, for a remove that finds no link up. Answers
+   * what it exited with; throws the road's own sentence where the login would not stand. */
+  runOver?(login: PlaceLogin, script: string, timeoutMs: number): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** The forwards over ssh this host holds for computers that reach it no other way; the installer holds one before
    * the deploy and the records keep it held. Absent on a runtime served without the ssh road. */
   back?: PlaceBackHolder;
@@ -1936,22 +1940,31 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     return took.flatMap(serversOutLines);
   };
 
-  /** The plugins the setup put on that computer, each taken off by its agent's own command over the link, the way a
-   * sync takes one out. A plugin the computer had before wsp stays, and nothing here fails the remove. */
-  const pluginsOffOver = async (placeId: string, held: PlaceRecord): Promise<string[]> => {
+  /** The plugins the setup put on that computer, each taken off by its agent's own command, the way a sync takes
+   * one out: over the link where it is up, else over the login the install used. A plugin the computer had before
+   * wsp stays. Answers the lines for the ones that came off and the names of the ones that did not, which the remove
+   * says; nothing here fails it. */
+  const pluginsOff = async (placeId: string, held: PlaceRecord, linked: boolean, login: PlaceLogin | undefined): Promise<{ off: string[]; kept: string[] }> => {
     const home = held.report.login["HOME"];
     const names = madeBySetup(held, "plugins");
     const undo = wiring.provision?.undo;
-    if (home === undefined || held.picks === undefined || names.length === 0 || undo === undefined) return [];
-    const machine = new PlaceMachine(linkTo(placeId), { id: held.name, home });
+    if (home === undefined || held.picks === undefined || names.length === 0 || undo === undefined) return { off: [], kept: [] };
     const planned = await undo(held.picks, names.map(name => ({ kind: "plugins" as const, name })), { home }).catch(() => []);
+    const machine = linked ? new PlaceMachine(linkTo(placeId), { id: held.name, home }) : undefined;
+    const runOver = wiring.runOver;
+    const run = async (cmd: string): Promise<boolean> => {
+      if (machine !== undefined) return (await machine.exec(cmd, { timeoutMs: UNDO_MS }).catch(() => undefined))?.exitCode === 0;
+      if (login === undefined || runOver === undefined) return false;
+      return (await runOver(login, cmd, UNDO_MS).catch(() => undefined))?.exitCode === 0;
+    };
     const off: string[] = [];
+    const kept = names.filter(name => !planned.some(u => u.key === `plugins/${name}` && u.cmd !== undefined));
     for (const u of planned) {
       if (u.cmd === undefined) continue;
-      const res = await machine.exec(u.cmd, { timeoutMs: UNDO_MS }).catch(() => undefined);
-      if (res?.exitCode === 0) off.push(pluginOffLine(u.label));
+      if (await run(u.cmd)) off.push(pluginOffLine(u.label));
+      else kept.push(u.label);
     }
-    return off;
+    return { off, kept };
   };
 
   /** The record with what that computer forks with on it, waited for no longer than one round trip on a link
@@ -2914,11 +2927,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const theirs = projects.filter(name => !made.some(key => (held.picks?.folders[key]?.name ?? key) === name));
       if (theirs.length > 0) throw new Error(placeHoldsProjectsRefusal(held.name, theirs));
       const reach = live.get(placeId)?.reach;
-      // Before either road sweeps: a plugin comes off by its agent's own command, which may sit in the install folder
-      // the sweep takes, and nothing on that computer knows which plugins were wsp's.
-      const pluginsOff = reach === undefined ? [] : await pluginsOffOver(placeId, held);
       const leaver = wiring.leave;
       const login = loginOf(held);
+      // Before either road sweeps: a plugin comes off by its agent's own command, which may sit in the install folder
+      // the sweep takes, and nothing on that computer knows which plugins were wsp's.
+      const plugins = await pluginsOff(placeId, held, reach !== undefined, login);
       let swept: string[] = [];
       let note: string | undefined;
       // What the road that logs in did where it did not finish the job, for the lines about the road that followed.
@@ -2961,7 +2974,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           }
         }
       }
-      swept = [...pluginsOff, ...swept];
+      swept = [...plugins.off, ...swept];
+      if (plugins.kept.length > 0) note = note === undefined ? pluginsKeptLine(held.name, plugins.kept) : `${note}; ${pluginsKeptLine(held.name, plugins.kept)}`;
       for (const key of made) {
         const folder = held.picks!.folders[key]!;
         const gone = await recording.removeFolder?.(placeId, key, folder).then(

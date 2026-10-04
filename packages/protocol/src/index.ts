@@ -6277,6 +6277,10 @@ export const placeStillInstalledLine = (name: string): string => `${name} is off
 /** What a remove took off that computer by its agent's own command: a plugin the setup put on there. */
 export const pluginOffLine = (name: string): string => `plugin ${name}`;
 
+/** What a remove says of the plugins the setup put on that computer and could not take off: they stay there. */
+export const pluginsKeptLine = (name: string, plugins: readonly string[]): string =>
+  `${plugins.join(", ")} ${plugins.length === 1 ? "is" : "are"} still on ${name}: wsp could not take ${plugins.length === 1 ? "it" : "them"} off`;
+
 /** What a remove took off this host's list with that computer: a project the recipe's folders step made there. The
  * checkout on that computer is the person's and stays. */
 export const projectLeftLine = (name: string): string => `project ${name}, its folder there left as it is`;

@@ -25,6 +25,7 @@ import {
   pendingHeldLine,
   noPendingRefusal,
   placeHoldsProjectsRefusal,
+  pluginsKeptLine,
   setupRowFix,
   placeProvisionPaths,
   placeProvisioningLine,
@@ -190,7 +191,7 @@ function signIns() {
 }
 
 /** A host with the setup wired, serving, and the road an add takes onto a computer that joins over the link. */
-async function hosting(o: { provision: PlaceProvisioner; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
+async function hosting(o: { provision: PlaceProvisioner; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; leave?: PlaceWiring["leave"]; runOver?: PlaceWiring["runOver"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
   const hostKey = o.hostKey ?? newPlaceKeyPair();
   const joined: { placeId: string; pair: PlaceKeyPair }[] = [];
   const store = o.store ?? memoryStore();
@@ -208,6 +209,8 @@ async function hosting(o: { provision: PlaceProvisioner; recipes?: RecipeShelf; 
       ...wiring(hostKey, undefined, o.update),
       provision: o.provision,
       ...(o.undo !== undefined ? { undo: o.undo } : {}),
+      ...(o.leave !== undefined ? { leave: o.leave } : {}),
+      ...(o.runOver !== undefined ? { runOver: o.runOver } : {}),
       install:
         o.install ??
         (async (req, stage) => {
@@ -333,6 +336,56 @@ describe("a remove of a computer set up with picks", () => {
     expect(cmds.filter(c => c.startsWith("take-off-") || c === "place.leave")).toEqual(["take-off-superpowers@market", "place.leave"]);
     expect(await runtime!.projects.list()).toEqual([]);
     expect(removed.swept).toEqual(["plugin superpowers@market", "/root/.wsp", "project app, its folder there left as it is"]);
+  });
+
+  it("takes the plugins off over the login where the link is down, and names each one it could not take off", async () => {
+    const p = provisioner({
+      rows: { plugins: [{ id: "plugins/superpowers@market", label: "superpowers@market", outcome: "installed" }, { id: "plugins/stuck@market", label: "stuck@market", outcome: "installed" }, { id: "plugins/had@market", label: "had@market", outcome: "present" }] },
+      undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: [`${c.kind}/${c.name}`], owner: `${c.kind}/${c.name}`, cmd: `take-off-${c.name}` })),
+    });
+    const over: { login: string; script: string }[] = [];
+    const order: string[] = [];
+    await hosting({
+      provision: p.wired,
+      runOver: async (login, script) => {
+        over.push({ login: login.ssh, script });
+        order.push(script);
+        return script.includes("stuck") ? { exitCode: 1, stdout: "", stderr: "Plugin is in use" } : { exitCode: 0, stdout: "", stderr: "" };
+      },
+      leave: async () => {
+        order.push("leave");
+        return ["/opt/wsp"];
+      },
+    });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, plugins: { "superpowers@market": {}, "stuck@market": {}, "had@market": {} } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    for (const ws of sockets.splice(0)) ws.close();
+    await until(async () => (await rowOf(place.id)).present === false);
+    const removed = await runtime!.places!.remove(place.id);
+    // Over the login the install used, before the leave takes the folder the agent runs from; never the one it had.
+    expect(over.map(o => [o.login, o.script])).toEqual([
+      ["root@10.0.0.9", "take-off-superpowers@market"],
+      ["root@10.0.0.9", "take-off-stuck@market"],
+    ]);
+    expect(order.at(-1)).toBe("leave");
+    expect(removed.swept).toEqual(["plugin superpowers@market", "/opt/wsp"]);
+    expect(removed.note).toContain(pluginsKeptLine("spoo", ["stuck@market"]));
+  });
+
+  it("names a plugin the link could not take off rather than saying nothing of it", async () => {
+    const cmds: string[] = [];
+    const p = provisioner({
+      rows: { plugins: [{ id: "plugins/stuck@market", label: "stuck@market", outcome: "installed" }] },
+      undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: [`${c.kind}/${c.name}`], owner: `${c.kind}/${c.name}`, cmd: `take-off-${c.name}` })),
+    });
+    await hosting({ provision: p.wired, cmds, answer: cmd => (cmd.startsWith("take-off-") ? { exitCode: 1 } : undefined) });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, plugins: { "stuck@market": {} } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const removed = await runtime!.places!.remove(place.id);
+    expect(removed.swept).toEqual(["/root/.wsp"]);
+    expect(removed.note).toBe(pluginsKeptLine("spoo", ["stuck@market"]));
   });
 
   it("still refuses a project the person recorded there by hand, and takes nothing off for it", async () => {

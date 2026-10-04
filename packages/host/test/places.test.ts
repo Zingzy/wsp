@@ -94,6 +94,7 @@ import {
   placeUpdateScript,
   placeUpdater,
   placeLeaver,
+  placeRunner,
   placeLeaveFailedLine,
   updatedLines,
   SIGN_IN_FLAGS_REFUSAL,
@@ -3676,6 +3677,21 @@ describe("the leave over the ssh road, which a remove takes wherever this host h
     expect(asked[0]!.script).not.toContain("rm ");
     const at = placeDaemonPaths("/home/maya");
     for (const path of [at.placeFile, at.placeKey, at.tokenPath, at.inbox]) expect(asked[0]!.script).not.toContain(path);
+  });
+
+  it("runs one script over the same login for a remove that finds no link up, and says ssh's own line where the login would not stand", async () => {
+    const asked: { reach: SshReach; script: string; timeoutMs?: number }[] = [];
+    const transport: SshTransport = async (reach, script, o) => {
+      asked.push({ reach, script, ...(o?.timeoutMs !== undefined ? { timeoutMs: o.timeoutMs } : {}) });
+      return { exitCode: 1, stdout: "", stderr: "Plugin is in use" };
+    };
+    const said = await placeRunner({ transport })({ ssh: "root@65.21.4.12:2222", keyPath: "/Users/lena/.ssh/hetzner" }, "claude plugin uninstall 'x@y'", 5_000);
+    expect(said).toEqual({ exitCode: 1, stdout: "", stderr: "Plugin is in use" });
+    expect(asked[0]!.reach).toMatchObject({ user: "root", host: "65.21.4.12", port: 2222, keyPath: "/Users/lena/.ssh/hetzner" });
+    expect(asked[0]!.script).toBe(`bash -c ${shellQuote("claude plugin uninstall 'x@y'")}`);
+    expect(asked[0]!.timeoutMs).toBe(5_000);
+    const refused = placeRunner({ transport: async () => ({ exitCode: 255, stdout: "", stderr: "ssh: connect to host 65.21.4.12 port 2222: Connection refused" }) });
+    await expect(refused({ ssh: "root@65.21.4.12:2222" }, "true", 5_000)).rejects.toBeInstanceOf(PlaceLoginRefusedError);
   });
 
   it("reads back what that leave said it took, and none of the sentences a person reads around them", async () => {
