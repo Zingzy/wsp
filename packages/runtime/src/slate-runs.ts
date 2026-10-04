@@ -64,6 +64,8 @@ export interface CmdRunDecl {
   once?: boolean;
   /** A literal command that reads the raw result on stdin and prints the JSON the record's json becomes. */
   then?: string;
+  /** The text of each of the slate's files the command or its then reads, by name: part of what the person approves. */
+  files?: Record<string, string>;
 }
 
 /** One value as it reaches a command, evaluated by the host at the moment the run starts. A secret is named, never
@@ -105,6 +107,7 @@ export interface RunAsk {
   timeout: number;
   confirm?: string;
   then?: string;
+  files?: Record<string, string>;
 }
 
 /** A reshape's answer: the JSON it printed, or why it failed with what it said on stderr. */
@@ -141,6 +144,8 @@ export interface SlateRunsDeps {
   approvals?: RunApprovals;
   /** `slates.secrets.json` beside the state file, for secrets declared `keep`. Unset keeps nothing on disk. */
   secretsFile?: string;
+  /** The slate's own folder with its files written, which every command and then reads as SLATE_DIR. */
+  dir?: (threadId: string) => string;
   now?: () => number;
 }
 
@@ -311,6 +316,8 @@ interface Kept {
   keep: boolean;
 }
 
+const filesUnwritten = (e: unknown): string => `the slate's files were not written: ${e instanceof Error ? e.message : String(e)}`;
+
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value !== null && typeof value === "object") {
@@ -480,20 +487,29 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     deps.onRecord(threadId, run, record);
     return record;
   };
-  const loginEnv = (): Record<string, string> => {
+  /** Throws where the slate's files could not be written. */
+  const loginEnv = (threadId: string): Record<string, string> => {
     const env: Record<string, string> = {};
     for (const [name, value] of Object.entries(deps.env())) if (!name.startsWith("WSP_")) env[name] = value;
+    if (deps.dir !== undefined) env["SLATE_DIR"] = deps.dir(threadId);
     return env;
   };
-  const reshape = (threadId: string, cmd: string, input: string, folder: string, timeoutS = DEFAULT_TIMEOUT_S): Reshape =>
-    reshapeResult({ cmd, input, cwd: existsSync(folder) ? folder : process.cwd(), env: loginEnv(), timeoutS, scrub: text => secrets.scrub(threadId, text) });
+  const reshape = (threadId: string, cmd: string, input: string, folder: string, timeoutS = DEFAULT_TIMEOUT_S): Reshape => {
+    let env: Record<string, string>;
+    try {
+      env = loginEnv(threadId);
+    } catch (e) {
+      return { done: Promise.resolve({ why: filesUnwritten(e), exit: null, err: "" }), kill: () => {} };
+    }
+    return reshapeResult({ cmd, input, cwd: existsSync(folder) ? folder : process.cwd(), env, timeoutS, scrub: text => secrets.scrub(threadId, text) });
+  };
   const running = (t: ThreadRuns): number => [...t.runs.values()].filter(l => l.record.state === "running").length;
 
   const key = (decl: CmdRunDecl): string => {
     const env = Object.entries(decl.env ?? {})
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([name, expr]) => [name, stableJson(expr)]);
-    const what = [decl.kind, decl.cmd, env, (decl.args ?? []).map(stableJson), decl.stdin === undefined ? null : stableJson(decl.stdin), decl.on ?? "thread", decl.cwd ?? "", decl.stream === true, decl.every ?? null, decl.always === true, ...(decl.then !== undefined ? [decl.then] : [])];
+    const what = [decl.kind, decl.cmd, env, (decl.args ?? []).map(stableJson), decl.stdin === undefined ? null : stableJson(decl.stdin), decl.on ?? "thread", decl.cwd ?? "", decl.stream === true, decl.every ?? null, decl.always === true, ...(decl.then !== undefined ? [decl.then] : []), ...(decl.files !== undefined ? [stableJson(decl.files)] : [])];
     return createHash("sha256").update(JSON.stringify(what)).digest("hex").slice(0, 32);
   };
 
@@ -515,6 +531,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
       timeout: timeoutOf(req.decl),
       ...(req.decl.confirm !== undefined ? { confirm: req.decl.confirm } : {}),
       ...(req.decl.then !== undefined ? { then: req.decl.then } : {}),
+      ...(req.decl.files !== undefined ? { files: req.decl.files } : {}),
     };
   };
 
@@ -550,7 +567,12 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     if (running(t) >= RUNNING_MAX) return hold(req, l, "busy");
     const inputs = req.inputs();
     if ((inputs.args ?? []).some(input => "secret" in input)) return fail(req, l, SECRET_IN_ARGS);
-    const env = loginEnv();
+    let env: Record<string, string>;
+    try {
+      env = loginEnv(threadId);
+    } catch (e) {
+      return fail(req, l, filesUnwritten(e));
+    }
     for (const [name, input] of Object.entries(inputs.env ?? {})) {
       if (!ENV_NAME.test(name)) return fail(req, l, `${name} is not a name an environment variable can have`);
       const text = "secret" in input ? secrets.plaintext(threadId, input.secret) : input.value === null ? undefined : asText(input.value);

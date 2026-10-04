@@ -319,4 +319,29 @@ describe("a slate's MCP runs", () => {
     expect((await press("s")).ask).toBeUndefined();
     await vi.waitFor(async () => expect((await get()).values["shaped"]).toMatchObject({ state: "done", runs: 2 }), { timeout: 10_000 });
   }, 60_000);
+
+  it("a then that reads the slate's own file runs it from SLATE_DIR, with the file's text in its consent", async () => {
+    const { rt, threadId, asThread } = await host();
+    const get = async (): Promise<SlateView> => {
+      await rt.slates.settled();
+      return (await rt.slates.get(threadId))!;
+    };
+    const press = async () => rt.slates.event({ threadId, version: (await get()).version, piece: "go", event: "press", requestId: `go-${Date.now()}` });
+    const shapedBy = (code: string) => `<slate>
+  <run name="first" tool="notes.list_text" then='sh "$SLATE_DIR/first.sh"' />
+  <column><button id="go" label="Go" onPress={start($first)} /></column>
+  <file name="first.sh">{\`${code}\`}</file>
+</slate>`;
+    const CODE = `read -r line; printf '{"first":"%s"}' "$line"`;
+    await rt.slates.write({ text: shapedBy(CODE) }, asThread);
+    const asked = await press();
+    expect(asked.ask).toMatchObject({ kind: "server", then: 'sh "$SLATE_DIR/first.sh"', files: { "first.sh": CODE } });
+    await rt.slates.approve({ threadId, key: asked.ask!.key, scope: "thread" });
+    await vi.waitFor(async () => expect((await get()).values["first"]).toMatchObject({ state: "done", json: { first: "# Inbox" } }), { timeout: 10_000 });
+    // New code under the same then asks again.
+    await rt.slates.write({ text: shapedBy(`${CODE}; :`) }, asThread);
+    const again = await press();
+    expect(again.ask).toMatchObject({ kind: "server", files: { "first.sh": `${CODE}; :` } });
+    expect(again.ask!.key).not.toBe(asked.ask!.key);
+  }, 60_000);
 });

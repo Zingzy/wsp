@@ -52,6 +52,8 @@ import {
   type SlateView,
   type SlateWriteAnswer,
 } from "@wsp/protocol";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Store } from "./store.js";
 import { createSlateRuns, lastResult, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
 import { HELD_CONFIRM, consentKey, createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
@@ -134,6 +136,8 @@ export interface SlatesDeps {
   runEnv(): Readonly<Record<string, string>>;
   /** Where secrets declared keep are written, beside the state file. */
   secretsFile?: string;
+  /** Under the host's home: each thread's slate writes its files into a folder of its own here, named by the thread. */
+  slatesDir?: string;
   /** The runs factory; the real one unless a test swaps it. */
   runs?: (d: SlateRunsDeps) => SlateRuns;
   /** One of the thread's agent's MCP servers, as that agent would start it on this computer. */
@@ -198,6 +202,20 @@ const sourcesNamed = (text: string): string[] => SOURCE_NAMES.filter(name => new
 
 /** A value path as written, `$` optional: `i` is `$i`. */
 const ownPath = (path: string): string => (path.startsWith("$") ? path : `$${path}`);
+
+/** The files a run's cmd or then reads: every one where it names $SLATE_DIR, else the ones it names. */
+function filesRead(doc: SlateDoc | null, decl: SlateRunDecl): Record<string, string> | undefined {
+  const said = [decl.kind === "cmd" ? decl.cmd : "", (decl as { then?: string }).then ?? ""].join("\n");
+  const every = /\$\{?SLATE_DIR\b/.test(said);
+  const used = Object.entries(doc?.files ?? {}).filter(([name]) => every || new RegExp(`(^|[^A-Za-z0-9._-])${name.replace(/[.]/g, "\\.")}($|[^A-Za-z0-9._-])`).test(said));
+  return used.length === 0 ? undefined : Object.fromEntries(used);
+}
+
+/** A declaration with the text of the files it reads beside it, as its approval key and its sheet take it. */
+function withFiles(doc: SlateDoc | null, decl: SlateRunDecl): SlateRunDecl & { files?: Record<string, string> } {
+  const files = filesRead(doc, decl);
+  return files === undefined ? decl : { ...decl, files };
+}
 
 /** What a run executes, without how often or how long: a change here makes its last result stale. */
 const commandOf = (decl: SlateRunDecl): SlateJson => {
@@ -314,6 +332,21 @@ export function createSlates(deps: SlatesDeps): Slates {
       },
       list: threadId => Object.entries(records.get(threadId)?.approvals ?? {}).flatMap(([k, a]) => (a.state === "allowed" ? [k] : [])),
   };
+  const folderOf = (threadId: string): string | undefined => (deps.slatesDir === undefined ? undefined : join(deps.slatesDir, threadId));
+  /** The slate's folder made to hold its document's files and nothing else, written before every command reads it:
+   * a rewound slate runs the code of the turn it went back to. */
+  const writeFiles = (threadId: string): string => {
+    const dir = folderOf(threadId)!;
+    const files = records.get(threadId)?.document?.files ?? {};
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    for (const name of readdirSync(dir)) if (files[name] === undefined) rmSync(join(dir, name), { recursive: true, force: true });
+    for (const [name, text] of Object.entries(files)) {
+      // Removed first, so a link left in its place is never followed and the mode is the new file's.
+      rmSync(join(dir, name), { recursive: true, force: true });
+      writeFileSync(join(dir, name), text, { mode: 0o600, flag: "wx" });
+    }
+    return dir;
+  };
   const moved = (threadId: string, run: string, record: RunRecord): void => {
     if (capturing?.threadId === threadId && capturing.run === run) return;
     void serial(threadId, () => runMoved(threadId, run, record)).catch((e: unknown) => console.warn(`the slate of thread ${threadWord(threadId)} lost a record of $${run}: ${e instanceof Error ? e.message : String(e)}`));
@@ -322,6 +355,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     env: deps.runEnv,
     now: deps.now,
     ...(deps.secretsFile !== undefined ? { secretsFile: deps.secretsFile } : {}),
+    ...(deps.slatesDir !== undefined ? { dir: writeFiles } : {}),
     approvals,
     onRecord: moved,
     onLine: (threadId, run, line) => {
@@ -353,7 +387,8 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   /** The run name and command an approval key stands for, so the menu can list it after the document changes. */
   function approvalNames(r: SlateRecord, key: string): { run?: string; cmd?: string } {
-    for (const [name, decl] of Object.entries(r.document?.runs ?? {})) {
+    for (const [name, declared] of Object.entries(r.document?.runs ?? {})) {
+      const decl = withFiles(r.document, declared);
       if (decl.kind === "cmd" && runs.key(decl as CmdRunDecl) === key) return { run: name, cmd: decl.cmd };
       if (decl.kind !== "cmd" && key === consentKey(decl)) return { run: name, cmd: `the MCP server ${decl.server}${decl.then !== undefined ? `, then ${decl.then}` : ""}` };
       if (decl.kind !== "cmd" && key === `mcp:${decl.server}`) return { run: name, cmd: `the MCP server ${decl.server}` };
@@ -571,6 +606,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         timeoutS: a.timeout,
         ...(a.confirm !== undefined ? { confirm: a.confirm } : {}),
         ...(a.then !== undefined ? { then: a.then } : {}),
+        ...(a.files !== undefined ? { files: a.files } : {}),
         why: isRunRecord(rec) && rec.why !== undefined ? rec.why : HELD_APPROVAL,
       };
     });
@@ -602,7 +638,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   };
 
   const armTimers = (r: SlateRecord): void => {
-    const list = Object.entries(r.document?.runs ?? {}).flatMap(([run, decl]) => (decl.every !== undefined ? [{ run, every: decl.every, key: decl.kind === "cmd" ? runs.key(decl as CmdRunDecl) : JSON.stringify(decl), ...(decl.always === true ? { always: true } : {}) }] : []));
+    const list = Object.entries(r.document?.runs ?? {}).flatMap(([run, decl]) => (decl.every !== undefined ? [{ run, every: decl.every, key: decl.kind === "cmd" ? runs.key(withFiles(r.document, decl) as CmdRunDecl) : JSON.stringify(decl), ...(decl.always === true ? { always: true } : {}) }] : []));
     runs.timers(r.threadId, list);
     const servers = Object.values(r.document?.runs ?? {}).flatMap(decl => (decl.kind === "cmd" ? [] : [{ server: decl.server, kept: decl.every !== undefined && decl.always === true }]));
     mcp.servers(r.threadId, servers.map(s => s.server), servers.filter(s => s.kept).map(s => s.server));
@@ -716,7 +752,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     try {
       const said = decl.kind === "resource" ? undefined : decl.confirm;
       const confirm = said === undefined ? undefined : slateText(resolveSlateProp(said, contextOf(r, views)) ?? null) || `Run $${run}?`;
-      const asked = { ...decl, ...(confirm !== undefined ? { confirm } : {}) };
+      const asked = { ...withFiles(r.document, decl), ...(confirm !== undefined ? { confirm } : {}) };
       const answer =
         asked.kind !== "cmd"
           ? mcp.start({ threadId: r.threadId, run, decl: asked as McpRunDecl, by, args: mcpArgsOf(r, asked as McpRunDecl), runs: count })
@@ -735,14 +771,14 @@ export function createSlates(deps: SlatesDeps): Slates {
     const decl = r.document?.runs[run];
     const prior = r.values[run];
     const count = isRunRecord(prior) ? prior.runs : 0;
-    if (decl !== undefined && decl.kind !== "cmd") return mcp.provisional(r.threadId, decl, count) as SlateRunRecord;
+    if (decl !== undefined && decl.kind !== "cmd") return mcp.provisional(r.threadId, withFiles(r.document, decl) as McpRunDecl, count) as SlateRunRecord;
     return approvedAlways(r, run) ? (runningRecord(isRunRecord(prior) ? lastResult(prior as unknown as RunRecord) : undefined, count + 1, deps.now()) as SlateRunRecord) : { state: "held", why: HELD_APPROVAL, runs: count };
   };
 
   /** Whether the person said "Always in this thread" to the run as declared now, and it asks nothing every start. */
   const approvedAlways = (r: SlateRecord, run: string): boolean => {
     const decl = r.document?.runs[run];
-    return decl?.kind === "cmd" && decl.confirm === undefined && r.approvals[runs.key(decl as CmdRunDecl)]?.state === "allowed";
+    return decl?.kind === "cmd" && decl.confirm === undefined && r.approvals[runs.key(withFiles(r.document, decl) as CmdRunDecl)]?.state === "allowed";
   };
 
   /** A record the runs module wrote outside a batch (an end, a cancel, a queued start, an approval): one batch, so
@@ -1192,7 +1228,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         });
         return;
       }
-      const named = Object.entries(r.document?.runs ?? {}).filter(([, decl]) => decl.kind === "cmd" && runs.key(decl as CmdRunDecl) === p.key).map(([name]) => name);
+      const named = Object.entries(r.document?.runs ?? {}).filter(([, decl]) => decl.kind === "cmd" && runs.key(withFiles(r.document, decl) as CmdRunDecl) === p.key).map(([name]) => name);
       if (named.length === 0) throw usageRefusal(`this slate declares no command with approval key ${p.key}:`, "read the slate again and approve what it asks now.");
       await serial(p.threadId, async () => {
         if (p.scope === "refuse") {
@@ -1211,7 +1247,7 @@ export function createSlates(deps: SlatesDeps): Slates {
           if (runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once") !== undefined) continue;
           // The hold was a host's before a restart, which this process never saw: hold it again, then answer it.
           const decl = r.document!.runs[run] as Extract<SlateRunDecl, { kind: "cmd" }>;
-          const again = runs.start({ threadId: p.threadId, run, decl: decl as CmdRunDecl, by: "person", folder: deps.thread(p.threadId)?.folder ?? process.cwd(), inputs: inputsOf(r, decl), last: rec as unknown as RunRecord });
+          const again = runs.start({ threadId: p.threadId, run, decl: withFiles(r.document, decl) as CmdRunDecl, by: "person", folder: deps.thread(p.threadId)?.folder ?? process.cwd(), inputs: inputsOf(r, decl), last: rec as unknown as RunRecord });
           if (again.outcome === "held") runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once");
         }
         await save(r);
@@ -1297,6 +1333,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         runs.drop(threadId);
         mcp.drop(threadId);
         records.delete(threadId);
+        const dir = folderOf(threadId);
+        if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
         holds.delete(threadId);
         await deps.store.delete(SLATES, threadId);
       });

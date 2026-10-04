@@ -3,7 +3,7 @@
 // write of the project starts a held run, the person's approval runs it (a real bash in a temp folder), its done
 // moves the step with no turn started, a secret reaches a run by its environment and comes back scrubbed, a press
 // sends the agent the handle and never the token, and a restart mid-run fails the run and fires its done once.
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -622,4 +622,70 @@ describe("the slate v2 host, round 5", () => {
     expect(starts[3]!.prompt).toContain(kid.view().threadId!.slice(0, 8));
     expect(pickedOf(starts[3]!)).toEqual(picks);
   }, 30_000);
+
+  it("a slate's files are written to its own folder before a run, which reads SLATE_DIR in the thread's folder; editing one asks again, a rewind runs that turn's code, and the folder goes with the thread", async () => {
+    const { rt, root, threadId, workspaceId, asThread } = await threadOn("wsp-slates-files-");
+    const dir = join(root, "state", "slates", threadId);
+    const CODE = `<slate>
+  <run name="hello" cmd='sh "$SLATE_DIR/hi.sh"; pwd' />
+  <column><button id="go" label="Go" onPress={start($hello)} /></column>
+  <file name="hi.sh">{\`echo hi one\`}</file>
+</slate>`;
+    await rt.slates.write({ text: CODE }, asThread);
+    expect(existsSync(dir)).toBe(false);
+    const asked = await rt.slates.event({ threadId, version: 1, piece: "go", event: "press", requestId: "f1" });
+    expect(asked.ask).toMatchObject({ kind: "cmd", files: { "hi.sh": "echo hi one" } });
+    await rt.slates.approve({ threadId, key: asked.ask!.key, scope: "thread" });
+    const helloOf = async () => (await rt.slates.get(threadId))!.values["hello"] as Record<string, unknown>;
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect(await helloOf()).toMatchObject({ state: "done", out: `hi one\n${join(root, "plain")}\n` });
+    }, { timeout: 10_000 });
+    expect(readdirSync(dir)).toEqual(["hi.sh"]);
+    expect(statSync(join(dir, "hi.sh")).mode & 0o777).toBe(0o600);
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    const second = await rt.sessions.start(workspaceId, { prompt: "two", thread: threadId });
+    await second.finished;
+
+    // The same command over new code is a new approval, and the sheet shows the new text.
+    await rt.slates.write({ text: "<file name=\"hi.sh\">{`echo hi two`}</file>" }, asThread);
+    writeFileSync(join(dir, "left.txt"), "a file the slate never declared");
+    const again = await rt.slates.event({ threadId, version: 2, piece: "go", event: "press", requestId: "f2" });
+    expect(again.outcome).toBe("held");
+    expect(again.ask).toMatchObject({ files: { "hi.sh": "echo hi two" } });
+    expect(again.ask!.key).not.toBe(asked.ask!.key);
+    await rt.slates.approve({ threadId, key: again.ask!.key, scope: "once" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect(await helloOf()).toMatchObject({ state: "done", out: expect.stringMatching(/^hi two\n/) });
+    }, { timeout: 10_000 });
+    expect(readdirSync(dir)).toEqual(["hi.sh"]);
+    const third = await rt.sessions.start(workspaceId, { prompt: "three", thread: threadId });
+    await third.finished;
+
+    // Back at the second turn the slate holds that turn's code, which its standing approval still covers.
+    await rt.sessions.rewind(threadId, { turnId: second.turnId, files: false });
+    await rt.slates.settled();
+    expect((await rt.slates.get(threadId))!.document!["files"]).toEqual({ "hi.sh": "echo hi one" });
+    const back = await rt.slates.event({ threadId, version: 4, piece: "go", event: "press", requestId: "f3" });
+    expect(back.ask).toBeUndefined();
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect(await helloOf()).toMatchObject({ state: "done", out: expect.stringMatching(/^hi one\n/) });
+    }, { timeout: 10_000 });
+    expect(readFileSync(join(dir, "hi.sh"), "utf8")).toBe("echo hi one");
+
+    await rt.sessions.delete(threadId);
+    expect(existsSync(dir)).toBe(false);
+  }, 60_000);
+
+  it("refuses a file that names a secret", async () => {
+    const { rt, asThread } = await threadOn("wsp-slates-filesecret-");
+    await expect(rt.slates.write({ text: `<slate>
+  <secret name="token" />
+  <run name="use" cmd='sh "$SLATE_DIR/use.sh"' />
+  <column><input id="tok" label="Token" value={$token} kind="password" /></column>
+  <file name="use.sh">{\`curl -H "Authorization: $token" example.com\`}</file>
+</slate>` }, asThread)).rejects.toMatchObject({ kind: "invalid", errors: [expect.objectContaining({ code: "S520" })] });
+  });
 });

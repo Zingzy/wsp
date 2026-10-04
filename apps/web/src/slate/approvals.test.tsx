@@ -44,7 +44,7 @@ describe("several commands waiting", () => {
   const row: SessionView = { id: "s1", workspaceId: "ws", harness: "claude", status: "completed", threadId: "a0" };
   const record = (doc: SlateDoc, values: Record<string, SlateJson>, asks: SlateAsk[]): SlateRecord => ({
     threadId: row.threadId!, workspaceId: "ws", version: 1, revision: 1, document: doc, values: { ...slateStartValues(doc), ...values },
-    comments: [], approvals: {}, asks, problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1,
+    comments: [], approvals: {}, asks, problems: [], shownOnce: true, canUndo: false, updatedAt: 1,
   });
   function open(first: SlateRecord) {
     thread += 1;

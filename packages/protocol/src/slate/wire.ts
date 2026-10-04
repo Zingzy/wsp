@@ -51,6 +51,8 @@ export const SlateCmdAsk = z.object({
   confirm: z.string().optional(),
   /** The run's literal reshape, fed its raw result on stdin. */
   then: z.string().optional(),
+  /** The text of each of the slate's files the run reads, by name. */
+  files: z.record(z.string(), z.string()).optional(),
   /** Why it is held: "needs your approval", "started 12 times in a minute; press to run it again". */
   why: z.string(),
 });
@@ -80,6 +82,8 @@ export const SlateServerAsk = z.object({
   args: z.record(z.string(), SlateWireJson).optional(),
   /** The run's literal reshape, fed its raw result on stdin; its consent is part of this one. */
   then: z.string().optional(),
+  /** The text of each of the slate's files that reshape reads, by name. */
+  files: z.record(z.string(), z.string()).optional(),
 });
 
 /** A destructive tool, or a run that names confirm, asks on every start; "once" runs it, "refuse" drops the start. */
