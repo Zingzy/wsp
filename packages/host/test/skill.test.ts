@@ -88,6 +88,17 @@ describe("the wsp skill", () => {
     expect(instructions(true).slice(0, INSTRUCTIONS_KEPT)).toContain(`${ANOTHER_AGENT_WORDS}.`);
   });
 
+  it("says once a slate is written a request to see lands there, the person's result stays there, and long scripts live in a file", () => {
+    expect(THREAD_SLATE_WORDS).toContain("Once the slate is written, a request to see something lands there.");
+    const text = wspSkill();
+    const section = text.slice(text.indexOf("### slate\n"), text.indexOf("\n## ", text.indexOf("### slate\n")));
+    for (const words of [
+      "a request to see something lands there", "gets its result there unless they ask in the chat", "Keep a long script in a file in the folder",
+      "one heading per section", "status and last-checked lines small and muted", "actions at the end of their row with one primary per section",
+      "mono only for figures, ids, times and paths", "every live number with its window and unit", "nothing centered but a lone figure or card",
+    ]) expect(section, words).toContain(words);
+  });
+
   // slate-reach.json is what people say when a slate is the answer, the owner's own words among them; no model reads
   // it here, it only holds the instructions and the tool descriptions, which tool search matches, to those words.
   it("says every word the slate reach prompts rely on in a thread's instructions and in a slate tool's description", () => {
