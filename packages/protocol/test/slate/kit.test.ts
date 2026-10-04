@@ -103,7 +103,7 @@ describe("the richer kit", () => {
     }
     expect(values.hist).toEqual([{ at: 1000, v: 2400.5 }, { at: 61000, v: 2401.25 }, { at: 121000, v: 2399 }]);
     const sketch = sketchSlate(doc, values, { now: 121000 });
-    for (const line of ["# Gold", "grid of 3", "Per ounce  $2,399.00  trend 2400.5 to 2399", "Low  $2,399.00", "High  $2,401.25", "Feed", "(good) Live", "[every minute]", "Last hour  (3/60) [#.........]", "Per ounce, last hour  last $2,399.00, min $2,399.00, max $2,401.25 over 3 points", "  x 1000 to 121000, y $2,399.00 to $2,403.00"]) expect(sketch).toContain(line);
+    for (const line of ["# Gold", "grid of 3", "Per ounce  $2,399.00  trend 2400.5 to 2399", "Low  $2,399.00", "High  $2,401.25", "Feed", "(good) Live", "[every minute]", "Last hour  (3/60) [#.........]", "Per ounce, last hour  last $2,399.00, min $2,399.00, max $2,401.25 over 3 points", "  x 1000 to 121000, y $2,399.00 to $2,401.50"]) expect(sketch).toContain(line);
     let capped: SlateValues = { ...values, hist: Array.from({ length: 60 }, (_, i) => ({ at: i, v: i })) };
     capped = runSlateBatch(doc, capped, [{ path: "$spot", value: { state: "done", exit: 0, json: { price: 99 }, runs: 2 } }], { by: "run", now: 9 }).values;
     expect((capped.hist as SlateJson[]).length).toBe(60);

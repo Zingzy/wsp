@@ -9,19 +9,19 @@ import { LEGEND } from "../../settings/usage.js";
 import { figure, NOTE, str, TONE_INK } from "./look.js";
 
 /** The kit's axis, except that whole-number figures label only whole numbers: the axis spans whole numbers, split
- * into the most parts (four at most) that each step a whole number, so 0 to 1 reads 0 and 1, never 0, 0, 1, 1, 1. */
+ * into the kit's parts when each steps a whole number, else the most that do, so 0 to 1 reads 0 and 1, never 0, 0, 1, 1, 1. */
 function axisFor(values: readonly number[], format: SlateJson | undefined): { from: number; to: number; parts: number } {
   const axis = slateChartAxis(values);
-  if (format !== "integer") return { ...axis, parts: 4 };
+  if (format !== "integer") return axis;
   const from = Math.floor(axis.from);
   const to = Math.max(from + 1, Math.ceil(axis.to));
   const span = to - from;
-  const parts = [4, 3, 2].find(n => span % n === 0) ?? 1;
+  const parts = [axis.parts, 4, 3, 2].find(n => span % n === 0) ?? 1;
   return { from, to, parts };
 }
 
-/** The panel decides a chart's height, not the agent: 160 px in the 400 px panel, 220 once it is widened. */
-const heightFor = (width: number): number => (width >= 560 ? 220 : 160);
+/** The panel decides a chart's height, not the agent: 200 px in the 400 px panel, 260 once it is widened. */
+const heightFor = (width: number): number => (width >= 560 ? 260 : 200);
 
 /** The figure's own width, read as it changes. */
 function useWidth(): [(node: HTMLElement | null) => (() => void) | undefined, number] {

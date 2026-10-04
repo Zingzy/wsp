@@ -99,17 +99,23 @@ describe("the richer kit in the renderer", () => {
       expect(view.container.querySelector("[data-k=y-axis] [role=img], [data-k=y-axis] .digit-strip")).toBeNull();
     });
 
-    it("holds every value in four round steps", () => {
+    it("holds every value in four or five round steps", () => {
       for (const values of [[2400.5, 2401.25, 2399], [4141.8, 4141.8], [0, 0], [-5, -5], [3, 1000], [0.001, 0.0012], [-40, 25], [99.9, 100.1]]) {
-        const { from, to } = slateChartAxis(values);
+        const { from, to, parts } = slateChartAxis(values);
         expect(from, String(values)).toBeLessThanOrEqual(Math.min(...values));
         expect(to, String(values)).toBeGreaterThanOrEqual(Math.max(...values));
         expect(to, String(values)).toBeGreaterThan(from);
-        const step = (to - from) / 4;
+        expect([4, 5]).toContain(parts);
+        const step = (to - from) / parts;
         const lead = step / 10 ** Math.floor(Math.log10(step));
         expect([1, 2, 2.5, 5].some(m => Math.abs(lead - m) < 1e-9), `${values}: step ${step}`).toBe(true);
         expect(Math.abs(from / step - Math.round(from / step)), `${values}: from ${from}`).toBeLessThan(1e-9);
       }
+    });
+
+    it("takes five steps when four would leave the top half empty", () => {
+      expect(slateChartAxis([210, 435, 260])).toEqual({ from: 0, to: 500, parts: 5 });
+      expect(slateChartAxis([0, 790])).toEqual({ from: 0, to: 800, parts: 4 });
     });
   });
 
