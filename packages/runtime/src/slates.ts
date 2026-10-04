@@ -24,22 +24,21 @@ import {
   type SessionSlateEvent,
   type Slate,
   type SlateAction,
-  type SlateActAnswer,
-  type SlateActOutcome,
   type SlateBy,
   type SlateCause,
-  type SlateClearAnswer,
   type SlateEmpty,
   type SlateEvalContext,
+  type SlateEventAnswer,
   type SlateJson,
   type SlatePatchOp,
   type SlateProblem,
   type SlateReadAnswer,
   type SlateStateAnswer,
-  type SlateStateEvent,
-  type SlateUndoAnswer,
+  type SlateValuesEvent,
   type SlateView,
   type SlateWriteAnswer,
+  compileSlateJsx,
+  slateCatalog,
 } from "@wsp/protocol";
 import type { Store } from "./store.js";
 import { resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
@@ -87,7 +86,7 @@ export interface SlatesDeps {
   /** Records an event in the thread's transcript, live to every window. */
   record(event: SessionSlateEvent): void;
   /** Pushes an event to the windows and nowhere else. */
-  emit(event: SlateStateEvent): void;
+  emit(event: SlateValuesEvent): void;
   thread(threadId: string): SlateThreadFacts | undefined;
   /** Every thread under the lead, the lead included. */
   under(lead: string): string[];
@@ -95,7 +94,7 @@ export interface SlatesDeps {
   /** What the source resolvers read for this thread. */
   sources(threadId: string, workspaceId: string, state: Record<string, SlateJson>): SlateSourceContext;
   /** Puts a press's message into the thread: a start that the runtime steers or queues as it would any send. */
-  deliver(o: { threadId: string; workspaceId: string; prompt: string; requestId: string }): Promise<{ outcome: SlateActOutcome; turnId?: string }>;
+  deliver(o: { threadId: string; workspaceId: string; prompt: string; requestId: string }): Promise<{ outcome: "started" | "steered" | "queued"; turnId?: string }>;
   /** A slate in this workspace now binds the pull request's checks, so the host re-reads it sooner while one is pending. */
   watchPr?(workspaceId: string): void;
 }
@@ -188,7 +187,7 @@ function cutAt(value: SlateJson, at: (string | number)[], keep: number): SlateJs
 }
 
 /** What each outcome reads as under the pressed piece (09-actions, "Outcomes shown to the person"). */
-const SAID: Record<"send" | "steer" | "queue", Record<SlateActOutcome, string>> = {
+const SAID: Record<"send" | "steer" | "queue", Record<"started" | "steered" | "queued", string>> = {
   send: { started: "Sent", steered: "Sent into the running turn", queued: "Waiting for the turn to end" },
   steer: { started: "Nothing was running, so it was sent as the next message", steered: "Sent into the running turn", queued: "Waiting for the turn to end" },
   // A queue that waits even where the agent takes messages mid-turn needs a flag on the start this build lacks, so
@@ -198,14 +197,14 @@ const SAID: Record<"send" | "steer" | "queue", Record<SlateActOutcome, string>> 
 
 export interface Slates {
   get(threadId: string): Promise<SlateView | null>;
-  set(p: SlateTarget & { lines?: string; document?: Record<string, unknown>; ifVersion?: number }, caller?: Caller): Promise<SlateWriteAnswer>;
-  patch(p: SlateTarget & { lines?: string; ops?: Record<string, unknown>[]; ifVersion?: number }, caller?: Caller): Promise<SlateWriteAnswer>;
-  state(p: SlateTarget & { values: Record<string, unknown>; ifVersion?: number; sketch?: boolean }, caller?: Caller): Promise<SlateStateAnswer>;
-  read(p: SlateTarget & { values?: string[]; lines?: boolean; sketch?: boolean }, caller?: Caller): Promise<SlateReadAnswer>;
-  undo(p: SlateTarget, caller?: Caller): Promise<SlateUndoAnswer>;
-  clear(p: SlateTarget, caller?: Caller): Promise<SlateClearAnswer>;
+  write(p: SlateTarget & { text?: string; document?: Record<string, unknown>; check?: boolean; ifVersion?: number }, caller?: Caller): Promise<SlateWriteAnswer>;
+  state(p: SlateTarget & { values: Record<string, unknown>; ifVersion?: number }, caller?: Caller): Promise<SlateStateAnswer>;
+  read(p: SlateTarget & { values?: string[]; text?: boolean; sketch?: boolean }, caller?: Caller): Promise<SlateReadAnswer>;
+  catalog(p: { name?: string }): { text: string };
   shown(threadId: string): Promise<void>;
-  act(p: { threadId: string; version: number; piece: string; event: string; action: number; requestId: string; scope?: { item: unknown; index: number }; rowAction?: number }): Promise<SlateActAnswer>;
+  event(p: { threadId: string; version: number; piece: string; event: string; requestId: string; scope?: { item?: unknown; index: number }; rowAction?: number }): Promise<SlateEventAnswer>;
+  approve(p: { threadId: string; key: string; scope: "once" | "thread" | "refuse" }): Promise<void>;
+  cancel(p: { threadId: string; run: string }): Promise<void>;
   /** A window's hold on sources for a thread's slate; the release goes when the window lets go or its socket closes. */
   subscribe(p: { threadId: string; sources: string[] }): () => void;
   resolve(p: { threadId: string; paths: string[] }): Promise<{ values: Record<string, SlateJson> }>;
@@ -251,14 +250,14 @@ export function createSlates(deps: SlatesDeps): Slates {
     writes.set(threadId, b);
     if (b.tokens < 1 || b.hour.length >= WRITES_PER_HOUR) {
       const wait = b.tokens < 1 ? Math.ceil((1 - b.tokens) / WRITES_PER_SECOND) : Math.ceil((3_600_000 - (now - b.hour[0]!)) / 1000);
-      throw refused(problem("V701", "rate-limited", `wait ${wait} s; a slate that rewrites itself constantly is a bug`), "conflict");
+      throw refused(problem("V751", "write-rate", `wait ${wait} s; a slate that rewrites itself constantly is a bug`), "conflict");
     }
     b.tokens -= 1;
     b.hour.push(now);
   };
 
   const presses = new Map<string, { at: number[]; sentAt?: number }>();
-  const requests = new Map<string, { at: number; answer: Promise<SlateActAnswer> }>();
+  const requests = new Map<string, { at: number; answer: Promise<SlateEventAnswer> }>();
 
   const holds = new Map<string, Map<string, number>>();
 
@@ -301,7 +300,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   };
 
   const checkVersion = (r: SlateRecord, ifVersion: number | undefined): void => {
-    if (ifVersion !== undefined && ifVersion !== r.version) throw refused(problem("V700", "version-behind", `the slate is at version ${r.version}, not ${ifVersion}; read it and write again`), "conflict");
+    if (ifVersion !== undefined && ifVersion !== r.version) throw refused(problem("V750", "version-behind", `the slate is at version ${r.version}, not ${ifVersion}; read it and write again`), "conflict");
   };
 
   const announce = (r: SlateRecord, cause: SlateCause, by: SlateBy, pieces: string[]): void => {
@@ -350,11 +349,12 @@ export function createSlates(deps: SlatesDeps): Slates {
     threadId: r.threadId,
     workspaceId: r.workspaceId,
     version: r.version,
-    document: r.document,
-    state: r.state,
+    document: r.document as unknown as Record<string, unknown> | null,
+    values: r.state,
     ...(r.document === null ? { empty: r.empty ?? "none" } : {}),
-    annotations: r.annotations,
-    consents: r.consents,
+    comments: r.annotations,
+    approvals: r.consents,
+    asks: [],
     problems: [],
     shownOnce: r.shownOnce,
     canUndo: r.previous !== undefined,
@@ -405,10 +405,10 @@ export function createSlates(deps: SlatesDeps): Slates {
     r.version += 1;
     records.set(r.threadId, r);
     await save(r);
-    announce(r, cause, by, pieces);
+    announce(r, "write", by, pieces);
     if (/\bpr\.checks\b/.test(JSON.stringify(next))) deps.watchPr?.(r.workspaceId);
     const views = await viewsFor(r);
-    return { version: r.version, sketch: sketched(r, views), warnings, problems: problemsOf(r, views) };
+    return { version: r.version, text: sketched(r, views), warnings, problems: problemsOf(r, views) };
   };
 
   const exactlyOne = (named: Record<string, unknown>): void => {
@@ -416,13 +416,9 @@ export function createSlates(deps: SlatesDeps): Slates {
     if (given.length !== 1) throw Object.assign(usageRefusal(`A601 action-arg: a slate write takes exactly one of ${Object.keys(named).join(" or ")}, and this one has ${given.length === 0 ? "none" : given.join(" and ")}:`, `send ${Object.keys(named)[0]} alone.`), { code: "A601" });
   };
 
-  const slates: Slates = {
-    async get(threadId) {
-      const r = await recordOf(threadId);
-      return r === undefined ? null : viewOf(r);
-    },
-
-    async set(p, caller) {
+  /** The proof of concept's ops, kept under the four v2 ops until the v2 record replaces them. */
+  const poc = {
+    async set(p: SlateTarget & { lines?: string; document?: Record<string, unknown>; ifVersion?: number }, caller?: Caller): Promise<SlateWriteAnswer> {
       const threadId = targetOf(p, caller, true);
       exactlyOne({ lines: p.lines, document: p.document });
       return serial(threadId, async () => {
@@ -436,7 +432,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       });
     },
 
-    async patch(p, caller) {
+    async patch(p: SlateTarget & { lines?: string; ops?: Record<string, unknown>[]; ifVersion?: number }, caller?: Caller): Promise<SlateWriteAnswer> {
       const threadId = targetOf(p, caller, true);
       exactlyOne({ lines: p.lines, ops: p.ops });
       return serial(threadId, async () => {
@@ -463,7 +459,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       });
     },
 
-    async state(p, caller) {
+    async state(p: SlateTarget & { values: Record<string, unknown>; ifVersion?: number }, caller?: Caller): Promise<SlateStateAnswer> {
       const threadId = targetOf(p, caller, true);
       return serial(threadId, async () => {
         const r = await needRecord(threadId);
@@ -480,16 +476,15 @@ export function createSlates(deps: SlatesDeps): Slates {
         r.version += 1;
         await save(r);
         const values = Object.fromEntries(Object.keys(p.values).map(path => [path, getSlateState(state, path) ?? null]));
-        deps.emit({ type: "slate.state", workspaceId: r.workspaceId, threadId, version: r.version, values });
+        deps.emit({ type: "slate.values", workspaceId: r.workspaceId, threadId, version: r.version, values });
         // The person's typing stays out of the transcript; the agent's writes are each one small event.
         if (by === "agent") announce(r, "state", by, []);
-        if (p.sketch !== true) return { version: r.version };
         const views = await viewsFor(r);
-        return { version: r.version, sketch: sketched(r, views), problems: problemsOf(r, views) };
+        return { version: r.version, text: sketched(r, views), problems: problemsOf(r, views) };
       });
     },
 
-    async read(p, caller) {
+    async read(p: SlateTarget & { values?: string[]; lines?: boolean; sketch?: boolean }, caller?: Caller): Promise<SlateReadAnswer> {
       const threadId = targetOf(p, caller, false);
       const r = await needRecord(threadId);
       const asked = p.values ?? [];
@@ -498,38 +493,35 @@ export function createSlates(deps: SlatesDeps): Slates {
       const views = await viewsFor(r, paths);
       const values = Object.fromEntries(paths.map(path => [path, resolveIn(views, path) ?? null]));
       return {
-        schema: 1,
         version: r.version,
-        ...(r.document?.title !== undefined ? { title: r.document.title } : {}),
-        document: r.document,
-        ...(p.lines === true && r.document !== null ? { lines: printSlate(r.document) } : {}),
+        text: [p.sketch !== false ? sketched(r, views) : `slate v${r.version}`, ...(p.lines === true && r.document !== null ? ["", printSlate(r.document)] : [])].join("\n"),
+        document: r.document as unknown as Record<string, unknown> | null,
         state: r.state,
-        pipes: {},
-        feeds: {},
+        derived: {},
+        runs: {},
         values,
         problems: problemsOf(r, views),
-        annotations: r.annotations,
-        consents: r.consents,
-        ...(p.sketch !== false ? { sketch: sketched(r, views) } : {}),
+        comments: r.annotations,
+        approvals: Object.fromEntries(Object.entries(r.consents).map(([k, v]) => [k, v.state])),
       };
     },
 
-    async undo(p, caller) {
+    async undo(p: SlateTarget, caller?: Caller): Promise<SlateWriteAnswer> {
       const threadId = targetOf(p, caller, true);
       return serial(threadId, async () => {
         const r = await needRecord(threadId);
         const back = r.previous;
-        if (back === undefined) throw refused(problem("V702", "nothing-to-undo", "there is no earlier slate to go back to; the undo keeps one step"), "conflict");
+        if (back === undefined) throw refused(problem("V752", "nothing-to-undo", "there is no earlier slate to go back to; the undo keeps one step"), "conflict");
         r.previous = { ...snapOf(r), version: r.version };
         become(r, back);
         r.version += 1;
         await save(r);
         announce(r, "undo", byOf(caller), []);
-        return { version: r.version, sketch: await sketchOf(r) };
+        return { version: r.version, text: await sketchOf(r), warnings: [], problems: [] };
       });
     },
 
-    async clear(p, caller) {
+    async clear(p: SlateTarget, caller?: Caller): Promise<SlateWriteAnswer> {
       const threadId = targetOf(p, caller, true);
       return serial(threadId, async () => {
         const r = await needRecord(threadId);
@@ -539,8 +531,68 @@ export function createSlates(deps: SlatesDeps): Slates {
         r.version += 1;
         await save(r);
         announce(r, "clear", byOf(caller), []);
-        return { version: r.version };
+        return { version: r.version, text: `slate v${r.version}, cleared`, warnings: [], problems: [] };
       });
+    },
+  };
+
+  const slates: Slates = {
+    async get(threadId) {
+      const r = await recordOf(threadId);
+      return r === undefined ? null : viewOf(r);
+    },
+
+    async write(p, caller) {
+      const { text, document, check, ...target } = p;
+      const trimmed = text?.trim();
+      if (trimmed === "<clear />") return poc.clear(target, caller);
+      if (trimmed === "<undo />") return poc.undo(target, caller);
+      if (text !== undefined && !trimmed!.startsWith("<slate")) {
+        const threadId = targetOf(target, caller, true);
+        const r = await needRecord(threadId);
+        if (r.document === null) throw Object.assign(new Error("Z802 no-slate: this slate is empty; write one with a whole <slate>"), { kind: "usage", code: "Z802" });
+        checkVersion(r, p.ifVersion);
+        const props = /^<props\s+id="([^"]+)"\s+(.*?)\s*\/>$/s.exec(trimmed!);
+        if (props === null) throw invalid([problem("P105", "bad-patch-op", "this build patches with <props id=... /> alone")], []);
+        const set = Object.fromEntries([...props[2]!.matchAll(/(\w+)="([^"]*)"/g)].map(m => [m[1]!, m[2]!]));
+        return poc.patch({ ...target, ops: [{ op: "props", id: props[1]!, props: set }] }, caller);
+      }
+      if (check === true) {
+        const checked = text !== undefined ? compileSlateJsx(text) : validateSlate(document);
+        if (checked.errors.length > 0 || checked.document === undefined) throw invalid(checked.errors, checked.warnings);
+        const r = await recordOf(targetOf(target, caller, false));
+        return { version: r?.version ?? 0, text: sketchSlate(checked.document, checked.document.state ?? {}, { resolve: () => undefined }), warnings: checked.warnings, problems: [] };
+      }
+      if (text !== undefined) {
+        const compiled = compileSlateJsx(text);
+        if (compiled.errors.length > 0 || compiled.document === undefined) throw invalid(compiled.errors, compiled.warnings);
+        return poc.set({ ...target, document: compiled.document as unknown as Record<string, unknown> }, caller);
+      }
+      return poc.set({ ...target, ...(document !== undefined ? { document } : {}) }, caller);
+    },
+
+    async state(p, caller) {
+      const values = Object.fromEntries(Object.entries(p.values).map(([k, v]) => [k.startsWith("$") ? `state.${k.slice(1)}` : k, v]));
+      return poc.state({ ...p, values }, caller);
+    },
+
+    async read(p, caller) {
+      const { text, values, ...rest } = p;
+      const asked = values?.map(v => (v.startsWith("$") ? `state.${v.slice(1)}` : v));
+      const read = await poc.read({ ...rest, ...(asked !== undefined ? { values: asked } : {}), ...(text === true ? { lines: true } : {}) }, caller);
+      return { ...read, values: Object.fromEntries(Object.entries(read.values).map(([k, v]) => [k.startsWith("state.") ? `$${k.slice(6)}` : k, v])) };
+    },
+
+    catalog() {
+      return { text: slateCatalog({}).text };
+    },
+
+    async approve() {
+      throw usageRefusal("this build runs no commands yet:", "approve once the v2 record lands.");
+    },
+
+    async cancel() {
+      throw usageRefusal("this build runs no commands yet:", "cancel once the v2 record lands.");
     },
 
     async shown(threadId) {
@@ -552,7 +604,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       });
     },
 
-    act(p) {
+    event(p) {
       const now = deps.now();
       for (const [id, held] of requests) if (now - held.at > REQUEST_KEPT_MS) requests.delete(id);
       // A press sent again after a reconnect is the same press: it answers what the first one came to.
@@ -567,12 +619,11 @@ export function createSlates(deps: SlatesDeps): Slates {
         const rowActions = piece.props?.["rowActions"];
         const owner = p.rowAction === undefined ? undefined : Array.isArray(rowActions) ? (rowActions[p.rowAction] as { on?: Slate["pieces"][string]["on"]; label?: unknown } | undefined) : undefined;
         if (p.rowAction !== undefined && owner === undefined) throw usageRefusal(`${p.piece} has no row action ${p.rowAction}.`, "Press it again once the slate has redrawn.");
-        const action = actionsOf(owner !== undefined ? owner.on : piece.on, p.event)[p.action];
-        if (action === undefined) throw usageRefusal(`${p.piece} has no action ${p.action} on ${p.event}.`, "Press it again once the slate has redrawn.");
-        if (action.do !== "send" && action.do !== "steer" && action.do !== "queue") throw usageRefusal(`a ${action.do} action runs in the window, not on the host:`, "only send, steer and queue are pressed through the host.");
+        const action = actionsOf(owner !== undefined ? owner.on : piece.on, p.event).find(a => a.do === "send" || a.do === "steer" || a.do === "queue");
+        if (action === undefined) throw usageRefusal(`${p.piece} sends nothing on ${p.event}.`, "Press it again once the slate has redrawn.");
         const pressed = presses.get(p.threadId) ?? { at: [] };
         pressed.at = pressed.at.filter(t => now - t < 1000);
-        if (pressed.at.length >= ACTIONS_PER_SECOND || (pressed.sentAt !== undefined && now - pressed.sentAt < SEND_EVERY_MS)) throw refused(problem("V703", "action-rate", "too fast; try again in a moment"), "conflict");
+        if (pressed.at.length >= ACTIONS_PER_SECOND || (pressed.sentAt !== undefined && now - pressed.sentAt < SEND_EVERY_MS)) throw refused(problem("V753", "send-rate", "too fast; try again in a moment"), "conflict");
         pressed.at.push(now);
         pressed.sentAt = now;
         presses.set(p.threadId, pressed);
@@ -603,8 +654,8 @@ export function createSlates(deps: SlatesDeps): Slates {
       });
       // Delivered outside the record's queue: a start that waits on a running turn must not hold up that turn's own
       // writes to the slate.
-      const answer = composed.then(async ({ prompt, kind, workspaceId }): Promise<SlateActAnswer> => {
-        let landed: { outcome: SlateActOutcome; turnId?: string };
+      const answer = composed.then(async ({ prompt, kind, workspaceId }): Promise<SlateEventAnswer> => {
+        let landed: { outcome: "started" | "steered" | "queued"; turnId?: string };
         try {
           landed = await deps.deliver({ threadId: p.threadId, workspaceId, prompt, requestId: p.requestId });
         } catch (e) {

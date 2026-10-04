@@ -1682,14 +1682,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "slates.get":
               send({ id: msg.id, ok: true, slate: await rt.slates.get(msg.threadId) });
               return;
-            case "slates.set": {
+            case "slates.write": {
               const { id, op: _op, origin: _sent, ...params } = msg;
-              send({ id, ok: true, ...(await rt.slates.set(params, origin)) });
-              return;
-            }
-            case "slates.patch": {
-              const { id, op: _op, origin: _sent, ...params } = msg;
-              send({ id, ok: true, ...(await rt.slates.patch(params, origin)) });
+              send({ id, ok: true, ...(await rt.slates.write(params, origin)) });
               return;
             }
             case "slates.state": {
@@ -1702,25 +1697,26 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id, ok: true, ...(await rt.slates.read(params, origin)) });
               return;
             }
-            case "slates.undo": {
-              const { id, op: _op, origin: _sent, ...params } = msg;
-              send({ id, ok: true, ...(await rt.slates.undo(params, origin)) });
+            case "slates.catalog":
+              send({ id: msg.id, ok: true, ...rt.slates.catalog(msg.name !== undefined ? { name: msg.name } : {}) });
               return;
-            }
-            case "slates.clear": {
-              const { id, op: _op, origin: _sent, ...params } = msg;
-              send({ id, ok: true, ...(await rt.slates.clear(params, origin)) });
-              return;
-            }
             case "slates.shown":
               await rt.slates.shown(msg.threadId);
               send({ id: msg.id, ok: true });
               return;
-            case "slates.act": {
+            case "slates.event": {
               const { id, op: _op, origin: _sent, ...params } = msg;
-              send({ id, ok: true, ...(await rt.slates.act(params)) });
+              send({ id, ok: true, ...(await rt.slates.event(params)) });
               return;
             }
+            case "slates.approve":
+              await rt.slates.approve({ threadId: msg.threadId, key: msg.key, scope: msg.scope });
+              send({ id: msg.id, ok: true });
+              return;
+            case "slates.cancel":
+              await rt.slates.cancel({ threadId: msg.threadId, run: msg.run });
+              send({ id: msg.id, ok: true });
+              return;
             case "slates.subscribe": {
               // Held until the window lets go, or its socket closes and every hold it took goes with it.
               const release = rt.slates.subscribe({ threadId: msg.threadId, sources: msg.sources });

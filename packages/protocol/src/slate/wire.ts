@@ -1,39 +1,62 @@
 import { z } from "zod";
 import { AccountRow } from "../usage.js";
-import { SlateJson, SlateProblem, SlateSchema, type Slate } from "./types.js";
 
-// The slate's wire: the ops a window and the slate verbs send the host, what each answers, and the three events
-// (01-architecture, "Wire operations"). Shapes the slate module owns are carried as JSON here and validated by
-// that module on the host, so a window never needs the validator to read an answer.
+// The slate's wire, version 2: the ops a window, the slate verbs and the Rust tool server send the host, what each
+// answers, and the events (01-architecture, "Wire operations"). Shapes the slate module owns (the document, a
+// problem) ride as open JSON here and are validated by that module on the host, so a window reads an answer
+// without the validator and this file never moves when the module's types do.
 
-/** A JSON value as the slate stores it: in state, in `with`, in a resolved path. */
-export const SlateWireJson = SlateJson;
+/** A JSON value as a slate holds it: a live value, a `with` entry, a resolved path. */
+export const SlateWireJson: z.ZodType<unknown> = z.unknown();
 
-/** A stored document as an answer carries it: the host stored it only after the slate module validated it. */
-export const SlateWireDocument = SlateSchema;
-export type SlateWireDocument = Slate;
+/** The stored document as an answer carries it, stored only after the slate module validated it. */
+export const SlateWireDocument = z.record(z.string(), z.unknown());
+export type SlateWireDocument = z.infer<typeof SlateWireDocument>;
 
-/** A document as a write sends it, unread until the validator reads it, so a malformed one gets its problems listed
- * rather than a refusal of the frame. */
-const SentDocument = z.record(z.string(), z.unknown());
+/** The one shape for errors, warnings and runtime problems (10, "The failure object"); the module adds fields. */
+export const SlateWireProblem = z.object({ code: z.string(), name: z.string(), message: z.string() }).passthrough();
+export type SlateWireProblem = z.infer<typeof SlateWireProblem>;
 
-/** The one shape for errors, warnings and runtime problems (11-agent-toolchain). */
-export const SlateWireProblem = SlateProblem;
-export type SlateWireProblem = SlateProblem;
+/** Live values by path (`$name`, `$name.field`), secrets as their handles. */
+export const SlateValues = z.record(z.string(), SlateWireJson);
+export type SlateValues = z.infer<typeof SlateValues>;
 
-export const SlateState = z.record(z.string(), SlateWireJson);
-export type SlateState = z.infer<typeof SlateState>;
-
-export const SLATE_CAUSES = ["set", "patch", "state", "clear", "undo", "restore", "annotate", "consent"] as const;
+export const SLATE_CAUSES = ["write", "state", "clear", "undo", "restore", "comment", "run"] as const;
 export const SlateCause = z.enum(SLATE_CAUSES);
 export type SlateCause = z.infer<typeof SlateCause>;
 
-export const SlateBy = z.enum(["agent", "person", "host"]);
+export const SLATE_BY = ["agent", "person", "host", "reaction", "timer"] as const;
+export const SlateBy = z.enum(SLATE_BY);
 export type SlateBy = z.infer<typeof SlateBy>;
 
 /** Why a slate has no document: never written, cleared, or rewound to a turn from before it existed (Z804). */
 export const SlateEmpty = z.enum(["none", "cleared", "rewound-before"]);
 export type SlateEmpty = z.infer<typeof SlateEmpty>;
+
+/** What the consent sheet shows for a held run (07, "Consent"): everything the person reads before approving. */
+export const SlateAsk = z.object({
+  /** The approval key: the hash of the declaration without its values. */
+  key: z.string(),
+  run: z.string(),
+  kind: z.literal("cmd"),
+  cmd: z.string(),
+  /** Each env name and the value it carries now; a secret as dots with its length. */
+  env: z.record(z.string(), z.string()),
+  args: z.array(z.string()),
+  /** The first line of stdin, where there is any. */
+  stdin: z.string().optional(),
+  computer: z.string(),
+  folder: z.string(),
+  timeoutS: z.number(),
+  confirm: z.string().optional(),
+  /** Why it is held: "needs your approval", "started 12 times in a minute; press to run it again". */
+  why: z.string(),
+});
+export type SlateAsk = z.infer<typeof SlateAsk>;
+
+/** An approval as a window or a read sees it: allowed or refused, never whether once or for the thread. */
+export const SlateApprovalView = z.object({ run: z.string().optional(), cmd: z.string().optional(), state: z.enum(["allowed", "refused"]), at: z.number() });
+export type SlateApprovalView = z.infer<typeof SlateApprovalView>;
 
 /** The record as a window reads it: everything but the turn snapshots and the previous document. */
 export const SlateView = z.object({
@@ -41,16 +64,17 @@ export const SlateView = z.object({
   workspaceId: z.string(),
   version: z.number().int().nonnegative(),
   document: SlateWireDocument.nullable(),
-  state: SlateState,
+  values: SlateValues,
   /** Set while document is null, saying which empty state the tab draws. */
   empty: SlateEmpty.optional(),
-  annotations: z.array(z.record(z.string(), z.unknown())),
-  consents: z.record(z.string(), z.object({ state: z.enum(["allowed", "refused"]), at: z.number() })),
+  comments: z.array(z.record(z.string(), z.unknown())),
+  /** By approval key. */
+  approvals: z.record(z.string(), SlateApprovalView),
+  /** Every held run's sheet, oldest first: the header row's "This slate wants to run ..." and Review. */
+  asks: z.array(SlateAsk),
   problems: z.array(SlateWireProblem),
   shownOnce: z.boolean(),
-  /** Whether the one-step undo has a document to go back to (08-state). */
   canUndo: z.boolean(),
-  /** Whether a rewind moved this slate and Undo rewind can put it back. */
   rewound: z.boolean(),
   updatedAt: z.number(),
 });
@@ -63,40 +87,48 @@ export type SlateView = z.infer<typeof SlateView>;
 const threadParams = { threadId: z.string().optional(), turnToken: z.string().optional() };
 
 export const SlatesGetParams = z.object({ threadId: z.string() });
-export const SlatesStateParams = z.object({ ...threadParams, values: SlateState, ifVersion: z.number().int().optional(), sketch: z.boolean().optional() });
-export const SlatesSetParams = z.object({ ...threadParams, lines: z.string().optional(), document: SentDocument.optional(), ifVersion: z.number().int().optional() });
-export const SlatesPatchParams = z.object({ ...threadParams, lines: z.string().optional(), ops: z.array(z.record(z.string(), z.unknown())).optional(), ifVersion: z.number().int().optional() });
-export const SlatesReadParams = z.object({ ...threadParams, values: z.array(z.string()).optional(), lines: z.boolean().optional(), sketch: z.boolean().optional() });
-export const SlatesUndoParams = z.object(threadParams);
-export const SlatesClearParams = z.object(threadParams);
-export const SlatesShownParams = z.object({ threadId: z.string() });
-export const SlatesActParams = z.object({
+export const SlatesWriteParams = z.object({
+  ...threadParams,
+  /** The JSX-like form: a whole `<slate>`, or a patch (any other elements, `<clear />`, `<undo />`). */
+  text: z.string().optional(),
+  /** The stored form, instead of text. */
+  document: z.record(z.string(), z.unknown()).optional(),
+  /** Validate and sketch, store nothing. */
+  check: z.boolean().optional(),
+  ifVersion: z.number().int().optional(),
+});
+export const SlatesStateParams = z.object({ ...threadParams, values: SlateValues, ifVersion: z.number().int().optional() });
+export const SlatesReadParams = z.object({ ...threadParams, values: z.array(z.string()).optional(), text: z.boolean().optional(), sketch: z.boolean().optional() });
+export const SlatesCatalogParams = z.object({ name: z.string().optional() });
+export const SlatesEventParams = z.object({
   threadId: z.string(),
+  /** The version the window drew; the host reads the piece off its own stored version all the same. */
   version: z.number().int(),
   piece: z.string(),
-  event: z.string(),
-  /** The index of the action in the event's list. */
-  action: z.number().int().nonnegative(),
+  event: z.enum(["press", "submit", "change"]),
   requestId: z.string().min(1).max(200),
-  /** The row, for an action on a repeating piece. */
+  /** The row, for an event inside a repeating piece; the host reads `item` off its own list at delivery. */
   scope: z.object({ item: SlateWireJson, index: z.number().int().nonnegative() }).optional(),
-  /** A row action of a repeating piece, by its index in the piece's rowActions, whose own `on` holds the action. */
+  /** A row action of a table, by its index. */
   rowAction: z.number().int().nonnegative().optional(),
 });
-export const SlatesSubscribeParams = z.object({ threadId: z.string(), sources: z.array(z.string()), feeds: z.array(z.string()) });
+export const SlatesApproveParams = z.object({ threadId: z.string(), key: z.string(), scope: z.enum(["once", "thread", "refuse"]) });
+export const SlatesCancelParams = z.object({ threadId: z.string(), run: z.string() });
+export const SlatesShownParams = z.object({ threadId: z.string() });
+export const SlatesSubscribeParams = z.object({ threadId: z.string(), sources: z.array(z.string()) });
 export const SlatesResolveParams = z.object({ threadId: z.string(), paths: z.array(z.string()).max(200) });
 
 /** Every slate op by name with its params, which the protocol's op union takes in whole. */
 export const SLATE_OPS = {
   "slates.get": SlatesGetParams,
+  "slates.write": SlatesWriteParams,
   "slates.state": SlatesStateParams,
-  "slates.set": SlatesSetParams,
-  "slates.patch": SlatesPatchParams,
   "slates.read": SlatesReadParams,
-  "slates.undo": SlatesUndoParams,
-  "slates.clear": SlatesClearParams,
+  "slates.catalog": SlatesCatalogParams,
+  "slates.event": SlatesEventParams,
+  "slates.approve": SlatesApproveParams,
+  "slates.cancel": SlatesCancelParams,
   "slates.shown": SlatesShownParams,
-  "slates.act": SlatesActParams,
   "slates.subscribe": SlatesSubscribeParams,
   "slates.unsubscribe": SlatesSubscribeParams,
   "slates.resolve": SlatesResolveParams,
@@ -108,55 +140,55 @@ export type SlateOpName = keyof typeof SLATE_OPS;
 export const SlatesGetAnswer = z.object({ slate: SlateView.nullable() });
 export type SlatesGetAnswer = z.infer<typeof SlatesGetAnswer>;
 
-/** What every document write answers: the version stored and how the slate reads now. */
-export const SlateWriteAnswer = z.object({ version: z.number().int(), sketch: z.string(), warnings: z.array(SlateWireProblem), problems: z.array(SlateWireProblem) });
+/** What every write answers: the version stored and the sketch as text. */
+export const SlateWriteAnswer = z.object({ version: z.number().int(), text: z.string(), warnings: z.array(SlateWireProblem), problems: z.array(SlateWireProblem) });
 export type SlateWriteAnswer = z.infer<typeof SlateWriteAnswer>;
 
-export const SlateStateAnswer = z.object({ version: z.number().int(), sketch: z.string().optional(), problems: z.array(SlateWireProblem).optional() });
+export const SlateStateAnswer = z.object({ version: z.number().int(), text: z.string(), problems: z.array(SlateWireProblem) });
 export type SlateStateAnswer = z.infer<typeof SlateStateAnswer>;
 
-export const SlateUndoAnswer = z.object({ version: z.number().int(), sketch: z.string() });
-export type SlateUndoAnswer = z.infer<typeof SlateUndoAnswer>;
-
-export const SlateClearAnswer = z.object({ version: z.number().int() });
-export type SlateClearAnswer = z.infer<typeof SlateClearAnswer>;
-
+/** 10, "Read back": the record, each derived value and run, the paths asked for, and the sketch as text. */
 export const SlateReadAnswer = z.object({
-  schema: z.number().int(),
   version: z.number().int(),
-  title: z.string().optional(),
+  /** The sketch, and with `text: true` the document printed in the JSX-like form after a blank line. */
+  text: z.string(),
   document: SlateWireDocument.nullable(),
-  lines: z.string().optional(),
-  state: SlateState,
-  pipes: z.record(z.string(), SlateWireJson),
-  feeds: z.record(z.string(), z.object({ at: z.number().optional(), error: z.string().optional(), loading: z.boolean().optional() })),
-  values: z.record(z.string(), SlateWireJson),
+  /** The paths named in the read's `values`, resolved now (10, worked transcript 3). */
+  values: SlateValues,
+  /** The live values by name, secrets as handles. */
+  state: SlateValues,
+  derived: SlateValues,
+  runs: SlateValues,
   problems: z.array(SlateWireProblem),
-  annotations: z.array(z.record(z.string(), z.unknown())),
-  consents: z.record(z.string(), z.object({ state: z.enum(["allowed", "refused"]), at: z.number() })),
-  sketch: z.string().optional(),
+  comments: z.array(z.record(z.string(), z.unknown())),
+  approvals: z.record(z.string(), z.enum(["allowed", "refused"])),
 });
 export type SlateReadAnswer = z.infer<typeof SlateReadAnswer>;
 
-/** How a press that sends landed: the runtime's own start outcomes (09-actions). */
-export const SlateActOutcome = z.enum(["started", "steered", "queued"]);
-export type SlateActOutcome = z.infer<typeof SlateActOutcome>;
+export const SlatesCatalogAnswer = z.object({ text: z.string() });
+export type SlatesCatalogAnswer = z.infer<typeof SlatesCatalogAnswer>;
 
-export const SlateActAnswer = z.object({
-  outcome: SlateActOutcome,
+/** How an event landed: a send's start outcome, a run held for approval, or steps applied with nothing sent. */
+export const SlateEventOutcome = z.enum(["started", "steered", "queued", "held", "done"]);
+export type SlateEventOutcome = z.infer<typeof SlateEventOutcome>;
+
+export const SlateEventAnswer = z.object({
+  outcome: SlateEventOutcome,
   /** The quiet sentence the renderer draws under the piece for two seconds. */
   said: z.string(),
   turnId: z.string().optional(),
+  /** The consent sheet's content when the press held a run. */
+  ask: SlateAsk.optional(),
 });
-export type SlateActAnswer = z.infer<typeof SlateActAnswer>;
+export type SlateEventAnswer = z.infer<typeof SlateEventAnswer>;
 
-export const SlatesResolveAnswer = z.object({ values: z.record(z.string(), SlateWireJson) });
+export const SlatesResolveAnswer = z.object({ values: SlateValues });
 export type SlatesResolveAnswer = z.infer<typeof SlatesResolveAnswer>;
 
 // --- events ---
 
-/** Recorded in the transcript for every accepted write by the agent or the host: small, so the timeline can say
- * the slate changed and a window knows to fetch the record with slates.get. */
+/** Recorded in the transcript for every accepted write by the agent, a run's start and end and the host's restores:
+ * small, so the timeline can say the slate changed and a window knows to fetch the record. No values ride it. */
 export const SessionSlateEvent = z.object({
   type: z.literal("session.slate"),
   workspaceId: z.string(),
@@ -169,12 +201,19 @@ export const SessionSlateEvent = z.object({
   by: SlateBy,
   /** The piece ids the write touched, at most 20. */
   pieces: z.array(z.string()).max(20),
+  /** The run, for cause run. */
+  run: z.string().optional(),
 });
 export type SessionSlateEvent = z.infer<typeof SessionSlateEvent>;
 
-/** A state write, pushed to windows and never recorded: the person's typing would walk the transcript's cap. */
-export const SlateStateEvent = z.object({ type: z.literal("slate.state"), workspaceId: z.string(), threadId: z.string(), version: z.number().int(), values: SlateState });
-export type SlateStateEvent = z.infer<typeof SlateStateEvent>;
+/** Values that moved in a batch, pushed to windows and never recorded: the person's typing would walk the
+ * transcript's cap. Secrets as handles. */
+export const SlateValuesEvent = z.object({ type: z.literal("slate.values"), workspaceId: z.string(), threadId: z.string(), version: z.number().int(), values: SlateValues });
+export type SlateValuesEvent = z.infer<typeof SlateValuesEvent>;
+
+/** New lines of a streaming run, scrubbed, pushed and never recorded. */
+export const SlateRunEvent = z.object({ type: z.literal("slate.run"), workspaceId: z.string(), threadId: z.string(), run: z.string(), lines: z.array(z.string()) });
+export type SlateRunEvent = z.infer<typeof SlateRunEvent>;
 
 /** An account's row after a turn's limit reading folded into it, so a bound meter moves at once. */
 export const UsageAccountEvent = z.object({ type: z.literal("usage.account"), key: z.string(), row: AccountRow });

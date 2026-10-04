@@ -244,7 +244,6 @@ const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
   "agents setup reset": "--reset",
   "projects set reset": "--reset",
   "slate read values": "--values",
-  "slate patch ops": "the ops are a .json file's list, the patch lines a .slate file's",
 };
 
 describe("the command line, the MCP tools and the skill are one contract", () => {
@@ -365,12 +364,29 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     const WINDOW_ONLY: Record<string, string> = {
       "slates.get": "the window's fetch of the record it draws; an agent reads its slate with slate read, which answers the sketch too",
       "slates.shown": "the window saying it opened the Slate tab on the first write, a fact about one person's window",
-      "slates.act": "a press is the person's act in the window; an agent hears it as the message the press sends",
+      "slates.event": "a press is the person's act in the window; an agent hears it as the message the press sends",
+      "slates.approve": "the person's answer to the consent sheet; an agent never approves a command it declared",
+      "slates.cancel": "the person stopping a run from the window; an agent never starts or stops a run",
       "slates.subscribe": "a window's hold on the sources its drawn pieces read; an agent's read resolves what it names at once",
       "slates.unsubscribe": "a window letting go of a hold it took",
       "slates.resolve": "the window's read of a path it cannot resolve itself; an agent names paths in slate read",
     };
     expect(RUNTIME_OPS.filter(op => op.startsWith("slates.") && !verbs.includes(`"${op}"`)).sort()).toEqual(Object.keys(WINDOW_ONLY).sort());
+  });
+
+  it("the four slate tools' entries in tools/list total under 2,500 characters, the budget every session pays (10)", async () => {
+    const server = mcpServer("/nonexistent/state.json", { env: {} });
+    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "parity", version: "0" });
+    await server.connect(toServer);
+    await client.connect(toClient);
+    try {
+      const slate = (await client.listTools()).tools.filter(t => t.name.startsWith("slate_"));
+      expect(slate.map(t => t.name).sort()).toEqual(["slate_catalog", "slate_read", "slate_state", "slate_write"]);
+      expect(slate.reduce((n, t) => n + JSON.stringify(t).length, 0)).toBeLessThan(2500);
+    } finally {
+      await client.close();
+    }
   });
 
   it("the Changes and Pull request panes' own ops that no verb sends say why they stay with the pane", () => {

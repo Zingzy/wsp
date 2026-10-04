@@ -261,6 +261,13 @@ describe("the wsp skill", () => {
     expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n\n${RULES_HEADING}\n\nFour.\n`, ["claude"])).toThrow(`${RULES_HEADING} has no rules`);
     expect(instructions()).toBe(instructionsOf(wspSkill(), THREAD_AGENTS));
     expect(instructions().startsWith(`${ANOTHER_AGENT_WORDS}. ${SLATE_WORDS}. A project is a folder on one computer, a git repo or not`)).toBe(true);
+    // The slate's sentence is second and under 220 characters with its full stop, inside what Claude Code keeps (10).
+    expect(`${SLATE_WORDS}.`.length).toBeLessThan(220);
+    expect(instructions().indexOf(`${SLATE_WORDS}.`)).toBe(ANOTHER_AGENT_WORDS.length + 2);
+    // The skill's slate section stays under 600 tokens, counted at four characters a token.
+    const text = wspSkill();
+    const section = text.slice(text.indexOf("### slate\n"), text.indexOf("\n## ", text.indexOf("### slate\n")));
+    expect(section.length / 4).toBeLessThan(600);
     // A caller holding only the tools reads the whole sequence here or nowhere: health check, the recipe from what
     // their agents used, the question about the heavy rows, the person's init line, then the host started here.
     expect(instructions()).toContain("The road is a health check");
