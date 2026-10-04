@@ -23,8 +23,11 @@ const DOC = slate({
   },
 });
 
+// The engines live for the window's life, so across this file's tests: every record and push is newer than the last.
+let revision = 0;
+
 function record(over: Partial<SlateRecord> = {}): SlateRecord {
-  return { threadId: "t1", workspaceId: "ws", version: 1, document: DOC, values: { step: "one" }, comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over };
+  return { threadId: "t1", workspaceId: "ws", version: 1, revision: (revision += 1), document: DOC, values: { step: "one" }, comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over };
 }
 
 const ROW: SessionView = { id: "s1", workspaceId: "ws", harness: "claude", status: "completed", threadId: "t1" };
@@ -118,7 +121,7 @@ describe("the Slate tab", () => {
     select(slates, "t1");
     render(<SlateSurface />);
     expect(await screen.findByText("on step one")).toBeTruthy();
-    event({ type: "slate.values", workspaceId: "ws", threadId: "t1", version: 2, values: { $step: "two" } });
+    event({ type: "slate.values", workspaceId: "ws", threadId: "t1", version: 1, revision: (revision += 1), values: { $step: "two" } });
     expect(await screen.findByText("on step two")).toBeTruthy();
     expect(slates.calls.filter(c => c === "get")).toHaveLength(1);
   });

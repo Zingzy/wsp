@@ -79,7 +79,7 @@ function fakeHost(values: Record<string, SlateJson>): SlateApi {
 
 function drawBound(doc: SlateDoc, app: ReturnType<typeof fakeApp>, api: SlateApi) {
   const engine = new SlateEngine("t1", () => undefined, immediate);
-  engine.setRecord(doc, slateStartValues(doc), 1);
+  engine.setRecord(doc, slateStartValues(doc), 1, 1);
   const link = fakeLink();
   const sender = new StateSender(engine, () => link);
   const unbind = bindSources(engine, "t1", {

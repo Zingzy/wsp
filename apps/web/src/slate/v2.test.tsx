@@ -21,7 +21,7 @@ const HANDLE = { secret: true, set: true, len: 24, at: 1 };
 const TOKEN = "tok_9f8e7d6c5b4a39281706f5e4";
 
 function record(doc: SlateDoc, values: Record<string, SlateJson> = {}, over: Partial<SlateRecord> = {}): SlateRecord {
-  return { threadId: tid(), workspaceId: "ws", version: 1, document: doc, values: { ...slateStartValues(doc), ...values }, comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over };
+  return { threadId: tid(), workspaceId: "ws", version: 1, revision: 1, document: doc, values: { ...slateStartValues(doc), ...values }, comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over };
 }
 
 function host(first: SlateRecord, over: Partial<SlateApi> = {}): SlateApi {
@@ -87,16 +87,16 @@ describe("schema 2 in the Slate tab", () => {
     expect(token.type).toBe("password");
     expect(screen.getByRole("button", { name: "Open Vercel tokens" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
-    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 2, values: { $vercelToken: HANDLE } });
+    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 1, revision: 2, values: { $vercelToken: HANDLE } });
     flush();
     expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
-    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 3, values: { $step: 2 } });
+    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 1, revision: 3, values: { $step: 2 } });
     flush();
     expect(screen.getByText("Step 2 of 4")).toBeTruthy();
     expect(screen.getByLabelText("Project name on Vercel")).toBeTruthy();
     expect(screen.queryByLabelText("Vercel token")).toBeNull();
     // The run's result drives the derived value, and the derived value the text.
-    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 4, values: { $project: "wsp-landing", $check: { state: "done", exit: 0, out: "Found wsp-landing (prj_8f2a)", runs: 1 } } });
+    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 1, revision: 4, values: { $project: "wsp-landing", $check: { state: "done", exit: 0, out: "Found wsp-landing (prj_8f2a)", runs: 1 } } });
     flush();
     expect(screen.getByText("Found wsp-landing")).toBeTruthy();
   });
@@ -175,7 +175,7 @@ describe("schema 2 in the Slate tab", () => {
     expect([...log.children].map(line => line.textContent)).toEqual(["RUN  v3", " ✓ rounds once", " ✓ totals add up"]);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Cancel" })));
     expect(slates.cancel).toHaveBeenCalledWith(tid(), "tests");
-    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 2, values: { $tests: { state: "cancelled", exit: null, runs: 1 } } });
+    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 1, revision: 2, values: { $tests: { state: "cancelled", exit: null, runs: 1 } } });
     flush();
     expect(screen.getByText("Cancelled")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
@@ -275,9 +275,9 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
       values: { ok: { start: false } },
       pieces: {
         root: { type: "column", children: ["next", "free", "off"] },
-        next: { type: "button", props: { label: "Next", held: "Check the project first" }, on: { press: { do: "set", path: "$ok", value: true } } },
-        free: { type: "button", props: { label: "Free", held: null }, on: { press: { do: "set", path: "$ok", value: true } } },
-        off: { type: "button", props: { label: "Off", held: { bind: "$ok" } }, on: { press: { do: "set", path: "$ok", value: true } } },
+        next: { type: "button", props: { label: "Next", held: "Check the project first" }, on: { press: [{ do: "set", path: "$ok", value: true }] } },
+        free: { type: "button", props: { label: "Free", held: null }, on: { press: [{ do: "set", path: "$ok", value: true }] } },
+        off: { type: "button", props: { label: "Off", held: { bind: "$ok" } }, on: { press: [{ do: "set", path: "$ok", value: true }] } },
       },
     });
     openThread(host(record(doc)));
@@ -302,8 +302,8 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
       values: { q: { start: "" } },
       pieces: {
         root: { type: "column", children: ["ask", "note"] },
-        ask: { type: "input", props: { label: "Issue", value: { bind: "$q" }, submit: "Look up" }, on: { submit: { do: "send", text: "Look this up" } } },
-        note: { type: "input", props: { label: "Note", value: { bind: "$q" }, lines: 3, submit: "Save" }, on: { submit: { do: "send", text: "Saved" } } },
+        ask: { type: "input", props: { label: "Issue", value: { bind: "$q" }, submit: "Look up" }, on: { submit: [{ do: "send", text: "Look this up" }] } },
+        note: { type: "input", props: { label: "Note", value: { bind: "$q" }, lines: 3, submit: "Save" }, on: { submit: [{ do: "send", text: "Saved" }] } },
       },
     });
     const slates = host(record(doc), { event: vi.fn(async () => ({ outcome: "started" as const, said: "" })) });
@@ -318,5 +318,44 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
     fireEvent.change(field, { target: { value: "WSP-12" } });
     await act(async () => fireEvent.keyDown(field, { key: "Enter" }));
     await waitFor(() => expect(slates.event).toHaveBeenCalledWith(tid(), expect.objectContaining({ piece: "ask", event: "submit" })));
+  });
+
+  const version = () => document.querySelector("[data-slate-version]")?.textContent;
+
+  it("shows the document's version on the tab; values and run results never move it", async () => {
+    openThread(host(record(APPENDIX_C, {}, { version: 3, revision: 10 })));
+    await screen.findByText("Step 1 of 4");
+    expect(version()).toBe("v3");
+    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 3, revision: 11, values: { $step: 2 } });
+    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 3, revision: 12, values: { $check: { state: "done", exit: 0, out: "ok", runs: 1 } } });
+    flush();
+    expect(screen.getByText("Step 2 of 4")).toBeTruthy();
+    expect(version()).toBe("v3");
+  });
+
+  it("orders pushes by the data revision and drops one older than what it drew", async () => {
+    openThread(host(record(APPENDIX_C, {}, { revision: 10 })));
+    await screen.findByText("Step 1 of 4");
+    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 1, revision: 12, values: { $step: 3 } });
+    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 1, revision: 11, values: { $step: 2 } });
+    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 1, revision: 12, values: { $step: 4 } });
+    flush();
+    expect(screen.getByText("Step 3 of 4")).toBeTruthy();
+  });
+
+  it("takes a newer document from a record read before a push, and keeps the push's values", async () => {
+    let answer: (r: { record: SlateRecord }) => void = () => {};
+    const get = vi.fn(async () => ({ record: record(APPENDIX_C, { step: 1 }, { revision: 5 }) }));
+    openThread(host(record(APPENDIX_C), { get }));
+    await screen.findByText("Step 1 of 4");
+    get.mockImplementationOnce(() => new Promise(resolve => (answer = resolve)));
+    push({ type: "session.slate", workspaceId: "ws", sessionId: "s1", threadId: tid(), cause: "write", version: 2, by: "agent", pieces: [] });
+    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 2, revision: 8, values: { $step: 3 } });
+    const titled = { ...APPENDIX_C, title: "Deploy setup, again" };
+    await act(async () => answer({ record: record(titled, { step: 2 }, { version: 2, revision: 7 }) }));
+    flush();
+    expect(await screen.findByText("Deploy setup, again")).toBeTruthy();
+    expect(version()).toBe("v2");
+    expect(screen.getByText("Step 3 of 4")).toBeTruthy();
   });
 });

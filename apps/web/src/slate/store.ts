@@ -78,12 +78,7 @@ function linkFor(threadId: string): SlateLink {
     approve: (key, scope) => (api === null ? gone() : api.approve(threadId, key, scope)),
     cancel: run => (api === null ? gone() : api.cancel(threadId, run)),
     consent: ask => askConsent(threadId, { run: ask.run, ask }),
-    writeState: async values => {
-      if (api === null) return gone();
-      const answer = await api.state(threadId, values);
-      bundles.get(threadId)?.engine.noteVersion(answer.version);
-      return answer;
-    },
+    writeState: values => (api === null ? gone() : api.state(threadId, values)),
     fill: text => host?.fill(threadId, text),
     pane: kind => (host === null ? false : host.openPane(host.selected().panelKey, kind)),
     open: href => void window.open(href, "_blank", "noopener,noreferrer"),
@@ -115,7 +110,7 @@ function documentOf(entry: SlateEntry): SlateDoc | null {
 }
 
 function applyRecord(engine: SlateEngine, entry: SlateEntry): void {
-  engine.setRecord(documentOf(entry), entry.record?.values ?? {}, entry.record?.version ?? 0);
+  engine.setRecord(documentOf(entry), entry.record?.values ?? {}, entry.record?.version ?? 0, entry.record?.revision ?? 0);
 }
 
 const inFlight = new Map<string, Promise<SlateEntry | undefined>>();
@@ -161,7 +156,7 @@ export function showOnce(threadId: string, entry: SlateEntry | undefined): void 
 export function slateEvent(
   e:
     | { type: "session.slate"; threadId: string; by: string }
-    | { type: "slate.values"; threadId: string; version: number; values: Record<string, unknown> }
+    | { type: "slate.values"; threadId: string; version: number; revision: number; values: Record<string, unknown> }
     | { type: "slate.run"; threadId: string; run: string; lines: readonly string[] }
     | { type: "session.done"; threadId?: string | undefined; result: TurnResult },
 ): void {
@@ -178,7 +173,7 @@ export function slateEvent(
     case "slate.values": {
       // Values off the wire are JSON the host's batch wrote.
       const values = e.values as Record<string, SlateJson>;
-      bundles.get(e.threadId)?.engine.applyValues(values, e.version);
+      bundles.get(e.threadId)?.engine.applyValues(values, e.revision);
       // A run newly held is a sheet the record does not carry yet: the header row and Review read it from there.
       const asks = useSlateStore.getState().byThread[e.threadId]?.record?.asks ?? [];
       const held = Object.entries(values).some(([path, value]) => /^\$[a-zA-Z_]\w*$/.test(path) && isRunRecord(value) && value.state === "held" && !asks.some(ask => `$${ask.run}` === path));
