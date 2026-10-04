@@ -4,6 +4,7 @@ import { Button, DANGER_BUTTON } from "../../components/ui/button.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
 import type { PieceView } from "../SlateView.js";
 import { str, heldBy } from "./look.js";
+import { SlateIcon } from "./icon.js";
 import { Outcome } from "./outcome.js";
 import { usePress } from "./press.js";
 
@@ -54,6 +55,7 @@ export const button: PieceView = {
         title={held === undefined ? (str(props["note"]) ?? pressTitle(piece.on?.press)) : undefined}
         onClick={press}
       >
+        <SlateIcon name={props["icon"]} className="size-3.5" />
         {label}
       </Button>
     );

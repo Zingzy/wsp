@@ -5,7 +5,8 @@ import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../compone
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { truthy } from "../actions.js";
-import { str } from "./look.js";
+import { SlateIcon } from "./icon.js";
+import { groupLook, str } from "./look.js";
 import { twoWayPath } from "./press.js";
 
 const HEAD = "flex h-7 min-w-0 items-center gap-1 text-sm text-foreground/70";
@@ -21,6 +22,7 @@ export const section: PieceView = {
     const open = path !== undefined ? props["open"] === undefined || truthy(props["open"]) : local;
     const head = (
       <>
+        <SlateIcon name={props["icon"]} className="mr-1 size-3.5" />
         <span className="min-w-0 truncate" role="heading" aria-level={3}>{title}</span>
         {note === undefined ? null : <span className="ml-2 truncate text-xs text-muted-foreground">{note}</span>}
       </>
@@ -29,7 +31,7 @@ export const section: PieceView = {
       return (
         <section data-slate-section className="flex min-w-0 flex-col gap-2.5">
           <div className={HEAD}>{head}</div>
-          <div className="flex min-w-0 flex-col gap-2">{children}</div>
+          <div className={cn("flex min-w-0 flex-col gap-2", groupLook(props))}>{children}</div>
         </section>
       );
     }
@@ -48,7 +50,7 @@ export const section: PieceView = {
           <ChevronRight aria-hidden className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-150 motion-reduce:transition-none", open && "rotate-90")} />
         </CollapsibleTrigger>
         <CollapsiblePanel>
-          <div className="flex min-w-0 flex-col gap-2 pt-2.5">{children}</div>
+          <div className={cn("mt-2.5 flex min-w-0 flex-col gap-2", groupLook(props))}>{children}</div>
         </CollapsiblePanel>
       </Collapsible>
     );
