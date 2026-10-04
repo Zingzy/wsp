@@ -3770,6 +3770,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     under: lead => treeUnder(lead),
     threadOfToken: token => threadOfToken(token),
+    mcpServer: async (threadId, name) => {
+      const workspaceId = latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
+      const harness = latestOn(threadId)?.harness ?? threadRecords.get(threadId)?.harness;
+      const entry = workspaceId === undefined ? undefined : live.get(workspaceId);
+      if (entry === undefined || harness === undefined) throw new Error(`thread ${threadId} has no workspace this host holds`);
+      if (entry.record.kind !== "local") throw new Error("a slate's tool runs start their server on this computer, and this thread runs on another");
+      const reader = opts.agentsReader;
+      if (reader?.server === undefined) throw new Error("this host reads no agent's MCP config");
+      return reader.server({ kind: "here", projects: [{ id: workspaceId!, name: "thread", path: checkoutOf(entry.record) }] }, { agent: harness, name });
+    },
     sources: (threadId, workspaceId) => ({
       threadId,
       workspaceId,

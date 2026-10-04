@@ -52,7 +52,8 @@ import {
   type SlateWriteAnswer,
 } from "@wsp/protocol";
 import type { Store } from "./store.js";
-import { createSlateRuns, restartedRecord, rewoundRecord, type CmdRunDecl, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
+import { createSlateRuns, restartedRecord, rewoundRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
+import { createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
 import { HOST_SLATE_SOURCES, resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
 
 export const SLATES = "slates";
@@ -135,6 +136,8 @@ export interface SlatesDeps {
   secretsFile?: string;
   /** The runs factory; the real one unless a test swaps it. */
   runs?: (d: SlateRunsDeps) => SlateRuns;
+  /** One of the thread's agent's MCP servers, as that agent would start it on this computer. */
+  mcpServer?(threadId: string, name: string): Promise<McpServerSpec>;
 }
 
 /** Where a slate op names its thread: a window always, a thread's token by itself, a person's shell inside a turn by
@@ -252,7 +255,8 @@ export interface Slates {
   write(p: SlateTarget & { text?: string; document?: Record<string, unknown>; check?: boolean; ifVersion?: number; values?: Record<string, unknown>; press?: { piece: string; index?: number; action?: number } }, caller?: Caller): Promise<SlateWriteAnswer>;
   state(p: SlateTarget & { values: Record<string, unknown>; ifVersion?: number }, caller?: Caller): Promise<SlateStateAnswer>;
   read(p: SlateTarget & { values?: string[]; text?: boolean; sketch?: boolean; document?: boolean }, caller?: Caller): Promise<SlateReadAnswer>;
-  catalog(p: { name?: string }): { text: string };
+  /** With a thread, a name that is one of its agent's MCP servers answers that server's tools. */
+  catalog(p: SlateTarget & { name?: string }, caller?: Caller): Promise<{ text: string }>;
   shown(threadId: string): Promise<void>;
   event(p: { threadId: string; version: number; piece: string; event: "press" | "submit" | "change"; requestId: string; scope?: { item?: unknown; index: number }; rowAction?: number }): Promise<SlateEventAnswer>;
   approve(p: { threadId: string; key: string; scope: "once" | "thread" | "refuse" }): Promise<void>;
@@ -297,11 +301,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   const startedBy = new Map<string, RunBy>();
   const byKey = (threadId: string, run: string): string => `${threadId}\u0000${run}`;
 
-  const runs: SlateRuns = (deps.runs ?? createSlateRuns)({
-    env: deps.runEnv,
-    now: deps.now,
-    ...(deps.secretsFile !== undefined ? { secretsFile: deps.secretsFile } : {}),
-    approvals: {
+  const approvals: RunApprovals = {
       has: (threadId, key) => records.get(threadId)?.approvals[key]?.state === "allowed",
       allow: (threadId, key) => {
         const r = records.get(threadId);
@@ -316,11 +316,17 @@ export function createSlates(deps: SlatesDeps): Slates {
         void save(r);
       },
       list: threadId => Object.entries(records.get(threadId)?.approvals ?? {}).flatMap(([k, a]) => (a.state === "allowed" ? [k] : [])),
-    },
-    onRecord: (threadId, run, record) => {
-      if (capturing?.threadId === threadId && capturing.run === run) return;
-      void serial(threadId, () => runMoved(threadId, run, record)).catch((e: unknown) => console.warn(`the slate of thread ${threadWord(threadId)} lost a record of $${run}: ${e instanceof Error ? e.message : String(e)}`));
-    },
+  };
+  const moved = (threadId: string, run: string, record: RunRecord): void => {
+    if (capturing?.threadId === threadId && capturing.run === run) return;
+    void serial(threadId, () => runMoved(threadId, run, record)).catch((e: unknown) => console.warn(`the slate of thread ${threadWord(threadId)} lost a record of $${run}: ${e instanceof Error ? e.message : String(e)}`));
+  };
+  const runs: SlateRuns = (deps.runs ?? createSlateRuns)({
+    env: deps.runEnv,
+    now: deps.now,
+    ...(deps.secretsFile !== undefined ? { secretsFile: deps.secretsFile } : {}),
+    approvals,
+    onRecord: moved,
     onLine: (threadId, run, line) => {
       const r = records.get(threadId);
       if (r !== undefined) deps.emit({ type: "slate.run", workspaceId: r.workspaceId, threadId, run, lines: [line] });
@@ -334,9 +340,25 @@ export function createSlates(deps: SlatesDeps): Slates {
     },
   });
 
+  const mcp = createSlateMcp({
+    server: (threadId, name) => (deps.mcpServer === undefined ? Promise.reject(new Error("this host starts no MCP servers for a slate")) : deps.mcpServer(threadId, name)),
+    onRecord: moved,
+    onAsks: threadId => {
+      const r = records.get(threadId);
+      if (r !== undefined) deps.emit({ type: "slate.values", workspaceId: r.workspaceId, threadId, version: r.version, revision: r.revision, values: {} });
+    },
+    approvals,
+    secrets: runs.secrets,
+    computer: threadId => deps.thread(threadId)?.computer ?? "this computer",
+    now: deps.now,
+  });
+
   /** The run name and command an approval key stands for, so the menu can list it after the document changes. */
   function approvalNames(r: SlateRecord, key: string): { run?: string; cmd?: string } {
-    for (const [name, decl] of Object.entries(r.document?.runs ?? {})) if (decl.kind === "cmd" && runs.key(decl as CmdRunDecl) === key) return { run: name, cmd: decl.cmd };
+    for (const [name, decl] of Object.entries(r.document?.runs ?? {})) {
+      if (decl.kind === "cmd" && runs.key(decl as CmdRunDecl) === key) return { run: name, cmd: decl.cmd };
+      if (decl.kind !== "cmd" && key === `mcp:${decl.server}`) return { run: name, cmd: `the MCP server ${decl.server}` };
+    }
     return {};
   }
 
@@ -535,7 +557,7 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   const asksOf = (r: SlateRecord): SlateAsk[] => {
     const facts = deps.thread(r.threadId);
-    return runs.held(r.threadId).map((a: RunAsk) => {
+    const cmds = runs.held(r.threadId).map((a: RunAsk): SlateAsk => {
       const rec = r.values[a.run];
       return {
         key: a.key,
@@ -552,6 +574,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         why: isRunRecord(rec) && rec.why !== undefined ? rec.why : HELD_APPROVAL,
       };
     });
+    return [...cmds, ...mcp.held(r.threadId)];
   };
 
   const viewOf = (r: SlateRecord): SlateView => ({
@@ -582,12 +605,15 @@ export function createSlates(deps: SlatesDeps): Slates {
   const armTimers = (r: SlateRecord): void => {
     const list = Object.entries(r.document?.runs ?? {}).flatMap(([run, decl]) => (decl.every !== undefined ? [{ run, every: decl.every, key: decl.kind === "cmd" ? runs.key(decl as CmdRunDecl) : JSON.stringify(decl), ...(decl.always === true ? { always: true } : {}) }] : []));
     runs.timers(r.threadId, list);
+    const servers = Object.values(r.document?.runs ?? {}).flatMap(decl => (decl.kind === "cmd" ? [] : [{ server: decl.server, kept: decl.every !== undefined && decl.always === true }]));
+    mcp.servers(r.threadId, servers.map(s => s.server), servers.filter(s => s.kept).map(s => s.server));
   };
 
   /** A snapshot put back: every run stopped with its completion dropped, records that said running say cancelled,
    * secrets read as the store holds them, and nothing fires (02, "Rewind"). */
   const become = (r: SlateRecord, snap: SlateSnap): void => {
     runs.stopAll(r.threadId, { quiet: true });
+    mcp.stopAll(r.threadId, { quiet: true });
     r.document = snap.document;
     r.values = structuredClone(snap.values);
     for (const name of Object.keys(r.document?.runs ?? {})) {
@@ -623,7 +649,11 @@ export function createSlates(deps: SlatesDeps): Slates {
   /** What a dropped declaration leaves behind: its secret forgotten at once, its run stopped. */
   const dropDeclared = (r: SlateRecord, next: SlateDoc | null): void => {
     for (const [name, decl] of Object.entries(r.document?.values ?? {})) if (decl.secret === true && next?.values[name]?.secret !== true) runs.secrets.forget(r.threadId, name);
-    for (const name of Object.keys(r.document?.runs ?? {})) if (next?.runs[name] === undefined) runs.cancel(r.threadId, name);
+    for (const name of Object.keys(r.document?.runs ?? {})) {
+      if (next?.runs[name] !== undefined) continue;
+      runs.cancel(r.threadId, name);
+      mcp.cancel(r.threadId, name);
+    }
   };
 
   /** Drops the oldest snapshots past the count and the byte cap, then every kept version no turn points at. */
@@ -658,6 +688,21 @@ export function createSlates(deps: SlatesDeps): Slates {
       ...(decl.stdin !== undefined ? { stdin: one(decl.stdin) } : {}),
     };
   };
+  /** A tool run's arguments, read when the call goes: a secret stands as its mark wherever an expression reads it, and
+   * becomes plaintext only inside slate-mcp at the call. */
+  const mcpArgsOf = (r: SlateRecord, decl: McpRunDecl) => (): Record<string, SlateJson> => {
+    if (decl.kind !== "tool" || decl.args === undefined) return {};
+    const ctx = contextOf(r, viewsNow.get(r.threadId) ?? new Map());
+    const plain = ctx.resolve;
+    const marked: SlateEvalContext = {
+      ...ctx,
+      resolve: path => {
+        const own = parseSlateOwnPath(path);
+        return own !== undefined && own.segs.length === 0 && r.document?.values[own.name]?.secret === true ? slateSecretMark(own.name) : plain(path);
+      },
+    };
+    return Object.fromEntries(Object.entries(decl.args).map(([k, v]) => [k, resolveSlateProp(v, marked) ?? null]));
+  };
   /** The sources a run's inputs read, kept from the last batch of its slate. */
   const viewsNow = new Map<string, ReadonlyMap<string, SlateJson | undefined>>();
 
@@ -667,11 +712,10 @@ export function createSlates(deps: SlatesDeps): Slates {
     const prior = r.values[run];
     const count = isRunRecord(prior) ? prior.runs : 0;
     if (decl === undefined) return { record: { state: "failed", why: `$${run} is not declared`, runs: count } };
-    if (decl.kind !== "cmd") return { record: { state: "failed", why: `${decl.kind} runs are not in this build`, runs: count } };
     viewsNow.set(r.threadId, views);
     capturing = { threadId: r.threadId, run };
     try {
-      const answer = runs.start({ threadId: r.threadId, run, decl: decl as CmdRunDecl, by, folder: deps.thread(r.threadId)?.folder ?? process.cwd(), inputs: inputsOf(r, decl), runs: count });
+      const answer = decl.kind !== "cmd" ? mcp.start({ threadId: r.threadId, run, decl, by, args: mcpArgsOf(r, decl), runs: count }) : runs.start({ threadId: r.threadId, run, decl: decl as CmdRunDecl, by, folder: deps.thread(r.threadId)?.folder ?? process.cwd(), inputs: inputsOf(r, decl), runs: count });
       startedBy.set(byKey(r.threadId, run), by);
       if (answer.record.state === "running") announce(r, "run", by, [], run);
       return { record: answer.record as SlateRunRecord, ...(answer.outcome === "held" && answer.ask !== undefined ? { ask: answer.ask } : {}) };
@@ -686,6 +730,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     const decl = r.document?.runs[run];
     const prior = r.values[run];
     const count = isRunRecord(prior) ? prior.runs : 0;
+    if (decl !== undefined && decl.kind !== "cmd") return mcp.provisional(r.threadId, decl, count) as SlateRunRecord;
     const approved = decl?.kind === "cmd" && decl.confirm === undefined && r.approvals[runs.key(decl as CmdRunDecl)]?.state === "allowed";
     return approved ? { state: "running", runs: count + 1, startedAt: deps.now() } : { state: "held", why: HELD_APPROVAL, runs: count };
   };
@@ -897,6 +942,7 @@ export function createSlates(deps: SlatesDeps): Slates {
 
     close() {
       runs.close();
+      mcp.close();
     },
 
     async get(threadId) {
@@ -1018,8 +1064,21 @@ export function createSlates(deps: SlatesDeps): Slates {
       };
     },
 
-    catalog(p) {
-      return { text: slateCatalog(p.name) };
+    async catalog(p, caller) {
+      const text = slateCatalog(p.name);
+      const name = p.name?.trim();
+      if (name === undefined || name === "" || !text.startsWith(`${name} is not in the catalog`)) return { text };
+      let threadId: string;
+      try {
+        threadId = targetOf(p, caller, false);
+      } catch {
+        return { text };
+      }
+      try {
+        return { text: await mcp.catalog(threadId, name) };
+      } catch (e) {
+        return { text: `${text}\n${name} as an MCP server of this thread's agent: ${e instanceof Error ? e.message : String(e)}` };
+      }
     },
 
     async shown(threadId) {
@@ -1057,9 +1116,9 @@ export function createSlates(deps: SlatesDeps): Slates {
         runs.release(p.threadId);
         const event: BatchEvent = { piece: p.piece, kind: p.event, ...(item !== undefined ? { item } : {}), ...(p.scope !== undefined ? { index: p.scope.index } : {}), ...(p.rowAction !== undefined ? { rowAction: p.rowAction } : {}) };
         const out = await batch(r, [], "person", { event, requestId: p.requestId, sendAt: now });
-        return { r, out };
+        return { r, out, started: new Set(Object.keys(doc.runs).filter(run => doc.runs[run]!.kind !== "cmd")) };
       });
-      const answer = composed.then(async ({ r, out }): Promise<SlateEventAnswer> => {
+      const answer = composed.then(async ({ r, out, started }): Promise<SlateEventAnswer> => {
         let landed: Awaited<ReturnType<typeof deliverAll>>;
         try {
           landed = await deliverAll(r, out.sends);
@@ -1067,7 +1126,9 @@ export function createSlates(deps: SlatesDeps): Slates {
           throw Object.assign(new Error(`This thread cannot take a message now: ${e instanceof Error ? e.message : String(e)}`), { kind: (e as { kind?: unknown }).kind ?? "conflict" });
         }
         const held = out.asks[0];
-        const ask = held === undefined ? undefined : asksOf(r).find(a => a.run === held.run);
+        // A tool run's sheet may wait on the server's tool list, or on finding the tool destructive.
+        if (held === undefined && started.size > 0) await mcp.pending(r.threadId, 5_000);
+        const ask = held === undefined ? asksOf(r).find(a => a.kind !== "cmd" && started.has(a.run)) : asksOf(r).find(a => a.run === held.run);
         if (landed !== undefined) return { outcome: landed.outcome, said: SAID[landed.kind][landed.outcome], ...(landed.turnId !== undefined ? { turnId: landed.turnId } : {}), ...(ask !== undefined ? { ask } : {}) };
         if (ask !== undefined) return { outcome: "held", said: "Needs your approval", ask };
         return { outcome: "done", said: "" };
@@ -1085,6 +1146,23 @@ export function createSlates(deps: SlatesDeps): Slates {
           if (p.scope === "refuse") delete r.sendsAllowed;
           else r.sendsAllowed = deps.now();
           await save(r);
+        });
+        return;
+      }
+      if (mcp.owns(p.threadId, p.key)) {
+        const server = p.key.startsWith("mcp:");
+        if (!server && p.scope === "thread") throw usageRefusal("a destructive tool asks on every start, so it takes Run once or Don't:", "approve it with scope once.");
+        await serial(p.threadId, async () => {
+          if (p.scope === "refuse") {
+            if (server) r.approvals[p.key] = { state: "refused", at: deps.now(), ...approvalNames(r, p.key) };
+            await save(r);
+            mcp.deny(p.threadId, p.key);
+            return;
+          }
+          if (p.scope === "thread") r.approvals[p.key] = { state: "allowed", at: deps.now(), ...approvalNames(r, p.key) };
+          viewsNow.set(p.threadId, await viewsFor(r));
+          await save(r);
+          mcp.approve(p.threadId, p.key, p.scope);
         });
         return;
       }
@@ -1117,6 +1195,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     async cancel(p) {
       await needRecord(p.threadId);
       runs.cancel(p.threadId, p.run);
+      mcp.cancel(p.threadId, p.run);
     },
 
     subscribe(p) {
@@ -1125,6 +1204,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       for (const s of p.sources) held.set(s, (held.get(s) ?? 0) + 1);
       // A slate with any hold on it counts as shown for its timers (01, "slates.subscribe").
       runs.shown(p.threadId, true);
+      mcp.shown(p.threadId, true);
       if (p.sources.includes("pr")) {
         const r = records.get(p.threadId);
         if (r !== undefined) deps.watchPr?.(r.workspaceId);
@@ -1138,7 +1218,10 @@ export function createSlates(deps: SlatesDeps): Slates {
           if (n <= 0) held.delete(s);
           else held.set(s, n);
         }
-        if (held.size === 0) runs.shown(p.threadId, false);
+        if (held.size === 0) {
+          runs.shown(p.threadId, false);
+          mcp.shown(p.threadId, false);
+        }
       };
     },
 
@@ -1215,6 +1298,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     async forget(threadId) {
       await serial(threadId, async () => {
         runs.drop(threadId);
+        mcp.drop(threadId);
         records.delete(threadId);
         holds.delete(threadId);
         await deps.store.delete(SLATES, threadId);
