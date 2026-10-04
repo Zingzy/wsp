@@ -42,12 +42,8 @@ function useMoreToScroll(value: string): { ref: RefObject<HTMLSpanElement | null
  * wide enough for ADDRESS, the longest, at 11 px caps with the tracking the label wears. */
 const LABEL_WIDTH = "w-14";
 
-/** A fact somebody has to type on another computer: its label in a fixed column, the fact in mono, and the glyph
- * that copies it. The fact is one run of text that scrolls sideways in its own box, since a line broken or cut is
- * not the line a person pastes. */
-export function CopyRow({ label, value, k, children }: { label?: string; value: string; k: string; children?: ReactNode }) {
+function useCopy(value: string): { copied: boolean; copy: () => void } {
   const [copied, setCopied] = useState(false);
-  const scroll = useMoreToScroll(value);
   const copy = (): void => {
     void copyText(value).then(
       () => {
@@ -57,6 +53,32 @@ export function CopyRow({ label, value, k, children }: { label?: string; value: 
       () => {},
     );
   };
+  return { copied, copy };
+}
+
+/** A device code a person types on a sign-in page: the code in large mono and the button that copies it. The
+ * button keeps its word and turns only its glyph, so nothing beside it moves. */
+export function DeviceCode({ code }: { code: string }) {
+  const { copied, copy } = useCopy(code);
+  return (
+    <>
+      <span data-k="sign-in-code" className="font-mono text-xl text-foreground tabular-nums">
+        {code}
+      </span>
+      <Button size="xs" variant="outline" data-k="copy-code" onClick={copy}>
+        {copied ? <CheckIcon aria-hidden className="size-3.5" /> : <CopyIcon aria-hidden className="size-3.5" />}
+        Copy
+      </Button>
+    </>
+  );
+}
+
+/** A fact somebody has to type on another computer: its label in a fixed column, the fact in mono, and the glyph
+ * that copies it. The fact is one run of text that scrolls sideways in its own box, since a line broken or cut is
+ * not the line a person pastes. */
+export function CopyRow({ label, value, k, children }: { label?: string; value: string; k: string; children?: ReactNode }) {
+  const { copied, copy } = useCopy(value);
+  const scroll = useMoreToScroll(value);
   return (
     <div data-copy-row={k} className="flex h-10 w-full items-center gap-3 rounded-md border border-border bg-(--input-fill) px-3">
       {label === undefined ? null : (
