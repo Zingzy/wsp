@@ -5,6 +5,7 @@ import type { PieceViews } from "../SlateView.js";
 import { bars } from "./bars.js";
 import { button } from "./button.js";
 import { chart } from "./chart.js";
+import { diagram } from "./diagram.js";
 import { chip } from "./chip.js";
 import { choices } from "./choices.js";
 import { checklist } from "./checklist.js";
@@ -29,5 +30,5 @@ import { text } from "./text.js";
 import { toggle } from "./toggle.js";
 
 export const SLATE_VIEWS: PieceViews = Object.fromEntries(
-  [column, row, grid, section, heading, text, markdown, number, meter, ring, chart, sparkline, bars, status, chip, facts, table, checklist, output, button, input, select, choices, toggle, empty].map(view => [view.type, view]),
+  [column, row, grid, section, heading, text, markdown, number, meter, ring, chart, diagram, sparkline, bars, status, chip, facts, table, checklist, output, button, input, select, choices, toggle, empty].map(view => [view.type, view]),
 );

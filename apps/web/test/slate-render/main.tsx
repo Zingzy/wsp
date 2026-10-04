@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Built by Vite into a folder and opened in a real browser: the slate renderer drawing reach check's spoo live traffic as its agent wrote it
-// at the panel's width (?w=, 400 unless named), inside the panel's 16 px column, with no host behind it.
+// Built by Vite into a folder and opened in a real browser: the slate renderer drawing reach check's spoo live traffic as
+// its agent wrote it, or with ?doc=diagram a deploy's flow, at the panel's width (?w=, 400 unless named), inside the
+// panel's 16 px column, with no host behind it.
 import { createRoot } from "react-dom/client";
 import { ActionRunner, StateSender, type SlateLink } from "../../src/slate/actions";
 import { SlateEngine } from "../../src/slate/engine";
-import { REACH_TEXT, REACH_VALUES, todaySlate } from "../../src/slate/fixtures/today";
+import { DIAGRAM_TEXT, REACH_TEXT, REACH_VALUES, todaySlate } from "../../src/slate/fixtures/today";
 import { SLATE_VIEWS } from "../../src/slate/pieces";
 import { SlateView } from "../../src/slate/SlateView";
 import "./harness.css";
 
-const width = Number(new URLSearchParams(location.search).get("w") ?? 400);
-const { doc, values } = todaySlate(REACH_TEXT, REACH_VALUES);
+const query = new URLSearchParams(location.search);
+const width = Number(query.get("w") ?? 400);
+const { doc, values } = query.get("doc") === "diagram" ? todaySlate(DIAGRAM_TEXT) : todaySlate(REACH_TEXT, REACH_VALUES);
 const engine = new SlateEngine("t1");
 engine.setRecord(doc, values, 3, 3);
 (window as unknown as { slateEngine: SlateEngine }).slateEngine = engine;

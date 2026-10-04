@@ -288,6 +288,12 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
     },
     fallback: "text", example: `<chart label="Gold" items={$hist} x={item.at} value={item.v} format="usd" />`,
   },
+  diagram: {
+    type: "diagram", level: "core", purpose: "A Mermaid diagram: a flow, a sequence or a state machine; value={`...${$step}`} shows the live step.", holdsChildren: false, textProp: "value", rawText: true,
+    props: { value: { type: "string", binds: "yes", required: true, about: "Mermaid source; a text child is taken as written, braces and all" }, label: str() }, items: {}, events: [],
+    sketch: v => { const lines = shown(v.prop("value")).split("\n"); const label = shown(v.prop("label")); return `${label === "" ? "" : `${label}  `}${lines[0]}${lines.length > 1 ? ` (+${lines.length - 1} line${lines.length === 2 ? "" : "s"})` : ""}`; },
+    fallback: "its source as code", example: "<diagram label=\"Deploy\" value={`flowchart LR\n  build --> test --> ship\n  classDef now stroke-width:3px\n  class ${$step} now`} />",
+  },
   sparkline: {
     type: "sparkline", level: "core", purpose: "A small line beside text; number's trend draws one beside a figure.", holdsChildren: false,
     props: { label: str(req), values: { type: "list", binds: "yes", required: true }, tone: tone() }, items: {}, events: [],
@@ -357,11 +363,6 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
       return join2(shown(v.prop("label")), `(${figure(String(v.prop("format") ?? "percent"), value, max)}) ${bar(value, max)}`, shown(v.prop("note")));
     },
     fallback: "meter", example: `<ring label="Done" value={$done} max={len($steps)} format="fraction" />`,
-  },
-  diagram: {
-    type: "diagram", level: "working", purpose: "A Mermaid diagram from a literal text child.", holdsChildren: false, textProp: "source", rawText: true,
-    props: { label: str(req), source: { type: "string", binds: "yes", required: true } }, items: {}, events: [],
-    sketch: v => `diagram: ${shown(v.prop("label"))}`, fallback: "code", example: `<diagram label="Flow">graph TD; a-->b</diagram>`,
   },
   image: {
     type: "image", level: "extended", purpose: "An image from a data: URI or a file in the thread's folder.", holdsChildren: false,

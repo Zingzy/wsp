@@ -3,54 +3,31 @@
 // (the owner's word of 2026-10-05): reach check's spoo live traffic as its agent wrote it, at the panel's 400 px and
 // widened to 640 and 960. A section stands 32 px from what is beside it and pieces 12; a table's header words sit on
 // their columns, 11 px over the card; the log's last column ends on the card's right inset however wide the panel;
-// and the bar lists' switch never moves the page. The harness is built by Vite into a folder and served as files, no
-// dev server; like the other render tests it runs only when asked for (WSP_RENDER=1).
-import { spawnSync } from "node:child_process";
-import { createReadStream, existsSync, mkdtempSync, rmSync } from "node:fs";
-import { createServer, type Server } from "node:http";
-import { tmpdir } from "node:os";
-import { dirname, extname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+// and the bar lists' switch never moves the page. Like the other render tests it runs only when asked for
+// (WSP_RENDER=1).
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
-
-const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
+import { serveHarness, type Harness } from "./slate-render/serve";
 
 if (renderSkipped !== undefined) console.info(`slate spacing render test skipped: ${renderSkipped}`);
 
 describe.skipIf(renderSkipped !== undefined)("the slate's spacing, tables and bar lists laid out in Chromium", () => {
-  let out = "";
-  let server: Server | undefined;
+  let harness: Harness | undefined;
   let browser: Browser | undefined;
-  let base = "";
 
   beforeAll(async () => {
-    out = mkdtempSync(join(tmpdir(), "wsp-slate-spacing-"));
-    // The build runs in a child of its own: Vite's esbuild refuses jsdom's TextEncoder.
-    const built = spawnSync(process.execPath, [join(WEB_DIR, "node_modules/vite/bin/vite.js"), "build", "test/slate-render", "--config", "vite.config.ts", "--base", "./", "--outDir", out, "--emptyOutDir", "--logLevel", "error"], { cwd: WEB_DIR, encoding: "utf8" });
-    if (built.status !== 0) throw new Error(`the harness did not build: ${built.stderr}`);
-    server = createServer((req, res) => {
-      const file = join(out, decodeURIComponent(new URL(req.url ?? "/", "http://x").pathname));
-      if (!file.startsWith(out) || !existsSync(file)) return void res.writeHead(404).end();
-      res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream" });
-      createReadStream(file).pipe(res);
-    });
-    await new Promise<void>(done => server!.listen(0, "127.0.0.1", done));
-    const address = server.address();
-    base = `http://127.0.0.1:${typeof address === "object" && address !== null ? address.port : 0}/index.html`;
+    harness = await serveHarness();
     browser = await launchRender();
   }, 120_000);
   afterAll(async () => {
     await stopRender(browser, undefined);
-    server?.close();
-    rmSync(out, { recursive: true, force: true });
+    harness?.stop();
   });
 
   const open = async (width: number): Promise<Page> => {
     const page = await browser!.newPage({ viewport: { width: width + 40, height: 1200 } });
-    await page.goto(`${base}?w=${width}`);
+    await page.goto(`${harness!.base}?w=${width}`);
     await page.waitForSelector("[data-slate-bar-switch]");
     return page;
   };

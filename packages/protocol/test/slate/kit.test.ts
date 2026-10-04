@@ -53,9 +53,9 @@ describe("the richer kit", () => {
     expect(sketch).toMatch(/\n {2}x \d\d:\d\d to \d\d:\d\d, y \$0\.00 to \$4\.00\n/);
     expect(sketch).toContain("(x) 2 right");
     expect(compiled(printSlate(doc))).toEqual(doc);
-    for (const type of ["heading", "grid", "status", "chip", "ring", "chart", "sparkline", "bars", "choices", "number", "section"]) {
+    for (const type of ["heading", "grid", "status", "chip", "ring", "chart", "sparkline", "bars", "choices", "number", "section", "diagram"]) {
       expect(slateCatalog(type), type).toContain(SLATE_PIECES[type]!.purpose);
-      const declared = `<value name="hist" start={[]} /><value name="pick" start={null} /><value name="up" start={true} /><value name="done" start={1} /><value name="steps" start={[]} /><value name="q" start={{ options: [], answer: null }} />`;
+      const declared = `<value name="hist" start={[]} /><value name="pick" start={null} /><value name="up" start={true} /><value name="done" start={1} /><value name="steps" start={[]} /><value name="q" start={{ options: [], answer: null }} /><value name="step" start="build" />`;
       expect(parseSlate(`<slate>${declared}<column>${SLATE_PIECES[type]!.example}</column></slate>`).errors, type).toEqual([]);
     }
   });
@@ -164,5 +164,24 @@ describe("writing commands and fixes", () => {
     const out = applySlatePatch(doc, slateStartValues(doc), patch!);
     expect(out.errors).toEqual([]);
     expect(out.document!.pieces.price!.props!.value).toEqual({ bind: "$spot.json.v" });
+  });
+});
+
+describe("the diagram", () => {
+  it("takes a Mermaid source as a literal text child, braces and all, or a formula that reads the live step", () => {
+    const literal = parseSlate(`<slate><column><diagram id="d" label="Flow">flowchart TD
+  A{Ready?} -->|yes| B[Ship]</diagram></column></slate>`);
+    expect(literal.errors).toEqual([]);
+    expect(literal.document!.pieces["d"]!.props).toEqual({ label: "Flow", value: "flowchart TD\n  A{Ready?} -->|yes| B[Ship]" });
+    const live = parseSlate(`<slate><value name="step" start="test" /><column>${SLATE_PIECES["diagram"]!.example}</column></slate>`);
+    expect(live.errors).toEqual([]);
+    expect(sketchSlate(live.document!, { step: "test" }, {})).toContain("Deploy  flowchart LR (+3 lines)");
+    expect(parseSlate(printSlate(live.document!)).document).toEqual(live.document);
+    expect(parseSlate(`<slate><column><diagram label="Flow" /></column></slate>`).errors.map(e => e.code)).not.toEqual([]);
+  });
+
+  it("is in the catalog's index, which points a flow at it", () => {
+    expect(slateCatalog()).toContain("diagram: value label");
+    expect(slateCatalog()).toContain("a flow is a diagram");
   });
 });

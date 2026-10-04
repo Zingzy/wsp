@@ -4,12 +4,12 @@
 // header over the card, and state as a word.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
-import { GOLD_TEXT, GOLD_VALUES, INBOX_TEXT, INBOX_VALUES, QUIZ_TEXT, REACH_TEXT, REACH_VALUES, SPOO_TEXT, SPOO_VALUES, todaySlate } from "./fixtures/today";
+import { DIAGRAM_TEXT, GOLD_TEXT, GOLD_VALUES, INBOX_TEXT, INBOX_VALUES, QUIZ_TEXT, REACH_TEXT, REACH_VALUES, SPOO_TEXT, SPOO_VALUES, todaySlate } from "./fixtures/today";
 import { SLATE_VIEWS } from "./pieces";
 import { SlateView } from "./SlateView";
 import { fakeLink, manualScheduler } from "./testing";
@@ -342,4 +342,27 @@ describe("the old design's spacing and tables, and the bar lists' switch (the ow
     view.unmount();
     expect(hidden(render(ui).container)).toEqual([true, true, true, true, false]);
   });
+});
+
+describe("the diagram", () => {
+  it("names its diagram, keeps MermaidBlock's line under a source that does not parse, and follows its step's value", async () => {
+    const { doc, values } = todaySlate(DIAGRAM_TEXT);
+    const scheduler = manualScheduler();
+    const engine = new SlateEngine("t1", () => undefined, scheduler);
+    engine.setRecord(doc, values, 3, 3);
+    const link = fakeLink();
+    const { container } = render(<SlateView engine={engine} views={SLATE_VIEWS} runner={new ActionRunner(engine, () => link)} sender={new StateSender(engine, () => link)} />);
+    expect(container.querySelector('[data-slate-piece="flow"] figcaption')!.textContent).toBe("Where the deploy is");
+    // A diagram stands bare, as a chart does, never a row of a card.
+    expect(container.querySelector('[data-slate-piece="flow"]')!.closest("[data-slate-card]")).toBeNull();
+    const lines = await screen.findAllByText("Diagram did not parse", undefined, { timeout: 20_000 });
+    expect(lines.some(line => line.closest('[data-slate-piece="broken"]') !== null)).toBe(true);
+    expect(container.querySelector('[data-slate-piece="broken"] [data-slate-diagram-source]')!.textContent).toBe("flowchart LR\n  A -->");
+    // jsdom lays nothing out, so the flow stands as its source here; what matters is that the source reads the value.
+    const flow = () => container.querySelector('[data-slate-piece="flow"] [data-slate-diagram-source]')?.textContent ?? "";
+    expect(flow()).toContain("class test now");
+    act(() => engine.applyValues({ $step: "ship" }, 9));
+    act(() => scheduler.run());
+    expect(flow()).toContain("class ship now");
+  }, 30_000);
 });
