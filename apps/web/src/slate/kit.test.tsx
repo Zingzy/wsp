@@ -108,6 +108,29 @@ describe("the richer kit in the renderer", () => {
     });
   });
 
+  it("never wraps a figure or mono column: 524 MB stays on one line, a long command truncates with its text on hover", () => {
+    const doc = compiled(`<slate><value name="procs" start={[{ name: "node server", pid: 4120, mem: 524, cmd: "node /usr/local/lib/node_modules/some/long/path/server.js --port 3000" }]} /><column>
+      <table items={$procs}>
+        <col title="Name" value={item.name} />
+        <col title="PID" value={item.pid} />
+        <col title="Memory" value={\`\${item.mem} MB\`} />
+        <col title="Command" value={item.cmd} mono />
+      </table>
+    </column></slate>`);
+    const { view } = draw(doc);
+    const cells = [...view.container.querySelectorAll<HTMLElement>("tbody td")];
+    const heads = [...view.container.querySelectorAll<HTMLElement>("thead th")];
+    expect(cells.map(c => c.textContent)).toEqual(["node server", "4120", "524 MB", "node /usr/local/lib/node_modules/some/long/path/server.js --port 3000"]);
+    expect(cells.map(c => c.classList.contains("whitespace-nowrap"))).toEqual([false, true, true, true]);
+    expect(heads.map(c => c.classList.contains("whitespace-nowrap"))).toEqual([false, true, true, true]);
+    expect(cells[2]!.className).toContain("font-mono");
+    expect(cells[2]!.className).toContain("text-right");
+    const clip = cells[3]!.querySelector<HTMLElement>("[data-k=clip]")!;
+    expect(clip.className).toContain("truncate");
+    expect(clip.title).toBe("node /usr/local/lib/node_modules/some/long/path/server.js --port 3000");
+    expect(cells[1]!.querySelector("[data-k=clip]")).toBeNull();
+  });
+
   it("writes a pick from choices and marks the answer once picked", async () => {
     const doc = example("a quiz that logs each answer");
     const { view, link, engine } = draw(doc);

@@ -20,6 +20,10 @@ const records = (value: SlatePropValue | undefined): Template[] =>
 
 type Row = { item: SlateJson; index: number };
 
+/** A figure as a cell shows it: a number, or text like 524 MB, 12%, $4.20 or 3 days. */
+const FIGURE = /^[-+]?[$€£]?\d[\d,]*(\.\d+)?\s?(%|[A-Za-z]{1,5}(\/s)?)?$/;
+const isFigure = (value: SlateJson | undefined): boolean => typeof value === "number" || (typeof value === "string" && FIGURE.test(value.trim()));
+
 function RowAction({ id, template, at, row, slate, raise }: Pick<PieceViewProps, "id" | "slate" | "raise"> & { template: Template; at: number; row: Row }) {
   const on = template["on"] as unknown as { press?: SlateStep | SlateStep[] } | undefined;
   const { busy, said, refused, press } = usePress(() => raise("press", { row, rowAction: at, ...(on?.press !== undefined ? { actions: on.press } : {}) }));
@@ -50,13 +54,15 @@ export const table: PieceView = {
     const cap = typeof props["rows"] === "number" ? Math.max(0, Math.floor(props["rows"])) : items.length;
     const shown = items.slice(0, cap);
     const end = (column: Template) => column["align"] === "end";
+    // A mono or figure column never wraps: it takes its widest cell and the text columns wrap around it.
+    const tight = columns.map(column => column["mono"] === true || (shown.length > 0 && shown.every((item, index) => isFigure(slate.resolve(column["value"], { item, index })))));
     return (
       <div className="min-w-0 overflow-x-auto">
         <table className="w-full border-collapse text-left">
           <thead>
             <tr className={cn("text-muted-foreground", GROUP_LABEL)}>
               {columns.map((column, at) => (
-                <th key={at} scope="col" className={cn("pb-1 pr-4 font-normal last:pr-0", end(column) && "text-right")}>
+                <th key={at} scope="col" className={cn("pb-1 pr-4 font-normal last:pr-0", end(column) && "text-right", tight[at] && "whitespace-nowrap")}>
                   {str(slate.resolve(column["title"]))}
                 </th>
               ))}
@@ -70,18 +76,20 @@ export const table: PieceView = {
                 <tr key={rowKey(slate, piece.props?.["key"], row)} className="align-top transition-colors duration-150 hover:bg-accent">
                   {columns.map((column, at) => {
                     const value = slate.resolve(column["value"], row);
-                    const mono = column["mono"] === true || typeof value === "number";
+                    const mono = column["mono"] === true || isFigure(value);
+                    const text = str(value);
                     return (
                       <td
                         key={at}
                         className={cn(
                           "py-1 pr-4 last:pr-0",
                           mono ? "font-mono text-xs leading-5 tabular-nums" : "text-[13px] leading-5",
+                          tight[at] && "whitespace-nowrap",
                           TONE_INK[toneOf(slate.resolve(column["tone"], row), slate, id)],
-                          (end(column) || (typeof value === "number" && column["align"] === undefined)) && "text-right",
+                          (end(column) || (isFigure(value) && column["align"] === undefined)) && "text-right",
                         )}
                       >
-                        {str(value)}
+                        {tight[at] && !isFigure(value) ? <span data-k="clip" title={text} className="block max-w-48 truncate">{text}</span> : text}
                       </td>
                     );
                   })}
