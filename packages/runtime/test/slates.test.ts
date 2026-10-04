@@ -562,6 +562,38 @@ describe("the slate v2 host, round 4", () => {
     }, { timeout: 10_000 });
   }, 40_000);
 
+  it("a timed run whose last result failed runs again the moment its slate is shown, across a restart too", async () => {
+    const store = memoryStore();
+    const { rt, root, threadId, asThread } = await threadOn("wsp-slates-stale-", { store });
+    const flag = join(root, "reachable");
+    await rt.slates.write({ text: `<slate title="Feed"><run name="feed" cmd='test -f "${flag}" && echo "{}" || { echo unreachable >&2; exit 1; }' every={30} timeout={20} /><column><text id="t">{$feed.state}</text></column></slate>` }, asThread);
+    const release = rt.slates.subscribe({ threadId, sources: [] });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.asks).toHaveLength(1);
+    }, { timeout: 2_000 });
+    await rt.slates.approve({ threadId, key: (await rt.slates.get(threadId))!.asks[0]!.key, scope: "thread" });
+    const feed = async (on: Runtime) => (await on.slates.get(threadId))!.values["feed"] as Record<string, unknown>;
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect(await feed(rt)).toMatchObject({ state: "failed", err: "unreachable\n" });
+    }, { timeout: 10_000 });
+    release();
+    await rt.close();
+    runtimes.splice(runtimes.indexOf(rt), 1);
+
+    // The cause is gone while nobody looks; the next look runs it at once, not a period later.
+    writeFileSync(flag, "");
+    const again = host(root, store, [], []);
+    await again.slates.ready();
+    expect(await feed(again)).toMatchObject({ state: "failed" });
+    again.slates.subscribe({ threadId, sources: [] });
+    await vi.waitFor(async () => {
+      await again.slates.settled();
+      expect(await feed(again)).toMatchObject({ state: "done", json: {} });
+    }, { timeout: 5_000 });
+  }, 30_000);
+
   it("the agent starts a run the person said always to, and an unapproved or ask-every-time run answers held without starting", async () => {
     const { rt, threadId, asThread, prompts } = await threadOn("wsp-slates-agent-start-");
     await rt.slates.write({ text: PROBE }, asThread);
