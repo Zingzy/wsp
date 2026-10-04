@@ -302,7 +302,11 @@ describe("a real turn's process group", () => {
     root = mkdtempSync(join(tmpdir(), "wsp-localexec-group-"));
     runDir = join(root, "runs");
   });
+  /** Runs a case waits on for an end it may never reach when it fails: killed after it, so a red run leaves no child. */
+  const ending: ExecStream[] = [];
+  const ended = <T extends ExecStream>(stream: T): T => (ending.push(stream), stream);
   afterEach(() => {
+    for (const stream of ending.splice(0)) stream.kill();
     rmSync(root, { recursive: true, force: true });
     sweepStrays();
   });
@@ -367,6 +371,59 @@ describe("a real turn's process group", () => {
     expect(attached).not.toBe("gone");
     (attached as ExecStream).closeInput();
     expect(await (attached as ExecStream).exited).toBe(0);
+  }, 20_000);
+
+  it("a held seed reaches the child only once it is due, and once", async () => {
+    let due: () => void = () => {};
+    const inputAfter = new Promise<void>(resolve => (due = resolve));
+    const factory = localExecStream({ root, runDir });
+    const stream = ended(factory("cat", { env: {}, input: ["hello"], inputAfter }));
+    const reader = stream.lines[Symbol.asyncIterator]();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(readFileSync(`${stream.run!}.in`, "utf8")).toBe("");
+    due();
+    expect(await reader.next()).toEqual({ value: "hello", done: false });
+    stream.closeInput();
+    expect(await stream.exited).toBe(0);
+  }, 20_000);
+
+  it("a line written or an end asked for before a held seed is due goes after the seed, and the seed is never lost", async () => {
+    const factory = localExecStream({ root, runDir });
+    const written = ended(factory("cat", { env: {}, input: ["first"], inputAfter: new Promise(() => {}) }));
+    expect(await written.write("second")).toBe("written");
+    written.closeInput();
+    const closed = ended(factory("cat", { env: {}, input: ["first"], inputAfter: new Promise(() => {}) }));
+    closed.closeInput();
+    for (const [stream, lines] of [[written, ["first", "second"]], [closed, ["first"]]] as const) {
+      expect(await Promise.all([collect(stream.lines), stream.exited])).toEqual([lines, 0]);
+    }
+  }, 20_000);
+
+  it("a held seed whose time never comes kills the run, and the child never reads it", async () => {
+    const stream = ended(localExecStream({ root, runDir })(`cat > ${join(root, "read")}`, { env: {}, input: ["hello"], inputAfter: Promise.reject(new Error("no snapshot")) }));
+    expect(await stream.exited).toBe(null);
+    expect(existsSync(`${stream.run!}.d`)).toBe(false);
+    expect(existsSync(join(root, "read")) ? readFileSync(join(root, "read"), "utf8") : "").toBe("");
+  }, 20_000);
+
+  it("an attach to a run whose held seed never came due hands the seed over, and one whose seed already reached it writes it no second time", async () => {
+    const reading = new Set<() => void>();
+    const factory = localExecStream({ root, runDir, reading });
+    const held = ended(factory("cat", { env: {}, input: ["hello"], inputAfter: new Promise(() => {}) }));
+    const reached = ended(factory("cat", { env: {}, input: ["hello"], inputAfter: Promise.resolve() }));
+    await vi.waitUntil(() => readFileSync(`${reached.run!}.in`, "utf8") !== "", { timeout: 5_000 });
+    // A host that went between handing the seed over and dropping it: the seed is in the channel and still held.
+    writeFileSync(`${reached.run!}.held`, "hello\n");
+    for (const stop of [...reading]) stop();
+    expect(readFileSync(`${held.run!}.in`, "utf8")).toBe("");
+    const next = localExecStream({ root, runDir, pollMs: 50 });
+    for (const run of [held.run!, reached.run!]) {
+      const attached = await next.attach!(run, { input: true, startedAt: Date.now() });
+      expect(attached).not.toBe("gone");
+      ended(attached as ExecStream).closeInput();
+      const [lines, code] = await Promise.all([collect((attached as ExecStream).lines), (attached as ExecStream).exited]);
+      expect({ lines, code }).toEqual({ lines: ["hello"], code: 0 });
+    }
   }, 20_000);
 
   it("an attach reading a long log from the first byte lets the loop turn between its chunks", async () => {

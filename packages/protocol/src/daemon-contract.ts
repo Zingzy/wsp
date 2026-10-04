@@ -256,6 +256,10 @@ export const GUEST_UNWATCHED = "the host stopped watching; run it again";
  * workspace on a computer somebody owns writes in that home, so following it would take the computer's own file of
  * that name. Said on both roads a leave runs on, and pinned to one text by the contract fixture. */
 export const placeKeptForLinkLine = (path: string): string => `nothing was removed at ${path}: a folder on the way to it is a link`;
+/** Why wsp's install folder is still there after a leave: the list in it of what the setup wrote outside the home
+ * still has lines, which only a leave cut short leaves, and the folder holds that list for a leave that finishes.
+ * Said on both roads a leave runs on, and pinned to one text by the contract fixture. */
+export const placeOutsideLeftLine = (prefix: string): string => `nothing was removed at ${prefix}: the leave did not finish taking what the setup wrote outside the home, which ${prefix}/landed still lists`;
 /** What a line reads when the host's socket went while it was waiting on an answer, and what the wsp command's
  * forwarder answers each request still waiting then. */
 export const HOST_CLOSED_LINE = "the host closed the connection";

@@ -2183,7 +2183,7 @@ export async function leaveCommand(
   io: CliIO,
   args: readonly string[],
   /** The workspace profile the sweep takes off as root is the one every install writes unless a caller names another. */
-  deps: { home: string; run: ServiceRunner; platform: string; apparmorProfile?: string; tools?: ToolFolders } = { home: process.env["HOME"] ?? "", run: systemRunner, platform: platform() },
+  deps: { home: string; run: ServiceRunner; platform: string; apparmorProfile?: string; tools?: ToolFolders; systemRoot?: string } = { home: process.env["HOME"] ?? "", run: systemRunner, platform: platform() },
 ): Promise<number> {
   if (args.length !== 0) throw usageRefusal("wsp leave takes no positional arguments.", "Run wsp leave on its own; it takes wsp off the computer you are sitting at.");
   const home = deps.home;
@@ -2197,7 +2197,7 @@ export async function leaveCommand(
   const manager = serviceManagerFor(deps.platform);
   // The agent is another process from this one, so the sweep stops it before taking its unit file, and the lines
   // below say so.
-  const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run, ...(deps.apparmorProfile === undefined ? {} : { apparmorProfile: deps.apparmorProfile }), ...(deps.tools === undefined ? {} : { tools: deps.tools }) });
+  const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run, ...(deps.apparmorProfile === undefined ? {} : { apparmorProfile: deps.apparmorProfile }), ...(deps.tools === undefined ? {} : { tools: deps.tools }), ...(deps.systemRoot === undefined ? {} : { systemRoot: deps.systemRoot }) });
   io.log("broken" in standing ? brokenPlaceLeftLine(standing.broken) : `${standing.joined.name} left the wsp at ${standing.joined.hostUrls.join(", ")}; removed:`);
   for (const line of swept.removed) io.log(sweptLine(line));
   for (const line of swept.kept) io.log(line);

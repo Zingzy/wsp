@@ -20,6 +20,7 @@ import {
   provisionPackedLine,
   provisionShippedLine,
   shellQuote,
+  TOOL_PREFIX,
   type PlaceProvisionRow,
 } from "@wsp/protocol";
 import { CATALOG_AGENTS, MCP_AGENTS, skillsDirOf } from "@wsp/catalog";
@@ -559,6 +560,155 @@ export function ownMarks(stdout: string): string[] {
     const rel = words.slice(1).join("\t");
     if (words[0] !== OWN_MARK || rel === "" || rel.startsWith("/") || rel.split("/").includes("..")) return [];
     return [rel];
+  });
+}
+
+/** What the leave outside the home prints for one path it took, so no path of the computer's reads as its words. */
+export const OUTSIDE_MARK = "wsp-outside";
+
+/** The last line of a listing that ran to its end. A listing cut short has none, and the run after the step then
+ * records nothing: a short list would read every path the computer had as one the step made. */
+const LISTED = "wsp-listed";
+
+/** The lines every script outside the home opens with: the computer's root (empty but in a test), wsp's own folder
+ * under /opt and the list in it. The list sits in that folder because nothing but wsp's own jobs writes there and no
+ * workspace can, while every workspace writes the home the other list sits in, and a line here names a file a
+ * leave run as root removes. */
+function outsideHead(root: string): string[] {
+  return ["set -u", `root=${shellQuote(root)}; prefix="$root${TOOL_PREFIX}"; ledger="$prefix/landed"`, "nl=$(printf '\\nx'); nl=${nl%x}", `tab=$(printf "${TAB}")`];
+}
+
+/** What each path on stdin stands as, one `state<TAB>path` line each: a file's digest, a link's target's digest, `dir`
+ * for a folder, nothing for anything else. Every file is hashed by one sha256sum, which keeps a cask's tens of
+ * thousands of files inside the leave's bound; the tests here are the shell's own and fork nothing. */
+const OUTSIDE_STATES = [
+  "states() {",
+  '  : > "$1.files"',
+  '  while IFS= read -r p; do',
+  `    if [ -L "$p" ]; then printf 'link:%s${TAB}%s${NL}' "$(readlink "$p" | sha256sum | cut -c1-64)" "$p"`,
+  `    elif [ -d "$p" ]; then printf 'dir${TAB}%s${NL}' "$p"`,
+  `    elif [ -f "$p" ]; then printf '%s\\000' "$p" >> "$1.files"`,
+  "    fi",
+  "  done",
+  `  [ ! -s "$1.files" ] || xargs -0 sha256sum -z -- < "$1.files" | tr '\\000' '\\n' | awk '{ print substr($0, 1, 64) "${TAB}" substr($0, 67) }'`,
+  '  rm -f "$1.files"',
+  "}",
+];
+
+/** The list's last line for each path that still stands as that line says, as `state<TAB>path`. A path not under
+ * /usr/local or /opt, under wsp's own folder, holding a `.` or `..` part, or whose folder is reached through a link
+ * is on no line of it: the folders are the ones a walk that never follows a link finds. */
+const OUTSIDE_STILL = [
+  "still() {",
+  '  find "$root/usr/local" "$root/opt" \\( -path "$prefix" -o -path "*$nl*" \\) -prune -o -type d -print > "$1.dirs" 2>/dev/null',
+  `  wsp_root="$root" wsp_prefix="$prefix" awk -F"${TAB}" 'NR == FNR { d[$0] = 1; next } { s[substr($0, length($1) + 2)] = $1 } END {`,
+  '    r = ENVIRON["wsp_root"]; px = ENVIRON["wsp_prefix"]',
+  "    for (p in s) {",
+  '      q = p; sub(/\\/[^\\/]*$/, "", q)',
+  '      if (index(p, r "/usr/local/") != 1 && index(p, r "/opt/") != 1) continue',
+  '      if (p == px || index(p, px "/") == 1 || index(p "/", "/./") || index(p "/", "/../") || index(p, "//") || !(q in d)) continue',
+  `      print s[p] "${TAB}" p`,
+  "    }",
+  `  }' "$1.dirs" "$ledger" > "$1.latest"`,
+  '  cut -f2- "$1.latest" | states "$1" > "$1.now"',
+  `  awk -F"${TAB}" 'NR == FNR { s[substr($0, length($1) + 2)] = $1; next } { p = substr($0, length($1) + 2); if ((p in s) && s[p] == $1) print }' "$1.latest" "$1.now"`,
+  '  rm -f "$1.dirs" "$1.latest" "$1.now"',
+  "}",
+];
+
+/** One listing of the folders a step walks, wsp's own folder and any path with a newline left out, written whole or
+ * not at all: sorted beside its place, closed by the end line, then moved into it. A listing the bound killed leaves
+ * no list, and the run stops with its scratch files gone. */
+function outsideListing(walked: readonly string[], out: string, tests = ""): string[] {
+  const from = walked.map(dir => `"$root"${shellQuote(dir)}`).join(" ");
+  return [
+    `find ${from} \\( -path "$prefix" -o -path "*$nl*" \\) -prune -o ${tests}-print > "${out}.found" 2>/dev/null`,
+    `[ $? -lt 128 ] && LC_ALL=C sort "${out}.found" > "${out}.part" && echo ${LISTED} >> "${out}.part" && mv "${out}.part" "${out}" || { rm -f "$at".*; exit 0; }`,
+  ];
+}
+
+/** The run before an install step on a computer somebody owns, over the folders the step's roads write under
+ * /usr/local and /opt: the time it starts, every path there as it stands, and which of the paths on the list still
+ * stand as wsp left them, so the run after tells what the step made, and what it wrote again of wsp's own, from
+ * what the computer had. A computer whose jobs cannot write wsp's folder can write neither of those, and this does
+ * nothing there. */
+export function outsideBeforeScript(step: string, walked: readonly string[], root = ""): string {
+  if (walked.length === 0) return "exit 0";
+  return [
+    ...outsideHead(root),
+    `at="$prefix/.landing-${step}"`,
+    '[ ! -L "$prefix" ] && mkdir -p "$prefix" 2>/dev/null || exit 0',
+    'rm -f "$at".*',
+    ...OUTSIDE_STATES,
+    ...OUTSIDE_STILL,
+    ': > "$at.mark" || exit 0',
+    ...outsideListing(walked, "$at.before"),
+    'if [ -f "$ledger" ] && [ ! -L "$ledger" ]; then',
+    '  still "$at.s" | cut -f2- | LC_ALL=C sort -u > "$at.ours.part" && mv "$at.ours.part" "$at.ours"',
+    "fi",
+    "exit 0",
+  ].join("\n");
+}
+
+/** The run after it: every path the step made, and every path that stood as wsp left it before the step and that
+ * the step wrote again, written down at what it stands as now. A path the computer had before wsp, one the person
+ * has written over since, and one a package put there are on none of those, so a leave never takes them; the last
+ * would leave dpkg naming a file that is gone. Nothing is recorded at all unless the listing before ran to its end.
+ * Lines are only appended, each in one write, so two steps closing at once lose none; the leave reads the last line
+ * a path has. */
+export function outsideAfterScript(step: string, walked: readonly string[], root = ""): string {
+  if (walked.length === 0) return "exit 0";
+  return [
+    ...outsideHead(root),
+    `at="$prefix/.landing-${step}"`,
+    `[ -f "$at.mark" ] && [ ! -L "$ledger" ] && [ "$(tail -n 1 "$at.before" 2>/dev/null)" = ${LISTED} ] || { rm -f "$at".*; exit 0; }`,
+    ...OUTSIDE_STATES,
+    ...outsideListing(walked, "$at.after"),
+    ...outsideListing(walked, "$at.changed", '-cnewer "$at.mark" '),
+    '[ -f "$at.ours" ] || : > "$at.ours"',
+    `cat "$root"/var/lib/dpkg/info/*.list 2>/dev/null | wsp_root="$root" awk '{ print ENVIRON["wsp_root"] $0 }' | LC_ALL=C sort -u > "$at.dpkg"`,
+    '{ LC_ALL=C comm -13 "$at.before" "$at.after"; LC_ALL=C comm -12 "$at.changed" "$at.ours"; } | LC_ALL=C sort -u | LC_ALL=C comm -23 - "$at.dpkg" | states "$at" | while IFS= read -r line; do',
+    `  printf '%s${NL}' "$line" >> "$ledger"`,
+    "done",
+    'rm -f "$at".*',
+    "exit 0",
+  ].join("\n");
+}
+
+/** The leave outside the home, run as root on the computer being left before wsp's folder goes: every path the list
+ * names that still stands as wsp left it, files and links removed in one pass, then folders once empty, children
+ * before their folder. The list goes last, once the run is through it: a leave cut short leaves it, and wsp's
+ * folder with it, for a leave that finishes. The daemon runs this same text through sh: its twin is held to it by
+ * the contract fixture. */
+export function outsideSweepScript(root = ""): string {
+  return [
+    ...outsideHead(root),
+    '[ -d "$prefix" ] && [ ! -L "$prefix" ] && [ -f "$ledger" ] && [ ! -L "$ledger" ] || exit 0',
+    'at="$prefix/.leaving"',
+    ...OUTSIDE_STATES,
+    ...OUTSIDE_STILL,
+    'rm -f "$at".*',
+    'still "$at.s" | LC_ALL=C sort -t"$tab" -k2 -r > "$at.take"',
+    ': > "$at.files"; : > "$at.dirs"',
+    'while IFS="$tab" read -r was p; do',
+    `  if [ "$was" = dir ]; then printf '%s\\000' "$p" >> "$at.dirs"; else printf '%s\\000' "$p" >> "$at.files"; fi`,
+    'done < "$at.take"',
+    'xargs -0 rm -f -- < "$at.files"',
+    'xargs -0 rmdir -- < "$at.dirs" 2>/dev/null',
+    'while IFS="$tab" read -r was p; do',
+    `  [ -e "$p" ] || [ -L "$p" ] || printf '${OUTSIDE_MARK}${TAB}%s${NL}' "$p"`,
+    'done < "$at.take"',
+    'rm -f "$ledger" "$at".*',
+    "exit 0",
+  ].join("\n");
+}
+
+/** The paths that leave answered with. A line that is not the mark's, or whose path is not absolute, is not one. */
+export function outsideMarks(stdout: string): string[] {
+  return stdout.split("\n").flatMap(line => {
+    const words = line.split("\t");
+    const path = words.slice(1).join("\t");
+    return words[0] === OUTSIDE_MARK && path.startsWith("/") ? [path] : [];
   });
 }
 
