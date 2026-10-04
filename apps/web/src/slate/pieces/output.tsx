@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A run's output as it streams (05, "The output of a run"): its state as one word, the tail of its lines in a box of
 // `lines` rows that follows the end while it runs, a quiet Cancel while it runs, and why under it when held or failed.
-// A finished run keeps its last lines until it next starts.
+// A finished run keeps its last lines until it next starts; after the agent changed its command they read as stale.
 import { useEffect, useRef } from "react";
 import type { SlateJson } from "@wsp/protocol";
 import { Crab } from "../../components/status/Crab.js";
@@ -53,6 +53,7 @@ export const output: PieceView = {
     const state: SlateRunState = isRunRecord(record) && record.state in RUN_WORDS ? record.state : "idle";
     const lines = run === undefined ? [] : (slate.lines(run) ?? (isRunRecord(record) ? recordLines(record) : []));
     const running = state === "running";
+    const stale = isRunRecord(record) && record.stale === true && !running;
     useEffect(() => {
       if (running && box.current !== null) box.current.scrollTop = box.current.scrollHeight;
     }, [running, lines.length]);
@@ -67,6 +68,11 @@ export const output: PieceView = {
             {running ? <Crab className="text-status-working" /> : null}
             {RUN_WORDS[state]}
           </span>
+          {stale ? (
+            <span data-slate-stale className="min-w-0 truncate text-[13px] text-muted-foreground">
+              from before the command changed
+            </span>
+          ) : null}
           {running ? (
             <Button data-slate-cancel={run} variant="ghost" size="xs" className="ml-auto" onClick={() => void cancel(run)}>
               Cancel
@@ -78,7 +84,7 @@ export const output: PieceView = {
             ref={box}
             role="log"
             aria-live={running ? "polite" : "off"}
-            className={cn("overflow-y-auto rounded-md bg-accent px-2 py-1.5 font-mono text-xs leading-4 tabular-nums text-foreground", props["wrap"] === true ? "whitespace-pre-wrap break-words" : "whitespace-pre")}
+            className={cn("overflow-y-auto rounded-md bg-accent px-2 py-1.5 font-mono text-xs leading-4 tabular-nums", stale ? "text-muted-foreground" : "text-foreground", props["wrap"] === true ? "whitespace-pre-wrap break-words" : "whitespace-pre")}
             style={{ maxHeight: `calc(${rows} * 1rem + 0.75rem)` }}
           >
             {lines.map((line, at) => (

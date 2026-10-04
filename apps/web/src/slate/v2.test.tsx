@@ -360,4 +360,19 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
     // A value the new document declared reaches the window with it.
     expect(slateBundle(tid()).engine.values["team"]).toBe("wsp");
   });
+
+  it("marks a run's output from before the agent changed its command, until it runs again", async () => {
+    const doc = slate({
+      root: "root",
+      runs: { spot: { kind: "cmd", cmd: "curl -s https://wttr.in/Pune" } },
+      pieces: { root: { type: "column", children: ["out"] }, out: { type: "output", props: { run: "$spot" } } },
+    });
+    openThread(host(record(doc, { spot: { state: "done", exit: 0, out: "Mumbai 31C", runs: 3, stale: true } }, { revision: 10 })));
+    expect(await screen.findByText("from before the command changed")).toBeTruthy();
+    expect(screen.getByRole("log").className).toContain("text-muted-foreground");
+    push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 1, revision: 11, values: { $spot: { state: "done", exit: 0, out: "Pune 27C", runs: 4 } } });
+    flush();
+    expect(screen.queryByText("from before the command changed")).toBeNull();
+    expect(screen.getByRole("log").textContent).toBe("Pune 27C");
+  });
 });
