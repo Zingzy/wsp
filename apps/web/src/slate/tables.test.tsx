@@ -29,19 +29,45 @@ const ends = (t: HTMLElement) => [...cells(t)].map(td => td.className.includes("
 const tracks = (t: HTMLElement) => t.style.gridTemplateColumns;
 
 describe("a table in its card", () => {
-  it("puts its header over its own card: the name's column takes the room, the figures end-aligned after it", () => {
+  it("stands a lookup of three columns or fewer bare on hairlines, its header the first line, the figures at the end", () => {
     const c = draw(`<slate title="Gold">
 <value name="karats" start={[{ k: "24K", g: "₹14,918" }, { k: "22K", g: "₹13,675" }, { k: "18K", g: "₹11,189" }]} />
 <column><section title="Per gram"><table id="t" items={$karats}><col title="Karat" value={item.k} /><col title="Price per gram" value={item.g} /></table></section></column>
 </slate>`);
     const t = table(c, "t");
+    expect(t.hasAttribute("data-slate-bare-table")).toBe(true);
     expect(heads(t)).toEqual([false, true]);
     expect(ends(t)).toEqual([false, true]);
-    // The card's border and the rows' inset are edge tracks the header shares, so no row pads its own tracks.
-    expect(tracks(t)).toBe("calc(var(--settings-inset,20px) - 15px) minmax(0,1fr) minmax(14ch,max-content) calc(var(--settings-inset,20px) - 15px)");
-    const card = t.querySelector("[data-slate-head] + div")!;
-    expect(card.className).toContain("bg-card/40");
-    expect(card.querySelectorAll("[role=row]")).toHaveLength(3);
+    // No card, so no edge tracks for its border and inset: the words stand on the section's one edge.
+    expect(tracks(t)).toBe("minmax(0,1fr) minmax(14ch,max-content)");
+    expect(t.className).toContain("border-b");
+    expect(t.querySelector("[data-slate-head]")!.className).toContain("border-t");
+    const rows = t.querySelector("[data-slate-head] + div")!;
+    expect(rows.className).not.toContain("bg-card");
+    expect(rows.className).toContain("border-t");
+    expect(rows.querySelectorAll("[role=row]")).toHaveLength(3);
+    // The name reads in the 14 px sans even where it looks like a figure; the price stays 12 px mono.
+    const [name, price] = [...cells(t)];
+    expect(name!.className).toContain("text-sm");
+    expect(name!.className).not.toContain("font-mono");
+    expect(price!.className).toContain("font-mono");
+  });
+
+  it("cards a log of four columns or more, its header words over the card on the rows' tracks", () => {
+    const c = draw(`<slate>
+<value name="log" start={[{ t: "18:52:24", m: "POST", p: "/api/v1/shorten", s: 429 }]} />
+<column><section title="Latest requests"><table id="t" items={$log}><col title="Time" value={item.t} mono /><col title="Method" value={item.m} mono /><col title="Path" value={item.p} mono /><col title="Status" value={item.s} /></table></section></column>
+</slate>`);
+    const t = table(c, "t");
+    expect(t.hasAttribute("data-slate-bare-table")).toBe(false);
+    // A log's columns stand 12 px apart, so its edge track is the card's border and inset less 12.
+    const edge = "calc(var(--settings-inset,20px) + 1px - 12px)";
+    expect(tracks(t).startsWith(`${edge} `)).toBe(true);
+    expect(tracks(t).endsWith(` ${edge}`)).toBe(true);
+    const head = t.querySelector("[data-slate-head]")!;
+    expect(head.className).toContain("pb-1.5");
+    expect(head.className).not.toContain("border-t");
+    expect(t.querySelector("[data-slate-head] + div")!.className).toContain("bg-card/40");
   });
 
   it("draws no header row when no column names itself, and the name 14 px, words 13 px muted, figures 12 px mono", () => {

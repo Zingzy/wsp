@@ -2,7 +2,7 @@
 // The owner's three slates of 2026-10-03 drawn from fixture documents in the locked settings grammar: heads with their
 // meta and refresh glyph, soft cards with hairlined rows, the stat cell, the chart under its head, lists with their
 // header over the card, and state as a word.
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
@@ -66,6 +66,10 @@ describe("the gold and traffic slate", () => {
     expect(foot.className).toContain("text-xs");
     expect(foot.className).toContain("text-muted-foreground");
     expect(c.querySelector("[data-slate-head]")!.textContent).toBe("ZoneLast hourLatest minute");
+    // His V3: the karat rates and the zones are lookups, bare on hairlines with no card.
+    const lookups = [...c.querySelectorAll<HTMLElement>("[role=table]")];
+    expect(lookups).toHaveLength(2);
+    expect(lookups.every(t => t.hasAttribute("data-slate-bare-table") && t.querySelector(".bg-card\\/40") === null)).toBe(true);
     expect([...c.querySelectorAll("[data-slate-head] + div [role=row]")].map(row => row.textContent)).toEqual(["spoo.me59,9611,224", "wakeupba.be832", "pickuptheph.one70", "singhi.me00"]);
   });
 });
@@ -164,7 +168,7 @@ describe("the spoo live traffic slate", () => {
   it("puts the request log's header cells on the rows' own tracks and sizes each machine column to its widest value", () => {
     const c = draw(SPOO_TEXT, SPOO_VALUES);
     const t = c.querySelector<HTMLElement>("[role=table]")!;
-    const edge = "calc(var(--settings-inset,20px) - 15px)";
+    const edge = "calc(var(--settings-inset,20px) + 1px - 12px)";
     // time, method and cc fit their widest value; path, the widest machine text, takes the room left and wraps.
     expect(t.style.gridTemplateColumns).toBe(`${edge} minmax(8ch,max-content) minmax(6ch,max-content) minmax(0,1fr) minmax(6ch,max-content) minmax(2ch,max-content) minmax(2ch,max-content) ${edge}`);
     const head = t.querySelector("[data-slate-head]")!;
@@ -181,7 +185,8 @@ describe("the spoo live traffic slate", () => {
     expect(first.map(cell => cell.textContent)).toEqual(["18:52:24", "POST", "/api/v1/shorten", "200", "84", "IN"]);
     expect(first[0]!.className).toContain("whitespace-nowrap");
     expect(first[2]!.className).toContain("break-all");
-    expect(t.className).toContain("gap-x-4");
+    // Option A's 12 px between a log's columns.
+    expect(t.className).toContain("gap-x-3");
   });
 });
 
@@ -261,5 +266,117 @@ describe("a series that holds one value", () => {
     const moved = fivexx([...Array.from({ length: 59 }, () => 0), 2]);
     expect(moved.querySelector("[data-slate-chart] [data-usage-chart]")).not.toBeNull();
     expect(moved.querySelector("[data-slate-chart-flat]")).toBeNull();
+  });
+});
+
+describe("the owner's picks of 2026-10-05", () => {
+  function engineOf(text: string, values: Record<string, SlateJson> = {}) {
+    const { doc, values: start } = todaySlate(text, values);
+    const engine = new SlateEngine("t1", () => undefined, manualScheduler());
+    engine.setRecord(doc, start, 3, 3);
+    const link = fakeLink();
+    const ui = <SlateView engine={engine} views={SLATE_VIEWS} runner={new ActionRunner(engine, () => link)} sender={new StateSender(engine, () => link)} />;
+    return { engine, ui };
+  }
+
+  it("cards the stat strip, the request log and the bar lists, and stands every other group bare on hairlines (V3)", () => {
+    const c = draw(SPOO_TEXT, SPOO_VALUES);
+    expect(c.querySelector("[data-slate-strip]")!.closest("[data-slate-card]")).not.toBeNull();
+    // The request log has six columns: a log of records takes the card.
+    expect(c.querySelector("[data-slate-head] + div")!.className).toContain("bg-card/40");
+    expect(c.querySelector("[data-slate-bar-switch] > div:last-child")!.className).toContain("bg-card/40");
+    const quiz = draw(QUIZ_TEXT);
+    // The question is acted on and keeps its card; the context's meter and facts are words on hairlines.
+    expect(quiz.querySelector("[role=radiogroup]")!.closest("[data-slate-card]")).not.toBeNull();
+    const meter = quiz.querySelector('[role=meter][aria-label="Window used"]')!;
+    expect(meter.closest("[data-slate-card]")).toBeNull();
+    expect(meter.closest("[data-slate-bare]")!.className).toContain("border-y");
+  });
+
+  it("switches the bar lists in one card, every list kept in its one cell, the pick held across a push and a redraw", () => {
+    const { engine, ui } = engineOf(SPOO_TEXT, SPOO_VALUES);
+    const view = render(ui);
+    const lists = () => [...view.container.querySelectorAll<HTMLElement>("[data-slate-bar-list]")];
+    expect(view.container.querySelectorAll("[data-slate-bar-switch]")).toHaveLength(1);
+    // Five lists in two grids, as the agent wrote them, make one switch; the window every name shares is said once.
+    expect([...view.container.querySelectorAll("[data-slate-bar-switch] [data-segment]")].map(s => s.textContent)).toEqual(["Countries", "Status codes", "Route class", "Top short links", "Events"]);
+    expect(view.container.querySelector("[data-slate-bar-switch-note]")!.textContent).toBe("15m");
+    // Every list stays mounted in the card's one grid cell; the others are invisible, never removed, so the card is the
+    // tallest list's height.
+    expect(lists().every(list => list.className.includes("col-start-1") && list.className.includes("row-start-1"))).toBe(true);
+    expect(lists().map(list => list.className.includes("invisible"))).toEqual([false, true, true, true, true]);
+    act(() => fireEvent.click(view.container.querySelector('[data-segment="codes"]')!));
+    expect(lists().map(list => list.className.includes("invisible"))).toEqual([true, false, true, true, true]);
+    act(() => engine.applyValues({ $codes: [{ n: "302", v: 3100 }] }, 9));
+    expect(lists().map(list => list.className.includes("invisible"))).toEqual([true, false, true, true, true]);
+    view.unmount();
+    const again = render(ui);
+    expect([...again.container.querySelectorAll<HTMLElement>("[data-slate-bar-list]")].map(list => list.className.includes("invisible"))).toEqual([true, false, true, true, true]);
+  });
+
+  it("stands the request log's header words 8 px over the card on the rows' own tracks", () => {
+    const c = draw(SPOO_TEXT, SPOO_VALUES);
+    const head = c.querySelector<HTMLElement>("[data-slate-head]")!;
+    expect(head.className).toContain("items-end");
+    expect(head.className).toContain("pb-1.5");
+    expect(head.querySelector("[role=columnheader]")!.className).toContain("min-h-0");
+  });
+
+  it("pads three stat cells a row at 12 px, 10 below, and spaces a section's pieces 16 px under a 12 px head", () => {
+    const c = draw(SPOO_TEXT, SPOO_VALUES);
+    const cells = c.querySelector<HTMLElement>("[data-slate-strip] > div")!;
+    expect(cells.className).toContain("@max-[34rem]:[&>*]:pt-3");
+    expect(cells.className).toContain("@max-[34rem]:[&>*]:pb-2.5");
+    const section = c.querySelector<HTMLElement>("[data-slate-section]")!;
+    expect(section.className).toContain("gap-3");
+    expect(section.children[1]!.className).toContain("gap-4");
+    expect(c.querySelector<HTMLElement>("[data-slate-group]")!.className).toContain("[&>[data-slate-type=section]:not(:first-child)]:mt-4");
+  });
+});
+
+describe("the live spoo slate as its agent wrote it", () => {
+  // The shape of reach check's document of 2026-10-05: bar lists held in grids, labels with their window, and a
+  // request log of six columns whose only word column is the two-letter country.
+  const bar = (id: string, label: string) => `<bars id="${id}" label="${label}" items={$l} name={item.n} value={item.v} />`;
+  const doc = (lists: string) => `<slate title="spoo live traffic"><value name="l" start={[{ n: "CA", v: 909 }, { n: "US", v: 668 }]} />
+<value name="recent" start={[{ t: "20:32:49", m: "POST", p: "/api/v1/shorten", s: 429, ms: 12, cc: "CA" }]} />
+<column gap="normal">${lists}
+<section title="Non-redirect and error requests (5m)"><table id="log" items={$recent} rows={15}>
+  <col title="time" value={item.t} mono /><col title="method" value={item.m} mono /><col title="path" value={item.p} mono />
+  <col title="status" value={item.s} /><col title="ms" value={item.ms} align="end" /><col title="cc" value={item.cc} />
+</table></section></column></slate>`;
+
+  it("switches bar lists held in grids, holders one after another sharing one switch, each named by its label", () => {
+    const c = draw(doc(`<grid columns={3}>${bar("b1", "Countries (15m)")}${bar("b2", "Status codes (15m)")}${bar("b3", "Route class (15m)")}</grid>
+<grid columns={2}>${bar("b4", "Top short links (15m)")}${bar("b5", "Events (15m)")}</grid>`));
+    expect(c.querySelectorAll("[data-slate-bar-switch]")).toHaveLength(1);
+    expect([...c.querySelectorAll("[data-segment]")].map(s => s.textContent)).toEqual(["Countries", "Status codes", "Route class", "Top short links", "Events"]);
+    expect(c.querySelector("[data-slate-bar-switch-note]")!.textContent).toBe("15m");
+    // No list stands in a bare column of its own any more.
+    expect(c.querySelectorAll("[data-slate-grid]")).toHaveLength(0);
+    expect(c.querySelectorAll("[data-slate-bar-list]")).toHaveLength(5);
+  });
+
+  // The kit takes a list's name only as label, so a list with no name is an empty label.
+  it("gives a holder apart from others its own switch, and a list with no name a numbered one", () => {
+    const c = draw(doc(`<grid columns={2}>${bar("b1", "Countries")}${bar("b2", "")}</grid>
+<text>between</text>
+<row>${bar("b3", "Events")}</row>`));
+    const switches = [...c.querySelectorAll("[data-slate-bar-switch]")];
+    expect(switches).toHaveLength(2);
+    expect([...switches[0]!.querySelectorAll("[data-segment]")].map(s => s.textContent)).toEqual(["Countries", "List 2"]);
+    expect([...switches[1]!.querySelectorAll("[data-segment]")].map(s => s.textContent)).toEqual(["Events"]);
+    expect(c.querySelector("[data-slate-bar-switch-note]")).toBeNull();
+  });
+
+  it("gives the request log's slack to the path, so status, ms and cc end on the card's right inset", () => {
+    const c = draw(doc(""));
+    const t = c.querySelector<HTMLElement>('[data-slate-piece="log"] [role=table]')!;
+    const tracks = t.style.gridTemplateColumns.split(/ (?![^(]*\))/);
+    // Edge, time, method, path, status, ms, cc, edge: the path's is the one track that grows.
+    expect(tracks).toHaveLength(8);
+    expect(tracks[3]).toBe("minmax(0,1fr)");
+    expect(tracks.filter(track => track.includes("1fr"))).toHaveLength(1);
+    expect(tracks[6]).toBe("fit-content(40%)");
   });
 });

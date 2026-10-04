@@ -114,8 +114,11 @@ export const table: PieceView = {
     const cap = typeof props["rows"] === "number" ? Math.max(0, Math.floor(props["rows"])) : items.length;
     const shown = items.slice(0, cap);
     const place = placeOf(slate, id);
-    const inset = place === "inside" ? "" : INSET;
-    const card = place === "inside" ? "" : CARD_SURFACE;
+    // A log of records, four columns or more, takes the card with its header over it; a lookup of three or fewer stands
+    // bare on hairlines, the header its first line (the owner's ruling of 2026-10-05).
+    const bare = place !== "inside" && columns.length <= 3;
+    const inset = place === "inside" || bare ? "" : INSET;
+    const card = place === "inside" ? "" : bare ? "border-y border-border/50" : CARD_SURFACE;
     const widths = sharedWidths(slate, id, tightWidths(slate, id));
     const text = widths.flatMap((width, at) => (width === undefined ? [at] : []));
     const cellsOf = (at: number) => shown.map((item, index) => slate.resolve(columns[at]?.["value"], { item, index }));
@@ -199,15 +202,20 @@ export const table: PieceView = {
         </div>
       );
     }
-    // A grid: the header over the card and every row on one template, the header cells on the rows' own tracks. The
+    // A grid: a log's header words 8 px over its card (the owner's pick A, 2026-10-05), a lookup's header its first bare
+    // line, and every row on one template, the header cells on the rows' own tracks. The
     // card's border and the rows' inset are two edge tracks, so no row pads its subgrid and no track overflows into the
     // next. A figure or machine-text column is as wide as its widest value (its header's included, the tables beside
-    // it at the least), so every column stands 16 px off the next. The name's column takes the room left; with none,
-    // the widest machine text does, and wraps.
-    const fill = text.length > 0 ? title : (columns.map((_, at) => at).filter(at => !figures[at]).sort((x, y) => (widths[y] ?? 0) - (widths[x] ?? 0))[0] ?? title);
+    // it at the least), so every column keeps its gap to the next. The column of the longest words or machine text takes
+    // the room left and wraps, so the figures end on the card's right inset however wide the panel.
+    const longest = (at: number) => Math.max(str(slate.resolve(columns[at]?.["title"]))?.length ?? 0, ...cellsOf(at).map(cell => str(cell)?.length ?? 0));
+    const fill = columns.map((_, at) => at).filter(at => !figures[at]).reduce<number | undefined>((best, at) => (best === undefined || longest(at) > longest(best) ? at : best), undefined) ?? title;
     const tight = (at: number) => widths[at] !== undefined && at !== fill;
-    const edges = place !== "inside";
-    const edge = "calc(var(--settings-inset,20px) - 15px)";
+    const edges = place !== "inside" && !bare;
+    // A log's columns stand 12 px apart, as option A draws them, so six fit the 400 px panel; a lookup's stand 16. The
+    // edge track is the card's 1 px border and the rows' inset, less the gap the grid adds after it.
+    const gap = bare || place === "inside" ? 16 : 12;
+    const edge = `calc(var(--settings-inset,20px) + 1px - ${gap}px)`;
     const tracks = [
       ...(edges ? [edge] : []),
       ...columns.map((_, at) => (at === fill ? "minmax(0,1fr)" : widths[at] !== undefined ? `minmax(${widths[at]}ch,max-content)` : "fit-content(40%)")),
@@ -216,11 +224,11 @@ export const table: PieceView = {
     ];
     const rim = edges ? <span aria-hidden /> : null;
     return (
-      <div role="table" className={cn("grid min-w-0 gap-x-4", MONO)} style={{ gridTemplateColumns: tracks.join(" ") }}>
-        {columns.every((_, at) => (header(at) ?? "") === "") ? null : <div role="row" data-slate-head className="col-span-full grid min-h-7 grid-cols-subgrid items-center pb-2.5">
+      <div role="table" {...(bare ? { "data-slate-bare-table": "" } : {})} className={cn("grid min-w-0", gap === 12 ? "gap-x-3" : "gap-x-4", MONO, bare && "border-b border-border/50")} style={{ gridTemplateColumns: tracks.join(" ") }}>
+        {columns.every((_, at) => (header(at) ?? "") === "") ? null : <div role="row" data-slate-head className={cn("col-span-full grid grid-cols-subgrid", bare ? "items-center border-t border-border/50 py-1.5" : "items-end pb-1.5")}>
           {rim}
           {columns.map((column, at) => (
-            <span key={at} role="columnheader" data-ch={widths[at]} className={cn(at === 0 ? SECTION_HEAD : WORD, "font-sans", end(column, at) && "text-right", tight(at) && "whitespace-nowrap")}>
+            <span key={at} role="columnheader" data-ch={widths[at]} className={cn(at === 0 ? cn(SECTION_HEAD, "min-h-0") : WORD, "font-sans", end(column, at) && "text-right", tight(at) && "whitespace-nowrap")}>
               {header(at)}
             </span>
           ))}
@@ -228,7 +236,7 @@ export const table: PieceView = {
           {rim}
         </div>}
         {shown.length === 0 ? null : (
-          <div className={cn("col-span-full grid grid-cols-subgrid [&>*+*]:border-t [&>*+*]:border-border/50", card)}>
+          <div className={cn("col-span-full grid grid-cols-subgrid [&>*+*]:border-t [&>*+*]:border-border/50", bare ? "border-t border-border/50" : card)}>
             {shown.map((item, index) => {
               const row = { item, index };
               const body = (
@@ -236,7 +244,8 @@ export const table: PieceView = {
                   {rim}
                   {columns.map((column, at) => {
                     const value = slate.resolve(column["value"], row);
-                    const mono = (column["mono"] === true && !isSentence(value)) || isFigure(value);
+                    // The row's name reads in the sans like a settings row's title, a figure like 24K too, unless it was asked for mono.
+                    const mono = (column["mono"] === true && !isSentence(value)) || (isFigure(value) && at !== title);
                     return (
                       <span
                         key={at}

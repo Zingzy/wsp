@@ -99,3 +99,7 @@ export function present<T>(slate: SlateEngine, raw: SlatePropValue | undefined, 
     return when === undefined || truthy(slate.evaluate(when));
   });
 }
+
+/** The segmented control as the toolbar and the bar lists' switch draw it: the keycap's edge and fill, 26 px segments. */
+export const SEGMENTED = "h-8 gap-0.5 rounded-[10px] border-input bg-input-fill shadow-[inset_0_1px_0_var(--keycap-top)]";
+export const SEGMENT = "h-[26px] rounded-lg px-2.5";

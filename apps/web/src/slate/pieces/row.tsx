@@ -4,6 +4,8 @@ import type { PieceView } from "../SlateView.js";
 import { gapOf } from "./look.js";
 import { Strip } from "./grid.js";
 import { isStatCell, isStrip } from "./riders.js";
+import { BarSwitch } from "./barswitch.js";
+import { isBarHolder } from "./runs.js";
 
 const ALIGN: Record<string, string> = { start: "justify-start", center: "justify-center", end: "justify-end", between: "justify-between" };
 /** With no align set, the buttons and the state word after the row's text sit at its end, and a filter beside a picker
@@ -17,7 +19,9 @@ export const row: PieceView = {
   // the stat strip.
   fills: (slate, id) => isStatCell(slate, id) || isStrip(slate, id),
   component: ({ id, props, slate, children }) =>
-    isStrip(slate, id) ? (
+    isBarHolder(slate, id) ? (
+      <BarSwitch slate={slate} ids={slate.piece(id)?.children ?? []} />
+    ) : isStrip(slate, id) ? (
       <Strip id={id} slate={slate} />
     ) : (
     <div

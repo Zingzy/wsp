@@ -8,7 +8,8 @@ import type { SlateEngine } from "../engine.js";
 import { PieceHost, type PieceView } from "../SlateView.js";
 import { figure, str } from "./look.js";
 import { isStrip, stripCells } from "./riders.js";
-import { placeOf } from "./runs.js";
+import { BarSwitch } from "./barswitch.js";
+import { isBarHolder, placeOf } from "./runs.js";
 
 /** Columns from 360 px of the grid's own width; under it, one column. Whole class names, so Tailwind finds them. */
 const COLUMNS: Record<number, string> = { 2: "@min-[360px]:grid-cols-2", 3: "@min-[360px]:grid-cols-3", 4: "@min-[360px]:grid-cols-4" };
@@ -47,9 +48,14 @@ const WIDE_CELLS: Record<number, string> = {
   5: "@min-[34rem]:grid-cols-5 @min-[34rem]:[&>*:not(:nth-child(5n+1))]:border-l @min-[34rem]:[&>*:nth-child(n+6)]:border-t",
   6: "@min-[34rem]:grid-cols-6 @min-[34rem]:[&>*:not(:nth-child(6n+1))]:border-l @min-[34rem]:[&>*:nth-child(n+7)]:border-t",
 };
-/** Cell padding by cells a row: the stat cell's 16 px, 12 px once three or more share the row. */
-const NARROW_PAD: Record<number, string> = { 1: "@max-[34rem]:[&>*]:px-(--settings-inset,20px)", 2: "@max-[34rem]:[&>*]:px-(--settings-inset,20px)", 3: "@max-[34rem]:[&>*]:px-3" };
-const WIDE_PAD = (c: number): string => (c >= 3 ? "@min-[34rem]:[&>*]:px-3" : "@min-[34rem]:[&>*]:px-(--settings-inset,20px)");
+/** Cell padding by cells a row: the stat cell's 16 px, and 12 px with 10 below once three or more share the row. */
+const NARROW_PAD: Record<number, string> = {
+  1: "@max-[34rem]:[&>*]:px-(--settings-inset,20px) @max-[34rem]:[&>*]:pt-4 @max-[34rem]:[&>*]:pb-3.5",
+  2: "@max-[34rem]:[&>*]:px-(--settings-inset,20px) @max-[34rem]:[&>*]:pt-4 @max-[34rem]:[&>*]:pb-3.5",
+  3: "@max-[34rem]:[&>*]:px-3 @max-[34rem]:[&>*]:pt-3 @max-[34rem]:[&>*]:pb-2.5",
+};
+const WIDE_PAD = (c: number): string =>
+  c >= 3 ? "@min-[34rem]:[&>*]:px-3 @min-[34rem]:[&>*]:pt-3 @min-[34rem]:[&>*]:pb-2.5" : "@min-[34rem]:[&>*]:px-(--settings-inset,20px) @min-[34rem]:[&>*]:pt-4 @min-[34rem]:[&>*]:pb-3.5";
 
 /** The stat strip: a number cell per number, the words riding their notes drawn by the numbers. */
 export function Strip({ id, slate }: { id: string; slate: SlateEngine }) {
@@ -64,7 +70,7 @@ export function Strip({ id, slate }: { id: string; slate: SlateEngine }) {
   const wide = across(cells.length, widest, WIDE, 6);
   return (
     <div data-slate-grid data-slate-strip data-across={`${narrow} ${wide}`} className={cn("@container min-w-0", placeOf(slate, id) === "page" && CARD_SURFACE)}>
-      <div className={cn("grid min-w-0 [&>*]:border-border/50 [&>*]:pt-4 [&>*]:pb-3.5", NARROW_CELLS[narrow], NARROW_PAD[narrow], WIDE_CELLS[wide], WIDE_PAD(wide))}>
+      <div className={cn("grid min-w-0 [&>*]:border-border/50", NARROW_CELLS[narrow], NARROW_PAD[narrow], WIDE_CELLS[wide], WIDE_PAD(wide))}>
         {cells.map(cell => (
           <PieceHost key={cell} id={cell} />
         ))}
@@ -77,7 +83,9 @@ export const grid: PieceView = {
   type: "grid",
   fills: isStrip,
   component: ({ id, props, slate, children }) =>
-    isStrip(slate, id) ? (
+    isBarHolder(slate, id) ? (
+      <BarSwitch slate={slate} ids={slate.piece(id)?.children ?? []} />
+    ) : isStrip(slate, id) ? (
       <Strip id={id} slate={slate} />
     ) : (
       <div data-slate-grid className="@container min-w-0">
