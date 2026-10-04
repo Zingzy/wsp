@@ -117,15 +117,9 @@ export function todaySlate(text: string, values: Record<string, SlateJson> = {})
   return { doc: parsed.document, values: { ...slateStartValues(parsed.document), ...values } };
 }
 
-/** The shape of the owner's "spoo live traffic" slate: six figures in a grid, the request log, and its five bar lists in
- * two grids as the agent wrote them on 2026-10-05. */
+/** The shape of the owner's "spoo live traffic" slate: six figures in a grid and the request log. */
 export const SPOO_TEXT = `<slate title="spoo live traffic">
   <value name="log" start={[]} />
-  <value name="countries" start={[]} />
-  <value name="codes" start={[]} />
-  <value name="routes" start={[]} />
-  <value name="links" start={[]} />
-  <value name="events" start={[]} />
   <column>
     <section title="Last five minutes" note="checked 4s">
       <grid columns={3}>
@@ -147,26 +141,10 @@ export const SPOO_TEXT = `<slate title="spoo live traffic">
         <col title="cc" value={item.cc} mono />
       </table>
     </section>
-    <grid columns={3}>
-      <bars id="countries" label="Countries (15m)" items={$countries} name={item.n} value={item.v} />
-      <bars id="codes" label="Status codes (15m)" items={$codes} name={item.n} value={item.v} />
-      <bars id="routes" label="Route class (15m)" items={$routes} name={item.n} value={item.v} />
-    </grid>
-    <grid columns={2}>
-      <bars id="links" label="Top short links (15m)" items={$links} name={item.n} value={item.v} />
-      <bars id="events" label="Events (15m)" items={$events} name={item.n} value={item.v} />
-    </grid>
   </column>
 </slate>`;
 
-const bars = (rows: [string, number][]): SlateJson => rows.map(([n, v]) => ({ n, v }));
-
 export const SPOO_VALUES: Record<string, SlateJson> = {
-  countries: bars([["CA", 843], ["US", 835], ["AR", 557], ["ID", 408], ["CN", 246], ["EC", 244], ["DE", 182], ["BD", 151]]),
-  codes: bars([["302", 3044], ["429", 919], ["201", 279], ["200", 120], ["404", 115], ["451", 102], ["401", 87], ["410", 23]]),
-  routes: bars([["redirect", 3287], ["api", 1209], ["page", 126], ["auth", 92]]),
-  links: bars([["/hMWNDwo", 85], ["/nm2FImh", 78], ["/9Cj4zMx", 53], ["/lSe3jZ", 49], ["/vrpyIG33", 49], ["/WPL9WvG", 39], ["/n0at5zT", 38], ["/q8Rt2Lk", 31], ["/Zx1Vb7c", 29], ["/Yw4Hd0e", 27]]),
-  events: bars([["request_completed", 3974], ["url_redirect", 1771], ["click_recorded", 1414], ["click_event_skipped_validation", 454], ["url_created", 337], ["url_resolve_non_active", 76], ["url_blocked", 73]]),
   log: [
     ["18:52:24", "POST", "/api/v1/shorten", 200, 84, "IN"],
     ["18:52:23", "GET", "/stats/a8Kp2", 200, 31, "US"],

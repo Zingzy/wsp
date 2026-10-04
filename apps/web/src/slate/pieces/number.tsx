@@ -15,7 +15,7 @@ import { placeOf } from "./runs.js";
 const capitalised = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
 
 /** Redraws when any of these pieces changes; subscribing also keeps them read while they draw nothing themselves. */
-export function usePiecesVersion(slate: SlateEngine, ids: readonly string[]): string {
+function usePiecesVersion(slate: SlateEngine, ids: readonly string[]): string {
   const key = ids.join(" ");
   const subscribe = useMemo(
     () => (listener: () => void) => {

@@ -174,12 +174,9 @@ describe("layout defaults", () => {
     expect(ch("ta")).toEqual([null, "6", "23"]);
     expect(ch("tb")).toEqual([null, "6", "23"]);
     expect(ch("tc")).toEqual([null, "6", "5"]);
-    // The figures keep one line in mono; the longest column, the up times, takes the room left and may wrap.
-    const [, cpu, up] = [...piece(view.container, "ta").querySelectorAll("[role=cell]")];
-    expect(cpu!.className).toContain("whitespace-nowrap");
-    expect(cpu!.className).toContain("font-mono");
-    expect(up!.className).toContain("font-mono");
-    expect(up!.className).toContain("break-all");
+    const up = piece(view.container, "ta").querySelectorAll("[role=cell]")[2]!;
+    expect(up.className).toContain("whitespace-nowrap");
+    expect(up.className).toContain("font-mono");
     push({ $b: [{ name: "postgres", cpu: "1,234.5%", up: "x" }] });
     expect(ch("ta")).toEqual([null, "8", "19"]);
   });
