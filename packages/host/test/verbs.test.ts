@@ -542,7 +542,7 @@ describe("wsp verbs over the host", () => {
 
     const cannot = await run("image", "build", "here");
     expect(cannot.code).toBe(1);
-    expect(cannot.io.errors.join("")).toContain(placeBuildsNoImageLine("here"));
+    expect(cannot.io.errors.join("")).toContain(placeBuildsNoImageLine((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)!.name));
 
     // Nothing was forked at any of them, and this computer was never read for a recipe.
     expect(elsewhere.machines).toEqual([]);
@@ -3893,12 +3893,12 @@ describe("wsp verbs over the host", () => {
       const fallback = (here.capDefault as { threads: number }).threads;
       const set = await run("computers", "set", HERE_PLACE_ID, "--threads", "2");
       expect(set.code, set.io.errors.join("\n")).toBe(0);
-      expect(set.io.lines).toEqual([`${here.name}: 2 threads at once (${fallback} by default), agents may spawn: up to 3 workspaces (the default)`]);
+      expect(set.io.lines).toEqual([`${here.name}: 2 threads at once (${fallback} by default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)`]);
       expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)).toMatchObject({ cap: { threads: 2 }, settings: { threads: 2 } });
       const asJson = await run("computers", "set", here.name, "--threads", "1", "--json");
       expect(json(asJson.io).at(-1)).toMatchObject({ computer: { id: HERE_PLACE_ID, cap: { threads: 1 }, capDefault: { threads: fallback } } });
       const back = await run("computers", "set", HERE_PLACE_ID, "--reset", "threads");
-      expect(back.io.lines).toEqual([`${here.name}: ${fallback} ${fallback === 1 ? "thread" : "threads"} at once (the default), agents may spawn: up to 3 workspaces (the default)`]);
+      expect(back.io.lines).toEqual([`${here.name}: ${fallback} ${fallback === 1 ? "thread" : "threads"} at once (the default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)`]);
       expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)!.settings).toBeUndefined();
     });
 
@@ -3927,10 +3927,10 @@ describe("wsp verbs over the host", () => {
       expect(off.code, off.io.errors.join("\n")).toBe(0);
       expect(off.io.lines[0]).toContain("agents may not spawn (on, up to 3 by default)");
       const capped = await run("computers", "set", HERE_PLACE_ID, "--spawn", "on", "--max-machines", "1", "--json");
-      expect(json(capped.io).at(-1)).toMatchObject({ computer: { spawn: { spawn: true, maxMachines: 1, maxDepth: 1 } } });
+      expect(json(capped.io).at(-1)).toMatchObject({ computer: { spawn: { spawn: true, maxMachines: 1, maxDepth: 2 } } });
       const mac = await macProject("mine");
       expect(mac.code, mac.io.errors.join("\n")).toBe(0);
-      expect((await rt.workspaces.list()).find(w => w.name === "mine")!.agents).toEqual({ spawn: true, maxMachines: 1, maxDepth: 1 });
+      expect((await rt.workspaces.list()).find(w => w.name === "mine")!.agents).toEqual({ spawn: true, maxMachines: 1, maxDepth: 2 });
       const wrong = await run("computers", "set", HERE_PLACE_ID, "--spawn", "yes");
       expect(wrong.code).toBe(EXIT_CODES.usage);
       expect(wrong.io.errors[0]).toContain("--spawn for here takes on or off");
@@ -3963,11 +3963,11 @@ describe("wsp verbs over the host", () => {
       const on = await run("workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "2");
       expect(on.code).toBe(0);
       expect(on.io.lines).toEqual(["alpha: agents may spawn: up to 2 workspaces"]);
-      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 2, maxDepth: 1 });
+      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 2, maxDepth: 2 });
       const back = await run("workspaces", "agents", "alpha", "--spawn", "off");
       expect(back.io.lines).toEqual(["alpha: agents may not spawn"]);
       // Off keeps the numbers it was given rather than throwing them away, so turning it on again is one word.
-      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 1 });
+      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 2 });
     });
 
     it("a cap alone tightens the switch it finds and leaves it on or off, and a word that is neither on nor off, or no word at all, is refused", async () => {
@@ -3999,7 +3999,7 @@ describe("wsp verbs over the host", () => {
       // Zero machines is a switch that is on and forks nothing, which is a thing a person may mean.
       const none = await run("workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "0");
       expect(none.code).toBe(0);
-      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 0, maxDepth: 1 });
+      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 0, maxDepth: 2 });
     });
 
     it("a project folder on this computer takes the switch, by the project's name, since its agents reach the host as themselves", async () => {
@@ -4009,7 +4009,7 @@ describe("wsp verbs over the host", () => {
       const made = await run("new", "mine", "mine", "--spawn", "on");
       expect(made.io.errors).toEqual([]);
       expect(made.code).toBe(0);
-      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 3, maxDepth: 1 });
+      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 3, maxDepth: 2 });
       const set = await run("workspaces", "agents", "mine", "--spawn", "off");
       expect(set.code, set.io.errors.join("\n")).toBe(0);
       expect((await rt.workspaces.list()).find(w => w.name === "mine")!.agents?.spawn).toBe(false);
@@ -4018,7 +4018,7 @@ describe("wsp verbs over the host", () => {
     it("a create with --spawn on turns the switch on", async () => {
       const made = await run("new", "alpha", "--spawn", "on", "--max-machines", "1");
       expect(made.code).toBe(0);
-      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 1, maxDepth: 1 });
+      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 1, maxDepth: 2 });
     });
 
     it("--tree draws a thread an agent spawned under the thread that spawned it, and stop ends the tree as one", async () => {
