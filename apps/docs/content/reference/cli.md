@@ -491,7 +491,7 @@ usage: wsp new [<project>] "<what you are working on>" [--from <project image>]
   --max-machines    how many machines may stand at once under one root thread
                     while spawning is on; defaults to 3
   --max-depth       how many levels of threads may stand under the root thread
-                    while spawning is on; defaults to 1
+                    while spawning is on; defaults to 2
   --json            print the raw protocol values, one JSON object per line,
                     with everything else on stderr
   --state           the state file the host serves
@@ -830,7 +830,7 @@ usage: wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>]
   --max-machines    how many machines may stand at once under one root thread
                     while spawning is on; defaults to 3
   --max-depth       how many levels of threads may stand under the root thread
-                    while spawning is on; defaults to 1
+                    while spawning is on; defaults to 2
   --json            print the raw protocol values, one JSON object per line,
                     with everything else on stderr
   --state           the state file the host serves

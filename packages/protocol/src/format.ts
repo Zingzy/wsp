@@ -2781,9 +2781,15 @@ export function spendCapRefusal(name: string, todayUsd: number, capUsd: number):
   return `${SPEND_LIMIT_LINE} on ${name} (${spendMeterWord(todayUsd, capUsd)}); raise its spend per day or start the machine after midnight`;
 }
 
-/** The one sentence a spawn deeper than the workspace allows is refused with. */
-export function spawnDepthRefusal(threadId: string, depth: number, cap: number): string {
-  return `thread ${threadWord(threadId)} is ${depth} deep under its root and this workspace allows ${cap}; a thread this deep may not spawn`;
+/** The one sentence a spawn deeper than the tree allows is refused with, and how to raise it where the cap is held:
+ * the computer's Levels deep, or the switch of a workspace that holds one of its own. */
+export function spawnDepthRefusal(threadId: string, depth: number, cap: number, held: { computer: string } | { workspace: string }): string {
+  const deeper = String(depth + 1);
+  const raise =
+    "computer" in held
+      ? `raise Levels deep in Settings > Computers or run ${shellLine(["wsp", "computers", "set", held.computer, "--max-depth", deeper])}`
+      : `raise it with ${shellLine(["wsp", "workspaces", "agents", held.workspace, "--max-depth", deeper])}`;
+  return `thread ${threadWord(threadId)} is ${depth} deep under its root and ${"computer" in held ? "this computer" : "its workspace"} allows ${cap}, so a thread this deep may not spawn; ${raise}`;
 }
 
 /** The one sentence a thread is refused with for naming a project that is not the one its own workspace holds: a

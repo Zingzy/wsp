@@ -350,7 +350,7 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
-  it("a thread the tree already spawned may not spawn again at one level", async () => {
+  it("under the default switch a child may spawn and its own child may not, the refusal naming the workspace's switch", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
@@ -363,8 +363,13 @@ describe("agents spawning agents", () => {
     expect(child.view().parentThreadId).toBe(rootThread);
     expect(child.view().rootThreadId).toBe(rootThread);
     const childScope: ThreadScope = { kind: "thread", threadId: childThread, workspaceId: ws.id, rootThreadId: rootThread };
-    await expect(rt.sessions.start(ws.id, { prompt: "grandchild" }, asThread(childScope))).rejects.toThrow(spawnDepthRefusal(childThread, 1, 1));
-    await expect(createOn(rt, { name: "deep" }, asThread(childScope))).rejects.toThrow(spawnDepthRefusal(childThread, 1, 1));
+    const grand = await rt.sessions.start(ws.id, { prompt: "grandchild" }, asThread(childScope));
+    const grandThread = grand.view().threadId!;
+    expect(grand.view().parentThreadId).toBe(childThread);
+    const grandScope: ThreadScope = { kind: "thread", threadId: grandThread, workspaceId: ws.id, rootThreadId: rootThread };
+    await expect(rt.sessions.start(ws.id, { prompt: "deeper" }, asThread(grandScope))).rejects.toThrow(spawnDepthRefusal(grandThread, 2, 2, { workspace: "lead" }));
+    await expect(createOn(rt, { name: "deep" }, asThread(grandScope))).rejects.toThrow(spawnDepthRefusal(grandThread, 2, 2, { workspace: "lead" }));
+    held.end(2);
     held.end(1);
     held.end(0);
     await rt.close();
@@ -863,11 +868,14 @@ describe("agents spawning agents", () => {
   };
   const MAC_HERE = { url: "http://127.0.0.1:4801" };
 
-  it("a thread on this computer starts its threads beside it, held to the depth cap and no machine cap, and the person's doors stay shut", async () => {
+  it("a thread on this computer starts its threads beside it, held to the computer's default depth and no machine cap, and the person's doors stay shut", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory }, { here: MAC_HERE });
     const project = await projectOn(rt, HERE_PLACE_ID, committedRepo());
-    const mac = await createOn(rt, { project: project.id, name: "mac", agents: { spawn: true, maxMachines: 1, maxDepth: 1 } });
+    // One machine on the computer's own switch, which the folder holds none of: the starts below count against none.
+    await rt.places!.set(HERE_PLACE_ID, { spawn: { maxMachines: 1 } });
+    const mac = await createOn(rt, { project: project.id, name: "mac" });
+    expect((await rt.workspaces.get(mac.id)).agents).toEqual({ ...AGENTS_ON, maxMachines: 1 });
     const lead = await rt.sessions.start(mac.id, { prompt: "hi" });
     const threadId = lead.view().threadId!;
     const token = held.launches[0]!.env[HOST_TOKEN_ENV]!;
@@ -886,10 +894,17 @@ describe("agents spawning agents", () => {
         { parent: threadId, root: threadId, cwd: mac.folder },
         { parent: threadId, root: threadId, cwd: mac.folder },
       ]);
-      // One level down is the cap, so a child's own token starts nothing more.
+      // Two levels down is the default, so a child's own token starts one more thread and that one's starts nothing,
+      // refused with the computer's own setting to raise.
       const child = await WsClient.connect(srv.port, { token: held.launches[1]!.env[HOST_TOKEN_ENV]! });
-      expect((await child.request("sessions.start", { prompt: "deeper" }))["error"]).toBe(spawnDepthRefusal(kids[0]!.threadId!, 1, 1));
+      expect((await child.request("sessions.start", { prompt: "deeper" }))["error"]).toBeUndefined();
       child.close();
+      await until(() => held.launches.length === 4);
+      const grand = (await rt.sessions.list(mac.id)).find(s => s.parentThreadId === kids[0]!.threadId)!;
+      expect(grand.rootThreadId).toBe(threadId);
+      const deepest = await WsClient.connect(srv.port, { token: held.launches[3]!.env[HOST_TOKEN_ENV]! });
+      expect((await deepest.request("sessions.start", { prompt: "deepest" }))["error"]).toBe(spawnDepthRefusal(grand.threadId!, 2, 2, { computer: "this-mac" }));
+      deepest.close();
       // The road a connect ticket is minted on is the person's, and so is every door that hands out access.
       expect((await client.request("ticket.issue", { purpose: "connect" }))["error"]).toBe(threadOpRefusal("ticket.issue", threadId));
       expect((await client.request("pair.issue"))["error"]).toBe(threadOpRefusal("pair.issue", threadId));
@@ -1319,7 +1334,7 @@ describe("agents spawning agents", () => {
     // So a thread on that machine is still one level deep and forks nothing.
     const child = await rt.sessions.start(forked.id, { prompt: "builder" }, asThread(scope));
     const childScope: ThreadScope = { kind: "thread", threadId: child.view().threadId!, workspaceId: forked.id, rootThreadId: rootThread };
-    await expect(createOn(rt, { name: "deeper" }, asThread(childScope))).rejects.toThrow(spawnDepthRefusal(childScope.threadId, 1, 1));
+    await expect(createOn(rt, { name: "deeper" }, asThread(childScope))).rejects.toThrow(spawnDepthRefusal(childScope.threadId, 1, 1, { workspace: "lead" }));
     held.end(0);
     await rt.close();
   });

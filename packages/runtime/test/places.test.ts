@@ -875,10 +875,10 @@ describe("a place's cap and what runs there", () => {
   it("refuses a number the row's kind does not take, a place this host does not hold and a set with no number, as usage, and writes nothing", async () => {
     const { store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
-    expect(await capOf(host, HERE_PLACE_ID, { machines: 2 })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once and agents may start agents, not machines at once` });
-    expect(await capOf(host, "solari", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: "solari takes machines at once, spend per day, nap after and agents may start agents, not threads at once" });
+    expect(await capOf(host, HERE_PLACE_ID, { machines: 2 })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once, agents may start agents and levels deep, not machines at once` });
+    expect(await capOf(host, "solari", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: "solari takes machines at once, spend per day, nap after, agents may start agents and levels deep, not threads at once" });
     expect(await capOf(host, "p_nothing", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: noSuchPlaceRefusal("p_nothing", [HERE.name, "solari"]) });
-    expect(await capOf(host, "solari", {})).toMatchObject({ ok: false, kind: "usage", error: "nothing to set on solari: it takes machines at once, spend per day, nap after and agents may start agents" });
+    expect(await capOf(host, "solari", {})).toMatchObject({ ok: false, kind: "usage", error: "nothing to set on solari: it takes machines at once, spend per day, nap after, agents may start agents and levels deep" });
     host.close();
     expect(await store.keys("caps")).toEqual([]);
   });
@@ -978,7 +978,7 @@ describe("a place's nap after", () => {
   it("is refused on the computer the host runs on, whose workspaces are folders that never nap, and says nothing of it on that row", async () => {
     await serving();
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
-    expect(await host.request("places.set", { placeId: HERE_PLACE_ID, napMs: 5 * MIN })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once and agents may start agents, not nap after` });
+    expect(await host.request("places.set", { placeId: HERE_PLACE_ID, napMs: 5 * MIN })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once, agents may start agents and levels deep, not nap after` });
     expect(await host.request("places.set", { placeId: "p_1", napMs: 30_000 })).toMatchObject({ ok: false });
     host.close();
     expect((await placesOf()).find(p => p.id === HERE_PLACE_ID)!.napMs).toBeUndefined();
@@ -995,22 +995,51 @@ describe("whether agents may start agents, as a place's default", () => {
       const c = await WsClient.connect(srv.port, { token: "host-token" });
       expect((await placesOf()).find(p => p.id === "solari")).toMatchObject({ spawn: AGENTS_ON, spawnDefault: AGENTS_ON });
       const before = await createOn(runtime, { on: "solari", golden: "snap_g", name: "before" });
-      expect(await c.request("places.set", { placeId: "solari", spawn: { spawn: false } })).toMatchObject({ ok: true, place: { spawn: { ...AGENTS_ON, spawn: false }, settings: { spawn: { ...AGENTS_ON, spawn: false } } } });
+      expect(await c.request("places.set", { placeId: "solari", spawn: { spawn: false } })).toMatchObject({ ok: true, place: { spawn: { ...AGENTS_ON, spawn: false }, settings: { spawn: { spawn: false } } } });
       expect(await c.request("places.set", { placeId: HERE_PLACE_ID, spawn: { maxMachines: 1 } })).toMatchObject({ ok: true, place: { spawn: { ...AGENTS_ON, maxMachines: 1 } } });
       // Read at every ask rather than copied at the create, so a workspace made before the change follows it.
       expect((await runtime.workspaces.get(before.id)).agents).toEqual({ ...AGENTS_ON, spawn: false });
       const after = await createOn(runtime, { on: "solari", golden: "snap_g", name: "after" });
       expect((await runtime.workspaces.get(after.id)).agents).toEqual({ ...AGENTS_ON, spawn: false });
-      const own = await createOn(runtime, { on: "solari", golden: "snap_g", name: "own", agents: { maxDepth: 2 } });
-      expect((await runtime.workspaces.get(own.id)).agents).toEqual({ ...AGENTS_ON, spawn: false, maxDepth: 2 });
+      const own = await createOn(runtime, { on: "solari", golden: "snap_g", name: "own", agents: { maxDepth: 3 } });
+      expect((await runtime.workspaces.get(own.id)).agents).toEqual({ ...AGENTS_ON, spawn: false, maxDepth: 3 });
       const mac = await createOn(runtime, { on: HERE_PLACE_ID, name: "mac" });
       expect((await runtime.workspaces.get(mac.id)).agents).toEqual({ ...AGENTS_ON, maxMachines: 1 });
       // A cap named alone on a workspace tightens the switch it reads as, which is its place's.
-      expect((await runtime.workspaces.agents(after.id, { maxMachines: 2 })).agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 1 });
+      expect((await runtime.workspaces.agents(after.id, { maxMachines: 2 })).agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 2 });
       expect(await c.request("places.set", { placeId: "solari", reset: ["spawn"] })).toMatchObject({ ok: true, place: { spawn: AGENTS_ON } });
       expect((await runtime.workspaces.get(before.id)).agents).toEqual(AGENTS_ON);
       c.close();
     } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("stores only the parts a person set, so a switch turned off and on again follows a later default, and levels deep resets alone", async () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-spawn-parts-"));
+    const shipped = AGENTS_ON.maxDepth;
+    try {
+      runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: wiring(newPlaceKeyPair()), local: fakeLocal(root) });
+      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      const c = await WsClient.connect(srv.port, { token: "host-token" });
+      await c.request("places.set", { placeId: HERE_PLACE_ID, spawn: { spawn: false } });
+      const back = (await c.request("places.set", { placeId: HERE_PLACE_ID, spawn: { spawn: true } })) as { place: PlaceView };
+      expect(back.place.settings).toEqual({ spawn: { spawn: true } });
+      const mac = await createOn(runtime, { on: HERE_PLACE_ID, name: "mac" });
+      // The default moves under a computer that toggled, and both its row and its workspace read the new one.
+      (AGENTS_ON as { maxDepth: number }).maxDepth = shipped + 3;
+      expect((await placesOf()).find(p => p.id === HERE_PLACE_ID)!.spawn?.maxDepth).toBe(shipped + 3);
+      expect((await runtime.workspaces.get(mac.id)).agents?.maxDepth).toBe(shipped + 3);
+      (AGENTS_ON as { maxDepth: number }).maxDepth = shipped;
+      // A depth set and taken back leaves the rest of the switch as the person set it.
+      expect(await c.request("places.set", { placeId: HERE_PLACE_ID, spawn: { maxDepth: 4 } })).toMatchObject({ place: { settings: { spawn: { spawn: true, maxDepth: 4 } }, spawn: { maxDepth: 4 } } });
+      const reset = (await c.request("places.set", { placeId: HERE_PLACE_ID, reset: ["max-depth"] })) as { place: PlaceView };
+      expect(reset.place.settings).toEqual({ spawn: { spawn: true } });
+      expect(reset.place.spawn).toEqual(AGENTS_ON);
+      expect((await c.request("places.set", { placeId: HERE_PLACE_ID, reset: ["spawn"] })) as { place: PlaceView }).not.toHaveProperty("place.settings");
+      c.close();
+    } finally {
+      (AGENTS_ON as { maxDepth: number }).maxDepth = shipped;
       rmSync(root, { recursive: true, force: true });
     }
   });

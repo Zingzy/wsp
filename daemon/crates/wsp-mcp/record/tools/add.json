@@ -810,11 +810,6 @@
                       "minimum": 1
                     }
                   },
-                  "required": [
-                    "spawn",
-                    "maxMachines",
-                    "maxDepth"
-                  ],
                   "additionalProperties": false
                 }
               },
@@ -834,10 +829,27 @@
               "type": "integer"
             },
             "spawn": {
-              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+              "type": "object",
+              "properties": {
+                "spawn": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/spawn"
+                },
+                "maxMachines": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/maxMachines"
+                },
+                "maxDepth": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/maxDepth"
+                }
+              },
+              "required": [
+                "spawn",
+                "maxMachines",
+                "maxDepth"
+              ],
+              "additionalProperties": false
             },
             "spawnDefault": {
-              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+              "$ref": "#/properties/computer/properties/spawn"
             },
             "running": {
               "type": "integer",
@@ -1734,11 +1746,6 @@
                       "minimum": 1
                     }
                   },
-                  "required": [
-                    "spawn",
-                    "maxMachines",
-                    "maxDepth"
-                  ],
                   "additionalProperties": false
                 }
               },
@@ -1758,10 +1765,27 @@
               "type": "integer"
             },
             "spawn": {
-              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+              "type": "object",
+              "properties": {
+                "spawn": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/spawn"
+                },
+                "maxMachines": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/maxMachines"
+                },
+                "maxDepth": {
+                  "$ref": "#/properties/computer/properties/settings/properties/spawn/properties/maxDepth"
+                }
+              },
+              "required": [
+                "spawn",
+                "maxMachines",
+                "maxDepth"
+              ],
+              "additionalProperties": false
             },
             "spawnDefault": {
-              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+              "$ref": "#/properties/computer/properties/spawn"
             },
             "running": {
               "type": "integer",

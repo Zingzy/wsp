@@ -534,7 +534,10 @@ export const COMPUTER_PAGE_WORDS = {
   napNever: "Never",
   threadsHere: "Threads here",
   spawnTitle: "Agents may start agents",
-  spawnLine: (machines: number, depth: number): string => `A thread here may open threads of its own: up to ${machines} ${machines === 1 ? "machine" : "machines"}, ${depth === 1 ? "one level deep" : `${depth} levels deep`}.`,
+  spawnLine: (depth: number, machines?: number): string =>
+    `A thread here may open threads of its own, up to ${machines === undefined ? "" : `${machines} ${machines === 1 ? "machine" : "machines"} and `}${depth === 1 ? "one level deep" : `${depth} levels deep`}.`,
+  levelsTitle: "Levels deep",
+  levelsLine: "1 lets the thread you start open threads, 2 lets those open their own.",
 } as const;
 
 /** The Limits tab's banked resets line: what is banked, and the one act that spends one after asking. */
