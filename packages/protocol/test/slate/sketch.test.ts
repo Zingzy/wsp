@@ -15,6 +15,23 @@ describe("the sketch", () => {
     expect(s.split("\n").every(l => l.length <= 100)).toBe(true);
   });
 
+  it("marks a piece that reads a run's result before the run has one, and not one that reads its state", () => {
+    const d = parseSlate(`<slate>
+  <run name="market" cmd="echo '{}'" />
+  <column>
+    <text id="closed" when={!$market.json.open}>Market closed</text>
+    <number id="spot" label="Spot" value={$market.json.v} />
+    <text id="waiting" when={$market.state == "idle"}>Waiting</text>
+  </column>
+</slate>`).document!;
+    const before = sketchSlate(d, slateStartValues(d), { version: 1, now });
+    expect(before).toContain("Market closed (reads $market, not run yet)  [closed text]");
+    expect(before).toContain("Spot  not read yet  [spot number]");
+    expect(before).toContain("Waiting  [waiting text]");
+    const ran = { ...slateStartValues(d), market: { state: "done", exit: 0, out: '{"open":false}', json: { open: false }, runs: 1, startedAt: now - 1000, endedAt: now } };
+    expect(sketchSlate(d, ran, { version: 2, now })).toContain("Market closed  [closed text]");
+  });
+
   it("draws the setup slate as the person sees it, the secret as dots, and the runs that moved", () => {
     const d = setup();
     const handle = { secret: true, set: true, len: 24, at: now };
