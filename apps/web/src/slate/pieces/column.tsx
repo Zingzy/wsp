@@ -8,7 +8,8 @@ import { Strip } from "./grid.js";
 import { isStrip, riddenBy } from "./riders.js";
 import { isGroup, Runs } from "./runs.js";
 
-const SECTIONS_APART = "[&>[data-slate-type=section]:not(:first-child)]:mt-3 [&>[data-slate-type=section]+*]:mt-3";
+/** Sections stand 32 px from what is beside them: the column's 12 px gap and 20 more. */
+const SECTIONS_APART = "[&>[data-slate-type=section]:not(:first-child)]:mt-5 [&>[data-slate-type=section]+*]:mt-5";
 const ALIGN: Record<string, string> = { start: "items-start", center: "items-center", end: "items-end", stretch: "items-stretch" };
 
 export const column: PieceView = {

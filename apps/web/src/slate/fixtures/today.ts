@@ -152,3 +152,58 @@ export const SPOO_VALUES: Record<string, SlateJson> = {
     ["18:52:19", "GET", "/api/v1/stats/a8Kp2", 404, 9, "IN"],
   ].map(([time, method, path, status, ms, cc], id) => ({ id, time, method, path, status, ms, cc }) as SlateJson),
 };
+
+/** reach check's "spoo live traffic" as its agent wrote it on 2026-10-05: six figures in a row, its bar lists held in two
+ * grids with their window in each label, and a request log whose only word column is the two-letter country. */
+export const REACH_TEXT = `<slate title="spoo live traffic">
+  <value name="countries" start={[]} />
+  <value name="codes" start={[]} />
+  <value name="routes" start={[]} />
+  <value name="links" start={[]} />
+  <value name="events" start={[]} />
+  <value name="recent" start={[]} />
+  <column gap="normal">
+    <row gap="normal" wrap>
+      <number label="req/min (5m avg)" value={290.4} />
+      <number label="p50" value={8} unit="ms" />
+      <number label="p95" value={61} unit="ms" />
+      <number label="5xx (5m)" value={0} tone="good" />
+      <number label="4xx (5m)" value={413} />
+      <number label="redirects (5m)" value={965} />
+    </row>
+    <grid columns={3}>
+      <bars id="countries" label="Countries (15m)" items={$countries} name={item.n} value={item.v} />
+      <bars id="codes" label="Status codes (15m)" items={$codes} name={item.n} value={item.v} />
+      <bars id="routes" label="Route class (15m)" items={$routes} name={item.n} value={item.v} />
+    </grid>
+    <grid columns={2}>
+      <bars id="links" label="Top short links (15m)" items={$links} name={item.n} value={item.v} />
+      <bars id="events" label="Events (15m)" items={$events} name={item.n} value={item.v} />
+    </grid>
+    <section title="Non-redirect and error requests (5m)">
+      <table id="log" items={$recent} rows={15}>
+        <col title="time" value={item.t} mono />
+        <col title="method" value={item.m} mono />
+        <col title="path" value={item.p} mono />
+        <col title="status" value={item.s} />
+        <col title="ms" value={item.ms} align="end" />
+        <col title="cc" value={item.cc} />
+      </table>
+    </section>
+  </column>
+</slate>`;
+
+const named = (rows: [string, number][]): SlateJson => rows.map(([n, v]) => ({ n, v }));
+
+export const REACH_VALUES: Record<string, SlateJson> = {
+  countries: named([["CA", 909], ["US", 668], ["AR", 410], ["ID", 301], ["EC", 262], ["BR", 197], ["CN", 139], ["YE", 112]]),
+  codes: named([["302", 2243], ["429", 1114], ["201", 294], ["404", 84], ["401", 83], ["451", 73], ["200", 50], ["307", 25]]),
+  routes: named([["redirect", 2408], ["api", 1198], ["page", 285], ["auth", 83]]),
+  links: named([["/hMWNDwo", 85], ["/nm2FImh", 78], ["/9Cj4zMx", 53], ["/lSe3jZ", 49], ["/vrpyIG33", 49], ["/WPL9WvG", 39], ["/n0at5zT", 38]]),
+  events: named([["request_completed", 4079], ["url_redirect", 1823], ["click_recorded", 1469], ["click_event_skipped_validation", 462], ["url_created", 339], ["url_resolve_non_active", 85], ["url_blocked", 82], ["url_resolve_not_found", 65], ["url_not_found", 65], ["stream_group_stats", 60]]),
+  recent: [
+    ["20:32:49", "POST", "/api/v1/shorten", 429, 12, "CA"],
+    ["20:32:45", "POST", "/", 429, 5, "DE"],
+    ["20:32:42", "POST", "/api/v1/shorten", 201, 64, "EC"],
+  ].map(([t, m, p, s, ms, cc]) => ({ t, m, p, s, ms, cc }) as SlateJson),
+};

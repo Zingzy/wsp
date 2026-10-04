@@ -2,12 +2,14 @@
 // The owner's three slates of 2026-10-03 drawn from fixture documents in the locked settings grammar: heads with their
 // meta and refresh glyph, soft cards with hairlined rows, the stat cell, the chart under its head, lists with their
 // header over the card, and state as a word.
-import { cleanup, render } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
-import { GOLD_TEXT, GOLD_VALUES, INBOX_TEXT, INBOX_VALUES, QUIZ_TEXT, SPOO_TEXT, SPOO_VALUES, todaySlate } from "./fixtures/today";
+import { GOLD_TEXT, GOLD_VALUES, INBOX_TEXT, INBOX_VALUES, QUIZ_TEXT, REACH_TEXT, REACH_VALUES, SPOO_TEXT, SPOO_VALUES, todaySlate } from "./fixtures/today";
 import { SLATE_VIEWS } from "./pieces";
 import { SlateView } from "./SlateView";
 import { fakeLink, manualScheduler } from "./testing";
@@ -261,5 +263,83 @@ describe("a series that holds one value", () => {
     const moved = fivexx([...Array.from({ length: 59 }, () => 0), 2]);
     expect(moved.querySelector("[data-slate-chart] [data-usage-chart]")).not.toBeNull();
     expect(moved.querySelector("[data-slate-chart-flat]")).toBeNull();
+  });
+});
+
+describe("the old design's spacing and tables, and the bar lists' switch (the owner's word of 2026-10-05)", () => {
+  it("stands sections 32 px apart and pieces 12, with no stylesheet rule adding its own margin over a section", () => {
+    const c = draw(GOLD_TEXT, GOLD_VALUES);
+    const group = c.querySelector<HTMLElement>("[data-slate-group]")!;
+    expect(group.className).toContain("gap-3");
+    expect(group.className).toContain("[&>[data-slate-type=section]:not(:first-child)]:mt-5");
+    expect(c.querySelector<HTMLElement>("[data-slate-section] > div:last-child")!.className).toContain("gap-3");
+    // The first proof of concept's rule gave every section 12 px over its head and outranked the column's own margin.
+    expect(readFileSync(join(__dirname, "../index.css"), "utf8")).not.toMatch(/slate-piece\[data-slate-type="section"\]/);
+    // A row or column of pieces stands them 12 px apart at its normal gap.
+    const row = draw(`<slate><column><row><button label="One" onPress={send("1")} /><button label="Two" onPress={send("2")} /></row></column></slate>`);
+    expect(row.querySelector<HTMLElement>('[data-slate-type="row"] > div')!.className).toContain("gap-3");
+  });
+
+  it("puts a table's header words on their columns' tracks, a third nearer the card than before", () => {
+    const c = draw(GOLD_TEXT, GOLD_VALUES);
+    const head = c.querySelector<HTMLElement>("[data-slate-head]")!;
+    expect(head.className).toContain("pb-[5px]");
+    const table = head.parentElement!;
+    const edge = "calc(var(--settings-inset,20px) - 15px)";
+    expect(table.style.gridTemplateColumns.startsWith(edge)).toBe(true);
+    const row = head.nextElementSibling!.querySelector("[role=row]")!;
+    expect(row.children).toHaveLength(head.children.length);
+  });
+
+  it("gives the request log's slack to its longest column, the path, not the two-letter country", () => {
+    const c = draw(REACH_TEXT, REACH_VALUES);
+    const tracks = c.querySelector<HTMLElement>('[data-slate-piece="log"] [role=table]')!.style.gridTemplateColumns.split(/ (?![^(]*\))/);
+    // Edge, time, method, path, status, ms, cc, edge.
+    expect(tracks).toHaveLength(8);
+    expect(tracks[3]).toBe("minmax(0,1fr)");
+    expect(tracks.filter(track => track.includes("1fr"))).toHaveLength(1);
+  });
+
+  it("switches bar lists held in grids in one card, named by their labels, the shared window said once", () => {
+    const c = draw(REACH_TEXT, REACH_VALUES);
+    expect(c.querySelectorAll("[data-slate-bar-switch]")).toHaveLength(1);
+    expect([...c.querySelectorAll("[data-segment]")].map(s => s.textContent)).toEqual(["Countries", "Status codes", "Route class", "Top short links", "Events"]);
+    expect(c.querySelector("[data-slate-bar-switch-note]")!.textContent).toBe("15m");
+    const lists = [...c.querySelectorAll<HTMLElement>("[data-slate-bar-list]")];
+    expect(lists).toHaveLength(5);
+    // Every list stays mounted in the card's one cell, the others invisible, so the card is the tallest list's height.
+    expect(lists.every(list => list.className.includes("col-start-1") && list.className.includes("row-start-1"))).toBe(true);
+    expect(lists.map(list => list.className.includes("invisible"))).toEqual([false, true, true, true, true]);
+  });
+
+  it("switches bar lists written side by side too, a holder apart from them its own switch, an unnamed list numbered", () => {
+    const c = draw(`<slate><value name="l" start={[{ n: "CA", v: 909 }]} /><column>
+<bars label="Countries" items={$l} name={item.n} value={item.v} /><bars label="" items={$l} name={item.n} value={item.v} />
+<text>between</text>
+<row><bars label="Events" items={$l} name={item.n} value={item.v} /></row>
+<bars label="Alone" items={$l} name={item.n} value={item.v} />
+</column></slate>`);
+    const switches = [...c.querySelectorAll("[data-slate-bar-switch]")];
+    expect(switches).toHaveLength(2);
+    expect([...switches[0]!.querySelectorAll("[data-segment]")].map(s => s.textContent)).toEqual(["Countries", "List 2"]);
+    expect([...switches[1]!.querySelectorAll("[data-segment]")].map(s => s.textContent)).toEqual(["Events"]);
+    // A single list on its own keeps its head over its own card.
+    expect(c.textContent).toContain("Alone");
+  });
+
+  it("holds the pick across a value push and a redraw", () => {
+    const { doc, values } = todaySlate(REACH_TEXT, REACH_VALUES);
+    const engine = new SlateEngine("t1", () => undefined, manualScheduler());
+    engine.setRecord(doc, values, 3, 3);
+    const link = fakeLink();
+    const ui = <SlateView engine={engine} views={SLATE_VIEWS} runner={new ActionRunner(engine, () => link)} sender={new StateSender(engine, () => link)} />;
+    const view = render(ui);
+    const hidden = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>("[data-slate-bar-list]")].map(list => list.className.includes("invisible"));
+    act(() => fireEvent.click(view.container.querySelector('[data-segment="events"]')!));
+    expect(hidden(view.container)).toEqual([true, true, true, true, false]);
+    act(() => engine.applyValues({ $events: [{ n: "request_completed", v: 4100 }] }, 9));
+    expect(hidden(view.container)).toEqual([true, true, true, true, false]);
+    view.unmount();
+    expect(hidden(render(ui).container)).toEqual([true, true, true, true, false]);
   });
 });

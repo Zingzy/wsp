@@ -202,9 +202,11 @@ export const table: PieceView = {
     // A grid: the header over the card and every row on one template, the header cells on the rows' own tracks. The
     // card's border and the rows' inset are two edge tracks, so no row pads its subgrid and no track overflows into the
     // next. A figure or machine-text column is as wide as its widest value (its header's included, the tables beside
-    // it at the least), so every column stands 16 px off the next. The name's column takes the room left; with none,
-    // the widest machine text does, and wraps.
-    const fill = text.length > 0 ? title : (columns.map((_, at) => at).filter(at => !figures[at]).sort((x, y) => (widths[y] ?? 0) - (widths[x] ?? 0))[0] ?? title);
+    // it at the least), so every column stands 16 px off the next.
+    const longest = (at: number) => Math.max(str(slate.resolve(columns[at]?.["title"]))?.length ?? 0, ...cellsOf(at).map(cell => str(cell)?.length ?? 0));
+    // The column of the longest words or machine text takes the room left, so the last column ends on the right inset
+    // however wide the panel.
+    const fill = columns.map((_, at) => at).filter(at => !figures[at]).reduce<number | undefined>((best, at) => (best === undefined || longest(at) > longest(best) ? at : best), undefined) ?? title;
     const tight = (at: number) => widths[at] !== undefined && at !== fill;
     const edges = place !== "inside";
     const edge = "calc(var(--settings-inset,20px) - 15px)";
@@ -217,7 +219,7 @@ export const table: PieceView = {
     const rim = edges ? <span aria-hidden /> : null;
     return (
       <div role="table" className={cn("grid min-w-0 gap-x-4", MONO)} style={{ gridTemplateColumns: tracks.join(" ") }}>
-        {columns.every((_, at) => (header(at) ?? "") === "") ? null : <div role="row" data-slate-head className="col-span-full grid min-h-7 grid-cols-subgrid items-center pb-2.5">
+        {columns.every((_, at) => (header(at) ?? "") === "") ? null : <div role="row" data-slate-head className="col-span-full grid min-h-7 grid-cols-subgrid items-center pb-[5px]">
           {rim}
           {columns.map((column, at) => (
             <span key={at} role="columnheader" data-ch={widths[at]} className={cn(at === 0 ? SECTION_HEAD : WORD, "font-sans", end(column, at) && "text-right", tight(at) && "whitespace-nowrap")}>

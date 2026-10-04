@@ -1776,10 +1776,6 @@ html.desktop-mac:not(.dark):has([data-terminal-translucent]) :is([data-right-pan
 .slate-piece {
   animation: slate-piece-in 150ms ease-out;
 }
-/* Each section after the first stands 12 px clear of what is above its head. */
-.slate-piece[data-slate-type="section"]:not(:first-child) {
-  margin-top: 12px;
-}
 @media (prefers-reduced-motion: reduce) {
   .slate-piece {
     animation: none;
