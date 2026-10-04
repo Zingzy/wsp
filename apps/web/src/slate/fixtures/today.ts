@@ -207,3 +207,20 @@ export const REACH_VALUES: Record<string, SlateJson> = {
     ["20:32:42", "POST", "/api/v1/shorten", 201, 64, "EC"],
   ].map(([t, m, p, s, ms, cc]) => ({ t, m, p, s, ms, cc }) as SlateJson),
 };
+
+/** A deploy's flow with its live step marked from a value, and a source that does not parse. */
+export const DIAGRAM_TEXT = `<slate title="Deploy">
+  <value name="step" start="test" />
+  <column>
+    <section title="Deploy">
+      <diagram id="flow" label="Where the deploy is" value={\`flowchart LR
+  build --> test --> ship
+  classDef now stroke-width:3px
+  class \${$step} now\`} />
+    </section>
+    <section title="Broken">
+      <diagram id="broken">flowchart LR
+  A --></diagram>
+    </section>
+  </column>
+</slate>`;
