@@ -100,6 +100,7 @@ import {
   SIGN_IN_FLAGS_REFUSAL,
   placeNoLoginsLine,
   boxSignedInLine,
+  boxReplacesLine,
   joinUnansweredLine,
   addUndoneLine,
   addTakenLine,
@@ -3104,6 +3105,18 @@ describe("wsp add <place> --sign-in <agent>", () => {
     // A row that says where that computer keeps its logins is never turned away: the host asks its backend again
     // whenever a computer dials back on another daemon, so a box that has just taken this one is ready here.
     expect(io.errors.join("\n")).not.toContain(placeNoLoginsLine("spoo"));
+  });
+
+  it("says the sign-in replaces the login standing there before it starts, and says nothing of it where none stands", async () => {
+    const io = captured();
+    const run = signingIn({ signedIn: true }, [{ ...spoo, signIns: { claude: "vault-key", codex: "signed-in" } }]);
+    expect(await addCommand(io, opts(tmp("signin-replaces")), ["spoo"], { signIn: "codex" }, run.deps)).toBe(0);
+    expect(io.lines[0]).toBe(boxReplacesLine("spoo", "codex"));
+    expect(boxReplacesLine("spoo", "codex")).toBe("Codex is signed in on spoo; this sign-in replaces that login.");
+    expect(run.asked).toHaveLength(1);
+    const fresh = captured();
+    expect(await addCommand(fresh, opts(tmp("signin-fresh")), ["spoo"], { signIn: "codex" }, signingIn({ signedIn: true }, [{ ...spoo, signIns: { codex: "none" } }]).deps)).toBe(0);
+    expect(fresh.lines.join("\n")).not.toContain("replaces that login");
   });
 
   it("signs in an agent whose login is not shared too, as the host plans it, and says so without a shared login", async () => {
