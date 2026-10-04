@@ -103,7 +103,8 @@ const SWEEP_MS = 30_000;
 const STARTS_PER_MINUTE = 12;
 const ERR_KEPT = 4_000;
 const HELD_APPROVAL = "needs your approval";
-const HELD_CONFIRM = "asks every time";
+/** Why a destructive tool's start waits: its sheet opens on every start. */
+export const HELD_CONFIRM = "asks every time";
 const HELD_BUDGET = `started ${STARTS_PER_MINUTE} times in a minute; press to run it again`;
 const DOTS = "••••";
 

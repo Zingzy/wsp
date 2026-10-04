@@ -244,6 +244,7 @@ const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
   "agents setup reset": "--reset",
   "projects set reset": "--reset",
   "slate read values": "--values",
+  "slate state start": "--start",
 };
 
 describe("the command line, the MCP tools and the skill are one contract", () => {

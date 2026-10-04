@@ -109,6 +109,8 @@ const box = { pad: enm(PAD, "none"), surface: enm(SURFACE, "plain") };
 
 /** A value as a sketch shows it: nothing for missing. */
 const shown = (v: SlateJson | undefined): string => (v === null || v === undefined ? "" : typeof v === "string" ? v : typeof v === "object" ? JSON.stringify(v) : String(v));
+/** A held prop as the window reads it: a sentence holds the piece, and anything else (null, false, blank) holds nothing. */
+export const slateHeldText = (v: SlateJson | undefined): string | undefined => (typeof v === "string" && v.trim() !== "" ? v : undefined);
 const isNum = (v: SlateJson | undefined): v is number => typeof v === "number" && Number.isFinite(v);
 const numbers = (v: SlateJson | undefined): number[] => (Array.isArray(v) ? v.filter(isNum) : []);
 const trend = (label: string, vals: number[]): string => (vals.length === 0 ? `${label}  no points yet` : `${label}  last ${vals.at(-1)}, min ${Math.min(...vals)}, max ${Math.max(...vals)} over ${vals.length} points`.trimStart());
@@ -388,7 +390,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
     type: "button", level: "core", purpose: "An action the person presses. held is a sentence that disables it: bind it to a condition.", holdsChildren: false, interactive: true, textProp: "label", needsHandler: "press",
     props: { label: str(req), variant: enm(VARIANT), held: str(), note: str(), size: enm(["normal", "small"]), icon: icon() },
     items: {}, events: ["press"],
-    sketch: v => { const held = shown(v.prop("held")); return `[ ${shown(v.prop("label"))} ]${held !== "" ? ` (held: ${held})` : ""}`; },
+    sketch: v => { const held = slateHeldText(v.prop("held")); return `[ ${shown(v.prop("label"))} ]${held !== undefined ? ` (held: ${held})` : ""}`; },
     fallback: "none needed", example: `<button label="Next" variant="primary" held={$ok ? null : 'Check the id first'} onPress={set($step, 2)} />`,
   },
   input: {

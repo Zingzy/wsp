@@ -106,9 +106,14 @@ describe("a slate's MCP runs", () => {
       daemonRoad: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }),
     };
     mkdirSync(join(root, "state"));
-    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: harness() }, local, statePath: join(root, "state", "state.json"), agentsReader });
-    rt.events.on("*", e => events.push(e as EventUnion));
-    runtimes.push(rt);
+    const store = memoryStore();
+    const boot = (): Runtime => {
+      const made = createRuntime({ backend: stubBackend(), store, adapters: { claude: harness() }, local, statePath: join(root, "state", "state.json"), agentsReader });
+      made.events.on("*", e => events.push(e as EventUnion));
+      runtimes.push(made);
+      return made;
+    };
+    let rt = boot();
     const project = await rt.projects.add({ source: folder });
     const { workspace } = await rt.workspaces.folderFor({ project: project.id });
     const first = await rt.sessions.start(workspace.id, { prompt: "show my inbox in a slate" });
@@ -176,8 +181,6 @@ describe("a slate's MCP runs", () => {
     await vi.waitFor(async () => expect((await get()).values["remove"]).toMatchObject({ state: "done", out: "deleted 7" }), { timeout: 10_000 });
     const again = await rt.slates.event({ threadId, version: view!.version, piece: "del", event: "press", requestId: "d2" });
     expect(again.ask).toMatchObject({ kind: "tool", tool: "delete_item" });
-    await rt.slates.approve({ threadId, key: again.ask!.key, scope: "refuse" });
-    await vi.waitFor(async () => expect((await get()).values["remove"]).toMatchObject({ state: "cancelled", why: "you said not to run it" }), { timeout: 10_000 });
 
     // A resource run on the same server needs no new consent and reads JSON into json.
     const stat = await rt.slates.event({ threadId, version: view!.version, piece: "stat", event: "press", requestId: "s1" });
@@ -190,11 +193,21 @@ describe("a slate's MCP runs", () => {
     // One connection served every call of the thread.
     expect(readFileSync(starts, "utf8").trim().split("\n")).toHaveLength(1);
 
+    // A restart keeps the server's consent and opens the destructive tool's sheet again; Don't ends that start.
+    await rt.slates.settled();
+    release();
+    await rt.close();
+    runtimes.splice(runtimes.indexOf(rt), 1);
+    rt = boot();
+    await rt.slates.ready();
+    await vi.waitFor(async () => expect((await get()).asks).toMatchObject([{ kind: "tool", run: "remove", tool: "delete_item", args: { id: 7 } }]), { timeout: 10_000 });
+    await rt.slates.approve({ threadId, key: again.ask!.key, scope: "refuse" });
+    await vi.waitFor(async () => expect((await get()).values["remove"]).toMatchObject({ state: "cancelled", why: "you said not to run it" }), { timeout: 10_000 });
+
     // The agent's read, the pushes and the transcript hold no key.
     const read = await rt.slates.read({ values: ["$inbox.out", "$inbox.json.key"] }, asThread);
     expect(read.values).toEqual({ "$inbox.out": "listed 3 with key [secret:key]", "$inbox.json.key": "[secret:key]" });
     expect(JSON.stringify(read)).not.toContain(KEY);
     expect(JSON.stringify(events)).not.toContain(KEY);
-    release();
   }, 60_000);
 });

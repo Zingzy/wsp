@@ -64,7 +64,10 @@ pub struct WriteIn {
 pub struct StateIn {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    pub values: Map<String, Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub values: Option<Map<String, Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub if_version: Option<i64>,
 }
@@ -186,10 +189,11 @@ async fn write(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 }
 
 async fn state(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let StateIn { thread, values, if_version } = input("slate_state", arguments)?;
+    let StateIn { thread, values, start, if_version } = input("slate_state", arguments)?;
     let client = host.client().await?;
     let mut asked = target(&host, &client, thread).await?;
-    asked.insert("values".to_owned(), Value::Object(values));
+    put(&mut asked, "values", values);
+    put(&mut asked, "start", start);
     put(&mut asked, "ifVersion", if_version);
     answered(&client, "slates.state", asked).await
 }

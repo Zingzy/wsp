@@ -239,7 +239,7 @@ import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { GITHUB_TOKEN_ENV, isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
-import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
+import { baseModel, boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
 import { holdsRepo, ownerRepoOf, projectForRepo, seedChoiceFrom } from "@wsp/protocol";
 import { taskStopRefusedLine, taskStopUnsupportedLine, type SubagentView, type TaskStop } from "@wsp/protocol";
 import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, modelIdRefusal, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
@@ -3749,6 +3749,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   bus.on("workspace.cost", e => {
     if (e.type === "workspace.cost") accrued.set(e.workspaceId, e.accruedUsd);
   });
+  /** The model, effort and window a thread's own turns ran with, read off its rows as the composer reads them: for
+   * each, the last turn that named one, the window split back off the model the CLI announced. A start from a slate
+   * names them, since a resume that names no model runs on the CLI's own default rather than the thread's. */
+  const ownPicks = (workspaceId: string, threadId: string): { model?: string; effort?: string; contextWindow?: string } => {
+    const rows = rowsOn(threadId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+    const ran = rows.filter(r => r.model !== undefined).at(-1);
+    const session = startedAs(workspaceId, threadId);
+    const model = ran?.model ?? (session === undefined ? undefined : resumedFact(workspaceId, session, "model"));
+    const effort = rows.filter(r => r.effort !== undefined).at(-1)?.effort;
+    const window = ran?.contextWindow ?? /\[([^\]]+)\]$/.exec(model ?? "")?.[1];
+    return { ...(model !== undefined ? { model: baseModel(model) } : {}), ...(effort !== undefined ? { effort } : {}), ...(window !== undefined ? { contextWindow: window } : {}) };
+  };
   const slates: Slates = createSlates({
     store,
     now: () => clock.now(),
@@ -3771,6 +3783,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     under: lead => treeUnder(lead),
     threadOfToken: token => threadOfToken(token),
     mcpServer: async (threadId, name) => {
+      // The slates recover at boot before the workspaces are loaded, and a held run asks for its server then.
+      await ready();
       const workspaceId = latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
       const harness = latestOn(threadId)?.harness ?? threadRecords.get(threadId)?.harness;
       const entry = workspaceId === undefined ? undefined : live.get(workspaceId);
@@ -3817,7 +3831,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (e.type === "session.queued" && e.requestId === requestId) queuedNow?.();
       });
       try {
-        const started = sessionsApi.start(workspaceId, { prompt, thread: threadId, requestId, startedBy: "person", via: "slate" });
+        const started = sessionsApi.start(workspaceId, { prompt, thread: threadId, requestId, startedBy: "person", via: "slate", ...ownPicks(workspaceId, threadId) });
         const first = await Promise.race([started, queued]);
         if ("outcome" in first && !("turnId" in first)) {
           started.catch((e: unknown) => console.warn(`a press waiting in thread ${threadWord(threadId)} was not sent: ${e instanceof Error ? e.message : String(e)}`));

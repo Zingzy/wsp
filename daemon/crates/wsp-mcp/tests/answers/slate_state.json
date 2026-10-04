@@ -50,6 +50,32 @@
           "ifVersion": 1
         }
       ]
+    },
+    {
+      "case": "a run started and one held",
+      "arguments": {
+        "start": [
+          "check",
+          "$deploy"
+        ]
+      },
+      "env": {
+        "WSP_TURN": "turn-token-1"
+      },
+      "replies": {
+        "slates.state": "{\"id\":1,\"ok\":true,\"version\":8,\"text\":\"slate v8, 3 pieces, 1 bound, 1 problem\\nruns:\\n  $check: running, refreshing (exit 0, 840 ms)\",\"problems\":[{\"code\":\"R913\",\"name\":\"run-held\",\"message\":\"$deploy was not started: it starts from here once the person says \\\"Always in this thread\\\" to it\"}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"slate v8, 3 pieces, 1 bound, 1 problem\\nruns:\\n  $check: running, refreshing (exit 0, 840 ms)\"}],\"structuredContent\":{\"version\":8,\"text\":\"slate v8, 3 pieces, 1 bound, 1 problem\\nruns:\\n  $check: running, refreshing (exit 0, 840 ms)\",\"problems\":[{\"code\":\"R913\",\"name\":\"run-held\",\"message\":\"$deploy was not started: it starts from here once the person says \\\"Always in this thread\\\" to it\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "slates.state",
+          "turnToken": "turn-token-1",
+          "start": [
+            "check",
+            "$deploy"
+          ]
+        }
+      ]
     }
   ]
 }
