@@ -4,7 +4,7 @@
 // header over the card, and state as a word.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
@@ -355,6 +355,7 @@ describe("the diagram", () => {
     expect(container.querySelector('[data-slate-piece="flow"] figcaption')!.textContent).toBe("Where the deploy is");
     // A diagram stands bare, as a chart does, never a row of a card.
     expect(container.querySelector('[data-slate-piece="flow"]')!.closest("[data-slate-card]")).toBeNull();
+    expect(within(container.querySelector<HTMLElement>('[data-slate-piece="flow"]')!).getByRole("button", { name: "Expand" })).toBeTruthy();
     const lines = await screen.findAllByText("Diagram did not parse", undefined, { timeout: 20_000 });
     expect(lines.some(line => line.closest('[data-slate-piece="broken"]') !== null)).toBe(true);
     expect(container.querySelector('[data-slate-piece="broken"] [data-slate-diagram-source]')!.textContent).toBe("flowchart LR\n  A -->");
