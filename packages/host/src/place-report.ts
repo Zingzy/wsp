@@ -13,7 +13,7 @@ import { spawnRun } from "@wsp/collect";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS, configSum } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, landedFilesScript, writeConfigHere, localShape, outsideMarks, outsideSweepScript, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
-import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOwnedPaths, TOOL_LINKS_DIR, TOOL_PREFIX, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOutsideLeftLine, placeOwnedPaths, TOOL_LINKS_DIR, TOOL_PREFIX, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { apparmorOffStep, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { onPath, runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
@@ -379,6 +379,9 @@ export function sweepTools(at: ToolFolders): string[] {
     return [];
   }
   if (!prefix.isDirectory()) return [placeKeptForLinkLine(at.prefix)];
+  // The list of what the setup wrote outside the home goes last in a leave that finished; one still holding lines is
+  // the only record of what a leave cut short left behind.
+  if (holdsLines(join(at.prefix, "landed"))) return [placeOutsideLeftLine(at.prefix)];
   const removed: string[] = [];
   let names: string[];
   try {
@@ -405,6 +408,16 @@ export function sweepTools(at: ToolFolders): string[] {
   rmSync(at.prefix, { recursive: true, force: true });
   if (!there(at.prefix)) removed.push(at.prefix);
   return removed;
+}
+
+/** Whether a file stands at that path with anything in it, read without following a link. */
+function holdsLines(path: string): boolean {
+  try {
+    const at = lstatSync(path);
+    return at.isFile() && at.size > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** The ownership read as this computer runs it: the one script the engine renders for the home, through a plain sh

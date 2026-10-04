@@ -40,7 +40,7 @@ import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine, noPlaceSystemL
 import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { computerLines, hostPlatform, placeLines, placeNames } from "../src/verbs.js";
-import { namesPlace, TOOL_PREFIX, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { namesPlace, placeOutsideLeftLine, TOOL_PREFIX, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { pinnedDroppingPort, refusedPort } from "../../runtime/test/held-port.js";
 import {
   ADD_FLAGS_REFUSAL,
@@ -1294,11 +1294,11 @@ describe("taking wsp off the computer it is typed on", () => {
     const sh = shWithSha256sum();
     mkdirSync(join(system, "usr/local/bin"), { recursive: true });
     writeFileSync(join(system, "usr/local/bin/jq"), "the box's own jq\n");
-    sh(outsideBeforeScript("agents", system));
+    sh(outsideBeforeScript("agents", ["/usr/local/bin"], system));
     writeFileSync(join(system, "usr/local/bin/claude"), "claude 2.1.280\n");
     writeFileSync(join(system, "usr/local/bin/gopls"), "gopls\n");
     writeFileSync(join(system, "usr/local/bin/jq"), "jq over the box's own\n");
-    sh(outsideAfterScript("agents", system));
+    sh(outsideAfterScript("agents", ["/usr/local/bin"], system));
     const tools = { prefix: join(system, TOOL_PREFIX), links: join(system, "usr/local/bin") };
     const other = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 1000, tools, systemRoot: system });
     expect(other.removed).not.toContain(join(system, "usr/local/bin/claude"));
@@ -1306,6 +1306,34 @@ describe("taking wsp off the computer it is typed on", () => {
     const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 0, tools, systemRoot: system });
     expect(swept.removed).toEqual(expect.arrayContaining([join(system, "usr/local/bin/claude"), join(system, "usr/local/bin/gopls"), tools.prefix]));
     expect(readdirSync(join(system, "usr/local/bin"))).toEqual(["jq"]);
+    expect(existsSync(tools.prefix)).toBe(false);
+  });
+
+  it("keeps wsp's install folder and its list when the leave outside the home was cut short, and says so", async () => {
+    const home = tmp("leave-outside-cut");
+    const system = realpathSync(tmp("leave-outside-cut-root"));
+    const whole = shWithSha256sum();
+    mkdirSync(join(system, "usr/local/bin"), { recursive: true });
+    whole(outsideBeforeScript("agents", ["/usr/local/bin"], system));
+    writeFileSync(join(system, "usr/local/bin/claude"), "claude 2.1.280\n");
+    whole(outsideAfterScript("agents", ["/usr/local/bin"], system));
+    // The shell running the leave killed part way, as a bound kills it; the read answers nothing, as the leave's own does.
+    const stub = tmp("leave-outside-cut-stub");
+    writeStub(join(stub, "xargs"), "#!/bin/sh\nkill -KILL $PPID\n");
+    const cut = (script: string): string => {
+      try {
+        return whole(`PATH=${shellQuote(stub)}:$PATH\n${script}`);
+      } catch {
+        return "";
+      }
+    };
+    const tools = { prefix: join(system, TOOL_PREFIX), links: join(system, "usr/local/bin") };
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: cut, uid: 0, tools, systemRoot: system });
+    expect(swept.removed).toContain(placeOutsideLeftLine(tools.prefix));
+    expect(existsSync(join(tools.prefix, "landed"))).toBe(true);
+    expect(existsSync(join(system, "usr/local/bin/claude"))).toBe(true);
+    const again = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: whole, uid: 0, tools, systemRoot: system });
+    expect(again.removed).toEqual(expect.arrayContaining([join(system, "usr/local/bin/claude"), tools.prefix]));
     expect(existsSync(tools.prefix)).toBe(false);
   });
 

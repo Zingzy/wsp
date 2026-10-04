@@ -472,6 +472,11 @@ pub(crate) fn sweep_tool_prefix(prefix: &Path, links: &Path) -> Vec<String> {
     if !meta.is_dir() {
         return vec![words::place_kept_for_link(prefix.to_string_lossy())];
     }
+    // The list of what the setup wrote outside the home goes last in a leave that finished; one still holding lines
+    // is the only record of what a leave cut short left behind.
+    if std::fs::symlink_metadata(prefix.join("landed")).is_ok_and(|list| list.is_file() && list.len() > 0) {
+        return vec![words::place_outside_left(prefix.to_string_lossy())];
+    }
     let mut removed = Vec::new();
     for entry in std::fs::read_dir(links).into_iter().flatten().flatten() {
         let link = entry.path();
@@ -1406,6 +1411,23 @@ mod tests {
     }
 
     #[test]
+    fn an_install_folder_whose_outside_list_still_has_lines_stays_with_its_links_and_is_said() {
+        let root = tempfile::tempdir().unwrap();
+        let prefix = root.path().join("opt-wsp");
+        let links = root.path().join("usr-local-bin");
+        std::fs::create_dir_all(prefix.join("go/bin")).unwrap();
+        std::fs::create_dir_all(&links).unwrap();
+        std::os::unix::fs::symlink(prefix.join("go/bin/x"), links.join("x")).unwrap();
+        std::fs::write(prefix.join("landed"), "dir\t/opt/gcloud\n").unwrap();
+        assert_eq!(sweep_tool_prefix(&prefix, &links), [words::place_outside_left(prefix.to_string_lossy())]);
+        assert!(prefix.join("landed").exists() && std::fs::symlink_metadata(links.join("x")).is_ok());
+        // A list the leave finished with is gone, and an empty one holds nothing back.
+        std::fs::write(prefix.join("landed"), "").unwrap();
+        assert!(sweep_tool_prefix(&prefix, &links).contains(&prefix.to_string_lossy().into_owned()));
+        assert!(!prefix.exists());
+    }
+
+    #[test]
     fn an_install_folder_that_is_a_link_stays_and_is_said() {
         let root = tempfile::tempdir().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
@@ -1461,5 +1483,6 @@ mod tests {
         assert_eq!(swept, [bin.join("claude").to_string_lossy().into_owned()]);
         assert!(!bin.join("claude").exists());
         assert!(bin.join("jq").exists() && bin.join("gopls").exists());
+        assert!(!root.join("opt/wsp/landed").exists(), "a leave that finished takes its list too");
     }
 }

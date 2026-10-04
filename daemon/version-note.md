@@ -1,1 +1,1 @@
-A leave run as root first takes what the setup wrote under /usr/local and /opt, read off the list in /opt/wsp: each path still as wsp left it, a folder once empty, and nothing the computer had before wsp.
+A leave run as root first takes what the setup wrote under /usr/local and /opt, read off the list in /opt/wsp: each path still as wsp left it, hashed in one pass, a folder once empty, and nothing the computer had before wsp; the list goes last, and while it still holds lines /opt/wsp stays and the leave says so.

@@ -58,42 +58,59 @@ pub fn own_marks(stdout: &str) -> Vec<String> {
 pub const OUTSIDE_MARK: &str = "wsp-outside";
 
 /// The leave outside the home, run as root before wsp's own folder goes: every path the list in that folder names
-/// that still stands as the setup left it under /usr/local or /opt, files and links removed and folders taken once
-/// empty. `root` is the folder those sit under, empty for this computer's own. The engine's outsideSweepScript is the
-/// text this renders, held to it byte for byte by the contract fixture.
+/// that still stands as the setup left it under /usr/local or /opt, files and links removed in one pass and folders
+/// taken once empty, then the list itself, so a leave cut short leaves the list for one that finishes. `root` is the
+/// folder those sit under, empty for this computer's own. The engine's outsideSweepScript is the text this holds, with
+/// the root as its one hole, held to it byte for byte by the contract fixture.
 pub fn outside_sweep_script(root: &str) -> String {
-    [
-        "set -u".to_owned(),
-        format!("root={}; prefix=\"$root{}\"; ledger=\"$prefix/landed\"", shell_quote(root), crate::numbers::TOOL_PREFIX),
-        r#"[ -d "$prefix" ] && [ ! -L "$prefix" ] && [ -f "$ledger" ] && [ ! -L "$ledger" ] || exit 0"#.to_owned(),
-        format!("tab=$(printf \"{TAB}\")"),
-        "state() {".to_owned(),
-        r#"  if [ -L "$1" ]; then printf 'link:%s\n' "$(readlink "$1" | sha256sum | cut -c1-64)""#.to_owned(),
-        r#"  elif [ -d "$1" ]; then echo dir"#.to_owned(),
-        r#"  elif [ -f "$1" ]; then sha256sum < "$1" | cut -c1-64"#.to_owned(),
-        "  fi".to_owned(),
-        "}".to_owned(),
-        "under() {".to_owned(),
-        r#"  case "$1" in "$root/usr/local/"*|"$root/opt/"*) ;; *) return 1 ;; esac"#.to_owned(),
-        r#"  case "$1" in "$prefix"|"$prefix/"*) return 1 ;; esac"#.to_owned(),
-        r#"  case "$1/" in */../*|*/./*|*//*) return 1 ;; esac"#.to_owned(),
-        r#"  d=$(dirname "$1")"#.to_owned(),
-        r#"  [ "$(cd -P "$d" 2>/dev/null && pwd)" = "$d" ]"#.to_owned(),
-        "}".to_owned(),
-        format!(
-            "awk -F\"{TAB}\" '{{ s[substr($0, length($1) + 2)] = $1 }} END {{ for (p in s) print s[p] FS p }}' \"$ledger\" | LC_ALL=C sort -t\"$tab\" -k2 -r | while IFS=\"$tab\" read -r was p; do"
-        ),
-        r#"  under "$p" || continue"#.to_owned(),
-        r#"  if [ "$was" = dir ]; then"#.to_owned(),
-        format!("    [ -d \"$p\" ] && [ ! -L \"$p\" ] && rmdir \"$p\" 2>/dev/null && printf '{OUTSIDE_MARK}{TAB}%s{NL}' \"$p\""),
-        r#"  elif [ -n "$was" ] && [ "$(state "$p")" = "$was" ]; then"#.to_owned(),
-        format!("    rm -f \"$p\" && printf '{OUTSIDE_MARK}{TAB}%s{NL}' \"$p\""),
-        "  fi".to_owned(),
-        "done".to_owned(),
-        "exit 0".to_owned(),
-    ]
-    .join("\n")
+    OUTSIDE_SWEEP.replacen("'{root}'", &shell_quote(root), 1)
 }
+
+const OUTSIDE_SWEEP: &str = r#"set -u
+root='{root}'; prefix="$root/opt/wsp"; ledger="$prefix/landed"
+nl=$(printf '\nx'); nl=${nl%x}
+tab=$(printf "\t")
+[ -d "$prefix" ] && [ ! -L "$prefix" ] && [ -f "$ledger" ] && [ ! -L "$ledger" ] || exit 0
+at="$prefix/.leaving"
+states() {
+  : > "$1.files"
+  while IFS= read -r p; do
+    if [ -L "$p" ]; then printf 'link:%s\t%s\n' "$(readlink "$p" | sha256sum | cut -c1-64)" "$p"
+    elif [ -d "$p" ]; then printf 'dir\t%s\n' "$p"
+    elif [ -f "$p" ]; then printf '%s\000' "$p" >> "$1.files"
+    fi
+  done
+  [ ! -s "$1.files" ] || xargs -0 sha256sum -z -- < "$1.files" | tr '\000' '\n' | awk '{ print substr($0, 1, 64) "\t" substr($0, 67) }'
+  rm -f "$1.files"
+}
+still() {
+  find "$root/usr/local" "$root/opt" \( -path "$prefix" -o -path "*$nl*" \) -prune -o -type d -print > "$1.dirs" 2>/dev/null
+  wsp_root="$root" wsp_prefix="$prefix" awk -F"\t" 'NR == FNR { d[$0] = 1; next } { s[substr($0, length($1) + 2)] = $1 } END {
+    r = ENVIRON["wsp_root"]; px = ENVIRON["wsp_prefix"]
+    for (p in s) {
+      q = p; sub(/\/[^\/]*$/, "", q)
+      if (index(p, r "/usr/local/") != 1 && index(p, r "/opt/") != 1) continue
+      if (p == px || index(p, px "/") == 1 || index(p "/", "/./") || index(p "/", "/../") || index(p, "//") || !(q in d)) continue
+      print s[p] "\t" p
+    }
+  }' "$1.dirs" "$ledger" > "$1.latest"
+  cut -f2- "$1.latest" | states "$1" > "$1.now"
+  awk -F"\t" 'NR == FNR { s[substr($0, length($1) + 2)] = $1; next } { p = substr($0, length($1) + 2); if ((p in s) && s[p] == $1) print }' "$1.latest" "$1.now"
+  rm -f "$1.dirs" "$1.latest" "$1.now"
+}
+rm -f "$at".*
+still "$at.s" | LC_ALL=C sort -t"$tab" -k2 -r > "$at.take"
+: > "$at.files"; : > "$at.dirs"
+while IFS="$tab" read -r was p; do
+  if [ "$was" = dir ]; then printf '%s\000' "$p" >> "$at.dirs"; else printf '%s\000' "$p" >> "$at.files"; fi
+done < "$at.take"
+xargs -0 rm -f -- < "$at.files"
+xargs -0 rmdir -- < "$at.dirs" 2>/dev/null
+while IFS="$tab" read -r was p; do
+  [ -e "$p" ] || [ -L "$p" ] || printf 'wsp-outside\t%s\n' "$p"
+done < "$at.take"
+rm -f "$ledger" "$at".*
+exit 0"#;
 
 /// The paths that leave answered with. A line that is not the mark's, or whose path is not absolute, is not one.
 pub fn outside_marks(stdout: &str) -> Vec<String> {
