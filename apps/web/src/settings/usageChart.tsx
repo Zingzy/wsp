@@ -138,8 +138,8 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   /** A fixed axis from the caller, its figures drawn as plain text, split in four unless it names fewer parts; without
    * one it runs from 0 to a round top in four and the figures roll. */
   axis?: { readonly from: number; readonly to: number; readonly parts?: number };
-  /** The panel's size: the axis in a column of at least 40 px, as wide as its widest figure, 8 px off the plot, its
-   * figures and ticks at 11 px. */
+  /** The panel's size: the plot takes the whole width, its axis figures at 11 px inside it, each at the plot's left edge
+   * just above its gridline, and the ticks at 11 px. */
   small?: boolean;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
@@ -184,8 +184,8 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   }, []);
 
   return (
-    <div data-usage-chart="tokens" className={cn("grid gap-y-3", small ? "grid-cols-[minmax(40px,max-content)_minmax(0,1fr)] gap-x-2" : "grid-cols-[auto_minmax(0,1fr)] gap-x-3")}>
-      <div data-k="y-axis" aria-hidden className={cn("relative font-mono leading-none whitespace-nowrap text-muted-foreground tabular-nums", small ? "text-[11px]" : "text-xs")} style={{ height: HEIGHT }}>
+    <div data-usage-chart="tokens" className={cn("grid gap-y-3", small ? "grid-cols-[minmax(0,1fr)]" : "grid-cols-[auto_minmax(0,1fr)] gap-x-3")}>
+      {small ? null : <div data-k="y-axis" aria-hidden className="relative font-mono text-xs leading-none whitespace-nowrap text-muted-foreground tabular-nums" style={{ height: HEIGHT }}>
         {marks.map(g => (
           <span key={g} data-k="y-tick" className="invisible block h-0 text-right">
             {figure(from + (top * g) / parts)}
@@ -196,7 +196,7 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
             {axis === undefined ? <DigitRoll rollIn value={figure(from + (top * g) / parts)} /> : figure(from + (top * g) / parts)}
           </span>
         ))}
-      </div>
+      </div>}
       <div className="relative" style={{ height: HEIGHT }}>
         <svg aria-hidden className="absolute inset-0 size-full overflow-visible text-border" viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none">
           {marks.slice(1).map(g => {
@@ -249,8 +249,18 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
             </Tooltip>
           ))}
         </div>
+        {/* Over the line and its dither, so a figure reads where the series runs under it. */}
+        {small ? (
+          <div data-k="y-axis" aria-hidden className="pointer-events-none absolute inset-0 font-mono text-[11px] leading-3 whitespace-nowrap text-muted-foreground tabular-nums">
+            {marks.map(g => (
+              <span key={g} data-k="y-tick" className="absolute left-0" style={{ bottom: PAD + (g / parts) * (HEIGHT - PAD * 2) + 2 }}>
+                {figure(from + (top * g) / parts)}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
-      <span aria-hidden />
+      {small ? null : <span aria-hidden />}
       <div className={cn("relative h-4 font-mono leading-4 text-muted-foreground tabular-nums", small ? "text-[11px]" : "text-xs")}>
         {ticks.map(tick => (
           <span key={tick.at} data-k="tick" className={cn("absolute top-0", tick.at === 0 ? "" : tick.at === 1 ? "-translate-x-full" : "-translate-x-1/2")} style={{ left: `${tick.at * 100}%` }}>

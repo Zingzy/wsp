@@ -121,14 +121,22 @@ describe("what the live gold slate wrote", () => {
     expect(c.querySelector('[data-slate-piece="spot"] [data-slate-status]')).toBeNull();
   });
 
-  it("sizes a chart's axis gutter to its widest figure, so a dollar figure keeps its sign", () => {
+  it("sets a chart's axis figures inside the plot at its left edge, so the plot takes the whole width", () => {
     const c = draw(`<slate><value name="h" start={[{ t: "21:48", v: 4141.8 }, { t: "22:47", v: 4200 }]} /><column>
 <chart label="Spot, last hour" items={$h} x={item.t} value={item.v} format="usd" /></column></slate>`);
     const chart = c.querySelector<HTMLElement>("[data-usage-chart]")!;
-    expect(chart.className).toContain("grid-cols-[minmax(40px,max-content)_minmax(0,1fr)]");
-    const labels = [...chart.querySelectorAll("[data-k=y-tick]")].map(tick => tick.textContent);
-    expect(labels.every(label => label!.startsWith("$"))).toBe(true);
-    expect(chart.querySelector("[data-k=y-axis]")!.className).toContain("whitespace-nowrap");
+    // One column: the plot and the tick words span the chart, no gutter beside them.
+    expect(chart.className).toContain("grid-cols-[minmax(0,1fr)]");
+    const axis = chart.querySelector<HTMLElement>("[data-k=y-axis]")!;
+    expect(axis.className).toContain("absolute");
+    expect(axis.className).toContain("text-[11px]");
+    expect(axis.parentElement!.querySelector("svg[role=img]")).not.toBeNull();
+    const ticks = [...axis.querySelectorAll<HTMLElement>("[data-k=y-tick]")];
+    expect(ticks.map(tick => tick.textContent)).toEqual(["$4,140.00", "$4,160.00", "$4,180.00", "$4,200.00", "$4,220.00"]);
+    // Each figure stands at the plot's left edge, its foot 2 px above its gridline.
+    expect(ticks.every(tick => tick.className.includes("left-0"))).toBe(true);
+    expect(ticks.map(tick => tick.style.bottom)).toEqual(["8px", "45px", "82px", "119px", "156px"]);
+    expect([...chart.querySelectorAll("[data-k=tick]")].map(tick => tick.textContent)).toEqual(["21:48", "22:47"]);
   });
 });
 
@@ -240,5 +248,23 @@ describe("the strip follows the content, and whole numbers label whole ticks", (
 
   it("keeps four parts for figures that are not whole numbers", () => {
     expect(ticks([0, 1, 1, 0, 1], "plain")).toHaveLength(5);
+  });
+});
+
+describe("a series that holds one value", () => {
+  const fivexx = (values: number[]) => {
+    const items = JSON.stringify(values.map((v, i) => ({ t: `18:${String(10 + i).padStart(2, "0")}`, v })));
+    return draw(`<slate><value name="h" start={${items}} /><column><section title="Errors"><chart label="5xx, per minute, last hour" items={$h} x={item.t} value={item.v} format="integer" /></section></column></slate>`);
+  };
+
+  it("draws a 5xx count flat at 0 as one quiet line in the legend's place, and the plot once it moves", () => {
+    const flat = fivexx(Array.from({ length: 60 }, () => 0));
+    const chart = flat.querySelector("[data-slate-chart]")!;
+    expect(chart.querySelector("[data-usage-chart]")).toBeNull();
+    expect(chart.querySelector("figcaption")!.textContent).toBe("5xxper minute, last hoursteady at 0");
+    cleanup();
+    const moved = fivexx([...Array.from({ length: 59 }, () => 0), 2]);
+    expect(moved.querySelector("[data-slate-chart] [data-usage-chart]")).not.toBeNull();
+    expect(moved.querySelector("[data-slate-chart-flat]")).toBeNull();
   });
 });

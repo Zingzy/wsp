@@ -50,6 +50,8 @@ export const chart: PieceView = {
     const unit = str(props["unit"]);
     const shown = (v: number): string => `${figure(v, props["format"]) ?? ""}${unit === undefined ? "" : ` ${unit}`}`;
     const values = rows.length === 1 ? [rows[0]!.v, rows[0]!.v] : rows.map(r => r.v);
+    // A series that holds one value the whole window says so on the legend's line; the plot comes back once it moves.
+    const flat = rows.length > 0 && rows.every(r => r.v === rows[0]!.v);
     // One chart per slate carries the accent; any other draws its line in the muted ink.
     const tone = slate.isLoud("accent", id) ? "accent" : "muted";
     const comma = label.indexOf(", ");
@@ -63,11 +65,16 @@ export const chart: PieceView = {
             <span aria-hidden className={cn(LEGEND.swatch, "w-4", TONE_INK[tone])} />
             {name}
             {what === "" ? null : <span className="text-xs leading-4 text-muted-foreground">{what}</span>}
+            {flat ? (
+              <span data-slate-chart-flat className="text-xs leading-4 text-muted-foreground">
+                steady at <span className="font-mono tabular-nums text-foreground">{shown(rows[0]!.v)}</span>
+              </span>
+            ) : null}
           </span>
         </figcaption>
         {rows.length === 0 ? (
           <span className={NOTE}>Not read yet</span>
-        ) : (
+        ) : flat ? null : (
           <UsageChart
             steps={values.map((_, i) => i)}
             lines={[{ key: "line", label, points: values, ink: { className: TONE_INK[tone] } }]}

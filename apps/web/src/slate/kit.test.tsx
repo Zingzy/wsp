@@ -78,22 +78,25 @@ describe("the richer kit in the renderer", () => {
     const ticks = (c: HTMLElement): string[] => [...c.querySelectorAll<HTMLElement>("[data-k=y-axis] > span.absolute")].map(t => t.textContent ?? "");
     const at = (v: number, i: number) => ({ at: 1_759_000_000_000 + i * 60_000, v });
 
-    it("draws flat data as round figures around the value, as plain text", () => {
-      const { view } = draw(compiled(GOLD), { hist: [4141.8, 4141.8, 4141.8].map(at) });
-      expect(ticks(view.container)).toEqual(["$4,100.00", "$4,125.00", "$4,150.00", "$4,175.00", "$4,200.00"]);
+    // A series that holds one value draws no plot: the legend's line says the value, and the plot returns once it moves.
+    for (const [name, hist] of [
+      ["flat data", [4141.8, 4141.8, 4141.8].map(at)],
+      ["two equal points", [4141.8, 4141.8].map(at)],
+      ["one point", [at(4141.8, 0)]],
+    ] as const) {
+      it(`collapses ${name} to the legend's line, steady at the value`, () => {
+        const { view } = draw(compiled(GOLD), { hist: [...hist] });
+        const chart = view.container.querySelector("[data-slate-chart]")!;
+        expect(chart.querySelector("[data-usage-chart]")).toBeNull();
+        expect(chart.querySelector("[data-slate-chart-flat]")!.textContent).toBe("steady at $4,141.80");
+      });
+    }
+
+    it("draws the plot with its round axis once the value moves", () => {
+      const { view } = draw(compiled(GOLD), { hist: [4141.8, 4160, 4141.8].map(at) });
+      expect(ticks(view.container)).toEqual(["$4,140.00", "$4,145.00", "$4,150.00", "$4,155.00", "$4,160.00"]);
+      expect(view.container.querySelector("[data-slate-chart-flat]")).toBeNull();
       expect(view.container.querySelector("[data-k=y-axis] [role=img], [data-k=y-axis] .digit-strip")).toBeNull();
-    });
-
-    it("draws two equal points with the same axis", () => {
-      const { view } = draw(compiled(GOLD), { hist: [4141.8, 4141.8].map(at) });
-      expect(ticks(view.container)).toEqual(["$4,100.00", "$4,125.00", "$4,150.00", "$4,175.00", "$4,200.00"]);
-      expect(view.container.querySelector("svg[role=img] polyline")!.getAttribute("points")!.split(" ")).toHaveLength(2);
-    });
-
-    it("draws one point as a level line on a readable axis", () => {
-      const { view } = draw(compiled(GOLD), { hist: [at(4141.8, 0)] });
-      expect(ticks(view.container)).toEqual(["$4,100.00", "$4,125.00", "$4,150.00", "$4,175.00", "$4,200.00"]);
-      expect([...view.container.querySelectorAll("[data-k=tick]")].map(t => t.textContent)).toHaveLength(1);
     });
 
     it("holds every value in four round steps", () => {
