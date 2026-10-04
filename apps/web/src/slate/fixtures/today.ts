@@ -208,7 +208,8 @@ export const REACH_VALUES: Record<string, SlateJson> = {
   ].map(([t, m, p, s, ms, cc]) => ({ t, m, p, s, ms, cc }) as SlateJson),
 };
 
-/** A deploy's flow with its live step marked from a value, and a source that does not parse. */
+/** A deploy's flow with its live step marked from a value, a flow wider and taller than the panel, and a source that
+ * does not parse. */
 export const DIAGRAM_TEXT = `<slate title="Deploy">
   <value name="step" start="test" />
   <column>
@@ -217,6 +218,19 @@ export const DIAGRAM_TEXT = `<slate title="Deploy">
   build --> test --> ship
   classDef now stroke-width:3px
   class \${$step} now\`} />
+    </section>
+    <section title="Request">
+      <diagram id="wide" label="A request's way through">flowchart TD
+  visit[Visitor] --> proxy[Cloudflare proxy] --> edge{Cached?}
+  edge -->|hit| redirect[Redirect from the edge]
+  edge -->|miss| caddy[Caddy] --> route{Which path?}
+  route -->|pages| next[Next frontend]
+  route -->|api| api[FastAPI] --> mongo[(Mongo)]
+  route -->|stats| stats[Stats worker] --> redis[(Redis)]
+  route -->|static| files[Static files]
+  route -->|other| missing[Not found]
+  api --> respond[Response] --> logs[Click stream] --> worker[Click worker] --> counts[Click counts]
+  redis -. promote .-> edge</diagram>
     </section>
     <section title="Broken">
       <diagram id="broken">flowchart LR

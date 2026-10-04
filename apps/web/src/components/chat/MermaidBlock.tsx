@@ -67,10 +67,19 @@ function themeVariables(): Record<string, string | boolean> | null {
   };
 }
 
+/** A host's own look for its diagrams, over the page's: theme variables (a size Mermaid lays out by), CSS for the SVG it
+ * draws, and the flowchart's spacing. Mermaid's config is one for the page, so the last look asked for is the one set. */
+export interface MermaidLook {
+  readonly variables?: Readonly<Record<string, string>>;
+  readonly css?: string;
+  readonly flowchart?: Readonly<Record<string, number>>;
+}
+
 let configuredFor: string | null = null;
 
-function configure(theme: "light" | "dark"): void {
-  if (configuredFor === theme) return;
+function configure(theme: "light" | "dark", look: MermaidLook | undefined): void {
+  const key = `${theme} ${look === undefined ? "" : JSON.stringify(look)}`;
+  if (configuredFor === key) return;
   const variables = themeVariables();
   mermaid.initialize({
     startOnLoad: false,
@@ -83,12 +92,14 @@ function configure(theme: "light" | "dark"): void {
     secure: ["secure", "securityLevel", "startOnLoad", "maxTextSize", "suppressErrorRendering", "maxEdges", "themeCSS", "themeVariables", "fontFamily", "altFontFamily"],
     theme: "base",
     darkMode: theme === "dark",
-    ...(variables === null ? {} : { themeVariables: variables }),
+    ...(variables === null && look?.variables === undefined ? {} : { themeVariables: { ...variables, ...look?.variables } }),
+    ...(look?.css === undefined ? {} : { themeCSS: look.css }),
+    ...(look?.flowchart === undefined ? {} : { flowchart: { ...look.flowchart } }),
   });
-  configuredFor = theme;
+  configuredFor = key;
 }
 
-export default function MermaidBlock({ code, resolvedTheme, source }: { code: string; resolvedTheme: "light" | "dark"; source: ReactNode }) {
+export default function MermaidBlock({ code, resolvedTheme, source, look }: { code: string; resolvedTheme: "light" | "dark"; source: ReactNode; look?: MermaidLook }) {
   const id = `mermaid-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const [drawn, setDrawn] = useState<Drawn>({ kind: "pending" });
   useEffect(() => {
@@ -99,7 +110,7 @@ export default function MermaidBlock({ code, resolvedTheme, source }: { code: st
         if (live) setDrawn({ kind: "refused" });
         return;
       }
-      configure(resolvedTheme);
+      configure(resolvedTheme, look);
       try {
         await mermaid.parse(code);
       } catch (e) {
@@ -118,7 +129,7 @@ export default function MermaidBlock({ code, resolvedTheme, source }: { code: st
     return () => {
       live = false;
     };
-  }, [code, id, resolvedTheme]);
+  }, [code, id, resolvedTheme, look]);
 
   if (drawn.kind === "svg") {
     return (
