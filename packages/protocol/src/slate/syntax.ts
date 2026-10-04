@@ -45,6 +45,7 @@ class Reader {
       this.comments();
       this.ws();
       if (this.i >= this.src.length) break;
+      if (this.peek() !== "<" && out.length === 0 && (this.peek() === "{" || this.peek() === "[")) this.fail("this is JSON, and a slate is JSX-like text that starts with <slate>; slate_catalog shows it", `<slate title="Gold"><number label="Spot" value={$spot.json.usd} unit="USD" /></slate>`);
       if (this.peek() !== "<") this.fail(`expected an element at line ${this.line()}, found text`);
       out.push(this.element());
     }
@@ -83,7 +84,7 @@ class Reader {
         const end = this.src.indexOf(q, this.i + 1);
         if (end < 0) this.fail(`the string for ${an[0]} at line ${aline} never closes`);
         const raw = this.src.slice(this.i + 1, end);
-        if (raw.endsWith("\\")) this.fail(`attribute strings take no escapes (${an[0]} at line ${aline})`, q === '"' ? `use single quotes around it, or write it as {"..."}` : `use double quotes around it, or write it as {'...'}`);
+        if (raw.endsWith("\\")) this.fail(`attribute strings take no escapes (${an[0]} at line ${aline}): a backslash does not hide a ${q} inside ${q}...${q}`, q === '"' ? `${an[0]}='echo "hi"', single quotes outside the double ones` : `${an[0]}="echo 'hi'", double quotes outside the single ones`);
         this.i = end + 1;
         attrs.push({ name: an[0], kind: "string", value: raw, line: aline });
         continue;

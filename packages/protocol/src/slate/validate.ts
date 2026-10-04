@@ -658,6 +658,7 @@ export function validateDocument(doc: SlateDoc, lines?: SlateLines): { errors: S
 export function validateSlate(input: unknown): { document?: SlateDoc; errors: SlateProblem[]; warnings: SlateProblem[] } {
   if (typeof input !== "object" || input === null || Array.isArray(input)) return { errors: [slateProblem("D202", "a document is an object with schema, root, values, derived, runs, reactions and pieces")], warnings: [] };
   const schema = (input as { schema?: unknown }).schema;
+  if (schema === undefined) return { errors: [slateProblem("D200", "this JSON is not a slate: a slate is the JSX-like text slate_catalog shows, sent as text, never JSON of your own", { fix: `<slate title="Gold"><number label="Spot" value={$spot.json.usd} unit="USD" /></slate>` })], warnings: [] };
   if (schema !== 2) return { errors: [slateProblem("D200", `schema ${JSON.stringify(schema)} is not a version this host knows; this host reads schema 2`, { fix: "update wsp" })], warnings: [] };
   const filled = { values: {}, derived: {}, runs: {}, reactions: [], ...(input as object) };
   const parsed = SlateSchema.safeParse(filled);
