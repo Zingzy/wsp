@@ -27,6 +27,7 @@ export const MCP_WORDS = {
   always: "Always in this thread",
   dont: "Don't",
   call: "Call",
+  then: "Then its result goes on stdin to",
 } as const;
 
 const dots = (value: unknown): boolean => typeof value === "string" && /^•+/.test(value);
@@ -45,6 +46,17 @@ export function ArgList({ args }: { args: Record<string, unknown> | undefined })
         </div>
       ))}
     </dl>
+  );
+}
+
+/** A run's reshape: the literal command its raw result is piped to, as it will run. */
+export function ThenCommand({ then }: { then: string | undefined }) {
+  if (then === undefined) return null;
+  return (
+    <div data-slate-consent-then className="flex min-w-0 flex-col gap-1">
+      <p className="text-muted-foreground">{MCP_WORDS.then}</p>
+      <pre className="max-h-[calc(6*1rem+1rem)] overflow-auto whitespace-pre-wrap break-all rounded-md bg-accent px-2.5 py-2 font-mono text-xs leading-4 tabular-nums text-foreground">{then}</pre>
+    </div>
   );
 }
 
@@ -83,6 +95,7 @@ export function ServerConsentSheet({ ask, cadence, answer, onClose }: { ask: Sla
                   {resource ? MCP_WORDS.reads : MCP_WORDS.calls} <code data-slate-consent-tool className="font-mono text-xs tabular-nums">{ask.tool}</code>
                 </p>
                 <ArgList args={ask.args} />
+                <ThenCommand then={ask.then} />
                 <p data-slate-consent-cadence className="text-muted-foreground">
                   {cadence}
                 </p>
@@ -145,6 +158,7 @@ export function ToolConfirmSheet({ ask, answer, onClose }: { ask: SlateToolAsk; 
         </AlertDialogHeader>
         <div data-slate-consent={ask.run} data-slate-confirm-tool={ask.tool} className="flex min-w-0 flex-col gap-3 px-5 pt-2 text-[13px] leading-5">
           <ArgList args={ask.args} />
+          <ThenCommand then={ask.then} />
           {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}
         </div>
         <AlertDialogFooter>

@@ -175,6 +175,14 @@ describe("the once-per-server sheet", () => {
     expect(document.querySelector("[data-slate-consent-tool]")!.parentElement!.textContent).toBe("Reads mail://inbox/admin");
     expect(document.querySelector("[data-slate-arg]")).toBeNull();
   });
+
+  it("shows a run's then as the command its result goes to, and nothing without one", () => {
+    render(<ServerConsentSheet ask={{ ...SERVER_ASK, key: "mcp:zoho-mail#then:0123456789abcdef", then: "python3 inbox.py" }} cadence="" answer={vi.fn(async () => {})} onClose={vi.fn()} />);
+    expect(document.querySelector("[data-slate-consent-then]")!.textContent).toBe("Then its result goes on stdin topython3 inbox.py");
+    cleanup();
+    render(<ServerConsentSheet ask={SERVER_ASK} cadence="" answer={vi.fn(async () => {})} onClose={vi.fn()} />);
+    expect(document.querySelector("[data-slate-consent-then]")).toBeNull();
+  });
 });
 
 describe("the destructive confirm", () => {

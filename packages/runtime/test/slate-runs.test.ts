@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSlateRuns, restartedRecord, rewoundRecord, type CmdRunDecl, type RunInputs, type RunRecord, type RunStart, type SlateRuns, type SlateRunsDeps } from "../src/slate-runs.js";
 
@@ -369,6 +370,35 @@ describe("process lifetime", () => {
     expect(restartedRecord(was, 9)).toEqual({ state: "failed", why: "the host restarted while it ran", exit: null, runs: 2, startedAt: 1, endedAt: 9 });
     expect(rewoundRecord(was, 9)).toMatchObject({ state: "cancelled", why: "the thread was rewound" });
     expect(restartedRecord({ state: "done", runs: 1 })).toEqual({ state: "done", runs: 1 });
+  });
+});
+
+describe("then", () => {
+  const SHAPE = `"${process.execPath}" "${fileURLToPath(new URL("./fixtures/lines-to-json.mjs", import.meta.url))}"`;
+
+  it("reshapes the output into json, keeps out raw, is part of the key and shows on the sheet", async () => {
+    const h = harness();
+    const decl = cmd(`printf '# Inbox\\n- 1 | ann | Hello\\n- 2 | bo | Invoice\\n'`, { then: SHAPE });
+    const held = h.start("inbox", decl);
+    expect(held).toMatchObject({ outcome: "held", ask: { then: SHAPE } });
+    expect(h.runs.key(decl)).not.toBe(h.runs.key(cmd(decl.cmd)));
+    expect(h.runs.key(decl)).not.toBe(h.runs.key({ ...decl, then: "cat" }));
+    const ended = h.until("inbox", ["done", "failed"]);
+    h.runs.approve(THREAD, "inbox", "always");
+    expect(await ended).toMatchObject({ state: "done", exit: 0, out: "# Inbox\n- 1 | ann | Hello\n- 2 | bo | Invoice\n", json: { items: [{ id: 1, from: "ann", subject: "Hello" }, { id: 2, from: "bo", subject: "Invoice" }] } });
+  });
+
+  it("a failing reshape fails the run with its stderr, and one that prints no JSON says so", async () => {
+    const h = harness();
+    expect(await runAllowed(h, "bad", cmd("echo raw", { then: "cat >/dev/null; echo cannot read it >&2; exit 4" }))).toMatchObject({ state: "failed", why: "then exited with 4", exit: 4, out: "raw\n", err: "cannot read it\n" });
+    expect(await runAllowed(h, "prose", cmd("echo raw", { then: "echo not json" }))).toMatchObject({ state: "failed", why: "then printed no JSON: not json", out: "raw\n" });
+    expect((await runAllowed(h, "failed", cmd("exit 2", { then: "echo '{}'" })))).toMatchObject({ state: "failed", why: "exited with 2" });
+  });
+
+  it("reads the output scrubbed and never sees a secret", async () => {
+    const h = harness();
+    h.runs.secrets.set(THREAD, "token", "tok_9f8e7d6c5b4a");
+    expect((await runAllowed(h, "leak", cmd(`echo "$T"`, { env: { T: "$token" }, then: `python3 -c 'import json,sys; print(json.dumps({"got": sys.stdin.read().strip()}))'` }), { env: { T: { secret: "token" } } })).json).toEqual({ got: "[secret:token]" });
   });
 });
 

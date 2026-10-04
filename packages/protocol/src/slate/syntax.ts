@@ -312,7 +312,7 @@ class Compiler {
   declaration(el: El): void {
     const allowed: Record<string, readonly string[]> = {
       value: ["name", "start"], secret: ["name", "keep"], derived: ["name", "value"],
-      run: ["name", "cmd", "tool", "resource", "env", "args", "stdin", "on", "cwd", "timeout", "stream", "confirm", "every", "once", "always"],
+      run: ["name", "cmd", "tool", "resource", "env", "args", "stdin", "on", "cwd", "timeout", "stream", "confirm", "every", "once", "always", "then"],
       when: ["id", "change", "done", "do"],
     };
     const ok = allowed[el.tag]!;
@@ -353,7 +353,7 @@ class Compiler {
     const kinds = (["cmd", "tool", "resource"] as const).filter(k => attr(k) !== undefined || (k === "cmd" && el.text !== undefined));
     if (attr("cmd") !== undefined && el.text !== undefined) { this.error("K701", `<run name="${name}"> has cmd= and a command inside; keep one`, el.line, { piece: key }); return; }
     if (kinds.length !== 1) { this.error("K701", `<run name="${name}"> takes exactly one of cmd, tool or resource`, el.line, { piece: key }); return; }
-    const common: Pick<Extract<SlateRunDecl, { kind: "cmd" }>, "confirm" | "every" | "once" | "always"> = {};
+    const common: Pick<Extract<SlateRunDecl, { kind: "cmd" }>, "confirm" | "every" | "once" | "always" | "then"> = {};
     const every = attr("every");
     if (every !== undefined) {
       const s = seconds(every);
@@ -367,6 +367,12 @@ class Compiler {
       const v = confirm.kind === "braced" ? this.valueText(confirm.value) : confirm.value;
       if (typeof v === "string" || isSlateBinding(v) || isSlateFormat(v)) common.confirm = v;
       else this.error("T303", "confirm is a sentence: confirm=\"Stop it?\" or confirm={`Kill ${$name}?`}", confirm.line, { piece: key, prop: "confirm" });
+    }
+    const then = attr("then");
+    if (then !== undefined) {
+      const text = then.kind === "string" ? then.value : then.kind === "braced" ? commandText(then.value) : undefined;
+      if (text === undefined || text.trim() === "") this.error("K700", "then is a literal command that reads the result on stdin: then='python3 shape.py'", then.line, { piece: key, prop: "then" });
+      else common.then = text;
     }
     const kind = kinds[0]!;
     let run: SlateRunDecl;
@@ -412,7 +418,7 @@ class Compiler {
       const res = attr("resource")!;
       const colon = res.value.indexOf(":");
       if (res.kind !== "string" || colon <= 0) this.error("K705", "resource names a server and a uri as \"server:uri\"", res.line, { piece: key, prop: "resource" });
-      run = { kind: "resource", server: res.value.slice(0, Math.max(0, colon)), uri: res.value.slice(colon + 1), ...(common.every !== undefined ? { every: common.every } : {}), ...(common.always ? { always: true as const } : {}) };
+      run = { kind: "resource", server: res.value.slice(0, Math.max(0, colon)), uri: res.value.slice(colon + 1), ...(common.every !== undefined ? { every: common.every } : {}), ...(common.always ? { always: true as const } : {}), ...(common.then !== undefined ? { then: common.then } : {}) };
       for (const n of ["env", "args", "stdin", "on", "cwd", "timeout", "stream", "confirm", "once"]) if (attr(n) !== undefined) this.error("K701", `a resource run takes no ${n}`, el.line, { piece: key });
     }
     this.doc.runs[name] = run;
@@ -905,6 +911,12 @@ export function parseSlatePatch(text: string, current: SlateDoc | null): { patch
 
 const ATTR_ORDER_LAST = ["when"];
 
+/** A literal command as an attribute: quoted where it can be, else a raw block taken as written. */
+function commandAttr(name: string, cmd: string): string {
+  const raw = (cmd.includes("\n") || (cmd.includes('"') && cmd.includes("'"))) && !cmd.includes("`") && dedent(cmd) === cmd;
+  return raw ? `${name}={\`${cmd}\`}` : `${name}=${quoteAttr(cmd)}`;
+}
+
 function quoteAttr(s: string): string {
   if (!s.includes('"') && !s.endsWith("\\")) return `"${s}"`;
   if (!s.includes("'") && !s.endsWith("\\")) return `'${s}'`;
@@ -1008,8 +1020,7 @@ export function printSlate(doc: SlateDoc): string {
   for (const [name, r] of Object.entries(doc.runs)) {
     const parts = ["<run", `name="${name}"`];
     if (r.kind === "cmd") {
-      const raw = (r.cmd.includes("\n") || (r.cmd.includes('"') && r.cmd.includes("'"))) && !r.cmd.includes("`") && dedent(r.cmd) === r.cmd;
-      parts.push(raw ? `cmd={\`${r.cmd}\`}` : `cmd=${quoteAttr(r.cmd)}`);
+      parts.push(commandAttr("cmd", r.cmd));
       if (r.env !== undefined) parts.push(`env={${valueExpr(r.env)}}`);
       if (r.args !== undefined) parts.push(`args={[${r.args.map(valueExpr).join(", ")}]}`);
       if (r.stdin !== undefined) parts.push(attrText("stdin", r.stdin));
@@ -1025,6 +1036,7 @@ export function printSlate(doc: SlateDoc): string {
     if (r.every !== undefined) parts.push(`every={${r.every}}`);
     if ("once" in r && r.once === true) parts.push("once");
     if (r.always === true) parts.push("always");
+    if (r.then !== undefined) parts.push(commandAttr("then", r.then));
     line(1, parts, " />");
   }
   for (const r of doc.reactions) {

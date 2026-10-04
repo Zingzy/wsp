@@ -65,7 +65,7 @@ describe("the catalog", () => {
   });
 
   it("answers runs, functions, steps, handlers and examples within their budgets", () => {
-    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(540);
+    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(590);
     for (const n of ["functions", "steps", "handlers"]) expect(slateTokens(slateCatalog(n)), n).toBeLessThan(600);
     expect(slateTokens(slateCatalog("examples"))).toBeLessThan(3500);
     for (const e of SLATE_EXAMPLES) expect(parseSlate(e.text).errors, e.title).toEqual([]);

@@ -17,6 +17,8 @@ import type { RunRecord } from "../src/slate-runs.js";
 import { stubBackend, testPlatform } from "./stub-backend.js";
 
 const STUB = fileURLToPath(new URL("./fixtures/stub-mcp.mjs", import.meta.url));
+const SERVERS: Record<string, string> = { stub: STUB, notes: fileURLToPath(new URL("./fixtures/stub-text-mcp.mjs", import.meta.url)) };
+const SHAPE = `"${process.execPath}" "${fileURLToPath(new URL("./fixtures/lines-to-json.mjs", import.meta.url))}"`;
 const KEY = "sk_live_51HxQ2mZ9vT3pLk";
 
 const roots: string[] = [];
@@ -62,6 +64,53 @@ const SLATE = `<slate title="Stub inbox">
   </column>
 </slate>`;
 
+/** A host with a project, a thread on it, and the stub servers in its agent's config. */
+async function host() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "wsp-slate-mcp-")));
+  roots.push(root);
+  const folder = join(root, "project");
+  mkdirSync(folder);
+  const starts = join(root, "starts");
+  const events: EventUnion[] = [];
+  const asked: { agent: string; name: string; path: string | undefined }[] = [];
+  const agentsReader: AgentsReader = {
+    read: () => Promise.reject(new Error("not here")),
+    tools: () => Promise.reject(new Error("not here")),
+    server: async (on, ask) => {
+      asked.push({ ...ask, path: on.projects?.[0]?.path });
+      const script = SERVERS[ask.name];
+      if (script === undefined) throw new Error(`no MCP server called ${ask.name} is in Claude Code's config there`);
+      return { transport: { kind: "stdio", command: process.execPath, args: [script], env: { STUB_STARTS: starts } }, cwd: folder, env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" }, secrets: [] };
+    },
+  };
+  const local: LocalWiring = {
+    backend: new LocalBackend({ root }),
+    execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
+    home: () => join(root, ".claude"),
+    homeDir: root,
+    rootsPath: join(root, "roots"),
+    env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: root }),
+    platform: testPlatform(),
+    daemonRoad: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }),
+  };
+  mkdirSync(join(root, "state"));
+  const store = memoryStore();
+  const boot = (): Runtime => {
+    const made = createRuntime({ backend: stubBackend(), store, adapters: { claude: harness() }, local, statePath: join(root, "state", "state.json"), agentsReader });
+    made.events.on("*", e => events.push(e as EventUnion));
+    runtimes.push(made);
+    return made;
+  };
+  const rt = boot();
+  const project = await rt.projects.add({ source: folder });
+  const { workspace } = await rt.workspaces.folderFor({ project: project.id });
+  const first = await rt.sessions.start(workspace.id, { prompt: "show my inbox in a slate" });
+  await first.finished;
+  const threadId = first.view().threadId!;
+  const asThread: Caller = { origin: "here", by: { kind: "thread", threadId, workspaceId: workspace.id, rootThreadId: threadId } };
+  return { root, folder, starts, events, asked, boot, rt, threadId, asThread };
+}
+
 describe("a slate's MCP runs", () => {
   it("folds a tool's input schema to one line per property", () => {
     expect(foldSchema({ properties: { params: { type: "object", required: ["account"], properties: { account: { type: "string", description: "The alias. More words." }, limit: { type: "integer", maximum: 50 } } }, tags: { type: "array", items: { type: "string" } }, mode: { enum: ["a", "b"] } }, required: ["params"] })).toEqual([
@@ -89,6 +138,9 @@ describe("a slate's MCP runs", () => {
       onRecord: (_t, run, r) => (records[run] = r),
       approvals: { has: () => true, allow: () => {}, revoke: () => {}, list: () => [] },
       secrets: { plaintext: () => undefined, scrub: (_t, text) => text },
+      reshape: () => {
+        throw new Error("no run here reshapes");
+      },
       computer: () => "this computer",
       idleMs: 300,
     });
@@ -116,47 +168,8 @@ describe("a slate's MCP runs", () => {
   }, 30_000);
 
   it("asks once per server, fills json on a timer, confirms a destructive tool every press, scrubs the secret and lists the tools", async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "wsp-slate-mcp-")));
-    roots.push(root);
-    const folder = join(root, "project");
-    mkdirSync(folder);
-    const starts = join(root, "starts");
-    const events: EventUnion[] = [];
-    const asked: { agent: string; name: string; path: string | undefined }[] = [];
-    const agentsReader: AgentsReader = {
-      read: () => Promise.reject(new Error("not here")),
-      tools: () => Promise.reject(new Error("not here")),
-      server: async (on, ask) => {
-        asked.push({ ...ask, path: on.projects?.[0]?.path });
-        if (ask.name !== "stub") throw new Error(`no MCP server called ${ask.name} is in Claude Code's config there`);
-        return { transport: { kind: "stdio", command: process.execPath, args: [STUB], env: { STUB_STARTS: starts } }, cwd: folder, env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" }, secrets: [] };
-      },
-    };
-    const local: LocalWiring = {
-      backend: new LocalBackend({ root }),
-      execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
-      home: () => join(root, ".claude"),
-      homeDir: root,
-      rootsPath: join(root, "roots"),
-      env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: root }),
-      platform: testPlatform(),
-      daemonRoad: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }),
-    };
-    mkdirSync(join(root, "state"));
-    const store = memoryStore();
-    const boot = (): Runtime => {
-      const made = createRuntime({ backend: stubBackend(), store, adapters: { claude: harness() }, local, statePath: join(root, "state", "state.json"), agentsReader });
-      made.events.on("*", e => events.push(e as EventUnion));
-      runtimes.push(made);
-      return made;
-    };
-    let rt = boot();
-    const project = await rt.projects.add({ source: folder });
-    const { workspace } = await rt.workspaces.folderFor({ project: project.id });
-    const first = await rt.sessions.start(workspace.id, { prompt: "show my inbox in a slate" });
-    await first.finished;
-    const threadId = first.view().threadId!;
-    const asThread: Caller = { origin: "here", by: { kind: "thread", threadId, workspaceId: workspace.id, rootThreadId: threadId } };
+    const { folder, starts, events, asked, boot, rt: booted, threadId, asThread } = await host();
+    let rt = booted;
     const get = async (): Promise<SlateView> => {
       await rt.slates.settled();
       return (await rt.slates.get(threadId))!;
@@ -166,10 +179,10 @@ describe("a slate's MCP runs", () => {
     const before = await rt.slates.catalog({ name: "stub" }, asThread);
     expect(before.text).toContain("stub: an MCP server of this thread's agent, 2 tools, 1 resource.");
     expect(before.text).toContain("Not allowed in this thread yet");
-    expect(before.text).toContain("list_items [read-only]: Lists the newest items in an account.");
+    expect(before.text).toContain("list_items [returns data, read-only]: Lists the newest items in an account.");
     expect(before.text).toContain("  params.account: string, required. The account's alias.");
     expect(before.text).toContain("  params.limit: integer, default 10, min 1, max 50");
-    expect(before.text).toContain("delete_item [destructive, asks on every start]: Deletes one item for good.");
+    expect(before.text).toContain("delete_item [text only, destructive, asks on every start]: Deletes one item for good.");
     expect(before.text).toContain("resource stub://status (application/json): The stub's own status.");
     expect(asked[0]).toEqual({ agent: "claude", name: "stub", path: folder });
     // A name that is neither in the kit nor a server says both.
@@ -246,5 +259,64 @@ describe("a slate's MCP runs", () => {
     expect(read.values).toEqual({ "$inbox.out": "listed 3 with key [secret:key]", "$inbox.json.key": "[secret:key]" });
     expect(JSON.stringify(read)).not.toContain(KEY);
     expect(JSON.stringify(events)).not.toContain(KEY);
+  }, 60_000);
+
+  it("marks a text-only tool in the catalog, the record and the sketch, and a then reshapes its text into json", async () => {
+    const { rt, threadId, asThread } = await host();
+    const get = async (): Promise<SlateView> => {
+      await rt.slates.settled();
+      return (await rt.slates.get(threadId))!;
+    };
+    const press = async (piece: string) => rt.slates.event({ threadId, version: (await get()).version, piece, event: "press", requestId: `${piece}-${Date.now()}` });
+
+    // No outputSchema and no call yet: both tools read text only. The structured stub declares its schema.
+    const before = (await rt.slates.catalog({ name: "notes" }, asThread)).text;
+    expect(before).toContain("list_text [text only, read-only]: Lists the inbox as markdown.");
+    expect(before).toContain("count [text only, read-only]: Counts the calls so far.");
+    expect(before).toContain("Each tool says whether it returns data");
+    expect((await rt.slates.catalog({ name: "stub" }, asThread)).text).toContain("list_items [returns data, read-only]");
+
+    await rt.slates.write({
+      text: `<slate title="Notes">
+  <run name="plain" tool="notes.list_text" />
+  <run name="shaped" tool="notes.list_text" then='${SHAPE}' />
+  <run name="count" tool="notes.count" />
+  <column>
+    <text id="raw" value={$plain.out} />
+    <table id="items" items={$shaped.json.items} key={item.id}><col title="From" value={item.from} /><col title="Subject" value={item.subject} /></table>
+    <button id="p" label="Plain" onPress={start($plain)} />
+    <button id="s" label="Shaped" onPress={start($shaped)} />
+    <button id="c" label="Count" onPress={start($count)} />
+  </column>
+</slate>`,
+    }, asThread);
+
+    // The text-only call: the record says text, json stays empty, the sketch says text only.
+    const plain = await press("p");
+    expect(plain.ask).toMatchObject({ kind: "server", key: "mcp:notes", server: "notes" });
+    await rt.slates.approve({ threadId, key: "mcp:notes", scope: "thread" });
+    await vi.waitFor(async () => expect((await get()).values["plain"]).toMatchObject({ state: "done", text: true, out: "# Inbox\n- 1 | ann | Hello\n- 2 | bo | Invoice" }), { timeout: 10_000 });
+    expect((await get()).values["plain"]).not.toHaveProperty("json");
+    expect((await rt.slates.read({}, asThread)).text).toMatch(/\$plain: done, text only/);
+
+    // A structured answer with no outputSchema: the probe moves count to returns data, and its record has no text mark.
+    expect((await press("c")).ask).toBeUndefined();
+    await vi.waitFor(async () => expect((await get()).values["count"]).toMatchObject({ state: "done", json: { n: 2 } }), { timeout: 10_000 });
+    expect((await get()).values["count"]).not.toHaveProperty("text");
+    const after = (await rt.slates.catalog({ name: "notes" }, asThread)).text;
+    expect(after).toContain("count [returns data, read-only]");
+    expect(after).toContain("list_text [text only, read-only]");
+
+    // The reshape is a command on this computer, so the allowed server asks again with it on the sheet.
+    const shaped = await press("s");
+    expect(shaped.ask).toMatchObject({ kind: "server", server: "notes", tool: "list_text", then: SHAPE });
+    expect(shaped.ask!.key).toMatch(/^mcp:notes#then:[0-9a-f]{16}$/);
+    await rt.slates.approve({ threadId, key: shaped.ask!.key, scope: "thread" });
+    await vi.waitFor(async () => expect((await get()).values["shaped"]).toMatchObject({ state: "done", out: "# Inbox\n- 1 | ann | Hello\n- 2 | bo | Invoice", json: { items: [{ id: 1, from: "ann", subject: "Hello" }, { id: 2, from: "bo", subject: "Invoice" }] } }), { timeout: 10_000 });
+    expect((await get()).values["shaped"]).not.toHaveProperty("text");
+    expect((await rt.slates.read({}, asThread)).text).toMatch(/\$shaped: done \(exit 0/);
+    // Allowed for the thread, the next press runs with no sheet.
+    expect((await press("s")).ask).toBeUndefined();
+    await vi.waitFor(async () => expect((await get()).values["shaped"]).toMatchObject({ state: "done", runs: 2 }), { timeout: 10_000 });
   }, 60_000);
 });

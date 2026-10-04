@@ -49,6 +49,8 @@ export const SlateCmdAsk = z.object({
   folder: z.string(),
   timeoutS: z.number(),
   confirm: z.string().optional(),
+  /** The run's literal reshape, fed its raw result on stdin. */
+  then: z.string().optional(),
   /** Why it is held: "needs your approval", "started 12 times in a minute; press to run it again". */
   why: z.string(),
 });
@@ -76,6 +78,8 @@ export const SlateServerAsk = z.object({
   tool: z.string().optional(),
   /** That call's evaluated arguments, a secret as dots with its length. */
   args: z.record(z.string(), SlateWireJson).optional(),
+  /** The run's literal reshape, fed its raw result on stdin; its consent is part of this one. */
+  then: z.string().optional(),
 });
 
 /** A destructive tool, or a run that names confirm, asks on every start; "once" runs it, "refuse" drops the start. */
@@ -89,6 +93,7 @@ export const SlateToolAsk = z.object({
   why: z.string(),
   args: z.record(z.string(), SlateWireJson),
   confirm: z.string().optional(),
+  then: z.string().optional(),
 });
 
 export const SlateAsk = z.discriminatedUnion("kind", [SlateCmdAsk, SlateServerAsk, SlateToolAsk]);

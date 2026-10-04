@@ -31,6 +31,8 @@ export interface RunRecord {
   cut?: true;
   /** Running again with the last result kept beside it until the new one replaces it. */
   refreshing?: true;
+  /** A tool answered with text alone, no structured result. */
+  text?: true;
 }
 
 /** What a run that ran left for `$name` to read, kept on its record while it runs again. */
@@ -60,6 +62,8 @@ export interface CmdRunDecl {
   every?: number;
   always?: boolean;
   once?: boolean;
+  /** A literal command that reads the raw result on stdin and prints the JSON the record's json becomes. */
+  then?: string;
 }
 
 /** One value as it reaches a command, evaluated by the host at the moment the run starts. A secret is named, never
@@ -100,6 +104,15 @@ export interface RunAsk {
   on: "thread" | "host";
   timeout: number;
   confirm?: string;
+  then?: string;
+}
+
+/** A reshape's answer: the JSON it printed, or why it failed with what it said on stderr. */
+export type ReshapeAnswer = { json: SlateJson } | { why: string; exit: number | null; err: string };
+
+export interface Reshape {
+  done: Promise<ReshapeAnswer>;
+  kill(): void;
 }
 
 export type RunStartAnswer =
@@ -169,10 +182,59 @@ export interface SlateRuns {
   shown(threadId: string, shown: boolean): void;
   /** The person pressed, or the agent wrote: a run held by the start budget may start again. */
   release(threadId: string): void;
+  /** A run's `then`: the literal command on this computer with the raw result, already scrubbed, on its stdin. */
+  reshape(threadId: string, cmd: string, input: string, folder: string, timeoutS?: number): Reshape;
   secrets: SlateSecrets;
   /** The thread is gone: its runs, timers, approvals in memory and secrets with it. */
   drop(threadId: string): void;
   close(): void;
+}
+
+/** Runs `then` under bash -c in `cwd` with `input` on stdin; its stdout must parse as JSON. Output is capped as a
+ * run's, scrubbed, and the whole group dies at the deadline or on kill. */
+export function reshapeResult(o: { cmd: string; input: string; cwd: string; env: Record<string, string>; timeoutS: number; scrub: (text: string) => string }): Reshape {
+  const child = spawn("bash", ["-c", o.cmd], { cwd: o.cwd, env: o.env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+  const chunks = { out: [] as Buffer[], err: [] as Buffer[] };
+  let total = 0;
+  const take = (stream: "out" | "err") => (chunk: Buffer): void => {
+    const room = Math.max(0, EXEC_OUTPUT_MAX - total);
+    total += Math.min(room, chunk.length);
+    if (room > 0) chunks[stream].push(chunk.subarray(0, room));
+  };
+  child.stdout?.on("data", take("out"));
+  child.stderr?.on("data", take("err"));
+  child.stdin?.on("error", () => {});
+  child.stdin?.end(o.input);
+  let timedOut = false;
+  const kill = (): void => {
+    if (child.pid !== undefined) killGroup(child.pid);
+  };
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    kill();
+  }, o.timeoutS * 1_000);
+  const done = new Promise<ReshapeAnswer>(settle => {
+    let ended = false;
+    const end = (code: number | null, error?: Error): void => {
+      if (ended) return;
+      ended = true;
+      clearTimeout(deadline);
+      kill();
+      const err = runOutputTail(o.scrub(Buffer.concat(chunks.err).toString("utf8")));
+      if (error !== undefined) return settle({ why: `then could not start: ${o.scrub(error.message)}`, exit: null, err });
+      if (timedOut) return settle({ why: `then timed out after ${o.timeoutS} s`, exit: EXEC_DEADLINE_EXIT, err });
+      if (code !== 0) return settle({ why: `then exited with ${code ?? "a signal"}`, exit: code, err });
+      const out = o.scrub(Buffer.concat(chunks.out).toString("utf8"));
+      try {
+        settle({ json: JSON.parse(out) as SlateJson });
+      } catch {
+        settle({ why: `then printed no JSON${out.trim() === "" ? "" : `: ${out.trim().split("\n")[0]!.slice(0, 120)}`}`, exit: 0, err });
+      }
+    };
+    child.on("error", e => end(null, e));
+    child.on("close", code => end(code));
+  });
+  return { done, kill };
 }
 
 const RESULT_FIELDS = ["exit", "out", "err", "json", "lines", "endedAt", "ms", "cut"] as const;
@@ -228,6 +290,8 @@ interface Live {
   /** The last result, kept through holds so the next start carries it. */
   result?: RunResult;
   pid?: number;
+  /** The run's `then`, while it reshapes the result. */
+  reshaping?: Reshape;
   held?: { req: RunStart; for: HeldFor };
   /** When reactions and timers started it, for the start budget. */
   starts: number[];
@@ -416,13 +480,20 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     deps.onRecord(threadId, run, record);
     return record;
   };
+  const loginEnv = (): Record<string, string> => {
+    const env: Record<string, string> = {};
+    for (const [name, value] of Object.entries(deps.env())) if (!name.startsWith("WSP_")) env[name] = value;
+    return env;
+  };
+  const reshape = (threadId: string, cmd: string, input: string, folder: string, timeoutS = DEFAULT_TIMEOUT_S): Reshape =>
+    reshapeResult({ cmd, input, cwd: existsSync(folder) ? folder : process.cwd(), env: loginEnv(), timeoutS, scrub: text => secrets.scrub(threadId, text) });
   const running = (t: ThreadRuns): number => [...t.runs.values()].filter(l => l.record.state === "running").length;
 
   const key = (decl: CmdRunDecl): string => {
     const env = Object.entries(decl.env ?? {})
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([name, expr]) => [name, stableJson(expr)]);
-    const what = [decl.kind, decl.cmd, env, (decl.args ?? []).map(stableJson), decl.stdin === undefined ? null : stableJson(decl.stdin), decl.on ?? "thread", decl.cwd ?? "", decl.stream === true, decl.every ?? null, decl.always === true];
+    const what = [decl.kind, decl.cmd, env, (decl.args ?? []).map(stableJson), decl.stdin === undefined ? null : stableJson(decl.stdin), decl.on ?? "thread", decl.cwd ?? "", decl.stream === true, decl.every ?? null, decl.always === true, ...(decl.then !== undefined ? [decl.then] : [])];
     return createHash("sha256").update(JSON.stringify(what)).digest("hex").slice(0, 32);
   };
 
@@ -443,6 +514,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
       on: req.decl.on ?? "thread",
       timeout: timeoutOf(req.decl),
       ...(req.decl.confirm !== undefined ? { confirm: req.decl.confirm } : {}),
+      ...(req.decl.then !== undefined ? { then: req.decl.then } : {}),
     };
   };
 
@@ -478,8 +550,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     if (running(t) >= RUNNING_MAX) return hold(req, l, "busy");
     const inputs = req.inputs();
     if ((inputs.args ?? []).some(input => "secret" in input)) return fail(req, l, SECRET_IN_ARGS);
-    const env: Record<string, string> = {};
-    for (const [name, value] of Object.entries(deps.env())) if (!name.startsWith("WSP_")) env[name] = value;
+    const env = loginEnv();
     for (const [name, input] of Object.entries(inputs.env ?? {})) {
       if (!ENV_NAME.test(name)) return fail(req, l, `${name} is not a name an environment variable can have`);
       const text = "secret" in input ? secrets.plaintext(threadId, input.secret) : input.value === null ? undefined : asText(input.value);
@@ -553,7 +624,8 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
           if (rest !== "") line(stream, rest);
         }
       }
-      const out = runOutputTail(secrets.scrub(threadId, Buffer.concat(chunks.out).toString("utf8")));
+      const raw = secrets.scrub(threadId, Buffer.concat(chunks.out).toString("utf8"));
+      const out = runOutputTail(raw);
       const err = runOutputTail(secrets.scrub(threadId, Buffer.concat(chunks.err).toString("utf8")));
       let json: SlateJson | undefined;
       if (out.trim() !== "") {
@@ -563,24 +635,34 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
           json = undefined;
         }
       }
-      const endedAt = now();
       const exit = timedOut ? EXEC_DEADLINE_EXIT : code;
       const why = error !== undefined ? secrets.scrub(threadId, error.message) : timedOut ? `timed out after ${timeout} s` : exit === 0 ? undefined : exit === null ? `ended by ${signal ?? "a signal"}` : `exited with ${exit}`;
-      write(threadId, run, l, {
-        state: exit === 0 && error === undefined ? "done" : "failed",
-        ...(why !== undefined ? { why } : {}),
-        exit,
-        out,
-        err,
-        ...(json !== undefined ? { json } : {}),
-        ...(decl.stream === true ? { lines: [...lines] } : {}),
-        startedAt,
-        endedAt,
-        ms: endedAt - startedAt,
-        runs,
-        ...(cut ? { cut: true as const } : {}),
+      const finish = (fields: Pick<RunRecord, "state" | "why" | "exit" | "err" | "json">): void => {
+        const endedAt = now();
+        write(threadId, run, l, {
+          ...fields,
+          out,
+          ...(decl.stream === true ? { lines: [...lines] } : {}),
+          startedAt,
+          endedAt,
+          ms: endedAt - startedAt,
+          runs,
+          ...(cut ? { cut: true as const } : {}),
+        });
+        next(threadId);
+      };
+      const ok = exit === 0 && error === undefined;
+      if (!ok || decl.then === undefined) {
+        finish({ state: ok ? "done" : "failed", ...(why !== undefined ? { why } : {}), exit, err, ...(json !== undefined ? { json } : {}) });
+        return;
+      }
+      const shaping = reshape(threadId, decl.then, raw, cwd, timeout);
+      l.reshaping = shaping;
+      void shaping.done.then(answer => {
+        if (l.gen !== gen) return;
+        delete l.reshaping;
+        finish("json" in answer ? { state: "done", exit, err, json: answer.json } : { state: "failed", why: answer.why, exit: answer.exit, err: answer.err });
       });
-      next(threadId);
     };
     child.on("error", e => end(null, null, e));
     child.on("exit", (code, signal) => {
@@ -601,6 +683,8 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     l.gen += 1;
     if (l.pid !== undefined) killGroup(l.pid);
     delete l.pid;
+    l.reshaping?.kill();
+    delete l.reshaping;
     delete l.held;
     const t = thread(threadId);
     t.queue = t.queue.filter(r => r !== run);
@@ -695,6 +779,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
       t.shown = on;
       tick(threadId);
     },
+    reshape,
     release(threadId) {
       for (const l of threads.get(threadId)?.runs.values() ?? []) l.starts = [];
     },

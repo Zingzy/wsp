@@ -10,6 +10,7 @@ import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTit
 import { RUNS, type SlateEngine } from "./engine.js";
 import { cn } from "../lib/utils.js";
 import { isRunRecord, type SlateApproval, type SlateAsk, type SlateDoc } from "./model.js";
+import { ThenCommand } from "./mcp.js";
 import { usePieceVersion } from "./SlateView.js";
 
 export const CONSENT_WORDS = {
@@ -98,6 +99,7 @@ export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask:
       <pre data-slate-consent-cmd className="max-h-[calc(12*1rem+1rem)] overflow-auto whitespace-pre-wrap break-all rounded-md bg-accent px-2.5 py-2 font-mono text-xs leading-4 tabular-nums text-foreground">
         {ask.cmd}
       </pre>
+      <ThenCommand then={ask.then} />
       <p data-slate-consent-cadence className="text-foreground">
         {cadence}
       </p>

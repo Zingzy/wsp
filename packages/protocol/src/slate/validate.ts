@@ -263,6 +263,7 @@ class Validator {
     const w = (prop: string): Where => ({ piece: `$${name}`, prop });
     if ("every" in r && r.every !== undefined && (!Number.isFinite(r.every) || r.every < SLATE_LIMITS.timerFloorS)) this.add("K703", `every is at least ${SLATE_LIMITS.timerFloorS} s`, w("every"), `every={${SLATE_LIMITS.timerFloorS}}`);
     if ("confirm" in r && r.confirm !== undefined) this.propValue(r.confirm, w("confirm"));
+    if (r.then !== undefined && (typeof r.then !== "string" || r.then.trim() === "")) this.add("K700", "then is a literal command that reads the result on stdin", w("then"), "then='python3 shape.py'");
     if (r.always === true && r.every === undefined) this.add("K703", "always keeps a timer running while the slate is not shown, so it needs every", w("always"), "every={60} always");
     if (r.kind === "cmd") {
       if (typeof r.cmd !== "string" || r.cmd.trim() === "") this.add("K700", "the command is literal text; hand values to it with env={{ NAME: $value }}", w("cmd"));
@@ -669,7 +670,7 @@ function shapeProblems(issue: ShapeIssue, doc: Record<string, unknown>): SlatePr
   if ((area === "values" || area === "derived" || area === "runs") && name !== undefined) {
     const piece = `$${name}`;
     if (keys.length > 0) {
-      const takes = area === "values" ? "start, secret and keep" : area === "runs" ? "kind, cmd, env, args, stdin, on, cwd, timeout, stream, confirm, every, once and always" : "an expression";
+      const takes = area === "values" ? "start, secret and keep" : area === "runs" ? "kind, cmd, env, args, stdin, on, cwd, timeout, stream, confirm, every, once, always and then" : "an expression";
       return keys.map(k => slateProblem(area === "runs" ? "K704" : "T302", `${piece} has no ${k}; it takes ${takes}`, { piece, prop: k }));
     }
     if (area === "runs" && issue.code === "invalid_union_discriminator") return [slateProblem("K701", `${piece} takes kind "cmd", "tool" or "resource"`, { piece, prop: "kind" })];

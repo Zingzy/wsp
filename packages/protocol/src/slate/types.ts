@@ -100,15 +100,16 @@ export type SlateSecretDecl = SlateValueDecl & { secret: true };
 /** One expression in the language of 04, as source text. */
 export type SlateDerivedDecl = SlateExpression;
 
-/** confirm is the sentence the sheet asks on every start: literal, or a formula read when the run is held. */
-interface RunCommon { confirm?: string | SlateBinding | SlateFormat; every?: number; once?: true; always?: true }
+/** confirm is the sentence the sheet asks on every start: literal, or a formula read when the run is held. then is a
+ * literal command that reads the raw result on stdin and prints the JSON the run's json becomes. */
+interface RunCommon { confirm?: string | SlateBinding | SlateFormat; every?: number; once?: true; always?: true; then?: string }
 export type SlateRunDecl =
   | (RunCommon & {
       kind: "cmd"; cmd: string; env?: Record<string, SlatePropValue>; args?: SlatePropValue[]; stdin?: SlatePropValue;
       on?: "thread" | "host"; cwd?: string; timeout?: number; stream?: true;
     })
   | (RunCommon & { kind: "tool"; server: string; tool: string; args?: Record<string, SlatePropValue> })
-  | { kind: "resource"; server: string; uri: string; every?: number; always?: true };
+  | { kind: "resource"; server: string; uri: string; every?: number; always?: true; then?: string };
 
 /** A reaction declared with <when>; a piece's handlers are reactions on the piece's own events. */
 export interface SlateReactionDecl {
@@ -146,14 +147,14 @@ export interface SlateDoc {
 /** The stored document; the wire calls it Slate. */
 export type Slate = SlateDoc;
 
-const RunCommonSchema = { confirm: z.union([z.string(), SlateBinding, SlateFormat]).optional(), every: z.number().optional(), once: z.literal(true).optional(), always: z.literal(true).optional() };
+const RunCommonSchema = { confirm: z.union([z.string(), SlateBinding, SlateFormat]).optional(), every: z.number().optional(), once: z.literal(true).optional(), always: z.literal(true).optional(), then: z.string().optional() };
 export const SlateRunDeclSchema: z.ZodType<SlateRunDecl> = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("cmd"), cmd: z.string(), env: z.record(SlatePropValue).optional(), args: z.array(SlatePropValue).optional(), stdin: SlatePropValue.optional(),
     on: z.enum(["thread", "host"]).optional(), cwd: z.string().optional(), timeout: z.number().optional(), stream: z.literal(true).optional(), ...RunCommonSchema,
   }).strict(),
   z.object({ kind: z.literal("tool"), server: z.string(), tool: z.string(), args: z.record(SlatePropValue).optional(), ...RunCommonSchema }).strict(),
-  z.object({ kind: z.literal("resource"), server: z.string(), uri: z.string(), every: z.number().optional(), always: z.literal(true).optional() }).strict(),
+  z.object({ kind: z.literal("resource"), server: z.string(), uri: z.string(), every: z.number().optional(), always: z.literal(true).optional(), then: z.string().optional() }).strict(),
 ]) as unknown as z.ZodType<SlateRunDecl>;
 
 export const SlatePieceSchema: z.ZodType<SlatePiece> = z.object({
@@ -212,8 +213,10 @@ export interface SlateRunRecord {
   stale?: true;
   /** Running again, the last result's fields kept until the new one replaces them. */
   refreshing?: true;
+  /** A tool answered with text alone, no structured result. */
+  text?: true;
 }
-export const SLATE_RUN_FIELDS = ["state", "why", "exit", "out", "err", "json", "lines", "startedAt", "endedAt", "ms", "runs", "cut", "stale", "refreshing"] as const;
+export const SLATE_RUN_FIELDS = ["state", "why", "exit", "out", "err", "json", "lines", "startedAt", "endedAt", "ms", "runs", "cut", "stale", "refreshing", "text"] as const;
 export const SLATE_RUN_IDLE: SlateRunRecord = { state: "idle", runs: 0 };
 
 /** What $secret reads: never the plaintext. */

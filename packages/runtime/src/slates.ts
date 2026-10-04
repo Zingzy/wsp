@@ -54,7 +54,7 @@ import {
 } from "@wsp/protocol";
 import type { Store } from "./store.js";
 import { createSlateRuns, lastResult, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
-import { HELD_CONFIRM, createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
+import { HELD_CONFIRM, consentKey, createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
 import { HOST_SLATE_SOURCES, resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
 
 export const SLATES = "slates";
@@ -350,6 +350,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     },
     approvals,
     secrets: runs.secrets,
+    reshape: (threadId, cmd, input) => runs.reshape(threadId, cmd, input, deps.thread(threadId)?.folder ?? process.cwd()),
     computer: threadId => deps.thread(threadId)?.computer ?? "this computer",
     now: deps.now,
   });
@@ -358,6 +359,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   function approvalNames(r: SlateRecord, key: string): { run?: string; cmd?: string } {
     for (const [name, decl] of Object.entries(r.document?.runs ?? {})) {
       if (decl.kind === "cmd" && runs.key(decl as CmdRunDecl) === key) return { run: name, cmd: decl.cmd };
+      if (decl.kind !== "cmd" && key === consentKey(decl)) return { run: name, cmd: `the MCP server ${decl.server}${decl.then !== undefined ? `, then ${decl.then}` : ""}` };
       if (decl.kind !== "cmd" && key === `mcp:${decl.server}`) return { run: name, cmd: `the MCP server ${decl.server}` };
     }
     return {};
@@ -572,6 +574,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         folder: a.folder,
         timeoutS: a.timeout,
         ...(a.confirm !== undefined ? { confirm: a.confirm } : {}),
+        ...(a.then !== undefined ? { then: a.then } : {}),
         why: isRunRecord(rec) && rec.why !== undefined ? rec.why : HELD_APPROVAL,
       };
     });

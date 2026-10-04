@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import type { McpTransport } from "@wsp/catalog";
 import { runOutputTail } from "@wsp/protocol";
 import type { SlateAsk, SlateJson, SlateRunDecl } from "@wsp/protocol";
-import type { RunApprovals, RunBy, RunRecord, RunStartAnswer } from "./slate-runs.js";
+import type { Reshape, RunApprovals, RunBy, RunRecord, RunStartAnswer } from "./slate-runs.js";
 
 export type McpRunDecl = Extract<SlateRunDecl, { kind: "tool" | "resource" }>;
 
@@ -28,6 +28,7 @@ export interface McpToolInfo {
   title?: string;
   description?: string;
   inputSchema?: unknown;
+  outputSchema?: unknown;
   annotations?: { title?: string; readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: boolean };
 }
 
@@ -56,6 +57,8 @@ export interface SlateMcpDeps {
   onAsks?(threadId: string): void;
   approvals: RunApprovals;
   secrets: { plaintext(threadId: string, name: string): string | undefined; scrub(threadId: string, text: string): string };
+  /** A run's `then` on this computer, in the thread's folder, the raw result already scrubbed on its stdin. */
+  reshape(threadId: string, cmd: string, input: string): Reshape;
   computer(threadId: string): string;
   now?: () => number;
   /** How long a connection lives unused while its slate is not shown and no `always` timer keeps it. */
@@ -90,6 +93,10 @@ export interface SlateMcp {
 
 export const serverKey = (server: string): string => `mcp:${server}`;
 
+/** A run's consent: its server's, and with a `then` that command's too, so a new reshape asks again. */
+export const consentKey = (decl: McpRunDecl): string =>
+  decl.then === undefined ? serverKey(decl.server) : `${serverKey(decl.server)}#then:${createHash("sha256").update(decl.then).digest("hex").slice(0, 16)}`;
+
 const SECRET_MARK = "\u0000wsp-secret:";
 /** Where a secret stands in a tool's evaluated arguments: replaced by its plaintext at the call, by dots on a sheet. */
 export const slateSecretMark = (name: string): string => `${SECRET_MARK}${name}\u0000`;
@@ -120,7 +127,7 @@ function stableJson(value: unknown): string {
 /** A tool run's confirm key: the server, the tool and the argument names, so new values never ask again. */
 export const toolKey = (decl: McpRunDecl): string =>
   `tool:${createHash("sha256")
-    .update(stableJson(decl.kind === "tool" ? ["tool", decl.server, decl.tool, Object.keys(decl.args ?? {}).sort(), decl.confirm ?? null] : ["resource", decl.server, decl.uri]))
+    .update(stableJson([...(decl.kind === "tool" ? ["tool", decl.server, decl.tool, Object.keys(decl.args ?? {}).sort(), decl.confirm ?? null] : ["resource", decl.server, decl.uri]), ...(decl.then !== undefined ? [decl.then] : [])]))
     .digest("hex")
     .slice(0, 32)}`;
 
@@ -375,10 +382,11 @@ export function foldSchema(schema: unknown, prefix = "", depth = 0, root: Schema
   return lines;
 }
 
-const hintsOf = (tool: McpToolInfo): string[] => {
+const hintsOf = (tool: McpToolInfo, structured: boolean | undefined): string[] => {
+  const shape = tool.outputSchema !== undefined || structured === true ? "returns data" : "text only";
   const a = tool.annotations;
-  if (a === undefined) return [];
-  return [...(a.readOnlyHint === true ? ["read-only"] : []), ...(isDestructive(tool) ? ["destructive, asks on every start"] : []), ...(a.idempotentHint === true ? ["idempotent"] : []), ...(a.openWorldHint === true ? ["reaches outside"] : [])];
+  if (a === undefined) return [shape];
+  return [shape, ...(a.readOnlyHint === true ? ["read-only"] : []), ...(isDestructive(tool) ? ["destructive, asks on every start"] : []), ...(a.idempotentHint === true ? ["idempotent"] : []), ...(a.openWorldHint === true ? ["reaches outside"] : [])];
 };
 
 // ---- the runs ----
@@ -388,6 +396,7 @@ interface Live {
   gen: number;
   /** The call in flight, for a cancel to tell the server. */
   inflight?: { conn: Conn; id: number };
+  reshaping?: Reshape;
   held?: { req: McpRunStart; ask: "server" | "tool" | "budget" };
   starts: number[];
 }
@@ -408,6 +417,9 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
   /** Tool lists by thread and server, kept past a closed connection so a sheet and a provisional start can read them. */
   const lists = new Map<string, McpToolInfo[]>();
   const listKey = (threadId: string, server: string): string => `${threadId}\u0000${server}`;
+  /** Whether a tool's answers carried a structured result, by thread, server and tool, off the runs that called it. */
+  const seen = new Map<string, boolean>();
+  const seenKey = (threadId: string, server: string, tool: string): string => `${listKey(threadId, server)}\u0000${tool}`;
 
   const thread = (threadId: string): ThreadMcp => {
     let t = threads.get(threadId);
@@ -518,10 +530,10 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
         ...(tool.annotations?.readOnlyHint !== undefined ? { readOnly: tool.annotations.readOnlyHint } : {}),
         ...(tool.annotations !== undefined ? { destructive: isDestructive(tool) } : {}),
       }));
-      return { key: serverKey(d.server), run, kind: "server", server: d.server, computer, why: HELD_APPROVAL, tools, tool: d.kind === "tool" ? d.tool : d.uri, ...(args !== undefined ? { args } : {}) };
+      return { key: consentKey(d), run, kind: "server", server: d.server, computer, why: HELD_APPROVAL, tools, tool: d.kind === "tool" ? d.tool : d.uri, ...(args !== undefined ? { args } : {}), ...(d.then !== undefined ? { then: d.then } : {}) };
     }
     const tool = d as Extract<McpRunDecl, { kind: "tool" }>;
-    return { key: toolKey(d), run, kind: "tool", server: d.server, tool: tool.tool, computer, why: HELD_CONFIRM, args: args ?? {}, ...(typeof tool.confirm === "string" ? { confirm: tool.confirm } : {}) };
+    return { key: toolKey(d), run, kind: "tool", server: d.server, tool: tool.tool, computer, why: HELD_CONFIRM, args: args ?? {}, ...(typeof tool.confirm === "string" ? { confirm: tool.confirm } : {}), ...(tool.then !== undefined ? { then: tool.then } : {}) };
   };
 
   const hold = (req: McpRunStart, l: Live, ask: "server" | "tool" | "budget", runs: number): RunStartAnswer => {
@@ -545,7 +557,8 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
     return missing !== undefined ? { missing } : out;
   };
 
-  const resultOf = (threadId: string, spec: McpServerSpec, decl: McpRunDecl, got: unknown): Omit<RunRecord, "runs"> => {
+  /** The record a call's answer gives, and the raw result a `then` reads: the structured result as JSON, else the text. */
+  const resultOf = (threadId: string, spec: McpServerSpec, decl: McpRunDecl, got: unknown): { record: Omit<RunRecord, "runs">; raw: string } => {
     const scrubbed = (text: string): string => clean(threadId, spec, text);
     if (decl.kind === "resource") {
       const contents = Array.isArray((got as { contents?: unknown })?.contents) ? ((got as { contents: { text?: unknown; mimeType?: unknown; blob?: unknown }[] }).contents) : [];
@@ -559,14 +572,19 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
           json = undefined;
         }
       }
-      return { state: "done", exit: 0, out: runOutputTail(out), ...(json !== undefined ? { json } : {}) };
+      return { record: { state: "done", exit: 0, out: runOutputTail(out), ...(json !== undefined ? { json } : {}) }, raw: out };
     }
     const r = (got ?? {}) as { content?: { type?: unknown; text?: unknown }[]; structuredContent?: unknown; isError?: unknown };
     const texts = (Array.isArray(r.content) ? r.content : []).flatMap(c => (c?.type === "text" && typeof c.text === "string" ? [c.text] : []));
     const text = scrubbed(texts.join("\n"));
-    if (r.isError === true) return { state: "failed", why: "the tool said it failed", exit: 1, out: "", err: runOutputTail(text) };
+    if (r.isError === true) return { record: { state: "failed", why: "the tool said it failed", exit: 1, out: "", err: runOutputTail(text) }, raw: text };
+    const structured = r.structuredContent !== undefined && r.structuredContent !== null;
+    if (decl.kind === "tool") {
+      const at = seenKey(threadId, decl.server, decl.tool);
+      seen.set(at, seen.get(at) === true || structured);
+    }
     let json: SlateJson | undefined;
-    if (r.structuredContent !== undefined && r.structuredContent !== null) json = mapStrings(r.structuredContent as SlateJson, scrubbed);
+    if (structured) json = mapStrings(r.structuredContent as SlateJson, scrubbed);
     else if (texts.length > 0) {
       try {
         json = mapStrings(JSON.parse(texts.length === 1 ? texts[0]! : texts.join("\n")) as SlateJson, scrubbed);
@@ -574,7 +592,7 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
         json = undefined;
       }
     }
-    return { state: "done", exit: 0, out: runOutputTail(text), ...(json !== undefined ? { json } : {}) };
+    return { record: { state: "done", exit: 0, out: runOutputTail(text), ...(json !== undefined ? { json } : {}), ...(structured ? {} : { text: true as const }) }, raw: structured ? JSON.stringify(json) : text };
   };
 
   /** The run goes running now and its call follows; a destructive tool found on the way holds it for the confirm. */
@@ -619,8 +637,19 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
           const got = await call.answer;
           if (l.gen !== gen) return;
           delete l.inflight;
+          const { record: result, raw } = resultOf(threadId, conn.spec, decl, got);
+          let record: Omit<RunRecord, "runs"> = result;
+          if (decl.then !== undefined && result.state === "done") {
+            const shaping = deps.reshape(threadId, decl.then, raw);
+            l.reshaping = shaping;
+            const answer = await shaping.done;
+            if (l.gen !== gen) return;
+            delete l.reshaping;
+            const { json: _json, text: _text, ...kept } = result;
+            record = "json" in answer ? { ...kept, json: answer.json } : { ...kept, state: "failed", why: answer.why, exit: answer.exit, err: answer.err };
+          }
           const endedAt = now();
-          write(threadId, run, l, { ...resultOf(threadId, conn.spec, decl, got), startedAt, endedAt, ms: endedAt - startedAt, runs });
+          write(threadId, run, l, { ...record, startedAt, endedAt, ms: endedAt - startedAt, runs });
         } finally {
           conn.busy -= 1;
           conn.usedAt = now();
@@ -643,6 +672,8 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
       l.inflight.conn.client.notify("notifications/cancelled", { requestId: l.inflight.id, reason: why ?? "cancelled" });
       delete l.inflight;
     }
+    l.reshaping?.kill();
+    delete l.reshaping;
     delete l.held;
     if (why === undefined || (was !== "running" && was !== "held")) return;
     write(threadId, run, l, { state: "cancelled", why, exit: null, runs: l.record.runs, endedAt: now() });
@@ -670,11 +701,11 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
   sweep.unref();
 
   const heldOn = (threadId: string, key: string): [string, Live][] =>
-    [...(threads.get(threadId)?.runs ?? [])].filter(([, l]) => l.held !== undefined && l.held.ask !== "budget" && (l.held.ask === "server" ? serverKey(l.held.req.decl.server) : toolKey(l.held.req.decl)) === key);
+    [...(threads.get(threadId)?.runs ?? [])].filter(([, l]) => l.held !== undefined && l.held.ask !== "budget" && (l.held.ask === "server" ? consentKey(l.held.req.decl) : toolKey(l.held.req.decl)) === key);
 
   return {
     provisional(threadId, decl, runs) {
-      if (!deps.approvals.has(threadId, serverKey(decl.server))) return { state: "held", why: HELD_APPROVAL, runs };
+      if (!deps.approvals.has(threadId, consentKey(decl))) return { state: "held", why: HELD_APPROVAL, runs };
       if (decl.kind === "tool") {
         const info = lists.get(listKey(threadId, decl.server))?.find(x => x.name === decl.tool);
         if (decl.confirm !== undefined || isDestructive(info)) return { state: "held", why: HELD_CONFIRM, runs };
@@ -695,12 +726,17 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
         if (l.starts.length >= STARTS_PER_MINUTE) return hold(req, l, "budget", l.record.runs);
         l.starts.push(at);
       }
-      if (!deps.approvals.has(req.threadId, serverKey(req.decl.server))) return hold(req, l, "server", l.record.runs);
+      if (!deps.approvals.has(req.threadId, consentKey(req.decl))) return hold(req, l, "server", l.record.runs);
       return launch(req, l, false);
     },
 
     approve(threadId, key, scope) {
-      if (scope === "thread" && key.startsWith("mcp:")) deps.approvals.allow(threadId, key);
+      if (scope === "thread" && key.startsWith("mcp:")) {
+        deps.approvals.allow(threadId, key);
+        // A reshape's sheet named the server and its tools too, so it stands for the server's own consent.
+        const at = key.indexOf("#then:");
+        if (at > 0) deps.approvals.allow(threadId, key.slice(0, at));
+      }
       for (const [, l] of heldOn(threadId, key)) {
         const req = l.held!.req;
         delete l.held;
@@ -771,9 +807,10 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
         `${server}: an MCP server of this thread's agent, ${tools.length} tool${tools.length === 1 ? "" : "s"}${resources.length > 0 ? `, ${resources.length} resource${resources.length === 1 ? "" : "s"}` : ""}.`,
         allowed ? "Allowed in this thread: its runs start without asking, but a destructive tool asks on every start." : "Not allowed in this thread yet: the first run on it asks the person once, for reading and calling.",
         `A run calls a tool: <run name="x" tool="${server}.<tool>" args={{ <property>: <expression> }} every={60} />; a resource: <run name="x" resource="${server}:<uri>" />. $x.json holds the structured result (else the text parsed as JSON), $x.out the text, $x.err the error.`,
+        "Each tool says whether it returns data (a structured result fills $x.json) or text only (prose for a model: draw $x.out, or reshape it with then=).",
       ];
       const body = tools.map(tool => {
-        const hints = hintsOf(tool);
+        const hints = hintsOf(tool, seen.get(seenKey(threadId, server, tool.name)));
         const about = sentence(tool.description, 240);
         const props = foldSchema(tool.inputSchema);
         return [`${tool.name}${hints.length > 0 ? ` [${hints.join(", ")}]` : ""}${about !== undefined ? `: ${about}` : ""}`, ...(props.length > 0 ? props : ["  (no arguments)"])].join("\n");
@@ -789,6 +826,7 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
       for (const server of [...t.conns.keys()]) closeConn(t, server);
       threads.delete(threadId);
       for (const k of [...lists.keys()]) if (k.startsWith(`${threadId}\u0000`)) lists.delete(k);
+      for (const k of [...seen.keys()]) if (k.startsWith(`${threadId}\u0000`)) seen.delete(k);
     },
 
     close() {

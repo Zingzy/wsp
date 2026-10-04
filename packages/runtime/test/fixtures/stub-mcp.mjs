@@ -11,6 +11,7 @@ const TOOLS = [
     title: "List items",
     description: "Lists the newest items in an account. Pages by limit.",
     annotations: { readOnlyHint: true },
+    outputSchema: { type: "object", properties: { account: { type: "string" }, items: { type: "array" }, call: { type: "integer" }, key: { type: "string" } } },
     inputSchema: {
       type: "object",
       required: ["params"],

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSlate, sketchSlate, slateResultShape, slateStartValues, type SlateDoc, type SlateJson } from "../../src/slate/index.js";
+import { parseSlate, printSlate, sketchSlate, slateResultShape, slateStartValues, type SlateDoc, type SlateJson } from "../../src/slate/index.js";
 
 const EMAILS = [
   { messageId: "m1", fromAddress: "billing@vercel.com", subject: "Your invoice", receivedTime: "2026-10-04 09:12", flags: { seen: true } },
@@ -45,3 +45,30 @@ describe("a tool run's result by its shape", () => {
     expect([...lines, ...nested].every(l => l.length <= 100)).toBe(true);
   });
 });
+
+describe("a run's then", () => {
+  const text = `<slate title="Mail">
+  <run name="inbox" tool="zoho-mail.zoho_list_emails" args={{ params: { account: "admin" } }} then='python3 inbox.py' every={60} />
+  <run name="board" resource="linear:linear://board" then="jq .items" />
+  <run name="df" cmd="df -h /" then={\`awk 'NR > 1 { print "{\\"use\\": \\"" $5 "\\"}" }'\`} />
+  <column>
+    <output run={$inbox} />
+  </column>
+</slate>`;
+
+  it("is a literal command on any kind of run, and prints back as written", () => {
+    const parsed = parseSlate(text);
+    expect(parsed.errors).toEqual([]);
+    const runs = parsed.document!.runs;
+    expect([runs["inbox"]!.then, runs["board"]!.then, runs["df"]!.then]).toEqual(["python3 inbox.py", "jq .items", `awk 'NR > 1 { print "{\\"use\\": \\"" $5 "\\"}" }'`]);
+    expect(parseSlate(printSlate(parsed.document!)).document!.runs).toEqual(runs);
+    expect(parseSlate(text.replace("then='python3 inbox.py'", "then={$script}")).errors).toMatchObject([{ code: "K700", prop: "then" }]);
+  });
+
+  it("leaves a text-only tool's record marked, and the sketch says text only", () => {
+    const d = parseSlate(text).document!;
+    const lines = sketchSlate(d, { ...slateStartValues(d), inbox: { state: "done", out: "# Inbox\n- 1 | ann | Hello", text: true, runs: 1 } }, { version: 2 }).split("\n");
+    expect(lines).toContain("  $inbox: done, text only");
+  });
+});
+
