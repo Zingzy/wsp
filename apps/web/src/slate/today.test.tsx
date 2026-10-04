@@ -366,3 +366,12 @@ describe("the diagram", () => {
     expect(flow()).toContain("class ship now");
   }, 30_000);
 });
+
+describe("prose in a section", () => {
+  it("stands bare under the section's head, never as a row of a card", () => {
+    const c = draw(`<slate><column><section title="Things the code does"><markdown value="- **Edge hits are never counted.** The worker records nothing." /></section></column></slate>`);
+    const md = c.querySelector('[data-slate-piece^="markdown"]')!;
+    expect(md).not.toBeNull();
+    expect(md.closest("[data-slate-card]")).toBeNull();
+  });
+});

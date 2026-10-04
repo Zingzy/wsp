@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The settings grammar's one rule for what stands where: a section, and the page around the sections, lay their
 // children out as soft cards whose rows are the children, with a hairline between rows. Pieces that are not rows
-// stand bare between the cards: a head, a chart or diagram, a meta line, a button under its card, a toolbar of
+// stand bare between the cards: a head, a chart or diagram, prose, a meta line, a button under its card, a toolbar of
 // controls, a table with its header over its own card, and a section of its own.
 import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
@@ -41,6 +41,7 @@ export function isCardRow(slate: SlateEngine, id: string): boolean {
     case "heading":
     case "chart":
     case "diagram":
+    case "markdown":
     case "button":
     case "table":
     case "bars":
