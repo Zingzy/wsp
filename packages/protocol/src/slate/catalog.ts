@@ -140,16 +140,15 @@ function sourceEntry(name: string): string {
 
 const RUNS = `runs: a command the slate starts with no turn of yours.
 <run name="check" cmd='gh api "repos/$REPO/issues/$ID"' env={{ REPO: $repo, ID: $id }} timeout={20} />
-<run name="tests" cmd="pnpm test $1" args={["cart"]} stream once />
 <run name="py">{\`python3 -c "print('both quotes, $HOME, {braces}')"\`}</run>
-cmd="..." or cmd='...' takes no escapes; for any text write cmd={"say \\"hi\\""} or the block above, which takes the text as written.
+cmd="..." or cmd='...' takes no escapes; for any text write cmd={"say \\"hi\\""} or the block above, taken as written.
 <run name="ci" cmd='gh secret set TOKEN --repo "$REPO"' stdin={$token} env={{ REPO: $repo }} on="host" />
 The command is literal, run by bash -c; values reach it only as env ($ID), args ($1) or stdin. A secret goes only on stdin or in the program's own env variable, never after a flag (W011).
-on: thread (default) or host. timeout: seconds, default 60, at most 600. every={60}: seconds, at least 10, while the slate is shown; always keeps it ticking. once: a start while running does nothing; else it restarts.
-start($run) in a handler or a <when>. The person approves each command once; until then it reads held. confirm="Stop it?" or confirm={\`Kill \${$name}?\`} asks on every start.
+on: host, else the thread. timeout: seconds, default 60, at most 600. every={60}: seconds, at least 10, while shown; always ticks hidden too. once: no restart while running.
+start($run) in a handler or <when>. The person approves each command once; until then it reads held. confirm="Stop it?" or confirm={\`Kill \${$name}?\`} asks every start.
 $run reads ${SLATE_RUN_FIELDS.join(" ")}; state is idle held running done failed cancelled; output is scrubbed of secrets.
-Chain: <when change={$id} do={start($check)} />, then <when done={$check} do={set($ok, $check.exit == 0)} />; done fires whatever the outcome.
-Tool and resource runs (tool="server.tool", resource="server:uri") arrive in phase 2.`;
+Chain: <when done={$check} do={set($ok, $check.exit == 0)} />; done fires on any outcome.
+<run name="list" tool="server.tool" args={{ id: $id }} /> calls an MCP tool, args as its JSON; resource="server:uri" reads one. slate_catalog <server> lists its tools. json is its structured result, else its text parsed. The person allows a server once per thread; a destructive tool asks every start. A secret in args returns as [secret:name].`;
 
 function functionsEntry(): string {
   const shown = new Set(["percent", "pct", "tokens", "usd", "duration", "ago", "until", "date", "plural", "word", "short", "num", "json", "contains", "orElse", "len", "first", "pluck"]);
