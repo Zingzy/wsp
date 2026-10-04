@@ -54,6 +54,7 @@ import {
   placeNoPicksLine,
   placeProvisionPaths,
   placeProvisioningLine,
+  EXEC_DEADLINE_EXIT,
   placeSyncingLine,
   pluginOffLine,
   pluginsKeptLine,
@@ -96,6 +97,7 @@ import {
   pendingNotJoinedFix,
   CHOOSE_FIX,
   type AgentsSignInEvent,
+  type SignInLine,
   type PlaceApplied,
   type PlacePendingEvent,
   type PlaceSetup,
@@ -156,7 +158,7 @@ import {
   shellQuote,
 } from "@wsp/protocol";
 import { GITHUB_TOKEN_ENV, LinkBackend, unlandFiles, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, envInput, keyFingerprint, machineServerPort, newSetupRun, pathLine, plainPath, putFiles, serversOutLines, unmergeServers, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage, type SetupRun } from "@wsp/engine";
-import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedFileIn, sharedOn } from "@wsp/catalog";
+import { CATALOG_AGENTS, keyEnvOf, loginSignIn, mintsToken, sharedFileIn, sharedOn } from "@wsp/catalog";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { openPlaceForward, type PlaceForward } from "./place-forward.js";
@@ -455,6 +457,9 @@ export interface PlaceRecording {
   /** Signs an agent in on that computer through the sign-in relay, as the app's own sign-in does: every step it
    * reaches, the page and the code among them, goes to `emit`. Absent, a machine sign-in fails its row. */
   signIn?(placeId: string, agent: string, emit: (e: AgentsSignInEvent) => void): Promise<{ leave(): void; stop?(): void }>;
+  /** The line an agent's sign-in on that computer runs, its status command and that command's environment among
+   * it, as the hand sign-in plans it. */
+  signInLine?(placeId: string, agent: string): Promise<SignInLine>;
   /** Records one folder of this computer's as a project on that computer, seeded with what its pick keeps, by the
    * add's own road. Answers the folder's row. Absent, a folder fails its row. */
   addFolder?(placeId: string, key: string, folder: RecipeFile["folders"][string]): Promise<PlaceProvisionRow>;
@@ -992,6 +997,8 @@ const INSTALLS = "installs";
 const FILES = "files";
 /** How long the anonymous read of a folder's repository gets on that computer. */
 const PROBE_MS = 30_000;
+/** How long an agent's own status command gets on that computer before a setup decides whether to sign it in. */
+const SIGNIN_STATUS_MS = 30_000;
 
 const firstLineOf = (e: unknown): string => (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
 
@@ -1027,6 +1034,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   /** The records as they stand, by id: `load` fills it and every write below keeps it, so the one road that must
    * answer without waiting (which backend a fork's record stands on) can. */
   const kept = new Map<string, PlaceRecord>();
+  /** What stands for each agent on that computer as its last report and this host's vault say, the one read the
+   * agent row and the setup's sign-ins both take. */
+  const signInsHere = (placeId: string): Record<string, AgentSignInState> | undefined => {
+    const report = kept.get(placeId)?.report;
+    return report === undefined ? undefined : signInsOf(report, opts.vault?.() ?? {});
+  };
   /** The backend each place offers, built once from what that place said about it and swapped when it says
    * something else; the link under it is the door's, so the same object serves a place that comes and goes. */
   const backends = new Map<string, MachineBackend>();
@@ -1565,17 +1578,36 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         },
       );
     };
-    const agentSignIn = (agent: string): void => signInThere(agent, `signins/${agent}`, CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent, "signins");
+    /** Whether an agent is signed in on that computer, by its own status command run there as the hand sign-in
+     * plans it; the logins that computer's daemon last listed only where that status cannot be read. */
+    const agentSignedIn = async (agent: string, plan: ProvisionPlan): Promise<boolean> => {
+      const check = loginSignIn(agent)?.status;
+      if (check !== undefined) {
+        const line = await recording.signInLine?.(placeId, agent).catch(() => undefined);
+        const res = line?.status === undefined ? undefined : await machine.exec(withEnvFromInput(`${pathLine(plan.path, plan.prefix)}\n${line.status} 2>&1`), { timeoutMs: SIGNIN_STATUS_MS, stdin: envInput(line.env ?? {}) }).catch(() => undefined);
+        // A status cut at its deadline said nothing about the login, so it is not read as signed out.
+        if (res !== undefined && res.exitCode !== EXEC_DEADLINE_EXIT) return check.signedIn(res.stdout, res.exitCode);
+      }
+      return signInsHere(placeId)?.[agent] === "signed-in";
+    };
+    /** An agent's sign-in on that computer, started only where it is not signed in there already: its login clears
+     * the one standing the moment it starts, so only the person's own Sign in may replace a login. */
+    const agentSignIn = async (agent: string, plan: ProvisionPlan): Promise<void> => {
+      const label = CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent;
+      if (await agentSignedIn(agent, plan)) return landRow({ id: `signins/${agent}`, label, outcome: "present", note: SIGNED_IN_THERE, step: "signins" });
+      signInThere(agent, `signins/${agent}`, label, "signins");
+    };
 
     /** The sign-ins step: an agent that signs in from the vault reads its token there now, and every turn there is
-     * handed it; an agent that signs in on that computer is started and left waiting on the person. */
-    const signIns = async (): Promise<PlaceProvisionRow[]> => {
+     * handed it; an agent that signs in on that computer and is not signed in there yet is started and left waiting
+     * on the person. */
+    const signIns = async (plan: ProvisionPlan): Promise<PlaceProvisionRow[]> => {
       const out: PlaceProvisionRow[] = [];
       for (const [agent, row] of Object.entries(picks.agents)) {
         if (sync !== undefined && !sync.changes.some(c => c.key === `agents/${agent}` && (c.how === "added" || c.how === "changed"))) continue;
         const label = CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent;
         if ((row.signin ?? "vault") === "machine") {
-          agentSignIn(agent);
+          await agentSignIn(agent, plan);
           continue;
         }
         out.push(vaultSignIn(agent, vault()) === "vault-key" ? { id: `signins/${agent}`, label, outcome: "present", note: FROM_THE_VAULT } : { id: `signins/${agent}`, label, outcome: "failed", note: noVaultTokenLine(agent) });
@@ -1596,6 +1628,20 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     let githubKnown: boolean | undefined;
     void githubReady.then(ok => (githubKnown = ok));
 
+    /** gh's own status there, over the vault's token on the run's input where one is given, else its own login. */
+    const ghStatus = (plan: ProvisionPlan, token?: string): Promise<ExecResult> => {
+      const cmd = `${pathLine(plan.path, plan.prefix)}\ngh auth status --hostname github.com 2>&1`;
+      return token === undefined ? machine.exec(cmd, { timeoutMs: GITHUB_MS }) : machine.exec(withEnvFromInput(cmd), { timeoutMs: GITHUB_MS, stdin: envInput({ [GITHUB_TOKEN_ENV]: token }) });
+    };
+    /** gh's login on that computer through the sign-in relay, started only where gh is not signed in there already. */
+    const githubSignIn = async (plan: ProvisionPlan): Promise<void> => {
+      if ((await ghStatus(plan).catch(() => undefined))?.exitCode === 0) {
+        githubSettled(true);
+        return landRow({ id: GITHUB_ROW, label: "GitHub", outcome: "present", note: SIGNED_IN_THERE, step: "github" });
+      }
+      signInThere(GITHUB_CLI, GITHUB_ROW, "GitHub", "github", ok => githubSettled(ok));
+    };
+
     /** The GitHub step: gh put on where nothing else puts it, then signed in by the row's word: the vault's token
      * on the run's input and nowhere else, gh's own login on that computer through the sign-in relay, or skipped. */
     const github = async (plan: ProvisionPlan): Promise<PlaceProvisionRow[]> => {
@@ -1610,7 +1656,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         return gh;
       }
       if (githubWord === "machine") {
-        signInThere(GITHUB_CLI, GITHUB_ROW, "GitHub", "github", ok => githubSettled(ok));
+        await githubSignIn(plan);
         return gh;
       }
       const token = vault()[GITHUB_TOKEN_ENV];
@@ -1618,7 +1664,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         githubSettled(false);
         return [...gh, { id: GITHUB_ROW, label: "GitHub", outcome: "failed", note: NO_GITHUB_TOKEN_LINE }];
       }
-      const res = await machine.exec(withEnvFromInput(`${pathLine(plan.path, plan.prefix)}\ngh auth status --hostname github.com 2>&1`), { timeoutMs: GITHUB_MS, stdin: envInput({ [GITHUB_TOKEN_ENV]: token }) });
+      const res = await ghStatus(plan, token);
       // gh names the token's scopes on its status, which the row carries so a person reads what a clone may reach.
       const scopes = ghStatusOf(res.stdout).scopes?.join(", ");
       githubSettled(res.exitCode === 0);
@@ -1721,16 +1767,16 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     const run = newSetupRun();
     try {
-      // A sign-in the last run left waiting is run again for a fresh page and code: the pty behind the old one is gone.
-      for (const w of rerun) {
-        if (w.row === GITHUB_ROW) signInThere(GITHUB_CLI, GITHUB_ROW, "GitHub", "github", ok => githubSettled(ok));
-        else agentSignIn(w.row.slice("signins/".length));
-      }
       if (picks.configs.github !== undefined && githubWord === "vault" && vault()[GITHUB_TOKEN_ENV] === undefined) await wiring.githubToken?.().catch(() => undefined);
       await undo();
       const planned = await provisioner.setup(picks, { home }, sync?.steps);
       // A sync puts on only the plugins it added; the rest are there, and their install would run again.
       const plan = sync === undefined || planned.plugins === undefined ? planned : { ...planned, plugins: planned.plugins.filter(p => sync.moved.has(p.id)) };
+      // A sign-in the last run left waiting is run again for a fresh page and code: the pty behind the old one is gone.
+      for (const w of rerun) {
+        if (w.row === GITHUB_ROW) await githubSignIn(plan);
+        else await agentSignIn(w.row.slice("signins/".length), plan);
+      }
       const engine = (s: EngineStep) => () => provisioner.step(machine, plan, s, run, stageOf(s), { home });
       const floor = await step("floor", engine("floor"));
       if (floor?.failed === true) return await end(floorFailedLine(floor.rows));
@@ -1752,7 +1798,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
             return "stop";
           },
         },
-        { name: "signins", after: ["agents"], lanes: [], light: true, run: () => go(step("signins", signIns)) },
+        { name: "signins", after: ["agents"], lanes: [], light: true, run: () => go(step("signins", () => signIns(plan))) },
         { name: "skills", after: [], lanes: [FILES], run: () => go(step("skills", engine("skills"))) },
         { name: "github", after: ghIsCli ? ["clis"] : [], lanes: picks.configs.github === undefined || githubWord === "skip" ? [] : [INSTALLS], run: () => go(step("github", () => github(plan))) },
         { name: "clis", after: ["agents"], lanes: [INSTALLS], run: () => go(step("clis", engine("clis"))) },
@@ -2499,10 +2545,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     settingsAt: placeId => settingsHeld.get(placeId) ?? {},
 
-    signInsAt: placeId => {
-      const report = kept.get(placeId)?.report;
-      return report === undefined ? undefined : signInsOf(report, opts.vault?.() ?? {});
-    },
+    signInsAt: signInsHere,
 
     async loginLanded(placeId, agent) {
       const file = sharedLoginFile(agent);
