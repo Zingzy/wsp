@@ -88,12 +88,16 @@ describe("the wsp skill", () => {
     expect(instructions(true).slice(0, INSTRUCTIONS_KEPT)).toContain(`${ANOTHER_AGENT_WORDS}.`);
   });
 
-  it("says once a slate is written a request to see lands there, the person's result stays there, and long scripts live in a file", () => {
+  it("says once a slate is written a request to see lands there, the person's result stays there, and the slate's own code lives in its files", () => {
     expect(THREAD_SLATE_WORDS).toContain("Once the slate is written, a request to see something lands there.");
+    expect(THREAD_SLATE_WORDS).toContain("Build and read it with the slate tools, never wsp from a shell, which may be another install.");
     const text = wspSkill();
     const section = text.slice(text.indexOf("### slate\n"), text.indexOf("\n## ", text.indexOf("### slate\n")));
     for (const words of [
-      "a request to see something lands there", "gets its result there unless they ask in the chat", "Keep a long script in a file in the folder",
+      "a request to see something lands there", "gets its result there unless they ask in the chat",
+      "Code only the slate uses goes in a `<file name=\"x.py\">`, run as `\"$SLATE_DIR/x.py\"`; code the project already has is called where it is.",
+      "give a `<secret name=\"token\" />` input; never ask them to paste it into a file or the chat",
+      "Build and read it with the slate tools (`slate_catalog`, `slate_write`, `slate_state`, `slate_read`), never `wsp` from a shell",
       "one heading per section", "status and last-checked lines small and muted", "actions at the end of their row with one primary per section",
       "mono only for figures, ids, times and paths", "every live number with its window and unit", "nothing centered but a lone figure or card",
     ]) expect(section, words).toContain(words);
