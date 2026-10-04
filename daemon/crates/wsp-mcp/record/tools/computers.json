@@ -423,6 +423,9 @@
                         "note": {
                           "type": "string"
                         },
+                        "fix": {
+                          "type": "string"
+                        },
                         "ms": {
                           "type": "integer",
                           "minimum": 0
@@ -1337,6 +1340,9 @@
                           "$ref": "#/properties/computers/items/properties/setup/properties/steps/items/properties/step"
                         },
                         "note": {
+                          "type": "string"
+                        },
+                        "fix": {
                           "type": "string"
                         },
                         "ms": {

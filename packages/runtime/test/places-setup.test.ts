@@ -24,6 +24,9 @@ import {
   noAgentLine,
   pendingHeldLine,
   noPendingRefusal,
+  placeHoldsProjectsRefusal,
+  pluginsKeptLine,
+  setupRowFix,
   placeProvisionPaths,
   placeProvisioningLine,
   placeWord,
@@ -82,6 +85,10 @@ function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number
       const frame = raw as unknown as Record<string, unknown>;
       if (frame["op"] === "machine.backend") return void c.say({ id: frame["id"], ok: true, ...FACTS });
       if (frame["op"] === "machine.capacity") return void c.say({ id: frame["id"], ok: true, cores: 2, memMb: 7600, memRoomMb: 6000, machineMemMb: 4096, diskFreeBytes: 19 * 1024 ** 3, images: [], machines: { running: 0, paused: 0 } });
+      if (frame["op"] === "place.leave") {
+        cmds.push("place.leave");
+        return void c.say({ id: frame["id"], ok: true, swept: ["/root/.wsp"] });
+      }
       if (frame["op"] !== "exec") return;
       const cmd = String(frame["cmd"] ?? "");
       cmds.push(cmd);
@@ -184,7 +191,7 @@ function signIns() {
 }
 
 /** A host with the setup wired, serving, and the road an add takes onto a computer that joins over the link. */
-async function hosting(o: { provision: PlaceProvisioner; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
+async function hosting(o: { provision: PlaceProvisioner; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; leave?: PlaceWiring["leave"]; runOver?: PlaceWiring["runOver"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
   const hostKey = o.hostKey ?? newPlaceKeyPair();
   const joined: { placeId: string; pair: PlaceKeyPair }[] = [];
   const store = o.store ?? memoryStore();
@@ -202,6 +209,8 @@ async function hosting(o: { provision: PlaceProvisioner; recipes?: RecipeShelf; 
       ...wiring(hostKey, undefined, o.update),
       provision: o.provision,
       ...(o.undo !== undefined ? { undo: o.undo } : {}),
+      ...(o.leave !== undefined ? { leave: o.leave } : {}),
+      ...(o.runOver !== undefined ? { runOver: o.runOver } : {}),
       install:
         o.install ??
         (async (req, stage) => {
@@ -293,6 +302,105 @@ function shelf(file: RecipeFile, items: Record<string, string>) {
 
 const rowOf = async (placeId: string): Promise<PlaceView> => (await runtime!.places!.list(Date.now())).find(p => p.id === placeId)!;
 const ended = (frames: readonly PlaceSetupEvent[]): PlaceSetupEvent[] => frames.filter(f => f.end !== undefined);
+
+describe("the add's own steps", () => {
+  it("says how long the join took once that computer dialled in", async () => {
+    await hosting({ provision: provisioner().wired });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    const job = runtime!.places!.adds().find(a => a.placeId === place.id);
+    expect(job?.steps.find(s => s.step === "join")).toMatchObject({ state: "done", ms: expect.any(Number) });
+  });
+});
+
+describe("a remove of a computer set up with picks", () => {
+  it("takes the plugins wsp put on off before the sweep and the projects its folders made with it, the folders left", async () => {
+    const cmds: string[] = [];
+    const p = provisioner({
+      rows: { plugins: [{ id: "plugins/superpowers@market", label: "superpowers@market", outcome: "installed" }, { id: "plugins/had@market", label: "had@market", outcome: "present" }] },
+      undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: [`${c.kind}/${c.name}`], owner: `${c.kind}/${c.name}`, cmd: `take-off-${c.name}` })),
+    });
+    const { store } = await hosting({ provision: p.wired, cmds });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, plugins: { "superpowers@market": {}, "had@market": {} }, folders: { app: { from: "/Users/dev/app", keep: [] } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    // The project the folders step made there, as its row reads once it landed.
+    await runtime!.projects.add({ source: "https://github.com/acme/app.git", on: place.id, name: "app" });
+    const record = (await store.get("places", place.id)) as PlaceRecord;
+    const rows = record.applied!.rows.filter(r => r.id !== "folders/app");
+    await store.put("places", place.id, { ...record, applied: { ...record.applied!, rows: [...rows, { id: "folders/app", label: "app", outcome: "installed", step: "folders" }] } });
+    cmds.length = 0;
+    const removed = await runtime!.places!.remove(place.id);
+    expect(removed.removed).toBe(true);
+    // Only the plugin wsp put on, and before the sweep takes the folder its agent may run from.
+    expect(p.undone.at(-1)?.removed).toEqual(["plugins/superpowers@market"]);
+    expect(cmds.filter(c => c.startsWith("take-off-") || c === "place.leave")).toEqual(["take-off-superpowers@market", "place.leave"]);
+    expect(await runtime!.projects.list()).toEqual([]);
+    expect(removed.swept).toEqual(["plugin superpowers@market", "/root/.wsp", "project app, its folder there left as it is"]);
+  });
+
+  it("takes the plugins off over the login where the link is down, and names each one it could not take off", async () => {
+    const p = provisioner({
+      rows: { plugins: [{ id: "plugins/superpowers@market", label: "superpowers@market", outcome: "installed" }, { id: "plugins/stuck@market", label: "stuck@market", outcome: "installed" }, { id: "plugins/had@market", label: "had@market", outcome: "present" }] },
+      undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: [`${c.kind}/${c.name}`], owner: `${c.kind}/${c.name}`, cmd: `take-off-${c.name}` })),
+    });
+    const over: { login: string; script: string }[] = [];
+    const order: string[] = [];
+    await hosting({
+      provision: p.wired,
+      runOver: async (login, script) => {
+        over.push({ login: login.ssh, script });
+        order.push(script);
+        return script.includes("stuck") ? { exitCode: 1, stdout: "", stderr: "Plugin is in use" } : { exitCode: 0, stdout: "", stderr: "" };
+      },
+      leave: async () => {
+        order.push("leave");
+        return ["/opt/wsp"];
+      },
+    });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, plugins: { "superpowers@market": {}, "stuck@market": {}, "had@market": {} } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    for (const ws of sockets.splice(0)) ws.close();
+    await until(async () => (await rowOf(place.id)).present === false);
+    const removed = await runtime!.places!.remove(place.id);
+    // Over the login the install used, before the leave takes the folder the agent runs from; never the one it had.
+    expect(over.map(o => [o.login, o.script])).toEqual([
+      ["root@10.0.0.9", "take-off-superpowers@market"],
+      ["root@10.0.0.9", "take-off-stuck@market"],
+    ]);
+    expect(order.at(-1)).toBe("leave");
+    expect(removed.swept).toEqual(["plugin superpowers@market", "/opt/wsp"]);
+    expect(removed.note).toContain(pluginsKeptLine("spoo", ["stuck@market"]));
+  });
+
+  it("names a plugin the link could not take off rather than saying nothing of it", async () => {
+    const cmds: string[] = [];
+    const p = provisioner({
+      rows: { plugins: [{ id: "plugins/stuck@market", label: "stuck@market", outcome: "installed" }] },
+      undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: [`${c.kind}/${c.name}`], owner: `${c.kind}/${c.name}`, cmd: `take-off-${c.name}` })),
+    });
+    await hosting({ provision: p.wired, cmds, answer: cmd => (cmd.startsWith("take-off-") ? { exitCode: 1 } : undefined) });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, plugins: { "stuck@market": {} } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const removed = await runtime!.places!.remove(place.id);
+    expect(removed.swept).toEqual(["/root/.wsp"]);
+    expect(removed.note).toBe(pluginsKeptLine("spoo", ["stuck@market"]));
+  });
+
+  it("still refuses a project the person recorded there by hand, and takes nothing off for it", async () => {
+    const cmds: string[] = [];
+    const p = provisioner({ rows: { plugins: [{ id: "plugins/superpowers@market", label: "superpowers@market", outcome: "installed" }] }, undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: [`${c.kind}/${c.name}`], owner: `${c.kind}/${c.name}`, cmd: `take-off-${c.name}` })) });
+    await hosting({ provision: p.wired, cmds });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, plugins: { "superpowers@market": {} } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await runtime!.projects.add({ source: "https://github.com/acme/theirs.git", on: place.id, name: "theirs" });
+    cmds.length = 0;
+    await expect(runtime!.places!.remove(place.id)).rejects.toThrow(placeHoldsProjectsRefusal("spoo", ["theirs"]));
+    expect(cmds).toEqual([]);
+  });
+});
 
 describe("an update of a computer already set up", () => {
   it("asks the updater every time, with a binary only where the computer is behind, and runs its setup again", async () => {
@@ -426,6 +534,8 @@ describe("a computer added with its picks", () => {
       ["github", "github"],
       ["folders/gone", "folders"],
     ]);
+    // Each says what to do beside what happened, in the words of the computer it is on.
+    expect(row.applied?.rows.filter(r => r.outcome === "failed").map(r => r.fix)).toEqual([setupRowFix({ step: "github" }, "spoo"), setupRowFix({ step: "folders" }, "spoo")]);
     expect(placeWord(row, null).word).toBe("Needs you");
     expect(ended(frames)[0]?.end).toBe("needs-you");
   });

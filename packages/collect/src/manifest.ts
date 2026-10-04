@@ -4,7 +4,7 @@
 // the same shape with bring and choice filled in is saved as the recipe file,
 // so one schema covers both a fresh collection and a saved recipe.
 import { z } from "zod";
-import { issuesLine, LoginChoice, ToolPin } from "@wsp/protocol";
+import { issuesLine, LoginChoice, ServerSignIn, ToolPin } from "@wsp/protocol";
 
 export const RUNGS = ["identity", "shell", "toolchains", "tools", "agents", "logins"] as const;
 export const Rung = z.enum(RUNGS);
@@ -61,6 +61,8 @@ const Fields = z.object({
   font: z.string().min(1).optional(),
   /** Only on a zsh or bash rc row: the files it reads on a bare source line, `~`-relative under home and absolute outside it; the pack wraps each line whose file it does not carry so the machine skips it without an error. */
   sources: z.array(z.string().min(1)).optional(),
+  /** Only on an MCP server row: how the server signs in, read off its definition. */
+  signIn: ServerSignIn.optional(),
 });
 
 export const ManifestEntry = Fields.superRefine((e, ctx) => {
