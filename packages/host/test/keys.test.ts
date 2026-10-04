@@ -616,10 +616,11 @@ describe("terminalIO", () => {
     // The hint wraps at the frame's width, so the tail of the file's words may land under the bar.
     expect(out).toContain("◆  Solari API key\n┃  No SOLARI_API_KEY in the environment, ./.env, or the .env beside your state file (~/.wsp/.env");
     expect(out).toMatch(/┃  console\.getsolari\.com\n┃  _\n┗  enter next   esc cancel/);
-    // The question is wrapped at the frame's width, so the path may push "so wsp stops asking?" under the bar.
-    expect(out).toContain(`◆  Save the key to ${join(home, ".env")} so wsp`);
-    expect(out).toMatch(/◆  Save the key to [^\n]*\n(┃    [^\n]*\n)?┃  ○ Yes \/ ● No\n┗  ← → change   y n answer   enter choose   esc cancel/);
-    expect(out).toMatch(/◇  Save the key to [^\n]*\n(│    [^\n]*\n)?│  No\n/);
+    // The question is wrapped at the frame's width, and the path is one word, so it and what follows it may each
+    // land under the bar, as far down as the temp folder's length pushes them.
+    expect(out.replaceAll("\n┃    ", " ")).toContain(`◆  Save the key to ${join(home, ".env")} so wsp stops asking?`);
+    expect(out).toMatch(/◆  Save the key to[^\n]*\n(┃    [^\n]*\n)*┃  ○ Yes \/ ● No\n┗  ← → change   y n answer   enter choose   esc cancel/);
+    expect(out).toMatch(/◇  Save the key to[^\n]*\n(│    [^\n]*\n)*│  No\n/);
     expect(out).not.toContain(SOLARI);
     expect(existsSync(join(home, ".env"))).toBe(false);
   });
