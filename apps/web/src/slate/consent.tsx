@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The person's approval before a slate's command first runs (07, "Consent"; 11, "The consent sheet"): the row under
-// the header while a run is held, and the 440 px sheet that shows the whole command text, each environment name with
-// the value it carries now (a secret as dots), the computer and the folder, the timeout and who wrote it, with
-// Don't, Run once and Always in this thread. A run that names `confirm` asks in the destructive tier every time.
+// the header while a run is held, and the 440 px sheet that shows the host's ask: the whole command text, each
+// environment name with the value it carries now (a secret as dots), the computer and the folder, the timeout and who
+// wrote it, with Don't, Run once and Always in this thread. A run that names `confirm` asks in the destructive tier.
 import { useState } from "react";
-import type { SlateJson } from "@wsp/protocol";
-import { isSlateBinding } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { RUNS, type SlateEngine } from "./engine.js";
-import { isRunRecord, isSecretHandle, type SlateApproval, type SlateAsk, type SlateRunDecl } from "./model.js";
-import { ownPath } from "./paths.js";
+import { cn } from "../lib/utils.js";
+import { isRunRecord, type SlateApproval, type SlateAsk } from "./model.js";
 import { usePieceVersion } from "./SlateView.js";
 
 export const CONSENT_WORDS = {
@@ -23,93 +21,27 @@ export const CONSENT_WORDS = {
   always: "Always in this thread",
   run: "Run",
   wrote: "Written by the agent in this thread",
-  noCommand: "This run is no longer in the slate.",
 } as const;
 
-/** Where the window says a run goes when the host's ask did not: the thread's computer and folder. */
-export interface ConsentWhere {
-  computer?: string;
-  folder?: string;
-}
-
-export interface ConsentRow {
-  name: string;
-  value: string;
-  secret: boolean;
-}
-
-export interface ConsentContent {
-  run: string;
-  cmd: string;
-  env: ConsentRow[];
-  args: string[];
-  stdin?: string;
-  where: string;
-  wrote: string;
-  confirm?: string;
-  key?: string;
-}
-
-const text = (value: SlateJson | undefined): string => (value === undefined || value === null ? "" : typeof value === "string" ? value : JSON.stringify(value));
-const dots = (len: number | undefined): string => `${"•".repeat(Math.min(24, Math.max(4, len ?? 8)))}${len === undefined ? "" : ` (${len} characters)`}`;
-
-/** The handle an env binding names when it binds a secret whole, else undefined. */
-function secretBound(engine: SlateEngine, value: unknown): SlateJson | undefined {
-  if (!isSlateBinding(value)) return undefined;
-  const path = value.bind.trim();
-  if (ownPath(path) === undefined || !engine.isSecret(path)) return undefined;
-  const handle = engine.reader()(path);
-  return isSecretHandle(handle) ? handle : { secret: true, set: false };
-}
-
-/** What the sheet shows: the host's ask where a press brought one, the window's own reading of the document else.
- * A secret is dots with its length whoever filled the row. */
-export function consentOf(engine: SlateEngine, run: string, ask: SlateAsk | undefined, here: ConsentWhere): ConsentContent | undefined {
-  const decl: SlateRunDecl | undefined = engine.document?.runs?.[run];
-  const cmd = ask?.cmd ?? decl?.cmd;
-  if (cmd === undefined) return undefined;
-  const names = [...new Set([...Object.keys(decl?.env ?? {}), ...Object.keys(ask?.env ?? {})])];
-  const env = names.map(name => {
-    const handle = secretBound(engine, decl?.env?.[name]);
-    if (handle !== undefined) return { name, value: isSecretHandle(handle) && handle.set ? dots(handle.len) : "(empty)", secret: true };
-    return { name, value: ask?.env?.[name] ?? text(engine.resolve(decl?.env?.[name])), secret: false };
-  });
-  const args = ask?.args ?? (Array.isArray(decl?.args) ? decl.args.map(arg => text(engine.resolve(arg))) : []);
-  const stdinText = ask?.stdin ?? (decl?.stdin === undefined ? undefined : text(engine.resolve(decl.stdin)));
-  const stdin = stdinText === undefined || stdinText === "" ? undefined : stdinText.split("\n")[0];
-  const computer = ask?.on ?? here.computer ?? "this computer";
-  const folder = ask?.cwd ?? (decl?.cwd === undefined ? here.folder : decl.cwd.startsWith("/") || here.folder === undefined ? decl.cwd : `${here.folder.replace(/\/$/, "")}/${decl.cwd}`);
-  const timeout = ask?.timeout ?? decl?.timeout ?? 60;
-  return {
-    run,
-    cmd,
-    env,
-    args,
-    ...(stdin !== undefined ? { stdin } : {}),
-    where: `on ${computer}${folder === undefined ? "" : `, in ${folder}`}, ${timeout} s at most`,
-    wrote: `${CONSENT_WORDS.wrote}${ask?.turn === undefined ? "" : `, turn ${ask.turn}`}.`,
-    ...(decl?.confirm !== undefined ? { confirm: decl.confirm } : {}),
-    ...(ask?.key !== undefined ? { key: ask.key } : {}),
-  };
-}
-
-/** The slate's held runs in document order, each with its command's first line. */
-export function heldRuns(engine: SlateEngine): { run: string; cmd: string }[] {
-  const runs = engine.document?.runs ?? {};
-  return Object.entries(runs).flatMap(([run, decl]) => {
+/** The slate's held runs in document order, each with the host's sheet where the record carries one. */
+export function heldRuns(engine: SlateEngine, asks: readonly SlateAsk[]): { run: string; cmd: string; ask: SlateAsk | undefined }[] {
+  return Object.entries(engine.document?.runs ?? {}).flatMap(([run, decl]) => {
     const record = engine.values[run];
-    return isRunRecord(record) && record.state === "held" ? [{ run, cmd: (decl.cmd ?? decl.tool ?? decl.uri ?? run).split("\n")[0] ?? run }] : [];
+    if (!isRunRecord(record) || record.state !== "held") return [];
+    const ask = asks.find(a => a.run === run);
+    const cmd = ask?.cmd ?? (decl.kind === "cmd" ? decl.cmd : decl.kind === "tool" ? `${decl.server}.${decl.tool}` : decl.uri);
+    return [{ run, cmd: cmd.split("\n")[0] ?? cmd, ask }];
   });
 }
 
 /** One row per held run under the header: the command cut to one line in mono, Review and Don't. */
-export function HeldRuns({ engine, review, refuse }: { engine: SlateEngine; review(run: string): void; refuse(run: string): void }) {
+export function HeldRuns({ engine, asks, review, refuse }: { engine: SlateEngine; asks: readonly SlateAsk[]; review(run: string): void; refuse(ask: SlateAsk): void }) {
   usePieceVersion(engine, RUNS);
-  const held = heldRuns(engine);
+  const held = heldRuns(engine, asks);
   if (held.length === 0) return null;
   return (
     <div className="flex shrink-0 flex-col gap-1 px-3 pb-1">
-      {held.map(({ run, cmd }) => (
+      {held.map(({ run, cmd, ask }) => (
         <div key={run} data-slate-held={run} className="flex h-7 min-w-0 items-center gap-2 text-[13px]">
           <span className="shrink-0 text-muted-foreground">{CONSENT_WORDS.wants}</span>
           <code className="min-w-0 flex-1 truncate font-mono text-xs tabular-nums text-foreground" title={cmd}>
@@ -118,7 +50,7 @@ export function HeldRuns({ engine, review, refuse }: { engine: SlateEngine; revi
           <Button variant="outline" size="xs" onClick={() => review(run)}>
             {CONSENT_WORDS.review}
           </Button>
-          <Button variant="ghost" size="xs" onClick={() => refuse(run)}>
+          <Button variant="ghost" size="xs" disabled={ask === undefined} onClick={() => (ask === undefined ? undefined : refuse(ask))}>
             {CONSENT_WORDS.dont}
           </Button>
         </div>
@@ -127,7 +59,10 @@ export function HeldRuns({ engine, review, refuse }: { engine: SlateEngine; revi
   );
 }
 
-export function ConsentSheet({ content, answer, onClose }: { content: ConsentContent; answer(scope: SlateApproval): Promise<unknown>; onClose(): void }) {
+const dots = (value: string): boolean => /^•+/.test(value);
+
+export function ConsentSheet({ ask, answer, onClose }: { ask: SlateAsk; answer(scope: SlateApproval): Promise<unknown>; onClose(): void }) {
+  const env = Object.entries(ask.env);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | undefined>(undefined);
   const decide = (scope: SlateApproval) => {
@@ -142,47 +77,49 @@ export function ConsentSheet({ content, answer, onClose }: { content: ConsentCon
     );
   };
   const body = (
-    <div data-slate-consent={content.run} className="flex min-w-0 flex-col gap-3 text-[13px] leading-5">
+    <div data-slate-consent={ask.run} className="flex min-w-0 flex-col gap-3 text-[13px] leading-5">
       <pre data-slate-consent-cmd className="max-h-[calc(12*1rem+1rem)] overflow-auto whitespace-pre-wrap break-all rounded-md bg-accent px-2.5 py-2 font-mono text-xs leading-4 tabular-nums text-foreground">
-        {content.cmd}
+        {ask.cmd}
       </pre>
-      {content.env.length === 0 && content.args.length === 0 && content.stdin === undefined ? null : (
+      {env.length === 0 && ask.args.length === 0 && ask.stdin === undefined ? null : (
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-xs leading-4 tabular-nums">
-          {content.env.map(row => (
-            <div key={row.name} data-slate-consent-env={row.name} className="contents">
-              <dt className="text-muted-foreground">{row.name}</dt>
-              <dd className="min-w-0 break-all text-foreground">{row.value}</dd>
+          {env.map(([name, value]) => (
+            <div key={name} data-slate-consent-env={name} className="contents">
+              <dt className="text-muted-foreground">{name}</dt>
+              <dd className={cn("min-w-0 break-all", dots(value) ? "text-muted-foreground" : "text-foreground")}>{value}</dd>
             </div>
           ))}
-          {content.args.map((arg, at) => (
+          {ask.args.map((arg, at) => (
             <div key={`arg-${at}`} className="contents">
               <dt className="text-muted-foreground">${at + 1}</dt>
               <dd className="min-w-0 break-all text-foreground">{arg}</dd>
             </div>
           ))}
-          {content.stdin === undefined ? null : (
+          {ask.stdin === undefined ? null : (
             <div className="contents">
               <dt className="text-muted-foreground">stdin</dt>
-              <dd className="min-w-0 truncate text-foreground">{content.stdin}</dd>
+              <dd className="min-w-0 truncate text-foreground">{ask.stdin}</dd>
             </div>
           )}
         </dl>
       )}
       <p className="text-muted-foreground">
-        <span data-slate-consent-where className="text-foreground">{content.where}</span>
+        <span data-slate-consent-where className="text-foreground">
+          on {ask.computer}, in {ask.folder}, {ask.timeoutS} s at most
+        </span>
         <br />
-        {content.wrote}
+        {CONSENT_WORDS.wrote}.
       </p>
       {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}
     </div>
   );
-  if (content.confirm !== undefined) {
+  if (ask.confirm !== undefined) {
     return (
       <AlertDialog open onOpenChange={open => (open ? undefined : onClose())}>
         <AlertDialogPopup>
           <AlertDialogHeader>
             <AlertDialogTitle>{CONSENT_WORDS.title}</AlertDialogTitle>
-            <AlertDialogDescription>{content.confirm}</AlertDialogDescription>
+            <AlertDialogDescription>{ask.confirm}</AlertDialogDescription>
           </AlertDialogHeader>
           <div className="px-5 pt-2">{body}</div>
           <AlertDialogFooter>

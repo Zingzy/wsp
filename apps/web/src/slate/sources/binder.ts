@@ -6,14 +6,14 @@
 import { foldThreads, threadKeyOf, type SlateJson, type ThreadView } from "@wsp/protocol";
 import type { SlateEngine } from "../engine.js";
 import { splitPath } from "../paths.js";
-import type { SlateApi } from "../wire.js";
+import type { SlateApi, SlateRecord } from "../wire.js";
 import { SLATE_SOURCE_VIEWS } from "./index.js";
 import { ASK_HOST, type AppState, type SourceContext } from "./source.js";
 
 export interface BinderDeps {
   app(): AppState;
   subscribeApp(listener: () => void): () => void;
-  slates(): { lastTurn: Record<string, import("@wsp/protocol").TurnResult | undefined>; record: import("@wsp/protocol").SlateView | null };
+  slates(): { lastTurn: Record<string, import("@wsp/protocol").TurnResult | undefined>; record: SlateRecord | null };
   subscribeSlates(listener: () => void): () => void;
   api(): SlateApi | null;
   now?(): number;

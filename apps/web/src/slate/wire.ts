@@ -19,10 +19,13 @@ export interface SlateRecord {
   shownOnce?: boolean;
   canUndo?: boolean;
   empty?: "none" | "cleared" | "rewound-before";
+  /** Every held run's sheet, oldest first. */
+  asks: SlateAsk[];
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const EMPTY = new Set(["none", "cleared", "rewound-before"]);
+const EMPTY: readonly unknown[] = ["none", "cleared", "rewound-before"] satisfies NonNullable<SlateRecord["empty"]>[];
+const isEmptyWord = (v: unknown): v is NonNullable<SlateRecord["empty"]> => EMPTY.includes(v);
 
 class WireFault extends Error {}
 const fault = (op: string): never => {
@@ -44,7 +47,8 @@ function recordOf(raw: unknown): { record: SlateRecord | null; newer?: number } 
     version: slate["version"],
     ...(typeof slate["shownOnce"] === "boolean" ? { shownOnce: slate["shownOnce"] } : {}),
     ...(typeof slate["canUndo"] === "boolean" ? { canUndo: slate["canUndo"] } : {}),
-    ...(typeof empty === "string" && EMPTY.has(empty) ? { empty: empty as SlateRecord["empty"] & string } : {}),
+    ...(isEmptyWord(empty) ? { empty } : {}),
+    asks: Array.isArray(slate["asks"]) ? slate["asks"].flatMap(ask => askOf(ask) ?? []) : [],
   };
   const schema = isObject(doc) ? doc["schema"] : undefined;
   if (typeof schema === "number" && schema > SLATE_SCHEMA) return { record: { ...base, document: null }, newer: schema };
@@ -55,16 +59,16 @@ const strings = (v: unknown): Record<string, string> | undefined =>
   isObject(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === "string" ? x : JSON.stringify(x)])) : undefined;
 
 function askOf(v: unknown): SlateAsk | undefined {
-  if (!isObject(v) || typeof v["run"] !== "string") return undefined;
-  const str = (k: string) => (typeof v[k] === "string" ? { [k]: v[k] } : {});
-  const env = strings(v["env"]);
+  if (!isObject(v)) return undefined;
+  const { key, run, cmd, computer, folder, timeoutS, why, stdin, confirm } = v;
+  if (typeof key !== "string" || typeof run !== "string" || typeof cmd !== "string" || typeof computer !== "string" || typeof folder !== "string" || typeof timeoutS !== "number") return undefined;
   return {
-    run: v["run"],
-    ...str("key"), ...str("cmd"), ...str("stdin"), ...str("on"), ...str("cwd"),
-    ...(env !== undefined ? { env } : {}),
-    ...(Array.isArray(v["args"]) ? { args: v["args"].map(a => (typeof a === "string" ? a : JSON.stringify(a))) } : {}),
-    ...(typeof v["timeout"] === "number" ? { timeout: v["timeout"] } : {}),
-    ...(typeof v["turn"] === "number" ? { turn: v["turn"] } : {}),
+    key, run, kind: "cmd", cmd, computer, folder, timeoutS,
+    why: typeof why === "string" ? why : "",
+    env: strings(v["env"]) ?? {},
+    args: Array.isArray(v["args"]) ? v["args"].map(a => (typeof a === "string" ? a : JSON.stringify(a))) : [],
+    ...(typeof stdin === "string" ? { stdin } : {}),
+    ...(typeof confirm === "string" ? { confirm } : {}),
   };
 }
 
@@ -77,7 +81,7 @@ export interface SlateApi {
   get(threadId: string): Promise<{ record: SlateRecord | null; newer?: number }>;
   state(threadId: string, values: Record<string, SlateJson>): Promise<{ version: number }>;
   event(threadId: string, ask: SlateEventAsk): Promise<SlateEventAnswer>;
-  approve(threadId: string, run: string, scope: SlateApproval, key?: string): Promise<void>;
+  approve(threadId: string, key: string, scope: SlateApproval): Promise<void>;
   cancel(threadId: string, run: string): Promise<void>;
   shown(threadId: string): Promise<void>;
   /** The slate as text, the sketch the agent reads (10). */
@@ -87,18 +91,6 @@ export interface SlateApi {
   subscribe(threadId: string, sources: readonly string[]): Promise<void>;
   unsubscribe(threadId: string, sources: readonly string[]): Promise<void>;
   resolve(threadId: string, paths: readonly string[]): Promise<Record<string, unknown>>;
-}
-
-function recordOf(raw: unknown): { record: SlateRecord | null; newer?: number } {
-  const slate = (raw as { slate?: unknown } | null)?.slate ?? raw;
-  if (slate === null || slate === undefined) return { record: null };
-  const parsed = SlateRecordShape.parse(slate);
-  const doc = parsed.document;
-  const schema = doc !== null && typeof doc === "object" ? (doc as { schema?: unknown }).schema : undefined;
-  const base = { values: parsed.values, version: parsed.version, ...(parsed.shownOnce !== undefined ? { shownOnce: parsed.shownOnce } : {}), ...(parsed.canUndo !== undefined ? { canUndo: parsed.canUndo } : {}), ...(parsed.empty !== undefined ? { empty: parsed.empty } : {}) };
-  if (typeof schema === "number" && schema > SLATE_SCHEMA) return { record: { ...base, document: null }, newer: schema };
-  const checked = doc === null ? null : SlateDocShape.safeParse(doc);
-  return { record: { ...base, document: checked?.success === true ? (doc as SlateDoc) : null } };
 }
 
 export function slateApi(c: Requester): SlateApi {
@@ -112,7 +104,7 @@ export function slateApi(c: Requester): SlateApi {
       const held = askOf(raw["ask"]);
       return { outcome: raw["outcome"], ...(typeof raw["said"] === "string" ? { said: raw["said"] } : {}), ...(held !== undefined ? { ask: held } : {}) };
     },
-    approve: async (threadId, run, scope, key) => void (await c.request("slates.approve", { threadId, run, scope, ...(key !== undefined ? { key } : {}) })),
+    approve: async (threadId, key, scope) => void (await c.request("slates.approve", { threadId, key, scope })),
     cancel: async (threadId, run) => void (await c.request("slates.cancel", { threadId, run })),
     shown: async threadId => void (await c.request("slates.shown", { threadId })),
     sketch: async threadId => {

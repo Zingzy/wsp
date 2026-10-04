@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The path grammar the renderer walks itself: a head name, then ".field" and "[index]" steps, as the expression
 // language writes them. Sources answer the steps after the head; the dependency sets compare paths as text.
-import { isSlateBinding, isSlateFormat, type SlateJson, type SlatePropValue } from "@wsp/protocol";
+import { getSlateValue, isSlateBinding, isSlateFormat, parseSlateOwnPath, setSlateValue, type SlateJson, type SlatePropValue } from "@wsp/protocol";
 import { dependencies } from "./expr.js";
 import type { SlatePiece } from "./model.js";
 
@@ -24,37 +24,14 @@ export function splitPath(path: string): { head: string; steps: (string | number
 
 /** An own path, "$name" then steps: the value's name and the steps into it. */
 export function ownPath(path: string): { name: string; steps: (string | number)[] } | undefined {
-  if (!path.startsWith("$")) return undefined;
-  const split = splitPath(path.slice(1));
-  return split === undefined ? undefined : { name: split.head, steps: split.steps };
+  const own = parseSlateOwnPath(path);
+  return own === undefined ? undefined : { name: own.name, steps: own.segs };
 }
 
-export function getOwn(values: Readonly<Record<string, SlateJson>>, path: string): SlateJson | undefined {
-  const own = ownPath(path);
-  if (own === undefined || !Object.prototype.hasOwnProperty.call(values, own.name)) return undefined;
-  return walk(values[own.name], own.steps);
-}
+export const getOwn = (values: Readonly<Record<string, SlateJson>>, path: string): SlateJson | undefined => getSlateValue(values, path);
 
-/** A copy of the values with one path written; a step through something that is not there makes it. */
-export function setOwn(values: Readonly<Record<string, SlateJson>>, path: string, value: SlateJson): Record<string, SlateJson> {
-  const own = ownPath(path);
-  if (own === undefined || UNSAFE.has(own.name)) return { ...values };
-  const put = (at: SlateJson | undefined, steps: readonly (string | number)[]): SlateJson => {
-    if (steps.length === 0) return value;
-    const [step, ...rest] = steps as [string | number, ...(string | number)[]];
-    if (typeof step === "number") {
-      const list = Array.isArray(at) ? [...at] : [];
-      const i = step < 0 ? list.length + step : step;
-      list[i] = put(list[i], rest);
-      return list.map(v => v ?? null);
-    }
-    if (UNSAFE.has(step)) return at ?? null;
-    const record = at !== null && typeof at === "object" && !Array.isArray(at) ? { ...at } : {};
-    record[step] = put(record[step], rest);
-    return record;
-  };
-  return { ...values, [own.name]: put(values[own.name], own.steps) };
-}
+/** A copy of the values with one path written; a path that cannot be written leaves them as they were. */
+export const setOwn = (values: Readonly<Record<string, SlateJson>>, path: string, value: SlateJson): Record<string, SlateJson> => setSlateValue(values, path, value) ?? { ...values };
 
 const UNSAFE = new Set(["__proto__", "constructor", "prototype"]);
 

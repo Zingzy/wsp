@@ -4,7 +4,6 @@
 // state is the panel's own Empty, quiet, with no spinner while the record is on its way.
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useMemo } from "react";
-import { hereName, threadKeyOf } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
@@ -12,8 +11,8 @@ import { ScrollArea } from "../components/ui/scroll-area.js";
 import { useSelectedThreadId, useStore } from "../protocol/store.js";
 import { requestComposerFocus } from "../shell/shellRequests.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
-import { ConsentSheet, consentOf, HeldRuns, type ConsentWhere } from "./consent.js";
-import { DOC, type SlateEngine } from "./engine.js";
+import { ConsentSheet, HeldRuns } from "./consent.js";
+import { DOC } from "./engine.js";
 import { isRunRecord } from "./model.js";
 import { SLATE_VIEWS } from "./pieces/index.js";
 import { bindSources } from "./sources/binder.js";
@@ -74,8 +73,8 @@ function ThreadSlate({ threadId }: { threadId: string }) {
   return (
     <div data-slate-surface={threadId} className="flex min-h-0 flex-1 flex-col">
       <SlateHeader threadId={threadId} entry={entry} />
-      <HeldRuns engine={bundle.engine} review={run => askConsent(threadId, { run })} refuse={run => void slateLink(threadId).approve(run, "refuse")} />
-      <Consent threadId={threadId} engine={bundle.engine} />
+      <HeldRuns engine={bundle.engine} asks={entry.record?.asks ?? []} review={run => askConsent(threadId, { run })} refuse={ask => void slateLink(threadId).approve(ask.key, "refuse")} />
+      <Consent threadId={threadId} />
       <ScrollArea className="min-h-0 flex-1">
         <div className="px-3 pb-3 pt-1">
           <SlateView engine={bundle.engine} views={SLATE_VIEWS} runner={bundle.runner} sender={bundle.sender} />
@@ -122,25 +121,17 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   );
 }
 
-/** Where the thread runs, for a sheet the host's ask did not fill: this computer's name and the thread's folder. */
-function useWhere(threadId: string): ConsentWhere {
-  const computer = useStore(s => hereName(s.places));
-  const folder = useStore(s => {
-    for (const rows of Object.values(s.sessions)) for (const row of rows) if (threadKeyOf(row) === threadId) return row.cwd;
-    return undefined;
-  });
-  return { ...(computer !== "" ? { computer } : {}), ...(folder !== undefined ? { folder } : {}) };
-}
-
-/** The consent sheet over the tab, while a press held a run or the person pressed Review. */
-function Consent({ threadId, engine }: { threadId: string; engine: SlateEngine }) {
+/** The consent sheet over the tab, while a press held a run or the person pressed Review: the host's ask, off the
+ * press's answer or the record; a held run the record has no ask for yet is fetched again. */
+function Consent({ threadId }: { threadId: string }) {
   const asking = useSlateStore(s => s.asking[threadId]);
-  const where = useWhere(threadId);
-  if (asking === undefined) return null;
-  const content = consentOf(engine, asking.run, asking.ask, where);
-  const close = () => askConsent(threadId, undefined);
-  if (content === undefined) return null;
-  return <ConsentSheet content={content} answer={scope => slateLink(threadId).approve(asking.run, scope, content.key)} onClose={close} />;
+  const asks = useSlateStore(s => s.byThread[threadId]?.record?.asks);
+  const ask = asking?.ask ?? asks?.find(a => a.run === asking?.run);
+  useEffect(() => {
+    if (asking !== undefined && ask === undefined) void loadSlate(threadId);
+  }, [asking, ask, threadId]);
+  if (ask === undefined) return null;
+  return <ConsentSheet ask={ask} answer={scope => slateLink(threadId).approve(ask.key, scope)} onClose={() => askConsent(threadId, undefined)} />;
 }
 
 /** No slate yet, cleared, rewound to before it, or newer than this build: the panel's own empty state. */

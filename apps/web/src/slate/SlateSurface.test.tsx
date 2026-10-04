@@ -3,28 +3,28 @@
 // the tab opened once on the agent's first write, and state pushes folded in place.
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionView, Slate, SlateView as SlateRecord } from "@wsp/protocol";
+import type { SessionView } from "@wsp/protocol";
 import type { Api, ProtocolEvent } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { useRightPanelStore } from "../rightPanelStore";
 import { SlateSurface } from "./SlateSurface";
 import { useSlateStore } from "./store";
-import type { SlateApi } from "./wire";
+import { slate } from "./testing";
+import type { SlateApi, SlateRecord } from "./wire";
 
-const DOC: Slate = {
-  schema: 1,
+const DOC = slate({
   root: "root",
   title: "Progress",
-  state: { step: "one" },
+  values: { step: { start: "one" } },
   pieces: {
     root: { type: "column", children: ["said", "where"] },
     said: { type: "text", props: { value: "First version" } },
-    where: { type: "text", props: { value: { format: "on step ${state.step}" } } },
+    where: { type: "text", props: { value: { format: "on step ${$step}" } } },
   },
-};
+});
 
 function record(over: Partial<SlateRecord> = {}): SlateRecord {
-  return { threadId: "t1", workspaceId: "ws", version: 1, document: DOC, state: { step: "one" }, annotations: [], consents: {}, problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over };
+  return { version: 1, document: DOC, values: { step: "one" }, shownOnce: true, canUndo: false, asks: [], ...over };
 }
 
 const ROW: SessionView = { id: "s1", workspaceId: "ws", harness: "claude", status: "completed", threadId: "t1" };
@@ -40,7 +40,10 @@ function host(answers: (SlateRecord | null | { newer: number })[]): SlateApi & {
       return answer !== null && "newer" in answer ? { record: record({ document: null }), newer: answer.newer } : { record: answer };
     }),
     state: vi.fn(async () => ({ version: 2 })),
-    act: vi.fn(async () => ({ outcome: "started" as const, said: "Sent" })),
+    event: vi.fn(async () => ({ outcome: "started", said: "Sent" })),
+    approve: vi.fn(async () => {}),
+    cancel: vi.fn(async () => {}),
+    sketch: vi.fn(async () => ""),
     shown: vi.fn(async () => {
       calls.push("shown");
     }),
@@ -59,7 +62,7 @@ function select(slates: SlateApi, threadId: string | null) {
 const event = (e: Record<string, unknown>) => act(() => useStore.getState().applyEvent(e as unknown as ProtocolEvent));
 
 beforeEach(() => {
-  useSlateStore.setState({ byThread: {}, lastTurn: {} });
+  useSlateStore.setState({ byThread: {}, asking: {}, lastTurn: {} });
   useRightPanelStore.setState({ byWorkspaceId: {} });
 });
 afterEach(cleanup);
@@ -92,9 +95,9 @@ describe("the Slate tab", () => {
   });
 
   it("says a slate newer than this build needs a newer wsp, and draws none of it", async () => {
-    select(host([{ newer: 2 }]), "t1");
+    select(host([{ newer: 3 }]), "t1");
     render(<SlateSurface />);
-    expect(await screen.findByText(/needs a newer wsp \(schema 2\)/)).toBeTruthy();
+    expect(await screen.findByText(/needs a newer wsp \(schema 3\)/)).toBeTruthy();
     expect(screen.queryByText("First version")).toBeNull();
   });
 
@@ -110,12 +113,12 @@ describe("the Slate tab", () => {
     expect(slates.calls.filter(c => c === "get")).toHaveLength(2);
   });
 
-  it("folds a slate.state push into what is drawn without a fetch", async () => {
+  it("folds a slate.values push into what is drawn without a fetch", async () => {
     const slates = host([record()]);
     select(slates, "t1");
     render(<SlateSurface />);
     expect(await screen.findByText("on step one")).toBeTruthy();
-    event({ type: "slate.state", workspaceId: "ws", threadId: "t1", version: 2, values: { "state.step": "two" } });
+    event({ type: "slate.values", workspaceId: "ws", threadId: "t1", version: 2, values: { $step: "two" } });
     expect(await screen.findByText("on step two")).toBeTruthy();
     expect(slates.calls.filter(c => c === "get")).toHaveLength(1);
   });
@@ -137,7 +140,7 @@ describe("the Slate tab", () => {
   });
 
   it("does not open the tab for a write to a thread the centre does not show", async () => {
-    const slates = host([record({ threadId: "t2", shownOnce: false })]);
+    const slates = host([record({ shownOnce: false })]);
     select(slates, "t1");
     event({ type: "session.slate", workspaceId: "ws", sessionId: "s2", threadId: "t2", cause: "set", version: 1, by: "agent", pieces: ["root"] });
     await waitFor(() => expect(slates.calls).toContain("get"));

@@ -29,10 +29,11 @@ export interface SlateEventAnswer {
 export interface SlateLink {
   event(ask: SlateEventAsk): Promise<SlateEventAnswer>;
   writeState(values: Record<string, SlateJson>): Promise<unknown>;
-  approve(run: string, scope: SlateApproval, key?: string): Promise<unknown>;
+  /** Answers a held run's sheet by its approval key. */
+  approve(key: string, scope: SlateApproval): Promise<unknown>;
   cancel(run: string): Promise<unknown>;
-  /** Opens the consent sheet on a held run. */
-  consent(run: string, ask?: SlateAsk): void;
+  /** Opens the consent sheet on a run a press held. */
+  consent(ask: SlateAsk): void;
   fill(text: string): void;
   /** Opens or focuses a right panel pane; false where the pane cannot open here. */
   pane?(kind: string): boolean;
@@ -100,7 +101,8 @@ export class StateSender {
    * holds the handle alone (08, "Where the plaintext lives"). An empty text clears it. */
   async secret(path: string, text: string): Promise<void> {
     await this.#link().writeState({ [path]: text });
-    this.#engine.settle(path, { secret: true, set: text !== "", len: text.length });
+    this.#engine.settle(path, { secret: true, set: text !== "", len: text.length, at: Date.now() });
+    this.#engine.invalidate([path]);
   }
 
   async #send(path: string, value: SlateJson): Promise<void> {
@@ -147,7 +149,7 @@ export class ActionRunner {
       };
       try {
         const answer = await this.#link().event(ask);
-        if (answer.ask !== undefined) this.#link().consent(answer.ask.run, answer.ask);
+        if (answer.ask !== undefined) this.#link().consent(answer.ask);
         said = answer.said ?? outcomeWord(answer.outcome);
       } catch (error) {
         return { refused: error instanceof Error ? error.message : String(error) };
