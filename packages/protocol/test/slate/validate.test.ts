@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSlate, parseSlatePatch, validateSlate, SLATE_CODES } from "../../src/slate/index.js";
+import { parseSlate, parseSlatePatch, slateCatalog, validateSlate, SLATE_CODES } from "../../src/slate/index.js";
 import { SPEC_EXAMPLES } from "./examples.js";
 
 const wrap = (pieces: string, decls = ""): string => `<slate title="T">\n${decls}\n  <column>\n    ${pieces}\n  </column>\n</slate>`;
@@ -70,6 +70,7 @@ const FIXTURES: [string, string][] = [
   ["W003", wrap(`<bars label="x" items={machine.history.cpu} name={item.x} value={item.y} />`)],
   ["W004", wrap(`<text>a \u2014 b</text>`)],
   ["W011", wrap(`<text>x</text>`, `  <secret name="t" />\n  <run name="r" cmd='vercel ls --token "$T"' env={{ T: $t }} />`)],
+  ["W012", wrap(`<text>Market closed \u00b7 Weekend close</text>`)],
 ];
 
 describe("the validator", () => {
@@ -103,6 +104,33 @@ describe("the validator", () => {
     expect(all(wrap(`<text>x</text>`, `  <secret name="t" />\n  <run name="r" cmd="gh x --body=$T" env={{ T: $t }} />`))).toContain("W011");
     expect(all(wrap(`<text>x</text>`, `  <secret name="t" />\n  <run name="r" cmd="vercel ls -p $T" env={{ T: $t }} />`))).toContain("W011");
     expect(all(wrap(`<text>x</text>`, `  <secret name="t" />\n  <run name="r" cmd='printf "%s" "$T" > f' env={{ T: $t }} />`))).not.toContain("W011");
+  });
+
+  it("warns W012 on words joined by a middle dot, a bullet or a bar, in a literal, a format or a formula", () => {
+    const decls = `  <value name="a" start="x" />\n  <value name="xs" start={["a", "b"]} />`;
+    const joined = [
+      `<text>Market closed \u00b7 Weekend close</text>`,
+      `<facts><fact label="Purity" value="24K \u00b7 99.9% pure" /></facts>`,
+      `<text>Open \u2022 Closed</text>`,
+      `<text>Spot | Ask</text>`,
+      "<text>{`${$a} \u00b7 ${$a}`}</text>",
+      `<text>Closed \u00b7 {$a}</text>`,
+      `<text>{join($xs, " \u00b7 ")}</text>`,
+      `<text>{join($xs, " | ")}</text>`,
+    ];
+    for (const piece of joined) {
+      const w = parseSlate(wrap(piece, decls)).warnings.filter(x => x.code === "W012");
+      expect(w, piece).toHaveLength(1);
+      expect(w[0]!.message, piece).toContain("give each its own piece, or join with a comma");
+    }
+    const clean = [
+      `<text>Market closed, weekend close</text>`,
+      `<text>{$xs | take(1) | join(", ")}</text>`,
+      `<markdown>| a | b |\n| - | - |\n| 1 | 2 |</markdown>`,
+      `<text>\u2022 first</text>`,
+    ];
+    for (const piece of clean) expect(all(wrap(piece, decls)), piece).not.toContain("W012");
+    expect(slateCatalog()).toContain("Layout separates things, never a mark");
   });
 
   it("refuses always without every as K703 and takes it with every (correction 2)", () => {

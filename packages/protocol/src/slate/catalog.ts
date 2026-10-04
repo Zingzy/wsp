@@ -71,6 +71,7 @@ function index(): string {
     "Every piece: id, when={cond}. tone: default muted good warning bad info accent. emphasis: normal strong quiet.",
     "On section, column and grid: pad none tight normal loose; surface=\"inset\" sets the group on the app's card ground; align start center end lines children up across it; not set, they fill its width.",
     "icon=\"<lucide name>\" (slate_catalog icons). bars compare categories; time is a chart.",
+    "Layout separates things, never a mark: no \"·\", \"•\" or \" | \" between words; give each its own piece (facts, chips, a row) or join with a comma.",
     "Sources, read only:",
     ...["thread", "usage", "cost", "time", "git", "pr"].map(sourceLine),
     "Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once> <when change={$path} or done={$run} do={steps}>",

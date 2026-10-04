@@ -41,6 +41,21 @@ function literalType(v: SlateJson): SlateType {
 
 const isBound = (v: SlatePropValue | undefined): boolean => isSlateBinding(v) || isSlateFormat(v);
 const looksLikePath = (s: string): boolean => { const m = /^([a-z]+)\.[a-zA-Z_.[\]0-9]+$/.exec(s); return m !== null && m[1]! in SLATE_SOURCES; };
+const JOINED = /\S\s*([·•])\s*\S|\S (\|) \S|^\s*([·•])\s*$|^ +(\|) +$/;
+const QUOTED = /"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g;
+const quoted = (expr: string): string[] => [...expr.matchAll(QUOTED)].map(m => (m[1] ?? m[2] ?? m[3] ?? "").replace(/\$\{[^}]*\}/g, "x"));
+/** The mark a prop's words are joined by, read off its literal, its format's runs and the quoted texts in its formulas. */
+function joiningMark(v: SlatePropValue): string | undefined {
+  const parts = isSlateFormat(v) ? parseSlateFormat(v.format).parts : [];
+  const texts = typeof v === "string" ? [v]
+    : isSlateBinding(v) ? quoted(v.bind)
+    : [parts.map(p => (typeof p === "string" ? p : "x")).join(""), ...parts.flatMap(p => (typeof p === "string" ? [] : quoted(p.expr)))];
+  for (const t of texts) {
+    const m = JOINED.exec(t);
+    if (m !== null) return m.slice(1).find(x => x !== undefined);
+  }
+  return undefined;
+}
 const isRecordValue = (v: unknown): v is Record<string, SlatePropValue> => typeof v === "object" && v !== null && !Array.isArray(v) && !isBound(v as SlatePropValue);
 
 class Validator {
@@ -489,6 +504,8 @@ class Validator {
     const name = w.prop!.split(".").at(-1)!;
     const enumWords = Array.isArray(ps.type) ? (ps.type as readonly string[]) : undefined;
     if (v === null) return;
+    const mark = type === "markdown" || ps.binds === "state" ? undefined : joiningMark(v);
+    if (mark !== undefined) this.add("W012", `${name} joins words with "${mark}"; the kit separates things by layout, never a mark: give each its own piece, or join with a comma`, w, "separate pieces (facts, chips, a row) or a comma");
     if (isBound(v)) {
       if (ps.binds === "no") { this.add("T305", `${name} takes a literal, not a formula`, w); return; }
       if (ps.binds === "state") {
