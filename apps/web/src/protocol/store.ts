@@ -11,7 +11,7 @@ import type { Launch, SidebarProjectSnapshot } from "../adapt/view-model.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { failureOf, type Failure } from "./failure.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
-import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
+import { lastOpen, rememberOpen, type LastOpen } from "./lastWorkspace.js";
 import { claimKept, claiming, claimsAnswered, keepCreations, keptCreations, letGo, own } from "./keptCreations.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
@@ -24,6 +24,7 @@ import { CREATE_UNHEARD, imageBuildFrame } from "../shell/creationLog.js";
 import { requestNewThread } from "../shell/shellRequests.js";
 import { useSignInStore } from "../shell/signInStore.js";
 import { newId, useComposerDraftStore } from "../components/chat/composerDraftStore.js";
+import { useComposerFilesStore } from "../components/chat/composerFiles.js";
 import { useComposerOptionsStore } from "../components/chat/composerOptionsStore.js";
 import type { ComposerStart } from "../components/chat/composerPicks.js";
 
@@ -350,10 +351,17 @@ function openThreadOf(
   return { threadId: null, fresh: false, toast: noSuchThreadLine() };
 }
 
-/** The workspace the person had open last, when the list still has it. */
-function remembered(workspaces: readonly WorkspaceView[]): string | undefined {
-  const id = lastWorkspaceId();
-  return id !== undefined && workspaces.some(w => w.id === id) ? id : undefined;
+/** The workspace and thread the person had open last, when the list still has the workspace. */
+function remembered(workspaces: readonly WorkspaceView[]): LastOpen | undefined {
+  const last = lastOpen();
+  return last !== undefined && workspaces.some(w => w.id === last.workspaceId) ? last : undefined;
+}
+
+/** The remembered thread as an address, for a load with none of its own, while the rows still carry it: one deleted
+ * since is nothing to say a word about, as a link the person followed would be. */
+function keptThread(last: LastOpen | undefined, rows: readonly SessionView[]): AppAddress | undefined {
+  if (last?.threadId === undefined || !rows.some(r => r.workspaceId === last.workspaceId && r.threadId === last.threadId)) return undefined;
+  return { workspaceId: last.workspaceId, threadId: last.threadId };
 }
 
 /** The sidebar's top row: the one fallback for a selection with nothing to go on. */
@@ -389,8 +397,11 @@ function handOver(key: string, workspaceId: string): void {
   drafts.rekeyQueue(key, workspaceId);
   const creation = useStore.getState().creations.find(c => c.key === key);
   if (creation?.queued === true && creation.asked !== undefined) {
-    if (creation.opens === undefined) drafts.enqueue(workspaceId, creation.asked, "head");
-    else openOn(workspaceId, { ...creation, asked: creation.asked, opens: creation.opens });
+    if (creation.opens === undefined) {
+      const files = useComposerFilesStore.getState().unqueue(key);
+      const row = drafts.enqueue(workspaceId, creation.asked, "head");
+      if (files.length > 0) useComposerFilesStore.setState(s => ({ queued: { ...s.queued, [row]: files } }));
+    } else openOn(workspaceId, { ...creation, asked: creation.asked, opens: creation.opens });
   }
   const draft = drafts.drafts[key];
   if (draft !== undefined) {
@@ -411,6 +422,7 @@ function handOver(key: string, workspaceId: string): void {
 /** What waited for a machine that will never come goes with its creation, and so does everything handOver would have
  * moved, since nothing reads a dead creation's key again. */
 function dropWaiting(key: string): void {
+  useComposerFilesStore.getState().drop(key);
   const drafts = useComposerDraftStore.getState();
   for (const row of drafts.queues[key] ?? []) drafts.removeQueued(key, row.id);
   useComposerDraftStore.setState(s => {
@@ -726,6 +738,7 @@ export const useStore = create<State>((set, get) => {
     noteGap() { set(s => ({ gaps: s.gaps + 1 })); },
     bind(api) {
       set({ api });
+      useComposerFilesStore.setState({ kept: api.sessionAttachment });
       capabilitiesSaid = false;
       sessionsSaid.clear();
       api.subscribe(e => get().applyEvent(e));
@@ -793,7 +806,11 @@ export const useStore = create<State>((set, get) => {
       if (!get().api) return null;
       // Unique across reloads: a draft or a waiting message persisted under a key must never meet another creation.
       const key = `${CREATION_PREFIX}${newId()}`;
-      if (asked?.queuedFrom !== undefined) movePicks(asked.queuedFrom, key);
+      if (asked?.queuedFrom !== undefined) {
+        movePicks(asked.queuedFrom, key);
+        // The page's files wait with the message, under the creation's key, until handOver queues it on the workspace.
+        useComposerFilesStore.getState().queue(asked.queuedFrom, key);
+      }
       const said =
         asked === undefined
           ? {}
@@ -887,8 +904,9 @@ export const useStore = create<State>((set, get) => {
       // store from nothing, and what the person is reading is recorded there rather than here.
       const address = readAddress();
       // A project's home stands in the centre with nothing picked on purpose; a refresh fills the gap only when no home does.
-      const selectedId = s.selectedId ?? (s.projectHome !== null ? null : (addressed(address, workspaces) ?? remembered(workspaces) ?? firstRow({ workspaces, statuses: s.statuses, sessions })));
-      const open = openThreadOf(address, selectedId, s.selectedThreadId, rows);
+      const last = remembered(workspaces);
+      const selectedId = s.selectedId ?? (s.projectHome !== null ? null : (addressed(address, workspaces) ?? last?.workspaceId ?? firstRow({ workspaces, statuses: s.statuses, sessions })));
+      const open = openThreadOf(address ?? keptThread(last, rows), selectedId, s.selectedThreadId, rows);
       set({
         workspaces,
         sessions,
@@ -1306,8 +1324,9 @@ export const useStore = create<State>((set, get) => {
           }));
           return;
         case "session.held":
-          // A thread is spoken for before its harness is up, from this window or any other client: its row is read now.
-          void get().reloadSessions(e.workspaceId);
+          // A thread is spoken for before its harness is up, from this window or any other client: its row is read
+          // now, and the send it answers, by its request id, has its own tile go once the row is in.
+          void get().reloadSessions(e.workspaceId).then(() => (e.requestId === undefined ? undefined : get().launched(e.workspaceId, e.requestId)));
           return;
         case "session.start": {
           // The next send resumes this id; the runtime persists it, the view learns it here.
@@ -1317,7 +1336,7 @@ export const useStore = create<State>((set, get) => {
             workspaces: s.workspaces.map(remember),
             statuses: s.statuses[e.workspaceId] ? { ...s.statuses, [e.workspaceId]: remember(s.statuses[e.workspaceId]!) } : s.statuses,
           }));
-          void get().reloadSessions(e.workspaceId).then(() => get().launched(e.workspaceId));
+          void get().reloadSessions(e.workspaceId).then(() => (e.requestId === undefined ? undefined : get().launched(e.workspaceId, e.requestId)));
           // The runtime re-asks the binary at a start, so a Claude Code upgrade on the machine shows within its TTL.
           void get().loadHarnesses(e.workspaceId);
           return;
@@ -1381,9 +1400,10 @@ export const useStore = create<State>((set, get) => {
   };
 });
 
-// Every road to a workspace (a click, a chord, a finished creation, the boot fallback) lands here; a creation row is not a workspace yet.
+// Every road to a workspace or a thread (a click, a chord, a finished creation, the boot fallback) lands here; a creation row is not a workspace yet.
 useStore.subscribe((s, prev) => {
-  if (s.selectedId !== prev.selectedId && s.selectedId !== null && s.workspaces.some(w => w.id === s.selectedId)) rememberWorkspace(s.selectedId);
+  if (s.selectedId === prev.selectedId && s.selectedThreadId === prev.selectedThreadId) return;
+  if (s.selectedId !== null && s.workspaces.some(w => w.id === s.selectedId)) rememberOpen(s.selectedId, s.selectedThreadId);
 });
 // Every change to the record, the host's or a pick painted ahead of it, is what the next load paints first.
 useStore.subscribe((s, prev) => {

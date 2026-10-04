@@ -12,7 +12,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type HarnessCatalog, type PlaceView, type Preferences, type ProjectView, type WorkspaceView } from "@wsp/protocol";
 import { Shell } from "../src/App.js";
-import type { Api } from "../src/protocol/client.js";
+import type { Api, StartSessionOptions } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { useComposerOptionsStore } from "../src/components/chat/composerOptionsStore.js";
@@ -399,5 +399,34 @@ describe("New thread's send", () => {
     await waitFor(() => expect(started).not.toEqual([]));
     await act(() => new Promise(r => setTimeout(r, 300)));
     expect(started).toEqual(["ws_new: what do you think about yams?"]);
+  });
+
+  it("carries the image the first message was sent with, on the start and on the person's row", async () => {
+    const starts: StartSessionOptions[] = [];
+    const api: Api = {
+      ...fakeApi([WSP, SPOO], CURRENT),
+      createWorkspace: async () => MADE,
+      startSession: async o => {
+        starts.push(o);
+        return { id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running", prompt: o.prompt, startedAt: 0 };
+      },
+    };
+    URL.createObjectURL = vi.fn(() => "blob:wsp/shot");
+    URL.revokeObjectURL = vi.fn();
+    useStore.setState({ api: null, conn: "live", workspaces: [], statuses: {}, creations: [], sessions: {}, ready: false, selectedId: null, selectedThreadId: null, projectHome: null, freshThread: false, preferences: CURRENT, projects: [], places: [], landings: {} });
+    useStore.getState().bind(api);
+    render(<Shell />);
+    await waitFor(() => expect(useStore.getState().ready).toBe(true));
+    act(() => useStore.setState({ projects: [WSP, SPOO], places: PLACES }));
+    act(() => useStore.getState().openProjectHome(SPOO.id));
+    await waitFor(() => expect(document.querySelector("[data-k=project-home]")).not.toBeNull());
+    const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4])], "shot.png", { type: "image/png" });
+    fireEvent.paste(document.querySelector<HTMLElement>("[data-chat-composer-surface]")!, { clipboardData: { files: [png], items: [], getData: () => "" } });
+    await waitFor(() => expect(document.querySelectorAll("[data-composer-files] [data-chat-image]")).toHaveLength(1));
+    await typeInto(composerEditor(), "what does this show?");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(starts).toHaveLength(1));
+    expect(starts[0]!.attachments).toEqual([{ mediaType: "image/png", bytes: "iVBORw0KGgoBAgME", name: "shot.png" }]);
+    await waitFor(() => expect(document.querySelector("[data-chat-image-row=true] [data-chat-image='shot.png'] img")).not.toBeNull());
   });
 });

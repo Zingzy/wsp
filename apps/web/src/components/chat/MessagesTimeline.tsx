@@ -1001,9 +1001,9 @@ export const PERSON_BUBBLE = "relative max-w-[80%] rounded-2xl bg-message p-3 te
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  // The pixels are this tab's, held under the request id its own send carried; a transcript from a reload or another
-  // client has the runtime's records and draws their words.
-  const files = useSentFiles(row.message.requestId);
+  // The pixels are this tab's, held under the request id its own send carried, or the host's, which keeps every
+  // message's images until its thread goes.
+  const files = useSentFiles(row.message);
 
   return (
     <div className="group flex flex-col items-end gap-1">
