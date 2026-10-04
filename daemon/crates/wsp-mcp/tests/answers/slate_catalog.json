@@ -1,0 +1,50 @@
+{
+  "tool": "slate_catalog",
+  "cases": [
+    {
+      "case": "the index",
+      "arguments": {},
+      "replies": {
+        "slates.catalog": "{\"id\":1,\"ok\":true,\"text\":\"pieces:\\n  meter label value max tone\\n  input \u0085 \\\"name\\\" 🧪\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"pieces:\\n  meter label value max tone\\n  input \\u0085 \\\"name\\\" 🧪\"}],\"structuredContent\":{\"text\":\"pieces:\\n  meter label value max tone\\n  input \\u0085 \\\"name\\\" 🧪\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "slates.catalog"
+        }
+      ]
+    },
+    {
+      "case": "one entry",
+      "arguments": {
+        "name": "meter"
+      },
+      "replies": {
+        "slates.catalog": "{\"id\":1,\"ok\":true,\"text\":\"meter: a number against its max\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"meter: a number against its max\"}],\"structuredContent\":{\"text\":\"meter: a number against its max\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "slates.catalog",
+          "name": "meter"
+        }
+      ]
+    },
+    {
+      "case": "no such entry",
+      "arguments": {
+        "name": "meeter"
+      },
+      "replies": {
+        "slates.catalog": "{\"id\":1,\"ok\":false,\"error\":\"the catalog has no meeter: did you mean meter?\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the catalog has no meeter: did you mean meter?\"}],\"structuredContent\":{\"error\":\"the catalog has no meeter: did you mean meter?\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "slates.catalog",
+          "name": "meeter"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "cloudOff": {
+    "name": "slate_write",
+    "description": "Writes this thread's slate, a live panel for the person.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "document": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "check": {
+          "type": "boolean"
+        },
+        "if_version": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "warnings": {},
+        "problems": {}
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "slate_write",
+    "description": "Writes this thread's slate, a live panel for the person.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "document": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "check": {
+          "type": "boolean"
+        },
+        "if_version": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "warnings": {},
+        "problems": {}
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}
