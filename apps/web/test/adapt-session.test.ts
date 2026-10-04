@@ -305,6 +305,7 @@ describe("deriveSession: tool classification", () => {
     ["command_execution", { command: "pnpm test" }, { itemType: "command_execution", command: "pnpm test" }],
     ["file_change", { changes: [{ kind: "edit", path: "src/a.ts" }, { kind: "add", path: "src/b.ts" }] }, { itemType: "file_change", changedFiles: ["src/a.ts", "src/b.ts"] }],
     ["web_search", { query: "vitest snapshots" }, { itemType: "web_search", detail: "vitest snapshots" }],
+    ["spawn_agent", { prompt: "find every caller\nand list them" }, { itemType: "collab_agent_tool_call", detail: "find every caller\nand list them" }],
   ])("a Codex turn's %s row reads as the same kind of call the Claude name reads as", (toolName, input, expected) => {
     const m = deriveSession([start, tool(toolName, input)]);
     expect(m.workEntries[0]).toMatchObject({ label: toolName, ...expected });
