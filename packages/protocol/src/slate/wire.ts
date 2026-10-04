@@ -100,6 +100,11 @@ export const SlatesWriteParams = z.object({
   /** Validate and sketch, store nothing. */
   check: z.boolean().optional(),
   ifVersion: z.number().int().optional(),
+  /** With check: values to rehearse against, `$` optional, applied to a copy as the person's write would be. */
+  values: SlateWireValues.optional(),
+  /** With check: a press to rehearse after the values, by piece id, row index and a table's row action. */
+  press: z.object({ piece: z.string(), index: z.number().int().nonnegative().optional(), action: z.number().int().nonnegative().optional() }).optional(),
+  /** Text and document may both be left out of a rehearsal, which then runs against the slate as stored. */
 });
 export const SlatesStateParams = z.object({ ...threadParams, values: SlateWireValues, ifVersion: z.number().int().optional() });
 export const SlatesReadParams = z.object({

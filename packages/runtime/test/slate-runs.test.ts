@@ -377,8 +377,8 @@ describe("timers", () => {
     vi.useFakeTimers();
     const h = harness();
     h.runs.timers(THREAD, [
-      { run: "shown", every: 1 },
-      { run: "always", every: 60, always: true },
+      { run: "shown", every: 1, key: "k-shown" },
+      { run: "always", every: 60, key: "k-always", always: true },
     ]);
     expect(h.timers).toEqual(["always"]);
     vi.advanceTimersByTime(30_000);

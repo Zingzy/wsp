@@ -3804,7 +3804,7 @@ const ifVersionOf = (ctx: VerbContext): number | undefined => {
 /** A $path=json word of a state line: the value parsed as JSON, else taken as the text it is. */
 function stateValue(word: string): [string, unknown] | undefined {
   const at = word.indexOf("=");
-  if (at <= 0 || !word.startsWith("$")) return undefined;
+  if (at <= 0) return undefined;
   const raw = word.slice(at + 1);
   try {
     return [word.slice(0, at), JSON.parse(raw)];
@@ -3838,28 +3838,51 @@ const SLATE_VERBS: readonly Verb[] = [
   },
   {
     name: "slate write",
-    usage: "wsp slate write [<thread>] <file> [--check] [--if-version <n>]",
-    about: "writes the thread's slate from a .slate file (a whole <slate> or a patch) or a .json document and prints its sketch; --check stores nothing",
+    usage: "wsp slate write [<thread>] [<file>] [--check] [--set <path>=<json>]... [--press <piece>] [--row <n>] [--action <n>] [--if-version <n>]",
+    about: "writes the thread's slate from a .slate file (a whole <slate> or a patch) or a .json document and prints its sketch; --check stores nothing, and with --set or --press rehearses values and a press on a copy, the file optional",
     page: "agent",
-    options: { check: { type: "boolean" }, "if-version": { type: "string" } },
+    options: { check: { type: "boolean" }, set: { type: "string", multiple: true }, press: { type: "string" }, row: { type: "string" }, action: { type: "string" }, "if-version": { type: "string" } },
     run: async ctx => {
+      const values: Record<string, unknown> = {};
+      for (const word of flagList(ctx.flags, "set")) {
+        const pair = stateValue(word);
+        if (pair === undefined) throw usageRefusal(`--set ${word} is not <path>=<json>:`, "write it like --set '$i=2'.");
+        values[pair[0]] = pair[1];
+      }
+      const piece = typeof ctx.flags["press"] === "string" ? ctx.flags["press"] : undefined;
+      const row = typeof ctx.flags["row"] === "string" ? Number(ctx.flags["row"]) : undefined;
+      const action = typeof ctx.flags["action"] === "string" ? Number(ctx.flags["action"]) : undefined;
+      for (const [flag, n] of [["row", row], ["action", action]] as const) if (n !== undefined && (piece === undefined || !Number.isInteger(n) || n < 0)) throw usageRefusal(`--${flag} goes with --press, a whole number from 0:`, usageIs(ctx));
+      const rehearsal = Object.keys(values).length > 0 || piece !== undefined;
       const [a, b] = ctx.args;
-      if (a === undefined || ctx.args.length > 2) throw usageRefusal("wsp slate write takes a file, after a thread where it is not yours.", usageIs(ctx));
-      const [ref, file] = b === undefined ? [undefined, a] : [a, b];
+      if ((a === undefined && !rehearsal) || ctx.args.length > 2) throw usageRefusal("wsp slate write takes a file, after a thread where it is not yours.", usageIs(ctx));
+      const [ref, file] = b !== undefined ? [a, b] : a !== undefined && /\.(slate|json)$/.test(a) ? [undefined, a] : [a, undefined];
       const client = await ctx.client();
       const ifVersion = ifVersionOf(ctx);
-      const wrote = await slateAsk<{ text: string }>(client, "slates.write", { ...(await slateTarget(client, ref, ctx.env)), ...slateFile(ctx, file), ...(ctx.flags["check"] === true ? { check: true } : {}), ...(ifVersion !== undefined ? { ifVersion } : {}) });
+      const rehearse = { ...(Object.keys(values).length > 0 ? { values } : {}), ...(piece !== undefined ? { press: { piece, ...(row !== undefined ? { index: row } : {}), ...(action !== undefined ? { action } : {}) } } : {}) };
+      const wrote = await slateAsk<{ text: string }>(client, "slates.write", { ...(await slateTarget(client, ref, ctx.env)), ...(file !== undefined ? slateFile(ctx, file) : {}), ...(ctx.flags["check"] === true ? { check: true } : {}), ...rehearse, ...(ifVersion !== undefined ? { ifVersion } : {}) });
       emitSlate(ctx, wrote);
       return 0;
     },
     tool: tool({
       description: "Writes this thread's slate, a live panel for the person.",
-      input: { thread: SlateThreadIn, text: z.string().optional(), document: z.record(z.string(), z.unknown()).optional(), check: z.boolean().optional(), if_version: SlateIfVersionIn },
+      input: {
+        thread: SlateThreadIn,
+        text: z.string().optional(),
+        document: z.record(z.string(), z.unknown()).optional(),
+        check: z.boolean().optional(),
+        values: z.record(z.string(), z.unknown()).optional(),
+        press: z.string().optional(),
+        row: z.number().int().optional(),
+        action: z.number().int().optional(),
+        if_version: SlateIfVersionIn,
+      },
       output: slateOut("warnings", "problems"),
       stream: ["text"],
-      call: async ({ thread, text, document, check, if_version }, deps) => {
+      call: async ({ thread, text, document, check, values, press, row, action, if_version }, deps) => {
         const client = await deps.client();
-        const wrote = await slateAsk<{ text: string }>(client, "slates.write", { ...(await slateTarget(client, thread, deps.env)), ...pick({ text, document, check, ifVersion: if_version }) });
+        const pressed = press === undefined ? undefined : { piece: press, ...pick({ index: row, action }) };
+        const wrote = await slateAsk<{ text: string }>(client, "slates.write", { ...(await slateTarget(client, thread, deps.env)), ...pick({ text, document, check, values, press: pressed, ifVersion: if_version }) });
         return asText(wrote.text, wrote);
       },
     }),
@@ -3867,7 +3890,7 @@ const SLATE_VERBS: readonly Verb[] = [
   {
     name: "slate state",
     usage: "wsp slate state [<thread>] <path>=<json>... [--if-version <n>]",
-    about: "sets the slate's $values by path, like '$steps[2].done=true', and prints its sketch",
+    about: "sets the slate's $values by path, like '$steps[2].done=true' or 'i=2', and prints its sketch",
     page: "agent",
     options: { "if-version": { type: "string" } },
     run: async ctx => {
@@ -3912,7 +3935,7 @@ const SLATE_VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: "Reads this thread's slate: sketch, JSX-like form, values, runs.",
+      description: "Reads this thread's slate: values, runs, sketch.",
       input: { thread: SlateThreadIn, values: z.array(z.string()).optional(), text: z.boolean().optional(), sketch: z.boolean().optional(), document: z.boolean().optional() },
       output: slateOut("document", "values", "derived", "runs", "state", "problems", "comments", "approvals"),
       stream: ["text"],
@@ -6323,6 +6346,10 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   file: "a file on this computer to send with the message: an image goes as an image, any other file lands in the thread's folder and the message names its path; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",
   "slate write check": "validate and sketch the slate, storing nothing",
+  "slate write set": "with --check, a value to rehearse against, like '$i=2' or 'picked=1'; repeats",
+  "slate write press": "with --check, a piece to rehearse a press on, after the --set values",
+  "slate write row": "the row index of the --press piece inside a list, from 0",
+  "slate write action": "which row action of a --press table to rehearse, from 0",
   "if-version": "the version a read printed; refused with V750 when the document moved past it",
   "slate read values": "a path to resolve now, like '$check.exit' or usage.week.percent, or * for every bound one; repeats",
   "slate read no-text": "leave out the slate in the JSX-like form a patch is written against",

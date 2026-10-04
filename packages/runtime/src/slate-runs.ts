@@ -155,7 +155,9 @@ export interface SlateRuns {
    * restored values say what the runs were. */
   stopAll(threadId: string, opts?: { quiet?: boolean; why?: string }): void;
   /** The declared timers of a slate; replaces what it had. */
-  timers(threadId: string, timers: { run: string; every: number; always?: boolean }[]): void;
+  /** The declared timers of a slate; replaces what it had. A timer whose key, every and always are unchanged keeps
+   * its period; a new or changed one fires at once. */
+  timers(threadId: string, timers: { run: string; every: number; key: string; always?: boolean }[]): void;
   /** Whether any window shows the slate. Shown-only timers tick only while it is; `always` ones regardless. */
   shown(threadId: string, shown: boolean): void;
   /** The person pressed, or the agent wrote: a run held by the start budget may start again. */
@@ -208,7 +210,7 @@ interface ThreadRuns {
   runs: Map<string, Live>;
   /** Runs held because four were running, in the order they asked. */
   queue: string[];
-  timers: Map<string, { every: number; always: boolean; handle?: ReturnType<typeof setInterval> }>;
+  timers: Map<string, { every: number; key: string; always: boolean; handle?: ReturnType<typeof setInterval> }>;
   shown: boolean;
 }
 
@@ -652,11 +654,10 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     },
     timers(threadId, list) {
       const t = thread(threadId);
-      // A timer the new list declares the same keeps ticking on its period; only a new or changed one fires at once.
-      const kept = new Map([...t.timers].filter(([run, was]) => list.some(n => n.run === run && n.every === was.every && (n.always === true) === was.always)));
+      const kept = new Map([...t.timers].filter(([run, was]) => list.some(n => n.run === run && n.key === was.key && n.every === was.every && (n.always === true) === was.always)));
       for (const [run, timer] of t.timers) if (!kept.has(run) && timer.handle !== undefined) clearInterval(timer.handle);
       t.timers = kept;
-      for (const timer of list) if (!kept.has(timer.run)) t.timers.set(timer.run, { every: timer.every, always: timer.always === true });
+      for (const timer of list) if (!kept.has(timer.run)) t.timers.set(timer.run, { every: timer.every, key: timer.key, always: timer.always === true });
       tick(threadId);
     },
     shown(threadId, on) {

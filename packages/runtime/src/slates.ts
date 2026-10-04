@@ -193,6 +193,15 @@ const usage = (p: SlateProblem): Error => Object.assign(new Error(`${p.code} ${p
 /** The source names a document or a list of paths reads, read off its text. */
 const sourcesNamed = (text: string): string[] => SOURCE_NAMES.filter(name => new RegExp(`\\b${name}\\.`).test(text));
 
+/** A value path as written, `$` optional: `i` is `$i`. */
+const ownPath = (path: string): string => (path.startsWith("$") ? path : `$${path}`);
+
+/** What a run executes, without how often or how long: a change here makes its last result stale. */
+const commandOf = (decl: SlateRunDecl): SlateJson => {
+  const { every: _every, always: _always, timeout: _timeout, stream: _stream, ...what } = decl as SlateRunDecl & { timeout?: number; stream?: true };
+  return asJson(what);
+};
+
 /** A carried value with any line that would read as a second `slate:` line made harmless (12, injection). */
 function defanged(value: SlateJson): SlateJson {
   if (typeof value === "string") return value.replace(/^(\s*slate)\s*:(?=\s*\{)/gm, "$1：");
@@ -240,7 +249,7 @@ const asJson = (v: unknown): SlateJson => v as SlateJson;
 
 export interface Slates {
   get(threadId: string): Promise<SlateView | null>;
-  write(p: SlateTarget & { text?: string; document?: Record<string, unknown>; check?: boolean; ifVersion?: number }, caller?: Caller): Promise<SlateWriteAnswer>;
+  write(p: SlateTarget & { text?: string; document?: Record<string, unknown>; check?: boolean; ifVersion?: number; values?: Record<string, unknown>; press?: { piece: string; index?: number; action?: number } }, caller?: Caller): Promise<SlateWriteAnswer>;
   state(p: SlateTarget & { values: Record<string, unknown>; ifVersion?: number }, caller?: Caller): Promise<SlateStateAnswer>;
   read(p: SlateTarget & { values?: string[]; text?: boolean; sketch?: boolean; document?: boolean }, caller?: Caller): Promise<SlateReadAnswer>;
   catalog(p: { name?: string }): { text: string };
@@ -571,7 +580,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   };
 
   const armTimers = (r: SlateRecord): void => {
-    const list = Object.entries(r.document?.runs ?? {}).flatMap(([run, decl]) => (decl.every !== undefined ? [{ run, every: decl.every, ...(decl.always === true ? { always: true } : {}) }] : []));
+    const list = Object.entries(r.document?.runs ?? {}).flatMap(([run, decl]) => (decl.every !== undefined ? [{ run, every: decl.every, key: decl.kind === "cmd" ? runs.key(decl as CmdRunDecl) : JSON.stringify(decl), ...(decl.always === true ? { always: true } : {}) }] : []));
     runs.timers(r.threadId, list);
   };
 
@@ -601,9 +610,12 @@ export function createSlates(deps: SlatesDeps): Slates {
       else if (before?.values[name] !== undefined && name in r.values) live[name] = r.values[name]!;
       else live[name] = structuredClone(decl.start);
     }
-    for (const name of Object.keys(next.runs)) {
+    for (const [name, decl] of Object.entries(next.runs)) {
       const rec = r.values[name];
-      live[name] = before?.runs[name] !== undefined && isRunRecord(rec) ? rec : asJson(structuredClone(SLATE_RUN_IDLE));
+      const was = before?.runs[name];
+      if (was === undefined || !isRunRecord(rec)) live[name] = asJson(structuredClone(SLATE_RUN_IDLE));
+      // The last result of a command that is no longer the one declared stays readable, marked, until it runs again.
+      else live[name] = ["done", "failed", "cancelled"].includes(rec.state) && !slateEqual(commandOf(was), commandOf(decl)) ? asJson({ ...(rec as object), stale: true }) : rec;
     }
     return live;
   };
@@ -815,6 +827,28 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   // ---- writes ----
 
+  /** A check with values or a press: the batch's pure core over a copy, nothing stored, started or sent, and the
+   * sketch as the slate would read then, with what the press would have done after it. */
+  const rehearse = async (r: SlateRecord, doc: SlateDoc, values: SlateValues, p: { values?: Record<string, unknown>; press?: { piece: string; index?: number; action?: number } }, warnings: SlateProblem[]): Promise<SlateWriteAnswer> => {
+    const preview: SlateRecord = { ...r, document: doc, values };
+    const views = await viewsFor(preview);
+    const writes = Object.entries(p.values ?? {}).map(([path, value]) => ({ path: ownPath(path), value: value as SlateJson }));
+    const press = p.press;
+    if (press !== undefined && doc.pieces[press.piece] === undefined) {
+      const near = slateNearest(press.piece, Object.keys(doc.pieces));
+      throw invalid([problem("D203", "piece-missing", `there is no piece ${press.piece} to press`, near !== undefined ? { fix: near } : {})], warnings);
+    }
+    const result = runSlateBatch(doc, values, writes, { ...contextOf(preview, views), by: "person", ...(press !== undefined ? { event: { piece: press.piece, kind: "press", ...(press.index !== undefined ? { index: press.index } : {}), ...(press.action !== undefined ? { rowAction: press.action } : {}) } } : {}) });
+    const after = sketched({ ...preview, values: result.values }, views);
+    const would = [
+      ...result.starts.map(s => `would start $${s.run} (${s.why})`),
+      ...result.cancels.map(run => `would cancel $${run}`),
+      ...result.sends.map(s => `would ${s.do} ${JSON.stringify(s.text)}`),
+      ...result.other.map(o => `would ${o.step.do} in the window`),
+    ];
+    return { version: r.version, text: would.length > 0 ? `${after}\n${would.join("\n")}` : after, warnings, problems: result.problems };
+  };
+
   const writeDocument = async (r: SlateRecord, next: SlateDoc | null, values: SlateValues, by: "agent" | "person", cause: SlateCause, pieces: string[], warnings: SlateProblem[]): Promise<SlateWriteAnswer> => {
     if (sizeOf(values) > VALUES_BYTES) throw invalid([problem("S500", "values-too-big", `the values are ${sizeOf(values)} bytes; a slate holds at most ${VALUES_BYTES}`)], warnings);
     dropDeclared(r, next);
@@ -873,15 +907,22 @@ export function createSlates(deps: SlatesDeps): Slates {
     async write(p, caller) {
       const threadId = targetOf(p, caller, true);
       const given = [p.text, p.document].filter(v => v !== undefined).length;
-      if (given !== 1) throw Object.assign(usageRefusal(`A601 step-arg: a slate write takes exactly one of text or document, and this one has ${given === 0 ? "none" : "both"}:`, "send text alone."), { code: "A601" });
+      const rehearsal = p.values !== undefined || p.press !== undefined;
+      if (rehearsal && p.check !== true) throw usageRefusal("values and press rehearse a slate, which only a check does:", "add check, or set the live values with slate_state.");
+      if (given > 1 || (given === 0 && !rehearsal)) throw Object.assign(usageRefusal(`A601 step-arg: a slate write takes exactly one of text or document, and this one has ${given === 0 ? "none" : "both"}:`, "send text alone."), { code: "A601" });
       const by = byOf(caller);
-      const whole = p.document !== undefined || p.text!.trimStart().startsWith("<slate");
+      const whole = p.document !== undefined || (p.text !== undefined && p.text.trimStart().startsWith("<slate"));
       return serial(threadId, async () => {
         const r = (await recordOf(threadId)) ?? freshRecord(threadId);
+        if (given === 0) {
+          if (r.document === null) throw usage(problem("Z802", "no-slate", "this thread has no slate to rehearse; send the <slate> with check"));
+          return rehearse(r, r.document, r.values, p, []);
+        }
         if (whole) {
           const checked = p.text !== undefined ? parseSlate(p.text) : validateSlate(p.document);
           if (checked.errors.length > 0 || checked.document === undefined) throw invalid(checked.errors, checked.warnings);
           const doc = checked.document;
+          if (rehearsal) return rehearse(r, doc, valuesFor(r, doc), p, checked.warnings);
           if (p.check === true) {
             const preview: SlateRecord = { ...r, document: doc, values: valuesFor({ threadId, document: null, values: {} }, doc) };
             return { version: r.version, text: sketched(preview, new Map(), true), warnings: checked.warnings, problems: [] };
@@ -903,6 +944,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         if (applied.errors.length > 0 || applied.document === undefined) throw invalid(applied.errors, applied.warnings);
         const next = applied.document;
         const values = next === null ? r.values : valuesFor({ threadId, document: r.document, values: applied.values ?? r.values }, next);
+        if (rehearsal && next !== null) return rehearse(r, next, values, p, applied.warnings);
         if (p.check === true) return { version: r.version, text: sketched({ ...r, document: next, values }, new Map(), true), warnings: applied.warnings, problems: [] };
         checkVersion(r, p.ifVersion);
         if (by === "agent") spendWrite(threadId);
@@ -920,9 +962,10 @@ export function createSlates(deps: SlatesDeps): Slates {
         if (doc === null) throw usage(problem("Z802", "no-slate", "this slate is empty; write one with slate_write"));
         checkVersion(r, p.ifVersion);
         const input: { path: string; value: SlateJson }[] = [];
-        for (const [path, value] of Object.entries(p.values)) {
+        for (const [written, value] of Object.entries(p.values)) {
+          const path = ownPath(written);
           const own = parseSlateOwnPath(path);
-          if (own === undefined) throw invalid([problem("S501", "name-undeclared", `${path} is not a value path; a value path reads $name, with .field and [index] below it`, path.startsWith("$") ? {} : { fix: `$${path}` })], []);
+          if (own === undefined) throw invalid([problem("S501", "name-undeclared", `${written} is not a value path; a value path reads $name, with .field and [index] below it`)], []);
           if (doc.derived[own.name] !== undefined || doc.runs[own.name] !== undefined) throw invalid([problem("A607", "set-not-value", `$${own.name} is a ${doc.derived[own.name] !== undefined ? "derived value" : "run"} and cannot be written`, { fix: "write the value it reads" })], []);
           const decl = doc.values[own.name];
           if (decl === undefined) {

@@ -123,8 +123,8 @@ The command line and the MCP server call the same functions. Every verb takes `-
 | `wsp thread allow <thread>` | `thread_allow` (thread) | answers the prompt the thread is stopped on and lets the call run, the same pick the app's own button sends; a thread stopped on a prompt reads Needs you in `wsp threads` and runs nothing until somebody picks. Refused in one line when the thread is waiting on no prompt and when the prompt carries no such answer |
 | `wsp thread deny <thread>` | `thread_deny` (thread) | answers the same prompt the other way: the call is refused and the turn goes on with that answer |
 | `wsp slate catalog [<name>]` | `slate_catalog` (name) | what a slate can hold, read before writing one: the index of pieces, sources, steps, functions and the rules, or with a name (a piece, a source, `functions`, `steps`, `runs`, `examples`) that entry in full. See slate below |
-| `wsp slate write [<thread>] <file> [--check] [--if-version <n>]` | `slate_write` (thread, text, document, check, if_version) | writes the thread's slate from the JSX-like form (a whole `<slate>` or a patch) or the stored document, and answers the version and a text sketch; `--check` stores nothing; a refusal lists every error with its line and fix |
-| `wsp slate state [<thread>] <path>=<json>... [--if-version <n>]` | `slate_state` (thread, values, if_version) | sets the slate's `$values` by path, like `'$steps[2].done=true'`; reactions on them fire; answers the version and the sketch |
+| `wsp slate write [<thread>] [<file>] [--check] [--set <path>=<json>]... [--press <piece>] [--row <n>] [--action <n>] [--if-version <n>]` | `slate_write` (thread, text, document, check, values, press, row, action, if_version) | writes the thread's slate from the JSX-like form (a whole `<slate>` or a patch) or the stored document, and answers the version and a text sketch; `--check` stores nothing; with `--set` or `--press` a check rehearses values and a press on a copy and answers the sketch as it would read then, with what the press would start or send, the file optional; a refusal lists every error with its line and fix |
+| `wsp slate state [<thread>] <path>=<json>... [--if-version <n>]` | `slate_state` (thread, values, if_version) | sets the slate's `$values` by path, like `'$steps[2].done=true'` or `i=2`; reactions on them fire; answers the version and the sketch. To try a slate out, rehearse with `slate write --check --set` instead of writing the person's values |
 | `wsp slate read [<thread>] [--values <path>]... [--no-text] [--no-sketch] [--document]` | `slate_read` (thread, values, text, sketch, document) | the slate as it stands: the sketch, then the JSX-like form to patch by id, values, derived values, runs, problems, comments, approvals and the paths named (`*` for every bound one); `--no-text` leaves out the JSX-like form, `--document` adds the stored JSON. A lead reads a child's by thread |
 | `wsp send <thread> [--model <slug>] [--effort <word>] [--fast] [--file <path>] [--detach] "<message>"` | `send` (thread, message, model, effort, fast, files, detach) | a message into an existing thread; it runs on that thread's own agent and at the access that thread runs at, which no message changes; `--fast` and `--file` mean what they mean on `run`; follows the turn to the reply, or with `--detach` returns the moment the turn is started |
 | `wsp stop <thread> [--task <id>]` | `stop` (thread, task) | ends the thread's running turn, as the app's stop button does; the machine stays up. A thread whose agents spawned threads of their own stops as one, and the line names each of those it ended. `--task` stops one of the agent's own subagents by its TASK id off `threads` and nothing else: the turn and its other subagents run on |
@@ -316,14 +316,14 @@ You write a small JSX-like text: `<slate title="...">`, pieces as elements (`<te
 
 ```
 wsp slate catalog
-wsp slate catalog meter
 wsp slate write ./tracker.slate --check
+wsp slate write --check --set '$i=2' --press next
 wsp slate write ./tracker.slate
 wsp slate state '$steps[2].done=true'
 wsp slate read --values '$check.exit'
 ```
 
-On the tools the same take `text`. Every write answers the version and a text sketch of the slate with values filled in. A refusal lists every error with its line and the fix; nothing was stored. A patch is elements without `<slate>`: a piece with an existing `id` replaces it, `<props id="week" tone="warning" />` merges, `<add under="root">`, `<remove id="x" />`, `<clear />`, `<undo />`.
+On the tools the same take `text`. Every write answers the version and a text sketch of the slate with values filled in. A refusal lists every error with its fix; nothing is stored. A patch is elements without `<slate>`: a piece with an existing `id` replaces it, `<props id="week" tone="warning" />` merges, `<add under="root">`, `<remove id="x" />`, `<clear />`, `<undo />`.
 
 Only a press reaches you: a `send("text", $path, pr.url)` step on a button puts one message into this thread, the text, a blank line, then `slate: {...}` with the values as data, never instructions. A comment the person leaves reaches you the same way. Nothing else is sent; for their input, give them a button that sends, or read the slate. A `$run` reads `state`, `exit`, `out` and `json`, scrubbed of secrets. If the person pastes a screenshot, do not read numbers off it; read the slate. `slate:week` in their message names a piece; read it.
 

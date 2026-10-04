@@ -367,7 +367,72 @@ describe("the slate v2 host", () => {
     expect(aged.text).toMatch(/since \d+d /);
     expect(aged.problems).toEqual([]);
   });
+
+  it("a check rehearses values and a press on a copy, a bare name writes $name, and a changed command marks its last result stale", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-rehearse-");
+    await rt.slates.write({ text: QUIZ }, asThread);
+    const live = (await rt.slates.get(threadId))!;
+
+    // The rehearsal answers the sketch as it would read, and what the press would do; the live slate never moves.
+    const tried = await rt.slates.write({ check: true, values: { i: 2 }, press: { piece: "pick", index: 1, action: 0 } }, asThread);
+    expect(tried.text).toContain("question 2");
+    expect(tried.text).toContain("picked b");
+    expect(tried.text).toContain("would start $grade (a press on pick)");
+    expect(tried.text).toContain(`would send "Graded."`);
+    const after = (await rt.slates.get(threadId))!;
+    expect(after.values).toEqual(live.values);
+    expect([after.version, after.revision]).toEqual([live.version, live.revision]);
+    expect(after.asks).toEqual([]);
+    // A rehearsal with a new document sketches that document over the live values, storing nothing.
+    const next = await rt.slates.write({ text: QUIZ.replace("question {$i}", "Q{$i}"), check: true, values: { $i: 5 } }, asThread);
+    expect(next.text).toContain("Q5");
+    expect((await rt.slates.get(threadId))!.version).toBe(live.version);
+    await expect(rt.slates.write({ values: { i: 1 } }, asThread)).rejects.toThrow(/only a check/);
+    await expect(rt.slates.write({ check: true, press: { piece: "pik" } }, asThread)).rejects.toThrow(/D203.*Did you mean pick/);
+
+    // A bare name is its $name.
+    await rt.slates.state({ values: { i: 3 } }, asThread);
+    expect((await rt.slates.get(threadId))!.values["i"]).toBe(3);
+
+    // The run's last result, then its command changed: the record stays and says it is stale until it runs again.
+    const pressed = await rt.slates.event({ threadId, version: 1, piece: "grade-it", event: "press", requestId: "g1" });
+    await rt.slates.approve({ threadId, key: pressed.ask!.key, scope: "once" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["grade"]).toMatchObject({ state: "done", out: "graded paris\n" });
+    }, { timeout: 10_000 });
+    await rt.slates.write({ text: QUIZ.replace("paris", "rome") }, asThread);
+    const stale = (await rt.slates.get(threadId))!;
+    expect(stale.values["grade"]).toMatchObject({ state: "done", out: "graded paris\n", stale: true });
+    expect((await rt.slates.read({}, asThread)).text).toMatch(/\$grade: done \(exit 0, \d+ ms\), stale: the command changed since it ran/);
+    const again = await rt.slates.event({ threadId, version: 3, piece: "grade-it", event: "press", requestId: "g2" });
+    await rt.slates.approve({ threadId, key: again.ask!.key, scope: "once" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      const v = (await rt.slates.get(threadId))!.values["grade"];
+      expect(v).toMatchObject({ state: "done", out: "graded rome\n" });
+      expect(v).not.toHaveProperty("stale");
+    }, { timeout: 10_000 });
+    // How long it may run is not what it runs: the result stays fresh.
+    await rt.slates.write({ text: QUIZ.replace("paris", "rome").replace("timeout={20}", "timeout={30}") }, asThread);
+    expect((await rt.slates.get(threadId))!.values["grade"]).not.toHaveProperty("stale");
+  }, 30_000);
 });
+
+const QUIZ = `<slate title="Quiz">
+  <value name="i" start={0} />
+  <value name="picked" start="" />
+  <run name="grade" cmd="echo graded paris" timeout={20} />
+  <column>
+    <text id="q">question {$i}</text>
+    <text id="p">picked {$picked}</text>
+    <table id="pick" items={['a', 'b', 'c']}>
+      <col title="Answer" value={item} />
+      <action label="Pick" onPress={[set($picked, item), start($grade), send("Graded.", $picked)]} />
+    </table>
+    <button id="grade-it" label="Grade" onPress={start($grade)} />
+  </column>
+</slate>`;
 
 const TICKER = `<slate title="Ticker">
   <value name="ticks" start={0} />
