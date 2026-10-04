@@ -296,6 +296,23 @@ export const unsetReferenceRefusal = (name: string): string => `its config reads
 export const noSuchServerRefusal = (name: string, agent: string): string => `no MCP server called ${name} is in ${agent}'s config there; wsp servers lists them`;
 export const noMcpAgentRefusal = (agent: string): string => `${agent} is no agent whose MCP config wsp reads; one of ${MCP_AGENT_IDS}`;
 
+/** One server of an agent's config there with its references read, for a client that keeps it running: a slate's
+ * tool and resource runs. `secrets` are the values handed to it, to hide from what it says. */
+export async function resolveServer(host: Host, agentId: string, name: string, o: { project?: string; values?: Readonly<Record<string, string>> }): Promise<{ transport: McpTransport; cwd: string; secrets: string[] }> {
+  const agent = MCP_AGENTS.find(a => a.id === agentId);
+  if (agent === undefined) throw new Error(noMcpAgentRefusal(agentId));
+  const found = await findServer(host, agent, name, o.project);
+  if (found === undefined) throw new Error(noSuchServerRefusal(name, agent.name));
+  if (found.server.disabled === true) throw new Error(`${name} is switched off in ${agent.name}'s config`);
+  const resolved = agent.mcp.format.resolve(found.server, n => o.values?.[n]);
+  if ("missing" in resolved) throw new Error(unsetReferenceRefusal(resolved.missing));
+  const t = resolved.transport;
+  const given = t.kind === "stdio" ? Object.entries(t.env).flatMap(([k, v]) => (secretNamed(k) ? [v] : [])) : Object.values(t.headers);
+  const secrets = [...new Set([...resolved.values, ...given].flatMap(valueForms))].filter(v => v !== "");
+  const cwd = found.project && o.project !== undefined ? o.project : host.home;
+  return { transport: t, cwd: t.kind === "stdio" ? (t.cwd ?? cwd) : cwd, secrets };
+}
+
 /** Whether the harness asked from `cwd` finds the name in two scopes, where it picks one itself and may start a
  * command server of that name. */
 async function twiceAt(host: Host, agent: McpAgent, name: string, cwd: string): Promise<boolean> {
