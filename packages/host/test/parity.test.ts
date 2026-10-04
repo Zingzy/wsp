@@ -374,7 +374,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     expect(RUNTIME_OPS.filter(op => op.startsWith("slates.") && !verbs.includes(`"${op}"`)).sort()).toEqual(Object.keys(WINDOW_ONLY).sort());
   });
 
-  it("the four slate tools' entries in tools/list total under 2,700 characters, the budget every session pays (10)", async () => {
+  it("the four slate tools' entries in tools/list total under 3,400 characters, the budget every session pays (10)", async () => {
     const server = mcpServer("/nonexistent/state.json", { env: {} });
     const [toClient, toServer] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "parity", version: "0" });
@@ -383,8 +383,9 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     try {
       const slate = (await client.listTools()).tools.filter(t => t.name.startsWith("slate_"));
       expect(slate.map(t => t.name).sort()).toEqual(["slate_catalog", "slate_read", "slate_state", "slate_write"]);
-      // 10 said 2,500; a check's rehearsal (values, press, row, action) and read's document took it past, by the owner's asks.
-      expect(slate.reduce((n, t) => n + JSON.stringify(t).length, 0)).toBeLessThan(2700);
+      // 10 said 2,500; a check's rehearsal and read's document took it to 2,700, and descriptions in the words people
+      // say, which tool search matches, to 3,400; the input schemas stay as lean as they were.
+      expect(slate.reduce((n, t) => n + JSON.stringify(t).length, 0)).toBeLessThan(3400);
     } finally {
       await client.close();
     }

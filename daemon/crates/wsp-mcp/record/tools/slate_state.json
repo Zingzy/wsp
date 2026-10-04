@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "slate_state",
-    "description": "Sets slate $values by path; reactions fire.",
+    "description": "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -46,7 +46,7 @@
   },
   "cloudOn": {
     "name": "slate_state",
-    "description": "Sets slate $values by path; reactions fire.",
+    "description": "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire.",
     "inputSchema": {
       "type": "object",
       "properties": {

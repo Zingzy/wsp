@@ -110,12 +110,18 @@ export const INSTRUCTIONS_KEPT = 2048;
  * (10, "The instructions sentence"); the skill's slate section sits past the cut. */
 export const SLATE_WORDS = "This thread can own a slate, a live panel the person reads, presses and fills in: when they ask for a panel, dashboard, form, checklist, tracker or walkthrough, or name the slate, call slate_catalog, then slate_write";
 
+/** What a thread's own tool server opens with, ahead of everything else: that the session is a thread with a slate
+ * beside it, keyed on what the person wants to do rather than on the names of pieces, since they say "I wanna see
+ * this live" and never "a panel". The slate tools' descriptions carry the same words, since tool search reads those. */
+export const THREAD_SLATE_WORDS =
+  "This session is a wsp thread, and it has a slate: a live panel shown here, beside this conversation, that the person sees while you work. Use it whenever they want to see, watch, monitor or keep an eye on something that changes (live data, traffic, metrics, a price, logs, a PR, progress, status), want a dashboard, or want something to press, fill in or tick off (a form, a checklist, a walkthrough): call slate_catalog, then slate_write, and show it there. A run with every={60} refreshes the slate on a timer with no turns, so updates the person watches never stream into the chat, never poll in a loop and never point them to another window.";
+
 /** The MCP server's instructions: what another agent is, since it is the one fact an agent acts on before it has read
  * anything else and it has to land inside what the agent keeps, then the skill's opening paragraph, the setup
  * walkthrough's, the agents the host has adapters for, the line that points back at the skill and the command line,
  * and the rules for running work on a machine, one line each as the skill writes them. The frontmatter and the title
  * line are not part of it. */
-export function instructionsOf(skill: string, agents: readonly string[]): string {
+export function instructionsOf(skill: string, agents: readonly string[], scoped = false): string {
   const lines = skill.split("\n");
   let start = 0;
   if (lines[0] === "---") {
@@ -134,8 +140,10 @@ export function instructionsOf(skill: string, agents: readonly string[]): string
   const lead = paragraph(lines, rules + 1);
   const written = bullets(lines, rules + 1);
   if (lead === "" || written.length === 0) throw new Error(`${RULES_HEADING} has no rules`);
-  return [[`${ANOTHER_AGENT_WORDS}.`, `${SLATE_WORDS}.`, opening, walkthrough, agentsLine(agents), BEYOND_THE_TOOLS, lead].join(" "), ...written].join("\n");
+  const body = [[`${ANOTHER_AGENT_WORDS}.`, ...(scoped ? [] : [`${SLATE_WORDS}.`]), opening, walkthrough, agentsLine(agents), BEYOND_THE_TOOLS, lead].join(" "), ...written].join("\n");
+  return scoped ? `${THREAD_SLATE_WORDS}\n\n${body}` : body;
 }
 
-/** The MCP server's instructions, worked out when a server opens, for the same reason. */
-export const instructions = (): string => instructionsOf(wspSkill(), THREAD_AGENTS);
+/** The MCP server's instructions, worked out when a server opens, for the same reason; a thread's own server opens
+ * with its slate. */
+export const instructions = (scoped = false): string => instructionsOf(wspSkill(), THREAD_AGENTS, scoped);

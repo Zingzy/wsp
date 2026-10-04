@@ -2409,7 +2409,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     // TypeScript server answers there. The agent starts it in its own folder, which is the folder a thread opened with
     // no workspace is placed by.
     const { serveMcp } = await import("./mcp.js");
-    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...starts, ...(values.host !== undefined ? { host: values.host } : {}) });
+    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...starts, ...(values.host !== undefined ? { host: values.host } : {}), ...(values.scoped === true ? { scoped: true } : {}) });
     return 0;
   }
   const json = values.json === true;
