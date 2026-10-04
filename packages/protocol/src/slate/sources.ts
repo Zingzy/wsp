@@ -187,7 +187,7 @@ export function slateSourceType(head: string, segs: readonly (string | number)[]
   }
   let shape: SlateShape = source.shape;
   let walked = head;
-  for (const seg of segs) {
+  for (const [at, seg] of segs.entries()) {
     if (typeof seg === "number") {
       if (typeof shape === "object" && "list" in shape) { shape = shape.list; walked += `[${seg}]`; continue; }
       return { t: "any" };
@@ -197,8 +197,9 @@ export function slateSourceType(head: string, segs: readonly (string | number)[]
     const next: SlateShape | undefined = shape.fields[seg];
     if (next === undefined) {
       const fix = nearest(seg, Object.keys(shape.fields));
-      const whole = `${walked}.${seg}${segs.slice(segs.indexOf(seg) + 1).map(s => (typeof s === "number" ? `[${s}]` : `.${s}`)).join("")}`;
-      return { code: "X401", message: `${whole} is not a path${fix !== undefined ? `. Did you mean ${walked}.${fix}?` : `; ${walked} has ${Object.keys(shape.fields).join(", ")}`}`, ...(fix !== undefined ? { fix: `${walked}.${fix}` } : {}) };
+      const rest = segs.slice(at + 1).map(s => (typeof s === "number" ? `[${s}]` : `.${s}`)).join("");
+      const fixed = fix !== undefined ? `${walked}.${fix}${rest}` : undefined;
+      return { code: "X401", message: `${walked}.${seg}${rest} is not a path${fixed !== undefined ? `. Did you mean ${fixed}?` : `; ${walked} has ${Object.keys(shape.fields).join(", ")}`}`, ...(fixed !== undefined ? { fix: fixed } : {}) };
     }
     shape = next;
     walked += `.${seg}`;
