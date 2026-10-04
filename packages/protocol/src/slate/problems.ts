@@ -17,19 +17,19 @@ export const SLATE_CODES = {
   A600: "step-unknown", A601: "step-arg", A602: "event-unknown", A603: "text-not-literal", A606: "too-many-steps", A607: "set-not-value",
   A608: "window-step-in-reaction", A610: "reaction-cycle", A611: "reaction-shape",
   K700: "cmd-not-literal", K701: "run-kind", K702: "run-name", K703: "timer", K704: "run-arg", K705: "tool-name", K706: "tool-unknown",
-  K707: "too-many-runs",
+  K707: "too-many-runs", K708: "file-name", K709: "files-too-big",
   V750: "version-behind", V751: "write-rate", V752: "nothing-to-undo", V753: "send-rate",
   Z800: "thread-not-yours", Z801: "thread-not-in-tree", Z802: "no-slate", Z804: "rewound-before",
   R900: "data-missing", R901: "data-late", R902: "eval-failed", R903: "source-unavailable", R904: "consent-refused", R905: "draw-failed",
   R906: "tool-error", R907: "over-budget", R908: "piece-fallback", R910: "reaction-runaway", R911: "run-runaway", R912: "reaction-failed",
   R913: "run-held",
   W001: "content-looks-like-path", W002: "tone-alone", W003: "series-as-bars", W004: "copy-style", W006: "deprecated", W010: "short-secret",
-  W011: "secret-in-argv", W012: "joined-by-mark", W013: "chart-x-index", W014: "mono-on-sentence",
+  W011: "secret-in-argv", W012: "joined-by-mark", W013: "chart-x-index", W014: "mono-on-sentence", W015: "file-undeclared",
 } as const;
 export type SlateCode = keyof typeof SLATE_CODES;
 
 /** Codes that never block a write. */
-export const SLATE_WARNINGS: ReadonlySet<string> = new Set<SlateCode>(["T311", "X403", "W001", "W002", "W003", "W004", "W006", "W010", "W011", "W012", "W013", "W014"]);
+export const SLATE_WARNINGS: ReadonlySet<string> = new Set<SlateCode>(["T311", "X403", "W001", "W002", "W003", "W004", "W006", "W010", "W011", "W012", "W013", "W014", "W015"]);
 
 export function slateProblem(code: SlateCode, message: string, extra: Omit<SlateProblem, "code" | "name" | "message"> = {}): SlateProblem {
   const out: SlateProblem = { code, name: SLATE_CODES[code], message };

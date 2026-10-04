@@ -97,7 +97,7 @@ class Reader {
       if (q === "`") this.fail(`a template for ${an[0]} goes inside braces: ${an[0]}={\`...\`}`);
       this.fail(`cannot read the value of ${an[0]} at line ${aline}`);
     }
-    if (SLATE_PIECES[name]?.rawText === true) {
+    if (SLATE_PIECES[name]?.rawText === true || isFileDecl({ tag: name, attrs })) {
       const close = `</${name}>`;
       const end = this.src.indexOf(close, this.i);
       if (end < 0) this.fail(`<${name}> at line ${line} is not closed; write </${name}>`);
@@ -289,7 +289,8 @@ class Compiler {
     }
     if (el.text !== undefined) this.error("P100", "<slate> takes elements, not text; put the words in a <text>", el.line);
     for (const ch of el.children) if (DECLARATIONS.has(ch.tag)) this.guard(() => this.declareName(ch));
-    const pieces = el.children.filter(ch => !DECLARATIONS.has(ch.tag));
+    for (const ch of el.children) if (isFileDecl(ch)) this.file(ch);
+    const pieces = el.children.filter(ch => !DECLARATIONS.has(ch.tag) && !isFileDecl(ch));
     for (const p of pieces) for (const id of explicitIds(p)) this.taken.add(id);
     for (const ch of el.children) if (DECLARATIONS.has(ch.tag)) this.guard(() => this.declaration(ch));
     if (pieces.length !== 1) {
@@ -344,6 +345,21 @@ class Compiler {
       case "run": this.run(el, name); break;
       case "when": this.reaction(el); break;
     }
+  }
+
+  /** <file name="x.py">{`...`}</file>: code written only for the slate, taken as written. */
+  file(el: El): string | undefined {
+    for (const a of el.attrs) if (a.name !== "name") this.error("T302", `<file name="..."> takes name alone, not ${a.name}`, a.line);
+    const name = el.attrs.find(a => a.name === "name");
+    if (name === undefined || name.kind !== "string") { this.error("K708", "<file> needs name=\"...\", a plain file name like name=\"shape.py\"", el.line); return undefined; }
+    if (this.doc.files?.[name.value] !== undefined) this.error("P104", `the file ${name.value} is declared twice`, el.line, { piece: name.value });
+    const raw = el.raw ?? "";
+    const braced = /^\{\s*`([\s\S]*)`\s*\}$/.exec(raw);
+    const text = braced === null ? raw : dedent(braced[1]!);
+    if (text.trim() === "") this.error("K700", `<file name="${name.value}"> is empty; its text goes inside: <file name="${name.value}">{\`...\`}</file>`, el.line, { piece: name.value });
+    (this.doc.files ??= {})[name.value] = text;
+    this.lines.set(name.value, el.line);
+    return name.value;
   }
 
   private run(el: El, name: string): void {
@@ -531,7 +547,7 @@ class Compiler {
   }
 
   piece(el: El, depth = 1): string | undefined {
-    if (DECLARATIONS.has(el.tag)) { this.error("P100", `<${el.tag}> is a declaration and goes directly under <slate>`, el.line); return undefined; }
+    if (DECLARATIONS.has(el.tag) || isFileDecl(el)) { this.error("P100", `<${el.tag}> is a declaration and goes directly under <slate>`, el.line); return undefined; }
     if ((SLATE_ITEM_KINDS as readonly string[]).includes(el.tag)) { this.error("T314", `<${el.tag}> is an item and goes inside the piece that takes it`, el.line); return undefined; }
     const spec = SLATE_PIECES[el.tag];
     const idAttr = el.attrs.find(a => a.name === "id");
@@ -737,7 +753,8 @@ class Compiler {
             if (current?.derived[name] !== undefined) ops.push({ op: "derived", name, expr: null });
             else if (current?.runs[name] !== undefined) ops.push({ op: "run", name, decl: null });
             else if (current?.values[name] !== undefined) ops.push({ op: "value", name, decl: null });
-            else this.error("D203", `nothing is declared as $${name}`, el.line, { fix: nearest(name, [...this.names.keys()]) });
+            else if (current?.files?.[name] !== undefined) ops.push({ op: "file", name, text: null });
+            else this.error("D203", `nothing is declared as ${name}`, el.line, { fix: nearest(name, [...this.names.keys(), ...Object.keys(current?.files ?? {})]) });
             continue;
           }
           if (current?.pieces[id!] === undefined && current?.reactions.some(r => r.id === id)) ops.push({ op: "reaction", id: id!, reaction: null });
@@ -800,6 +817,11 @@ class Compiler {
           continue;
         }
       }
+      if (isFileDecl(el)) {
+        const name = this.file(el);
+        if (name !== undefined) ops.push({ op: "file", name, text: this.doc.files![name]! });
+        continue;
+      }
       if (DECLARATIONS.has(el.tag)) {
         this.guard(() => this.declareName(el));
         const before = this.doc.reactions.length;
@@ -828,6 +850,9 @@ class Compiler {
     return ops;
   }
 }
+
+/** <file name="..."> declares code for the slate; <file path="..."> is the piece that shows a file of the folder. */
+const isFileDecl = (el: Pick<El, "tag" | "attrs">): boolean => el.tag === "file" && el.attrs.some(a => a.name === "name");
 
 function explicitIds(el: El): string[] {
   const out: string[] = [];
@@ -1101,6 +1126,10 @@ export function printSlate(doc: SlateDoc): string {
     out.push(`${"  ".repeat(depth)}</${p.type}>`);
   };
   piece(doc.root, 1);
+  for (const [name, text] of Object.entries(doc.files ?? {})) {
+    const braced = !text.includes("`") && !/^\s|\s$/.test(text);
+    out.push(`  <file name="${name}">${braced ? `{\`\n${text.split("\n").map(l => (l === "" ? "" : `    ${l}`)).join("\n")}\n  \`}` : text}</file>`);
+  }
   out.push("</slate>");
   return out.join("\n");
 }

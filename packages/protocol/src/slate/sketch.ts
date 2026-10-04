@@ -47,6 +47,8 @@ function cut(text: string, room: number): string {
   return room <= 1 ? "…" : `${text.slice(0, room - 1)}…`;
 }
 
+const size = (bytes: number): string => (bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`);
+
 const SECRET_DOTS = "••••";
 
 function shownValue(v: SlateJson | undefined): string {
@@ -199,6 +201,8 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
     runLines.push(`  $${name}: ${r.state}${r.refreshing === true ? ", refreshing" : ""}${r.text === true ? ", text only" : ""}${facts.length > 0 ? ` (${facts.join(", ")})` : ""}${r.why !== undefined ? ` ${r.why}` : ""}${r.stale === true ? ", stale: the command changed since it ran" : ""}`);
   }
   if (runLines.length > 0) lines.push("runs:", ...runLines);
+  const files = Object.entries(doc.files ?? {});
+  if (files.length > 0) lines.push(`files in $SLATE_DIR: ${files.map(([name, text]) => `${name} (${size(new TextEncoder().encode(text).length)})`).join(", ")}`);
   if (problems.length > 0) {
     lines.push("problems:");
     for (const p of problems) lines.push(`  ${p.code} ${p.piece ?? "slate"}${p.prop !== undefined ? `.${p.prop}` : ""}${p.line !== undefined ? ` (line ${p.line})` : ""}: ${p.message}`);

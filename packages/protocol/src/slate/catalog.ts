@@ -23,7 +23,7 @@ export const SLATE_RULES: readonly string[] = [
   "prop=\"text\" is literal; prop={formula} reads live data or $values; a text child with {holes} fills a sentence. Nothing in braces is JavaScript.",
   "Props are meaning, never style. held is a sentence that disables: bind it to a condition.",
   "A list binds to items; item and index read the row.",
-  "A press reaches you only through send(\"literal text\", $path). Chains run without you: <when done={$run} do={set($y, $run.json.z)} />.",
+  "A press reaches you only through send(\"literal text\", $path); <when> chains run without you.",
   "Write once, then patch by id: <props id=\"price\" value={$spot.json.v} />; never resend the whole slate.",
   "Simple and airy unless asked for more: few pieces, one idea per section, short labels. Separate things by layout, never by ·, • or |.",
   "One heading per section: its title or a heading, never bold text.",
@@ -32,6 +32,8 @@ export const SLATE_RULES: readonly string[] = [
   "mono only for figures, ids, times and paths.",
   "Every live number says its window and unit.",
   "Nothing centered but a lone figure or card.",
+  "Use the slate tools, never wsp from a shell.",
+  "A secret the person types goes in a <secret> input, never a file or the chat.",
 ];
 
 export const SLATE_INDEX_EXAMPLE = `<slate title="Issue">
@@ -80,16 +82,16 @@ function index(): string {
     ...core.map(pieceLine),
     "Every piece: id, when={cond}; items take when too. tone: default muted good warning bad info accent. emphasis: normal strong quiet.",
     "section, column, grid: pad none tight normal loose; surface=\"inset\" sets the card ground; align start center end, else children fill the width.",
-    "icon: a lucide name or a formula (slate_catalog icons). bars compare categories; time is a chart.",
+    "icon: a lucide name or a formula. bars compare categories; time is a chart.",
     "Sources, read only:",
     ...["thread", "usage", "cost", "time", "git", "pr"].map(sourceLine),
-    "Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once confirm> <when change={$path} or done={$run} do={steps}>",
+    "Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once confirm then> <file name> <when change={$path} or done={$run} do={steps}>",
     `Steps: ${Object.keys(SLATE_STEPS).join(" ")}. Functions: ${Object.keys(SLATE_FUNCTIONS).join(" ")}.`,
     `After |: ${Object.keys(SLATE_PIPE_STEPS).join(" ")}. $run reads state exit out err json; a secret only .set .len.`,
     "Rules:",
     ...SLATE_RULES.map((r, i) => `${i + 1}. ${r}`),
     SLATE_INDEX_EXAMPLE,
-    "More: slate_catalog with a piece, a source, runs, functions, steps, handlers, icons or examples.",
+    "More: slate_catalog <piece, source, runs, functions, steps, handlers, icons or examples>.",
   ].join("\n");
 }
 
@@ -139,16 +141,17 @@ function sourceEntry(name: string): string {
 }
 
 const RUNS = `runs: a command the slate starts with no turn of yours.
-<run name="check" cmd='gh api "repos/$REPO/issues/$ID"' env={{ REPO: $repo, ID: $id }} timeout={20} />
-<run name="py">{\`python3 -c "print('both quotes, $HOME, {braces}')"\`}</run>
-cmd="..." or cmd='...' takes no escapes; for any text write cmd={"say \\"hi\\""} or the block above, taken as written.
+<run name="check" cmd='gh api "repos/$REPO/issues/$ID"' env={{ REPO: $repo, ID: $id }} />
+<run name="py">{\`python3 -c "print('both quotes, $HOME')"\`}</run>
+Quoted cmd takes no escapes; the block above takes any text as written.
 <run name="ci" cmd='gh secret set TOKEN --repo "$REPO"' stdin={$token} env={{ REPO: $repo }} on="host" />
-The command is literal, run by bash -c; values reach it only as env ($ID), args ($1) or stdin. A secret goes only on stdin or in the program's own env variable, never after a flag (W011).
+The command is literal, run by bash -c in the thread's folder; values reach it only as env ($ID), args ($1) or stdin. A secret goes only on stdin or in the program's own env, never after a flag (W011).
 on: host, else the thread. timeout: seconds, default 60, at most 600. every={60}: seconds, at least 10, while shown; always ticks hidden too. once: no restart while running.
 start($run) in a handler or <when>. The person approves each command once; until then it reads held. confirm="Stop it?" or confirm={\`Kill \${$name}?\`} asks every start.
 $run reads ${SLATE_RUN_FIELDS.join(" ")}; state is idle held running done failed cancelled; output is scrubbed of secrets.
 Chain: <when done={$check} do={set($ok, $check.exit == 0)} />; done fires on any outcome.
-<run name="list" tool="server.tool" args={{ id: $id }} /> calls an MCP tool, args as its JSON; resource="server:uri" reads one. slate_catalog <server> lists its tools. json is its structured result, else its text parsed. The person allows a server once per thread; a destructive tool asks every start. A secret in args returns as [secret:name].
+Code written only for the slate goes in a <file name="x.py"> and runs as "$SLATE_DIR/x.py"; code the project already has is called where it is.
+<run name="list" tool="server.tool" args={{ id: $id }} /> calls an MCP tool; resource="server:uri" reads one. slate_catalog <server> lists its tools. json is its structured result, else its text parsed. The person allows a server once per thread; a destructive tool asks every start. A secret in args returns as [secret:name].
 A tool slate_catalog marks text only answers prose: json stays empty unless the text is JSON, and out draws as one block.
 then='python3 inbox.py' on any run pipes its raw result (structured as JSON, else text) to that literal command; its stdout, as JSON, becomes json; out stays raw. Approved with the run; its failure fails the run.`;
 

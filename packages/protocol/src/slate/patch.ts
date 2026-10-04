@@ -124,6 +124,12 @@ export function applySlatePatch(doc: SlateDoc | null, values: SlateValues, patch
         else d.reactions.push(copy(op.reaction));
         break;
       }
+      case "file": {
+        if (op.text !== null) (d.files ??= {})[op.name] = op.text;
+        else if (d.files?.[op.name] === undefined) fail("D203", `there is no file ${op.name}`);
+        else { delete d.files[op.name]; if (Object.keys(d.files).length === 0) delete d.files; }
+        break;
+      }
       case "clear": fail("P105", "<clear /> stands alone in its write"); break;
       default: break;
     }
