@@ -5,7 +5,7 @@ import type { SlateJson } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { getOwn } from "../paths.js";
-import { str } from "./look.js";
+import { heldBy, str } from "./look.js";
 import { twoWayPath } from "./press.js";
 
 interface Choice { value: SlateJson; label: string; note: string | undefined }
@@ -28,7 +28,7 @@ export const choices: PieceView = {
     const path = twoWayPath(piece.props?.["value"]);
     const picked = path === undefined ? props["value"] : getOwn(slate.values, path);
     const answer = props["answer"];
-    const held = str(props["held"]);
+    const held = heldBy(props["held"]);
     const label = str(props["label"]) ?? "";
     const known = picked !== undefined && picked !== null && answer !== undefined && answer !== null;
     return (

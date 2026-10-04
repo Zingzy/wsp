@@ -93,7 +93,7 @@ describe("the slate renderer", () => {
     draw(EVERY_PIECE, VALUES);
     const types = new Set([...document.querySelectorAll<HTMLElement>("[data-slate-type]")].map(el => el.dataset["slateType"]));
     for (const type of ["column", "row", "section", "text", "markdown", "number", "meter", "facts", "table", "button", "input"]) expect(types).toContain(type);
-    expect(Object.keys(SLATE_VIEWS).sort()).toEqual(["button", "checklist", "column", "empty", "facts", "input", "markdown", "meter", "number", "output", "row", "section", "select", "table", "text", "toggle"]);
+    expect(Object.keys(SLATE_VIEWS).sort()).toEqual(["bars", "button", "chart", "checklist", "chip", "choices", "column", "empty", "facts", "grid", "heading", "input", "markdown", "meter", "number", "output", "ring", "row", "section", "select", "sparkline", "status", "table", "text", "toggle"]);
     expect(screen.getByText("Fix the login")).toBeTruthy();
     expect(screen.getByRole("meter", { name: "Weekly" }).getAttribute("aria-valuenow")).toBe("46");
     expect(screen.getByText("resets 3d 7h")).toBeTruthy();

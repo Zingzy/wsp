@@ -2,6 +2,7 @@
 import type { SlateJson } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
+import { SlateIcon } from "./icon.js";
 import { str, TONE_INK, toneOf } from "./look.js";
 
 interface Fact {
@@ -9,6 +10,7 @@ interface Fact {
   value: string;
   tone: SlateJson | undefined;
   mono: boolean;
+  icon: SlateJson | undefined;
 }
 
 function factsOf(value: SlateJson | undefined): Fact[] {
@@ -18,7 +20,7 @@ function factsOf(value: SlateJson | undefined): Fact[] {
     const shown = str(entry["value"]);
     // A pair whose value is missing is left out.
     if (shown === undefined || shown === "") return [];
-    return [{ label: str(entry["label"]) ?? "", value: shown, tone: entry["tone"], mono: entry["mono"] === true }];
+    return [{ label: str(entry["label"]) ?? "", value: shown, tone: entry["tone"], mono: entry["mono"] === true, icon: entry["icon"] }];
   });
 }
 
@@ -33,7 +35,7 @@ export const facts: PieceView = {
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-[13px] leading-5">
           {list.map((fact, at) => (
             <div key={at} className="contents">
-              <dt className="text-muted-foreground">{fact.label}</dt>
+              <dt className="flex items-center gap-1.5 text-muted-foreground"><SlateIcon name={fact.icon} className="size-3" />{fact.label}</dt>
               <dd className={cn("min-w-0 break-words", ink(fact))}>{fact.value}</dd>
             </div>
           ))}
@@ -44,6 +46,7 @@ export const facts: PieceView = {
       <p className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px] leading-5">
         {list.map((fact, at) => (
           <span key={at} className="whitespace-nowrap">
+            <SlateIcon name={fact.icon} className="mr-1.5 inline size-3 align-[-1px]" />
             <span className="text-muted-foreground">{fact.label}</span> <span className={ink(fact)}>{fact.value}</span>
           </span>
         ))}

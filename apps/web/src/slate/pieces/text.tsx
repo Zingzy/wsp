@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
+import { SlateIcon } from "./icon.js";
 import { str, TEXT_SIZE, TONE_INK, toneOf } from "./look.js";
 
 export const text: PieceView = {
@@ -15,9 +16,8 @@ export const text: PieceView = {
     const tone = emphasis === "quiet" ? "muted" : toneOf(props["tone"], slate, id);
     const size = props["size"] === "large" && !slate.isLoud("large", id) ? "normal" : String(props["size"] ?? "normal");
     const lines = typeof props["lines"] === "number" ? props["lines"] : undefined;
-    return (
+    const body = (
       <p
-       
         title={lines !== undefined ? value : undefined}
         className={cn(
           "min-w-0 whitespace-pre-wrap break-words",
@@ -33,6 +33,13 @@ export const text: PieceView = {
       >
         {value}
       </p>
+    );
+    if (props["icon"] === undefined) return body;
+    return (
+      <div className="flex min-w-0 items-start gap-2">
+        <SlateIcon name={props["icon"]} className="mt-[3px]" />
+        {body}
+      </div>
     );
   },
 };
