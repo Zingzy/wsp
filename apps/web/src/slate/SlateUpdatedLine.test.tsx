@@ -14,7 +14,7 @@ afterEach(cleanup);
 const scope = { workspaceId: "ws", sessionId: "s1", threadId: "t1" };
 const turn = (turnId: string, writes: ("agent" | "person")[]): SessionEvent[] => [
   { type: "session.start", ...scope, turnId, prompt: "go" } as SessionEvent,
-  ...writes.map((by, i) => ({ type: "session.slate", ...scope, turnId, cause: "patch", version: i + 1, by, pieces: ["root"] }) as SessionEvent),
+  ...writes.map((by, i) => ({ type: "session.slate", ...scope, turnId, cause: "write", version: i + 1, by, pieces: ["root"] }) as SessionEvent),
   { type: "session.done", ...scope, turnId, result: { status: "completed" } } as SessionEvent,
 ];
 

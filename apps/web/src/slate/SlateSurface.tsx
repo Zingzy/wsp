@@ -20,6 +20,9 @@ import { SlateView, usePieceVersion } from "./SlateView.js";
 import { askConsent, loadSlate, slateBundle, slateLink, useSlateStore, type SlateEntry } from "./store.js";
 import { threadWorkspace } from "./SlateHost.js";
 
+/** The hold a drawn slate keeps on the host while the tab shows it (07, "A timer"). */
+export const SHOWN_HOLD = "slate";
+
 export const SLATE_WORDS = {
   noThread: "Pick a thread to see its slate.",
   nothing: "Nothing here yet",
@@ -68,6 +71,13 @@ function ThreadSlate({ threadId }: { threadId: string }) {
       api: () => useStore.getState().api?.slates ?? null,
     });
   }, [bundle, threadId, drawn]);
+  useEffect(() => {
+    if (!drawn) return;
+    // The tab on screen is what "shown" means to the host: its `every` runs tick while any window holds the slate.
+    const api = useStore.getState().api?.slates ?? null;
+    void api?.subscribe(threadId, [SHOWN_HOLD]).catch(() => {});
+    return () => void api?.unsubscribe(threadId, [SHOWN_HOLD]).catch(() => {});
+  }, [threadId, drawn]);
   if (entry === undefined) return null;
   if (!drawn) return <EmptySlate threadId={threadId} entry={entry} />;
   return (

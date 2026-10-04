@@ -24,7 +24,7 @@ const DOC = slate({
 });
 
 function record(over: Partial<SlateRecord> = {}): SlateRecord {
-  return { version: 1, document: DOC, values: { step: "one" }, shownOnce: true, canUndo: false, asks: [], ...over };
+  return { threadId: "t1", workspaceId: "ws", version: 1, document: DOC, values: { step: "one" }, comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over };
 }
 
 const ROW: SessionView = { id: "s1", workspaceId: "ws", harness: "claude", status: "completed", threadId: "t1" };
@@ -40,7 +40,7 @@ function host(answers: (SlateRecord | null | { newer: number })[]): SlateApi & {
       return answer !== null && "newer" in answer ? { record: record({ document: null }), newer: answer.newer } : { record: answer };
     }),
     state: vi.fn(async () => ({ version: 2 })),
-    event: vi.fn(async () => ({ outcome: "started", said: "Sent" })),
+    event: vi.fn(async () => ({ outcome: "started" as const, said: "Sent" })),
     approve: vi.fn(async () => {}),
     cancel: vi.fn(async () => {}),
     sketch: vi.fn(async () => ""),

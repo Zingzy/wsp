@@ -11,7 +11,7 @@ import type { Launch, SidebarProjectSnapshot } from "../adapt/view-model.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { failureOf, type Failure } from "./failure.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
-import { isSlatePush, refetchSlates, slateEvent } from "../slate/store.js";
+import { refetchSlates, slateEvent } from "../slate/store.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { claimKept, claiming, claimsAnswered, keepCreations, keptCreations, letGo, own } from "./keptCreations.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
@@ -1144,7 +1144,6 @@ export const useStore = create<State>((set, get) => {
       }));
     },
     applyEvent(e) {
-      if (isSlatePush(e)) return slateEvent(e);
       switch (e.type) {
         case "thread.marked":
         case "thread.rewound":
@@ -1391,6 +1390,8 @@ export const useStore = create<State>((set, get) => {
           if (preferenceSetsInFlight === 0) preferencesLanded(e.preferences, get().preferences);
           return;
         case "session.slate":
+        case "slate.values":
+        case "slate.run":
           slateEvent(e);
           return;
         case "usage.account":

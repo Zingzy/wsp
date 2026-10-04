@@ -146,23 +146,12 @@ export function showOnce(threadId: string, entry: SlateEntry | undefined): void 
   void host.api()?.shown(threadId).catch(() => {});
 }
 
-type SlatePush =
-  | { type: "slate.values"; threadId: string; version: number; values: Record<string, SlateJson> }
-  | { type: "slate.run"; threadId: string; run: string; lines: readonly string[] };
-
-/** The two pushes a batch and a streaming run send windows (01, "Events"), read off the socket's open shape. */
-export function isSlatePush(e: { type: string }): e is SlatePush & { type: string } {
-  const v = e as Record<string, unknown>;
-  if (typeof v["threadId"] !== "string") return false;
-  if (e.type === "slate.values") return typeof v["version"] === "number" && typeof v["values"] === "object" && v["values"] !== null;
-  return e.type === "slate.run" && typeof v["run"] === "string" && Array.isArray(v["lines"]);
-}
-
 /** A slate event off the socket, from the protocol store's one subscription. */
 export function slateEvent(
   e:
     | { type: "session.slate"; threadId: string; by: string }
-    | SlatePush
+    | { type: "slate.values"; threadId: string; version: number; values: Record<string, unknown> }
+    | { type: "slate.run"; threadId: string; run: string; lines: readonly string[] }
     | { type: "session.done"; threadId?: string | undefined; result: TurnResult },
 ): void {
   switch (e.type) {
@@ -176,10 +165,12 @@ export function slateEvent(
       return;
     }
     case "slate.values": {
-      bundles.get(e.threadId)?.engine.applyValues(e.values, e.version);
+      // Values off the wire are JSON the host's batch wrote.
+      const values = e.values as Record<string, SlateJson>;
+      bundles.get(e.threadId)?.engine.applyValues(values, e.version);
       // A run newly held is a sheet the record does not carry yet: the header row and Review read it from there.
       const asks = useSlateStore.getState().byThread[e.threadId]?.record?.asks ?? [];
-      const held = Object.entries(e.values).some(([path, value]) => /^\$[a-zA-Z_]\w*$/.test(path) && isRunRecord(value) && value.state === "held" && !asks.some(ask => `$${ask.run}` === path));
+      const held = Object.entries(values).some(([path, value]) => /^\$[a-zA-Z_]\w*$/.test(path) && isRunRecord(value) && value.state === "held" && !asks.some(ask => `$${ask.run}` === path));
       if (held) void loadSlate(e.threadId);
       return;
     }

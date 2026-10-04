@@ -21,14 +21,14 @@ const HANDLE = { secret: true, set: true, len: 24, at: 1 };
 const TOKEN = "tok_9f8e7d6c5b4a39281706f5e4";
 
 function record(doc: SlateDoc, values: Record<string, SlateJson> = {}, over: Partial<SlateRecord> = {}): SlateRecord {
-  return { version: 1, document: doc, values: { ...startsOf(doc), ...values }, shownOnce: true, canUndo: false, asks: [], ...over };
+  return { threadId: tid(), workspaceId: "ws", version: 1, document: doc, values: { ...startsOf(doc), ...values }, comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over };
 }
 
 function host(first: SlateRecord, over: Partial<SlateApi> = {}): SlateApi {
   return {
     get: vi.fn(async () => ({ record: first })),
     state: vi.fn(async () => ({ version: 2 })),
-    event: vi.fn(async () => ({ outcome: "done" })),
+    event: vi.fn(async () => ({ outcome: "done" as const, said: "" })),
     approve: vi.fn(async () => {}),
     cancel: vi.fn(async () => {}),
     shown: vi.fn(async () => {}),
@@ -144,7 +144,7 @@ describe("schema 2 in the Slate tab", () => {
 
   it("opens the sheet at once when a press held a run, from the host's answer", async () => {
     const ask: SlateAsk = { ...CHECK_ASK, key: "k-env", run: "env", cmd: "printf ... >> .env.tmp; mv .env.tmp .env", env: { VERCEL_TOKEN: "•••••••• (8 characters)" } };
-    const slates = host(record(APPENDIX_C, { step: 3, project: "wsp-landing", vercelToken: HANDLE }), { event: vi.fn(async () => ({ outcome: "held", ask })) });
+    const slates = host(record(APPENDIX_C, { step: 3, project: "wsp-landing", vercelToken: HANDLE }), { event: vi.fn(async () => ({ outcome: "held" as const, said: "", ask })) });
     openThread(slates);
     fireEvent.click(await screen.findByRole("button", { name: "Write .env" }));
     const sheet = await screen.findByRole("dialog");
@@ -176,6 +176,15 @@ describe("schema 2 in the Slate tab", () => {
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     // A finished run keeps its last lines until it next starts.
     expect(screen.getByRole("log").textContent).toContain("totals add up");
+  });
+
+  it("holds the slate on the host while the tab draws it, so its timers tick only while shown", async () => {
+    const slates = host(record(APPENDIX_C));
+    const view = openThread(slates);
+    await screen.findByText("Step 1 of 4");
+    expect(slates.subscribe).toHaveBeenCalledWith(tid(), ["slate"]);
+    view.unmount();
+    expect(slates.unsubscribe).toHaveBeenCalledWith(tid(), ["slate"]);
   });
 
   it("sends a secret's text once and keeps none of it in the window after", async () => {
