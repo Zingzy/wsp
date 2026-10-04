@@ -13,7 +13,8 @@ import { requestComposerFocus } from "../shell/shellRequests.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { cadenceOf, ConsentSheet, HeldRuns } from "./consent.js";
 import { DOC, RUNS } from "./engine.js";
-import { isRunRecord, type SlateAsk } from "./model.js";
+import { ServerConsentSheet, ToolConfirmSheet } from "./mcp.js";
+import { isRunRecord, type SlateApproval, type SlateAsk } from "./model.js";
 import { SLATE_VIEWS } from "./pieces/index.js";
 import { Refreshing } from "./pieces/refreshing.js";
 import { bindSources } from "./sources/binder.js";
@@ -159,16 +160,11 @@ function Consent({ threadId }: { threadId: string }) {
     markSeen(threadId, ask.key);
     askConsent(threadId, undefined);
   };
-  return (
-    <ConsentSheet
-      key={ask.key}
-      ask={ask}
-      cadence={cadenceOf(slateBundle(threadId).engine.document, ask.run)}
-      more={unseen.filter(a => a.key !== ask.key).length}
-      answer={scope => slateLink(threadId).approve(ask.key, scope).then(() => void loadSlate(threadId))}
-      onClose={close}
-    />
-  );
+  const cadence = cadenceOf(slateBundle(threadId).engine.document, ask.run);
+  const answer = (scope: SlateApproval) => slateLink(threadId).approve(ask.key, scope).then(() => void loadSlate(threadId));
+  if (ask.kind === "server") return <ServerConsentSheet key={ask.key} ask={ask} cadence={cadence} answer={answer} onClose={close} />;
+  if (ask.kind === "tool") return <ToolConfirmSheet key={ask.key} ask={ask} answer={answer} onClose={close} />;
+  return <ConsentSheet key={ask.key} ask={ask} cadence={cadence} more={unseen.filter(a => a.key !== ask.key).length} answer={answer} onClose={close} />;
 }
 
 /** No slate yet, cleared, rewound to before it, or newer than this build: the panel's own empty state. */

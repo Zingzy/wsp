@@ -19,7 +19,7 @@ const SHAPE_COLUMNS = 6;
 const SHAPE_DEPTH = 2;
 
 const isRecord = (v: SlateJson | undefined): v is Record_ => typeof v === "object" && v !== null && !Array.isArray(v);
-const isScalar = (v: SlateJson | undefined): boolean => v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+const isScalar = (v: SlateJson | undefined): v is string | number | boolean | null => v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 const PATH_KEY = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 /** A field name as a label: `receivedTime` and `received_time` read "Received time". */

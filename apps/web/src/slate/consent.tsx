@@ -46,7 +46,7 @@ export function heldRuns(engine: SlateEngine, asks: readonly SlateAsk[]): { run:
     const record = engine.values[run];
     if (!isRunRecord(record) || record.state !== "held") return [];
     const ask = asks.find(a => a.run === run);
-    const cmd = ask?.cmd ?? (decl.kind === "cmd" ? decl.cmd : decl.kind === "tool" ? `${decl.server}.${decl.tool}` : decl.uri);
+    const cmd = ask?.kind === "cmd" ? ask.cmd : decl.kind === "cmd" ? decl.cmd : decl.kind === "tool" ? `${decl.server}.${decl.tool}` : `${decl.server}:${decl.uri}`;
     return [{ run, cmd: cmd.split("\n")[0] ?? cmd, ask }];
   });
 }
@@ -78,7 +78,7 @@ export function HeldRuns({ engine, asks, review, refuse }: { engine: SlateEngine
 
 const dots = (value: string): boolean => /^•+/.test(value);
 
-export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask: SlateAsk; cadence: string; more?: number; answer(scope: SlateApproval): Promise<unknown>; onClose(): void }) {
+export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask: Extract<SlateAsk, { kind: "cmd" }>; cadence: string; more?: number; answer(scope: SlateApproval): Promise<unknown>; onClose(): void }) {
   const env = Object.entries(ask.env);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | undefined>(undefined);

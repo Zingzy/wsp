@@ -1,16 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // MCP runs in the renderer: a tool run's result drawn by its shape through the kit's pieces, the once-per-server
 // sheet naming the server, the call and the tools it lists, and the destructive confirm with the arguments as sent.
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseSlate, slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { parseSlate, slateStartValues, type SessionView, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import type { Api } from "../protocol/client";
+import { useStore } from "../protocol/store";
+import { useRightPanelStore } from "../rightPanelStore";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { ServerConsentSheet, ToolConfirmSheet, type SlateServerAsk, type SlateToolAsk } from "./mcp";
 import { SLATE_VIEWS } from "./pieces";
 import { columnsOf, wordsOf } from "./shape";
+import { SlateSurface } from "./SlateSurface";
 import { SlateView } from "./SlateView";
+import { useSlateStore } from "./store";
 import { fakeLink, manualScheduler } from "./testing";
+import type { SlateApi, SlateRecord } from "./wire";
 
 afterEach(cleanup);
 
@@ -193,5 +199,56 @@ describe("the destructive confirm", () => {
     expect(screen.getByText("Delete this email for good?")).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Don't" })));
     expect(answer).toHaveBeenCalledWith("refuse");
+  });
+});
+
+describe("in the Slate tab", () => {
+  let thread = 0;
+  const row: SessionView = { id: "s1", workspaceId: "ws", harness: "claude", status: "completed", threadId: "m0" };
+  const record = (doc: SlateDoc, values: Record<string, SlateJson>, over: Partial<SlateRecord> = {}): SlateRecord => ({
+    threadId: row.threadId!, workspaceId: "ws", version: 1, revision: 1, document: doc, values: { ...slateStartValues(doc), ...values },
+    comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over,
+  });
+  function open(first: SlateRecord, over: Partial<SlateApi> = {}) {
+    const slates: SlateApi = {
+      get: vi.fn(async () => ({ record: first })), state: vi.fn(async () => ({ version: 2 })), event: vi.fn(async () => ({ outcome: "done" as const, said: "" })),
+      approve: vi.fn(async () => {}), cancel: vi.fn(async () => {}), shown: vi.fn(async () => {}), sketch: vi.fn(async () => ""),
+      undo: vi.fn(async () => ({ version: 2 })), clear: vi.fn(async () => ({ version: 2 })), subscribe: vi.fn(async () => {}), unsubscribe: vi.fn(async () => {}),
+      resolve: vi.fn(async () => ({})), ...over,
+    };
+    useStore.setState({ api: { slates, subscribe: () => () => {} } as unknown as Api, selectedId: "ws", selectedThreadId: row.threadId!, sessions: { ws: [row] } });
+    render(<SlateSurface />);
+    return slates;
+  }
+  const next = () => {
+    thread += 1;
+    row.threadId = `m${thread}`;
+    useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {} });
+    useRightPanelStore.setState({ byWorkspaceId: {} });
+  };
+
+  it("opens the server's sheet for a timer's held tool run, names it on the held row, and approves by the server's key", async () => {
+    next();
+    const slates = open(record(INBOX, { inbox: { state: "held", why: "needs your approval", runs: 0 } }, { asks: [SERVER_ASK] }));
+    const sheet = await screen.findByRole("dialog", { name: "Let this slate use zoho-mail?" });
+    const held = document.querySelector<HTMLElement>('[data-slate-held="inbox"]')!;
+    expect(within(held).getByText("zoho-mail.zoho_list_emails")).toBeTruthy();
+    expect(sheet.querySelector("[data-slate-consent-cadence]")!.textContent).toBe("Runs every 60 s, only while this slate is on screen");
+    await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Always in this thread" })));
+    expect(slates.approve).toHaveBeenCalledWith(row.threadId, "mcp:zoho-mail", "thread");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("opens the destructive confirm when a press brings back a tool's ask", async () => {
+    next();
+    const doc = compiled(`<slate title="Mail">
+  <run name="trash" tool="zoho-mail.zoho_delete_email" args={{ messageId: "m2", account: "admin" }} />
+  <button label="Delete" onPress={start($trash)} />
+</slate>`);
+    const slates = open(record(doc, {}), { event: vi.fn(async () => ({ outcome: "held" as const, said: "", ask: TOOL_ASK })) });
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    const sheet = await screen.findByRole("alertdialog", { name: "Call zoho_delete_email?" });
+    await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Call" })));
+    expect(slates.approve).toHaveBeenCalledWith(row.threadId, "tk-3f9a", "once");
   });
 });

@@ -4,7 +4,6 @@
 // Always in this thread and Don't; and on every start of a tool that changes things, the destructive dialog with the
 // tool and its arguments as they will be sent.
 import { useState } from "react";
-import type { SlateJson } from "@wsp/protocol";
 import { AlertDialog, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
@@ -30,11 +29,11 @@ export const MCP_WORDS = {
   call: "Call",
 } as const;
 
-const dots = (value: SlateJson): boolean => typeof value === "string" && /^•+/.test(value);
-const shown = (value: SlateJson): string => (typeof value === "string" ? value : JSON.stringify(value));
+const dots = (value: unknown): boolean => typeof value === "string" && /^•+/.test(value);
+const shown = (value: unknown): string => (typeof value === "string" ? value : JSON.stringify(value));
 
 /** Each argument by name with the value it carries, a secret as dots, in mono. */
-export function ArgList({ args }: { args: Record<string, SlateJson> | undefined }) {
+export function ArgList({ args }: { args: Record<string, unknown> | undefined }) {
   const entries = Object.entries(args ?? {});
   if (entries.length === 0) return null;
   return (
