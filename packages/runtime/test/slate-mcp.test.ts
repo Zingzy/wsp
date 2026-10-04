@@ -12,7 +12,8 @@ import type { AdapterEvent, Caller, EventUnion, SlateView, TurnResult } from "@w
 import { createRuntime, type AgentsReader, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/index.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
-import { foldSchema } from "../src/slate-mcp.js";
+import { createSlateMcp, foldSchema } from "../src/slate-mcp.js";
+import type { RunRecord } from "../src/slate-runs.js";
 import { stubBackend, testPlatform } from "./stub-backend.js";
 
 const STUB = fileURLToPath(new URL("./fixtures/stub-mcp.mjs", import.meta.url));
@@ -77,6 +78,42 @@ describe("a slate's MCP runs", () => {
       "  params.folder: string | null, default null. Folder name, e.g. 'Inbox'.",
     ]);
   });
+
+  it("closes a server's connection once the slate is hidden and idle, unless an always timer keeps it", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "wsp-slate-mcp-")));
+    roots.push(root);
+    const starts = join(root, "starts");
+    const records: Record<string, RunRecord> = {};
+    const mcp = createSlateMcp({
+      server: async () => ({ transport: { kind: "stdio", command: process.execPath, args: [STUB], env: { STUB_STARTS: starts } }, cwd: root, env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" }, secrets: [] }),
+      onRecord: (_t, run, r) => (records[run] = r),
+      approvals: { has: () => true, allow: () => {}, revoke: () => {}, list: () => [] },
+      secrets: { plaintext: () => undefined, scrub: (_t, text) => text },
+      computer: () => "this computer",
+      idleMs: 300,
+    });
+    const call = async (n: number): Promise<void> => {
+      mcp.start({ threadId: "t", run: "inbox", decl: { kind: "tool", server: "stub", tool: "list_items" }, by: "person", args: () => ({ params: { account: "a", limit: 1 } }) });
+      await vi.waitFor(() => expect(records["inbox"]).toMatchObject({ state: "done", runs: n }), { timeout: 10_000 });
+    };
+    const spawned = (): number => readFileSync(starts, "utf8").trim().split("\n").length;
+    mcp.servers("t", ["stub"], []);
+    mcp.shown("t", true);
+    await call(1);
+    await new Promise(r => setTimeout(r, 700));
+    await call(2);
+    expect(spawned()).toBe(1);
+    mcp.shown("t", false);
+    await new Promise(r => setTimeout(r, 900));
+    await call(3);
+    expect(spawned()).toBe(2);
+    mcp.servers("t", ["stub"], ["stub"]);
+    mcp.shown("t", false);
+    await new Promise(r => setTimeout(r, 900));
+    await call(4);
+    expect(spawned()).toBe(2);
+    mcp.close();
+  }, 30_000);
 
   it("asks once per server, fills json on a timer, confirms a destructive tool every press, scrubs the secret and lists the tools", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "wsp-slate-mcp-")));
