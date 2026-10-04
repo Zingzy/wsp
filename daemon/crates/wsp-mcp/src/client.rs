@@ -16,6 +16,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -43,6 +44,10 @@ struct Head {
     error: Option<Value>,
     #[serde(default)]
     kind: Option<Value>,
+    #[serde(default)]
+    errors: Option<Box<RawValue>>,
+    #[serde(default)]
+    warnings: Option<Box<RawValue>>,
 }
 
 struct Shared {
@@ -312,7 +317,14 @@ impl Client {
         let head: Head = serde_json::from_str(&text).map_err(|e| Failure::new(e.to_string()))?;
         if head.ok != Some(true) {
             let said = head.error.as_ref().and_then(Value::as_str).map_or_else(|| format!("{op} failed"), str::to_owned);
-            return Err(Failure { message: said, kind: head.kind.as_ref().and_then(Value::as_str).map(str::to_owned) });
+            // Only a list is carried, as problemListsOf carries one.
+            let list = |raw: Option<Box<RawValue>>| raw.filter(|r| r.get().starts_with('[')).map(|r| r.get().to_owned());
+            return Err(Failure {
+                message: said,
+                kind: head.kind.as_ref().and_then(Value::as_str).map(str::to_owned),
+                errors: list(head.errors),
+                warnings: list(head.warnings),
+            });
         }
         serde_json::from_str(&text).map_err(|e| Failure::new(format!("{op}: {e}")))
     }

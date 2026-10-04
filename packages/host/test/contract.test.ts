@@ -456,7 +456,7 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");
     // The thread's slate from a person's shell, named by the thread's id: every slate verb once.
     const tracker = join(dir, "tracker.slate");
-    writeFileSync(tracker, '<slate title="Steps" state={{ done: 1 }}>\n  <column>\n    <meter id="progress" label="Steps" value={state.done} max={3} />\n  </column>\n</slate>\n');
+    writeFileSync(tracker, '<slate title="Steps">\n  <value name="done" start={1} />\n  <column>\n    <meter id="progress" label="Steps" value={$done} max={3} />\n  </column>\n</slate>\n');
     const change = join(dir, "change.slate");
     writeFileSync(change, '<props id="progress" label="Steps done" />\n');
     await last("slate catalog", "slate", "catalog");

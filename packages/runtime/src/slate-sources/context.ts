@@ -14,7 +14,6 @@ export interface SlateSourceContext {
   /** The account the thread runs on, as the Usage page lists it. */
   account(): Promise<AccountRow | undefined>;
   workspace(): SlateWorkspaceFacts | undefined;
-  state: Record<string, SlateJson>;
 }
 
 export interface SlateWorkspaceFacts {

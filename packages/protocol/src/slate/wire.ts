@@ -18,8 +18,8 @@ export const SlateWireProblem = z.object({ code: z.string(), name: z.string(), m
 export type SlateWireProblem = z.infer<typeof SlateWireProblem>;
 
 /** Live values by path (`$name`, `$name.field`), secrets as their handles. */
-export const SlateValues = z.record(z.string(), SlateWireJson);
-export type SlateValues = z.infer<typeof SlateValues>;
+export const SlateWireValues = z.record(z.string(), SlateWireJson);
+export type SlateWireValues = z.infer<typeof SlateWireValues>;
 
 export const SLATE_CAUSES = ["write", "state", "clear", "undo", "restore", "comment", "run"] as const;
 export const SlateCause = z.enum(SLATE_CAUSES);
@@ -64,7 +64,7 @@ export const SlateView = z.object({
   workspaceId: z.string(),
   version: z.number().int().nonnegative(),
   document: SlateWireDocument.nullable(),
-  values: SlateValues,
+  values: SlateWireValues,
   /** Set while document is null, saying which empty state the tab draws. */
   empty: SlateEmpty.optional(),
   comments: z.array(z.record(z.string(), z.unknown())),
@@ -97,7 +97,7 @@ export const SlatesWriteParams = z.object({
   check: z.boolean().optional(),
   ifVersion: z.number().int().optional(),
 });
-export const SlatesStateParams = z.object({ ...threadParams, values: SlateValues, ifVersion: z.number().int().optional() });
+export const SlatesStateParams = z.object({ ...threadParams, values: SlateWireValues, ifVersion: z.number().int().optional() });
 export const SlatesReadParams = z.object({ ...threadParams, values: z.array(z.string()).optional(), text: z.boolean().optional(), sketch: z.boolean().optional() });
 export const SlatesCatalogParams = z.object({ name: z.string().optional() });
 export const SlatesEventParams = z.object({
@@ -154,11 +154,11 @@ export const SlateReadAnswer = z.object({
   text: z.string(),
   document: SlateWireDocument.nullable(),
   /** The paths named in the read's `values`, resolved now (10, worked transcript 3). */
-  values: SlateValues,
+  values: SlateWireValues,
   /** The live values by name, secrets as handles. */
-  state: SlateValues,
-  derived: SlateValues,
-  runs: SlateValues,
+  state: SlateWireValues,
+  derived: SlateWireValues,
+  runs: SlateWireValues,
   problems: z.array(SlateWireProblem),
   comments: z.array(z.record(z.string(), z.unknown())),
   approvals: z.record(z.string(), z.enum(["allowed", "refused"])),
@@ -182,7 +182,7 @@ export const SlateEventAnswer = z.object({
 });
 export type SlateEventAnswer = z.infer<typeof SlateEventAnswer>;
 
-export const SlatesResolveAnswer = z.object({ values: SlateValues });
+export const SlatesResolveAnswer = z.object({ values: SlateWireValues });
 export type SlatesResolveAnswer = z.infer<typeof SlatesResolveAnswer>;
 
 // --- events ---
@@ -208,7 +208,7 @@ export type SessionSlateEvent = z.infer<typeof SessionSlateEvent>;
 
 /** Values that moved in a batch, pushed to windows and never recorded: the person's typing would walk the
  * transcript's cap. Secrets as handles. */
-export const SlateValuesEvent = z.object({ type: z.literal("slate.values"), workspaceId: z.string(), threadId: z.string(), version: z.number().int(), values: SlateValues });
+export const SlateValuesEvent = z.object({ type: z.literal("slate.values"), workspaceId: z.string(), threadId: z.string(), version: z.number().int(), values: SlateWireValues });
 export type SlateValuesEvent = z.infer<typeof SlateValuesEvent>;
 
 /** New lines of a streaming run, scrubbed, pushed and never recorded. */

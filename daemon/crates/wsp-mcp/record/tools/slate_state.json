@@ -1,0 +1,92 @@
+{
+  "cloudOff": {
+    "name": "slate_state",
+    "description": "Sets slate $values by path; reactions fire.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "if_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "values"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "problems": {}
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "slate_state",
+    "description": "Sets slate $values by path; reactions fire.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "if_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "values"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "problems": {}
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}
