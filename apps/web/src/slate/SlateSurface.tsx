@@ -12,9 +12,10 @@ import { useSelectedThreadId, useStore } from "../protocol/store.js";
 import { requestComposerFocus } from "../shell/shellRequests.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { cadenceOf, ConsentSheet, HeldRuns } from "./consent.js";
-import { DOC } from "./engine.js";
+import { DOC, RUNS } from "./engine.js";
 import { isRunRecord, type SlateAsk } from "./model.js";
 import { SLATE_VIEWS } from "./pieces/index.js";
+import { Refreshing } from "./pieces/refreshing.js";
 import { bindSources } from "./sources/binder.js";
 import { SlateView, usePieceVersion } from "./SlateView.js";
 import { askConsent, loadSlate, markSeen, slateBundle, slateLink, useSlateStore, type SlateEntry } from "./store.js";
@@ -98,7 +99,10 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   const bundle = slateBundle(threadId);
   const { engine } = bundle;
   usePieceVersion(engine, DOC);
+  usePieceVersion(engine, RUNS);
   const api = useStore(s => s.api?.slates ?? null);
+  const root = engine.document?.root;
+  const refreshing = root !== undefined && engine.piece(root)?.type !== "section" && engine.refreshingUnder(root);
   const title = engine.document?.title ?? "Slate";
   const copy = () => void api?.sketch(threadId).then(text => navigator.clipboard?.writeText(text));
   const runs = Object.keys(engine.document?.runs ?? {});
@@ -112,6 +116,7 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   return (
     <div className="flex h-7 shrink-0 items-center gap-2 px-3 pt-1" title={engine.document?.title}>
       <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{title}</span>
+      {refreshing ? <Refreshing /> : null}
       <span data-slate-version className="font-mono text-[11px] tabular-nums text-muted-foreground">v{engine.version}</span>
       <Menu>
         <MenuTrigger render={<Button variant="ghost" size="icon" aria-label={SLATE_WORDS.menu} />}>

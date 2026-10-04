@@ -80,6 +80,8 @@ export class SlateEngine {
   #loud = new Map<Loud, string>();
   /** Lines streamed by each run since it last started, ahead of the record's own. */
   #lines = new Map<string, string[]>();
+  /** Runs refreshing whose streamed lines are still the last result's. */
+  #fresh = new Set<string>();
   /** Section folds that name no value, kept for the window's life by piece id. */
   readonly folds = new Map<string, boolean>();
   #read: SourceReader;
@@ -177,7 +179,15 @@ export class SlateEngine {
   #restarted(path: string, value: SlateJson | undefined): void {
     const name = ownPath(path)?.name;
     if (name === undefined || path !== `$${name}` || this.#doc?.runs?.[name] === undefined) return;
-    if (walk(value, ["state"]) === "running" && walk(this.#remote[name], ["state"]) !== "running") this.#lines.delete(name);
+    if (walk(value, ["state"]) !== "running") {
+      // A refresh that streamed nothing ends on its record's own lines.
+      if (this.#fresh.delete(name)) this.#lines.delete(name);
+      return;
+    }
+    if (walk(this.#remote[name], ["state"]) === "running") return;
+    // A refresh keeps the last lines drawn until its own first line arrives.
+    if (walk(value, ["refreshing"]) === true) this.#fresh.add(name);
+    else this.#lines.delete(name);
   }
 
   #runsMoved(paths: readonly string[]): void {
@@ -187,7 +197,8 @@ export class SlateEngine {
 
   /** New lines of a streaming run, as slate.run carried them. */
   appendLines(run: string, lines: readonly string[]): void {
-    const kept = [...(this.#lines.get(run) ?? []), ...lines].slice(-LINES_KEPT);
+    const before = this.#fresh.delete(run) ? [] : (this.#lines.get(run) ?? []);
+    const kept = [...before, ...lines].slice(-LINES_KEPT);
     this.#lines.set(run, kept);
     this.invalidate([`$${run}.lines`]);
   }
@@ -195,6 +206,33 @@ export class SlateEngine {
   /** The run's lines as the window has them: what streamed here, else the record's own. */
   lines(run: string): readonly string[] | undefined {
     return this.#lines.get(run);
+  }
+
+  /** Whether a run is refreshing: started again, its last result still in its record until the new one lands. */
+  refreshing(run: string): boolean {
+    const record = this.#remote[run];
+    return this.#doc?.runs?.[run] !== undefined && walk(record, ["state"]) === "running" && walk(record, ["refreshing"]) === true;
+  }
+
+  /** Whether a piece under this one reads a refreshing run, short of a nested section and of the run's own output,
+   * which each say it themselves. */
+  refreshingUnder(id: string): boolean {
+    const runs = Object.keys(this.#doc?.runs ?? {}).filter(run => this.refreshing(run));
+    if (runs.length === 0) return false;
+    const reads = (path: string) => runs.some(run => touches(path, `$${run}`));
+    const seen = new Set<string>();
+    const visit = (child: string): boolean => {
+      if (seen.has(child)) return false;
+      seen.add(child);
+      const piece = this.piece(child);
+      if (piece === undefined || piece.type === "section" || piece.type === "output") return false;
+      const own = this.#readsOf(child);
+      return own.when.some(reads) || own.props.some(reads) || (piece.children ?? []).some(visit);
+    };
+    const piece = this.piece(id);
+    if (piece === undefined) return false;
+    const own = this.#readsOf(id);
+    return own.when.some(reads) || own.props.some(reads) || (piece.children ?? []).some(visit);
   }
 
   /** A secret's path: the person types it, the host keeps it, the window holds only its handle (08). */

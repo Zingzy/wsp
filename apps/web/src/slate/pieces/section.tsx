@@ -3,8 +3,10 @@ import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../components/ui/collapsible.js";
 import { cn } from "../../lib/utils.js";
-import type { PieceView } from "../SlateView.js";
+import { RUNS } from "../engine.js";
+import { usePieceVersion, type PieceView } from "../SlateView.js";
 import { truthy } from "../actions.js";
+import { Refreshing } from "./refreshing.js";
 import { SlateIcon } from "./icon.js";
 import { groupLook, str } from "./look.js";
 import { twoWayPath } from "./press.js";
@@ -20,11 +22,14 @@ export const section: PieceView = {
     // A fold that names no state path is the window's own, kept by piece id while the window lives.
     const [local, setLocal] = useState(() => slate.folds.get(id) ?? (props["open"] === undefined ? true : truthy(props["open"])));
     const open = path !== undefined ? props["open"] === undefined || truthy(props["open"]) : local;
+    usePieceVersion(slate, RUNS);
+    const refreshing = slate.refreshingUnder(id);
     const head = (
       <>
         <SlateIcon name={props["icon"]} className="mr-1 size-3.5" />
         <span className="min-w-0 truncate" role="heading" aria-level={3}>{title}</span>
         {note === undefined ? null : <span className="ml-2 truncate text-xs text-muted-foreground">{note}</span>}
+        {refreshing ? <Refreshing className="ml-2" /> : null}
       </>
     );
     if (props["collapsible"] !== true) {
