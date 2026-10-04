@@ -2,8 +2,10 @@
 // A drawing in a frame a person can zoom and pan: it opens fitted (to the frame's width, or to the whole frame) but never
 // so small its labels drop under the app's 12 px, and past that opens at that size from its top, its first node in
 // view. Pinch, or ctrl or cmd with the wheel, zooms around the pointer; a drag pans once the drawing outgrows the frame;
-// a double-click fits it again. A plain wheel is left to the page, so the slate still scrolls past it.
+// a double-click fits it again. A plain wheel is left to the page, so the slate still scrolls past it. Where the frame's
+// height follows the drawing, each edge with more of it beyond fades as a scroll area's does.
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
+import { SCROLL_FADE } from "../../components/ui/scroll-area.js";
 import { cn } from "../../lib/utils.js";
 
 export interface ZoomControls {
@@ -17,7 +19,7 @@ const LEAST = 0.2;
 
 export function ZoomFrame({ children, floor, fill, cap, className, controls }: {
   children: ReactNode;
-  /** The least scale the drawing opens at: the label floor over the label size. */
+  /** The least scale the drawing opens at: inline, the label floor over the label size. */
   floor: number;
   /** Fit the whole frame (the expanded view) rather than its width alone. */
   fill?: boolean;
@@ -104,12 +106,18 @@ export function ZoomFrame({ children, floor, fill, cap, className, controls }: {
 
   const outgrows = natural !== null && (natural.w * view.k > box.w + 1 || natural.h * view.k > box.h + 1);
   const height = fill === true || natural === null ? undefined : Math.min(cap ?? Infinity, Math.ceil(natural.h * fitted));
+  const beyond = height === undefined || natural === null ? undefined : {
+    "--scroll-area-overflow-x-start": `${Math.max(0, -view.x)}px`,
+    "--scroll-area-overflow-x-end": `${Math.max(0, view.x + natural.w * view.k - box.w)}px`,
+    "--scroll-area-overflow-y-start": `${Math.max(0, -view.y)}px`,
+    "--scroll-area-overflow-y-end": `${Math.max(0, view.y + natural.h * view.k - box.h)}px`,
+  };
   return (
     <div
       ref={frame}
       data-slate-zoom={Math.round(view.k * 1000) / 1000}
-      className={cn("relative min-w-0 touch-none overflow-hidden select-none", outgrows && "cursor-grab active:cursor-grabbing", className)}
-      style={height === undefined ? undefined : { height }}
+      className={cn("relative min-w-0 touch-none overflow-hidden select-none", beyond !== undefined && SCROLL_FADE, outgrows && "cursor-grab active:cursor-grabbing", className)}
+      style={height === undefined ? undefined : ({ height, ...beyond } as CSSProperties)}
       onDoubleClick={fit}
       onPointerDown={event => {
         if (!outgrows || event.button !== 0) return;

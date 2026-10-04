@@ -72,6 +72,28 @@ describe.skipIf(renderSkipped !== undefined)("the slate's diagram drawn in Chrom
     await page.close();
   });
 
+  it("fades each edge of the inline frame with more of the drawing beyond it, and only those", async () => {
+    const page = await open("diagram");
+    await page.waitForSelector(`${WIDE} svg`, { timeout: 30_000 });
+    await page.waitForSelector('[data-slate-piece="flow"] [data-slate-zoom] svg');
+    const beyond = (sel: string) =>
+      page.evaluate(s => {
+        const frame = document.querySelector<HTMLElement>(s)!;
+        const px = (edge: string) => parseFloat(frame.style.getPropertyValue(`--scroll-area-overflow-${edge}`));
+        return { mask: getComputedStyle(frame).maskImage !== "none", "x-start": px("x-start"), "x-end": px("x-end"), "y-start": px("y-start"), "y-end": px("y-end") };
+      }, sel);
+    const wide = await beyond(WIDE);
+    expect(wide.mask).toBe(true);
+    expect(wide["y-start"]).toBe(0);
+    expect(wide["y-end"]).toBeGreaterThan(0);
+    expect(wide["x-start"] + wide["x-end"]).toBeGreaterThan(0);
+    // The deploy's flow is a line of three, a little wider than the panel and no taller than its frame.
+    const flow = await beyond('[data-slate-piece="flow"] [data-slate-zoom]');
+    expect(flow).toMatchObject({ "x-start": 0, "y-start": 0, "y-end": 0 });
+    expect(flow["x-end"]).toBeGreaterThan(0);
+    await page.close();
+  });
+
   it("zooms around the pointer with ctrl and the wheel, leaves a plain wheel alone, pans by a drag and fits again on a double-click", async () => {
     const page = await open("diagram");
     await page.waitForSelector(`${WIDE} svg`, { timeout: 30_000 });
@@ -100,6 +122,35 @@ describe.skipIf(renderSkipped !== undefined)("the slate's diagram drawn in Chrom
     expect(panned.proxy.y - zoomed.proxy.y).toBeCloseTo(-40, 0);
     await page.mouse.dblclick(opened.proxy.x, opened.proxy.y);
     expect(await read(page, WIDE)).toEqual(opened);
+    await page.close();
+  });
+
+  it("opens the expanded view fitted whole, below the inline floor down to 0.4, with the dialog itself holding focus", async () => {
+    const page = await open("diagram");
+    await page.waitForSelector(`${WIDE} svg`, { timeout: 30_000 });
+    await page.locator('[data-slate-piece="wide"]').getByRole("button", { name: "Expand" }).click();
+    await page.waitForSelector(`${EXPANDED} svg`, { timeout: 30_000 });
+    await page.waitForTimeout(300);
+    const fit = await page.evaluate(sel => {
+      const frame = document.querySelector<HTMLElement>(sel)!;
+      const vb = frame.querySelector("svg")!.viewBox.baseVal;
+      const f = frame.getBoundingClientRect();
+      const d = frame.querySelector("svg")!.getBoundingClientRect();
+      const focused = document.activeElement!;
+      return {
+        k: Number(frame.dataset["slateZoom"]),
+        whole: Math.max(0.4, Math.min(1, frame.clientWidth / vb.width, frame.clientHeight / vb.height)),
+        inside: d.left >= f.left - 1 && d.right <= f.right + 1 && d.top >= f.top - 1 && d.bottom <= f.bottom + 1,
+        focus: focused.hasAttribute("data-slate-diagram-expanded"),
+        rings: document.querySelectorAll(":focus-visible").length,
+      };
+    }, EXPANDED);
+    expect(fit.k).toBeLessThan(1);
+    expect(fit.k).toBeCloseTo(fit.whole, 2);
+    expect(fit.inside).toBe(fit.k > 0.4);
+    expect(fit).toMatchObject({ focus: true, rings: 0 });
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => [document.activeElement?.getAttribute("aria-label"), document.activeElement?.matches(":focus-visible")])).toEqual(["Zoom out", true]);
     await page.close();
   });
 

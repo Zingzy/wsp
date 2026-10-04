@@ -3,8 +3,8 @@
 // runs strict and the SVG is purified again. Mermaid is its own chunk, loaded only once a slate holds a diagram. Here it
 // takes the slate's look: nodes are the settings card's surface with 13 px labels, edges hairlines, edge labels quiet
 // words on the ground. It opens fitted to the panel above the 12 px floor, zooms and pans in its frame, and opens whole
-// in a dialog over the window. A source built from $values redraws in both when its text changes; a source that does
-// not parse keeps MermaidBlock's own line under it.
+// in a dialog over the window, the dialog itself holding focus. A source built from $values redraws in both when its
+// text changes; a source that does not parse keeps MermaidBlock's own line under it.
 import { Maximize2, Minus, Plus, Scan, X } from "lucide-react";
 import { lazy, Suspense, useRef, useState } from "react";
 import { type MermaidLook } from "../../components/chat/MermaidBlock.js";
@@ -26,6 +26,8 @@ const EDGE_PX = 12;
 const FLOOR_PX = 12;
 /** The inline frame's tallest, so a tall flow never swallows the slate; the rest is a pan away. */
 const INLINE_CAP = 420;
+/** The dialog is the overview, with zoom in a press away, so it fits a drawing whole down to this scale. */
+const OVERVIEW_LEAST = 0.4;
 
 /** The settings card for nodes, hairlines for edges, the section head for a group's name. The colours are the page's
  * own variables, so the drawing follows a theme change without being drawn again. Mermaid puts its drawing's id before
@@ -79,6 +81,7 @@ export const diagram: PieceView = {
     const label = str(props["label"]);
     const [open, setOpen] = useState(false);
     const big = useRef<ZoomControls>(null);
+    const popup = useRef<HTMLDivElement>(null);
     // What stands while Mermaid loads, and over its line when the source is refused or does not parse.
     const source = <pre data-slate-diagram-source className="overflow-x-auto pt-1 pb-2 font-mono text-xs leading-4 whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">{code}</pre>;
     if (code === "") return label === undefined ? null : <p className="text-[13px] leading-5 text-foreground">{label}</p>;
@@ -96,7 +99,7 @@ export const diagram: PieceView = {
           <Drawing code={code} source={source} />
         </ZoomFrame>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogPopup data-slate-diagram-expanded className="h-[85vh] w-[90vw] max-w-[min(90vw,1400px)] sm:max-w-[min(90vw,1400px)]" bottomStickOnMobile={false}>
+          <DialogPopup ref={popup} initialFocus={popup} data-slate-diagram-expanded className="h-[85vh] w-[90vw] max-w-[min(90vw,1400px)] sm:max-w-[min(90vw,1400px)]" bottomStickOnMobile={false}>
             <div className="flex items-center gap-1 px-5 pt-4 pb-3">
               <DialogTitle className="min-w-0 flex-1 truncate">{label ?? "Diagram"}</DialogTitle>
               <IconButton label="Zoom out" onClick={() => big.current?.zoom(1 / 1.25)}>
@@ -112,7 +115,7 @@ export const diagram: PieceView = {
                 <X aria-hidden className="size-3.5" />
               </DialogClose>
             </div>
-            <ZoomFrame floor={FLOOR_PX / EDGE_PX} fill controls={big} className="mx-5 mb-5 flex-1 rounded-xl bg-background">
+            <ZoomFrame floor={OVERVIEW_LEAST} fill controls={big} className="mx-5 mb-5 flex-1 rounded-xl bg-background">
               <Drawing code={code} source={source} />
             </ZoomFrame>
           </DialogPopup>
