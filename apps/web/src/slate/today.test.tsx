@@ -121,22 +121,17 @@ describe("what the live gold slate wrote", () => {
     expect(c.querySelector('[data-slate-piece="spot"] [data-slate-status]')).toBeNull();
   });
 
-  it("sets a chart's axis figures inside the plot at its left edge, so the plot takes the whole width", () => {
+  it("sizes a chart's axis gutter to its widest figure, beside the plot and never over it", () => {
     const c = draw(`<slate><value name="h" start={[{ t: "21:48", v: 4141.8 }, { t: "22:47", v: 4200 }]} /><column>
 <chart label="Spot, last hour" items={$h} x={item.t} value={item.v} format="usd" /></column></slate>`);
     const chart = c.querySelector<HTMLElement>("[data-usage-chart]")!;
-    // One column: the plot and the tick words span the chart, no gutter beside them.
-    expect(chart.className).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(chart.className).toContain("grid-cols-[auto_minmax(0,1fr)]");
     const axis = chart.querySelector<HTMLElement>("[data-k=y-axis]")!;
-    expect(axis.className).toContain("absolute");
+    expect(axis.parentElement).toBe(chart);
+    expect(axis.querySelector("svg[role=img]")).toBeNull();
     expect(axis.className).toContain("text-[11px]");
-    expect(axis.parentElement!.querySelector("svg[role=img]")).not.toBeNull();
-    const ticks = [...axis.querySelectorAll<HTMLElement>("[data-k=y-tick]")];
-    expect(ticks.map(tick => tick.textContent)).toEqual(["$4,140.00", "$4,160.00", "$4,180.00", "$4,200.00", "$4,220.00"]);
-    // Each figure stands at the plot's left edge, its foot 2 px above its gridline.
-    expect(ticks.every(tick => tick.className.includes("left-0"))).toBe(true);
-    expect(ticks.map(tick => tick.style.bottom)).toEqual(["8px", "45px", "82px", "119px", "156px"]);
-    expect([...chart.querySelectorAll("[data-k=tick]")].map(tick => tick.textContent)).toEqual(["21:48", "22:47"]);
+    const labels = [...axis.querySelectorAll("[data-k=y-tick]")].map(tick => tick.textContent);
+    expect(labels).toEqual(["$4,140.00", "$4,160.00", "$4,180.00", "$4,200.00", "$4,220.00"]);
   });
 });
 
