@@ -3,6 +3,7 @@
 // 20 and the warnings beside them, each with its piece, prop, line and a fix where one is computable. The same pass
 // serves a JSX-like write, the JSON form, a check and a patched result.
 import { checkSlateExpression, parseSlateExpression, parseSlateFormat, slateDependencies, type SlateCheckScope, type SlateType } from "./expr.js";
+import { isSlateIcon, nearestSlateIcon } from "./icons.js";
 import { SLATE_PIECES, SLATE_RESERVED_PROPS, type SlateItemSpec, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
 import { SLATE_LIMITS } from "./limits.js";
 import { parseSlateOwnPath } from "./paths.js";
@@ -435,6 +436,7 @@ class Validator {
       this.add("S502", "an editable checklist writes its ticks back, so items binds a value: items={$steps}", { piece: id, prop: "items" });
     }
     if (p.type === "bars" && isSlateBinding(items) && slateIsSeries(items.bind.trim())) this.add("W003", `${items.bind} is a series over time; draw it as a line`, { piece: id, prop: "items" }, "<chart>");
+    else if (p.type === "bars" && isSlateBinding(props.name) && readsTime(props.name.bind)) this.add("W003", `bars name each row by ${props.name.bind}, a time: a series over time is a line`, { piece: id, prop: "name" }, "<chart>");
     return spec.rowTemplate === true ? rowType : row;
   }
 
@@ -523,6 +525,12 @@ class Validator {
       case "list":
         if (!Array.isArray(v)) this.add("T303", `${name} takes a list: ${name}={path} or ${name}={[...]}`, w);
         return;
+      case "icon": {
+        if (isSlateIcon(v)) return;
+        const fix = typeof v === "string" ? nearestSlateIcon(v) : undefined;
+        this.add("T306", `${JSON.stringify(v)} is not an icon in the kit${fix !== undefined ? `; did you mean ${fix}?` : ""} slate_catalog icons lists them`, w, fix !== undefined ? `icon="${fix}"` : undefined);
+        return;
+      }
       case "string": case "text":
         if (typeof v === "string") {
           if (looksLikePath(v)) this.add("W001", `${name} is the literal text "${v}", which reads like a path`, w, `${name}={${v}}`);
@@ -545,6 +553,16 @@ class Validator {
   }
 }
 
+const TIME_FIELDS = new Set(["at", "time", "date", "ts", "timestamp", "when", "day", "hour", "minute"]);
+const TIME_FNS = /\b(?:date|time|ago|weekday)\s*\(/;
+
+/** A row's name that reads a time: item.at, item.date, or date(...) and its kin. */
+function readsTime(expr: string): boolean {
+  if (TIME_FNS.test(expr) || slateDependencies(expr).includes("time.now")) return true;
+  const field = /\bitem\.([A-Za-z_]+)\b/.exec(expr)?.[1];
+  return field !== undefined && TIME_FIELDS.has(field);
+}
+
 /** The names a list of own paths starts from. */
 function roots(paths: readonly string[]): string[] {
   return [...new Set(paths.filter(p => p.startsWith("$")).map(p => p.slice(1).split(/[.[]/)[0]!))];
@@ -564,15 +582,47 @@ export function validateSlate(input: unknown): { document?: SlateDoc; errors: Sl
   if (schema !== 2) return { errors: [slateProblem("D200", `schema ${JSON.stringify(schema)} is not a version this host knows; this host reads schema 2`, { fix: "update wsp" })], warnings: [] };
   const filled = { values: {}, derived: {}, runs: {}, reactions: [], ...(input as object) };
   const parsed = SlateSchema.safeParse(filled);
-  if (!parsed.success) {
-    const errors = parsed.error.issues.slice(0, SLATE_LIMITS.errorsPerPass).map(i => {
-      const path = i.path.map(String);
-      const piece = path[0] === "pieces" ? path[1] : path[0] === "values" || path[0] === "derived" || path[0] === "runs" ? `$${path[1]}` : undefined;
-      return slateProblem(path[0] === "pieces" && path[2] === "type" ? "T300" : "D202", `${path.join(".") || "the document"}: ${i.message}`, { piece });
-    });
-    return { errors, warnings: [] };
-  }
+  if (!parsed.success) return { errors: parsed.error.issues.slice(0, SLATE_LIMITS.errorsPerPass).flatMap(i => shapeProblems(i, filled as Record<string, unknown>)), warnings: [] };
   const doc = parsed.data;
   const { errors, warnings } = validateDocument(doc);
   return { ...(errors.length === 0 ? { document: doc } : {}), errors, warnings };
+}
+
+interface ShapeIssue { code: string; path: (string | number)[]; message: string; keys?: string[] }
+
+const DOC_KEYS = ["schema", "kit", "title", "root", "values", "derived", "runs", "reactions", "pieces"];
+const PIECE_KEYS = "type, props, children, when, on and fallback";
+
+/** A shape error said as the rule it breaks, naming the piece and the prop: a prop beside props instead of in it is
+ * T302 with the move as its fix, not a root-ambiguous D202. */
+function shapeProblems(issue: ShapeIssue, doc: Record<string, unknown>): SlateProblem[] {
+  const path = issue.path.map(String);
+  const [area, name, field, sub] = path;
+  const keys = issue.code === "unrecognized_keys" ? (issue.keys ?? []) : [];
+  if (area === "pieces" && name !== undefined) {
+    const type = ((doc.pieces as Record<string, { type?: unknown }> | undefined)?.[name]?.type);
+    const spec = typeof type === "string" ? SLATE_PIECES[type] : undefined;
+    if (field === undefined && keys.length > 0) {
+      return keys.map(k => {
+        const known = spec?.props[k] !== undefined || Object.values(spec?.items ?? {}).some(i => i.prop === k);
+        return slateProblem("T302", `${k} sits beside props on ${name}; a piece holds ${PIECE_KEYS}${known ? `, and ${k} goes inside props` : spec !== undefined ? `, and ${String(type)} has no ${k}` : ""}`, { piece: name, prop: k, fix: known ? `"props": { "${k}": ... }` : nearest(k, Object.keys(spec?.props ?? {})) });
+      });
+    }
+    if (field === "type") return [slateProblem("T300", `${name}'s type is the piece's name as a string`, { piece: name, prop: "type" })];
+    if (field === "on") return [slateProblem(keys.length > 0 ? "A602" : "A600", keys.length > 0 ? `${name} has no on.${keys.join(", on.")}; events are press, submit and change` : `${name}.${path.slice(2).join(".")}: a handler is a list of steps, ${issue.message}`, { piece: name, prop: `on${sub !== undefined ? `.${sub}` : ""}` })];
+    const prop = field === "props" ? sub : field;
+    return [slateProblem("T303", `${name}.${path.slice(2).join(".")}: ${issue.message}`, { piece: name, ...(prop !== undefined ? { prop } : {}) })];
+  }
+  if ((area === "values" || area === "derived" || area === "runs") && name !== undefined) {
+    const piece = `$${name}`;
+    if (keys.length > 0) {
+      const takes = area === "values" ? "start, secret and keep" : area === "runs" ? "kind, cmd, env, args, stdin, on, cwd, timeout, stream, confirm, every, once and always" : "an expression";
+      return keys.map(k => slateProblem(area === "runs" ? "K704" : "T302", `${piece} has no ${k}; it takes ${takes}`, { piece, prop: k }));
+    }
+    if (area === "runs" && issue.code === "invalid_union_discriminator") return [slateProblem("K701", `${piece} takes kind "cmd", "tool" or "resource"`, { piece, prop: "kind" })];
+    return [slateProblem(area === "runs" ? "K704" : "T303", `${piece}.${path.slice(2).join(".") || "decl"}: ${issue.message}`, { piece, ...(field !== undefined ? { prop: field } : {}) })];
+  }
+  if (area === "reactions") return [slateProblem("A611", `reaction ${Number(name) + 1}${path.length > 2 ? `.${path.slice(2).join(".")}` : ""}: ${issue.message}; a <when> is { on: { change: [paths] } or { done: name }, do: [steps] }`, { piece: `reaction-${Number(name) + 1}` })];
+  if (keys.length > 0) return keys.map(k => slateProblem("D202", `the document has no ${k}; it holds ${DOC_KEYS.join(", ")}${area === undefined && k in SLATE_RESERVED_PROPS ? "; a piece's props go under pieces.<id>.props" : ""}`, { fix: nearest(k, DOC_KEYS) }));
+  return [slateProblem("D202", `${path.join(".") || "the document"}: ${issue.message}`)];
 }

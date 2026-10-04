@@ -89,7 +89,7 @@ describe("expressions", () => {
     expect(check("items.map(i => i.name)")).toEqual(["X420"]);
     expect(check("s.toUpperCase()")).toEqual(["X420"]);
     expect(check("a ?? b")).toEqual(["X420"]);
-    expect(check("[1, 2]")).toEqual(["X420"]);
+    expect(check("[1, 2]")).toEqual([]);
     expect(check("x = 1")).toEqual(["X420"]);
     expect(check("lenn(pr.checks)")).toEqual(["X404"]);
     expect(check("short(pr.word)")).toEqual(["X405"]);

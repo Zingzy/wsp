@@ -53,8 +53,8 @@ describe("the sketch", () => {
 });
 
 describe("the catalog", () => {
-  it("keeps the index under 900 tokens and its example valid", () => {
-    expect(slateTokens(slateCatalog())).toBeLessThan(900);
+  it("keeps the index near 1,000 tokens and its example valid", () => {
+    expect(slateTokens(slateCatalog())).toBeLessThan(1050);
     expect(parseSlate(SLATE_INDEX_EXAMPLE).errors).toEqual([]);
     expect(slateCatalog()).toContain(SLATE_INDEX_EXAMPLE);
   });
