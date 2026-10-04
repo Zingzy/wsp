@@ -27,7 +27,7 @@ import {
   forkRoom,
   placeCapOf,
   placeSetRefusal,
-  placeSettingKey,
+  placeSettingDropped,
   PlaceSettings,
   type PlaceSettingsAsk,
   type PlaceSettingWord,
@@ -579,8 +579,9 @@ export interface PlaceDoor {
    * every road after it is answered without one. Refuses with placeForksNowhereLine on a computer that offers no
    * backend at all. */
   forkingBackend(placeId: string): Promise<MachineBackend>;
-  /** The name a place goes by, for the sentences a person reads; the id itself for a place this host holds no
-   * record of. Answered without a read, so a refusal built while a road is running names the computer. */
+  /** The name a place goes by, as its row shows it, for the sentences a person reads: this computer's own name too,
+   * and the id itself for a place this host holds no record of. Answered without a read, so a refusal built while
+   * a road is running names the computer. */
   nameOf(placeId: string): string;
   /** What the person set on one place, as load read it and every set since wrote it: answered without a read, since
    * the idle policy asks it each time it arms a workspace there. */
@@ -1117,7 +1118,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       ...(capDefault !== undefined ? { capDefault } : {}),
       ...(Object.keys(settings).length > 0 ? { settings } : {}),
       ...(placeTakes(row, "nap") ? { napMs: settingFor(undefined, settings.napMs, napDefault), napDefault } : {}),
-      spawn: settingFor(undefined, settings.spawn, AGENTS_ON),
+      spawn: agentsFrom(undefined, settings.spawn ?? {}),
       spawnDefault: AGENTS_ON,
       running: await recording.runningOn(row.id, ids),
     };
@@ -2542,7 +2543,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }
     },
 
-    nameOf: placeId => kept.get(placeId)?.name ?? placeId,
+    nameOf: placeId => (placeId === HERE_PLACE_ID ? wiring.here().name : (kept.get(placeId)?.name ?? placeId)),
 
     settingsAt: placeId => settingsHeld.get(placeId) ?? {},
 
@@ -2929,13 +2930,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (refused !== undefined) throw Object.assign(new Error(refused), { kind: "usage" });
       const { spawn, ...rest } = set;
       const given = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined));
-      const dropped = new Set<string>(reset.map(placeSettingKey));
       // Read and written in one turn, so two settings made at once on one place both stand.
       await inTurn(async () => {
         const held = await settingsOf(placeId);
-        // The switch is a patch over the one the place holds, so a cap named alone keeps it on or off.
-        const switched = spawn === undefined ? {} : { spawn: agentsFrom(held.spawn, spawn) };
-        const next = Object.fromEntries(Object.entries({ ...held, ...given, ...switched }).filter(([key]) => !dropped.has(key)));
+        // The switch is a patch over the parts the place holds, and only the parts named are stored, so a cap named
+        // alone keeps it on or off and every part nobody named follows the default as it reads now.
+        const switched = spawn === undefined ? {} : { spawn: { ...held.spawn, ...spawn } };
+        const next = reset.reduce<PlaceSettings>((at, word) => placeSettingDropped(at, word), { ...held, ...given, ...switched });
         await (Object.keys(next).length === 0 ? store.delete(CAPS, placeId) : store.put(CAPS, placeId, next));
         settingsHeld.set(placeId, next);
       });

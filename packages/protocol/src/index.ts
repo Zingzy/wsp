@@ -3475,15 +3475,16 @@ export type PlaceCapSet = z.infer<typeof PlaceCapSet>;
  * `napMs` is how long a workspace there with no window of its own runs quiet before it naps; null never naps it. */
 export const PlaceSettings = PlaceCapSet.extend({
   napMs: z.number().int().min(60_000).max(NAP_AFTER_MAX_MS).nullable().optional(),
-  /** What the agents on a workspace there may ask of this host where the workspace holds no switch of its own. */
-  spawn: WorkspaceAgents.optional(),
+  /** What the agents on a workspace there may ask of this host where the workspace holds no switch of its own: only
+   * the parts the person set, so every other part follows AGENTS_ON as it reads now. */
+  spawn: WorkspaceAgents.partial().optional(),
 });
 export type PlaceSettings = z.infer<typeof PlaceSettings>;
-/** What a set asks for: the settings, with the agents switch as a patch over the one the place holds. */
-export const PlaceSettingsAsk = PlaceSettings.extend({ spawn: WorkspaceAgents.partial().optional() });
+/** What a set asks for: the settings, with the agents switch as a patch over the parts the place holds. */
+export const PlaceSettingsAsk = PlaceSettings;
 export type PlaceSettingsAsk = z.infer<typeof PlaceSettingsAsk>;
 /** A setting on a place by the word the command line and the tool name it with, which a reset takes. */
-export const PlaceSettingWord = z.enum(["threads", "machines", "spend", "nap", "spawn"]);
+export const PlaceSettingWord = z.enum(["threads", "machines", "spend", "nap", "spawn", "max-depth"]);
 export type PlaceSettingWord = z.infer<typeof PlaceSettingWord>;
 
 /** The Macs a computer's icon tells apart. */
@@ -7655,7 +7656,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceComputerName } from "./place-name.js";
 export { needsYouLine, subagentStateWord, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
-export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingKey, placeSettingsLine, placeTakes, settingFor, napMsOf, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
+export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingDropped, placeSettingNamed, placeSettingsLine, placeTakes, settingFor, napMsOf, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";

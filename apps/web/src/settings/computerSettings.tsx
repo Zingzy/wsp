@@ -5,7 +5,7 @@
 // a row off its default carries the arrow that takes it back.
 import { useState } from "react";
 import { MinusIcon, PlusIcon } from "lucide-react";
-import { HERE_PLACE_ID, NAP_AFTER_MAX_MS, fmtMemGb, type PlaceSettingWord, type PlaceSettingsAsk, type PlaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, NAP_AFTER_MAX_MS, fmtMemGb, placeSettingNamed, type PlaceSettingWord, type PlaceSettingsAsk, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
@@ -55,9 +55,9 @@ export function BehindRow({ place, ctx }: { place: PlaceView; ctx: SettingsConte
   );
 }
 
-/** The threads-at-once number with a step either side, at least one. While a set is on its way the host's row still
- * holds the number before it, so the number shown and the next step go off the last one sent. */
-function Stepper({ value, label, onChange }: { value: number; label: string; onChange: (next: number) => Promise<void> }) {
+/** A setting's number with a step either side, at least one. While a set is on its way the host's row still holds
+ * the number before it, so the number shown and the next step go off the last one sent. */
+function Stepper({ k, value, label, onChange }: { k: string; value: number; label: string; onChange: (next: number) => Promise<void> }) {
   const [sent, setSent] = useState<number | null>(null);
   const shown = sent ?? value;
   const step = (next: number): void => {
@@ -65,11 +65,11 @@ function Stepper({ value, label, onChange }: { value: number; label: string; onC
     void onChange(next).finally(() => setSent(last => (last === next ? null : last)));
   };
   return (
-    <span data-k="threads-at-once" role="group" aria-label={label} className="inline-flex h-[30px] items-center rounded-[7px] border border-border">
+    <span data-k={k} role="group" aria-label={label} className="inline-flex h-[30px] items-center rounded-[7px] border border-border">
       <Button variant="ghost" size="icon-xs" aria-label={W.fewer} disabled={shown <= 1} onClick={() => step(shown - 1)} className="h-full rounded-r-none">
         <MinusIcon aria-hidden className="size-3.5" />
       </Button>
-      <span data-k="threads-at-once-value" className="min-w-8 px-1 text-center text-[13px] tabular-nums text-foreground">
+      <span data-k={`${k}-value`} className="min-w-8 px-1 text-center text-[13px] tabular-nums text-foreground">
         {shown}
       </span>
       <Button variant="ghost" size="icon-xs" aria-label={W.more} onClick={() => step(shown + 1)} className="h-full rounded-l-none">
@@ -105,7 +105,7 @@ export function LimitsCard({ place }: { place: PlaceView }) {
           id="threads-at-once"
           title={W.threadsAtOnce}
           description={fallback === undefined || place.shape === undefined ? W.threadsLineBare : W.threadsLine(fallback, name, fmtMemGb(place.shape.memMb))}
-          control={<Stepper value={threads} label={W.threadsAtOnce} onChange={n => setOn(place, { threads: n })} />}
+          control={<Stepper k="threads-at-once" value={threads} label={W.threadsAtOnce} onChange={n => setOn(place, { threads: n })} />}
           {...(set.threads === undefined ? {} : { reset: resetOn(place, "threads") })}
         />
       )}
@@ -135,19 +135,30 @@ export function LimitsCard({ place }: { place: PlaceView }) {
   );
 }
 
-/** Threads here: whether a thread on this computer may open threads of its own, and how far. */
+/** Threads here: whether a thread on this computer may open threads of its own, and how far. Machines are named only
+ * where this computer forks them. */
 export function SpawnCard({ place }: { place: PlaceView }) {
   const spawn = place.spawn;
   if (spawn === undefined) return null;
+  const set = place.settings ?? {};
   return (
     <Card id="computer-spawn" head={W.threadsHere}>
       <Row
         id="agents-start-agents"
         title={W.spawnTitle}
-        description={W.spawnLine(spawn.maxMachines, spawn.maxDepth)}
+        description={W.spawnLine(spawn.maxDepth, place.takesForks === true ? spawn.maxMachines : undefined)}
         control={<Switch data-k="agents-start-agents" aria-label={W.spawnTitle} checked={spawn.spawn} onCheckedChange={on => void setOn(place, { spawn: { spawn: on } })} />}
-        {...(place.settings?.spawn === undefined ? {} : { reset: resetOn(place, "spawn") })}
+        {...(placeSettingNamed(set, "spawn") ? { reset: resetOn(place, "spawn") } : {})}
       />
+      {!spawn.spawn ? null : (
+        <Row
+          id="levels-deep"
+          title={W.levelsTitle}
+          description={W.levelsLine}
+          control={<Stepper k="levels-deep" value={spawn.maxDepth} label={W.levelsTitle} onChange={n => setOn(place, { spawn: { maxDepth: n } })} />}
+          {...(placeSettingNamed(set, "max-depth") ? { reset: resetOn(place, "max-depth") } : {})}
+        />
+      )}
     </Card>
   );
 }
