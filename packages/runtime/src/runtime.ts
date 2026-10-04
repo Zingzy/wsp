@@ -2177,6 +2177,8 @@ interface TurnWritten {
   subagents: number;
   reply?: TurnResult["status"];
   started: boolean;
+  /** Its card is written, so a host that re-opens it writes no second one, as a reply already written stands. */
+  changes: boolean;
 }
 const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritten => {
   const lastOf = <T extends SessionEvent["type"]>(type: T): Extract<SessionEvent, { type: T }> | undefined => {
@@ -2194,7 +2196,7 @@ const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritt
   const reply = lastOf("session.done")?.result.status;
   // A turn with a line or a reply already written had its start written too, whether or not the cap still holds it:
   // a second start row at the tail of the transcript would sit after the work it opened.
-  return { lines, subagents, ...(reply !== undefined ? { reply } : {}), started: lines > 0 || subagents > 0 || reply !== undefined || lastOf("session.start") !== undefined };
+  return { lines, subagents, ...(reply !== undefined ? { reply } : {}), started: lines > 0 || subagents > 0 || reply !== undefined || lastOf("session.start") !== undefined, changes: lastOf("session.changes") !== undefined };
 };
 
 /** An index as its file holds it, with the mark of the transcript file it was read off: an index whose transcript
@@ -2301,8 +2303,9 @@ interface SessionIndexRecord {
   /** reply is the held status of a turn whose result landed while its process still ran, on a row still running;
    * run is where that turn is on its machine, so a host that comes back re-opens it rather than failing it, and
    * turnToken is what that surviving process still has in its environment, so the host that re-opens it can answer
-   * for it. All three are written for a running row alone. */
-  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; run?: string; turnToken?: string; scopeDeviceId?: string })[];
+   * for it. All three are written for a running row alone, as is snapshot, the commit the turn's launch took of its
+   * folder, which the turn's changes are read against wherever it ends. */
+  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; run?: string; turnToken?: string; scopeDeviceId?: string; snapshot?: string })[];
   /** Every thread of the workspace by its runtime id; absent on a document from before threads had a record. */
   threads?: Record<string, ThreadRecord>;
 }
@@ -3409,7 +3412,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
    * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
    * takes the row, since a restart could re-open nothing from it. */
-  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> }>();
+  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> }>();
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
@@ -3693,6 +3696,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // Beside the turn token and for the same reason: the process out there still holds this device, so a host
         // that re-opens the turn has to know which one to take away when it ends.
         ...(s.view.status === "running" && s.scopeDeviceId !== undefined ? { scopeDeviceId: s.scopeDeviceId } : {}),
+        ...(s.view.status === "running" && s.snapshot !== undefined ? { snapshot: s.snapshot } : {}),
       }));
     const threads: Record<string, ThreadRecord> = {};
     for (const [threadId, { workspaceId: on, ...held }] of threadRecords) if (on === workspaceId) threads[threadId] = held;
@@ -6076,7 +6080,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       await Promise.all(moved.map(id => store.delete(TRANSCRIPTS, id)));
       for (const id of await store.keys(WORKSPACES)) if (!transcriptIndex.has(id)) await loadIndex(id);
-      const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }[] = [];
+      const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string; snapshot?: string }[] = [];
       for (const raw of await store.list(SESSIONS)) {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
@@ -6103,7 +6107,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
           continue;
         }
-        for (const { turnId, notify, notifyBy, notifyRoad, reply, run, turnToken, scopeDeviceId, ...view } of index.sessions) {
+        for (const { turnId, notify, notifyBy, notifyRoad, reply, run, turnToken, scopeDeviceId, snapshot, ...view } of index.sessions) {
           const by = readScope(notifyBy);
           const road = readRoad(notifyRoad);
           const row: {
@@ -6116,6 +6120,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             run?: string;
             turnToken?: string;
             scopeDeviceId?: string;
+            snapshot?: string;
             end?: (reason: string) => void;
           } = {
             view,
@@ -6131,6 +6136,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ...(run !== undefined ? { run } : {}),
             ...(turnToken !== undefined ? { turnToken } : {}),
             ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}),
+            ...(snapshot !== undefined ? { snapshot } : {}),
           };
           // A row left running because nothing answered about its run has no harness of its own to end, and the poll
           // that finds its machine gone must still be able to settle it.
@@ -8961,8 +8967,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** The folder this turn's images landed in on the machine, removed when the turn ends however it ends; absent on
      * a turn that landed none, whose harness read them inline or which carried none at all. */
     imagesDir?: string;
-    /** The snapshot of the turn's folder taken as it launched, which the range of what it changed starts from. */
-    snapshot?: { from: Promise<string | undefined>; cwd: string };
+    /** The snapshot of the turn's folder taken as it launched, which the range of what it changed starts from: the
+     * commit itself where it is known as the turn is handed over, a launch's already in or a re-opened turn's off
+     * its row. */
+    snapshot?: { from: Promise<string | undefined> | string; cwd: string };
     /** The box the turn's own exec stream reads to know it is waiting on something outside its own process: flipped
      * while a permission prompt of this turn stands open, and while its harness reports a command or a subagent it
      * started still running, so the turn's idle clock does not run out under a question nobody has answered yet nor
@@ -8972,10 +8980,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   }): SessionHandle => {
     const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, notifyRoad, turnToken, scopeDeviceId } = t;
     const workspaceId = entry.record.id;
-    const { lines: deltasWritten, subagents: subagentsWritten, reply: recordedReply, started: startWritten } = t.written ?? { lines: 0, subagents: 0, started: false };
+    const { lines: deltasWritten, subagents: subagentsWritten, reply: recordedReply, started: startWritten, changes: changesWritten } = t.written ?? { lines: 0, subagents: 0, started: false, changes: false };
     /** What the turn changed, read once at the first of its reply and its exit: a second snapshot, the range from the
      * launch's, and the files in it recorded under the turn. A turn that changed nothing records nothing. */
-    let changesRead = false;
+    let changesRead = changesWritten;
     const readChanges = (sessionId: string): void => {
       if (changesRead || t.snapshot === undefined) return;
       changesRead = true;
@@ -9418,13 +9426,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
     if (turnId !== rowId) sessions.delete(turnId);
-    sessions.set(rowId, { view, turnId, calls, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
+    sessions.set(rowId, { view, turnId, calls, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(typeof t.snapshot?.from === "string" ? { snapshot: t.snapshot.from } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
     void persistSessions(workspaceId);
+    // A launch that hands its prompt over late resolves its snapshot after the row exists; the row takes it then.
+    const taking = t.snapshot?.from;
+    if (taking instanceof Promise) {
+      void taking.then(commit => {
+        const row = sessions.get(rowId);
+        if (commit === undefined || row === undefined || row.turnId !== turnId || row.view.status !== "running") return;
+        row.snapshot = commit;
+        void persistSessions(workspaceId);
+      });
+    }
     /** The turn's process is over: its status settles, its token stops naming anything, and the harness's own title
      * for the session is read again, since it writes one as the turn settles. */
     const settled = (status: TurnStatus): void => {
       const row = sessions.get(rowId);
       if (row !== undefined && row.turnToken === turnToken) delete row.turnToken;
+      if (row?.turnId === turnId) delete row.snapshot;
       // The process is gone, so the token in its environment names nothing that can be asked for anything: it is
       // taken away here, the one exit both the reply road and the failure road reach.
       if (scopeDeviceId !== undefined) {
@@ -9504,7 +9523,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * `cannot` covers a row with no run recorded (a host from before this road, or a harness whose runs die with it),
    * no workspace or no machine running under it, no adapter for its harness in this process, and a handle that is
    * not one this host could have launched. */
-  const reattach = async (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }): Promise<Reopened> => {
+  const reattach = async (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string; snapshot?: string }): Promise<Reopened> => {
     const { view, run } = s;
     const threadId = view.threadId;
     const entry = live.get(view.workspaceId);
@@ -9569,6 +9588,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // answers for it takes it back and its exit is what hands it over.
         ...(s.scopeDeviceId !== undefined ? { scopeDeviceId: s.scopeDeviceId } : {}),
         ...(s.turnLive !== undefined ? { turnLive: s.turnLive } : {}),
+        ...(s.snapshot !== undefined && view.cwd !== undefined ? { snapshot: { from: s.snapshot, cwd: view.cwd } } : {}),
         outcome: "started",
         waiting,
         opening: { prompt: view.prompt ?? "" },
@@ -9795,7 +9815,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Every send takes one trip before its launch: its files land and its folder's snapshot is taken, or only started
       // where the agent takes its prompt late.
       let landed = false;
-      let snapshot: { from: Promise<string | undefined>; cwd: string } | undefined;
+      let snapshot: { from: Promise<string | undefined> | string; cwd: string } | undefined;
       // This send's own folder on the machine, named by the request id it minted: the landing runs before any turn is
       // registered, so two sends arriving together both pass the wait, and a folder they shared would leave the first
       // turn holding the second's picture.
@@ -9860,9 +9880,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             const landing = runsIn(entry, resume === undefined ? undefined : folderOf(workspaceId, resume), folder);
             filePaths = await landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, randomUUID()), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
             if (filePaths.length > 0) filesFolder = landing;
-            const from = snapshotOf(entry, landing);
-            if (!promptsLate) await from;
-            snapshot = { from, cwd: landing };
+            const taken = promptsLate ? snapshotOf(entry, landing) : await snapshotOf(entry, landing);
+            snapshot = taken === undefined ? undefined : { from: taken, cwd: landing };
             refuse();
             continue;
           }
@@ -9931,7 +9950,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(images.length > 0 ? { images } : {}),
               ...(mcpServers !== undefined ? { mcpServers } : {}),
               ...(limitDetails ? { limitDetails: true as const } : {}),
-              ...(promptsLate && snapshot !== undefined ? { promptAfter: snapshot.from.then(() => {}) } : {}),
+              ...(promptsLate && snapshot?.from instanceof Promise ? { promptAfter: snapshot.from.then(() => {}) } : {}),
               ...(catalog?.source === "harness" && catalog.version !== null ? { version: catalog.version } : {}),
               // The thread's earlier turns as its transcript holds them, this one left out since its message follows.
               ...(resume !== undefined ? { seed: async () => threadSeed(threadMessages((await openTranscript(workspaceId)).filter(e => e.turnId !== turnId), threadId)) } : {}),
