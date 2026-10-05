@@ -128,8 +128,15 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   };
   const [forgetting, setForgetting] = useState(false);
   const forget = () => Promise.all(secrets.map(path => bundle.sender.secret(path, "")));
+  // What the host refused of the menu's acts stays under the title until the next one, as a sheet keeps its refusal.
+  const [refused, setRefused] = useState<string | undefined>(undefined);
+  const act = (asked: Promise<unknown> | undefined) => {
+    setRefused(undefined);
+    void asked?.then(() => loadSlate(threadId), (error: unknown) => setRefused(refusalOf(error)));
+  };
   return (
-    <div data-slate-version={engine.version} className={cn(COLUMN, "mt-3 mb-4 flex h-7 shrink-0 items-center gap-2")} title={engine.document?.title}>
+    <>
+    <div data-slate-version={engine.version} className={cn(COLUMN, "mt-3 flex h-7 shrink-0 items-center gap-2", refused === undefined && "mb-4")} title={engine.document?.title}>
       <h2 className="min-w-0 flex-1 truncate text-[13px] leading-5 font-normal text-muted-foreground">{title}</h2>
       {refreshing ? <Refreshing /> : null}
       <Menu>
@@ -137,10 +144,10 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
           <MoreHorizontal />
         </MenuTrigger>
         <MenuPopup align="end">
-          <MenuItem disabled={entry.record?.canUndo !== true} onClick={() => void api?.undo(threadId).then(() => loadSlate(threadId))}>
+          <MenuItem disabled={entry.record?.canUndo !== true} onClick={() => act(api?.undo(threadId))}>
             {SLATE_WORDS.undo(engine.version)}
           </MenuItem>
-          <MenuItem onClick={() => void api?.clear(threadId).then(() => loadSlate(threadId))}>{SLATE_WORDS.clear}</MenuItem>
+          <MenuItem onClick={() => act(api?.clear(threadId))}>{SLATE_WORDS.clear}</MenuItem>
           {runs.length > 0 ? <MenuItem onClick={stop}>{SLATE_WORDS.stop}</MenuItem> : null}
           {secrets.length > 0 ? <MenuItem onClick={() => setForgetting(true)}>{SLATE_WORDS.forget}</MenuItem> : null}
           <MenuItem onClick={() => setStanding(true)}>{STANDING_WORDS.menu}</MenuItem>
@@ -150,8 +157,17 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
       {forgetting ? <ForgetSecrets forget={forget} onClose={() => setForgetting(false)} /> : null}
       {standing ? <StandingApprovals record={entry.record} revoke={key => slateLink(threadId).revoke(key).then(() => loadSlate(threadId))} onClose={() => setStanding(false)} /> : null}
     </div>
+    {refused === undefined ? null : (
+      <p data-slate-refused className={cn(COLUMN, "mb-4 text-[13px] leading-5 text-error-foreground")}>
+        {refused}
+      </p>
+    )}
+    </>
   );
 }
+
+/** A refused act's words, as the host said them. */
+const refusalOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** Forgetting the slate's secrets asks first: a kept secret does not come back, and the person types it again. */
 function ForgetSecrets({ forget, onClose }: { forget(): Promise<unknown>; onClose(): void }) {
@@ -250,6 +266,7 @@ function LinkPrompt({ threadId }: { threadId: string }) {
 /** No slate yet, cleared, rewound to before it, or newer than this build: the panel's own empty state. */
 function EmptySlate({ threadId, entry }: { threadId: string; entry: SlateEntry }) {
   const api = useStore(s => s.api?.slates ?? null);
+  const [refused, setRefused] = useState<string | undefined>(undefined);
   const first = entry.newer !== undefined ? SLATE_WORDS.newer(entry.newer) : entry.record?.empty === "cleared" ? SLATE_WORDS.cleared : entry.record?.empty === "rewound-before" ? SLATE_WORDS.rewound : null;
   const ask = () => {
     const workspaceId = threadWorkspace(threadId);
@@ -272,12 +289,20 @@ function EmptySlate({ threadId, entry }: { threadId: string; entry: SlateEntry }
             {SLATE_WORDS.askButton}
           </Button>
           {entry.record?.canUndo === true ? (
-            <Button variant="ghost" size="xs" onClick={() => void api?.undo(threadId).then(() => loadSlate(threadId))}>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => {
+                setRefused(undefined);
+                void api?.undo(threadId).then(() => loadSlate(threadId), (error: unknown) => setRefused(refusalOf(error)));
+              }}
+            >
               Undo
             </Button>
           ) : null}
         </div>
       ) : null}
+      {refused === undefined ? null : <p data-slate-refused className="text-[13px] leading-5 text-error-foreground">{refused}</p>}
     </Empty>
   );
 }

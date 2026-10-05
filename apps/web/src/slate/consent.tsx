@@ -24,6 +24,7 @@ export const LINK_WORDS = {
  * domain and Open once. */
 export function LinkConsent({ link, onOpen, onAlways, onClose }: { link: { href: string; domain: string }; onOpen(): void; onAlways(): Promise<unknown>; onClose(): void }) {
   const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | undefined>(undefined);
   return (
     <Dialog open onOpenChange={open => (open ? undefined : onClose())}>
       <DialogPopup>
@@ -34,6 +35,7 @@ export function LinkConsent({ link, onOpen, onAlways, onClose }: { link: { href:
           <code data-slate-link-href className="block min-w-0 truncate font-mono text-xs text-muted-foreground" title={link.href}>
             {link.href}
           </code>
+          {refused === undefined ? null : <p data-slate-refused className="pt-2 text-[13px] leading-5 text-error-foreground">{refused}</p>}
         </DialogPanel>
         <DialogFooter>
           <Button variant="outline" disabled={busy} onClick={onClose}>
@@ -44,10 +46,17 @@ export function LinkConsent({ link, onOpen, onAlways, onClose }: { link: { href:
             disabled={busy}
             onClick={() => {
               setBusy(true);
-              void onAlways().finally(() => {
-                onOpen();
-                onClose();
-              });
+              setRefused(undefined);
+              void onAlways().then(
+                () => {
+                  onOpen();
+                  onClose();
+                },
+                (error: unknown) => {
+                  setBusy(false);
+                  setRefused(error instanceof Error ? error.message : String(error));
+                },
+              );
             }}
           >
             {LINK_WORDS.always}

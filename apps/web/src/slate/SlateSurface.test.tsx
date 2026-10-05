@@ -200,6 +200,22 @@ describe("the tab's Approvals", () => {
     await waitFor(() => expect(api.state).toHaveBeenCalledWith("t9", { $token: "" }));
   });
 
+  it("shows what the host refused: a revoke keeps its row and says why, a refused Clear says why under the title", async () => {
+    const api = host([record({ threadId: "t8", approvals: { k1: { state: "allowed", at: 1, run: "deploy", cmd: "bash deploy.sh" } } })]);
+    api.revoke = vi.fn(async () => Promise.reject(new Error("the host is restarting")));
+    api.clear = vi.fn(async () => Promise.reject(new Error("the slate moved on; read it again")));
+    select(api, "t8");
+    render(<SlateSurface />);
+    fireEvent.click(await screen.findByRole("button", { name: "Slate menu" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Clear" }));
+    expect(await screen.findByText("the slate moved on; read it again")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Slate menu" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Approvals" }));
+    await act(async () => fireEvent.click(document.querySelector<HTMLElement>('[data-slate-revoke="k1"]')!));
+    expect(await screen.findByText("the host is restarting")).toBeTruthy();
+    expect(document.querySelector('[data-slate-revoke="k1"]')).not.toBeNull();
+  });
+
   it("lists each standing approval as a row with Revoke, and revoking asks the host", async () => {
     const api = host([record({ approvals: { k1: { state: "allowed", at: 1, run: "deploy", cmd: "bash deploy.sh" }, "domain:example.com": { state: "allowed", at: 2, cmd: "links to example.com" }, k2: { state: "refused", at: 3, run: "x", cmd: "rm -rf x" } } })]);
     select(api, "t1");

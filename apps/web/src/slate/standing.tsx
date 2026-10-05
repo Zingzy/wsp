@@ -24,6 +24,7 @@ function rowOf(key: string, approval: SlateRecord["approvals"][string]): { title
 
 export function StandingApprovals({ record, revoke, onClose }: { record: SlateRecord | null; revoke(key: string): Promise<unknown>; onClose(): void }) {
   const [busy, setBusy] = useState<string | undefined>(undefined);
+  const [refused, setRefused] = useState<string | undefined>(undefined);
   const allowed = Object.entries(record?.approvals ?? {}).filter(([, a]) => a.state === "allowed");
   return (
     <Dialog open onOpenChange={open => (open ? undefined : onClose())}>
@@ -54,7 +55,10 @@ export function StandingApprovals({ record, revoke, onClose }: { record: SlateRe
                         disabled={busy !== undefined}
                         onClick={() => {
                           setBusy(key);
-                          void revoke(key).finally(() => setBusy(undefined));
+                          setRefused(undefined);
+                          void revoke(key)
+                            .catch((error: unknown) => setRefused(error instanceof Error ? error.message : String(error)))
+                            .finally(() => setBusy(undefined));
                         }}
                       >
                         {STANDING_WORDS.revoke}
@@ -65,6 +69,7 @@ export function StandingApprovals({ record, revoke, onClose }: { record: SlateRe
               })}
             </Card>
           )}
+          {refused === undefined ? null : <p data-slate-refused className="pt-3 text-[13px] leading-5 text-error-foreground">{refused}</p>}
         </DialogPanel>
       </DialogPopup>
     </Dialog>
