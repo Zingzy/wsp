@@ -27,6 +27,8 @@ export interface SlateSourceModule {
   shape: { fields: Record<string, SlateShape> } | { keyed: SlateShape };
   /** Paths the registry marks as time series, which bars warns on. */
   series?: readonly string[];
+  /** The fields the catalog's index names for a core source; its own entry has the rest. */
+  indexed?: readonly string[];
   /** Notes per path for the catalog: which agents report it, when it is null. */
   notes?: Record<string, string>;
   example: string;
@@ -39,7 +41,7 @@ const points = list(rec({ x: "number", y: "number" }));
 
 export const SLATE_SOURCES: Readonly<Record<string, SlateSourceModule>> = slateTable<SlateSourceModule>({
   thread: {
-    name: "thread", level: "core", purpose: "This thread: status, last turn, context, cost, tokens, changes, plan.",
+    name: "thread", level: "core", indexed: ["id", "title", "status", "agent", "model", "turns", "lastTurn", "cost", "tokens", "context", "changes", "plan", "waitingOn", "subagents"], purpose: "This thread: status, last turn, context, cost, tokens, changes, plan.",
     update: "push", cost: "none beyond today", scope: "the slate's own thread",
     shape: rec({
       id: "string", title: "string", agent: "string", model: "string", effort: "string",
@@ -71,7 +73,7 @@ export const SLATE_SOURCES: Readonly<Record<string, SlateSourceModule>> = slateT
     example: "tree.counts.working",
   },
   usage: {
-    name: "usage", level: "core", purpose: "The plan windows of the account the thread runs on.",
+    name: "usage", level: "core", indexed: ["account", "windows", "session", "week", "status", "note"], purpose: "The plan windows of the account the thread runs on.",
     update: "push", cost: "one event per turn end", scope: "the account the thread runs on",
     shape: rec({
       account: rec({ key: "string", label: "string", agent: "string", plan: "string", address: "string", computers: list("string") }),
@@ -88,21 +90,21 @@ export const SLATE_SOURCES: Readonly<Record<string, SlateSourceModule>> = slateT
     example: "pct(usage.week.percent)",
   },
   cost: {
-    name: "cost", level: "core", purpose: "The workspace's cost: the rate now and what it has run up.",
+    name: "cost", level: "core", indexed: ["rateUsdPerHour", "accruedUsd"], purpose: "The workspace's cost: the rate now and what it has run up.",
     update: "push", cost: "none beyond today", scope: "the thread's workspace",
     shape: rec({ rateUsdPerHour: "number", accruedUsd: "number" }),
     notes: { "cost.rateUsdPerHour": "0 on this computer, which usd() reads as free" },
     example: "usd(cost.accruedUsd)",
   },
   time: {
-    name: "time", level: "core", purpose: "The clock, so a countdown or an age moves on its own.",
+    name: "time", level: "core", indexed: ["now", "today", "zone"], purpose: "The clock, so a countdown or an age moves on its own.",
     update: "tick", cost: "one re-evaluation a tick", scope: "none",
     shape: rec({ now: "number", today: "string", zone: "string" }),
     notes: { "time.now": "ms epoch; ticks each second while a visible piece reads it" },
     example: "until(usage.week.resetsAt)",
   },
   git: {
-    name: "git", level: "core", purpose: "The thread's checkout: branch, head, counts against upstream.",
+    name: "git", level: "core", indexed: ["branch", "head", "ahead", "behind", "changed"], purpose: "The thread's checkout: branch, head, counts against upstream.",
     update: "push", cost: "none for the checkout; status entries poll 15 s while bound", scope: "the thread's folder",
     shape: rec({
       branch: "string", head: "string", ahead: "number", behind: "number", changed: "number", stashes: "number",
@@ -113,7 +115,7 @@ export const SLATE_SOURCES: Readonly<Record<string, SlateSourceModule>> = slateT
     example: "git.branch",
   },
   pr: {
-    name: "pr", level: "core", purpose: "The pull request of the thread's branch and its checks.",
+    name: "pr", level: "core", indexed: ["number", "url", "state", "draft", "branch", "headSubject", "mergeable", "review", "checks", "word"], purpose: "The pull request of the thread's branch and its checks.",
     update: "push", cost: "one gh read every 3 min; every 30 s while a bound check is pending", scope: "the thread's folder",
     shape: rec({
       number: "number", url: "string", state: oneOf(["open", "merged", "closed"]), draft: "boolean", base: "string", branch: "string",

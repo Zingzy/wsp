@@ -70,20 +70,10 @@ function pieceLine(p: SlatePieceModule): string {
   return `${p.type}: ${[...props, ...events].join(" ")}${items.length > 0 ? `; ${items.join(" ")}` : ""}${p.holdsChildren && p.childLimit === undefined ? "; children" : ""}`;
 }
 
-/** The fields the index names for each source; the entry for the source has the rest. */
-const INDEX_FIELDS: Record<string, readonly string[]> = slateTable<readonly string[]>({
-  thread: ["id", "title", "status", "agent", "model", "turns", "lastTurn", "cost", "tokens", "context", "changes", "plan", "waitingOn", "subagents"],
-  usage: ["account", "windows", "session", "week", "status", "note"],
-  cost: ["rateUsdPerHour", "accruedUsd"],
-  time: ["now", "today", "zone"],
-  git: ["branch", "head", "ahead", "behind", "changed"],
-  pr: ["number", "url", "state", "draft", "branch", "headSubject", "mergeable", "review", "checks", "word"],
-});
-
 function sourceLine(name: string): string {
   const shape = SLATE_SOURCES[name]!.shape;
   if ("keyed" in shape) return `${name}.<server>: state tools[] resources[]`;
-  const fields = Object.entries(shape.fields).filter(([k]) => INDEX_FIELDS[name]?.includes(k) ?? true);
+  const fields = Object.entries(shape.fields).filter(([k]) => SLATE_SOURCES[name]!.indexed?.includes(k) ?? true);
   const more = fields.length < Object.keys(shape.fields).length ? " ..." : "";
   return `${name}: ${fields.map(([k, v]) => (typeof v === "object" && "list" in v ? `${k}[]` : k)).join(" ")}${more}`;
 }
@@ -97,7 +87,7 @@ function index(): string {
     "section, column, grid: pad none tight normal loose; surface=\"inset\" sets the card ground; align start center end, else children fill the width.",
     "bars compare categories; time is a chart, x in ms or ISO; a flow is a diagram.",
     "Sources, read only:",
-    ...["thread", "usage", "cost", "time", "git", "pr"].map(sourceLine),
+    ...Object.values(SLATE_SOURCES).filter(s => s.level === "core").map(s => sourceLine(s.name)),
     "Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once confirm then tool resource> <file name> <when change={$path} or done={$run} do={steps}>",
     `Steps: ${Object.keys(SLATE_STEPS).join(" ")}. Functions: ${Object.keys(SLATE_FUNCTIONS).join(" ")}. ago(t) "30s ago", until(t) "in 4m".`,
     `After |: ${Object.keys(SLATE_PIPE_STEPS).join(" ")}. $run reads state exit out err json; a secret only .set .len.`,
