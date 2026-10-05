@@ -369,6 +369,9 @@ describe("a slate's MCP runs", () => {
     // Allowed for the thread, the next press runs with no sheet.
     expect((await press("s")).ask).toBeUndefined();
     await vi.waitFor(async () => expect((await get()).values["shaped"]).toMatchObject({ state: "done", runs: 2 }), { timeout: 10_000 });
+    // Revoking the server takes the reshapes allowed under it too, so the next press asks again.
+    await rt.slates.revoke({ threadId, key: "mcp:notes" });
+    expect((await press("s")).ask).toMatchObject({ kind: "server", server: "notes", then: SHAPE });
   }, 60_000);
 
   it("a then that reads the slate's own file runs it from SLATE_DIR, with the file's text in its consent", async () => {

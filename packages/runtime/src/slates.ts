@@ -1502,6 +1502,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         }
         if (r.approvals[p.key] === undefined) throw usageRefusal(`this thread holds no approval ${p.key}.`, "Read its approvals again.");
         delete r.approvals[p.key];
+        // A server's own consent goes with the reshapes allowed under it, each kept as a key of its own.
+        if (p.key.startsWith("mcp:") && !p.key.includes("#then:")) for (const key of Object.keys(r.approvals)) if (key.startsWith(`${p.key}#then:`)) delete r.approvals[key];
         // What it covered stops now: each run started under it is cancelled, out of the queue, and off its timer.
         const covered = Object.entries(r.document?.runs ?? {}).flatMap(([name, declared]) => {
           const decl = approvalDecl(r, declared);
