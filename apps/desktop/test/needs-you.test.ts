@@ -5,8 +5,22 @@
 // and tells its page to open what it was about. The dock's badge takes a count
 // and nothing else.
 import { NEEDS_YOU } from "@wsp/protocol";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
-import { sayOutside, showBadge, type Notifier, type SystemNotification } from "../src/needs-you.js";
+import { noticeWindowOf, sayOutside, showBadge, type Notifier, type ShellWindow, type SystemNotification } from "../src/needs-you.js";
+
+// Process-wide: every test in this worker runs with gc exposed.
+setFlagsFromString("--expose-gc");
+const gc = runInNewContext("gc") as () => void;
+
+/** Runs the collector past the current job, which is what lets a WeakRef read empty. */
+async function collect(): Promise<void> {
+  for (let i = 0; i < 3; i++) {
+    await new Promise(resolve => setImmediate(resolve));
+    gc();
+  }
+}
 
 const NEED = { title: NEEDS_YOU, body: "sign in to GitHub CLI login", show: true, sound: false };
 
@@ -21,13 +35,17 @@ function stub(supported = true) {
     beep: () => {
       beeps += 1;
     },
+    refused: () => {},
     make: o => {
       shown.push(o);
       const note: SystemNotification = {
         show: () => {
           displayed += 1;
         },
-        on: (_event, listener) => clicks.push(listener),
+        on: (event: string, listener: (...args: never[]) => void) => {
+          if (event === "click") clicks.push(listener as () => void);
+          return note;
+        },
       };
       return note;
     },
@@ -37,7 +55,7 @@ function stub(supported = true) {
 
 function fakeWindow(focused: boolean) {
   const did: string[] = [];
-  return { did, win: { focused: () => focused, raise: () => did.push("raise"), open: (at?: { computer: string }) => did.push(at === undefined ? "open" : `open ${at.computer}`) } };
+  return { did, win: { focused: () => focused, raise: () => did.push("raise"), open: (id?: string) => did.push(id === undefined ? "open" : `open ${id}`) } };
 }
 
 describe("the shell's system notification for something the person should hear about", () => {
@@ -78,12 +96,76 @@ describe("the shell's system notification for something the person should hear a
     expect(did).toEqual(["raise", "open"]);
   });
 
-  it("a click on a line about a computer's setup tells the page which computer to open", () => {
+  it("a click hands the page back the id it put on that line, so the page opens what that line was about", () => {
     const { notifier, clicks } = stub();
     const { win, did } = fakeWindow(false);
-    sayOutside({ ...NEED, title: "spoo: setup failed", open: { computer: "spoo" } }, win, notifier);
+    sayOutside({ ...NEED, id: "7" }, win, notifier);
+    sayOutside({ ...NEED, id: "8" }, win, notifier);
     clicks[0]!();
-    expect(did).toEqual(["raise", "open spoo"]);
+    expect(did).toEqual(["raise", "open 7"]);
+  });
+
+  it("holds a shown notification until it is clicked, since Electron collects one nothing holds and its click goes nowhere", async () => {
+    let made: WeakRef<object> | undefined;
+    const notifier: Notifier = {
+      supported: () => true,
+      beep: () => {},
+      refused: () => {},
+      make: () => {
+        const note: SystemNotification = { show: () => {}, on: () => note };
+        made = new WeakRef(note);
+        return note;
+      },
+    };
+    sayOutside(NEED, fakeWindow(false).win, notifier);
+    await collect();
+    expect(made!.deref()).toBeDefined();
+  });
+
+  it("a line the system refused to show is logged and still reaches the person by the dock and, where it asked for one, the sound", () => {
+    const failed: ((event: unknown, error: string) => void)[] = [];
+    const refused: string[] = [];
+    let beeps = 0;
+    const notifier: Notifier = {
+      supported: () => true,
+      beep: () => void (beeps += 1),
+      refused: error => void refused.push(error),
+      make: () => {
+        const note: SystemNotification = {
+          show: () => {},
+          on: (event: string, listener: (...args: never[]) => void) => {
+            if (event === "failed") failed.push(listener as (event: unknown, error: string) => void);
+            return note;
+          },
+        };
+        return note;
+      },
+    };
+    sayOutside({ ...NEED, sound: true }, fakeWindow(false).win, notifier);
+    failed.forEach(f => f({}, "Notifications are not allowed for this application"));
+    expect(refused).toEqual(["Notifications are not allowed for this application"]);
+    expect(beeps).toBe(1);
+  });
+
+  it("a click after its window closed opens the app's window again and tells the gone page nothing, as Electron throws on a destroyed one", () => {
+    const { notifier, clicks } = stub();
+    let closed = false;
+    const gone = (): never => {
+      throw new Error("Object has been destroyed");
+    };
+    const sent: unknown[] = [];
+    const win: ShellWindow & { isMinimized(): boolean } = {
+      isDestroyed: () => closed,
+      isFocused: () => (closed ? gone() : false),
+      isMinimized: () => (closed ? gone() : false),
+      webContents: { send: (...args: unknown[]) => (closed ? gone() : void sent.push(args)) },
+    };
+    let reopened = 0;
+    sayOutside({ ...NEED, id: "a:1" }, noticeWindowOf(win, w => void w.isMinimized(), () => void (reopened += 1)), notifier);
+    closed = true;
+    expect(() => clicks[0]!()).not.toThrow();
+    expect(reopened).toBe(1);
+    expect(sent).toEqual([]);
   });
 
   it("a computer that shows no notifications is told nothing and builds none", () => {

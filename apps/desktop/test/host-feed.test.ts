@@ -56,7 +56,7 @@ describe("the menu bar's feed from the host the window is on", () => {
     const states: FeedState[] = [];
     const feed = hostFeed({ dial: async () => host.client(), changed: s => states.push(s), settleMs: 0, retryMs: 10 });
     await vi.waitFor(() => expect(states.at(-1)?.sessions).toHaveLength(1));
-    expect(states.at(-1)).toMatchObject({ lost: false, keepAwake: false, notifyNeeds: "notify-sound", notifyDone: "off" });
+    expect(states.at(-1)).toMatchObject({ lost: false, keepAwake: false, notifyNeeds: "notify-sound", notifyDone: "notify" });
     host.push(ask);
     await vi.waitFor(() => expect(states.at(-1)?.asks.get("s1")).toEqual({ askId: "a1", options: [{ id: "o_yes", label: "Yes", effect: "allow" }] }));
     await feed.answer("s1", "a1", "o_yes");
@@ -194,7 +194,7 @@ describe("the feed on a real host", () => {
       writeFileSync(join(home, "host-token"), `${host.authToken}\n`);
       const states: FeedState[] = [];
       const feed = hostFeed({ dial: () => dialHost(statePath, { aim: { kind: "here" }, home }), changed: s => states.push(s), settleMs: 0, retryMs: 50 });
-      await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ lost: false, sessions: [], keepAwake: true, notifyNeeds: "notify-sound", notifyDone: "off" }));
+      await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ lost: false, sessions: [], keepAwake: true, notifyNeeds: "notify-sound", notifyDone: "notify" }));
       expect(Array.isArray(states.at(-1)!.workspaces)).toBe(true);
       expect(Array.isArray(states.at(-1)!.places)).toBe(true);
       feed.close();

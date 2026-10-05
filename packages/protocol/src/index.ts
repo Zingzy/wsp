@@ -21,7 +21,7 @@ import { GENERAL_DEFAULTS, GENERAL_FIELDS, patchedGeneral } from "./general-pref
 import { UsageAlertEvent } from "./plan-alerts.js";
 import { RecipeFile } from "./recipe-file.js";
 import { ProjectHue, ProjectIcon } from "./project-look.js";
-import type { OutsideLine, OutsideOpen } from "./outside-line.js";
+import type { OutsideLine } from "./outside-line.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
@@ -2595,9 +2595,9 @@ export interface DesktopBridge {
    * turn): the shell shows a system notification while its window has no focus, and nothing while it has, since the
    * page already says it. The page decides nothing about focus; the shell owns that. */
   sayOutside(line: OutsideLine): void;
-  /** A click on that notification, after the shell has raised its window: the page opens what it was about. Returns
-   * the unsubscribe. */
-  onNeedsYouOpen(handler: (at?: OutsideOpen) => void): () => void;
+  /** A click on that notification, after the shell has raised its window, with the id the page put on its line: the
+   * page opens what it was about. Returns the unsubscribe. */
+  onNeedsYouOpen(handler: (id?: string) => void): () => void;
   /** How many threads wait on the person, for the dock's badge; zero clears it. */
   setBadge(count: number): void;
   /** Whether this computer's service starts wsp at every login; null where no service is registered for this state.
