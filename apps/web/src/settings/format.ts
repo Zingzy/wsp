@@ -149,8 +149,9 @@ export const ADD_COMPUTER_WORDS = {
   /** A project's remote and what of it no remote holds: nothing, or the commits that travel with it. */
   remoteLine: (remote: string, unpushed: number | undefined): string =>
     `${remote}${unpushed === undefined ? "" : unpushed === 0 ? ", clean" : `, ${unpushed} unpushed ${unpushed === 1 ? "commit comes" : "commits come"} along`}.`,
-  diskLine: (needed: string, free: string): string => `${needed} needed, ${free} free`,
-  diskShort: (box: string, free: string, needed: string): { said: string; fix: string } => ({ said: `${box} has ${free} free; these picks need ${needed}.`, fix: `Untick some rows, or free room on ${box}.` }),
+  /** The picks' bytes, the room the setup keeps free past them, and the room free there where the computer said. */
+  diskLine: (needed: string, kept: string, free?: string): string => `${needed} needed, ${kept} kept free${free === undefined ? "" : `, ${free} free`}`,
+  diskShort: (box: string, free: string, needed: string, kept: string): { said: string; fix: string } => ({ said: `${box} has ${free} free; these picks need ${needed}, and wsp keeps ${kept} free there.`, fix: `Untick some rows, or free room on ${box}.` }),
   unmeasured: (n: number): string => `${n} picked ${n === 1 ? "row was" : "rows were"} not measured`,
   tabOpened: "A tab opened in your browser.",
   dialledBack: "Dialled back.",

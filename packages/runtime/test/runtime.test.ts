@@ -1452,6 +1452,31 @@ describe("runtime session history", () => {
     await again.close();
   });
 
+  it("one thread's traffic never trims another thread's history off the workspace they share", async () => {
+    const { store } = countingStore();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: tooled("w".repeat(256 * 1024), "ok") } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    // Every thread of a project's folder is one workspace: a quiet thread, then busy ones beside it.
+    const quiet = await rt.sessions.start(ws.id, { prompt: "the quiet one" });
+    await quiet.finished;
+    // Three busy threads, each past the byte cap on its own.
+    const busy: string[] = [];
+    for (let b = 0; b < 3; b++) {
+      const first = await rt.sessions.start(ws.id, { prompt: `busy ${b}.0` });
+      await first.finished;
+      busy.push(first.view().threadId!);
+      for (let i = 1; i < 20; i++) await (await rt.sessions.start(ws.id, { thread: first.view().threadId!, prompt: `busy ${b}.${i}` })).finished;
+    }
+    const history = await rt.sessions.history(ws.id);
+    const ofQuiet = history.filter(e => e.threadId === quiet.view().threadId);
+    expect(ofQuiet.some(e => e.type === "session.start" && e.prompt === "the quiet one")).toBe(true);
+    expect(ofQuiet.at(-1)).toMatchObject({ type: "session.end" });
+    // Every busy thread keeps its newest turn whole, and the workspace stays inside the one cap.
+    for (const [b, threadId] of busy.entries()) expect(history.some(e => e.threadId === threadId && e.type === "session.start" && e.prompt === `busy ${b}.19`)).toBe(true);
+    expect(jsonBytes(history)).toBeLessThanOrEqual(TRANSCRIPT_BYTES);
+    await rt.close();
+  });
+
   it("keeps a tool result's opening characters in the transcript and hands the live stream all of it", async () => {
     const output = `first line\n${"r".repeat(TOOL_RESULT_KEPT * 4)}`;
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: tooled("{}", output) } });
@@ -2199,7 +2224,10 @@ describe("a turn the host comes back to", () => {
   /** A harness whose run lives on the machine, not in this process: every event it emits is a line of the run's log,
    * and an attach replays that log from its first line before the rest of it arrives, which is what reading the
    * guest's own log from byte zero does. Forgetting a run is the machine having swept it. */
-  const machineRuns = () => {
+  /** `namedAtLaunch`: the harness names its session at the launch and a resume keeps it, as Claude Code does, so a
+   * later turn of the thread takes over the row of the one before. */
+  const machineRuns = ({ namedAtLaunch }: { namedAtLaunch?: true } = {}) => {
+    const named = namedAtLaunch === true;
     interface Run {
       log: AdapterEvent[];
       sessionId: string;
@@ -2232,6 +2260,8 @@ describe("a turn the host comes back to", () => {
       return { localId, run: handle, finished, interrupt: async () => {} };
     };
     const asked: string[] = [];
+    /** The message and effort each attach was handed, in order. */
+    const reopenedWith: { prompt?: string; effort?: string }[] = [];
     /** The launch environment of each turn this fixture started, in order; an attach after a restart adds none. */
     const envs: Readonly<Record<string, string>>[] = [];
     const adapter: HarnessAdapterFactory = ctx => ({
@@ -2248,7 +2278,8 @@ describe("a turn the host comes back to", () => {
         const handle = `/tmp/wsp-run/${(++minted).toString(16).padStart(12, "0")}`;
         // The CLI keys the session by its own id, not by the one the launch minted, so the row and the harness
         // session are two different ids across the restart.
-        const run: Run = { log: [], sessionId: `sess-${minted}`, localId: `local-${minted}` };
+        const sessionId = o.resume ?? `sess-${minted}`;
+        const run: Run = { log: [], sessionId, localId: named ? sessionId : `local-${minted}` };
         runs.set(handle, run);
         const session = open(run, handle, o.onEvent, run.localId);
         queueMicrotask(() => emit(handle, { type: "session.start", sessionId: run.sessionId, model: "claude-sonnet-4-5", cwd: o.cwd ?? "/root/work" }));
@@ -2256,6 +2287,7 @@ describe("a turn the host comes back to", () => {
       },
       attach: async o => {
         if (unreachable !== undefined) throw unreachable;
+        reopenedWith.push({ prompt: o.prompt, effort: o.effort });
         const run = runs.get(o.run);
         // A machine that answered and no longer holds the run: no reader, and nothing is ever emitted for it.
         if (run === undefined) return "gone";
@@ -2275,6 +2307,7 @@ describe("a turn the host comes back to", () => {
       sweep: (handle: string) => runs.delete(handle),
       unreach: (e: Error) => (unreachable = e),
       asked: () => [...asked],
+      reopened: () => [...reopenedWith],
     };
   };
 
@@ -2311,6 +2344,27 @@ describe("a turn the host comes back to", () => {
     await rt2.close();
   });
 
+  it("a thread's later turn re-opened after a restart is handed its own message, not the one that opened the thread", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns({ namedAtLaunch: true });
+    const rt = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const first = await rt.sessions.start(ws.id, { prompt: "build it", effort: "low" });
+    await until(async () => (await rt.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    h.emit(h.handles()[0]!, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "built" } });
+    h.emit(h.handles()[0]!, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await first.finished;
+    await rt.sessions.start(ws.id, { prompt: "now test it", thread: first.view().threadId!, effort: "high" });
+    await until(() => h.handles().length === 2);
+    await rt.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(ws.id)).map(s => [s.status, s.prompt])).toEqual([["running", "build it"]]);
+    expect(h.reopened()).toEqual([{ prompt: "now test it", effort: "high" }]);
+    await rt2.close();
+  });
+
   it("the run outlives the host: the row keeps its run, stays running across the restart and completes with its reply", async () => {
     const backend = stubBackend();
     const store = memoryStore();
@@ -2321,6 +2375,8 @@ describe("a turn the host comes back to", () => {
 
     const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
     expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+    // A harness that hands the message over after its process starts may not have handed it yet when the host went.
+    expect(h.reopened().map(r => r.prompt)).toEqual(["build it"]);
     h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: "wrote the fix" });
     h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
     h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });

@@ -1214,7 +1214,7 @@ describe("MessagesTimeline", () => {
     );
     expect(markup).toContain("[image 1 MB png]");
     expect(markup).toContain("what does this show?");
-    // No pixels to draw: the runtime keeps the records and never the bytes.
+    // No pixels to draw: this tab holds none and no host is bound to read them back from.
     expect(markup).not.toContain("<img");
   });
 

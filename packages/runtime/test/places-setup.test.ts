@@ -53,7 +53,7 @@ import type { RecipeShelf, SeedWiring } from "../src/runtime.js";
 import { ADD_STOPPED_LINE, PlaceProvisioningError, type PlaceUndo, newPlaceKeyPair, type PlaceKeyPair, type PlaceProvisioner, type PlaceRecord, type PlaceUpdater, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
 import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
-import { fakeCopier, LocalBackend } from "@wsp/engine";
+import { fakeCopier, LocalBackend, ownedFloorBytes, PlaceAbsentError } from "@wsp/engine";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { DOOR, joinAt, relinkAt, report, wiring } from "./place-join.js";
@@ -1107,6 +1107,26 @@ describe("a host that stops in the middle of a setup", () => {
     await until(async () => (await rowOf(place.id)).setup?.waiting[0]?.code === "CODE-2");
     expect((await rowOf(place.id)).setup?.waiting[0]?.state).toBe("waiting");
   });
+
+  it("reads a sign-in a stopped host left waiting after the setup ended as expired, and a retry runs the login again", async () => {
+    const store = memoryStore();
+    const s1 = signIns();
+    const first = await hosting({ provision: provisioner().wired, store, acts: s1.acts });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code === "CODE-1") === true);
+    await stopHost();
+    const s2 = signIns();
+    await hosting({ provision: provisioner().wired, store, acts: s2.acts, hostKey: first.hostKey });
+    await dialsBack(first.hostKey, place.id, first.joined[0]!.pair);
+    await until(async () => (await rowOf(place.id)).setup?.waiting[0]?.state === "expired");
+    expect(placeWord(await rowOf(place.id), null)).toEqual({ word: "Needs you", sentence: "Codex's sign-in ran out; a retry asks for a fresh code" });
+    expect(s2.started).toEqual([]);
+    await runtime!.places!.setUp(place.id, {});
+    await until(() => s2.started.length === 1);
+    await until(async () => (await rowOf(place.id)).setup?.waiting[0]?.state === "waiting");
+    expect((await rowOf(place.id)).setup?.waiting).toEqual([expect.objectContaining({ row: "signins/codex", url: "https://auth.example/codex/1", code: "CODE-1" })]);
+  });
 });
 
 describe("what the picks weigh before Set up", () => {
@@ -1116,10 +1136,22 @@ describe("what the picks weigh before Set up", () => {
     await until(async () => (await runtime!.places!.pending())[0]?.step === "choosing");
     const picks = RecipeFile.parse({ name: "laptop", agents: { claude: {}, codex: {} }, plugins: { "lint@acme": {} } });
     const free = CURRENT.diskFreeBytes;
-    expect(await runtime!.places!.estimate("a_wait", picks)).toEqual({ neededBytes: 2 * 1024 ** 3, freeBytes: free, unmeasured: 1 });
-    expect(await runtime!.places!.estimate(added.place.id, picks)).toEqual({ neededBytes: 2 * 1024 ** 3, freeBytes: free, unmeasured: 1 });
+    // A computer that never said its disk's size keeps the 2 GB floor free.
+    const weighed = { neededBytes: 2 * 1024 ** 3, keptBytes: ownedFloorBytes(undefined) };
+    expect(await runtime!.places!.estimate("a_wait", picks)).toEqual({ ...weighed, freeBytes: free, unmeasured: 1 });
+    expect(await runtime!.places!.estimate(added.place.id, picks)).toEqual({ ...weighed, freeBytes: free, unmeasured: 1 });
     // An add that never joined has said nothing of its room.
-    expect(await runtime!.places!.estimate("root@10.0.0.77", picks)).toEqual({ neededBytes: 2 * 1024 ** 3, unmeasured: 1 });
+    expect(await runtime!.places!.estimate("root@10.0.0.77", picks)).toEqual({ ...weighed, unmeasured: 1 });
+  });
+
+  it("counts the room the install loop keeps free off the computer's disk size in what the picks need", async () => {
+    const GB = 1024 ** 3;
+    await hosting({ provision: provisioner().wired, report: report("spoo", { daemonVersion: DAEMON_VERSION, diskFreeBytes: 9 * GB, diskSizeBytes: 75 * GB }) });
+    const added = await runtime!.places!.add({ addId: "a_wait", address: "root@10.0.0.9", hostUrls: DOOR }, Date.now());
+    await until(async () => (await runtime!.places!.pending())[0]?.step === "choosing");
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: {}, codex: {} } });
+    // A tenth of 75 GB is kept free, past the 2 GB floor: 9 GB free does not take 2 GB of picks.
+    expect(await runtime!.places!.estimate(added.place.id, picks)).toEqual({ neededBytes: 2 * GB, keptBytes: ownedFloorBytes(75 * GB), freeBytes: 9 * GB, unmeasured: 0 });
   });
 });
 
@@ -1412,6 +1444,78 @@ describe("a computer that follows a recipe", () => {
     await runtime!.places!.recipeChanged("laptop");
     p.let("skills");
     await until(async () => (await rowOf(placeId)).applied?.hash === "h8");
+    expect(p.ran).toEqual(["skills", "skills"]);
+  });
+
+  it("holds a sync whose undo failed before any step ran behind on the old hash, and runs it at the next change", async () => {
+    let failing = true;
+    const { p, r, placeId } = await following({
+      undo: () => {
+        if (failing) throw new Error("the ledger would not read");
+        return [];
+      },
+    });
+    r.move({ ...V1, skills: {} }, { "clis/jq": "1.7" }, "h13");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(() => syncs.some(f => f.sync?.state === "running") && syncs.some((f, i) => i > syncs.findIndex(g => g.sync?.state === "running") && (f.sync?.state === "behind" || f.applied !== undefined)));
+    expect((await rowOf(placeId)).sync?.state).toBe("behind");
+    expect((await rowOf(placeId)).applied).toMatchObject({ hash: "h1", items: ITEMS });
+    expect(p.ran).toEqual([]);
+    failing = false;
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h13" && (await rowOf(placeId)).sync === undefined);
+  });
+
+  it("reads a sync the stopped host left running as behind once the host starts again, and runs it at the dial-back", async () => {
+    const store = memoryStore();
+    const p = provisioner();
+    const r = shelf(V1, ITEMS);
+    const host = await hosting({ provision: p.wired, recipes: r.recipes, store });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: V1, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await new Promise(resolve => setTimeout(resolve, 20));
+    p.ran.length = 0;
+    p.arm("skills");
+    r.move({ ...V1, skills: { ...V1.skills, why: { from: "~/.claude/skills" } } }, { ...ITEMS, "skills/why": "d2" }, "h14");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(() => p.ran.includes("skills"));
+    expect((await rowOf(place.id)).sync?.state).toBe("running");
+    await stopHost();
+    const again = provisioner();
+    await hosting({ provision: again.wired, recipes: r.recipes, store, hostKey: host.hostKey });
+    await runtime!.projects.list();
+    const row = await rowOf(place.id);
+    expect(row.sync?.state).toBe("behind");
+    expect(row.applied?.hash).toBe("h1");
+    expect(placeWord(row, null)).toEqual({ word: "Behind", sentence: "waiting to put on the recipe's 1 change: skills/why" });
+    await dialsBack(host.hostKey, place.id, host.joined[0]!.pair);
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h14" && (await rowOf(place.id)).sync === undefined);
+    expect(again.ran).toEqual(["skills"]);
+  });
+
+  it("holds a sync cut partway behind, and runs the step it never finished again when the computer dials back", async () => {
+    const o: Parameters<typeof provisioner>[0] = {};
+    const p = provisioner(o);
+    const r = shelf(V1, ITEMS);
+    const host = await hosting({ provision: p.wired, recipes: r.recipes });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: V1, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await new Promise(resolve => setTimeout(resolve, 20));
+    p.ran.length = 0;
+    p.arm("skills");
+    r.move({ ...V1, skills: { ...V1.skills, why: { from: "~/.claude/skills" } } }, { ...ITEMS, "skills/why": "d2" }, "h12");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(() => p.ran.includes("skills"));
+    // The link drops under the skills step, which the step hears as the computer gone.
+    for (const ws of sockets.splice(0)) ws.close();
+    await until(async () => (await rowOf(place.id)).present === false);
+    o.throws = { step: "skills", error: new PlaceAbsentError("spoo is not connected") };
+    p.let("skills");
+    await until(async () => (await rowOf(place.id)).sync?.state === "behind");
+    expect((await rowOf(place.id)).applied).toMatchObject({ hash: "h1", items: ITEMS });
+    delete o.throws;
+    await dialsBack(host.hostKey, place.id, host.joined[0]!.pair);
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h12" && (await rowOf(place.id)).sync === undefined);
     expect(p.ran).toEqual(["skills", "skills"]);
   });
 });

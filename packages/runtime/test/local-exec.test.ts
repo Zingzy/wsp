@@ -399,6 +399,43 @@ describe("a real turn's process group", () => {
     }
   }, 20_000);
 
+  it("a line held after the seed reaches the child once it is due and once, and one whose time never comes is dropped", async () => {
+    const factory = localExecStream({ root, runDir });
+    let due: () => void = () => {};
+    const kept = ended(factory("cat", { env: {}, input: ["seed"] }));
+    kept.writeAfter!("late", new Promise<void>(resolve => (due = resolve)));
+    const dropped = ended(factory("cat", { env: {}, input: ["seed"] }));
+    dropped.writeAfter!("late", Promise.reject(new Error("stopped")));
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(readFileSync(`${kept.run!}.in`, "utf8")).toBe("seed\n");
+    due();
+    await vi.waitUntil(() => readFileSync(`${kept.run!}.in`, "utf8") === "seed\nlate\n", { timeout: 5_000 });
+    expect(existsSync(`${dropped.run!}.late`)).toBe(false);
+    kept.closeInput();
+    dropped.closeInput();
+    expect(await Promise.all([collect(kept.lines), collect(dropped.lines)])).toEqual([["seed", "late"], ["seed"]]);
+  }, 20_000);
+
+  it("an attach hands over a late line held beside the run, and one the channel already took goes in no second time", async () => {
+    const reading = new Set<() => void>();
+    const factory = localExecStream({ root, runDir, reading });
+    const held = ended(factory("cat", { env: {}, input: ["seed"] }));
+    held.writeAfter!("late", new Promise(() => {}));
+    const reached = ended(factory("cat", { env: {}, input: ["seed"] }));
+    reached.writeAfter!("late", Promise.resolve());
+    await vi.waitUntil(() => readFileSync(`${reached.run!}.in`, "utf8") === "seed\nlate\n", { timeout: 5_000 });
+    // A host that went between handing the line over and dropping it: the line is in the channel and still held.
+    writeFileSync(`${reached.run!}.late`, "late\n");
+    for (const stop of [...reading]) stop();
+    const next = localExecStream({ root, runDir, pollMs: 50 });
+    for (const run of [held.run!, reached.run!]) {
+      const attached = (await next.attach!(run, { input: true, startedAt: Date.now() })) as ExecStream;
+      expect(attached.taken).toEqual(["seed", "late"]);
+      ended(attached).closeInput();
+      expect(await Promise.all([collect(attached.lines), attached.exited])).toEqual([["seed", "late"], 0]);
+    }
+  }, 20_000);
+
   it("a held seed whose time never comes kills the run, and the child never reads it", async () => {
     const stream = ended(localExecStream({ root, runDir })(`cat > ${join(root, "read")}`, { env: {}, input: ["hello"], inputAfter: Promise.reject(new Error("no snapshot")) }));
     expect(await stream.exited).toBe(null);

@@ -34,11 +34,13 @@ describe("a held thread", () => {
       said.push(e);
       if (e.type === "session.held") void rt.sessions.list(ws.id).then(rows => listed.push(...rows.map(r => r.threadId)));
     });
-    const started = await rt.sessions.start(ws.id, { prompt: "fix it" });
+    const started = await rt.sessions.start(ws.id, { prompt: "fix it", requestId: "req_1" });
     await new Promise(r => setTimeout(r, 20));
     expect(said.map(e => e.type)).toEqual(["session.held"]);
     const held = said[0] as Extract<EventUnion, { type: "session.held" }>;
     expect(held.workspaceId).toBe(ws.id);
+    // The send it answers, so the client that minted the id drops its own tile for it and no other.
+    expect(held.requestId).toBe("req_1");
     expect(listed).toContain(held.threadId);
     release();
     await started.finished;

@@ -10,9 +10,6 @@ import { expand } from "@wsp/collect";
 import { toolRowId, type RecipeFile } from "@wsp/protocol";
 import { folderFiles } from "./folder-files.js";
 
-/** Room a box needs past what goes on it: what its first agents and folders work in. */
-export const PICKS_SPARE_BYTES = 1024 ** 3;
-
 /** How many entries a folder's walk reads before it stops counting: a history this large is said as at least this. */
 const WALK_CAP = 200_000;
 
@@ -46,11 +43,12 @@ function treeBytes(path: string): number {
  * are the history's own. */
 export const folderBytes = (path: string, keep: readonly string[]): number => treeBytes(join(path, ".git")) + keep.reduce((n, rel) => n + treeBytes(join(path, rel)), 0);
 
-/** What the picks weigh on a box with the room it needs past them: the agents, the CLIs, the C toolchain where a
- * picked row builds with it, the skills and the folders. The floor already stands by the time anyone picks, so it is
- * not counted. `unmeasured` counts the rows nobody measured, plugins among them. */
+/** What the picks weigh on a box: the agents, the CLIs, the C toolchain where a picked row builds with it, the skills
+ * and the folders. The base tools already stand by the time anyone picks, and the room the setup keeps free is the
+ * runtime's to add off that box's disk, so neither is counted. `unmeasured` counts the rows nobody measured, plugins
+ * among them. */
 export function estimatePicks(picks: RecipeFile, home: string): { bytes: number; unmeasured: number } {
-  let bytes = PICKS_SPARE_BYTES;
+  let bytes = 0;
   let unmeasured = 0;
   const add = (n: number | undefined): void => {
     if (n === undefined) unmeasured++;

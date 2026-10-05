@@ -29,7 +29,6 @@ import {
   safeFileName,
   sendFilesDir,
   threadFilesDir,
-  threadImagesDir,
   turnImagesDir,
 } from "../src/index.js";
 
@@ -148,32 +147,32 @@ describe("the type read off the bytes, never off the name", () => {
 });
 
 describe("where a thread's copies live on a machine", () => {
-  it("one folder per send under the thread's own, and one name per image by its place and its type", () => {
-    expect(threadImagesDir("thr_1")).toBe("/root/.wsp/threads/thr_1/images");
-    const dir = turnImagesDir("thr_1", "req_a", "minted");
-    expect(dir).toBe("/root/.wsp/threads/thr_1/images/req_a");
-    expect(imagePathIn(dir, 0, "image/png")).toBe("/root/.wsp/threads/thr_1/images/req_a/1.png");
-    expect(imagePathIn(dir, 1, "image/jpeg")).toBe("/root/.wsp/threads/thr_1/images/req_a/2.jpg");
-    expect(imagePathIn(turnImagesDir("thr_2", "req_b", "minted"), 0, "image/webp")).toBe("/root/.wsp/threads/thr_2/images/req_b/1.webp");
+  const FILES = "/home/dev/app/.wsp-files/thr_1";
+  it("one folder per send beside its files in the thread's folder, and one name per image by its place and its type", () => {
+    const dir = turnImagesDir("/home/dev/app/", "thr_1", "req_a", "minted");
+    expect(dir).toBe(`${FILES}/req_a.images`);
+    expect(imagePathIn(dir, 0, "image/png")).toBe(`${FILES}/req_a.images/1.png`);
+    expect(imagePathIn(dir, 1, "image/jpeg")).toBe(`${FILES}/req_a.images/2.jpg`);
+    expect(imagePathIn(turnImagesDir("/home/dev/app", "thr_2", "req_b", "minted"), 0, "image/webp")).toBe("/home/dev/app/.wsp-files/thr_2/req_b.images/1.webp");
   });
 
-  it("two sends of one thread never share a folder, and every send's folder is under the thread's", () => {
-    expect(turnImagesDir("thr_1", "req_a", "m")).not.toBe(turnImagesDir("thr_1", "req_b", "m"));
+  it("two sends of one thread never share a folder, and every send's folder is under the thread's files", () => {
+    expect(turnImagesDir("/home/dev/app", "thr_1", "req_a", "m")).not.toBe(turnImagesDir("/home/dev/app", "thr_1", "req_b", "m"));
     for (const requestId of ["req_a", undefined]) {
-      expect(turnImagesDir("thr_1", requestId, "minted").startsWith(`${threadImagesDir("thr_1")}/`)).toBe(true);
+      expect(turnImagesDir("/home/dev/app", "thr_1", requestId, "minted").startsWith(`${threadFilesDir("/home/dev/app", "thr_1")}/`)).toBe(true);
     }
   });
 
   it("a send with no request id takes the minted name, since a shared folder would lose one send's picture", () => {
-    expect(turnImagesDir("thr_1", undefined, "minted")).toBe("/root/.wsp/threads/thr_1/images/minted");
+    expect(turnImagesDir("/home/dev/app", "thr_1", undefined, "minted")).toBe(`${FILES}/minted.images`);
   });
 
   it("a request id shaped like a path is not used as one: it is a client's string and this is a path on a machine", () => {
     for (const nasty of ["../../../etc", "a/b", "..", "", ".ssh/../..", "-rf"]) {
-      expect(turnImagesDir("thr_1", nasty, "minted")).toBe("/root/.wsp/threads/thr_1/images/minted");
+      expect(turnImagesDir("/home/dev/app", "thr_1", nasty, "minted")).toBe(`${FILES}/minted.images`);
     }
     // A plain id, whatever its shape otherwise, is the folder's name.
-    expect(turnImagesDir("thr_1", "a.b-c_1", "minted")).toBe("/root/.wsp/threads/thr_1/images/a.b-c_1");
+    expect(turnImagesDir("/home/dev/app", "thr_1", "a.b-c_1", "minted")).toBe(`${FILES}/a.b-c_1.images`);
   });
 
   it("a type outside the table has no name here; the caps refusal is what turns it away", () => {
