@@ -23,8 +23,9 @@ const HOST_MEMORY_BUDGET_MB = 40;
  * top threads and the fifteen-minute draw added about 0.1 MB more; the pull request pane's reply, resolve and react
  * shapes took main from 35.9 to 36.1 MB on 2026-10-03. Main read 36.3 MB with the daemon's worktree ops; threads in
  * the project's folder and one turn in a worktree read 36.5, and the skill worked out at each ask rather than held
- * whole brought that to 36.4. */
-const HOST_MEMORY_CAP_MB = 36.5;
+ * whole brought that to 36.4. Slates, their parser, kit, validator, runs and tools took main from 36.0 to 38.1 on
+ * this Mac on 2026-10-05. */
+const HOST_MEMORY_CAP_MB = 38.5;
 
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");
