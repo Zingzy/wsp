@@ -111,8 +111,8 @@ describe("the right panel chord with no workspace", () => {
     act(() => runShellCommand("rightPanel.toggle", target(null), []));
     await waitFor(() => expect(document.querySelector("[data-right-panel-tabbar]")).not.toBeNull());
     const cards = [...document.querySelectorAll("[data-surface-launch]")];
-    expect(cards.map(c => c.getAttribute("data-surface-launch"))).toEqual(["preview", "terminal", "diff", "files", "machine", "processes", "agents"]);
-    expect(cards.map(c => c.tagName)).toEqual(["BUTTON", "BUTTON", "DIV", "DIV", "BUTTON", "BUTTON", "DIV"]);
+    expect(cards.map(c => c.getAttribute("data-surface-launch"))).toEqual(["preview", "terminal", "diff", "files", "machine", "processes", "agents", "slate"]);
+    expect(cards.map(c => c.tagName)).toEqual(["BUTTON", "BUTTON", "DIV", "DIV", "BUTTON", "BUTTON", "DIV", "DIV"]);
     screen.getByText("Pick a project to review its changes.");
 
     act(() => runShellCommand("rightPanel.toggle", target(null), []));
