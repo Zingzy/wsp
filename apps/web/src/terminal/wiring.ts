@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Fills the terminal registry from the store: one WorkspaceTerminals per
-// workspace for as long as it exists, one daemon link while it runs and the
-// host's own socket is live. A napping workspace keeps its model (tabs,
+// workspace for as long as it exists, one daemon link while it runs, the
+// host's own socket is live and, for a folder on this computer, something on
+// screen reads it. A napping workspace keeps its model (tabs,
 // scrollback mirror) with the channel down; wake dials again and the model
 // re-attaches its ptys. The same link is the browser's only source of ports:
 // the daemon pushes port events only to sockets that asked with ports.watch,
@@ -10,7 +11,7 @@
 // own, to its daemon by place.
 import { HERE_PLACE_ID, readingRoad, workspaceKind, type DaemonLinkStatus } from "@wsp/protocol";
 import { getBrowser } from "../browser/model.js";
-import { provideDaemonHello, provideDaemonWire } from "../files/wire.js";
+import { daemonWireHeld, onDaemonWireHeld, provideDaemonHello, provideDaemonWire } from "../files/wire.js";
 import { errorText } from "../lib/utils.js";
 import { getLive } from "../machine/live.js";
 import { getProcs } from "../machine/procs.js";
@@ -93,6 +94,14 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
     }
   };
 
+  /** Whether something on screen reads a workspace's daemon: a mounted surface reads its wire, its drawer or right
+   * panel is open, or its terminal holds tabs. */
+  const onScreen = (id: string, wt: WorkspaceTerminals): boolean =>
+    daemonWireHeld(id) ||
+    selectTerminalUiState(useTerminalDrawerStore.getState().byWorkspaceId, id).terminalOpen ||
+    useRightPanelStore.getState().byWorkspaceId[id]?.isOpen === true ||
+    wt.tabs().length > 0;
+
   const sync = (): void => {
     const { api, workspaces, conn } = store.getState();
     if (!api) return;
@@ -125,7 +134,9 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
       // socket (machine/hostLive.ts), so asking its daemon for the same stream would set a second sampler going on
       // the same machine and put a link's health over figures that do not ride that link.
       const sysFromDaemon = readingRoad(workspaceKind(w), "metrics") === "daemon";
-      const up = w.phase === "running" && hostUp;
+      // A machine's link carries its sign-in pages and ports whoever looks; a folder on this computer is dialled only
+      // while it is on screen, since 125 folders held 125 links pinging every 10 s.
+      const up = w.phase === "running" && hostUp && (sysFromDaemon || onScreen(w.id, wt));
       if (up && !entry.link) {
         const browser = getBrowser(w.id);
         const link = connectDaemonLink({
@@ -187,11 +198,13 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
   const unsubscribe = store.subscribe(sync);
   const unsubscribeDrawer = useTerminalDrawerStore.subscribe(sync);
   const unsubscribePanel = useRightPanelStore.subscribe(sync);
+  const unsubscribeHeld = onDaemonWireHeld(sync);
   sync();
   return () => {
     unsubscribe();
     unsubscribeDrawer();
     unsubscribePanel();
+    unsubscribeHeld();
     unlink(here);
     provideTerminals(HERE_KEY, null);
     provideDaemonWire(HERE_KEY, null);
