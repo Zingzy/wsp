@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applySlatePatch, parseSlate, parseSlatePatch, printSlate, slateCatalog, slateStartValues, validateSlate, type SlateDoc } from "../../src/slate/index.js";
+import { applySlatePatch, parseSlate, parseSlatePatch, printSlate, resolveSlateProp, slateCatalog, slateStartValues, validateSlate, type SlateDoc } from "../../src/slate/index.js";
 import { SPEC_EXAMPLES } from "./examples.js";
 
 const doc = (text: string): SlateDoc => {
@@ -224,5 +224,14 @@ describe("the printed slate", () => {
     const printed = printSlate(doc);
     expect(printed).toContain("run={$tests}");
     expect(parseSlate(printed).document!.pieces).toEqual(doc.pieces);
+  });
+});
+
+describe("text with holes", () => {
+  it("keeps a $ written right before a hole as a dollar sign", () => {
+    const written = parseSlate(`<slate><value name="price" start={12} /><text>Price: \${$price}</text></slate>`).document!;
+    const text = Object.values(written.pieces).find(p => p.type === "text")!.props!.value!;
+    expect(resolveSlateProp(text, { resolve: p => (p === "$price" ? 12 : undefined) })).toBe("Price: $12");
+    expect(parseSlate(printSlate(written)).document).toEqual(written);
   });
 });

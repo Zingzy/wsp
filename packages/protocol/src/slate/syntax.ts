@@ -726,6 +726,8 @@ class Compiler {
         if (e.startsWith("/*") && e.endsWith("*/")) continue;
         const lit = stringLiteral(e);
         if (lit !== undefined) { format += lit.replace(/\$\{/g, "$${"); continue; }
+        // A $ just before ${ would read as the $${ escape and print the hole as text.
+        if (format.endsWith("$")) format = `${format.slice(0, -1)}\${'$'}`;
         format += `\${${e}}`;
         holes++;
       }
