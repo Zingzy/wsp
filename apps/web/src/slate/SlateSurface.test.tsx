@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Slate tab against a fake host: keyed by the selected thread, every empty state, a fetch on session.slate,
 // the tab opened once on the agent's first write, and state pushes folded in place.
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView } from "@wsp/protocol";
 import type { Api, ProtocolEvent } from "../protocol/client";
@@ -53,6 +53,7 @@ function host(answers: (SlateRecord | null | { newer: number })[]): SlateApi & {
     undo: vi.fn(async () => ({ version: 2 })),
     clear: vi.fn(async () => ({ version: 2 })),
     subscribe: vi.fn(async () => {}),
+    revoke: vi.fn(async () => {}),
     unsubscribe: vi.fn(async () => {}),
     resolve: vi.fn(async () => ({})),
   };
@@ -65,7 +66,7 @@ function select(slates: SlateApi, threadId: string | null) {
 const event = (e: Record<string, unknown>) => act(() => useStore.getState().applyEvent(e as unknown as ProtocolEvent));
 
 beforeEach(() => {
-  useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {} });
+  useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {}, linking: {} });
   useRightPanelStore.setState({ byWorkspaceId: {} });
 });
 afterEach(cleanup);
@@ -149,5 +150,54 @@ describe("the Slate tab", () => {
     await waitFor(() => expect(slates.calls).toContain("get"));
     expect(slates.shown).not.toHaveBeenCalled();
     expect(useRightPanelStore.getState().byWorkspaceId["ws"]?.activeSurfaceId ?? null).toBeNull();
+  });
+});
+
+describe("a link a press opens", () => {
+  const LINKED = slate({
+    root: "root",
+    pieces: { root: { type: "column", children: ["go"] }, go: { type: "button", props: { label: "Continue" }, on: { press: [{ do: "open", target: "https://example.com/x?d=1" }] } } },
+  });
+
+  it("names its domain on hover and asks once per domain before opening it", async () => {
+    const opened = vi.spyOn(window, "open").mockImplementation(() => null);
+    const api = host([record({ document: LINKED, values: {} })]);
+    select(api, "t1");
+    render(<SlateSurface />);
+    const button = await screen.findByRole("button", { name: "Continue" });
+    expect(button.getAttribute("title")).toBe("Opens example.com");
+    fireEvent.click(button);
+    expect(await screen.findByText("Open example.com from this slate?")).toBeTruthy();
+    expect(opened).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Always for this domain" }));
+    await waitFor(() => expect(opened).toHaveBeenCalledWith("https://example.com/x?d=1", "_blank", "noopener,noreferrer"));
+    expect(api.approve).toHaveBeenCalledWith("t1", "domain:example.com", "thread");
+    opened.mockRestore();
+  });
+
+  it("opens a domain this thread was allowed with no prompt", async () => {
+    const opened = vi.spyOn(window, "open").mockImplementation(() => null);
+    select(host([record({ document: LINKED, values: {}, approvals: { "domain:example.com": { state: "allowed", at: 1 } } })]), "t1");
+    render(<SlateSurface />);
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(opened).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("Open example.com from this slate?")).toBeNull();
+    opened.mockRestore();
+  });
+});
+
+describe("the tab's Approvals", () => {
+  it("lists each standing approval as a row with Revoke, and revoking asks the host", async () => {
+    const api = host([record({ approvals: { k1: { state: "allowed", at: 1, run: "deploy", cmd: "bash deploy.sh" }, "domain:example.com": { state: "allowed", at: 2, cmd: "links to example.com" }, k2: { state: "refused", at: 3, run: "x", cmd: "rm -rf x" } } })]);
+    select(api, "t1");
+    render(<SlateSurface />);
+    fireEvent.click(await screen.findByRole("button", { name: "Slate menu" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Approvals" }));
+    expect(await screen.findByText("Approvals in this thread")).toBeTruthy();
+    expect(screen.getByText("bash deploy.sh")).toBeTruthy();
+    expect(screen.getByText("links to example.com")).toBeTruthy();
+    expect(screen.queryByText("rm -rf x")).toBeNull();
+    fireEvent.click(document.querySelector<HTMLElement>('[data-slate-revoke="k1"]')!);
+    await waitFor(() => expect(api.revoke).toHaveBeenCalledWith("t1", "k1"));
   });
 });

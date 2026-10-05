@@ -66,6 +66,8 @@ export interface CmdRunDecl {
   then?: string;
   /** The text of each of the slate's files the command or its then reads, by name: part of what the person approves. */
   files?: Record<string, string>;
+  /** A hash of each file in the thread's folder the command or its then names, by its path there: an edit asks again. */
+  scripts?: Record<string, string>;
 }
 
 /** One value as it reaches a command, evaluated by the host at the moment the run starts. A secret is named, never
@@ -383,6 +385,10 @@ const LINES_KEPT = 500;
 const RUNNING_MAX = 4;
 const STARTS_PER_MINUTE = 12;
 const TIMER_FLOOR_S = 10;
+/** Five failed starts in a row back an `always` timer off to one start every five minutes, until one succeeds (07). */
+const BACKOFF_AFTER = 5;
+const BACKOFF_MS = 5 * 60_000;
+export const BACKED_OFF = "five starts in a row failed, so its timer starts it once every 5 minutes until one succeeds";
 /** After the leader exits and its group is killed, how long the pipes get to close before the run ends anyway: a
  * process that left the group with setsid can hold them open for as long as it lives. */
 const CLOSE_GRACE_MS = 1_000;
@@ -392,10 +398,11 @@ const DOTS = "••••";
 const HELD_APPROVAL = "needs your approval";
 const HELD_BUSY = `${RUNNING_MAX} runs are already running`;
 const HELD_BUDGET = `started ${STARTS_PER_MINUTE} times in a minute; press to run it again`;
+const HELD_PRESSED = `pressed ${STARTS_PER_MINUTE} times in a minute; it can start again in a minute`;
 const HELD_ASLEEP = "the box was asleep, so this tick did not wake it; press to run it now";
 const SECRET_IN_ARGS = "a secret reaches a command through env or stdin, never as an argument, which ps can read";
 
-type HeldFor = "approval" | "busy" | "budget";
+type HeldFor = "approval" | "busy" | "budget" | "pressed";
 
 interface Live {
   record: RunRecord;
@@ -410,13 +417,25 @@ interface Live {
   held?: { req: RunStart; for: HeldFor };
   /** When reactions and timers started it, for the start budget. */
   starts: number[];
+  /** When the person started it, for their own budget, which no press releases. */
+  pressed?: number[];
+}
+
+interface Timer {
+  every: number;
+  key: string;
+  always: boolean;
+  handle?: ReturnType<typeof setInterval>;
+  /** Failed starts in a row, and when the last one ended. */
+  failures: number;
+  failedAt?: number;
 }
 
 interface ThreadRuns {
   runs: Map<string, Live>;
   /** Runs held because four were running, in the order they asked. */
   queue: string[];
-  timers: Map<string, { every: number; key: string; always: boolean; handle?: ReturnType<typeof setInterval> }>;
+  timers: Map<string, Timer>;
   shown: boolean;
 }
 
@@ -619,7 +638,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     const env = Object.entries(decl.env ?? {})
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([name, expr]) => [name, stableJson(expr)]);
-    const what = [decl.kind, decl.cmd, env, (decl.args ?? []).map(stableJson), decl.stdin === undefined ? null : stableJson(decl.stdin), decl.on ?? "thread", decl.cwd ?? "", decl.stream === true, decl.every ?? null, decl.always === true, ...(decl.then !== undefined ? [decl.then] : []), ...(decl.files !== undefined ? [stableJson(decl.files)] : [])];
+    const what = [decl.kind, decl.cmd, env, (decl.args ?? []).map(stableJson), decl.stdin === undefined ? null : stableJson(decl.stdin), decl.on ?? "thread", decl.cwd ?? "", decl.stream === true, decl.every ?? null, decl.always === true, decl.timeout ?? DEFAULT_TIMEOUT_S, decl.once === true, ...(decl.then !== undefined ? [decl.then] : []), ...(decl.files !== undefined ? [stableJson(decl.files)] : []), ...(decl.scripts !== undefined ? [stableJson(decl.scripts)] : [])];
     return createHash("sha256").update(JSON.stringify(what)).digest("hex").slice(0, 32);
   };
 
@@ -645,17 +664,29 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     };
   };
 
+  /** A run's end as its timer counts it: a success clears the streak, a failure adds to it and, past the fifth on an
+   * `always` timer, says the timer backed off. */
+  const streak = (threadId: string, run: string, state: RunRecord["state"], why: string | undefined): string | undefined => {
+    const timer = thread(threadId).timers.get(run);
+    if (timer === undefined) return why;
+    if (state === "done") timer.failures = 0;
+    if (state !== "failed") return why;
+    timer.failures += 1;
+    timer.failedAt = now();
+    return timer.always && timer.failures >= BACKOFF_AFTER ? `${why ?? "it failed"}; ${BACKED_OFF}` : why;
+  };
+
   const hold = (req: RunStart, l: Live, why: HeldFor): RunStartAnswer => {
     l.held = { req, for: why };
     const t = thread(req.threadId);
     if (why === "busy" && !t.queue.includes(req.run)) t.queue.push(req.run);
-    const record = write(req.threadId, req.run, l, { state: "held", why: why === "approval" ? HELD_APPROVAL : why === "busy" ? HELD_BUSY : HELD_BUDGET, runs: l.record.runs });
+    const record = write(req.threadId, req.run, l, { state: "held", why: why === "approval" ? HELD_APPROVAL : why === "busy" ? HELD_BUSY : why === "pressed" ? HELD_PRESSED : HELD_BUDGET, runs: l.record.runs });
     return why === "approval" ? { outcome: "held", record, ask: ask(req) } : { outcome: "held", record };
   };
 
   const fail = (req: RunStart, l: Live, why: string): RunStartAnswer => {
     const at = now();
-    const record = write(req.threadId, req.run, l, { state: "failed", why, exit: null, runs: l.record.runs, endedAt: at });
+    const record = write(req.threadId, req.run, l, { state: "failed", why: streak(req.threadId, req.run, "failed", why)!, exit: null, runs: l.record.runs, endedAt: at });
     return { outcome: "failed", record };
   };
 
@@ -728,8 +759,10 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
       const why = o.error !== undefined ? secrets.scrub(threadId, o.error.message) : o.timedOut ? `timed out after ${timeout} s` : exit === 0 ? undefined : exit === null ? `ended by ${o.signal ?? "a signal"}` : `exited with ${exit}`;
       const finish = (fields: Pick<RunRecord, "state" | "why" | "exit" | "err" | "json">): void => {
         const endedAt = now();
+        const said = streak(threadId, run, fields.state, fields.why);
         write(threadId, run, l, {
           ...fields,
+          ...(said !== undefined ? { why: said } : {}),
           out,
           ...(decl.stream === true ? { lines: [...lines] } : {}),
           startedAt,
@@ -745,7 +778,8 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
         finish({ state: ok ? "done" : "failed", ...(why !== undefined ? { why } : {}), exit, err, ...(json !== undefined ? { json } : {}) });
         return;
       }
-      const shaping = road === undefined ? reshape(threadId, decl.then, raw, cwd, timeout) : road.reshape({ cmd: decl.then, input: raw, cwd, env, timeoutS: timeout, scrub: text => secrets.scrub(threadId, text) });
+      // A then gets the raw result and nothing the command was given (12): on a box, its login and SLATE_DIR alone.
+      const shaping = road === undefined ? reshape(threadId, decl.then, raw, cwd, timeout) : road.reshape({ cmd: decl.then, input: raw, cwd, env: { SLATE_DIR: road.slateDir }, timeoutS: timeout, scrub: text => secrets.scrub(threadId, text) });
       l.reshaping = shaping;
       void shaping.done.then(answer => {
         if (l.gen !== gen) return;
@@ -786,8 +820,12 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     for (const [run, timer] of t.timers) {
       const on = timer.always || t.shown;
       if (on && timer.handle === undefined) {
-        deps.onTimer?.(threadId, run);
-        timer.handle = setInterval(() => deps.onTimer?.(threadId, run), Math.max(timer.every, TIMER_FLOOR_S) * 1_000);
+        const fire = (): void => {
+          if (timer.always && timer.failures >= BACKOFF_AFTER && timer.failedAt !== undefined && now() - timer.failedAt < BACKOFF_MS) return;
+          deps.onTimer?.(threadId, run);
+        };
+        fire();
+        timer.handle = setInterval(fire, Math.max(timer.every, TIMER_FLOOR_S) * 1_000);
         timer.handle.unref();
       } else if (!on && timer.handle !== undefined) {
         clearInterval(timer.handle);
@@ -815,11 +853,16 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
         stop(req.threadId, req.run, l, undefined);
       }
       delete l.held;
+      const at = now();
       if (req.by !== "person") {
-        const at = now();
         l.starts = l.starts.filter(s => at - s < 60_000);
         if (l.starts.length >= STARTS_PER_MINUTE) return hold(req, l, "budget");
         l.starts.push(at);
+      } else {
+        // The person's starts have a budget of their own: a scripted window pressing fast restarts nothing past it.
+        l.pressed = (l.pressed ?? []).filter(s => at - s < 60_000);
+        if (l.pressed.length >= STARTS_PER_MINUTE) return hold(req, l, "pressed");
+        l.pressed.push(at);
       }
       if (req.decl.confirm !== undefined || !approvals.has(req.threadId, key(req.decl))) return hold(req, l, "approval");
       return launch(req, l);
@@ -858,7 +901,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
       const kept = new Map([...t.timers].filter(([run, was]) => list.some(n => n.run === run && n.key === was.key && n.every === was.every && (n.always === true) === was.always)));
       for (const [run, timer] of t.timers) if (!kept.has(run) && timer.handle !== undefined) clearInterval(timer.handle);
       t.timers = kept;
-      for (const timer of list) if (!kept.has(timer.run)) t.timers.set(timer.run, { every: timer.every, key: timer.key, always: timer.always === true });
+      for (const timer of list) if (!kept.has(timer.run)) t.timers.set(timer.run, { every: timer.every, key: timer.key, always: timer.always === true, failures: 0 });
       tick(threadId);
     },
     shown(threadId, on) {

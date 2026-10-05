@@ -3,7 +3,7 @@
 // the panel is per workspace like every tab's; what it shows follows the thread the centre has open. Every empty
 // state is the panel's own Empty, quiet, with no spinner while the record is on its way.
 import { MoreHorizontal } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "../components/ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
@@ -13,7 +13,8 @@ import { useSelectedThreadId, useStore } from "../protocol/store.js";
 import { requestComposerFocus } from "../shell/shellRequests.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { ApprovalsSheet, batchable } from "./approvals.js";
-import { cadenceOf, ConsentSheet, HeldRuns } from "./consent.js";
+import { cadenceOf, ConsentSheet, HeldRuns, LinkConsent } from "./consent.js";
+import { slateDomainKey } from "@wsp/protocol";
 import { DOC, RUNS } from "./engine.js";
 import { ServerConsentSheet, ToolConfirmSheet } from "./mcp.js";
 import { isRunRecord, type SlateApproval, type SlateAsk } from "./model.js";
@@ -21,8 +22,9 @@ import { SLATE_VIEWS } from "./pieces/index.js";
 import { Refreshing } from "./pieces/refreshing.js";
 import { bindSources } from "./sources/binder.js";
 import { SlateView, usePieceVersion } from "./SlateView.js";
-import { askConsent, loadSlate, markSeen, slateBundle, slateLink, useSlateStore, type SlateEntry } from "./store.js";
+import { askConsent, closeLink, loadSlate, markSeen, slateBundle, slateLink, useSlateStore, type SlateEntry } from "./store.js";
 import { threadWorkspace } from "./SlateHost.js";
+import { STANDING_WORDS, StandingApprovals } from "./standing.js";
 
 /** The hold a drawn slate keeps on the host while the tab shows it (07, "A timer"). */
 export const SHOWN_HOLD = "slate";
@@ -93,6 +95,7 @@ function ThreadSlate({ threadId }: { threadId: string }) {
       <SlateHeader threadId={threadId} entry={entry} />
       <HeldRuns engine={bundle.engine} asks={entry.record?.asks ?? []} review={run => askConsent(threadId, { run })} refuse={ask => refuse(threadId, ask)} />
       <Consent threadId={threadId} />
+      <LinkPrompt threadId={threadId} />
       <ScrollArea className="min-h-0 flex-1">
         <div className={cn(COLUMN, "pb-8")}>
           <SlateView engine={bundle.engine} views={SLATE_VIEWS} runner={bundle.runner} sender={bundle.sender} />
@@ -112,6 +115,7 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   const refreshing = root !== undefined && engine.piece(root)?.type !== "section" && engine.refreshingUnder(root);
   const title = engine.document?.title ?? "Slate";
   const copy = () => void api?.sketch(threadId).then(text => navigator.clipboard?.writeText(text));
+  const [standing, setStanding] = useState(false);
   const runs = Object.keys(engine.document?.runs ?? {});
   const secrets = Object.entries(engine.document?.values ?? {}).flatMap(([name, decl]) => (decl.secret === true ? [`$${name}`] : []));
   const stop = () => {
@@ -135,9 +139,11 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
           <MenuItem onClick={() => void api?.clear(threadId).then(() => loadSlate(threadId))}>{SLATE_WORDS.clear}</MenuItem>
           {runs.length > 0 ? <MenuItem onClick={stop}>{SLATE_WORDS.stop}</MenuItem> : null}
           {secrets.length > 0 ? <MenuItem onClick={forget}>{SLATE_WORDS.forget}</MenuItem> : null}
+          <MenuItem onClick={() => setStanding(true)}>{STANDING_WORDS.menu}</MenuItem>
           <MenuItem onClick={copy}>{SLATE_WORDS.copy}</MenuItem>
         </MenuPopup>
       </Menu>
+      {standing ? <StandingApprovals record={entry.record} revoke={key => slateLink(threadId).revoke(key).then(() => loadSlate(threadId))} onClose={() => setStanding(false)} /> : null}
     </div>
   );
 }
@@ -180,6 +186,20 @@ function Consent({ threadId }: { threadId: string }) {
   if (ask.kind === "server") return <ServerConsentSheet key={ask.key} ask={ask} cadence={cadence} answer={answer} onClose={close} />;
   if (ask.kind === "tool") return <ToolConfirmSheet key={ask.key} ask={ask} answer={answer} onClose={close} />;
   return <ConsentSheet key={ask.key} ask={ask} cadence={cadence} more={unseen.filter(a => a.key !== ask.key).length} answer={answer} onClose={close} />;
+}
+
+/** The prompt a press's link waits on, until the person opens it, allows its domain, or says no. */
+function LinkPrompt({ threadId }: { threadId: string }) {
+  const link = useSlateStore(s => s.linking[threadId]);
+  if (link === undefined) return null;
+  return (
+    <LinkConsent
+      link={link}
+      onOpen={() => void window.open(link.href, "_blank", "noopener,noreferrer")}
+      onAlways={() => slateLink(threadId).approve(slateDomainKey(link.domain), "thread").then(() => loadSlate(threadId))}
+      onClose={() => closeLink(threadId)}
+    />
+  );
 }
 
 /** No slate yet, cleared, rewound to before it, or newer than this build: the panel's own empty state. */

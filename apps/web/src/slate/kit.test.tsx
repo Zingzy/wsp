@@ -259,3 +259,12 @@ describe("the richer kit in the renderer", () => {
     expect(c.querySelector("[data-slate-section] [data-slate-icon=activity]")).toBeNull();
   });
 });
+
+describe("a slate's markdown", () => {
+  it("fetches no image by being shown: a remote image is a link, a GitHub host's too", () => {
+    const { view, frame } = draw(compiled(`<slate><markdown id="m" value="![status](https://avatars.githubusercontent.com/u/1?track=1) and ![x](https://evil.example.com/x.png)" /></slate>`));
+    frame();
+    expect(view.container.querySelector("img")).toBeNull();
+    expect([...view.container.querySelectorAll("a")].map(a => a.getAttribute("href"))).toEqual(["https://avatars.githubusercontent.com/u/1?track=1", "https://evil.example.com/x.png"]);
+  });
+});

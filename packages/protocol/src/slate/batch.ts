@@ -30,6 +30,8 @@ export interface SlateBatchContext {
   start?(run: string, by: "person" | "reaction"): SlateRunRecord;
   /** The person's one approval for this slate's reactions to message the agent (07). */
   reactionSends?: boolean;
+  /** False for writes that fire no reaction: a paired computer's, which never starts anything on this one (12). */
+  react?: boolean;
 }
 
 export interface SlateBatchSend extends SlateSendStep {
@@ -234,7 +236,7 @@ export function runSlateBatch(doc: SlateDoc, values: SlateValues, writes: { path
   for (const w of writes) b.write(w.path, w.value, ctx.by ?? "agent");
   b.event();
   let before = start;
-  for (let round = 1; ; round++) {
+  for (let round = 1; ctx.react !== false; round++) {
     const fired = b.fired(before, b.values);
     if (fired.length === 0) break;
     if (round > SLATE_LIMITS.rounds) {

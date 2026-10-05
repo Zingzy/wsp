@@ -40,6 +40,7 @@ export function fakeLink(over: Partial<SlateLink> = {}): SlateLink {
     writeState: vi.fn(async () => ({ version: 4 })),
     approve: vi.fn(async () => ({ ok: true })),
     cancel: vi.fn(async () => ({ ok: true })),
+    revoke: vi.fn(async () => ({ ok: true })),
     consent: vi.fn(),
     fill: vi.fn(),
     ...over,

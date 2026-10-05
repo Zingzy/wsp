@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { REWIND_NO_UNDO_LINE, type AdapterEvent, type Caller, type EventUnion, type SlateView, type TurnResult } from "@wsp/protocol";
+import { DEVICE_OPS, REWIND_NO_UNDO_LINE, THREAD_OPS, type AdapterEvent, type Caller, type EventUnion, type SlateView, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { SLATES } from "../src/slates.js";
@@ -347,6 +347,20 @@ describe("the slate v2 host", () => {
     await rt.slates.write({ text: TICKER.replace("every={60}", "every={120} always") }, asThread);
     const hidden = await held();
     expect([first, slower]).not.toContain(hidden);
+
+    // How long it may run and whether a start restarts it are on the sheet the person allowed, so either asks again.
+    await rt.slates.approve({ threadId, key: hidden, scope: "thread" });
+    await rt.slates.write({ text: TICKER.replace("every={60}", "every={120} always").replace("timeout={20}", "timeout={600}") }, asThread);
+    const longer = await held();
+    expect([first, slower, hidden]).not.toContain(longer);
+    await rt.slates.approve({ threadId, key: longer, scope: "thread" });
+    // A once run started while it runs is skipped, so the next write waits for this one to end.
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["tick"]).toMatchObject({ state: "done" });
+    }, { timeout: 10_000 });
+    await rt.slates.write({ text: TICKER.replace("every={60}", "every={120} always").replace("timeout={20}", "timeout={600} once") }, asThread);
+    expect([first, slower, hidden, longer]).not.toContain(await held());
     release();
   }, 30_000);
 
@@ -401,6 +415,78 @@ describe("the slate v2 host", () => {
   it("a start into a folder that is not there is refused before the agent is launched", async () => {
     const { rt, root, workspaceId } = await threadOn("wsp-slates-no-cwd-");
     await expect(rt.sessions.start(workspaceId, { prompt: "two", cwd: join(root, "plain", "nowhere") })).rejects.toThrow(/^there is no folder at .*nowhere; name one that exists$/);
+  });
+
+  it("an Always covers the scripts a command names in the thread's folder: an edit to one asks again and names it", async () => {
+    const { rt, root, threadId, asThread } = await threadOn("wsp-slates-script-hash-");
+    writeFileSync(join(root, "plain", "deploy.sh"), "echo safe\n");
+    await rt.slates.write({ text: `<slate><run name="deploy" cmd="bash deploy.sh" /><column><button id="go" label="Deploy" onPress={start($deploy)} /></column></slate>` }, asThread);
+    const press = async (n: number) => { await rt.slates.event({ threadId, version: (await rt.slates.get(threadId))!.version, piece: "go", event: "press", requestId: `p${n}` }); await rt.slates.settled(); };
+    const done = async (out: string) => vi.waitFor(async () => { await rt.slates.settled(); expect((await rt.slates.get(threadId))!.values["deploy"]).toMatchObject({ state: "done", out }); }, { timeout: 10_000 });
+    await press(1);
+    await rt.slates.approve({ threadId, key: (await rt.slates.get(threadId))!.asks[0]!.key, scope: "thread" });
+    await done("safe\n");
+    // Unchanged, the Always holds: the next press runs with no ask.
+    await press(2);
+    await done("safe\n");
+    expect((await rt.slates.get(threadId))!.asks).toEqual([]);
+    // Edited, it asks again and says which file changed.
+    writeFileSync(join(root, "plain", "deploy.sh"), "echo changed\n");
+    await press(3);
+    const view = (await rt.slates.get(threadId))!;
+    expect(view.values["deploy"]).toMatchObject({ state: "held" });
+    expect(view.asks).toMatchObject([{ run: "deploy", why: "deploy.sh changed since you allowed it, so it asks again" }]);
+  });
+
+  it("the person revokes an approval: its run stops and leaves its timer, and the next start asks again", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-revoke-");
+    await rt.slates.write({ text: TICKER.replace('cmd="sleep 1; echo tick"', 'cmd="sleep 5; echo tick"') }, asThread);
+    const release = rt.slates.subscribe({ threadId, sources: [] });
+    const key = (await rt.slates.get(threadId))!.asks[0]!.key;
+    await rt.slates.approve({ threadId, key, scope: "thread" });
+    await vi.waitFor(async () => { await rt.slates.settled(); expect((await rt.slates.get(threadId))!.values["tick"]).toMatchObject({ state: "running" }); }, { timeout: 5_000 });
+    await rt.slates.revoke({ threadId, key });
+    await vi.waitFor(async () => { await rt.slates.settled(); expect((await rt.slates.get(threadId))!.values["tick"]).toMatchObject({ state: "cancelled" }); }, { timeout: 5_000 });
+    const view = (await rt.slates.get(threadId))!;
+    expect(view.approvals[key]).toBeUndefined();
+    // Its timer is gone until something starts it again, and then it asks: the Always is gone.
+    await rt.slates.write({ text: TICKER.replace('cmd="sleep 1; echo tick"', 'cmd="sleep 5; echo tick"') }, asThread);
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      const again = (await rt.slates.get(threadId))!;
+      expect(again.values["tick"]).toMatchObject({ state: "held" });
+      expect(again.asks.map(a => a.key)).toEqual([key]);
+    }, { timeout: 5_000 });
+    await rt.slates.approve({ threadId, key: "domain:example.com", scope: "thread" });
+    await rt.slates.revoke({ threadId, key: "domain:example.com" });
+    expect((await rt.slates.get(threadId))!.approvals["domain:example.com"]).toBeUndefined();
+    await expect(rt.slates.revoke({ threadId, key: "nope" })).rejects.toThrow(/holds no approval nope/);
+    // The person's alone: no thread token and no paired device may send it.
+    expect(THREAD_OPS).not.toContain("slates.revoke");
+    expect(DEVICE_OPS).not.toContain("slates.revoke");
+    release();
+  });
+
+  it("keeps a link's domain the person allowed for the thread, and refuses a key that names no domain", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-domain-");
+    await rt.slates.write({ text: `<slate><column><button id="go" label="Go" onPress={open("https://example.com")} /></column></slate>` }, asThread);
+    await rt.slates.approve({ threadId, key: "domain:example.com", scope: "thread" });
+    expect((await rt.slates.get(threadId))!.approvals["domain:example.com"]).toMatchObject({ state: "allowed", cmd: "links to example.com" });
+    await expect(rt.slates.approve({ threadId, key: "domain:../x y", scope: "thread" })).rejects.toThrow(/names no domain/);
+  });
+
+  it("takes five of the person's events a second, answers a resend of one it took, and refuses the sixth", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-event-rate-");
+    await rt.slates.write({ text: `<slate><value name="n" start={0} /><column><button id="up" label="Up" onPress={set($n, $n + 1)} /></column></slate>` }, asThread);
+    const press = (id: string) => rt.slates.event({ threadId, version: 1, piece: "up", event: "press", requestId: id });
+    const five = [0, 1, 2, 3, 4].map(i => press(`e${i}`));
+    const sixth = press("e5");
+    const again = press("e0");
+    await Promise.all(five);
+    await expect(again).resolves.toBeDefined();
+    await expect(sixth).rejects.toThrow(/^V754 event-rate: too many presses; try again in a moment/);
+    await rt.slates.settled();
+    expect((await rt.slates.get(threadId))!.values["n"]).toBe(5);
   });
 
   it("a check previews what the panel shows for a run's result, setting $run.json on its copy, storing and starting nothing", async () => {
@@ -626,6 +712,32 @@ describe("the slate v2 host, round 4", () => {
       expect(resume).toBe(starts[0]!.resume ?? "55555555-5555-4555-8555-000000000001");
       expect({ model, effort, permissionMode, contextWindow }).toEqual({ contextWindow: undefined, ...picks });
     }
+  }, 30_000);
+
+  it("a paired computer writes values and starts nothing: no reaction fires off its write, and a start it names is refused", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-paired-");
+    await rt.slates.write({ text: PROBE }, asThread);
+    await rt.slates.state({ threadId, values: { $n: 1 } }, "here");
+    const asked = (await rt.slates.get(threadId))!;
+    await rt.slates.approve({ threadId, key: asked.asks[0]!.key, scope: "thread" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect(await probeOf(rt, threadId)).toMatchObject({ state: "done", out: "run 1\n", runs: 1 });
+    }, { timeout: 10_000 });
+
+    await rt.slates.state({ threadId, values: { $n: 5 } }, "paired");
+    await rt.slates.settled();
+    expect((await rt.slates.get(threadId))!.values["n"]).toBe(5);
+    expect(await probeOf(rt, threadId)).toMatchObject({ state: "done", out: "run 1\n", runs: 1 });
+    await expect(rt.slates.state({ threadId, start: ["$probe"] }, "paired")).rejects.toThrow("a paired computer writes a slate's values and starts no run");
+    expect(await probeOf(rt, threadId)).toMatchObject({ state: "done", runs: 1 });
+
+    // The same write from the window on this computer fires the reaction, as it always did.
+    await rt.slates.state({ threadId, values: { $n: 1 } }, "here");
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect(await probeOf(rt, threadId)).toMatchObject({ state: "done", out: "run 1\n", runs: 2 });
+    }, { timeout: 10_000 });
   }, 30_000);
 
   it("a run that starts again keeps its last result, marked refreshing, until the new one replaces it, across a restart too", async () => {

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSlateRuns, restartedRecord, rewoundRecord, type CmdRunDecl, type RunInputs, type RunRecord, type RunStart, type SlateRuns, type SlateRunsDeps } from "../src/slate-runs.js";
+import { BACKED_OFF, createSlateRuns, restartedRecord, rewoundRecord, type CmdRunDecl, type RunRoad, type RunInputs, type RunRecord, type RunStart, type SlateRuns, type SlateRunsDeps } from "../src/slate-runs.js";
 
 const THREAD = "t1";
 
@@ -265,6 +265,21 @@ describe("consent", () => {
     h.runs.release(THREAD);
     expect(h.start("r", decl, {}, "reaction").outcome).toBe("running");
   });
+
+  it("the person's starts have a budget of their own, 12 a minute, which no press or release frees", async () => {
+    const h = harness();
+    const decl = cmd("true");
+    h.start("r", decl);
+    h.runs.approve(THREAD, "r", "always");
+    await h.until("r", ["done"]);
+    for (let i = 1; i < 12; i++) {
+      const ended = h.until("r", ["done"]);
+      expect(h.start("r", decl, {}, "person").outcome).toBe("running");
+      await ended;
+    }
+    h.runs.release(THREAD);
+    expect(h.start("r", decl, {}, "person")).toMatchObject({ outcome: "held", record: { why: "pressed 12 times in a minute; it can start again in a minute" } });
+  });
 });
 
 /** Every process in a process group, by ps. */
@@ -418,6 +433,43 @@ describe("a box that naps", () => {
 });
 
 describe("timers", () => {
+  it("an always timer that fails five starts in a row starts once every five minutes, until a start succeeds", async () => {
+    vi.useFakeTimers();
+    let code = 1;
+    const starts: number[] = [];
+    const road: RunRoad = {
+      slateDir: "/tmp/wsp-slates/t",
+      start(_o, on) {
+        starts.push(Date.now());
+        queueMicrotask(() => on.end({ code, out: "", err: "", cut: false, timedOut: false }));
+        return { kill: () => {} };
+      },
+      reshape: () => ({ done: new Promise(() => {}), kill: () => {} }),
+    };
+    const decl = cmd("false", { every: 10, always: true });
+    const h: Harness = harness({ road: () => road, onTimer: (_t, run) => void h.runs.start({ threadId: THREAD, run, decl, by: "timer", folder: dir, inputs: () => ({}) }) });
+    // The first tick waits for the person's approval, then it and four more ticks fail: five in a row, the last saying
+    // the timer backed off.
+    h.runs.timers(THREAD, [{ run: "poll", every: 10, key: "k-poll", always: true }]);
+    expect(starts).toHaveLength(0);
+    h.runs.approve(THREAD, "poll", "always");
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(starts).toHaveLength(5);
+    const last = h.records.filter(r => r.run === "poll").at(-1)!.record;
+    expect(last).toMatchObject({ state: "failed", why: `exited with 1; ${BACKED_OFF}` });
+    await vi.advanceTimersByTimeAsync(290_000);
+    expect(starts).toHaveLength(5);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(starts).toHaveLength(6);
+    code = 0;
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(starts).toHaveLength(7);
+    expect(h.records.filter(r => r.run === "poll").at(-1)!.record).toMatchObject({ state: "done" });
+    // A success clears the streak: every tick starts it again.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(starts).toHaveLength(10);
+  });
+
   it("tick only while shown by default, always with always, never under 10 s", () => {
     vi.useFakeTimers();
     const h = harness();

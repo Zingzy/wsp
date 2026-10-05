@@ -36,6 +36,7 @@ function host(first: SlateRecord, over: Partial<SlateApi> = {}): SlateApi {
     undo: vi.fn(async () => ({ version: 2 })),
     clear: vi.fn(async () => ({ version: 2 })),
     subscribe: vi.fn(async () => {}),
+    revoke: vi.fn(async () => {}),
     unsubscribe: vi.fn(async () => {}),
     resolve: vi.fn(async () => ({})),
     ...over,
@@ -61,7 +62,7 @@ beforeEach(() => {
   // Each test its own thread id, so the window-lifetime engines of one test never meet the next's.
   thread += 1;
   ROW.threadId = `t${thread}`;
-  useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {} });
+  useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {}, linking: {} });
   useRightPanelStore.setState({ byWorkspaceId: {} });
 });
 afterEach(cleanup);

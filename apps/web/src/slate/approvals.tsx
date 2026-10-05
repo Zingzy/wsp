@@ -130,6 +130,7 @@ export function ApprovalsSheet({ asks, cadence, answer, onClose }: { asks: reado
             <p data-slate-consent-where className="text-muted-foreground">
               {where.join("; ")}. {CONSENT_WORDS.wrote}.
             </p>
+            <p data-slate-consent-reach className="text-muted-foreground">{CONSENT_WORDS.reach}</p>
             {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}
           </div>
         </DialogPanel>

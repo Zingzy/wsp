@@ -24,3 +24,16 @@ export const SLATE_STEPS: Readonly<Record<string, SlateStepModule>> = {
   copy: { kind: "copy", runs: "window", sig: "copy(text)", purpose: "copies to the clipboard", consent: "none; a press only", example: "copy(git.head)" },
   pane: { kind: "pane", runs: "window", sig: "pane(\"kind\")", purpose: "opens a right panel tab", consent: "none; a press only", example: "pane(\"pr\")" },
 };
+
+/** The host a web link opens, which a person allows once per thread; a mailto opens their own mail app and has none. */
+export function slateLinkDomain(href: string): string | undefined {
+  try {
+    const url = new URL(href);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.hostname.toLowerCase() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The approval a person's "Always for this domain" is kept under, beside the slate's command approvals. */
+export const slateDomainKey = (domain: string): string => `domain:${domain}`;

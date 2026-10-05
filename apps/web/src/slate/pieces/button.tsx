@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { slateLinkDomain } from "@wsp/protocol";
 import { stepsOf, type SlateStep } from "../model.js";
 import { Button, DANGER_BUTTON } from "../../components/ui/button.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
@@ -10,7 +11,7 @@ import { usePress } from "./press.js";
 
 /** The hover title a press shows before it is pressed: what each step does, a send's literal text and the paths it
  * carries (05, "button"). */
-export function pressTitle(steps: SlateStep | SlateStep[] | undefined): string | undefined {
+export function pressTitle(steps: SlateStep | SlateStep[] | undefined, resolve?: (value: unknown) => unknown): string | undefined {
   const lines = stepsOf(steps).map(step => {
     switch (step.do) {
       case "send":
@@ -25,8 +26,12 @@ export function pressTitle(steps: SlateStep | SlateStep[] | undefined): string |
       case "set":
       case "toggle":
         return `Changes ${step.path}`;
-      case "open":
-        return "Opens a link";
+      case "open": {
+        // The domain a press would contact, said before it is pressed (12, links).
+        const href = resolve?.(step.target);
+        const domain = typeof href === "string" ? slateLinkDomain(href) : undefined;
+        return domain === undefined ? "Opens a link" : `Opens ${domain}`;
+      }
       case "copy":
         return "Copies";
       case "pane":
@@ -34,6 +39,13 @@ export function pressTitle(steps: SlateStep | SlateStep[] | undefined): string |
     }
   });
   return lines.length === 0 ? undefined : lines.join("\n");
+}
+
+/** A note replaces the step list on hover, except the domain a link would open, which is always said. */
+function hoverTitle(note: string | undefined, steps: SlateStep | SlateStep[] | undefined, resolve: (value: unknown) => unknown): string | undefined {
+  if (note === undefined) return pressTitle(steps, resolve);
+  const opens = stepsOf(steps).filter(step => step.do === "open");
+  return opens.length === 0 ? note : `${note}\n${pressTitle(opens, resolve)}`;
 }
 
 export const button: PieceView = {
@@ -56,7 +68,7 @@ export const button: PieceView = {
         held={held !== undefined}
         disabled={busy}
         aria-busy={busy || undefined}
-        title={held === undefined ? (str(props["note"]) ?? pressTitle(piece.on?.press)) : undefined}
+        title={held === undefined ? hoverTitle(str(props["note"]), piece.on?.press, value => slate.resolve(value as never)) : undefined}
         onClick={press}
       >
         {label}

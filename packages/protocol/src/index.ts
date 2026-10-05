@@ -6497,6 +6497,7 @@ function slateOps() {
     op("slates.event"),
     op("slates.approve"),
     op("slates.cancel"),
+    op("slates.revoke"),
     op("slates.shown"),
     op("slates.subscribe"),
     op("slates.unsubscribe"),
@@ -7469,8 +7470,8 @@ export const DEVICE_OPS: readonly string[] = [
   "release.check",
   "host.terminalConfig",
   "init.get",
-  // A window on a paired computer draws a slate and writes its state; a press, an approval and a cancel act on the
-  // person's computer, so they are not here.
+  // A window on a paired computer draws a slate and writes its values, which start no run and fire no reaction; a
+  // press, an approval and a cancel act on the person's computer, so they are not here.
   "slates.get",
   "slates.state",
   "slates.catalog",
