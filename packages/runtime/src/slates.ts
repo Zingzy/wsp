@@ -23,6 +23,7 @@ import {
   slateDependencies,
   slateEqual,
   slateNearest,
+  setSlateValue,
   SLATE_SOURCES,
   slateStep,
   slateText,
@@ -972,15 +973,26 @@ export function createSlates(deps: SlatesDeps): Slates {
   /** A check with values or a press: the batch's pure core over a copy, nothing stored, started or sent, and the
    * sketch as the slate would read then, with what the press would have done after it. */
   const rehearse = async (r: SlateRecord, doc: SlateDoc, values: SlateValues, p: { values?: Record<string, unknown>; press?: { piece: string; index?: number; action?: number } }, warnings: SlateProblem[]): Promise<SlateWriteAnswer> => {
-    const preview: SlateRecord = { ...r, document: doc, values };
+    // A run's own fields, $run.json or $run.state, set on the copy before the batch: a preview of what the panel shows
+    // for a result the run has not had, which no live write may set.
+    const asked = Object.entries(p.values ?? {}).map(([path, value]) => ({ path: ownPath(path), value: value as SlateJson }));
+    let seeded = values;
+    for (const w of asked) {
+      const own = parseSlateOwnPath(w.path);
+      if (own === undefined || doc.runs[own.name] === undefined) continue;
+      const was = isRunRecord(seeded[own.name]) ? (seeded[own.name] as Record<string, SlateJson>) : {};
+      const base = asJson({ state: "done", runs: 1, ...was, ...(was["endedAt"] === undefined ? { state: "done", endedAt: deps.now() } : {}) });
+      seeded = setSlateValue({ ...seeded, [own.name]: base }, w.path, w.value) ?? seeded;
+    }
+    const preview: SlateRecord = { ...r, document: doc, values: seeded };
     const views = await viewsFor(preview);
-    const writes = Object.entries(p.values ?? {}).map(([path, value]) => ({ path: ownPath(path), value: value as SlateJson }));
+    const writes = asked.filter(w => { const own = parseSlateOwnPath(w.path); return own === undefined || doc.runs[own.name] === undefined; });
     const press = p.press;
     if (press !== undefined && doc.pieces[press.piece] === undefined) {
       const near = slateNearest(press.piece, Object.keys(doc.pieces));
       throw invalid([problem("D203", "piece-missing", `there is no piece ${press.piece} to press`, near !== undefined ? { fix: near } : {})], warnings);
     }
-    const result = runSlateBatch(doc, values, writes, { ...contextOf(preview, views), by: "person", ...(press !== undefined ? { event: { piece: press.piece, kind: "press", ...(press.index !== undefined ? { index: press.index } : {}), ...(press.action !== undefined ? { rowAction: press.action } : {}) } } : {}) });
+    const result = runSlateBatch(doc, seeded, writes, { ...contextOf(preview, views), by: "person", ...(press !== undefined ? { event: { piece: press.piece, kind: "press", ...(press.index !== undefined ? { index: press.index } : {}), ...(press.action !== undefined ? { rowAction: press.action } : {}) } } : {}) });
     const after = sketched({ ...preview, values: result.values }, views, false, [], warnings);
     const would = [
       ...result.starts.map(s => `would start $${s.run} (${s.why})`),

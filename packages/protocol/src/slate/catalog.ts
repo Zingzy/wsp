@@ -185,7 +185,8 @@ const PATCH = `patch: elements without <slate>, sent as text to slate_write; one
 <clear /> empties the slate; <undo /> goes back one write. Each stands alone in its write.
 For anything bigger, resend the whole <slate> with if_version set to the version you read.
 version, which every write and read answers, counts the slate's edits and is what if_version takes; wsp/2 and schema 2 name the format.
-check with press walks a press and its <when> chain on a copy: nothing runs and nothing is sent, and it says what would start.`;
+check with press walks a press and its <when> chain on a copy: nothing runs and nothing is sent, and it says what would start.
+check with values {"$run.json": {...}, "$run.exit": 0} previews the panel for a result the run has not had yet.`;
 
 function functionsEntry(): string {
   const shown = new Set(["percent", "pct", "tokens", "usd", "duration", "ago", "until", "date", "plural", "word", "short", "num", "json", "contains", "orElse", "len", "first", "pluck"]);

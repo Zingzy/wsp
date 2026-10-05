@@ -402,6 +402,14 @@ describe("the slate v2 host", () => {
     await expect(rt.sessions.start(workspaceId, { prompt: "two", cwd: join(root, "plain", "nowhere") })).rejects.toThrow(/^there is no folder at .*nowhere; name one that exists$/);
   });
 
+  it("a check previews what the panel shows for a run's result, setting $run.json on its copy, storing and starting nothing", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-preview-run-");
+    const text = `<slate><run name="market" cmd="echo '{}'" every={60} /><column><text when={$market.exit == 0}>{$market.json.open ? "Open" : "Closed"}</text></column></slate>`;
+    const preview = await rt.slates.write({ text, check: true, values: { "$market.json": { open: true }, "$market.exit": 0 } }, asThread);
+    expect(preview.text).toContain("Open  [text-1 text]");
+    expect(await rt.slates.get(threadId)).toBeNull();
+  });
+
   it("a read puts the paths it was asked for in its text, not only its structured answer", async () => {
     const { rt, asThread } = await threadOn("wsp-slates-read-text-");
     await rt.slates.write({ text: TICKER }, asThread);

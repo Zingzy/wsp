@@ -101,6 +101,7 @@ describe("the catalog", () => {
     expect(slateCatalog()).toContain(`held is a sentence that disables: bind it to a condition; "" or false enables.`);
     expect(slateCatalog("patch")).toContain("version, which every write and read answers, counts the slate's edits and is what if_version takes");
     expect(slateCatalog("patch")).toContain("check with press walks a press and its <when> chain on a copy: nothing runs and nothing is sent");
+    expect(slateCatalog("patch")).toContain(`check with values {"$run.json": {...}, "$run.exit": 0} previews the panel for a result the run has not had yet.`);
     expect(slateCatalog("output")).toContain("how many of the newest lines show, out then err, 8 by default");
     expect(slateCatalog()).toContain("then tool resource>");
     expect(slateCatalog()).toContain("with operators, a ? b : c, [lists], {records} and functions, never methods or =>.");
