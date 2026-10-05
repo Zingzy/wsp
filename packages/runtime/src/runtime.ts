@@ -458,6 +458,9 @@ export interface HarnessAdapter {
   /** Answers a question beside a thread on a copy of its session that nothing keeps; absent on a harness that cannot
    * copy a session, and the composer offers no side question for it. */
   aside?: SessionAsker;
+  /** Whether that copy loads the MCP servers a turn of the thread is handed. Only then is it handed them and the
+   * thread's host pair; a copy that loads none would carry a token nothing dials with. */
+  readonly asideServers?: true;
   /** The message that runs this harness's own compaction of the thread's context as a turn; absent where it has none. */
   readonly compacts?: string;
   /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. Absent
@@ -3239,6 +3242,29 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // come out of the same table, so a scoped token is listed, matched and revoked by the rules a paired computer's
   // token already lives under.
   const deviceDoor = makeDevices(store);
+  /**
+   * The token a launch of a thread's agent drives this host with, the address it dials and the wsp server it runs: a
+   * device of this host's, scoped to the thread, which the caller takes back once the launch's process exits, so a
+   * token read out of a machine after it opens nothing. Minted whatever the switch says, since a launch with none
+   * reaches this host through the person's own wsp server and acts as them; the guard refuses what the switch
+   * refuses. Only where the workspace has a road to this host, since a token with nowhere to go is one more secret
+   * for nothing.
+   */
+  const threadLaunch = async (entry: LiveWorkspace, threadId: string, rootThreadId: string): Promise<{ scoped?: Awaited<ReturnType<typeof deviceDoor.mint>>; env: Record<string, string>; wsp?: McpServerSpec }> => {
+    const reach = agentsReach(entry);
+    if (reach === undefined) return { env: {} };
+    const scoped = await deviceDoor.mint(`thread ${threadWord(threadId)}`, { kind: "thread", threadId, workspaceId: entry.record.id, rootThreadId }, Date.now(), moduleOf(entry.record.kind).turnRoad);
+    return {
+      scoped,
+      env: {
+        [HOST_TOKEN_ENV]: scoped.deviceToken,
+        // The address and the key beside it only for a launch that dials one: its wsp pins the key before it sends
+        // the token, so a directory answer naming another host is refused.
+        ...(reach.url !== undefined ? { [HOST_URL_ENV]: reach.url, ...(placeDoor === undefined ? {} : { [HOST_KEY_ENV]: placeDoor.hostKey() }) } : {}),
+      },
+      ...(reach.wsp !== undefined ? { wsp: reach.wsp } : {}),
+    };
+  };
   // The places joined to this host, over the one code store every code is spent from: the door holds the records
   // and the links, and the two roads into the runtime it needs are the ordinary record and delete roads below.
   if (opts.placeLinks !== undefined) {
@@ -8400,7 +8426,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       images: adapter.attachments !== undefined,
       ...(adapter.mcpServers === true ? { mcpServers: true } : {}),
       ...(adapter.movesAccess === true ? { movesAccess: true } : {}),
-      ...(adapter.aside !== undefined ? { asides: true } : {}),
+      asides: adapter.aside !== undefined,
       ...(adapter.compacts !== undefined ? { compacts: adapter.compacts } : {}),
       ...(adapter.resumesAt === true || adapter.revert !== undefined ? { rewindsConversation: true } : {}),
       ...(adapter.revert !== undefined ? { rewindsByCount: true } : {}),
@@ -9949,16 +9975,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // started for it a turn later.
       const notifyRoad = asked === undefined ? registered?.road : roadOf(origin);
       const turnToken = randomBytes(16).toString("hex");
-      // The token this turn's own agent drives this host with, and the address it dials: a device of this host's,
-      // scoped to this thread and taken away when the turn's process exits, so a token read out of a machine after
-      // the turn opens nothing. Minted whatever the switch says, since a turn with none reaches this host through the
-      // person's own wsp server and acts as them; the guard refuses what the switch refuses. Only where the turn has
-      // a road to this host, since a token with nowhere to go is one more secret for nothing.
-      const reach = agentsReach(entry);
-      const scoped =
-        reach !== undefined
-          ? await deviceDoor.mint(`thread ${threadWord(threadId)}`, { kind: "thread", threadId, workspaceId, rootThreadId: tree.rootThreadId ?? threadId }, Date.now(), moduleOf(entry.record.kind).turnRoad)
-          : undefined;
+      const { scoped, env: launchEnv, wsp } = await threadLaunch(entry, threadId, tree.rootThreadId ?? threadId);
       const dropScope = (): void => {
         if (scoped !== undefined) void deviceDoor.revoke(scoped.deviceId).catch((e: unknown) => console.warn(`the token of thread ${threadWord(threadId)} was not taken away: ${e instanceof Error ? e.message : String(e)}`));
       };
@@ -9972,15 +9989,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         built = adapterFor(
           entry,
           o.harness,
-          {
-            [TURN_TOKEN_ENV]: turnToken,
-            ...(scoped !== undefined ? { [HOST_TOKEN_ENV]: scoped.deviceToken } : {}),
-            // The address and the key beside it only for a turn that dials one: its wsp pins the key before it sends
-            // the token, so a directory answer naming another host is refused.
-            ...(scoped !== undefined && reach?.url !== undefined
-              ? { [HOST_URL_ENV]: reach.url, ...(placeDoor === undefined ? {} : { [HOST_KEY_ENV]: placeDoor.hostKey() }) }
-              : {}),
-          },
+          { [TURN_TOKEN_ENV]: turnToken, ...launchEnv },
           () => waiting.on,
           // A name no catalog row declares is one an MCP server's definition reads, which only the environment carries.
           serverValuesOf(opts.vault?.() ?? {}),
@@ -9997,10 +10006,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // person's other servers stay (measured on 2.1.284 and 0.155.1 against the user-scope config; a project's own
       // .mcp.json naming wsp was not measured). A harness that takes none is refused where a caller named servers and
       // left alone here, since the person asked for a thread, not for tools.
-      const mcpServers =
-        scoped !== undefined && reach?.wsp !== undefined && adapter.mcpServers === true
-          ? { [MCP_SERVER_NAME]: reach.wsp, ...o.mcpServers }
-          : o.mcpServers;
+      const mcpServers = wsp !== undefined && adapter.mcpServers === true ? { [MCP_SERVER_NAME]: wsp, ...o.mcpServers } : o.mcpServers;
       const records = (o.attachments ?? []).map(attachmentRecord);
       const blocked = filesBlocked(records, adapter.attachments, harness) ?? mcpServersBlocked(o.mcpServers, adapter.mcpServers, harness);
       if (blocked !== null) {
@@ -10487,16 +10493,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       const latest = s.view.threadId === undefined ? s.view : (latestOn(s.view.threadId) ?? s.view);
-      const { harness, adapter } = await launchAdapterFor(entry, latest.harness);
-      if (adapter.aside === undefined) throw new Error(asideUnsupportedLine(harness));
+      const servers = serverValuesOf(opts.vault?.() ?? {});
+      const { harness, adapter: bare } = await launchAdapterFor(entry, latest.harness, undefined, undefined, servers);
+      if (bare.aside === undefined) throw new Error(asideUnsupportedLine(harness));
       if (latest.claudeSessionId === undefined) throw new Error(ASIDE_NO_SESSION_LINE);
-      const answer = await adapter.aside({
-        session: latest.claudeSessionId,
-        question,
-        ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}),
-        ...(latest.model !== undefined ? { model: latest.model } : {}),
-      });
-      return { text: answer.text };
+      const ask = { session: latest.claudeSessionId, question, ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}), ...(latest.model !== undefined ? { model: latest.model } : {}) };
+      if (bare.asideServers !== true || bare.mcpServers !== true) return { text: (await bare.aside(ask)).text };
+      // A copy that loads the thread's servers is launched with the thread's own wsp server and the pair it dials
+      // with, since a harness resuming a session that announced a server it no longer has tells the model so, and the
+      // answer opens on it. The harness keeps every tool off; the token goes back the moment the answer is in.
+      const threadId = threadKeyOf(latest);
+      const { scoped, env: launchEnv, wsp } = await threadLaunch(entry, threadId, rootOf(threadId));
+      try {
+        const { adapter } = adapterFor(entry, harness, launchEnv, undefined, servers);
+        if (adapter.aside === undefined) throw new Error(asideUnsupportedLine(harness));
+        return { text: (await adapter.aside({ ...ask, ...(wsp !== undefined ? { mcpServers: { [MCP_SERVER_NAME]: wsp } } : {}) })).text };
+      } finally {
+        if (scoped !== undefined) await deviceDoor.revoke(scoped.deviceId).catch((e: unknown) => console.warn(`the token of a side question on thread ${threadWord(threadId)} was not taken away: ${e instanceof Error ? e.message : String(e)}`));
+      }
     },
 
     async run(step, origin) {

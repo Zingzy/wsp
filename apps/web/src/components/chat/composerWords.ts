@@ -22,6 +22,14 @@ export const COMPOSER_WORDS = {
   sendNowFailed: (said: string): string => `Could not send now: ${said}`,
   sendNowUnknown: "wsp no longer knows this turn",
   sendNowUnsupported: "this agent takes no message mid-turn",
+  /** A /btw held while the agent's lists or the thread's own row, which a side question copies, are on their way;
+   * until the row is in, the composer cannot say which agent the thread runs. */
+  asideUnknown: "Waiting to hear whether this thread's agent takes side questions",
+  /** A /btw refused, each saying the draft goes to the thread once the /btw is dropped: sent as it stands, it would
+   * reach the agent as a command it does not have. */
+  asideUnsupported: (agent: string): string => `${agent} takes no side question; drop the /btw to send it to the thread`,
+  /** The runtime names the session a side question copies by the thread's row, and keeps 200 rows a workspace. */
+  asideRowsGone: "This thread's early turns are no longer listed, so a side question has nothing to copy; drop the /btw to send it to the thread",
   /** The stash could not be written, the draft staying where it was. */
   stashNotWritten: "The stash could not be saved in this browser, so the draft stays here",
   /** The word on a file's chip the composer turned away; the sentence why rides its hover. */

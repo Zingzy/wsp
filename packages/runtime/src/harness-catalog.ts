@@ -47,8 +47,8 @@ const CLAUDE_EFFORTS: HarnessOption[] = levels(["low", "medium", "high", "xhigh"
 
 // The table alone cannot say whether a harness steers, whether it keeps a person's name for a session, or whether it
 // reads an image: only its adapter, on a machine, knows any of the three. A client reads a table row as no answer
-// (keepsRename, readsImages), never as a no. mcpServers is not one of those: no binary decides it, so a row names it
-// here and harness-catalog.test.ts pins every row to its adapter's own declaration.
+// (keepsRename, readsImages), never as a no. mcpServers and asides are not among them: no binary decides either, so a
+// row names them here and adapters.test.ts pins every row to its adapter's own declaration.
 const fromTable = (
   catalog: Omit<HarnessCatalog, "source" | "version" | "contextWindows" | "steers" | "renames" | "images"> & { contextWindows?: HarnessOption[]; pin?: TablePin },
 ): HarnessCatalog => {
@@ -75,6 +75,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     pin: { read: "--help", version: CLAUDE_CODE.version, date: "2026-09-23" },
     // --mcp-config takes the servers as JSON on the launch (read off `claude --help` at 2.1.257, 2026-09-10).
     mcpServers: true,
+    // A side question runs on a fork of the session, which the adapter makes; no binary decides it.
+    asides: true,
     // Its control channel takes a mode change while a turn runs, and the prompt that turn is stopped on is answered
     // with it, so an access picked mid-turn lands on the turn in front of the person.
     movesAccess: true,
@@ -128,6 +130,7 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     pin: { read: "app-server", version: "0.153.0", date: "2026-09-07" },
     // Servers ride the launch as `-c mcp_servers.<name>...` overrides (checked with `codex mcp get` on 0.155.1).
     mcpServers: true,
+    asides: true,
     // The oldest generation model/list still offers, and the cheapest of them.
     smallModel: "gpt-5.2",
     models: [
