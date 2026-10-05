@@ -341,3 +341,13 @@ describe("a piece's fallback", () => {
     expect(withPieces({ a: { type: "sparkle", fallback: "b" }, b: { type: "text", props: { value: "Hi" } } })).toEqual([]);
   });
 });
+
+describe("a secret on a run", () => {
+  it("is refused as an argument at write time, and taken in env, on stdin, or as its .len", () => {
+    const run = (attrs: string): string[] => all(wrap(`<text>x</text>`, `  <secret name="tok" />\n  <run name="r" cmd='echo' ${attrs} />`)).filter(c => c === "S520");
+    expect(run(`args={[$tok]}`)).toEqual(["S520"]);
+    expect(run(`env={{ TOK: $tok }}`)).toEqual([]);
+    expect(run(`stdin={$tok}`)).toEqual([]);
+    expect(run(`args={[$tok.len]}`)).toEqual([]);
+  });
+});

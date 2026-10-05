@@ -9,7 +9,7 @@ import { isSlateIcon, nearestSlateIcon } from "./icons.js";
 import { SLATE_PIECES, SLATE_RESERVED_PROPS, type SlateItemSpec, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
 import { SLATE_LIMITS, slateBytes } from "./limits.js";
 import { slateTable, parseSlateOwnPath } from "./paths.js";
-import { SLATE_WARNINGS, nearest, orList, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
+import { SLATE_SECRET_IN_ARGS, SLATE_WARNINGS, nearest, orList, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
 import { SLATE_SOURCES, slateIsSeries, slateSourceType } from "./sources.js";
 import { SLATE_STEPS } from "./steps.js";
 import {
@@ -319,7 +319,9 @@ class Validator {
         for (const s of this.secretsIn(v)) secretEnv.push([k, s]);
       }
       (r.args ?? []).forEach((v, i) => {
-        this.propValue(v, w(`args[${i}]`), { secretOk: true });
+        const secret = isSlateBinding(v) ? /^\s*\$([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(v.bind)?.[1] : undefined;
+        if (secret !== undefined && this.kinds.get(secret) === "secret") this.add("S520", `args[${i}] is the secret $${secret}; ${SLATE_SECRET_IN_ARGS}`, w(`args[${i}]`), `env={{ ${secret.toUpperCase()}: $${secret} }}, or stdin={$${secret}}`);
+        else this.propValue(v, w(`args[${i}]`));
       });
       if (r.stdin !== undefined) this.propValue(r.stdin, w("stdin"), { secretOk: true });
       for (const [envName, secret] of secretEnv) {

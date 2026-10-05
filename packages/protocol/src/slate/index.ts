@@ -4,7 +4,7 @@
 // run. Live values are keyed by name without the $; paths are "$name[.field|[index]]".
 export * from "./types.js";
 export { SLATE_LIMITS, slateBytes } from "./limits.js";
-export { SLATE_CODES, SLATE_WARNINGS, slateProblem, nearest as slateNearest, type SlateCode } from "./problems.js";
+export { SLATE_CODES, SLATE_SECRET_IN_ARGS, SLATE_WARNINGS, slateProblem, nearest as slateNearest, type SlateCode } from "./problems.js";
 export { parseSlateOwnPath, slateOwnPathText, getSlateValue, setSlateValue, slateStep, slateEqual } from "./paths.js";
 export {
   parseSlateExpression, evaluateSlateExpression, evaluateSlateFormat, slateDependencies, slatePropDependencies, resolveSlateProp,

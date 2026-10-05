@@ -4,6 +4,9 @@
 import type { SlateProblem } from "./types.js";
 import { slateTable } from "./paths.js";
 
+/** Why a run refuses a secret among its arguments, at write and at start alike. */
+export const SLATE_SECRET_IN_ARGS = "a secret reaches a command through env or stdin, never as an argument, which ps can read";
+
 export const SLATE_CODES = {
   P100: "bad-syntax", P102: "bare-not-boolean", P103: "bad-id", P104: "duplicate-id", P105: "bad-patch-op", P107: "reaction-without-id",
   D200: "schema-unknown", D201: "kit-unknown", D202: "root-ambiguous", D203: "piece-missing", D205: "cycle", D206: "too-deep",
