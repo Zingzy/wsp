@@ -84,7 +84,7 @@ class Reader {
         const end = this.src.indexOf(q, this.i + 1);
         if (end < 0) this.fail(`the string for ${an[0]} at line ${aline} never closes`);
         const raw = this.src.slice(this.i + 1, end);
-        if (raw.endsWith("\\")) this.fail(`attribute strings take no escapes (${an[0]} at line ${aline}): a backslash does not hide a ${q} inside ${q}...${q}`, q === '"' ? `${an[0]}='echo "hi"', single quotes outside the double ones` : `${an[0]}="echo 'hi'", double quotes outside the single ones`);
+        if (raw.endsWith("\\")) this.fail(`attribute strings take no escapes (${an[0]} at line ${aline}): a backslash does not hide a ${q} inside ${q}...${q}`, q === '"' ? `${an[0]}='echo "hi"', single quotes outside the double ones; with both quotes inside, the block form <run name="x">{\`...\`}</run>` : `${an[0]}="echo 'hi'", double quotes outside the single ones; with both quotes inside, the block form <run name="x">{\`...\`}</run>`);
         const entity = /&(?:[A-Za-z]+|#\d+|#x[0-9A-Fa-f]+);/.exec(raw);
         if (entity !== null) {
           // Nothing decodes an entity here: &quot; reaches a command as the five letters, and bash runs "quot".
@@ -295,6 +295,8 @@ class Compiler {
       else this.error("T302", `<slate> takes title alone, not ${a.name}`, a.line, { fix: "title" });
     }
     if (el.text !== undefined) this.error("P100", "<slate> takes elements, not text; put the words in a <text>", el.line);
+    // A declaration written beside the piece that reads it is lifted to the slate: run and value names are the slate's.
+    el = { ...el, children: [...el.children.filter(ch => !isDeclarationEl(ch)), ...el.children.flatMap(ch => (isDeclarationEl(ch) ? [ch] : nestedDeclarations(ch)))] };
     for (const ch of el.children) if (DECLARATIONS.has(ch.tag)) this.guard(() => this.declareName(ch));
     for (const ch of el.children) if (isFileDecl(ch)) this.file(ch);
     const pieces = el.children.filter(ch => !DECLARATIONS.has(ch.tag) && !isFileDecl(ch));
@@ -429,7 +431,10 @@ class Compiler {
       for (const n of ["tool", "resource"]) if (attr(n) !== undefined) this.error("K701", `a cmd run takes no ${n}`, el.line, { piece: key });
       run = r;
     } else if (kind === "tool") {
-      const tool = attr("tool")!;
+      const named = attr("tool")!;
+      // The agent's own name for the tool, mcp__server__tool as Claude Code and Codex list it, is server.tool here.
+      const agents = /^mcp__(.+?)__(.+)$/.exec(named.value);
+      const tool = agents !== null && named.kind === "string" ? { ...named, value: `${agents[1]}.${agents[2]}` } : named;
       const dot = tool.value.indexOf(".");
       if (tool.kind !== "string" || dot <= 0 || dot === tool.value.length - 1) this.error("K705", "tool names a server and a tool as \"server.tool\"", tool.line, { piece: key, prop: "tool" });
       const r: Extract<SlateRunDecl, { kind: "tool" }> = { kind: "tool", server: tool.value.slice(0, Math.max(0, dot)), tool: tool.value.slice(dot + 1), ...common };
@@ -557,6 +562,11 @@ class Compiler {
     if (DECLARATIONS.has(el.tag) || isFileDecl(el)) { this.error("P100", `<${el.tag}> is a declaration and goes directly under <slate>`, el.line); return undefined; }
     if ((SLATE_ITEM_KINDS as readonly string[]).includes(el.tag)) { this.error("T314", `<${el.tag}> is an item and goes inside the piece that takes it`, el.line); return undefined; }
     const spec = SLATE_PIECES[el.tag];
+    // Words written straight into a group are a <text> at its top, which is all a group can show them as.
+    if (spec?.holdsChildren === true && spec.textProp === undefined && el.text !== undefined) {
+      el = { ...el, children: [{ tag: "text", attrs: [], children: [], text: el.text, line: el.line }, ...el.children] };
+      delete el.text;
+    }
     const idAttr = el.attrs.find(a => a.name === "id");
     let id: string;
     if (idAttr !== undefined && idAttr.kind === "string" && SLATE_ID.test(idAttr.value)) {
@@ -861,6 +871,13 @@ class Compiler {
 
 /** <file name="..."> declares code for the slate; <file path="..."> is the piece that shows a file of the folder. */
 const isFileDecl = (el: Pick<El, "tag" | "attrs">): boolean => el.tag === "file" && el.attrs.some(a => a.name === "name");
+const isDeclarationEl = (el: El): boolean => DECLARATIONS.has(el.tag) || isFileDecl(el);
+/** The declarations inside a piece, however deep, taken out of it; the piece keeps its other children. */
+function nestedDeclarations(el: El): El[] {
+  const found = el.children.flatMap(ch => (isDeclarationEl(ch) ? [ch] : nestedDeclarations(ch)));
+  el.children = el.children.filter(ch => !isDeclarationEl(ch));
+  return found;
+}
 
 function explicitIds(el: El): string[] {
   const out: string[] = [];

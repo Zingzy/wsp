@@ -289,3 +289,26 @@ describe("what the render judge found agents writing", () => {
     ]);
   });
 });
+
+describe("what round three's Haiku wrote", () => {
+  it("takes a run nested in a piece and words written into a group, and the agent's own mcp__ tool name", () => {
+    const nested = parseSlate(`<slate><column><run name="rates" cmd="echo 1" every={60} /><text>{$rates.out}</text></column></slate>`);
+    expect(nested.errors).toEqual([]);
+    expect(Object.keys(nested.document!.runs)).toEqual(["rates"]);
+    const words = parseSlate(`<slate><section title="Requests">Requests: {len($n)}</section><value name="n" start={[]} /></slate>`);
+    expect(words.errors).toEqual([]);
+    expect(words.document!.pieces["section-1"]!.children).toEqual(["text-1"]);
+    const tool = parseSlate(`<slate><run name="q" tool="mcp__axiom__queryDataset" args={{ apl: "count()" }} /><column><text>x</text></column></slate>`);
+    expect(tool.document!.runs["q"]).toMatchObject({ kind: "tool", server: "axiom", tool: "queryDataset" });
+  });
+
+  it("refuses a token written into a command or a file, and points <piece> and both quotes at what works", () => {
+    const token = parseSlate(`<slate><run name="a" cmd="curl -H 'Authorization: Bearer xapt-dd233a3a-85a9-45d2-9a1c-a4608f2b9eeb' https://x" /><column><text>x</text></column></slate>`);
+    expect(token.errors).toMatchObject([{ code: "S520", message: expect.stringMatching(/^cmd holds a token written out \(xapt-d\.\.\.\)/) }]);
+    expect(token.errors[0]!.message).not.toContain("dd233a3a-85a9");
+    expect(parseSlate(`<slate><file name="q.py">KEY = "sk-ant-api03-abcdefghijklmnopqrst"</file><column><text>x</text></column></slate>`).errors).toMatchObject([{ code: "S520", piece: "q.py" }]);
+    expect(parseSlate(`<slate><run name="a" cmd='curl -H "Authorization: Bearer $TOKEN" https://x' /><column><text>x</text></column></slate>`).errors).toEqual([]);
+    expect(parseSlate(`<slate><column><piece id="rates"><text>x</text></piece></column></slate>`).errors[0]!.message).toBe(`"piece" is not a piece; the tag is the piece's own type, like <number ...> or <text>`);
+    expect(parseSlate(`<slate><run name="a" cmd="echo \\"hi\\"" /><column><text>x</text></column></slate>`).errors[0]!.fix).toContain(`with both quotes inside, the block form <run name="x">{\`...\`}</run>`);
+  });
+});

@@ -193,7 +193,7 @@ describe("a refusal a small model can act on", () => {
 
   it("an escaped quote in an attribute string shows the quoting that works", () => {
     const refused = parseSlate(`<slate><run name="p" cmd="python3 -c \\"print(1)\\"" /><text>x</text></slate>`);
-    expect(refused.errors[0]).toMatchObject({ code: "P100", message: `attribute strings take no escapes (cmd at line 1): a backslash does not hide a " inside "..."`, fix: `cmd='echo "hi"', single quotes outside the double ones` });
+    expect(refused.errors[0]).toMatchObject({ code: "P100", message: `attribute strings take no escapes (cmd at line 1): a backslash does not hide a " inside "..."`, fix: `cmd='echo "hi"', single quotes outside the double ones; with both quotes inside, the block form <run name="x">{\`...\`}</run>` });
     expect(parseSlate(`<slate><run name="p" cmd='python3 -c "print(1)"' /><text>x</text></slate>`).errors).toEqual([]);
     // An entity is no escape either: nothing decodes it, so &quot; reached bash as the word quot (sol-low, round three).
     expect(parseSlate(`<slate><run name="p" cmd="python3 &quot;$SLATE_DIR/x.py&quot;" /><text>x</text></slate>`).errors[0]).toMatchObject({ code: "P100", message: "attribute strings take no HTML entities (cmd at line 1): &quot; stays as written, nothing decodes it", fix: `cmd='python3 "$SLATE_DIR/x.py"', single quotes outside the double ones` });

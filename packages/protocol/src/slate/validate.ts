@@ -39,6 +39,14 @@ function titleCased(v: string): boolean {
 /** The head with every word past the first lowercased, acronyms and inner capitals kept. */
 const sentenceCase = (v: string): string => v.trim().split(/(\s+)/).map((w, i) => (i === 0 || /^\s+$/.test(w) || /^[A-Z0-9]{2,}s?$/.test(w) || KEPT_CAPS.test(w.slice(1)) ? w : w.toLowerCase())).join("");
 
+/** A credential written out in a command: a bearer value or a provider's key by its prefix. Answers its first
+ * characters, enough to say which, never the whole. */
+function tokenIn(text: string): string | undefined {
+  const m = /\bBearer\s+([A-Za-z0-9._~+\/-]{20,})|\b((?:xapt|xaat|sk|sk-ant|ghp|gho|ghs|github_pat|glpat|xox[abp]|AKIA)[-_][A-Za-z0-9_-]{16,})/.exec(text);
+  const token = m?.[1] ?? m?.[2];
+  return token === undefined || token.startsWith("$") ? undefined : token.slice(0, 6);
+}
+
 /** Attributes of a <run> that a piece is given by habit: the refusal points at the run. */
 const RUN_ATTRS: ReadonlySet<string> = new Set(["every", "cmd", "timeout", "always", "once", "interval", "refresh"]);
 const SECRET_FIELD_TYPES: Record<string, SlateType> = { set: { t: "boolean" }, len: { t: "number" }, at: { t: "number" } };
@@ -134,6 +142,10 @@ class Validator {
     if ((d.schema as number) !== 2) this.add("D200", `schema ${String(d.schema)} is not a version this host knows; this host reads schema 2`, {}, "update wsp");
     if (d.kit !== undefined && d.kit !== "wsp/2") this.add("D201", `kit ${d.kit} is not one this host has; it has wsp/2`);
     if (d.title !== undefined && titleCased(d.title)) this.add("W018", `the slate's title "${d.title}" is in Title Case; heads take sentence case`, {}, `title="${sentenceCase(d.title)}"`);
+    for (const [file, text] of Object.entries(d.files ?? {})) {
+      const token = tokenIn(text);
+      if (token !== undefined) this.add("S520", `${file} holds a token written out (${token}...); let the code read it from the file it lives in, or from an env the run hands it`, { piece: file });
+    }
     if (JSON.stringify({ ...d, files: undefined }).length > SLATE_LIMITS.documentBytes) this.add("D208", `the document is over ${SLATE_LIMITS.documentBytes / 1024} KB`);
     this.names();
     this.limits();
@@ -284,6 +296,10 @@ class Validator {
     if (r.always === true && r.every === undefined) this.add("K703", "always keeps a timer running while the slate is not shown, so it needs every", w("always"), "every={60} always");
     if (r.kind === "cmd") {
       if (typeof r.cmd !== "string" || r.cmd.trim() === "") this.add("K700", "the command is literal text; hand values to it with env={{ NAME: $value }}", w("cmd"));
+      for (const [field, text] of [["cmd", r.cmd], ["then", r.then]] as const) {
+        const token = typeof text === "string" ? tokenIn(text) : undefined;
+        if (token !== undefined) this.add("S520", `${field} holds a token written out (${token}...), which the slate keeps and shows the person; let the command read it from the file it lives in, or take it from a <secret> the person types`, w(field));
+      }
       if (r.timeout !== undefined && (!Number.isFinite(r.timeout) || r.timeout <= 0 || r.timeout > SLATE_LIMITS.timeoutMaxS)) this.add("K704", `timeout is seconds up to ${SLATE_LIMITS.timeoutMaxS}`, w("timeout"), `timeout={${SLATE_LIMITS.timeoutDefaultS}}`);
       if (r.on !== undefined && r.on !== "thread" && r.on !== "host") this.add("K704", "on is \"thread\" or \"host\"", w("on"));
       const secretEnv: [string, string][] = [];

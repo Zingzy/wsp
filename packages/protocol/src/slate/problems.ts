@@ -78,6 +78,8 @@ const HTML_TAGS: Readonly<Record<string, string>> = {
   ...Object.fromEntries(["div", "main", "body", "nav", "footer", "article", "aside", "card", "container", "stack", "box"].map(t => [t, "a group is a <column>, a <row> or a <section>"])),
   ...Object.fromEntries(["ul", "ol", "li", "list"].map(t => [t, "a list is a <checklist> or a <table items={...}>"])),
   ...Object.fromEntries(["data", "fetch", "source", "poll"].map(t => [t, "data comes from a <run name=\"x\" cmd='...' every={60} />, read as $x.json"])),
+  piece: "the tag is the piece's own type, like <number ...> or <text>",
+  component: "the tag is the piece's own type, like <number ...> or <text>",
   a: "a link is a <button> whose onPress opens it",
   img: "a slate draws no images",
 };
