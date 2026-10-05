@@ -438,6 +438,20 @@ describe("the slate v2 host", () => {
     expect(view.asks).toMatchObject([{ run: "deploy", why: "deploy.sh changed since you allowed it, so it asks again" }]);
   });
 
+  it("takes five of the person's events a second, answers a resend of one it took, and refuses the sixth", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-event-rate-");
+    await rt.slates.write({ text: `<slate><value name="n" start={0} /><column><button id="up" label="Up" onPress={set($n, $n + 1)} /></column></slate>` }, asThread);
+    const press = (id: string) => rt.slates.event({ threadId, version: 1, piece: "up", event: "press", requestId: id });
+    const five = [0, 1, 2, 3, 4].map(i => press(`e${i}`));
+    const sixth = press("e5");
+    const again = press("e0");
+    await Promise.all(five);
+    await expect(again).resolves.toBeDefined();
+    await expect(sixth).rejects.toThrow(/^V754 event-rate: too many presses; try again in a moment/);
+    await rt.slates.settled();
+    expect((await rt.slates.get(threadId))!.values["n"]).toBe(5);
+  });
+
   it("a check previews what the panel shows for a run's result, setting $run.json on its copy, storing and starting nothing", async () => {
     const { rt, threadId, asThread } = await threadOn("wsp-slates-preview-run-");
     const text = `<slate><run name="market" cmd="echo '{}'" every={60} /><column><text when={$market.exit == 0}>{$market.json.open ? "Open" : "Closed"}</text></column></slate>`;

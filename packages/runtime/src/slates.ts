@@ -188,6 +188,10 @@ const SNAPSHOT_BYTES = 8 * 1024 * 1024;
 const VALUES_BYTES = 256 * 1024;
 const MESSAGE_CHARS = 20_000;
 const REQUEST_KEPT_MS = 10 * 60_000;
+/** How many presses a request id is remembered for at most, the oldest dropped first. */
+const REQUESTS_KEPT = 500;
+/** The person's events a slate takes: five a second, a burst of five, before any is remembered or batched. */
+const EVENTS_PER_SECOND = 5;
 const PRESS_SEND_MS = 2_000;
 const REACTION_SEND_MS = 60_000;
 const WRITES_BURST = 20;
@@ -564,6 +568,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   const pressSentAt = new Map<string, number>();
   const reactionSentAt = new Map<string, number>();
   const requests = new Map<string, { at: number; answer: Promise<SlateEventAnswer> }>();
+  const eventBuckets = new Map<string, { tokens: number; at: number }>();
   const holds = new Map<string, Map<string, number>>();
 
   /** A thread another thread started has no slate: every slate tool tells it so in one line. */
@@ -1349,6 +1354,13 @@ export function createSlates(deps: SlatesDeps): Slates {
       // A press sent again after a reconnect is the same press: it answers what the first one came to.
       const seen = requests.get(p.requestId);
       if (seen !== undefined) return seen.answer;
+      const bucket = eventBuckets.get(p.threadId) ?? { tokens: EVENTS_PER_SECOND, at: now };
+      bucket.tokens = Math.min(EVENTS_PER_SECOND, bucket.tokens + ((now - bucket.at) / 1000) * EVENTS_PER_SECOND);
+      bucket.at = now;
+      eventBuckets.set(p.threadId, bucket);
+      if (bucket.tokens < 1) return Promise.reject(refused(problem("V754", "event-rate", "too many presses; try again in a moment"), "conflict"));
+      bucket.tokens -= 1;
+      while (requests.size >= REQUESTS_KEPT) requests.delete(requests.keys().next().value!);
       const composed = serial(p.threadId, async () => {
         const r = await needRecord(p.threadId);
         const doc = r.document;
