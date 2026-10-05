@@ -81,7 +81,8 @@ describe("the validator", () => {
   });
 
   it("holds every code it raises to the closed table", () => {
-    for (const [code] of FIXTURES) expect(code in SLATE_CODES).toBe(true);
+    const raised = new Set([...FIXTURES.map(([, text]) => text), ...SPEC_EXAMPLES.map(e => e.text)].flatMap(all));
+    for (const code of raised) expect(SLATE_CODES, code).toHaveProperty(code);
   });
 
   it("gives no error and no warning beyond T311 for every spec example", () => {

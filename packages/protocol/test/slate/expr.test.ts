@@ -72,7 +72,9 @@ describe("expressions", () => {
     expect(ev("pr.missing.deeper")).toBeUndefined();
     expect(ev("pr.checks[9].name")).toBeUndefined();
     expect(ev("pr.checks[-1].name")).toBe("docs");
-    expect(ev("$x.__proto__")).toBeUndefined();
+    const x = { resolve: (p: string) => (p === "$x" ? { a: 1 } : undefined) };
+    for (const name of ["__proto__", "constructor", "toString"]) expect(ev(`$x.${name}`, x)).toBeUndefined();
+    expect(ev("$x.a", x)).toBe(1);
   });
 
   it("refuses at write time what 04's table refuses", () => {
