@@ -72,8 +72,8 @@ function serverFlags(servers: Readonly<Record<string, McpServerSpec>>): string[]
     if (!SERVER_NAME_RE.test(name)) throw new Error(`an MCP server name must be one plain word of a config key, got "${name}"`);
     if (name !== MCP_SERVER_NAME) return entry(name, spec);
     const slate = JSON.stringify(SLATE_TOOLS);
-    // A thread another thread started has no slate: the tools stay off its wsp server and no slate server stands.
-    if (!launchHasSlate(servers)) return [...entry(name, spec), configRaw(`mcp_servers.${name}.disabled_tools`, slate)];
+    // A thread another thread started has no slate: its wsp server lists none of the slate's tools and no slate server stands.
+    if (!launchHasSlate(servers)) return entry(name, spec);
     return [
       ...entry(name, spec),
       configRaw(`mcp_servers.${name}.disabled_tools`, slate),
