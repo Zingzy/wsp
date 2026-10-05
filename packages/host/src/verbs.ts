@@ -26,8 +26,7 @@ import {
   AccessChoice,
   AgentSetupView,
   ThreadDefaults,
-  accessWordRefusal,
-  pickRefusal,
+  accessRefusal,
   accessWordsLine,
   agentEnvRefusal,
   ENV_REFUSED_FIX,
@@ -131,6 +130,7 @@ import {
   TerminalConfig,
   TerminalScheme,
   ThreadMessage,
+  ThreadHead,
   ThreadView,
   TurnStatus,
   UpgradeResult,
@@ -2102,13 +2102,18 @@ export function pickFlags(flags: Flags): Picks {
   return { ...Object.fromEntries(PICK_FLAGS.map(name => [name, flag(flags, name)])), ...(flags["fast"] === true ? { fast: true } : {}) };
 }
 
+/** What a refusal adds when the list it quotes is wsp's own table rather than the machine's own answer: a person
+ * reading a model they know their agent takes has to be told the list is not that agent's. */
+export const BUILT_IN_LIST_CLAUSE = "; that list is wsp's built-in one, since no agent there described itself, and the agent on that computer may take more";
+/** The same for a refusal that quotes no list, a model the table says takes no effort: "that list" would point at nothing. */
+export const BUILT_IN_TABLE_CLAUSE = "; wsp's built-in table says so, since no agent there described itself";
+
 /** Refuses, in the runtime's own words and before a machine is minted or woken for it, what the runtime would refuse
  * once the machine was there: an empty task or message, an agent the host has no adapter for, a pick the agent's
  * catalog does not list. Named a workspace, this asks that workspace's own machine, the same lists the app's composer
  * shows and the start itself will check against, so a model only that machine's config knows (a provider the agent is
- * routed to) is not refused here for being absent from a table. On a workspace that is not running the table answers,
- * and the start on the machine checks the rest. A start on this computer mints and wakes nothing, so its picks are
- * left to the start, which reads them against the agent's own lists here before it makes a folder. */
+ * routed to) is not refused here for being absent from a table. Without one, or on a workspace that is not running,
+ * the table answers, and the start on the machine checks the rest. */
 export async function checkedStart(client: HostClient, task: string, harness: string | undefined, picks: Picks, workspaceId?: string): Promise<void> {
   if (task.trim() === "") throw usageRefusal(EMPTY_MESSAGE_LINE, "Put it in quotes after the flags.");
   const { harnesses } = await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list", workspaceId === undefined ? undefined : { workspaceId });
@@ -2119,15 +2124,16 @@ export async function checkedStart(client: HostClient, task: string, harness: st
     if (all.some(c => c.harness === harness)) return;
     throw usageRefusal(noAdapterLine(harness, all.map(c => c.harness)), "Name one of those with --agent.");
   }
-  if (workspaceId === undefined) return;
   const asked = picksOf(picks);
   try {
     startPicks(table, asked, true);
   } catch (e) {
-    throw pickRefusal(e, table);
+    const said = e instanceof Error ? e.message : String(e);
+    const clause = (e as { offered?: number }).offered === 0 ? BUILT_IN_TABLE_CLAUSE : BUILT_IN_LIST_CLAUSE;
+    throw usageRefusal(table?.source === "table" ? `${said}${clause}` : said, "Drop the flag, or give it a value the agent offers.");
   }
-  const refused = asked.access === undefined || table === undefined ? null : accessWordRefusal(table, asked.access);
-  if (refused !== null) throw refused;
+  const refused = asked.access === undefined || table === undefined ? null : accessRefusal(table, asked.access);
+  if (refused !== null) throw usageRefusal(`${refused}.`, "Name one it takes, or drop --access.");
 }
 
 /** The person's view preferences as the host keeps them: the last project per workspace and the last target. */
@@ -2497,6 +2503,21 @@ async function readThread(client: HostClient, thread: ThreadView, last: boolean)
 /** What a read prints when the transcript holds nothing to print: which of the two silences it is. */
 const readLine = (read: { threadId: string; messages: readonly ThreadMessage[] }, last: boolean): string =>
   read.messages.length === 0 ? (last ? noReplyLine(read.threadId) : noMessagesLine(read.threadId)) : threadReadText(read.messages);
+
+/** A thread's head as the host answers it, by its fold key, its facts and events passed on as the host wrote them. */
+const threadHead = async (client: HostClient, thread: ThreadView): Promise<ThreadHead> => {
+  const { facts, events, pos, total } = await client.request<ThreadHead>("sessions.head", { threadId: thread.id });
+  return { facts, events, pos, total };
+};
+
+/** What a head prints: the title, what the thread runs on and where it stands, how much of it the head carries, and
+ * those newest events as a read lists them. */
+const headLine = (head: ThreadHead): string => {
+  const f = head.facts;
+  const runs = [f.model === undefined ? f.harness : `${f.harness} on ${f.model}`, ...(f.permissionMode !== undefined ? [f.permissionMode] : []), f.status].join(", ");
+  const rows = threadMessages(head.events, f.threadId ?? f.id);
+  return [f.title, runs, ...(f.cwd !== undefined ? [f.cwd] : []), `the newest ${head.events.length} of ${head.total} events`, ...(rows.length > 0 ? ["", threadReadText(rows)] : [])].join("\n");
+};
 
 /** The runtime's thread id of a row, the one its events carry; a row from before threads had ids is its own. */
 const threadIdOf = (t: ThreadView): string => t.threadId ?? t.id;
@@ -5679,6 +5700,33 @@ export const ALL_VERBS: readonly Verb[] = [
         const client = await deps.client();
         const read = await readThread(client, await threadOf(client, ref), last === true);
         return asText(readLine(read, last === true), read);
+      },
+    }),
+  },
+  {
+    name: "thread head",
+    usage: "wsp thread head <thread>",
+    about:
+      "the thread's facts and its newest events, what the app draws first on opening it: the title, the agent, model and access it runs on, where it stands and its folder, then as many of its newest events as fit in 64 KB, each tool result past 2 KB cut and marked with its whole length. Reading a head marks nothing",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp thread head takes one thread.", usageIs(ctx));
+      const client = await ctx.client();
+      const head = await threadHead(client, await threadOf(client, ref));
+      ctx.out.emit(head, headLine(head));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "The thread's head (by id, or a prefix of it): facts, the thread as threads lists it with the model, effort and context window its latest turn runs on and turnId while a turn runs; events, as many of the thread's newest transcript events as fit in 64 KB, oldest first, each tool result past 2 KB cut with cut set to its whole length; pos, the newest position the transcript has issued, which every event carries as its own pos; and total, how many events of the thread the transcript holds. It is the cheap look at a thread: read the whole conversation with thread_read. Nothing on a machine is touched and the thread is not marked read.",
+      input: { thread: z.string().describe("the thread's id, or a prefix of it that names one, as threads lists them") },
+      output: ThreadHead.shape,
+      call: async ({ thread: ref }, deps) => {
+        const client = await deps.client();
+        const head = await threadHead(client, await threadOf(client, ref));
+        return asText(headLine(head), head);
       },
     }),
   },

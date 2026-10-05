@@ -100,6 +100,13 @@ export const TURN_IDLE_MS = 10 * 60_000;
  * percent of one core clears it, which a vitest batch or a packager does many times over; a harness process waking
  * on its own timers stays under it, so a turn nothing is working on is still cut at TURN_IDLE_MS. */
 export const TURN_WORK_TICKS_PER_S = 5;
+/** How long a thread's agent process is kept up after its turn on the computer the host runs on, for the next send
+ * to skip the agent's boot. Half of the gaps from a turn's end to the thread's next send were under 30 minutes across
+ * 299 turns on 147 threads (2026-09-27 to 10-04). */
+export const AGENT_KEEP_MS = 30 * 60_000;
+/** The most agent processes kept up between turns on that computer at once, the one idle longest ended first: an
+ * idle one holds 200 to 400 MB with its MCP servers. */
+export const AGENTS_KEPT = 6;
 /** How long a harness gets to exit on its own after the result its turn ended on, before the runtime ends it and its
  * tree. Long enough for the harness to flush its own session store and go, short enough that a machine running turns
  * all day never carries more than the one it is on: seven finished turns' processes were found alive on one guest,
@@ -1439,7 +1446,7 @@ function listed(subject: string, word: string, options: ReadonlyArray<HarnessOpt
   if (value === undefined || options.some(o => o.value === value) || legacy.some(o => o.value === value) || hidden.some(o => o.value === value)) return;
   const older = legacy.length === 0 ? "" : `; legacy: ${optionWords(legacy)}`;
   const said = options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}${older}`;
-  throw Object.assign(new Error(said), { kind: "usage", offered: options.length });
+  throw Object.assign(new Error(said), { offered: options.length });
 }
 
 function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined, runsOn: string | undefined): void {
@@ -1531,6 +1538,12 @@ const sessionScope = {
   /** Minted by the runtime at a start without resume and kept by every start that resumes into it, so a
    * transcript folds into threads where it changes. Absent on transcripts from before it: those are one thread. */
   threadId: z.string().optional(),
+  /** Where the event sits in its workspace's transcript, from one, stamped by the runtime as it records the event and
+   * never issued twice in one transcript, a restart and a trim included: a client holding part of a thread places an
+   * event off the bus or out of a page against what it holds with one compare. Not the bus's `seq`, which counts
+   * every event of one host process and starts again with the next. Absent on an event the bus carried that the
+   * transcript never recorded. */
+  pos: z.number().int().positive().optional(),
 };
 
 /** What the CLI announces about itself in system/init, beyond model and tools. */
@@ -1600,6 +1613,9 @@ export const SessionDeltaEvent = z.object({
    * drops its oldest rows, so how many of a turn's rows survive says nothing about how many there were. Absent on a
    * row written before the stamp existed. */
   line: z.number().int().positive().optional(),
+  /** The length of the whole text, on a tool result a thread's head cut short; the rest is in a sessions.history
+   * page. Absent on every row a transcript holds and on a result the head kept whole. */
+  cut: z.number().int().positive().optional(),
 });
 
 export const SessionDoneEvent = z.object({
@@ -2453,6 +2469,62 @@ export const serverIconsLeftLine = (folder: string, reason: string): string =>
 export const ThreadMarkedEvent = z.object({ type: z.literal("thread.marked"), workspaceId: z.string(), threadIds: z.array(z.string()) });
 export type ThreadMarkedEvent = z.infer<typeof ThreadMarkedEvent>;
 
+/** What the composer and the top bar draw of a thread with no event in sight: the thread as foldThreads lists it, less
+ * its subagents, with the model, effort and context window its latest turn runs on and the running turn's id while one
+ * runs. The subagents stay with sessions.list: a builder's list grows by every turn, and every head pushed is kept in
+ * the bus's replay ring, where carrying it cost a day of turns 1.4 MB (measured). */
+export const ThreadFacts = ThreadView.omit({ subagents: true }).extend({
+  model: z.string().optional(),
+  effort: z.string().optional(),
+  contextWindow: z.string().optional(),
+  turnId: z.string().optional(),
+});
+export type ThreadFacts = z.infer<typeof ThreadFacts>;
+
+/** The bytes of JSON a thread's head answers in, facts and events together: a first paint's worth, which a click on a
+ * thread's tile draws without waiting on the rest. */
+export const HEAD_BYTES = 64 * 1024;
+/** The characters of a tool result a head keeps; every reader of a result in a first paint reads its first lines. */
+export const HEAD_RESULT_CHARS = 2 * 1024;
+/** How many events a history page answers when the caller names no limit, and the most it may name. */
+export const HISTORY_PAGE_EVENTS = 200;
+export const HISTORY_PAGE_MAX = 1000;
+/** The bytes of JSON a history page stops at, past its first event: a transcript keeps tool results of up to 16 KB,
+ * so a page bounded by its count alone could be megabytes. */
+export const HISTORY_PAGE_BYTES = 400 * 1024;
+
+/** A thread's head: its facts and the newest of its events, oldest first, cut to what a first paint needs, with every
+ * tool result past its first characters cut and marked. pos is the newest position the workspace's transcript has
+ * issued, so an event off the bus at or under it is one the head already counts; total is how many events of the
+ * thread the transcript holds. */
+export const ThreadHead = z.object({
+  facts: ThreadFacts,
+  events: z.array(SessionEvent),
+  pos: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+});
+export type ThreadHead = z.infer<typeof ThreadHead>;
+
+/** One page of a thread's events out of sessions.history: the newest ones under `before`, oldest first, with pos and
+ * total as ThreadHead carries them. */
+export const HistoryPage = z.object({
+  events: z.array(SessionEvent),
+  pos: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+});
+export type HistoryPage = z.infer<typeof HistoryPage>;
+
+/** A thread's facts moved: a turn started or ended, or its title or access changed. It carries the facts and the
+ * transcript's pos, never events, since every event of the thread rides the bus on its own. */
+export const ThreadHeadEvent = z.object({
+  type: z.literal("thread.head"),
+  workspaceId: z.string(),
+  threadId: z.string(),
+  facts: ThreadFacts,
+  pos: z.number().int().nonnegative(),
+});
+export type ThreadHeadEvent = z.infer<typeof ThreadHeadEvent>;
+
 /** A thread was rewound, or a rewind undone: its transcript lost the turns after the one it kept, so every window
  * holding the thread reads its history and its rows again. */
 export const ThreadRewoundEvent = z.object({ type: z.literal("thread.rewound"), workspaceId: z.string(), threadId: z.string() });
@@ -2567,6 +2639,10 @@ export type BundleOutcome = { ok: true } | { ok: false; error: string };
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
 export const DESKTOP_MAC_CLASS = "desktop-mac";
 
+/** The class the desktop preload puts on the html element where the shell draws the window controls over the page:
+ * the header row is the window's frame and leaves the room the titlebar-area variables name for the controls. */
+export const DESKTOP_WCO_CLASS = "wco";
+
 /** A key press the desktop shell took from its own menu and handed to the page, spelled the way a keyboard event
  * spells it, so the page's one keybinding table answers it. */
 export interface ShellChord {
@@ -2616,6 +2692,9 @@ export interface DesktopBridge {
   setTheme(theme: ThemePreference): void;
   /** Whether the page draws glass, so the window's own glass is on under it and off under a page drawn solid. */
   setGlass(glass: boolean): void;
+  /** The page's theme moved: window controls the shell draws over the page take the header's ground and ink again,
+   * read off the page's --titlebar-ground and --titlebar-ink. */
+  setTitleBar(): void;
   /** Something the person should hear about outside the app (a build waiting, a machine up, a prompt, a finished
    * turn): the shell shows a system notification while its window has no focus, and nothing while it has, since the
    * page already says it. The page decides nothing about focus; the shell owns that. */
@@ -3765,6 +3844,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionQueuedEvent.extend(sequenced),
   SessionHeldEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
+  ThreadHeadEvent.extend(sequenced),
   ThreadRewoundEvent.extend(sequenced),
   PortOpenEvent.extend(sequenced),
   PortCloseEvent.extend(sequenced),
@@ -4259,6 +4339,7 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     remote: z.string(),
     branch: z.string().optional(),
     number: z.number().int().nonnegative().optional(),
+    seen: z.string().optional(),
     machineId: z.string().optional(),
   }),
   /** One pull request's page through that same command line, answered as a GitPrViewReply. */
@@ -4927,6 +5008,8 @@ export const DaemonErrorCode = z.enum([
   "no-host-cli",
   /** Git refused a fetch or a push for want of a credential on the computer it ran on, so nothing moved. */
   "no-git-credential",
+  /** The git host's command line refused a read for the account's rate limit. */
+  "rate-limited",
 ]);
 export type DaemonErrorCode = z.infer<typeof DaemonErrorCode>;
 
@@ -5118,7 +5201,7 @@ const DAEMON_CONTENTS = [
   "2d3c09680f6c9dca01d8915f8d7be7306ba0db7fc6e1734353a86bf5afaa4e4e",
   "1557c21f49fe3ec9248ca8c405e450b0f201e9bc4fd3f552bfd0f36132272b17",
   "1ee653af3b44dc450246290cc7bb7617da6ec8f062d9e859452472019e52e51e",
-  "bcf75f81f3ab2483afc7ef7efcd930c2fa3747cdfe31117a02d119a3c120c4c3",
+  "1fb569928a97d7ba40fd54d251dc4202f267133344e7da3153f3f4aa723e180e",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5454,9 +5537,11 @@ const DAEMON_CONTENTS = [
  * /opt/wsp: each path still as wsp left it, hashed in one pass, a folder once empty, and nothing the computer had
  * before wsp; the list goes last, and while it still holds lines /opt/wsp stays and the leave says so.
  * Version 119: setup sign-ins, cut syncs and the size check survive their edges.
- * Version 120: A place report reads its free disk and its size off the volume a setup installs onto, wsp's install
- * folder or the nearest folder above it that is there, where it read the work folder's or the home's, so the size check
- * and the install loop read one volume. */
+ * Version 120: git.prRead asks a pull request named by number with what its last read saw (its last update, head commit
+ * and state): one REST read compares them, and where none moved it answers unchanged with nothing else run and none of
+ * the GraphQL budget spent; a read with nothing seen makes no such read. A read the git host refused for its rate limit
+ * carries the code rate-limited, and a branch so refused never reads as having no pull request. git.prView reads the
+ * page on one GraphQL call in place of four, the newest 100 conversation comments with the rest marked cut. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5511,6 +5596,9 @@ export function placeDaemonBehind(place: { daemonVersion?: number }): string | u
   const version = place.daemonVersion;
   return version === undefined || version >= DAEMON_VERSION ? undefined : `daemon ${version}, host ${DAEMON_VERSION}`;
 }
+
+/** The first daemon that answers fs.folders. */
+export const FS_FOLDERS_DAEMON_VERSION = 73;
 
 /** The line that moves a place onto this wsp's daemon, which is the fix half of every sentence about a place that
  * is behind. */
@@ -6097,7 +6185,6 @@ export const PlaceReport = z.object({
   arch: z.string().max(32),
   os: z.string().max(200),
   shape: WorkspaceSize,
-  /** What is free on the volume a setup installs onto: wsp's install folder's, or the nearest folder above it that is there. */
   diskFreeBytes: z.number().int().nonnegative().optional(),
   /** The size of that same disk, off the same read: what a setup keeps free there is a share of it. */
   diskSizeBytes: z.number().int().nonnegative().optional(),
@@ -6746,8 +6833,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * blob given, or taken off where the blob is null. */
   z.object({ id: reqId, op: z.literal("workspaces.viewed"), workspaceId: z.string(), path: z.string().optional(), blob: z.string().nullable().optional() }),
   /** The workspace's pull request page, read through the git host's command line on this computer, or the running
-   * copy's where this computer has none, and answered as a GitPrViewReply; never kept, so every ask reads it anew. */
-  z.object({ id: reqId, op: z.literal("workspaces.pullRequestView"), workspaceId: z.string() }),
+   * copy's where this computer has none, and answered as a GitPrViewReply; the host holds a read a minute, and an ask
+   * with fresh reads it anew. */
+  z.object({ id: reqId, op: z.literal("workspaces.pullRequestView"), workspaceId: z.string(), fresh: z.boolean().optional() }),
   /** The workspace's pull request's diff against its base, read as the page is and cut on a file's boundary at
    * GIT_DIFF_CAP_BYTES, answered as a GitPrDiffReply naming every file the cut left out. */
   z.object({ id: reqId, op: z.literal("workspaces.pullRequestDiff"), workspaceId: z.string() }),
@@ -6859,10 +6947,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * link that computer is holding: nothing is dialled, and it is refused where that computer is not connected.
    * HERE_PLACE_ID names the computer the host runs on, whose own daemon is dialled. One of the two, never both. */
   z.object({ id: reqId, op: z.literal("daemon.open"), workspaceId: z.string().optional(), placeId: z.string().optional() }),
-  /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until the socket goes.
-   * The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon; refused for
-   * every other kind, which reads them over its own daemon link with sys.watch. Replies `{}`. */
+  /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until sys.unsubscribe or
+   * the socket goes. The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon;
+   * refused for every other kind, which reads them over its own daemon link with sys.watch. Replies `{}`. */
   z.object({ id: reqId, op: z.literal("sys.subscribe"), workspaceId: z.string() }),
+  /** Stops this socket's sys.subscribe for the workspace; replies `{}` whether or not it held one. */
+  z.object({ id: reqId, op: z.literal("sys.unsubscribe"), workspaceId: z.string() }),
   /** Sends one frame down a channel this socket opened and replies with a DaemonSendReply carrying the daemon's own
    * answer, ok or not. Refused (ok false, no kind) when the channel is not this socket's or died before the daemon
    * answered. */
@@ -6932,8 +7022,22 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * from the binaries on its machine where they answer; without one, from the runtime's table. */
   z.object({ id: reqId, op: z.literal("harnesses.list"), workspaceId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("sessions.list"), workspaceId: z.string().optional() }),
-  /** Replies with the workspace's persisted SessionEvent[] (oldest first, capped by the runtime). */
-  z.object({ id: reqId, op: z.literal("sessions.history"), workspaceId: z.string() }),
+  /** Replies with the workspace's persisted SessionEvent[] (oldest first, capped by the runtime). With threadId,
+   * replies with a HistoryPage of that thread instead: its newest events under `before` (every one when absent), at
+   * most `limit` of them (HISTORY_PAGE_EVENTS when absent) and no more than HISTORY_PAGE_BYTES of them past the first,
+   * so a client pages back by passing the pos of the oldest event it holds. Refused as usage when before or limit
+   * comes without a thread. */
+  z.object({
+    id: reqId,
+    op: z.literal("sessions.history"),
+    workspaceId: z.string(),
+    threadId: z.string().optional(),
+    before: z.number().int().positive().optional(),
+    limit: z.number().int().positive().max(HISTORY_PAGE_MAX).optional(),
+  }),
+  /** Replies with the thread's ThreadHead, by its fold key as sessions.read takes it; refused as not found where the
+   * caller reaches no such thread. */
+  z.object({ id: reqId, op: z.literal("sessions.head"), threadId: z.string() }),
   /** Replies with { attachment: KeptAttachment }: one image a person's message carried, by the thread, the request id
    * its start carries and its place in the message, which the host keeps until the thread or its workspace goes. */
   z.object({ id: reqId, op: z.literal("sessions.attachment"), workspaceId: z.string(), threadId: z.string(), requestId: z.string(), index: z.number().int().nonnegative() }),
@@ -6944,9 +7048,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.steer"), sessionId: z.string(), prompt: z.string(), requestId: z.string().optional() }),
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
-   * options; replies with a SessionAnswerResult. Takes the runtime's session id, as sessions.interrupt does. A deny
-   * may carry the person's reason, what the agent should do instead. */
-  z.object({ id: reqId, op: z.literal("sessions.answer"), sessionId: z.string(), askId: z.string(), optionId: z.string(), reason: z.string().optional() }),
+   * options; replies with a SessionAnswerResult. Takes the runtime's session id, as sessions.interrupt does. */
+  z.object({ id: reqId, op: z.literal("sessions.answer"), sessionId: z.string(), askId: z.string(), optionId: z.string() }),
   /** Puts the session's running turn into another access mode from its next tool call on; replies with a
    * SessionAccessResult. Takes the runtime's session id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.access"), sessionId: z.string(), permissionMode: z.string() }),
@@ -7369,6 +7472,7 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.start",
   "sessions.list",
   "sessions.history",
+  "sessions.head",
   "sessions.attachment",
   "sessions.interrupt",
   "sessions.steer",
@@ -7436,9 +7540,11 @@ export const DEVICE_OPS: readonly string[] = [
   "projectGoldens.list",
   "projectGoldens.remove",
   "sys.subscribe",
+  "sys.unsubscribe",
   "harnesses.list",
   "sessions.list",
   "sessions.history",
+  "sessions.head",
   "sessions.attachment",
   "sessions.forget",
   "sessions.read",
@@ -7782,5 +7888,7 @@ export * from "./app-ports.js";
 export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, launchWords, PERMISSION_ALLOW, PERMISSION_DENY, programWord } from "./adapter-port.js";
+export { keepRun } from "./kept-run.js";
+export type { KeptAgent, KeptRun, KeptTurn } from "./kept-run.js";
 export { ANALYTICS_ENV, CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TaskStop, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";

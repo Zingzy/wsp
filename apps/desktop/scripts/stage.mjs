@@ -58,6 +58,8 @@ writeFileSync(
       name: "wsp",
       productName: "wsp",
       version: pkg.version,
+      // The name GNOME ties the running window to its launcher entry by; electron-builder reads it from this file.
+      desktopName: pkg.desktopName,
       private: true,
       type: "module",
       main: "main/main.mjs",

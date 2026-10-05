@@ -12,6 +12,7 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
   ACCOUNT_TICKET_REFUSAL,
+  usageRefusal,
   absentComputer,
   ACCOUNT_UNSERVED,
   AUTH_DEADLINE_MS,
@@ -25,6 +26,7 @@ import {
   HOST_STOPPING_CLOSE,
   isJoinedComputer,
   HostFolderListing,
+  FS_FOLDERS_DAEMON_VERSION,
   placeBehindLine,
   placeDaemonBehind,
   providerFoldersRefusal,
@@ -471,9 +473,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     const row = rows.find(place => place.id === placeId);
     if (row === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, rows.map(place => place.name))), { kind: "usage" });
     if (!isJoinedComputer(row)) throw Object.assign(new Error(providerFoldersRefusal(row.name)), { kind: "usage" });
-    const report = await places().reportOf(row.id);
-    const behind = report === undefined ? undefined : placeDaemonBehind(report);
-    if (behind !== undefined) throw new Error(placeBehindLine(row.name, behind));
+    // A daemon older than 60 cannot seal the link this rides, so only one from 60 to 72 is here without fs.folders.
+    const version = (await places().reportOf(row.id))?.daemonVersion;
+    if (version !== undefined && version < FS_FOLDERS_DAEMON_VERSION) throw new Error(placeBehindLine(row.name, placeDaemonBehind({ daemonVersion: version })!));
     const link = places().channel(row.id, () => {});
     if (link === undefined) throw new Error(absentComputer(row.name, null).sentence);
     try {
@@ -605,13 +607,15 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     /** The daemon links this socket holds open, by the id it was answered with. A channel is never reachable from
      * another socket, so a page cannot drive a machine by guessing an id another page was given. */
     const channels = new Map<string, DaemonChannel>();
-    /** The workspaces this socket already reads this computer's own figures for. */
-    const watchedSys = new Set<string>();
+    /** The workspaces this socket reads this computer's own figures for, each with what stops it. */
+    const watchedSys = new Map<string, () => void>();
     /** The sign-ins this socket started or joined: the only ones it may type a code into or stop. */
     const signIns = new Set<string>();
     detaches.push(() => {
       for (const ch of channels.values()) ch.close();
       channels.clear();
+      for (const detach of watchedSys.values()) detach();
+      watchedSys.clear();
     });
     let bound: { deviceId: string; cut: () => void } | undefined;
     ws.on("close", () => {
@@ -1361,7 +1365,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               });
               return;
             case "workspaces.pullRequestView":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestView({ workspaceId: msg.workspaceId }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestView({ workspaceId: msg.workspaceId, ...(msg.fresh === true ? { fresh: true } : {}) }, origin)) });
               return;
             case "workspaces.pullRequestDiff":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestDiff({ workspaceId: msg.workspaceId }, origin)) });
@@ -1574,17 +1578,28 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 return;
               }
               const workspaceId = msg.workspaceId;
-              watchedSys.add(workspaceId);
+              let stopped = false;
+              const pending = (): void => void (stopped = true);
+              const leave = (): void => void (watchedSys.get(workspaceId) === pending && watchedSys.delete(workspaceId));
+              watchedSys.set(workspaceId, pending);
               const detach = await rt.workspaces.watchSys(workspaceId, sample => send({ type: "workspace.sys", workspaceId, sample }), origin).catch((e: unknown) => {
-                watchedSys.delete(workspaceId);
+                leave();
                 throw e;
               });
-              // The page left while the first reading was in flight; nothing keeps sampling for a socket that is gone.
-              if (ws.readyState !== ws.OPEN) {
+              // The page left, or stopped watching, while the first reading was in flight: nothing keeps sampling for it.
+              if (stopped || ws.readyState !== ws.OPEN) {
                 detach();
+                leave();
+                send({ id: msg.id, ok: true });
                 return;
               }
-              detaches.push(detach);
+              watchedSys.set(workspaceId, detach);
+              send({ id: msg.id, ok: true });
+              return;
+            }
+            case "sys.unsubscribe": {
+              watchedSys.get(msg.workspaceId)?.();
+              watchedSys.delete(msg.workspaceId);
               send({ id: msg.id, ok: true });
               return;
             }
@@ -1592,27 +1607,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // A start on this computer names a project, a branch or a folder rather than a record: the folder's record
               // is found or made first, and the start runs on it.
               if (msg.workspaceId !== undefined && msg.branch !== undefined) throw Object.assign(new Error(BRANCH_ON_A_THREAD_LINE), { kind: "usage" });
-              const picks = {
-                ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
-                ...(msg.model !== undefined ? { model: msg.model } : {}),
-                ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
-                ...(msg.access !== undefined ? { access: msg.access } : {}),
-                ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
-                ...(msg.fast === true ? { fast: true } : {}),
-              };
               const at =
                 msg.workspaceId !== undefined
                   ? { workspaceId: msg.workspaceId, cwd: msg.cwd }
                   : await rt.workspaces
-                      .folderFor(
-                        {
-                          ...(msg.project !== undefined ? { project: msg.project } : {}),
-                          ...(msg.branch !== undefined ? { branch: msg.branch } : {}),
-                          ...(msg.cwd !== undefined ? { cwd: msg.cwd } : {}),
-                          ...(Object.keys(picks).length > 0 ? { picks } : {}),
-                        },
-                        origin,
-                      )
+                      .folderFor({ ...(msg.project !== undefined ? { project: msg.project } : {}), ...(msg.branch !== undefined ? { branch: msg.branch } : {}), ...(msg.cwd !== undefined ? { cwd: msg.cwd } : {}) }, origin)
                       .then(found => ({ workspaceId: found.workspace.id, cwd: found.cwd }));
               const handle = await rt.sessions.start(at.workspaceId, {
                 prompt: msg.prompt,
@@ -1643,7 +1642,16 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, sessions: await rt.sessions.list(msg.workspaceId, origin) });
               return;
             case "sessions.history":
+              if (msg.threadId !== undefined) {
+                const window = { threadId: msg.threadId, ...(msg.before !== undefined ? { before: msg.before } : {}), ...(msg.limit !== undefined ? { limit: msg.limit } : {}) };
+                send({ id: msg.id, ok: true, ...(await rt.sessions.page(msg.workspaceId, window, origin)) });
+                return;
+              }
+              if (msg.before !== undefined || msg.limit !== undefined) throw usageRefusal("before and limit page one thread's events.", "Name the thread with threadId.");
               send({ id: msg.id, ok: true, events: await rt.sessions.history(msg.workspaceId, origin) });
+              return;
+            case "sessions.head":
+              send({ id: msg.id, ok: true, ...(await rt.sessions.head(msg.threadId, origin)) });
               return;
             case "sessions.attachment":
               send({ id: msg.id, ok: true, attachment: await rt.sessions.attachment(msg.workspaceId, msg.threadId, msg.requestId, msg.index, origin) });
@@ -1652,7 +1660,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await rt.sessions.interrupt(msg.sessionId, origin, msg.task)) });
               return;
             case "sessions.answer":
-              send({ id: msg.id, ok: true, ...(await rt.sessions.answer(msg.sessionId, { askId: msg.askId, optionId: msg.optionId, ...(msg.reason === undefined ? {} : { reason: msg.reason }) }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.sessions.answer(msg.sessionId, { askId: msg.askId, optionId: msg.optionId }, origin)) });
               return;
             case "sessions.access":
               send({ id: msg.id, ok: true, ...(await rt.sessions.access(msg.sessionId, msg.permissionMode, origin)) });

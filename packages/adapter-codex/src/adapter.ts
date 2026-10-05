@@ -24,6 +24,7 @@ import {
   codexReconnectLine,
   endAfterResult,
   endRun,
+  keepRun,
   limitKindOfMinutes,
   RESET_CREDIT_STATUSES,
   titlePrompt,
@@ -52,6 +53,9 @@ import type {
   PlanStep,
   TurnTokens,
   HarnessLimit,
+  KeptAgent,
+  KeptRun,
+  KeptTurn,
   LimitWindow,
   ResetCredit,
 } from "@wsp/protocol";
@@ -99,6 +103,8 @@ export interface CodexStartOptions {
   limitDetails?: boolean;
   /** The server boots and opens the thread at once, and turn/start goes once this settles. */
   promptAfter?: Promise<void>;
+  /** The server stays up once the turn is over, for the thread's next turn/start: kept() hands it over. */
+  keep?: boolean;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -114,13 +120,19 @@ export interface CodexSession {
   /** The process this turn leads on the computer the host runs on, where it runs there; absent on a turn running on
    * another machine. */
   readonly pid?: number;
+  /** Where this turn starts in the run's log, on a server that ran the thread's earlier turns. */
+  readonly from?: number;
   readonly finished: Promise<TurnResult>;
+  /** turn/interrupt on the running turn and its subagents; on a kept server the server stays up for the next turn. */
   interrupt(): Promise<void>;
+  /** Once the turn is over, the server still up for the thread's next turn; nothing where the turn was not kept or
+   * the server went with it. */
+  kept?(): KeptAgent<CodexSession> | undefined;
   /** turn/steer on the running turn; not-running before the server started it, after it ended, and when the server
    * turns the message down. */
   steer(prompt: string): Promise<"accepted" | "not-running">;
   /** Answers an approval the server asked for with accept or decline; gone when no such request is open. */
-  answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string; reason?: string }): Promise<"answered" | "gone">;
+  answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<"answered" | "gone">;
   /** turn/interrupt on one subagent's own thread, by that thread's id, the lead and its other subagents running on. */
   stopTask(task: string): Promise<TaskStop>;
 }
@@ -475,6 +487,13 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     /** A run that asks the thread things and runs no turn (a revert), declined and unregistered as a side question
      * is: handed the thread's answer and each later answer of its own, it names the next request or how the run ends. */
     sideRun?: (id: RequestId, answer: Record<string, unknown> | undefined) => string | TurnResult;
+    /** The server this turn runs on, kept for the thread's next turn once this one is over. */
+    keeper?: KeptRun;
+    /** Where this turn starts in the run's log, on a kept server past its first turn. */
+    from?: number;
+    /** The thread already open on the server, a kept one or a re-opened run read from a later turn's start: nothing
+     * this turn reads announces it again, so it is announced at once. */
+    opened?: { threadId: string; legacy?: boolean };
     onEvent: (event: AdapterEvent) => void;
   }): CodexSession => {
     const { stream, localId, startedAt } = o;
@@ -493,6 +512,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     let rateLimits: Record<string, unknown> | undefined;
     let account: { id?: string; label?: string; plan?: string } = {};
     let modelUsed = o.model;
+    let cwdUsed = o.cwd;
     /** The last failure the stream showed, if any, in wsp's words and under the cause it claims. */
     let words: { line: string; cause?: TurnRefusal } | undefined;
     /** What the server said last in an error, for a process that dies without completing its turn. */
@@ -502,6 +522,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const stderrTail: string[] = [];
     /** Notes the server printed before the thread had an id to file them under. */
     const early: string[] = [];
+    /** The commands of this turn and its subagents that started and have not completed, by item id. */
+    const commands = new Set<string>();
     /** The changes each file-change item started with, which its approval request does not repeat. */
     const changesById = new Map<string, unknown>();
     /** Approvals the server is waiting on, by the askId the runtime holds, with the id the server asked under. */
@@ -553,6 +575,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       const runs = o.model ?? model;
       modelUsed = runs;
       const where = o.cwd ?? cwd;
+      cwdUsed = where;
       emit({ type: "session.start", sessionId: threadId, ...(runs !== undefined ? { model: runs } : {}), ...(where !== undefined ? { cwd: where } : {}) });
       for (const text of early.splice(0)) emit({ type: "turn.delta", sessionId: threadId, kind: "note", text });
     };
@@ -641,6 +664,9 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const finish = (result: TurnResult): void => {
       if (turnResult !== undefined) return;
       turnResult = result;
+      // A server is kept only past a turn that went as it should, so a sign-in or a fix made in between reaches the
+      // next turn on a server launched again.
+      if (result.status !== "completed" && result.status !== "interrupted") o.keeper?.release();
       emit({ type: "turn.done", sessionId: threadId, result });
       for (const askId of [...pending.keys()]) closeAsk(askId, "cancelled");
       settleAwaiting();
@@ -697,6 +723,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           const item = itemOf(params);
           if (item === undefined) break;
           const done = method === "item/completed";
+          if (item.type === "commandExecution") commands[done ? "delete" : "add"](item.id);
           if (item.type === "fileChange") changesById.set(item.id, item.changes);
           const c = children.get(task);
           if (done && item.type === "agentMessage" && c !== undefined) c.summary = str(item.text);
@@ -848,6 +875,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           const item = itemOf(params);
           if (item === undefined) break;
           const done = method === "item/completed";
+          if (item.type === "commandExecution") commands[done ? "delete" : "add"](item.id);
           if (item.type === "fileChange") changesById.set(item.id, item.changes);
           if (done && item.type === "agentMessage") lastText = str(item.text);
           childSigns(item, done);
@@ -921,6 +949,12 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
             void escalate();
           }, asideWallMs)
         : undefined;
+
+    if (o.opened !== undefined) {
+      legacy = o.opened.legacy === true;
+      announce(o.opened.threadId, undefined, undefined);
+      if (o.turnLine !== undefined) handOver(o.turnLine(threadId));
+    }
 
     const finished = (async (): Promise<TurnResult> => {
       let streamError: string | undefined;
@@ -1020,8 +1054,6 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         const wrote = await stream.write(decisionLine(open.id, answer.optionId === PERMISSION_ALLOW ? "accept" : "decline")).catch(() => "gone" as const);
         if (wrote !== "written") return "gone";
         emit({ type: "permission.close", sessionId: threadId, askId, outcome: answer.outcome, optionId: answer.optionId });
-        // A decline carries no words on this server, so the person's reason goes to the turn as their own message.
-        if (answer.outcome === "denied" && answer.reason !== undefined) void session.steer(answer.reason);
         return "answered";
       },
       stopTask: async task => {
@@ -1037,12 +1069,29 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         interruptRequested = true;
         const kids = [...children].flatMap(([task, c]) => (c.state === "running" && c.turnId !== undefined ? [{ threadId: task, turnId: c.turnId }] : []));
         if (live === undefined && kids.length === 0) return escalate();
+        // turn/interrupt completes the turn and leaves a command it was running going (seen on codex-cli 0.155.1 in 17
+        // of 18 stops); the server's exit is what ends it, so a turn stopped mid-command takes its server down.
+        if (commands.size > 0) o.keeper?.release();
         // Each subagent first, as T3 Code stops a lineage, so none is left mid-turn when its lead's process ends.
         for (const kid of kids) void interruptTurn(kid);
         if (live !== undefined) void interruptTurn({ threadId, turnId: live });
-        // The server completes an interrupted turn and exits on the EOF that follows; one that does not is ended.
+        // The server completes an interrupted turn and exits on the EOF that follows, or rests for the next turn
+        // where it is kept; one that does not is ended.
         await endAfterResult(stream, graceMs, graceMs);
       },
+      kept: () => {
+        const keeper = o.keeper;
+        if (keeper === undefined || !keeper.up || turnResult === undefined) return undefined;
+        const thread = { threadId, legacy, ...(modelUsed !== undefined ? { model: modelUsed } : {}), ...(cwdUsed !== undefined ? { cwd: cwdUsed } : {}) };
+        return {
+          // Keyed as a cold resume of the thread is, so the rows a kept turn writes are the ones a launched one would.
+          next: turn => nextOn(keeper, threadId, thread, turn),
+          close: c => keeper.close(c?.now === true ? 0 : (deps.resultExitMs ?? RUN_EXIT_MS), graceMs),
+          exited: keeper.exited,
+          sessionFile: { folder: `${deps.home}/sessions`, name: `-${threadId}.jsonl`, depth: 3 },
+        };
+      },
+      ...(o.from !== undefined ? { from: o.from } : {}),
     };
     if (o.aside !== true && o.sideRun === undefined) sessions.set(localId, session);
     return session;
@@ -1055,6 +1104,26 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     return imagePath(image.path);
   };
 
+  /** The thread's next turn on a server its last turn left up: turn/start on the thread it already holds, at the
+   * model, effort and access the earlier turn set, which the server keeps for every later turn. */
+  const nextOn = (keeper: KeptRun, localId: string, thread: { threadId: string; legacy: boolean; model?: string; cwd?: string }, turn: KeptTurn): CodexSession => {
+    const images = turn.images?.map(imagePathOf);
+    const { stream, from } = keeper.turn();
+    return follow({
+      stream,
+      localId,
+      startedAt: Date.now(),
+      keeper,
+      ...(from !== undefined ? { from } : {}),
+      opened: { threadId: thread.threadId, legacy: thread.legacy },
+      ...(thread.model !== undefined ? { model: thread.model } : {}),
+      ...(thread.cwd !== undefined ? { cwd: thread.cwd } : {}),
+      turnLine: threadId => turnStartLine({ threadId, text: turn.prompt, ...(images !== undefined ? { images } : {}) }),
+      ...(turn.after !== undefined ? { promptAfter: turn.after } : {}),
+      onEvent: turn.onEvent,
+    });
+  };
+
   const start = (options: CodexStartOptions): CodexSession => {
     if (options.contextWindow !== undefined) throw new Error("codex takes no context window");
     const images = options.images?.map(imagePathOf);
@@ -1063,8 +1132,11 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const thread = { ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.model !== undefined ? { model: options.model } : {}), ...(options.fast === true ? { serviceTier: "fast" as const } : {}), access };
     const threadLine = options.resume === undefined ? threadStartLine(thread) : threadResumeLine({ ...thread, threadId: options.resume });
     const command = buildCommand({ ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
+    const run = deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ACCOUNT_READ_LINE, rateLimitsReadLine(options.limitDetails === true), threadLine] });
+    const keeper = options.keep === true ? keepRun(run) : undefined;
     return follow({
-      stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ACCOUNT_READ_LINE, rateLimitsReadLine(options.limitDetails === true), threadLine] }),
+      stream: keeper === undefined ? run : keeper.turn().stream,
+      ...(keeper !== undefined ? { keeper } : {}),
       localId,
       startedAt: Date.now(),
       command,
@@ -1158,13 +1230,15 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     ...(attach !== undefined
       ? {
           attach: async (options: AdapterAttachOptions) => {
-            const stream = await attach(options.run, { input: true, startedAt: options.startedAt });
+            const stream = await attach(options.run, { input: true, startedAt: options.startedAt, ...(options.from !== undefined ? { from: options.from } : {}) });
             return stream === "gone"
               ? "gone"
               : follow({
                   stream,
                   localId: options.sessionId,
                   startedAt: options.startedAt,
+                  // Read from a later turn's start, the run holds no thread answer to announce the thread by.
+                  ...(options.from !== undefined && options.from > 0 ? { from: options.from, opened: { threadId: options.sessionId } } : {}),
                   ...(options.model !== undefined ? { model: options.model } : {}),
                   ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
                   ...(options.prompt !== undefined ? { owedTurn: (threadId: string) => turnLineFor({ threadId, prompt: options.prompt!, ...(options.effort !== undefined ? { effort: options.effort } : {}) }) } : {}),
