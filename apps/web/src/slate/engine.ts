@@ -8,6 +8,9 @@ import { evaluate, resolveProp, type Resolve, type Row } from "./expr.js";
 import type { SlateDoc, SlatePiece } from "./model.js";
 import { expandDerived, getOwn, ownPath, pieceReads, setOwn, touches, walk } from "./paths.js";
 
+/** A slate's own entry by name, never one off Object.prototype: a value may be called toString. */
+const own = <T>(map: Readonly<Record<string, T>> | undefined, name: string): T | undefined => (map !== undefined && Object.hasOwn(map, name) ? map[name] : undefined);
+
 /** Reads a source path ("pr.checks", "time.now") off whatever the window holds; undefined is not there yet. */
 export type SourceReader = (path: string) => SlateJson | undefined;
 
@@ -194,7 +197,7 @@ export class SlateEngine {
   /** A run that starts again begins its streamed lines afresh; a finished one keeps its last until then (11). */
   #restarted(path: string, value: SlateJson | undefined): void {
     const name = ownPath(path)?.name;
-    if (name === undefined || path !== `$${name}` || this.#doc?.runs?.[name] === undefined) return;
+    if (name === undefined || path !== `$${name}` || own(this.#doc?.runs, name) === undefined) return;
     if (walk(value, ["state"]) !== "running") {
       // A refresh that streamed nothing ends on its record's own lines.
       if (this.#fresh.delete(name)) this.#lines.delete(name);
@@ -227,7 +230,7 @@ export class SlateEngine {
   /** Whether a run is refreshing: started again, its last result still in its record until the new one lands. */
   refreshing(run: string): boolean {
     const record = this.#remote[run];
-    return this.#doc?.runs?.[run] !== undefined && walk(record, ["state"]) === "running" && walk(record, ["refreshing"]) === true;
+    return own(this.#doc?.runs, run) !== undefined && walk(record, ["state"]) === "running" && walk(record, ["refreshing"]) === true;
   }
 
   /** Whether a piece under this one reads a refreshing run, short of a nested section and of the run's own output,
@@ -266,7 +269,7 @@ export class SlateEngine {
   /** A secret's path: the person types it, the host keeps it, the window holds only its handle (08). */
   isSecret(path: string): boolean {
     const name = ownPath(path)?.name;
-    return name !== undefined && this.#doc?.values?.[name]?.secret === true;
+    return name !== undefined && own(this.#doc?.values, name)?.secret === true;
   }
 
   /** A write from elsewhere onto a path this window holds a value for: its own echo is dropped, a focused field
@@ -361,16 +364,16 @@ export class SlateEngine {
   reader(row?: Row): Resolve {
     const evaluating = new Set<string>();
     const read: Resolve = path => {
-      const own = ownPath(path);
-      if (own !== undefined) {
-        const formula = this.#doc?.derived?.[own.name];
-        if (formula === undefined) return walk(this.values[own.name], own.steps);
-        if (evaluating.has(own.name)) return undefined;
-        evaluating.add(own.name);
+      const mine = ownPath(path);
+      if (mine !== undefined) {
+        const formula = own(this.#doc?.derived, mine.name);
+        if (formula === undefined) return walk(own(this.values, mine.name), mine.steps);
+        if (evaluating.has(mine.name)) return undefined;
+        evaluating.add(mine.name);
         try {
-          return walk(evaluate(formula, read, undefined, this.#scheduler.now()), own.steps);
+          return walk(evaluate(formula, read, undefined, this.#scheduler.now()), mine.steps);
         } finally {
-          evaluating.delete(own.name);
+          evaluating.delete(mine.name);
         }
       }
       if (row !== undefined) {

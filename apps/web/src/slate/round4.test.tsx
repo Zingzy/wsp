@@ -258,6 +258,22 @@ describe("what the kit adds", () => {
     expect(piece(view.container, "t").textContent).toBe("201");
   });
 
+  it("reads a value named toString or constructor as the value it is, plain and through a derived", () => {
+    const doc = slate({
+      values: { toString: { start: "own words" }, constructor: { start: 7 } },
+      derived: { valueOf: "$constructor + 1" },
+      root: "root",
+      pieces: {
+        root: { type: "column", children: ["a", "b"] },
+        a: { type: "text", props: { value: { bind: "$toString" } } },
+        b: { type: "text", props: { value: { bind: "$valueOf" } } },
+      },
+    });
+    const { view } = draw(doc);
+    expect(piece(view.container, "a").textContent).toBe("own words");
+    expect(piece(view.container, "b").textContent).toBe("8");
+  });
+
   it("starts a section shut on a literal open={false}, keeps the person's fold, and follows a new literal", () => {
     const doc = (open: boolean) => slate({ root: "root", pieces: { root: { type: "column", children: ["sec"] }, sec: { type: "section", props: { title: "Logs", open }, children: ["body"] }, body: { type: "text", props: { value: "inside" } } } });
     const { engine, view } = draw(doc(false));
