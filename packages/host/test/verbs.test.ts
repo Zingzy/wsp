@@ -3956,7 +3956,7 @@ describe("wsp verbs over the host", () => {
 
     it("sets the turn limit in whole hours or off, on this computer and on a cloud, and a reset takes it back", async () => {
       await handle?.close();
-      rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: { ...placeWiring(statePath), provider: () => ({ id: "default", rateUsdPerHour: 0.1 }) }, daemonChannel: daemon.open });
+      rt = createRuntime({ statePath, backend, store, adapters: { claude: claude.adapter }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, statePath, copier), placeLinks: { ...placeWiring(statePath), provider: () => ({ id: "default", rateUsdPerHour: 0.1 }) }, daemonChannel: daemon.open });
       handle = await serve(captured(), { port: 0, statePath, webDir: join(dir, "web"), runtime: rt });
       const set = await run("computers", "set", HERE_PLACE_ID, "--turn-limit", "8");
       expect(set.code, set.io.errors.join("\n")).toBe(0);
