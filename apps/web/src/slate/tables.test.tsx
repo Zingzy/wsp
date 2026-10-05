@@ -29,6 +29,16 @@ const ends = (t: HTMLElement) => [...cells(t)].map(td => td.className.includes("
 const tracks = (t: HTMLElement) => t.style.gridTemplateColumns;
 
 describe("a table in its card", () => {
+  it("draws at most 200 rows and says how many more there are", () => {
+    const doc = parseSlate(`<slate><value name="rows" start={[]} /><table id="t" items={$rows}><col title="Name" value={item.n} /></table></slate>`).document!;
+    const engine = new SlateEngine("t1", () => undefined, manualScheduler());
+    engine.setRecord(doc, { rows: Array.from({ length: 1000 }, (_, at) => ({ n: `row ${at}` })) }, 3, 3);
+    const link = fakeLink();
+    const c = render(<SlateView engine={engine} views={SLATE_VIEWS} runner={new ActionRunner(engine, () => link)} sender={new StateSender(engine, () => link)} />).container;
+    expect(table(c, "t").querySelectorAll("[role=row]:not([data-slate-head])")).toHaveLength(200);
+    expect(c.textContent).toContain("and 800 more");
+  });
+
   it("puts its header over its own card: the name's column takes the room, the figures end-aligned after it", () => {
     const c = draw(`<slate title="Gold">
 <value name="karats" start={[{ k: "24K", g: "₹14,918" }, { k: "22K", g: "₹13,675" }, { k: "18K", g: "₹11,189" }]} />

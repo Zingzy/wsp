@@ -59,8 +59,7 @@ function tightWidths(slate: SlateEngine, id: string): (number | undefined)[] {
   if (piece === undefined) return [];
   const items = slate.resolve(piece.props?.["items"]);
   const list = Array.isArray(items) ? items : [];
-  const cap = slate.resolve(piece.props?.["rows"]);
-  const shown = typeof cap === "number" ? list.slice(0, Math.max(0, Math.floor(cap))) : list;
+  const shown = list.slice(0, drawnRows(slate.resolve(piece.props?.["rows"]), list.length));
   return shownColumns(slate, piece.props?.["columns"]).map(column => {
     const cells = shown.map((item, index) => slate.resolve(column["value"], { item, index }));
     const mono = column["mono"] === true && !cells.some(isSentence);
@@ -77,6 +76,12 @@ function sharedWidths(slate: SlateEngine, id: string, own: (number | undefined)[
   if (fellows.length === 0) return own;
   return own.map((width, at) => (width === undefined ? undefined : Math.max(width, ...fellows.map(widths => widths[at] ?? 0))));
 }
+
+/** Past this many rows a table says how many more there are rather than draw them all on every push (11). */
+export const ROWS_DRAWN = 200;
+
+/** How many of a table's rows draw: what its rows prop asks for, never past ROWS_DRAWN. */
+const drawnRows = (asked: SlateJson | undefined, length: number): number => Math.min(typeof asked === "number" ? Math.max(0, Math.floor(asked)) : length, ROWS_DRAWN);
 
 function rowKey(slate: SlateEngine, key: SlatePropValue | undefined, row: Row): string {
   const value = key === undefined ? undefined : slate.resolve(key, row);
@@ -111,8 +116,7 @@ export const table: PieceView = {
     const items = Array.isArray(props["items"]) ? props["items"] : [];
     const columns = shownColumns(slate, piece.props?.["columns"]);
     const actions = records(piece.props?.["rowActions"]).slice(0, 3);
-    const cap = typeof props["rows"] === "number" ? Math.max(0, Math.floor(props["rows"])) : items.length;
-    const shown = items.slice(0, cap);
+    const shown = items.slice(0, drawnRows(props["rows"], items.length));
     const place = placeOf(slate, id);
     const inset = place === "inside" ? "" : INSET;
     const card = place === "inside" ? "" : CARD_SURFACE;
