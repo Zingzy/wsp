@@ -11,6 +11,7 @@ import { SLATE_SOURCES, slateShapeText, type SlateShape } from "./sources.js";
 import { SLATE_STEPS } from "./steps.js";
 import { compileSlateText } from "./syntax.js";
 import { SLATE_RUN_FIELDS } from "./types.js";
+import { slateTable } from "./paths.js";
 
 /** A conservative token count: each word, each number and each other non-space character is one. Real tokenizers
  * join common words with their spaces and punctuation, so they count fewer. */
@@ -69,14 +70,14 @@ function pieceLine(p: SlatePieceModule): string {
 }
 
 /** The fields the index names for each source; the entry for the source has the rest. */
-const INDEX_FIELDS: Record<string, readonly string[]> = {
+const INDEX_FIELDS: Record<string, readonly string[]> = slateTable<readonly string[]>({
   thread: ["id", "title", "status", "agent", "model", "turns", "lastTurn", "cost", "tokens", "context", "changes", "plan", "waitingOn", "subagents"],
   usage: ["account", "windows", "session", "week", "status", "note"],
   cost: ["rateUsdPerHour", "accruedUsd"],
   time: ["now", "today", "zone"],
   git: ["branch", "head", "ahead", "behind", "changed"],
   pr: ["number", "url", "state", "draft", "branch", "headSubject", "mergeable", "review", "checks", "word"],
-};
+});
 
 function sourceLine(name: string): string {
   const shape = SLATE_SOURCES[name]!.shape;

@@ -7,7 +7,7 @@ import { checkSlateExpression, parseSlateExpression, parseSlateFormat, slateDepe
 import { isSlateIcon, nearestSlateIcon } from "./icons.js";
 import { SLATE_PIECES, SLATE_RESERVED_PROPS, type SlateItemSpec, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
 import { SLATE_LIMITS } from "./limits.js";
-import { parseSlateOwnPath } from "./paths.js";
+import { slateTable, parseSlateOwnPath } from "./paths.js";
 import { SLATE_WARNINGS, nearest, orList, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
 import { SLATE_SOURCES, slateIsSeries, slateSourceType } from "./sources.js";
 import { SLATE_STEPS } from "./steps.js";
@@ -23,11 +23,11 @@ type Kind = "value" | "secret" | "derived" | "run";
 type Trigger = "press" | "submit" | "change" | "reaction";
 interface Where { piece?: string; prop?: string }
 
-const RUN_FIELD_TYPES: Record<(typeof SLATE_RUN_FIELDS)[number], SlateType> = {
+const RUN_FIELD_TYPES: Record<(typeof SLATE_RUN_FIELDS)[number], SlateType> = slateTable<SlateType>({
   state: { t: "string" }, why: { t: "string" }, exit: { t: "number" }, out: { t: "any" }, err: { t: "string" }, json: { t: "any" },
   lines: { t: "list", of: { t: "string" } }, startedAt: { t: "number" }, endedAt: { t: "number" }, ms: { t: "number" }, runs: { t: "number" }, cut: { t: "boolean" }, stale: { t: "boolean" },
   refreshing: { t: "boolean" }, text: { t: "boolean" },
-};
+});
 /** A plain own path written as text, "$x" or "$x.out": the agent meant the formula. */
 const OWN_PATH = /^\$[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])*$/;
 /** Words a head capitalises in Title Case and sentence case leaves alone: an acronym, or a word with a capital inside. */
@@ -50,7 +50,7 @@ function tokenIn(text: string): string | undefined {
 
 /** Attributes of a <run> that a piece is given by habit: the refusal points at the run. */
 const RUN_ATTRS: ReadonlySet<string> = new Set(["every", "cmd", "timeout", "always", "once", "interval", "refresh"]);
-const SECRET_FIELD_TYPES: Record<string, SlateType> = { set: { t: "boolean" }, len: { t: "number" }, at: { t: "number" } };
+const SECRET_FIELD_TYPES: Record<string, SlateType> = slateTable({ set: { t: "boolean" }, len: { t: "number" }, at: { t: "number" } });
 
 /** The type a literal start reads as: a list of records takes its first record's fields. */
 function literalType(v: SlateJson): SlateType {

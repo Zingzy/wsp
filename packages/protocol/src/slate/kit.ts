@@ -6,6 +6,7 @@ import { fmtBytes, fmtCost, fmtInr, fmtTokens } from "../format.js";
 import { slateAxisWord, slateChartAxis } from "./chart.js";
 import { slateResultShape, sketchSlateResult } from "./shape.js";
 import { isSlateSecretHandle, type SlateEventName, type SlateJson, type SlatePropValue, type SlateRunDecl, type SlateRunRecord } from "./types.js";
+import { slateTable } from "./paths.js";
 
 export const SLATE_TONES = ["default", "muted", "good", "warning", "bad", "info", "accent"] as const;
 const EMPHASIS = ["normal", "strong", "quiet"] as const;
@@ -178,7 +179,7 @@ function actions(v: SlateSketchView, item: SlateJson, index: number): string {
 
 const rowActionItem: SlateItemSpec = { prop: "rowActions", row: true, rowWhen: true, events: ["press"], max: 3, fields: { label: { type: "string", binds: "item", required: true } } };
 
-export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
+const PIECES: Record<string, SlatePieceModule> = {
   column: {
     type: "column", level: "core", purpose: "Stacks children top to bottom.", holdsChildren: true,
     props: { gap: enm(DENSITY, "normal"), align: enm(["start", "center", "end", "stretch"], "stretch"), ...box }, items: {}, events: [],
@@ -509,14 +510,20 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
 };
 
+export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = slateTable(Object.fromEntries(Object.entries(PIECES).map(([type, m]) => [type, {
+  ...m,
+  props: slateTable(m.props),
+  items: slateTable(Object.fromEntries(Object.entries(m.items).map(([tag, item]) => [tag, { ...item, fields: slateTable(item.fields) }]))),
+}])));
+
 /** Item kinds by tag, wherever they may sit. */
 export const SLATE_ITEM_KINDS = ["col", "action", "fact", "option", "tab", "field"] as const;
 
 /** Style props a slate can never set, each with the meaning prop to use instead (05, "What the agent can never set"). */
-export const SLATE_RESERVED_PROPS: Readonly<Record<string, string>> = {
+export const SLATE_RESERVED_PROPS: Readonly<Record<string, string>> = slateTable<string>({
   color: "tone", colour: "tone", fill: "tone", ink: "tone",
   font: "emphasis, size or mono", fontSize: "size", fontWeight: "emphasis", bold: "emphasis=\"strong\"", italic: "emphasis",
   padding: "pad", margin: "gap or pad", spacing: "gap", background: "surface=\"inset\" on a section, column or grid", bg: "surface=\"inset\"", border: "nothing; wsp draws edges", radius: "nothing; wsp draws edges", shadow: "nothing; wsp draws edges", outline: "nothing; wsp draws edges",
   width: "nothing; the panel decides", height: "nothing; the panel decides", style: "nothing", className: "nothing", class: "nothing", css: "nothing", html: "nothing",
   glyph: "icon=\"<lucide name>\"", emoji: "icon=\"<lucide name>\"", animation: "nothing", transition: "nothing", pulse: "nothing", blink: "nothing",
-};
+});

@@ -6,7 +6,7 @@
 import { fmtBytes, fmtClock, fmtCost, fmtDuration, fmtTokens } from "../format.js";
 import { CHECK_STATE_WORDS } from "../pull-request.js";
 import { SLATE_LIMITS } from "./limits.js";
-import { slateEqual, slateStep } from "./paths.js";
+import { slateTable, slateEqual, slateStep } from "./paths.js";
 import { nearest, slateProblem, type SlateCode } from "./problems.js";
 import { isSlateBinding, isSlateFormat, type SlateJson, type SlateProblem, type SlatePropValue } from "./types.js";
 
@@ -54,13 +54,13 @@ class Fault extends Error {
 }
 
 /** JavaScript method names a model writes by reflex, with this language's spelling. */
-const METHOD_FIX: Record<string, string> = {
+const METHOD_FIX: Record<string, string> = slateTable<string>({
   length: "len(x)", map: "x | map(name: item.field) or pluck(x, 'field')", filter: "x | where(item.cond)", toUpperCase: "upper(x)",
   toLowerCase: "lower(x)", includes: "contains(x, v)", join: "join(x, sep)", slice: "x | take(n)", find: "x | where(...) | first",
   some: "len(x | where(...)) > 0", trim: "trim(x)", split: "split(x, sep)", replace: "replace(x, a, b)", startsWith: "startsWith(x, p)",
   endsWith: "endsWith(x, p)", reduce: "x | sum(item.field)", sort: "x | sortBy(item.field)", toString: "str(x)", toFixed: "number(x, places)",
   test: "contains, startsWith or endsWith; there are no regular expressions", forEach: "a piece that takes items",
-};
+});
 
 function tokenize(src: string): Token[] {
   const out: Token[] = [];
@@ -525,14 +525,14 @@ const plainNumber = (n: number, p?: number): string =>
 
 /** The app's own word for a known state (04, word()): check states, thread statuses, review and mergeable enums,
  * run states; any other string capitalised once. */
-const WORDS: Record<string, string> = {
+const WORDS: Record<string, string> = slateTable<string>({
   ...CHECK_STATE_WORDS,
   starting: "Starting", working: "Working", "needs-you": "Needs you", resting: "Resting", done: "Done", failed: "Failed",
   none: "None", approved: "Approved", changes_asked: "Changes asked", required: "Review required",
   mergeable: "Mergeable", conflicting: "Conflicting", unknown: "Unknown",
   idle: "Not run yet", held: "Held", running: "Running",
   open: "Open", merged: "Merged", closed: "Closed",
-};
+});
 export function slateWord(x: Val): Val {
   if (typeof x !== "string") return missing(x) ? null : slateText(x);
   const known = WORDS[x];
@@ -601,7 +601,7 @@ function pick(of: Val, at: Val): Val {
 const ret = (t: SlateType) => (): SlateType => t;
 const elemOf = (args: SlateType[]): SlateType => args[0]?.of ?? T.any;
 
-const F: Record<string, FnSpec> = {
+const F: Record<string, FnSpec> = slateTable<FnSpec>({
   percent: { min: 1, max: 2, returns: ret(T.str), numberFirst: true, sig: "percent(fraction, places?)", example: "percent(thread.context.used / thread.context.window)",
     fn: ([x, p]) => { if (!isNum(x)) return null; const v = x * 100; return `${v.toFixed(places(p, Math.abs(v) < 10 && v !== 0 ? 1 : 0))}%`; } },
   pct: { min: 1, max: 2, returns: ret(T.str), numberFirst: true, sig: "pct(points, places?)", example: "pct(usage.week.percent)",
@@ -702,7 +702,7 @@ const F: Record<string, FnSpec> = {
     fn: ([l, f], env) => (isList(l) && typeof f === "string" ? l.map(item => { env.charge(1); return field(item, f) ?? null; }) : null) },
   join: { min: 2, max: 2, returns: ret(T.str), listFirst: true, sig: "join(list, sep)", example: "join(pluck(pr.checks, 'name'), ', ')",
     fn: ([l, sep], env) => (isList(l) ? l.map(item => { env.charge(1); return slateText(item); }).join(typeof sep === "string" ? sep : ", ") : null) },
-};
+});
 
 /** Every function with its signature and an example, for the catalog and the checker. */
 export const SLATE_FUNCTIONS: Readonly<Record<string, Readonly<{ min: number; max: number; sig: string; example: string }>>> = F;
@@ -717,7 +717,7 @@ interface PipeSpec {
 }
 
 const same = (input: SlateType): SlateType => input;
-const PIPE: Record<string, PipeSpec> = {
+const PIPE: Record<string, PipeSpec> = slateTable<PipeSpec>({
   where: { min: 1, max: 1, needsList: true, out: same, sig: "where(cond)", purpose: "keeps the elements where cond is true", example: "pr.checks | where(item.state == 'fail')" },
   sortBy: { min: 1, max: 2, needsList: true, out: same, sig: "sortBy(expr, 'asc'|'desc')", purpose: "stable sort; nulls last", example: "processes.list | sortBy(item.cpu, 'desc')" },
   groupBy: { min: 1, max: 1, needsList: true, out: i => ({ t: "list", of: { t: "record", fields: { key: T.any, items: i, count: T.num } } }), sig: "groupBy(expr)", purpose: "{ key, items, count } per group in first-seen order", example: "pr.checks | groupBy(item.state)" },
@@ -736,7 +736,7 @@ const PIPE: Record<string, PipeSpec> = {
   flatten: { min: 0, max: 1, needsList: true, out: () => T.list, sig: "flatten(field?)", purpose: "joins inner lists", example: "tree.all | flatten(children)" },
   join: { min: 2, max: 3, needsList: true, out: same, sig: "join(other, key, otherKey?)", purpose: "attaches the matching element of other", example: "thread.subagents | join(tree.children, id)" },
   format: { min: 1, max: 1, needsList: false, out: i => (i.t === "list" ? { t: "list", of: T.str } : T.str), sig: "format(expr)", purpose: "expr as text per element", example: "pr.checks | format(`${item.name}: ${word(item.state)}`)" },
-};
+});
 
 /** Every pipeline step with its signature, purpose and an example. */
 export const SLATE_PIPE_STEPS: Readonly<Record<string, Readonly<{ min: number; max: number; sig: string; purpose: string; example: string }>>> = PIPE;

@@ -2,6 +2,7 @@
 // The closed table of problem codes (10, "The error code table"), each with its word and class, and the helpers
 // that make a Problem and find the nearest valid option for its fix.
 import type { SlateProblem } from "./types.js";
+import { slateTable } from "./paths.js";
 
 export const SLATE_CODES = {
   P100: "bad-syntax", P102: "bare-not-boolean", P103: "bad-id", P104: "duplicate-id", P105: "bad-patch-op", P107: "reaction-without-id",
@@ -73,7 +74,7 @@ export const orList = (words: readonly string[]): string =>
   words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} or ${words[words.length - 1]}`;
 
 /** What an HTML habit means in the kit: a small model writes <p> and <div> and needs the piece it meant, not a list. */
-const HTML_TAGS: Readonly<Record<string, string>> = {
+const HTML_TAGS: Readonly<Record<string, string>> = slateTable({
   ...Object.fromEntries(["p", "span", "label", "strong", "em", "b", "i", "small", "pre", "code"].map(t => [t, "words go in <text>...</text>"])),
   ...Object.fromEntries(["h1", "h2", "h3", "h4", "h5", "h6", "header", "title"].map(t => [t, "a title is a <heading>, or a <section title=\"...\">"])),
   ...Object.fromEntries(["div", "main", "body", "nav", "footer", "article", "aside", "card", "container", "stack", "box"].map(t => [t, "a group is a <column>, a <row> or a <section>"])),
@@ -83,7 +84,7 @@ const HTML_TAGS: Readonly<Record<string, string>> = {
   component: "the tag is the piece's own type, like <number ...> or <text>",
   a: "a link is a <button> whose onPress opens it",
   img: "a slate draws no images",
-};
+});
 
 /** The words for a tag the kit has no piece for: the piece an HTML habit meant, else the nearest name. */
 export function slateUnknownPiece(tag: string, pieces: readonly string[]): { message: string; fix?: string } {

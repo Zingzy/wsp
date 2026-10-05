@@ -6,6 +6,7 @@ import { CHECK_STATE_WORDS } from "../pull-request.js";
 import { LIMIT_KINDS } from "../usage.js";
 import type { SlateType } from "./expr.js";
 import { nearest } from "./problems.js";
+import { slateTable } from "./paths.js";
 
 /** A declared path's shape: a scalar, an enum, a list of a shape, or a record of fields. */
 export type SlateShape =
@@ -31,12 +32,12 @@ export interface SlateSourceModule {
   example: string;
 }
 
-const rec = (fields: Record<string, SlateShape>): { fields: Record<string, SlateShape> } => ({ fields });
+const rec = (fields: Record<string, SlateShape>): { fields: Record<string, SlateShape> } => ({ fields: slateTable(fields) });
 const list = (of: SlateShape): SlateShape => ({ list: of });
 const oneOf = (values: readonly string[]): SlateShape => ({ enum: values });
 const points = list(rec({ x: "number", y: "number" }));
 
-export const SLATE_SOURCES: Readonly<Record<string, SlateSourceModule>> = {
+export const SLATE_SOURCES: Readonly<Record<string, SlateSourceModule>> = slateTable<SlateSourceModule>({
   thread: {
     name: "thread", level: "core", purpose: "This thread: status, last turn, context, cost, tokens, changes, plan.",
     update: "push", cost: "none beyond today", scope: "the slate's own thread",
@@ -164,7 +165,7 @@ export const SLATE_SOURCES: Readonly<Record<string, SlateSourceModule>> = {
     }) },
     example: "mcp.linear.state",
   },
-};
+});
 
 /** A shape as a checker type. */
 export function slateShapeType(shape: SlateShape): SlateType {
@@ -175,7 +176,7 @@ export function slateShapeType(shape: SlateShape): SlateType {
   if ("enum" in shape) return { t: "string" };
   if ("list" in shape) return { t: "list", of: slateShapeType(shape.list) };
   if ("keyed" in shape) return { t: "any" };
-  return { t: "record", fields: Object.fromEntries(Object.entries(shape.fields).map(([k, v]) => [k, slateShapeType(v)])) };
+  return { t: "record", fields: slateTable(Object.fromEntries(Object.entries(shape.fields).map(([k, v]) => [k, slateShapeType(v)]))) };
 }
 
 /** A source path's type, or the problem naming the nearest declared path. */

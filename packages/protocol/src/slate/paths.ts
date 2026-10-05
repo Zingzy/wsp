@@ -7,6 +7,9 @@ import type { SlateJson, SlateOwnPath, SlateValues } from "./types.js";
 const SEGMENT = /^(?:\.([a-zA-Z_][a-zA-Z0-9_]*)|\[(-?\d+)\])/;
 const UNSAFE = new Set(["__proto__", "constructor", "prototype"]);
 
+/** A table looked up by the agent's words, with no prototype, so constructor or toString names nothing in it. */
+export const slateTable = <T>(entries: Record<string, T>): Record<string, T> => Object.assign(Object.create(null) as Record<string, T>, entries);
+
 /** The name and the segments after it, or undefined when the text is not an own path. */
 export function parseSlateOwnPath(path: SlateOwnPath): { name: string; segs: (string | number)[] } | undefined {
   const m = /^\$([a-zA-Z_][a-zA-Z0-9_]*)/.exec(path);
