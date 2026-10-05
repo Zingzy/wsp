@@ -883,6 +883,20 @@ describe("General's Version card", () => {
     expect(opened).toEqual([]);
   });
 
+  it("in an app that replaces itself, the kept download's step is Restart to update, which hands over to the shell", async () => {
+    const getBundle = vi.fn(async (): Promise<BundleOutcome> => ({ ok: true }));
+    const quitAndOpen = vi.fn(async (): Promise<BundleOutcome> => ({ ok: true }));
+    shellOn(null, { getBundle, quitAndOpen });
+    window.wsp = { ...window.wsp, updatesInPlace: true };
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "general");
+    await waitFor(() => expect(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }).title).toBe(HOVER));
+    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
+    fireEvent.click(await screen.findByRole("button", { name: ABOUT_WORDS.restartToUpdate }));
+    await waitFor(() => expect(quitAndOpen).toHaveBeenCalledTimes(1));
+    expect(buttons()).not.toContain(ABOUT_WORDS.quitAndOpen);
+  });
+
   it("a download the shell refuses lands its line as an error notice and puts Get back", async () => {
     const getBundle = vi.fn(async (): Promise<BundleOutcome> => ({ ok: false, error: "wsp-0.3.0-mac.dmg did not match the release's sha256 and was deleted" }));
     shellOn(null, { getBundle, quitAndOpen: vi.fn() });

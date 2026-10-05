@@ -11,6 +11,9 @@ files:
   - assets/**
   - package.json
 afterPack: scripts/after-pack.mjs
+# The app updates itself off the release's zip and the sha256 GitHub publishes, so no latest-mac.yml is written; with
+# a zip target and no publish block electron-builder tries to, and fails where it cannot read the repository.
+publish: null
 # wsp:// links open the app on what they name: the bundle's Info.plist on macOS, the desktop entry on Linux.
 protocols:
   - name: wsp
@@ -21,6 +24,9 @@ mac:
   # One bundle for both chips: reading the chip from a browser is unreliable, and a wrong pick is a dead first run.
   target:
     - target: dmg
+      arch: [universal]
+    # What an installed app replaces itself from: unpacked beside it with ditto, checked, and renamed into its place.
+    - target: zip
       arch: [universal]
     - target: dir
       arch: [universal]

@@ -7,6 +7,8 @@
 // machine, so the real sidebar and the real first run are fed
 // records here instead of pixels being drawn by hand.
 //
+// ?update=ready with &notices=1 says 0.3.0 staged on an app of 0.2.0 that replaces itself, ?update=why the note
+// on one that runs from its disk image, ?update=out today's note.
 // ?screen=<name> picks one, ?theme=light the light side, ?lightTheme= and ?darkTheme= each side's theme by id,
 // ?sidebar=<px> opens
 // the sidebar at that remembered width, ?pick=<project id> is the project
@@ -715,6 +717,17 @@ if (screen === "settings-version-behind") {
   };
 }
 
+const update = params.get("update");
+if (update !== null) {
+  window.wsp = {
+    version: "0.2.0",
+    hosts: async () => ({ here: hereWord(true), current: null, hosts: [] }),
+    ...(update === "ready" ? { updatesInPlace: true, getBundle: async () => ({ ok: true }), quitAndOpen: async () => ({ ok: true }) } : {}),
+    ...(update === "why" ? { updateWhy: "The app runs from a disk image or another drive, so it cannot replace itself. Move wsp to Applications." } : {}),
+  };
+  (window as unknown as { __WSP__?: { paired: boolean; version: string } }).__WSP__ = { paired: true, version: "0.2.0" };
+}
+
 // The switcher's pick is this window's own, so the screen writes it where the sidebar reads it before binding.
 const pick = params.get("pick");
 if (pick !== null) window.localStorage.setItem("wsp:sidebar-project", JSON.stringify(pick));
@@ -731,7 +744,7 @@ useStore.setState({
   settingsOpen: settings,
   addComputerOpen: screen === "settings-add-computer" || screen === "settings-computers-refused",
   release:
-    screen === "settings-version-behind"
+    screen === "settings-version-behind" || update !== null
       ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT }
       : screen === "settings-version-restart"
         ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, installed: "0.3.0", update: "npm i -g @zingzy/wsp@0.3.0", shape: "service" }
