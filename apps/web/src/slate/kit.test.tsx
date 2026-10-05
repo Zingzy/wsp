@@ -169,17 +169,28 @@ describe("the richer kit in the renderer", () => {
   });
 
   it("lines a group up only when align says so, and pads and insets on request", () => {
-    const doc = compiled(`<slate><column><section id="s" title="A" align="center" pad="loose"><text>x</text></section><section id="plain" title="B"><text>y</text></section><column id="inset" surface="inset"><text>z</text></column><grid id="g" columns={2} align="end"><text>1</text><text>2</text></grid></column></slate>`);
+    const doc = compiled(`<slate><column><section id="s" title="A" align="center" pad="loose"><status>x</status></section><section id="plain" title="B"><status>y</status></section><column id="inset" surface="inset"><status>z</status></column><grid id="g" columns={2} align="end"><text>1</text><text>2</text></grid></column></slate>`);
     const c = draw(doc).view.container;
     const inner = (id: string) => piece(c, id).querySelector<HTMLElement>("[data-slate-card], [data-slate-grid] > div")!;
     // A section's rows are a settings card whatever align, pad or surface it names: its rows take the card's inset.
     expect(inner("s").className).toContain("[&>:not([data-slate-rows])]:px-(--settings-inset,20px)");
     expect(inner("s").className).not.toMatch(/items-center|px-5/);
     expect(inner("plain").className).toContain("bg-card/40");
-    // A column standing among the cards takes no surface of its own: its text is a row of a card like any other.
+    // A column standing among the cards takes no surface of its own: its status is a row of a card like any other.
     expect(piece(c, "inset").querySelector("[data-slate-card]")).not.toBeNull();
     expect(inner("g").className).toContain("justify-items-end");
     expect(c.querySelector("[data-slate-piece=s]")!.textContent).toContain("A");
+  });
+
+  it("stands prose bare under its section head, plain, toned or mono, while a meta line still joins the card above it", () => {
+    const doc = compiled(`<slate><column>
+      <section id="prose" title="Feed"><text id="plain">Prices refresh every 60 seconds</text><text id="warn" tone="warning">Awaiting approval</text><text id="mono" mono>true</text></section>
+      <section id="rows" title="Now"><status id="up" tone="good">Up</status><text id="meta" tone="muted">checked 21s ago</text></section>
+    </column></slate>`);
+    const c = draw(doc).view.container;
+    for (const id of ["plain", "warn", "mono"]) expect(piece(c, id).closest("[data-slate-card]"), id).toBeNull();
+    expect(piece(c, "up").closest("[data-slate-card]")).not.toBeNull();
+    expect(piece(c, "meta").closest("[data-slate-card]")).toBe(piece(c, "up").closest("[data-slate-card]"));
   });
 
   it("draws bars, a status word with no dot, a chip as plain words, and no icon on a button, a text, a fact or a section head", () => {
