@@ -134,24 +134,13 @@ export function HeldRuns({ engine, asks, review, refuse }: { engine: SlateEngine
 
 const dots = (value: string): boolean => /^•+/.test(value);
 
-export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask: Extract<SlateAsk, { kind: "cmd" }>; cadence: string; more?: number; answer(scope: SlateApproval): Promise<unknown>; onClose(): void }) {
+/** What a held command will run, as every sheet that approves one shows it: the text, its reshape, how often it runs,
+ * each value it is handed, and where and how long it runs. */
+export function CommandBody({ ask, cadence, lines }: { ask: Extract<SlateAsk, { kind: "cmd" }>; cadence: string; lines: 4 | 12 }) {
   const env = Object.entries(ask.env);
-  const [busy, setBusy] = useState(false);
-  const [refused, setRefused] = useState<string | undefined>(undefined);
-  const decide = (scope: SlateApproval) => {
-    setBusy(true);
-    setRefused(undefined);
-    void answer(scope).then(
-      () => onClose(),
-      (error: unknown) => {
-        setBusy(false);
-        setRefused(error instanceof Error ? error.message : String(error));
-      },
-    );
-  };
-  const body = (
-    <div data-slate-consent={ask.run} className="flex min-w-0 flex-col gap-3 text-[13px] leading-5">
-      <pre data-slate-consent-cmd className="max-h-[calc(12*1rem+1rem)] overflow-auto whitespace-pre-wrap break-all rounded-md bg-accent px-2.5 py-2 font-mono text-xs leading-4 tabular-nums text-foreground">
+  return (
+    <>
+      <pre data-slate-consent-cmd className={cn("overflow-auto whitespace-pre-wrap break-all rounded-md bg-accent px-2.5 py-2 font-mono text-xs leading-4 tabular-nums text-foreground", lines === 12 ? "max-h-[calc(12*1rem+1rem)]" : "max-h-[calc(4*1rem+1rem)]")}>
         {ask.cmd}
       </pre>
       <ThenCommand then={ask.then} />
@@ -167,26 +156,44 @@ export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask:
             </div>
           ))}
           {ask.args.map((arg, at) => (
-            <div key={`arg-${at}`} className="contents">
+            <div key={`arg-${at}`} data-slate-consent-arg={at + 1} className="contents">
               <dt className="text-muted-foreground">${at + 1}</dt>
               <dd className="min-w-0 break-all text-foreground">{arg}</dd>
             </div>
           ))}
           {ask.stdin === undefined ? null : (
-            <div className="contents">
+            <div data-slate-consent-stdin className="contents">
               <dt className="text-muted-foreground">stdin</dt>
-              <dd className="min-w-0 truncate text-foreground">{ask.stdin}</dd>
+              <dd className="min-w-0 break-all text-foreground">{ask.stdin}</dd>
             </div>
           )}
         </dl>
       )}
-      <p className="text-muted-foreground">
-        <span data-slate-consent-where className="text-foreground">
-          on {ask.computer}, in {ask.folder}, {ask.timeoutS} s at most
-        </span>
-        <br />
-        {CONSENT_WORDS.wrote}.
+      <p data-slate-consent-where className="text-foreground">
+        on {ask.computer}, in {ask.folder}, {ask.timeoutS} s at most
       </p>
+    </>
+  );
+}
+
+export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask: Extract<SlateAsk, { kind: "cmd" }>; cadence: string; more?: number; answer(scope: SlateApproval): Promise<unknown>; onClose(): void }) {
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | undefined>(undefined);
+  const decide = (scope: SlateApproval) => {
+    setBusy(true);
+    setRefused(undefined);
+    void answer(scope).then(
+      () => onClose(),
+      (error: unknown) => {
+        setBusy(false);
+        setRefused(error instanceof Error ? error.message : String(error));
+      },
+    );
+  };
+  const body = (
+    <div data-slate-consent={ask.run} className="flex min-w-0 flex-col gap-3 text-[13px] leading-5">
+      <CommandBody ask={ask} cadence={cadence} lines={12} />
+      <p className="text-muted-foreground">{CONSENT_WORDS.wrote}.</p>
       <p data-slate-consent-reach className="text-muted-foreground">{CONSENT_WORDS.reach}</p>
       {more > 0 ? <p data-slate-consent-more className="text-muted-foreground">{CONSENT_WORDS.more(more)}</p> : null}
       {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}

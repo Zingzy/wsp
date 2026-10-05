@@ -8,7 +8,7 @@ import { Button } from "../components/ui/button.js";
 import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { Switch } from "../components/ui/switch.js";
 import { cn } from "../lib/utils.js";
-import { CONSENT_WORDS } from "./consent.js";
+import { CommandBody, CONSENT_WORDS } from "./consent.js";
 import { ArgList, MCP_WORDS, ThenCommand } from "./mcp.js";
 import type { SlateApproval, SlateAsk } from "./model.js";
 
@@ -31,33 +31,6 @@ export function batchable(asks: readonly SlateAsk[]): BatchAsk[] {
   return [...rows.values()];
 }
 
-const dots = (value: string): boolean => /^•+/.test(value);
-
-function CommandRow({ ask, cadence }: { ask: Extract<SlateAsk, { kind: "cmd" }>; cadence: string }) {
-  const env = Object.entries(ask.env);
-  return (
-    <>
-      <pre data-slate-consent-cmd className="max-h-[calc(4*1rem+1rem)] overflow-auto whitespace-pre-wrap break-all rounded-md bg-accent px-2.5 py-2 font-mono text-xs leading-4 tabular-nums text-foreground">
-        {ask.cmd}
-      </pre>
-      <ThenCommand then={ask.then} />
-      <p data-slate-consent-cadence className="text-muted-foreground">
-        {cadence}
-      </p>
-      {env.length === 0 ? null : (
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-xs leading-4 tabular-nums">
-          {env.map(([name, value]) => (
-            <div key={name} data-slate-consent-env={name} className="contents">
-              <dt className="text-muted-foreground">{name}</dt>
-              <dd className={cn("min-w-0 break-all", dots(value) ? "text-muted-foreground" : "text-foreground")}>{value}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-    </>
-  );
-}
-
 function ServerRow({ ask, cadence }: { ask: Extract<SlateAsk, { kind: "server" }>; cadence: string }) {
   const resource = ask.tool !== undefined && ask.tool.includes("://");
   return (
@@ -75,6 +48,9 @@ function ServerRow({ ask, cadence }: { ask: Extract<SlateAsk, { kind: "server" }
       <ThenCommand then={ask.then} />
       <p data-slate-consent-cadence className="text-muted-foreground">
         {cadence}
+      </p>
+      <p data-slate-consent-where className="text-foreground">
+        on {ask.computer}
       </p>
       <p className="text-muted-foreground">
         {ask.tools.length === 0 ? null : <>{MCP_WORDS.lists(ask.server, ask.tools.length)}. </>}
@@ -109,7 +85,6 @@ export function ApprovalsSheet({ asks, cadence, answer, onClose }: { asks: reado
       else next.add(key);
       return next;
     });
-  const where = [...new Set(asks.map(ask => (ask.kind === "cmd" ? `on ${ask.computer}, in ${ask.folder}` : `on ${ask.computer}`)))];
   return (
     <Dialog open onOpenChange={open => (open ? undefined : onClose())}>
       <DialogPopup>
@@ -123,13 +98,11 @@ export function ApprovalsSheet({ asks, cadence, answer, onClose }: { asks: reado
               return (
                 <div key={ask.key} data-slate-approval={ask.key} data-on={on} className={cn("flex min-w-0 gap-3", on ? undefined : "opacity-60")}>
                   <Switch checked={on} onCheckedChange={checked => toggle(ask.key, checked)} aria-label={ask.kind === "cmd" ? ask.cmd : APPROVALS_WORDS.server(ask.server)} className="mt-1.5" />
-                  <div className="flex min-w-0 flex-1 flex-col gap-2">{ask.kind === "cmd" ? <CommandRow ask={ask} cadence={cadence(ask.run)} /> : <ServerRow ask={ask} cadence={cadence(ask.run)} />}</div>
+                  <div className="flex min-w-0 flex-1 flex-col gap-2">{ask.kind === "cmd" ? <CommandBody ask={ask} cadence={cadence(ask.run)} lines={4} /> : <ServerRow ask={ask} cadence={cadence(ask.run)} />}</div>
                 </div>
               );
             })}
-            <p data-slate-consent-where className="text-muted-foreground">
-              {where.join("; ")}. {CONSENT_WORDS.wrote}.
-            </p>
+            <p className="text-muted-foreground">{CONSENT_WORDS.wrote}.</p>
             <p data-slate-consent-reach className="text-muted-foreground">{CONSENT_WORDS.reach}</p>
             {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}
           </div>

