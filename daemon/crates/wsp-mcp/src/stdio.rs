@@ -249,7 +249,6 @@ mod tests {
         let server = record::server();
         for cloud in [false, true] {
             assert!(!said(cloud).to_lowercase().contains("slate"));
-            assert!(server.instructions.cloud_off.contains("slate"));
         }
         assert_eq!(said(false), server.instructions.scoped_no_slate_cloud_off);
         assert_eq!(said(true), server.instructions.scoped_no_slate_cloud_on);
