@@ -42,6 +42,9 @@ export function catalogFromHarness(input: { readonly id: string; readonly harnes
 
 const ASK = "Ask anything";
 
+/** The placeholder a box too narrow for the whole one shows, so it reads as words rather than a cut. */
+export const COMPOSER_PLACEHOLDER_SHORT = ASK;
+
 /** Whether the menu has a command to show. A menu opened on nothing answers a typed slash with its empty state, which
  * reads as a promise the app cannot keep, so the words below and the menu itself are decided here and nowhere else. */
 export function offersSlashCommands(catalog: HarnessCatalog): boolean {

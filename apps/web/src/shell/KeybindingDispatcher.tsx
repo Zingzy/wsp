@@ -7,7 +7,7 @@
 // that cancels, and for the window losing focus with the hold unresolved.
 import { useEffect, useRef } from "react";
 import { isCommandPaletteOpen } from "../commandPaletteBus.js";
-import { surfaceShortcutTargetsTypingContext } from "../components/RightPanelTabs.js";
+import { isTypingTarget } from "../keyOwners.js";
 import { useSidebar } from "../components/ui/sidebar.js";
 import { eventHoldKeys, resolveShortcutCommand } from "../keybindings.js";
 import type { ResolvedKeybindingsConfig } from "../keybindingTypes.js";
@@ -53,7 +53,7 @@ export function KeybindingDispatcher({ keybindings: given }: { keybindings?: Res
       if (command === null) return;
       // An unchorded key inside an input is the user's text, whatever a rule says.
       const chorded = event.metaKey || event.ctrlKey;
-      if (!chorded && event.target instanceof Element && surfaceShortcutTargetsTypingContext(event.target)) return;
+      if (!chorded && event.target instanceof Element && isTypingTarget(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
       runShellCommand(command, target.current, eventHoldKeys(event));

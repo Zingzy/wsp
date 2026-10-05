@@ -11,6 +11,7 @@ import { useStore } from "../src/protocol/store.js";
 import { isMacPlatform } from "../src/lib/utils.js";
 import type { Api, ConnStatus, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
+import { ContextRing } from "../src/components/chat/ContextMeter.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { useAsideStore } from "../src/components/chat/asideStore.js";
@@ -1412,5 +1413,131 @@ describe("composerSendBlock", () => {
     expect(composerSendBlock({ ...live, conn: "closed", state: "unreachable", absent: true, daemonOnly: true })).toBe("closed");
     // A computer this host only waits for runs no turn, so its silence holds the box as it did.
     expect(composerSendBlock({ ...live, state: "unreachable", absent: true })).toBe("unreachable");
+  });
+});
+
+describe("the context ring's Compact context", () => {
+  // The reply says what the model held, so the ring draws; the catalog row carries the message the adapter declared.
+  const HELD: SessionEvent[] = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_0001" })).map(e => (e.type === "session.done" ? { ...e, result: { ...e.result, tokens: { input: 9, output: 1, context: 50_000, window: 200_000 } } } : e));
+  const row: SessionView = { id: "sess_local_1", workspaceId: WS, harness: "claude", status: "completed", claudeSessionId: "sess_0001", threadId: "thr_0001", prompt: "go", startedAt: 0 };
+  const compacting = (compacts: string | undefined): Partial<Api> => ({ listSessions: async () => [row], listHarnesses: async () => [{ ...CLAUDE_CATALOG, ...(compacts === undefined ? {} : { compacts }) }] });
+  const openCard = async () => {
+    const ring = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-context-ring]");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    fireEvent.click(ring);
+    return waitFor(() => {
+      const card = document.querySelector<HTMLElement>("[data-context-card]");
+      expect(card).not.toBeNull();
+      return card!;
+    });
+  };
+
+  it("sends the agent's own compaction into the thread as a turn, carrying none of the box's files and leaving the draft", async () => {
+    const { api, started } = fixtureApi([workspace], { [WS]: HELD.slice() }, [], compacting("/compact"));
+    await setup(api);
+    render(<ContextRing workspaceId={WS} />);
+    await screen.findByText(/Server is live at :3000\./);
+    await typeInto(composerEditor(), "half a thought");
+    const card = await openCard();
+    expect(card.querySelector("[data-context-figures]")?.textContent).toBe("25%50k / 200k");
+    fireEvent.click(card.querySelector<HTMLButtonElement>("[data-context-compact]")!);
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]).toMatchObject({ prompt: "/compact", workspaceId: WS });
+    expect(started[0]?.thread).toBe("thr_0001");
+    expect(started[0]?.attachments).toBeUndefined();
+    expect(draft()).toBe("half a thought");
+  });
+
+  it("offers no compaction for an agent whose adapter declares none", async () => {
+    const { api } = fixtureApi([workspace], { [WS]: HELD.slice() }, [], compacting(undefined));
+    await setup(api);
+    render(<ContextRing workspaceId={WS} />);
+    const card = await openCard();
+    expect(card.querySelector("[data-context-compact]")).toBeNull();
+  });
+
+  it("holds the button with the composer's reason while the socket is down", async () => {
+    const { api, started } = fixtureApi([workspace], { [WS]: HELD.slice() }, [], compacting("/compact"));
+    await setup(api);
+    render(<ContextRing workspaceId={WS} />);
+    await screen.findByText(/Server is live at :3000\./);
+    act(() => useStore.getState().setConn("reconnecting"));
+    const card = await openCard();
+    await waitFor(() => expect(card.querySelector<HTMLButtonElement>("[data-context-compact]")?.disabled).toBe(true));
+    expect(card.querySelector("[data-context-compact-held]")?.textContent).toBe(sendRefusal("reconnecting"));
+    fireEvent.click(card.querySelector<HTMLButtonElement>("[data-context-compact]")!);
+    expect(started.length).toBe(0);
+  });
+});
+
+describe("typing in a thread outside the composer", () => {
+  it("focuses the composer on a printable key typed anywhere that is not a field, and leaves fields, chords and dialogs their keys", async () => {
+    const { api } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    (document.activeElement as HTMLElement | null)?.blur();
+    const transcript = screen.getByText(/Server is live at :3000\./);
+    fireEvent.keyDown(transcript, { key: "h" });
+    await waitFor(() => expect(document.activeElement).toBe(editor));
+
+    editor.blur();
+    const field = document.createElement("input");
+    document.body.append(field);
+    field.focus();
+    fireEvent.keyDown(field, { key: "h" });
+    expect(document.activeElement).toBe(field);
+    field.blur();
+    for (const init of [{ key: "k", metaKey: true }, { key: "k", ctrlKey: true }, { key: " " }, { key: "Enter" }, { key: "ArrowDown" }]) {
+      fireEvent.keyDown(transcript, init);
+      expect(document.activeElement, JSON.stringify(init)).not.toBe(editor);
+    }
+    const modal = document.createElement("div");
+    modal.setAttribute("aria-modal", "true");
+    document.body.append(modal);
+    fireEvent.keyDown(transcript, { key: "h" });
+    expect(document.activeElement).not.toBe(editor);
+    modal.remove();
+    field.remove();
+  });
+});
+
+describe("a file dragged over the chat", () => {
+  const png = (name: string) => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], name, { type: "image/png" });
+  const dragData = (files: File[]) => ({ dataTransfer: { files, items: [], types: ["Files"], getData: () => "", dropEffect: "none" } });
+  const zone = () => document.querySelector<HTMLElement>("[data-chat-drop-zone]");
+
+  it("shows a drop zone over the whole chat while it is over it, and the drop anywhere in the chat lands in the composer", async () => {
+    const { api } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() }, [], { listHarnesses: async () => [{ ...CLAUDE_CATALOG, images: true }] });
+    await setup(api);
+    const transcript = await screen.findByText(/Server is live at :3000\./);
+    const files = [png("shot.png")];
+    expect(zone()).toBeNull();
+    fireEvent.dragEnter(transcript, dragData(files));
+    await waitFor(() => expect(zone()).not.toBeNull());
+    expect(zone()!.closest("[data-chat-view]")).not.toBeNull();
+    expect(zone()!.textContent).toContain("Drop files to attach");
+    fireEvent.dragLeave(transcript, { ...dragData(files), relatedTarget: null });
+    await waitFor(() => expect(zone()).toBeNull());
+
+    fireEvent.dragEnter(transcript, dragData(files));
+    await waitFor(() => expect(zone()).not.toBeNull());
+    const dropped = fireEvent.drop(transcript, dragData(files));
+    // The page takes the drop, so the desktop app never opens the file in place of itself.
+    expect(dropped).toBe(false);
+    await waitFor(() => expect(zone()).toBeNull());
+    await waitFor(() => expect(document.querySelector("[data-composer-files]")?.textContent ?? "").not.toBe(""));
+  });
+
+  it("ignores a drag that carries no file, such as text selected in the page", async () => {
+    const { api } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
+    await setup(api);
+    const transcript = await screen.findByText(/Server is live at :3000\./);
+    fireEvent.dragEnter(transcript, { dataTransfer: { files: [], items: [], types: ["text/plain"], getData: () => "words" } });
+    await new Promise(r => setTimeout(r, 20));
+    expect(zone()).toBeNull();
   });
 });

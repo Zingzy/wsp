@@ -458,6 +458,8 @@ export interface HarnessAdapter {
   /** Answers a question beside a thread on a copy of its session that nothing keeps; absent on a harness that cannot
    * copy a session, and the composer offers no side question for it. */
   aside?: SessionAsker;
+  /** The message that runs this harness's own compaction of the thread's context as a turn; absent where it has none. */
+  readonly compacts?: string;
   /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. Absent
    * means nothing is exported and both run with the machine's own environment only. */
   readonly env?: Readonly<Record<string, string>>;
@@ -8248,6 +8250,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(adapter.mcpServers === true ? { mcpServers: true } : {}),
       ...(adapter.movesAccess === true ? { movesAccess: true } : {}),
       ...(adapter.aside !== undefined ? { asides: true } : {}),
+      ...(adapter.compacts !== undefined ? { compacts: adapter.compacts } : {}),
       ...(adapter.resumesAt === true || adapter.revert !== undefined ? { rewindsConversation: true } : {}),
       ...(adapter.revert !== undefined ? { rewindsByCount: true } : {}),
       ...(adapter.screenCommands !== undefined ? { screenCommands: [...adapter.screenCommands] } : {}),

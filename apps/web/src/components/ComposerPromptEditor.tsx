@@ -682,6 +682,8 @@ interface ComposerPromptEditorProps {
   cursor: number;
   disabled: boolean;
   placeholder: string;
+  /** What the placeholder says where the editor is too narrow for the whole of it. */
+  shortPlaceholder?: string;
   className?: string;
   onChange: (nextValue: string, nextCursor: number) => void;
   onCommandKeyDown?: (key: ComposerCommandKey, event: KeyboardEvent) => boolean;
@@ -1319,7 +1321,7 @@ function ComposerSurroundSelectionPlugin() {
   return null;
 }
 
-function ComposerPromptEditorInner({ value, cursor, disabled, placeholder, className, onChange, onCommandKeyDown, editorRef }: ComposerPromptEditorProps) {
+function ComposerPromptEditorInner({ value, cursor, disabled, placeholder, shortPlaceholder, className, onChange, onCommandKeyDown, editorRef }: ComposerPromptEditorProps) {
   const [editor] = useLexicalComposerContext();
   const onChangeRef = useRef(onChange);
   const initialCursor = clampCollapsedComposerCursor(value, cursor);
@@ -1430,7 +1432,7 @@ function ComposerPromptEditorInner({ value, cursor, disabled, placeholder, class
   );
 
   return (
-    <div className="relative [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)] [@media(max-width:39.999rem)_and_(pointer:coarse)]:[font-size:max(var(--font-size-prompt,1rem),16px)]">
+    <div className="@container/editor relative [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)] [@media(max-width:39.999rem)_and_(pointer:coarse)]:[font-size:max(var(--font-size-prompt,1rem),16px)]">
       <PlainTextPlugin
         contentEditable={
           <ContentEditable
@@ -1445,8 +1447,15 @@ function ComposerPromptEditorInner({ value, cursor, disabled, placeholder, class
           />
         }
         placeholder={
-          <div className="pointer-events-none absolute inset-0 leading-relaxed text-placeholder">
-            {placeholder}
+          <div className="pointer-events-none absolute inset-0 truncate leading-relaxed text-placeholder">
+            {shortPlaceholder === undefined || shortPlaceholder === placeholder ? (
+              placeholder
+            ) : (
+              <>
+                <span className="@max-[15rem]/editor:hidden">{placeholder}</span>
+                <span className="@min-[15rem]/editor:hidden">{shortPlaceholder}</span>
+              </>
+            )}
           </div>
         }
         ErrorBoundary={LexicalErrorBoundary}
@@ -1465,7 +1474,7 @@ function ComposerPromptEditorInner({ value, cursor, disabled, placeholder, class
   );
 }
 
-export function ComposerPromptEditor({ value, cursor, disabled, placeholder, className, onChange, onCommandKeyDown, editorRef }: ComposerPromptEditorProps) {
+export function ComposerPromptEditor({ value, cursor, disabled, placeholder, shortPlaceholder, className, onChange, onCommandKeyDown, editorRef }: ComposerPromptEditorProps) {
   const initialValueRef = useRef(value);
   const initialConfig = useMemo<InitialConfigType>(
     () => ({
@@ -1489,6 +1498,7 @@ export function ComposerPromptEditor({ value, cursor, disabled, placeholder, cla
         cursor={cursor}
         disabled={disabled}
         placeholder={placeholder}
+        {...(shortPlaceholder !== undefined ? { shortPlaceholder } : {})}
         onChange={onChange}
         editorRef={editorRef}
         {...(onCommandKeyDown ? { onCommandKeyDown } : {})}

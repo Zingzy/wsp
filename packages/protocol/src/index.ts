@@ -1315,6 +1315,10 @@ export const HarnessCatalog = z.object({
   /** Whether a person may ask this harness a question beside a thread (sessions.aside), answered on a copy of the
    * thread's session that nothing keeps. The adapter in this host declares it, as with mcpServers; absent is a no. */
   asides: z.boolean().optional(),
+  /** The message that has this harness compact its own thread's context, run as a turn like any other message; the
+   * adapter in this host declares it, as with mcpServers. Absent where wsp has no road to the agent's own compaction,
+   * and nothing offers one. */
+  compacts: z.string().optional(),
   /** Whether rewinding a thread of this harness cuts its conversation too, in the harness's own history; absent is a
    * no, and a rewind there puts back the files alone while the harness keeps every turn it ran. */
   rewindsConversation: z.boolean().optional(),
