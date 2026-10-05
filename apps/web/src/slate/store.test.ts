@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The window's slate store against a fake host: what a load folds in, and a write that lands during a load.
+import { act } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AccountRow } from "@wsp/protocol";
+import type { Api, ProtocolEvent } from "../protocol/client";
+import { useStore } from "../protocol/store";
 import { bindSlates, loadSlate, useSlateStore } from "./store";
 import type { SlateApi, SlateRecord } from "./wire";
 
@@ -37,5 +41,22 @@ describe("the slate store", () => {
     await Promise.all([second, third]);
     expect(api.get).toHaveBeenCalledTimes(2);
     expect(useSlateStore.getState().byThread["t1"]?.record?.version).toBe(2);
+  });
+});
+
+describe("the usage accounts a slate reads", () => {
+  it("takes a reconnect's answer whole, so an account gone since leaves, and keeps a push that came during the ask", async () => {
+    const row = (key: string, label: string) => ({ key, agent: "claude", label, computers: ["mac"], plan: "Max", windows: [] }) as unknown as AccountRow;
+    let answer: (rows: AccountRow[]) => void = () => {};
+    const usageAccounts = vi.fn(() => new Promise<{ accounts: AccountRow[] }>(resolve => (answer = rows => resolve({ accounts: rows }))));
+    useStore.setState({ api: { usageAccounts, subscribe: () => () => {} } as unknown as Api, usageAccounts: null });
+    useStore.getState().loadUsageAccounts();
+    answer([row("a", "first"), row("b", "second")]);
+    await vi.waitFor(() => expect(Object.keys(useStore.getState().usageAccounts ?? {})).toEqual(["a", "b"]));
+    act(() => useStore.getState().noteGap());
+    act(() => useStore.getState().applyEvent({ type: "usage.account", key: "c", row: row("c", "new") } as unknown as ProtocolEvent));
+    answer([row("b", "second, read again")]);
+    await vi.waitFor(() => expect(useStore.getState().usageAccounts?.["b"]?.label).toBe("second, read again"));
+    expect(Object.keys(useStore.getState().usageAccounts ?? {}).sort()).toEqual(["b", "c"]);
   });
 });

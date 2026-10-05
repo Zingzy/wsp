@@ -486,6 +486,8 @@ export const GOLDEN_FRAMES_KEPT = 64;
 
 /** Whether usage.accounts was asked since the last gap, so every slate binding usage asks once between them. */
 let usageAccountsAsked = false;
+/** The rows pushed since usage.accounts was last asked: newer than its answer, so they stand over it. */
+let usageAccountsPushed: Record<string, AccountRow> = {};
 
 export const useStore = create<State>((set, get) => {
   /** A record the host answered, and its agent lists read again where it moved what they are marked by. */
@@ -762,8 +764,11 @@ export const useStore = create<State>((set, get) => {
     loadUsageAccounts() {
       if (usageAccountsAsked) return;
       usageAccountsAsked = true;
+      usageAccountsPushed = {};
+      // The answer is the whole list as it is now: it replaces what was kept, so an account gone since the last answer
+      // goes too, and only a push that came after the ask stands over it.
       void get().api?.usageAccounts?.().then(
-        answer => set(s => ({ usageAccounts: { ...Object.fromEntries(answer.accounts.map(row => [row.key, row])), ...s.usageAccounts } })),
+        answer => set({ usageAccounts: { ...Object.fromEntries(answer.accounts.map(row => [row.key, row])), ...usageAccountsPushed } }),
         () => {
           usageAccountsAsked = false;
         },
@@ -1430,6 +1435,7 @@ export const useStore = create<State>((set, get) => {
           slateEvent(e);
           return;
         case "usage.account":
+          usageAccountsPushed = { ...usageAccountsPushed, [e.key]: e.row };
           set(s => ({ usageAccounts: { ...s.usageAccounts, [e.key]: e.row } }));
           return;
         case "release.changed":
