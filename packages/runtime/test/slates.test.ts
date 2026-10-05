@@ -402,6 +402,14 @@ describe("the slate v2 host", () => {
     await expect(rt.sessions.start(workspaceId, { prompt: "two", cwd: join(root, "plain", "nowhere") })).rejects.toThrow(/^there is no folder at .*nowhere; name one that exists$/);
   });
 
+  it("a read puts the paths it was asked for in its text, not only its structured answer", async () => {
+    const { rt, asThread } = await threadOn("wsp-slates-read-text-");
+    await rt.slates.write({ text: TICKER }, asThread);
+    const read = await rt.slates.read({ values: ["$ticks", "$tick.state"], text: false }, asThread);
+    expect(read.text).toContain(`read:\n  $ticks = 0\n  $tick.state = "held"`);
+    expect(read.text).not.toContain("<slate");
+  });
+
   it("a write's warnings are in its text, with their fixes, not only in the structured answer", async () => {
     const { rt, asThread } = await threadOn("wsp-slates-warnings-text-");
     const wrote = await rt.slates.write({ text: `<slate title="Live Gold Prices"><column><text>a · b</text></column></slate>` }, asThread);

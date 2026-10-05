@@ -1176,9 +1176,11 @@ export function createSlates(deps: SlatesDeps): Slates {
       const clean = (v: SlateJson): SlateJson => mapStrings(v, s => scrub(r, s));
       const misreads = paths.flatMap(path => misread(doc, path));
       const sketch = p.sketch !== false ? sketched(r, views, false, misreads) : `slate v${r.version}`;
+      // The paths asked for go in the text too, since an agent may read the text alone.
+      const asks = paths.map(path => { const said = JSON.stringify(clean(evaluateSlateExpression(path, ctx) ?? null)); return `  ${path} = ${said.length > READ_OUTPUT_CHARS ? `${said.slice(0, READ_OUTPUT_CHARS)}... (${said.length} characters)` : said}`; });
       return {
         version: r.version,
-        text: [sketch, ...(p.text !== false && doc !== null ? ["", printSlate(doc)] : [])].join("\n"),
+        text: [sketch, ...(asks.length > 0 ? ["read:", ...asks] : []), ...(p.text !== false && doc !== null ? ["", printSlate(doc)] : [])].join("\n"),
         ...(p.document === true ? { document: doc as unknown as Record<string, unknown> | null } : {}),
         values: Object.fromEntries(paths.map(path => [path, clean(evaluateSlateExpression(path, ctx) ?? null)])),
         state: Object.fromEntries(Object.entries(r.values).filter(([name]) => doc?.runs[name] === undefined).map(([name, v]) => [`$${name}`, clean(v)])),
