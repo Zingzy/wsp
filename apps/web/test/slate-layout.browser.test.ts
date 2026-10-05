@@ -81,4 +81,32 @@ describe.skipIf(renderSkipped !== undefined)("the slate's layout in Chromium", (
     for (const step of steps) expect(step).toBeGreaterThan(head.width / 6 - 20);
     await page.close();
   });
+
+  it("gives a field room for its whole placeholder: the slot's 160 px where it fits, else a full line under its label", async () => {
+    for (const w of [600, 400]) {
+      const page = await open("form", w);
+      const fields = await page.evaluate(() =>
+        ["url", "slug"].map(id => {
+          const input = document.querySelector(`[data-slate-piece="${id}"] input`) as HTMLInputElement;
+          const style = getComputedStyle(input);
+          const ctx = document.createElement("canvas").getContext("2d")!;
+          ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+          const room = input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+          const row = input.closest("[data-slate-piece]")!.getBoundingClientRect();
+          const label = input.closest("[data-slate-piece]")!.querySelector("label")!.getBoundingClientRect();
+          return { needs: ctx.measureText(input.placeholder).width, room, width: input.getBoundingClientRect().width, inside: input.getBoundingClientRect().right <= row.right + 0.5, under: input.getBoundingClientRect().top >= label.bottom, fromLabel: Math.abs(input.getBoundingClientRect().left - label.left) };
+        }),
+      );
+      for (const f of fields) {
+        expect(f.room, `${w}: ${JSON.stringify(f)}`).toBeGreaterThanOrEqual(f.needs);
+        expect(f.width).toBeGreaterThanOrEqual(160);
+        expect(f.inside).toBe(true);
+        // Both placeholders outgrow the slot: each field stands under its label, from its edge (1 px is the border).
+        expect(f.under).toBe(true);
+        expect(f.fromLabel).toBeLessThanOrEqual(1);
+      }
+      await page.close();
+    }
+  });
+
 });

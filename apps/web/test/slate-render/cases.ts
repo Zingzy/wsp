@@ -16,4 +16,7 @@ export const RENDER_CASES: Readonly<Record<string, { text: string; values?: Reco
   "empty-table": {
     text: `<slate><value name="rows" start={[]} /><column><section title="Latest 5xx errors"><table id="errors" items={$rows}><col title="Time" value={item.t} /><col title="Status" value={item.s} /><col title="Method" value={item.m} /><col title="Path" value={item.p} /><col title="Duration (ms)" value={item.d} /><col title="Request" value={item.r} /></table></section></column></slate>`,
   },
+  form: {
+    text: `<slate><value name="url" start="" /><value name="slug" start="" /><column><section title="New link"><input id="url" label="Long URL" value={$url} placeholder="https://example.com/some/long/path" mono /><input id="slug" label="Alias" value={$slug} placeholder="optional, 3-16 letters" /></section></column></slate>`,
+  },
 };

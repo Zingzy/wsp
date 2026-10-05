@@ -24,6 +24,11 @@ const asText = (value: SlateJson | undefined): string => (value === undefined ||
 const LINE = "flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1.5";
 const LABEL = "min-w-0 text-sm leading-5 text-foreground";
 const SLOT_FIELD = cn(ROW_FIELD, "w-40 max-w-full");
+/** A field whose placeholder the 160 px slot cannot show whole takes its own line under the label, full width, as a
+ * field of several lines does, so every field in a card lines up whichever it is: 136 px of 13 px text holds about 17
+ * mono characters, 20 sans. */
+const LINE_FIELD = cn(ROW_FIELD, "w-full basis-full");
+const fieldFor = (placeholder: string | undefined, mono: boolean): string => ((placeholder?.length ?? 0) > (mono ? 17 : 20) ? LINE_FIELD : SLOT_FIELD);
 
 /** A secret's field: a password field whatever `kind` says. The text lives in the field until the host takes it,
  * then the field is empty again and draws the handle's dots (08). Emptying a filled field clears the secret. */
@@ -57,7 +62,7 @@ function SecretInput({ path, label, props, slate, sender }: { path: string; labe
       <Input
         id={fieldId}
         nativeInput
-        className={SLOT_FIELD}
+        className={fieldFor(str(props["placeholder"]), false)}
         type="password"
         autoComplete="off"
         data-slate-secret={path}
@@ -125,7 +130,7 @@ function TextInput({ piece, props, slate, sender, raise, path }: PieceViewProps 
     placeholder: str(props["placeholder"]),
     disabled: held !== undefined,
     title: held,
-    className: cn(lines > 1 ? "w-full" : SLOT_FIELD, props["mono"] === true && "font-mono"),
+    className: cn(lines > 1 ? "w-full" : fieldFor(str(props["placeholder"]), props["mono"] === true), props["mono"] === true && "font-mono"),
     onFocus: () => {
       if (path !== undefined) slate.focus(path);
       setDraft(text);
