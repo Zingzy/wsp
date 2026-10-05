@@ -254,3 +254,13 @@ describe("every field a run reads", () => {
     }
   });
 });
+
+describe("a per-row prop and a number given text", () => {
+  it("say the formula over item, or a number in braces, never a bare path", () => {
+    const chart = parseSlate(`<slate><value name="h" start={[]} /><chart label="x" items={$h} x="t" value="v" /></slate>`);
+    expect(chart.errors).toMatchObject([{ code: "T303", prop: "x", fix: "x={item.t}" }, { code: "T303", prop: "value", fix: "value={item.v}" }]);
+    expect(parseSlate(`<slate><value name="h" start={[]} /><bars label="x" items={$h} name="n" value={item.v} /></slate>`).errors).toMatchObject([{ code: "T303", fix: "name={item.n}" }]);
+    expect(parseSlate(`<slate><value name="n" start={1} /><meter label="x" value={1} max="n" /></slate>`).errors).toMatchObject([{ code: "T303", fix: "max={$n}" }]);
+    expect(parseSlate(`<slate><meter label="x" value={1} max="5" /></slate>`).errors).toMatchObject([{ code: "T303", fix: "max={5}" }]);
+  });
+});

@@ -592,9 +592,19 @@ class Validator {
       if (typeof v !== "string" || !enumWords.includes(v)) this.add("T306", `${name} is ${orList(enumWords)}; ${JSON.stringify(v)} is not one`, w, nearest(String(v), enumWords));
       return;
     }
+    if (ps.binds === "item" && name !== "key" && !/[.[]/.test(w.prop ?? "") && (typeof v === "string" || typeof v === "number")) {
+      // A literal on a per-row prop is the same on every row; the agent meant a field of the row.
+      const field = typeof v === "string" && /^[A-Za-z_]\w*$/.test(v) ? v : "field";
+      this.add("T303", `${name} is read per row, a formula over item: ${name}={item.${field}}; ${JSON.stringify(v)} would be the same on every row`, w, `${name}={item.${field}}`);
+      return;
+    }
     switch (ps.type) {
       case "number": case "integer":
-        if (typeof v === "string") { this.add("T303", `${name} takes a number; "${v}" is text. To bind it, write ${name}={${v}}`, w, `${name}={${v}}`); return; }
+        if (typeof v === "string") {
+          const fix = /^-?\d+(\.\d+)?$/.test(v.trim()) ? `${name}={${v.trim()}}` : this.kinds.has(v) ? `${name}={$${v}}` : undefined;
+          this.add("T303", `${name} takes a number in braces, like ${name}={5}, or a formula, like ${name}={$count}; "${v}" is text`, w, fix);
+          return;
+        }
         if (typeof v !== "number") { this.add("T303", `${name} takes a number`, w); return; }
         if (ps.type === "integer" && !Number.isInteger(v)) this.add("T303", `${name} is a whole number`, w);
         if ((ps.min !== undefined && v < ps.min) || (ps.max !== undefined && v > ps.max)) this.add("T303", `${name} is ${ps.min} to ${ps.max}`, w);
