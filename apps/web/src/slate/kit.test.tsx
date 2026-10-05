@@ -210,6 +210,19 @@ describe("the richer kit in the renderer", () => {
     expect(piece(c, "meta").closest("[data-slate-card]")).toBe(piece(c, "up").closest("[data-slate-card]"));
   });
 
+  it("sets a facts list's values in one face: mono only when every value is a figure, else sans, unless one asks for mono", () => {
+    const doc = compiled(`<slate><column>
+      <facts id="mixed"><fact label="Domain" value="spoo.me" /><fact label="Expires" value="2026-12-29" /><fact label="Days left" value="85" /><fact label="Checked" value="Tue 29 Dec" /></facts>
+      <facts id="figures"><fact label="CPU" value="12%" /><fact label="Memory" value="524 MB" /><fact label="Uptime" value="13s" /></facts>
+      <facts id="asked"><fact label="Path" value="/usr/local/bin" mono /><fact label="Days left" value="85" /></facts>
+    </column></slate>`);
+    const c = draw(doc).view.container;
+    const faces = (id: string) => [...piece(c, id).querySelectorAll("[data-settings-word]")].map(w => w.className.includes("font-mono"));
+    expect(faces("mixed")).toEqual([false, false, false, false]);
+    expect(faces("figures")).toEqual([true, true, true]);
+    expect(faces("asked")).toEqual([true, false]);
+  });
+
   it("draws bars, a status word with no dot, a chip as plain words, and no icon on a button, a text, a fact or a section head", () => {
     const doc = compiled(`<slate><value name="n" start={0} /><column>
       <bars label="Busiest" items={[{ n: 'web', v: 4 }, { n: 'host', v: 2 }]} name={item.n} value={item.v} />
