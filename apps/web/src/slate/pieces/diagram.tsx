@@ -57,8 +57,8 @@ function Drawing({ code, source }: { code: string; source: React.ReactNode }) {
   const dark = useAppDark();
   return (
     <RenderErrorBoundary fallback={source}>
-      <Suspense fallback={source}>
-        <MermaidBlock code={code} resolvedTheme={dark ? "dark" : "light"} source={source} look={SLATE_LOOK} />
+      <Suspense fallback={null}>
+        <MermaidBlock code={code} resolvedTheme={dark ? "dark" : "light"} source={source} look={SLATE_LOOK} drawing={null} />
       </Suspense>
     </RenderErrorBoundary>
   );

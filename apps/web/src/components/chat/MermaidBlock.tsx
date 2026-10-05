@@ -99,7 +99,8 @@ function configure(theme: "light" | "dark", look: MermaidLook | undefined): void
   configuredFor = key;
 }
 
-export default function MermaidBlock({ code, resolvedTheme, source, look }: { code: string; resolvedTheme: "light" | "dark"; source: ReactNode; look?: MermaidLook }) {
+/** `drawing`, when given, stands in while the diagram draws; the chat leaves it out and shows the source meanwhile. */
+export default function MermaidBlock({ code, resolvedTheme, source, look, drawing }: { code: string; resolvedTheme: "light" | "dark"; source: ReactNode; look?: MermaidLook; drawing?: ReactNode }) {
   const id = `mermaid-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const [drawn, setDrawn] = useState<Drawn>({ kind: "pending" });
   useEffect(() => {
@@ -141,6 +142,7 @@ export default function MermaidBlock({ code, resolvedTheme, source, look }: { co
       />
     );
   }
+  if (drawn.kind === "pending" && drawing !== undefined) return <>{drawing}</>;
   return (
     <div data-mermaid={drawn.kind}>
       {source}

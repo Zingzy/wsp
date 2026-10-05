@@ -376,3 +376,12 @@ describe("prose in a section", () => {
     expect(md.closest("[data-slate-card]")).toBeNull();
   });
 });
+
+describe("a diagram while it draws", () => {
+  it("shows nothing of its source before the drawing is ready", () => {
+    const c = draw(`<slate><column><diagram label="Flow">flowchart TD
+  A --> B</diagram></column></slate>`);
+    expect(c.querySelector('[data-slate-piece^="diagram"]')).not.toBeNull();
+    expect(c.textContent).not.toContain("flowchart TD");
+  });
+});
