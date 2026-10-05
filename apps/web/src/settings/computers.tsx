@@ -565,7 +565,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
         </section>
       )}
       {cloud || here ? null : <ComputerSignIns place={place} now={ctx.now} />}
-      {cloud ? null : <LimitsCard place={place} />}
+      <LimitsCard place={place} />
       {cloud ? null : <SpawnCard place={place} />}
       {cloud ? image === null ? null : <ReportLists report={imageAgentsReport(image, place.id)} ctx={{ where: "provider", on: name, editImage: () => openImageRecipe(place.id) }} /> : <AgentsLink place={place} ctx={ctx} />}
       {standing === undefined || !held ? null : <ImageCard place={place} name={standing.name} state={standing.state} view={standing.view} ctx={ctx} row />}

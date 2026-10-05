@@ -4,7 +4,7 @@
 // fold its own live rows through the same function, so the two cannot count
 // one computer two ways. One rule per kind of place, so a third kind is one
 // entry in the table below.
-import { agentsLine, fmtCost, fmtDuration, plural, SPEND_LIMIT_LINE } from "./format.js";
+import { agentsLine, fmtCost, fmtDuration, fmtLimit, plural, SPEND_LIMIT_LINE } from "./format.js";
 import type { CloudCap, PlaceCap, PlaceCapSet, PlaceKind, PlaceSettings, PlaceSettingsAsk, PlaceSettingWord, PlaceView, ThreadView, WorkspaceAgents, WorkspaceSize, WorkspaceView } from "./index.js";
 import { HERE_PLACE_ID } from "./place-word.js";
 import { isLocalWorkspace, workspaceState } from "./workspace-state.js";
@@ -58,6 +58,17 @@ export const NAP_AFTER_MAX_MS = 3 * 60 * 60_000;
 /** The nap window a person names in minutes: none of them never naps. */
 export const napMsOf = (minutes: number): number | null => (minutes === 0 ? null : minutes * 60_000);
 
+/** The turn limit on a cloud account until the person sets one: what a forgotten turn there can bill by the hour. A
+ * computer the person owns has none by default, since TURN_IDLE_MS already ends a stuck turn and nothing there bills. */
+export const TURN_WALL_MS = 6 * 60 * 60_000;
+
+/** The longest turn limit a person may set: past a day the number is more likely minutes typed as hours than a turn
+ * anyone means to run, and off is there for one that should never stop. */
+export const TURN_LIMIT_MAX_MS = 24 * 60 * 60_000;
+
+/** The turn limit a person names in hours: none of them is no limit. */
+export const turnLimitMsOf = (hours: number): number | null => (hours === 0 ? null : hours * 3_600_000);
+
 /** What a workspace runs under for one setting: its own, else its place's, else the default. Null is a value (a nap
  * that is off), so only an absent one falls through. The one chain the host's row and its idle and spawn rules read. */
 export function settingFor<T>(own: T | undefined, placed: T | undefined, fallback: T): T {
@@ -83,7 +94,7 @@ const dollars = (usd: number): string => (Number.isInteger(usd) ? `$${usd}` : fm
 const capNumber = (cap: PlaceCap | undefined, key: "threads" | "machines" | "spendPerDayUsd"): number | undefined =>
   cap !== undefined && key in cap ? (cap as Record<string, number>)[key] : undefined;
 
-type SettingView = Pick<PlaceView, "cap" | "capDefault" | "napMs" | "napDefault" | "spawn" | "spawnDefault">;
+type SettingView = Pick<PlaceView, "cap" | "capDefault" | "napMs" | "napDefault" | "turnLimitMs" | "turnLimitDefault" | "spawn" | "spawnDefault">;
 /** What a row says a setting runs at: the whole phrase, and the figure alone that a default beside it takes. */
 type SettingSaid = { long: string; short: string };
 
@@ -107,6 +118,15 @@ const SETTINGS: Record<PlaceSettingWord, { key: keyof PlaceSettings; parts?: rea
       const ms = fallback ? p.napDefault : p.napMs;
       if (ms === undefined) return undefined;
       return ms === null ? { long: "never naps", short: "never" } : { long: `naps after ${fmtDuration(ms)}`, short: fmtDuration(ms) };
+    },
+  },
+  "turn-limit": {
+    key: "turnLimitMs",
+    words: "turn limit",
+    reads: (p, fallback) => {
+      const ms = fallback ? p.turnLimitDefault : p.turnLimitMs;
+      if (ms === undefined) return undefined;
+      return ms === null ? { long: "no turn limit", short: "off" } : { long: `stops a turn at ${fmtLimit(ms)}`, short: fmtLimit(ms) };
     },
   },
   spawn: {
@@ -153,6 +173,8 @@ export function placeSettingDropped(settings: PlaceSettings, word: PlaceSettingW
 interface PlaceCapRule {
   /** The settings this kind takes. */
   keys: readonly PlaceSettingWord[];
+  /** How long one turn runs before it is stopped where the person set no limit; null is none. */
+  turnLimit: number | null;
   /** The set numbers over this kind's defaults; nothing where there is no default and nothing was set. */
   capOf(place: Pick<PlaceView, "shape">, set: PlaceCapSet): PlaceCap | undefined;
   /** How many at once the cap allows. */
@@ -167,7 +189,8 @@ interface PlaceCapRule {
 
 const PLACE_CAPS: Record<PlaceKind, PlaceCapRule> = {
   computer: {
-    keys: ["threads", "nap", "spawn", "max-depth"],
+    keys: ["threads", "nap", "turn-limit", "spawn", "max-depth"],
+    turnLimit: null,
     capOf: (place, set) => {
       const threads = set.threads ?? (place.shape === undefined ? undefined : threadsAtOnce(place.shape));
       return threads === undefined ? undefined : { threads };
@@ -181,7 +204,8 @@ const PLACE_CAPS: Record<PlaceKind, PlaceCapRule> = {
     },
   },
   provider: {
-    keys: ["machines", "spend", "nap", "spawn", "max-depth"],
+    keys: ["machines", "spend", "nap", "turn-limit", "spawn", "max-depth"],
+    turnLimit: TURN_WALL_MS,
     capOf: (_place, set) => ({ machines: set.machines ?? CLOUD_CAP_DEFAULT.machines, spendPerDayUsd: set.spendPerDayUsd ?? CLOUD_CAP_DEFAULT.spendPerDayUsd }),
     atOnce: cap => ("machines" in cap ? cap.machines : 0),
     noun: "machine",
@@ -193,6 +217,12 @@ const PLACE_CAPS: Record<PlaceKind, PlaceCapRule> = {
 /** A place's cap: the numbers the person set over its kind's defaults. */
 export function placeCapOf(place: Pick<PlaceView, "kind" | "shape">, set: PlaceCapSet = {}): PlaceCap | undefined {
   return PLACE_CAPS[place.kind].capOf(place, set);
+}
+
+/** How long one turn on a place of this kind runs before the runtime stops it: what the person set there, else the
+ * kind's default; null is no limit. The one reading the row and the turn's own reader both take. */
+export function placeTurnLimit(kind: PlaceKind, settings: PlaceSettings): number | null {
+  return settingFor(undefined, settings.turnLimitMs, PLACE_CAPS[kind].turnLimit);
 }
 
 /** Why a set is refused on this place: nothing set or reset at all, a setting its kind does not take, or one both

@@ -14,7 +14,7 @@ import { mcpServer } from "../src/mcp.js";
 import { CLOUD_ON } from "../src/cloud.js";
 import { PROVIDER_MODULES } from "../src/providers.js";
 import { CLOUD_MARK, CLOUD_SPAN_END, instructions, NO_CLOUD_MARK, NO_CLOUD_SPAN_END, skillFor, wspSkill } from "../src/skill.js";
-import { CLI_VERBS, VERBS } from "../src/verbs.js";
+import { CLI_VERBS, VERBS, verbPage } from "../src/verbs.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const captured = (): CliIO & { lines: string[]; errors: string[] } => {
@@ -95,14 +95,14 @@ describe.runIf(!CLOUD_ON)("with the cloud off", () => {
 
   it("no page, tool, skill line or instruction names a cloud", async () => {
     const tools = await toolList();
-    const read = { "wsp --help": HELP, "wsp --help agent": agentPage(), "the tool list": tools.text, "the skill": wspSkill(), "the instructions": instructions() };
+    const read = { "wsp --help": HELP, "wsp --help agent": agentPage(), "wsp computers set --help": verbPage(CLI_VERBS.find(v => v.name === "computers set")!, ""), "the tool list": tools.text, "the skill": wspSkill(), "the instructions": instructions() };
     const named = Object.entries(read).flatMap(([where, text]) => CLOUD_WORDS.filter(word => text.includes(word)).map(word => `${where}: ${word}`));
     expect(named).toEqual([]);
   });
 
   it("no page, tool, skill line or instruction says cloud, but for the uses allowed here", async () => {
     const tools = await toolList();
-    const read = { "wsp --help": HELP, "wsp --help agent": agentPage(), "the tool list": tools.text, "the skill": wspSkill(), "the instructions": instructions() };
+    const read = { "wsp --help": HELP, "wsp --help agent": agentPage(), "wsp computers set --help": verbPage(CLI_VERBS.find(v => v.name === "computers set")!, ""), "the tool list": tools.text, "the skill": wspSkill(), "the instructions": instructions() };
     const said = Object.entries(read).flatMap(([where, text]) =>
       [...text.matchAll(/[^.\n]*\bclouds?\b[^.\n]*/gi)].map(m => m[0].trim()).filter(line => !CLOUD_ALLOWED.some(allowed => line.includes(allowed))).map(line => `${where}: ${line}`),
     );

@@ -72,6 +72,9 @@ pub struct SetIn {
     #[cfg_attr(test, schemars(with = "Option<u64>"))]
     pub nap: Option<Number>,
     #[serde(default)]
+    #[cfg_attr(test, schemars(with = "Option<u64>"))]
+    pub turn_limit: Option<Number>,
+    #[serde(default)]
     pub spawn: Option<String>,
     #[serde(default)]
     #[cfg_attr(test, schemars(with = "Option<u64>"))]
@@ -98,7 +101,8 @@ struct Placed {
 }
 
 async fn set(host: std::sync::Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let SetIn { computer, threads, machines, spend, nap, spawn, max_machines, max_depth, recipe, reset } = input(SET_NAME, arguments)?;
+    let SetIn { computer, threads, machines, spend, nap, turn_limit, spawn, max_machines, max_depth, recipe, reset } =
+        input(SET_NAME, arguments)?;
     let client = host.client().await?;
     let words = record::words();
     let mut frame = Map::new();
@@ -123,6 +127,10 @@ async fn set(host: std::sync::Arc<Host>, arguments: Value) -> Result<Answer, Ref
         let window = nap_asked(entry_in(SET_LISTED, host.cloud()).unwrap_or_default(), minutes).map_err(Refused::Input)?;
         frame.insert("napMs".to_owned(), window);
     }
+    if let Some(hours) = &turn_limit {
+        let limit = turn_limit_asked(entry_in(SET_LISTED, host.cloud()).unwrap_or_default(), hours).map_err(Refused::Input)?;
+        frame.insert("turnLimitMs".to_owned(), limit);
+    }
     if let Some(asked) = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref())
         .map_err(|word| refused_field(SET_NAME, SET_LISTED, host.cloud(), "spawn", Value::from(word)))?
     {
@@ -146,12 +154,20 @@ fn nap_asked(entry: &str, minutes: &Number) -> Result<Value, String> {
     Ok(if m == 0 { Value::Null } else { Value::from(m * 60_000) })
 }
 
+/// The turn limit a call names in hours, held to the entry's range in its own words: none of them is no limit, the
+/// rule turnLimitMsOf keeps on the host's side.
+fn turn_limit_asked(entry: &str, hours: &Number) -> Result<Value, String> {
+    held_field(SET_NAME, entry, "turn_limit", &Value::Number(hours.clone()))?;
+    let Some(h) = hours.as_u64() else { return Err(input_refusal(SET_NAME, &format!("turn_limit cannot be read as {hours}"))) };
+    Ok(if h == 0 { Value::Null } else { Value::from(h * 3_600_000) })
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{json, Number, Value};
 
     use super::super::{entry_in, held_field};
-    use super::{nap_asked, SET};
+    use super::{nap_asked, turn_limit_asked, SET};
 
     fn minutes(v: Value) -> Number {
         v.as_number().unwrap().clone()
@@ -172,6 +188,17 @@ mod tests {
         for given in [json!(2.5), json!(-1), json!(181)] {
             let refused = nap_asked(entry, &minutes(given.clone())).expect_err(&format!("{given} was taken"));
             assert_eq!(refused, recorded(json!({ "computer": "attic", "nap": given })));
+        }
+    }
+
+    #[test]
+    fn a_turn_limit_is_whole_hours_in_range_or_none_and_anything_else_is_refused_in_the_inputs_words() {
+        let entry = entry_in(SET.listed, false).unwrap();
+        assert_eq!(turn_limit_asked(entry, &minutes(json!(0))).unwrap(), Value::Null);
+        assert_eq!(turn_limit_asked(entry, &minutes(json!(12))).unwrap(), json!(43_200_000));
+        for given in [json!(1.5), json!(-1), json!(25)] {
+            let refused = turn_limit_asked(entry, &minutes(given.clone())).expect_err(&format!("{given} was taken"));
+            assert_eq!(refused, recorded(json!({ "computer": "attic", "turn_limit": given })));
         }
     }
 

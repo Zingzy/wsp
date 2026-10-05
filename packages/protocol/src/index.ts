@@ -63,7 +63,7 @@ import { Checkout } from "./changes.js";
 import { GitBranchCompareReply, GitMergeInReply, GitStartOnReply, TreeFact } from "./tree.js";
 import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitPrReactReply, GitPrReplyReply, GitPrResolveReply, GitRepoReadReply, GitRunLogReply, GitUpdateReply, MergeMethod, PullRequest, PullRequestItem, PullRequestSeen, PR_REPLY_BODY_MAX, ReactionContent } from "./pull-request.js";
 import { GitIssueReadReply, GitPrCheckoutReply, GitPrDiffReply, GitPrReviewReply, ReviewDraft, WorkspaceFrom } from "./start.js";
-import { AGENTS_ON, NAP_AFTER_MAX_MS, placeAtLimitLine, placeFullLine } from "./place-state.js";
+import { AGENTS_ON, NAP_AFTER_MAX_MS, placeAtLimitLine, placeFullLine, TURN_LIMIT_MAX_MS } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
 import type { LinkTarget } from "./app-address.js";
 import { rootsPathIn } from "./project-path.js";
@@ -100,8 +100,6 @@ export const TURN_IDLE_MS = 10 * 60_000;
  * percent of one core clears it, which a vitest batch or a packager does many times over; a harness process waking
  * on its own timers stays under it, so a turn nothing is working on is still cut at TURN_IDLE_MS. */
 export const TURN_WORK_TICKS_PER_S = 5;
-/** The longest one turn may run however much it prints, a safety cap only; a per-workspace setting is a follow-up. */
-export const TURN_WALL_MS = 6 * 60 * 60_000;
 /** How long a harness gets to exit on its own after the result its turn ended on, before the runtime ends it and its
  * tree. Long enough for the harness to flush its own session store and go, short enough that a machine running turns
  * all day never carries more than the one it is on: seven finished turns' processes were found alive on one guest,
@@ -3481,6 +3479,8 @@ export type PlaceCapSet = z.infer<typeof PlaceCapSet>;
  * `napMs` is how long a workspace there with no window of its own runs quiet before it naps; null never naps it. */
 export const PlaceSettings = PlaceCapSet.extend({
   napMs: z.number().int().min(60_000).max(NAP_AFTER_MAX_MS).nullable().optional(),
+  /** How long one turn there may run before the runtime stops it; null never stops one. */
+  turnLimitMs: z.number().int().min(3_600_000).max(TURN_LIMIT_MAX_MS).nullable().optional(),
   /** What the agents on a workspace there may ask of this host where the workspace holds no switch of its own: only
    * the parts the person set, so every other part follows AGENTS_ON as it reads now. */
   spawn: WorkspaceAgents.partial().optional(),
@@ -3490,7 +3490,7 @@ export type PlaceSettings = z.infer<typeof PlaceSettings>;
 export const PlaceSettingsAsk = PlaceSettings;
 export type PlaceSettingsAsk = z.infer<typeof PlaceSettingsAsk>;
 /** A setting on a place by the word the command line and the tool name it with, which a reset takes. */
-export const PlaceSettingWord = z.enum(["threads", "machines", "spend", "nap", "spawn", "max-depth"]);
+export const PlaceSettingWord = z.enum(["threads", "machines", "spend", "nap", "turn-limit", "spawn", "max-depth"]);
 export type PlaceSettingWord = z.infer<typeof PlaceSettingWord>;
 
 /** The Macs a computer's icon tells apart. */
@@ -3619,6 +3619,11 @@ export const PlaceView = z.object({
   /** The nap window this host gives a place nobody set one on: what a reset of `napMs` goes back to. Present where
    * `napMs` is. */
   napDefault: z.number().int().optional(),
+  /** How long one turn here may run before the runtime stops it, the person's or the default; null where no limit
+   * stops one. */
+  turnLimitMs: z.number().int().nullable().optional(),
+  /** The turn limit this kind of place has when nobody set one: what a reset of `turnLimitMs` goes back to. */
+  turnLimitDefault: z.number().int().nullable().optional(),
   /** What the agents on a workspace here may ask of this host where it holds no switch of its own: the person's
    * setting for this place, else `spawnDefault`. */
   spawn: WorkspaceAgents.optional(),
@@ -7671,7 +7676,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceComputerName } from "./place-name.js";
 export { needsYouLine, subagentStateWord, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
-export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingDropped, placeSettingNamed, placeSettingsLine, placeTakes, settingFor, napMsOf, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
+export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingDropped, placeSettingNamed, placeSettingsLine, placeTakes, placeTurnLimit, settingFor, napMsOf, TURN_LIMIT_MAX_MS, TURN_WALL_MS, turnLimitMsOf, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";

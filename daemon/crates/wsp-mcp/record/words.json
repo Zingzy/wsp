@@ -200,7 +200,7 @@
   },
   "usages": {
     "computers": "wsp computers",
-    "computers_set": "wsp computers set <computer> [--threads <n>] [--nap <minutes>|off] [--spawn on|off] [--max-machines <n>] [--max-depth <n>] [--recipe <name>|none] [--reset <setting>]...",
+    "computers_set": "wsp computers set <computer> [--threads <n>] [--nap <minutes>|off] [--turn-limit <hours>|off] [--spawn on|off] [--max-machines <n>] [--max-depth <n>] [--recipe <name>|none] [--reset <setting>]...",
     "recipes": "wsp recipes",
     "recipes_show": "wsp recipes show <name>",
     "recipes_save": "wsp recipes save <name> --from <computer>",

@@ -447,7 +447,7 @@ describe("machineExecStream", () => {
       (async () => {
         for await (const line of attached.lines) void line;
       })(),
-    ).rejects.toThrow(/^stopped after 30m 00s at the 30m cap on one turn$/);
+    ).rejects.toThrow(/^stopped after 30m 00s at the 30m turn limit; send to continue where it stopped, or change the limit in Settings > Computers$/);
     expect(clock.now).toBe(30 * 60_000);
   });
 
@@ -460,7 +460,7 @@ describe("machineExecStream", () => {
       (async () => {
         for await (const line of stream.lines) seen.push(line);
       })(),
-    ).rejects.toThrow(/^stopped after 30m 00s at the 30m cap on one turn$/);
+    ).rejects.toThrow(/^stopped after 30m 00s at the 30m turn limit; send to continue where it stopped, or change the limit in Settings > Computers$/);
     expect(seen).toEqual([]);
     expect(clock.now).toBe(30 * 60_000);
     expect(await stream.exited).toBeNull();
@@ -548,7 +548,7 @@ describe("machineExecStream", () => {
       (async () => {
         for await (const line of stream.lines) seen.push(line);
       })(),
-    ).rejects.toThrow(/^stopped after 2h 00m 00s at the 2h cap on one turn$/);
+    ).rejects.toThrow(/^stopped after 2h 00m 00s at the 2h turn limit; send to continue where it stopped, or change the limit in Settings > Computers$/);
     expect(seen).toHaveLength(120);
     expect(await stream.exited).toBeNull();
     expect(guest.childAlive()).toBe(false);
@@ -836,7 +836,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
       (async () => {
         for await (const line of stream.lines) void line;
       })(),
-    ).rejects.toThrow(/at the 6h cap on one turn$/);
+    ).rejects.toThrow(/at the 6h turn limit; send to continue where it stopped, or change the limit in Settings > Computers$/);
     expect(clock.now).toBeGreaterThanOrEqual(LINK_RETRY_WINDOW_MS);
     expect(clock.now).toBeLessThan(LINK_RETRY_WINDOW_MS + 20_000);
     expect(await stream.exited).toBeNull();
@@ -850,7 +850,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
       (async () => {
         for await (const line of stream.lines) lines.push(line);
       })(),
-    ).rejects.toThrow(/at the 6h cap on one turn$/);
+    ).rejects.toThrow(/at the 6h turn limit; send to continue where it stopped, or change the limit in Settings > Computers$/);
     expect(lines).toEqual(["while-away"]);
     expect(await stream.exited).toBeNull();
   });

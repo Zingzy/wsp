@@ -8,7 +8,7 @@
 // through a hook per agent without any file of the person's being touched. A
 // hook the person's own file already claims is left alone and named in the result.
 import { BREW_PREFIX, CATALOG_AGENTS, CONTEXT_MARKER, MODE, SKILL_NAME, agentName, type AgentContext, type AgentEntry, type ContextHooks, type ContextOutcomeKind, type GuestFile, type GuestRoots } from "@wsp/catalog";
-import { ANOTHER_AGENT_WORDS, backgroundWorkWords, RUN_BLOCK_WORDS, TURN_END_WORDS, TURN_WALL_MS, fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
+import { ANOTHER_AGENT_WORDS, backgroundWorkWords, RUN_BLOCK_WORDS, TURN_END_WORDS, fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { SHELL_READ } from "./machine-facts.js";
 import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
@@ -37,7 +37,7 @@ export const GUEST_ROOTS: GuestRoots = { etc: "/etc", home: "/root" };
  * so the turn is held open until it does and the agent is handed its result there; nothing else wakes the agent, and
  * a turn cut before that (the wall) takes the command with it. */
 const turnFact = (agent: ContextAgent | undefined): string =>
-  `- ${TURN_END_WORDS}; a command you run in the background holds the turn open until it finishes, up to the ${TURN_WALL_MS / 3_600_000} hour cap on one turn, and its result reaches you there. ${backgroundWorkWords(agent?.backgroundRoad)}. Nothing else wakes you, so a command whose output you want in the same breath runs in the foreground and you wait for it. Only a server you mean to keep serving is detached with setsid nohup, and that one holds nothing open.`;
+  `- ${TURN_END_WORDS}; a command you run in the background holds the turn open until it finishes, up to the turn limit set for this computer if it has one, and its result reaches you there. ${backgroundWorkWords(agent?.backgroundRoad)}. Nothing else wakes you, so a command whose output you want in the same breath runs in the foreground and you wait for it. Only a server you mean to keep serving is detached with setsid nohup, and that one holds nothing open.`;
 
 /** The short, always-loaded text; the skill beside it carries the full document. */
 export const contextPath = (roots: GuestRoots = GUEST_ROOTS): string => `${roots.etc}/wsp/machine-context.md`;

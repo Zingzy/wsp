@@ -87,8 +87,11 @@ import {
   type PlaceReport,
   type PlaceView,
   type TurnResult,
+  TURN_WALL_MS,
+  turnCutLine,
 } from "@wsp/protocol";
 import { CODEX_TOML, MCP_SERVERS_JSON, TOOL_PREFIX, installEnv, installHomes } from "@wsp/catalog";
+import type { MachineExecOptions } from "../src/machine-exec.js";
 import { copyKey, createRuntime, GUEST_LOGIN_ENV, wiredPlace, type GoldenRecipe, type HarnessAdapterFactory, type HostFolders, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { removeScript } from "../src/project-landing.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
@@ -100,6 +103,7 @@ import { NO_AGENTS_READER, type AgentsActs, type AgentsOn, type AgentsReader, ty
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, createOn, fakeLocal, projectOn } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
+import { scriptGuest } from "./script-guest.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 import { DOOR, HERE, agreeing, joinAt, nonce, relinkAt, report, signWith, wiring } from "./place-join.js";
@@ -875,10 +879,10 @@ describe("a place's cap and what runs there", () => {
   it("refuses a number the row's kind does not take, a place this host does not hold and a set with no number, as usage, and writes nothing", async () => {
     const { store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
-    expect(await capOf(host, HERE_PLACE_ID, { machines: 2 })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once, agents may start agents and levels deep, not machines at once` });
-    expect(await capOf(host, "solari", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: "solari takes machines at once, spend per day, nap after, agents may start agents and levels deep, not threads at once" });
+    expect(await capOf(host, HERE_PLACE_ID, { machines: 2 })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once, turn limit, agents may start agents and levels deep, not machines at once` });
+    expect(await capOf(host, "solari", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: "solari takes machines at once, spend per day, nap after, turn limit, agents may start agents and levels deep, not threads at once" });
     expect(await capOf(host, "p_nothing", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: noSuchPlaceRefusal("p_nothing", [HERE.name, "solari"]) });
-    expect(await capOf(host, "solari", {})).toMatchObject({ ok: false, kind: "usage", error: "nothing to set on solari: it takes machines at once, spend per day, nap after, agents may start agents and levels deep" });
+    expect(await capOf(host, "solari", {})).toMatchObject({ ok: false, kind: "usage", error: "nothing to set on solari: it takes machines at once, spend per day, nap after, turn limit, agents may start agents and levels deep" });
     host.close();
     expect(await store.keys("caps")).toEqual([]);
   });
@@ -978,11 +982,143 @@ describe("a place's nap after", () => {
   it("is refused on the computer the host runs on, whose workspaces are folders that never nap, and says nothing of it on that row", async () => {
     await serving();
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
-    expect(await host.request("places.set", { placeId: HERE_PLACE_ID, napMs: 5 * MIN })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once, agents may start agents and levels deep, not nap after` });
+    expect(await host.request("places.set", { placeId: HERE_PLACE_ID, napMs: 5 * MIN })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once, turn limit, agents may start agents and levels deep, not nap after` });
     expect(await host.request("places.set", { placeId: "p_1", napMs: 30_000 })).toMatchObject({ ok: false });
     host.close();
     expect((await placesOf()).find(p => p.id === HERE_PLACE_ID)!.napMs).toBeUndefined();
   });
+});
+
+/** A harness whose turn is one real run read through the factory its kind handed it, failing with what ended the
+ * read, as the shipped adapters fail a turn whose stream the runtime cut. */
+const busy: HarnessAdapterFactory = ctx => ({
+  steers: false,
+  start: ({ onEvent }) => {
+    const sessionId = randomUUID();
+    onEvent({ type: "session.start", sessionId });
+    // It prints as it goes, so the idle cut never stands in for the limit under test.
+    const stream = ctx.execStream("while :; do echo working; sleep 0.05; done", { env: { ...ctx.env } });
+    const finished = (async (): Promise<TurnResult> => {
+      const result: TurnResult = await (async () => {
+        for await (const line of stream.lines) void line;
+        return { status: "completed", text: "done" } as const;
+      })().catch((e: unknown) => ({ status: "failed", error: e instanceof Error ? e.message : String(e) }) as const);
+      onEvent({ type: "turn.done", sessionId, result });
+      onEvent({ type: "session.end", sessionId, exitCode: await stream.exited, sawResult: true });
+      return result;
+    })();
+    return { localId: sessionId, finished, interrupt: async () => stream.kill() };
+  },
+});
+
+describe("a place's turn limit", () => {
+  const HOUR = 3_600_000;
+
+  it("reads off on a computer the person owns and six hours on a cloud, and takes a set and a reset on either", async () => {
+    const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
+    const joined = await join(hostKey, { code: await code() });
+    const rows = async (): Promise<Record<string, Pick<PlaceView, "turnLimitMs" | "turnLimitDefault">>> =>
+      Object.fromEntries((await placesOf()).map(p => [p.id, { turnLimitMs: p.turnLimitMs, turnLimitDefault: p.turnLimitDefault }]));
+    expect(await rows()).toEqual({
+      [HERE_PLACE_ID]: { turnLimitMs: null, turnLimitDefault: null },
+      [joined.placeId]: { turnLimitMs: null, turnLimitDefault: null },
+      solari: { turnLimitMs: TURN_WALL_MS, turnLimitDefault: TURN_WALL_MS },
+    });
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const here = (await host.request("places.set", { placeId: HERE_PLACE_ID, turnLimitMs: 2 * HOUR })) as { place: PlaceView };
+    expect(here).toMatchObject({ ok: true, place: { turnLimitMs: 2 * HOUR, turnLimitDefault: null, settings: { turnLimitMs: 2 * HOUR } } });
+    expect(placeSettingsLine(here.place)).toContain("stops a turn at 2h (off by default)");
+    expect(await host.request("places.set", { placeId: "solari", turnLimitMs: null })).toMatchObject({ ok: true, place: { turnLimitMs: null, turnLimitDefault: TURN_WALL_MS, settings: { turnLimitMs: null } } });
+    expect(await host.request("places.set", { placeId: joined.placeId, turnLimitMs: 30 * 60_000 })).toMatchObject({ ok: false });
+    expect(await rows()).toMatchObject({ [HERE_PLACE_ID]: { turnLimitMs: 2 * HOUR }, [joined.placeId]: { turnLimitMs: null }, solari: { turnLimitMs: null } });
+    expect(await host.request("places.set", { placeId: HERE_PLACE_ID, reset: ["turn-limit"] })).toMatchObject({ ok: true, place: { turnLimitMs: null } });
+    expect(await host.request("places.set", { placeId: "solari", reset: ["turn-limit"] })).toMatchObject({ ok: true, place: { turnLimitMs: TURN_WALL_MS } });
+    expect((await placesOf()).find(p => p.id === "solari")!.settings).toBeUndefined();
+    host.close();
+  });
+
+  it("is what a turn's reader runs under, read at the turn's launch, and a turn it stops says so and how to go on", async () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-turn-limit-"));
+    try {
+      const handed: (MachineExecOptions | undefined)[] = [];
+      // The clock the reader reads, moved past the limit once the turn is under way.
+      let skew = 0;
+      const local = fakeLocal(root);
+      const backend = stubBackend();
+      runtime = createRuntime({
+        backend,
+        places: wiredPlace("solari", backend),
+        store: memoryStore(),
+        adapters: { claude: busy },
+        placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }),
+        local: { ...local, execStream: (o, waiting) => (handed.push(o), local.execStream({ ...o, now: () => Date.now() + skew, pollMs: 20 }, waiting)) },
+      });
+      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      const mac = await createOn(runtime, { on: HERE_PLACE_ID, name: "mac" });
+      // The exec verb's road hands its own limits, idle among them; every road through the turn's adapter hands only the wall.
+      const turnOn = (): MachineExecOptions | undefined => [...handed].reverse().find(o => o !== undefined && o.idleMs === undefined);
+
+      const off = await runtime.sessions.start(mac.id, { prompt: "one" });
+      await until(() => turnOn() !== undefined);
+      expect(turnOn()).toEqual({ deadlineMs: Number.POSITIVE_INFINITY });
+      // A day on, a computer with no limit still has its turn running.
+      skew = 24 * HOUR;
+      await new Promise(done => setTimeout(done, 200));
+      expect((await runtime.sessions.list(mac.id)).map(r => r.status)).toEqual(["running"]);
+      await runtime.sessions.interrupt(off.id);
+      await off.finished;
+      skew = 0;
+
+      const host = await WsClient.connect(srv.port, { token: "host-token" });
+      expect(await host.request("places.set", { placeId: HERE_PLACE_ID, turnLimitMs: 2 * HOUR })).toMatchObject({ ok: true });
+      host.close();
+      handed.length = 0;
+      const capped = await runtime.sessions.start(mac.id, { prompt: "two" });
+      await until(() => turnOn() !== undefined);
+      expect(turnOn()).toEqual({ deadlineMs: 2 * HOUR });
+      skew = 2 * HOUR;
+      const result = await capped.finished;
+      expect(result.status).toBe("failed");
+      expect(result.error).toMatch(/^stopped after 2h 00m \d\ds at the 2h turn limit; send to continue where it stopped, or change the limit in Settings > Computers$/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("stops a turn on a cloud's machine at six hours until the person sets another, and never once it is off", async () => {
+    let skew = 0;
+    const backend = stubBackend();
+    runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: { claude: busy }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), machineExec: { now: () => Date.now() + skew, pollMs: 5 } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const cloud = await createOn(runtime, { on: "solari", golden: "snap_g", name: "cloud" });
+    scriptGuest(backend, [], backend.execImpl);
+    const capped = await runtime.sessions.start(cloud.id, { prompt: "one" });
+    await until(async () => (await runtime!.sessions.history(cloud.id)).some(e => e.type === "session.start"));
+    skew = TURN_WALL_MS;
+    expect(await capped.finished).toEqual({ status: "failed", error: turnCutLine("wall", TURN_WALL_MS, TURN_WALL_MS) });
+
+    skew = 0;
+    const host = await WsClient.connect(srv.port, { token: "host-token" });
+    expect(await host.request("places.set", { placeId: "solari", turnLimitMs: null })).toMatchObject({ ok: true });
+    host.close();
+    const guest = scriptGuest(backend, [], backend.execImpl);
+    const open = await runtime.sessions.start(cloud.id, { prompt: "two" });
+    await until(async () => (await runtime!.sessions.history(cloud.id)).filter(e => e.type === "session.start").length === 2);
+    // A day on, in the same poll that brings the turn's next line, so only the limit could stop it.
+    const answer = backend.execImpl;
+    backend.execImpl = async (m, cmd) => {
+      if (skew === 0 && cmd.includes("__WSP_EOF_")) {
+        skew = 24 * HOUR;
+        guest.append("working\n");
+      }
+      return answer(m, cmd);
+    };
+    await until(() => skew > 0);
+    await new Promise(done => setTimeout(done, 200));
+    expect((await runtime.sessions.list(cloud.id)).map(r => r.status)).toEqual(["failed", "running"]);
+    await runtime.sessions.interrupt(open.id);
+    await open.finished;
+  }, 20_000);
 });
 
 describe("whether agents may start agents, as a place's default", () => {

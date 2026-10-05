@@ -34,6 +34,7 @@ import {
   AGENTS_ON,
   agentsFrom,
   placeTakes,
+  placeTurnLimit,
   settingFor,
   placeLinkTranscript,
   placeRefusalTranscript,
@@ -585,6 +586,10 @@ export interface PlaceDoor {
   /** What the person set on one place, as load read it and every set since wrote it: answered without a read, since
    * the idle policy asks it each time it arms a workspace there. */
   settingsAt(placeId: string): PlaceSettings;
+  /** How long one turn on a place runs before its reader stops it, off the kind of row the place is and what the person
+   * set there, null being no limit: answered without a read, since every turn's launch asks it. Nothing for a place
+   * this door lists no row for. */
+  turnLimitAt(placeId: string): number | null | undefined;
   /** The sign-in word per agent on one computer, off the report it last sent and the vault this host holds: the
    * same reading its row carries, so what a turn is handed and what the screen says cannot part ways. Answered
    * without a read of the store, since every launch on that computer asks it. Nothing for a place this host holds
@@ -1117,6 +1122,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       ...(capDefault !== undefined ? { capDefault } : {}),
       ...(Object.keys(settings).length > 0 ? { settings } : {}),
       ...(placeTakes(row, "nap") ? { napMs: settingFor(undefined, settings.napMs, napDefault), napDefault } : {}),
+      turnLimitMs: placeTurnLimit(row.kind, settings),
+      turnLimitDefault: placeTurnLimit(row.kind, {}),
       spawn: agentsFrom(undefined, settings.spawn ?? {}),
       spawnDefault: AGENTS_ON,
       running: await recording.runningOn(row.id, ids),
@@ -2559,6 +2566,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     nameOf: placeId => (placeId === HERE_PLACE_ID ? wiring.here().name : (kept.get(placeId)?.name ?? placeId)),
 
     settingsAt: placeId => settingsHeld.get(placeId) ?? {},
+
+    turnLimitAt: placeId => {
+      const kind = placeId === HERE_PLACE_ID || kept.has(placeId) ? "computer" : providerIds().includes(placeId) ? "provider" : undefined;
+      return kind === undefined ? undefined : placeTurnLimit(kind, settingsHeld.get(placeId) ?? {});
+    },
 
     signInsAt: signInsHere,
 

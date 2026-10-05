@@ -405,6 +405,38 @@ describe("a computer's own page", () => {
     expect(asked.at(-1)).toEqual(["p_2", { spawn: { spawn: false } }, []]);
   });
 
+  it("sets the turn limit through the host, off by default on a computer, six hours on a cloud, and takes a set one back", async () => {
+    const HOUR = 3_600_000;
+    const asked: Array<[string, unknown, readonly string[]]> = [];
+    const row: PlaceView = { ...box, cap: { threads: 2 }, capDefault: { threads: 2 }, turnLimitMs: null, turnLimitDefault: null };
+    const cloud: PlaceView = { ...solari, turnLimitMs: 12 * HOUR, turnLimitDefault: 6 * HOUR, settings: { turnLimitMs: 12 * HOUR } };
+    useStore.setState({ places: [here, row, cloud] });
+    const api = computersApi({
+      agentsRead: async () => AGENTS_REPORT,
+      placesSet: async (placeId, ask, reset = []) => {
+        asked.push([placeId, ask, reset]);
+        return placeId === row.id ? { ...row, turnLimitMs: 6 * HOUR, settings: { turnLimitMs: 6 * HOUR } } : { ...cloud, turnLimitMs: 6 * HOUR, settings: {} };
+      },
+    }).api;
+    await mountComputers(api, { kind: "computer", id: "p_2" });
+    const limit = (): Element => document.querySelector("[data-settings-page] [data-settings-row=turn-limit]")!;
+    expect(limit().querySelector("[data-settings-title]")?.textContent).toBe(COMPUTER_PAGE_WORDS.turnLimitTitle);
+    expect(limit().querySelector("[data-settings-description]")?.textContent).toBe(COMPUTER_PAGE_WORDS.turnLimitLine);
+    expect(limit().querySelector("[data-k=turn-limit]")?.textContent).toBe("Off");
+    expect(limit().querySelector("[data-k=row-reset]")).toBeNull();
+    const offered = await pickOption(limit().querySelector("[data-k=turn-limit]")!, "6 hours");
+    expect(offered).toEqual(["1 hour", "2 hours", "4 hours", "6 hours", "8 hours", "12 hours", "24 hours", "Off"]);
+    await waitFor(() => expect(asked.at(-1)).toEqual(["p_2", { turnLimitMs: 6 * HOUR }, []]));
+    cleanup();
+
+    resetSettings();
+    useStore.setState({ places: [here, row, cloud] });
+    await mountComputers(api, { kind: "computer", id: "solari" });
+    expect(limit().querySelector("[data-k=turn-limit]")?.textContent).toBe("12 hours");
+    await act(async () => fireEvent.click(limit().querySelector("[data-k=row-reset]")!));
+    expect(asked.at(-1)).toEqual(["solari", {}, ["turn-limit"]]);
+  });
+
   it("steps Levels deep under the agents switch while it is on, takes a set depth back to the default, and names machines only where the computer forks them", async () => {
     const asked: Array<[string, unknown, readonly string[]]> = [];
     const agents = { spawn: true, maxMachines: 3, maxDepth: 2 };

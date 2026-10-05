@@ -533,6 +533,9 @@ export const COMPUTER_PAGE_WORDS = {
   napTitle: "Nap a quiet workspace after",
   napLine: "A workspace with no running turn stops and wakes on the next message.",
   napNever: "Never",
+  turnLimitTitle: "Turn limit",
+  turnLimitLine: "Stops a turn that runs this long. Send to the thread to continue where it stopped.",
+  turnLimitOff: "Off",
   threadsHere: "Threads here",
   spawnTitle: "Agents may start agents",
   spawnLine: (depth: number, machines?: number): string =>

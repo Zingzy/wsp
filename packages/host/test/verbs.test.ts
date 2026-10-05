@@ -3893,12 +3893,12 @@ describe("wsp verbs over the host", () => {
       const fallback = (here.capDefault as { threads: number }).threads;
       const set = await run("computers", "set", HERE_PLACE_ID, "--threads", "2");
       expect(set.code, set.io.errors.join("\n")).toBe(0);
-      expect(set.io.lines).toEqual([`${here.name}: 2 threads at once (${fallback} by default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)`]);
+      expect(set.io.lines).toEqual([`${here.name}: 2 threads at once (${fallback} by default), no turn limit (the default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)`]);
       expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)).toMatchObject({ cap: { threads: 2 }, settings: { threads: 2 } });
       const asJson = await run("computers", "set", here.name, "--threads", "1", "--json");
       expect(json(asJson.io).at(-1)).toMatchObject({ computer: { id: HERE_PLACE_ID, cap: { threads: 1 }, capDefault: { threads: fallback } } });
       const back = await run("computers", "set", HERE_PLACE_ID, "--reset", "threads");
-      expect(back.io.lines).toEqual([`${here.name}: ${fallback} ${fallback === 1 ? "thread" : "threads"} at once (the default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)`]);
+      expect(back.io.lines).toEqual([`${here.name}: ${fallback} ${fallback === 1 ? "thread" : "threads"} at once (the default), no turn limit (the default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)`]);
       expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)!.settings).toBeUndefined();
     });
 
@@ -3919,6 +3919,27 @@ describe("wsp verbs over the host", () => {
       const long = await run("computers", "set", forks.id, "--nap", "181");
       expect(long.code).toBe(EXIT_CODES.usage);
       expect(long.io.errors[0]).toBe(`wsp computers set: --nap for ${forks.id} takes whole minutes from 1 to 180, or off, and got "181". Write it as --nap 20 or --nap off.`);
+    });
+
+    it("sets the turn limit in whole hours or off, on this computer and on a cloud, and a reset takes it back", async () => {
+      await handle?.close();
+      rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: { ...placeWiring(statePath), provider: () => ({ id: "default", rateUsdPerHour: 0.1 }) }, daemonChannel: daemon.open });
+      handle = await serve(captured(), { port: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+      const set = await run("computers", "set", HERE_PLACE_ID, "--turn-limit", "8");
+      expect(set.code, set.io.errors.join("\n")).toBe(0);
+      expect(set.io.lines[0]).toContain("stops a turn at 8h (off by default)");
+      const cloud = (await rt.places!.rows()).find(p => p.kind === "provider")!;
+      expect(cloud).toMatchObject({ turnLimitMs: 6 * 3_600_000, turnLimitDefault: 6 * 3_600_000 });
+      const off = await run("computers", "set", cloud.id, "--turn-limit", "off", "--json");
+      expect(json(off.io).at(-1)).toMatchObject({ computer: { turnLimitMs: null, turnLimitDefault: 6 * 3_600_000, settings: { turnLimitMs: null } } });
+      const back = await run("computers", "set", cloud.id, "--reset", "turn-limit");
+      expect(back.io.lines[0]).toContain("stops a turn at 6h (the default)");
+      for (const word of ["0", "25", "1.5", "six"]) {
+        const wrong = await run("computers", "set", HERE_PLACE_ID, "--turn-limit", word);
+        expect(wrong.code).toBe(EXIT_CODES.usage);
+        expect(wrong.io.errors[0]).toBe(`wsp computers set: --turn-limit for ${HERE_PLACE_ID} takes whole hours from 1 to 24, or off, and got ${JSON.stringify(word)}. Write it as --turn-limit 6 or --turn-limit off.`);
+      }
+      expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)).toMatchObject({ turnLimitMs: 8 * 3_600_000 });
     });
 
     it("sets whether agents there may start agents for every workspace that says nothing of its own, and a workspace reads it", async () => {

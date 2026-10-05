@@ -4005,6 +4005,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const placeIdOf = (r: WorkspaceRecord): string | undefined => (isLocalWorkspace(r) ? HERE_PLACE_ID : (r.place ?? providerOf(r)));
   /** What the person set on the place a workspace, or a workspace about to land, stands on. */
   const settingsAt = (placeId: string | undefined): PlaceSettings | undefined => (placeId === undefined ? undefined : placeDoor?.settingsAt(placeId));
+  /** The wall a turn on a workspace runs under, off the row of the place it stands on, none being no limit. Nothing
+   * where the door lists no row for it, which leaves the reader its own default. */
+  const turnLimitOf = (r: WorkspaceRecord): MachineExecOptions | undefined => {
+    const placeId = placeIdOf(r);
+    const limit = placeId === undefined ? undefined : placeDoor?.turnLimitAt(placeId);
+    return limit === undefined ? undefined : { deadlineMs: limit ?? Number.POSITIVE_INFINITY };
+  };
   /** The switch a workspace runs under, read off its own record alone and never its tree's root. */
   const agentsHeld = (r: WorkspaceRecord): WorkspaceAgents => r.agents ?? spawnAt(placeIdOf(r));
   /** The switch a place gives its workspaces: the parts the person set there over the default as it reads now. */
@@ -8786,8 +8793,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * environment through its one module, so a variable put on here reaches a launch on every kind of machine and is
    * written nowhere else. `waiting` is the turn's own reading of whether it is waiting on something outside its own
    * process, a person's answer to a prompt or a command it started in the background, which its stream's idle clock
-   * reads; absent on every road that is not a turn. It is handed beside the limits and never as one, so the turn
-   * road goes on handing the factory none and runs under the turn's own. `servers` is the values the MCP servers'
+   * reads; absent on every road that is not a turn. It is handed beside the limits and never as one; the wall the
+   * factory gets is the turn limit of the place the workspace stands on, read at each launch, where the door has one. `servers` is the values the MCP servers'
    * definitions read by name, which only a turn's agent starts servers with, under the machine's own environment. */
   const adapterFor = (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting, servers: Readonly<Record<string, string>> = {}): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
@@ -8802,7 +8809,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       adapter: factory({
         machine: entry.machine,
         workspaceId: entry.record.id,
-        execStream: execFactoryFor(entry, undefined, waiting),
+        execStream: execFactoryFor(entry, turnLimitOf(entry.record), waiting),
         home: id => (place === undefined ? undefined : setups.get(place, id)?.configDir) ?? kind.home(entry, id),
         // The person's variables over the computer's own and under the turn's, which only wsp sets.
         env: { ...servers, ...kind.env(entry, harness), ...setup?.env, ...turnEnv },
