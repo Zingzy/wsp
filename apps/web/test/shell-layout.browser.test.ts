@@ -679,11 +679,12 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
   }, 60_000);
 
   it("a pick closes the option menu, so the click after it lands on the prompt the menu was covering", async () => {
-    // A turn running on this computer with a prompt open under the composer, which is the page the menu covered.
+    // A turn running on this computer with a prompt open, folded over the composer, which is the page the menu covered.
     await page!.goto(`${base}?theme=dark&local=1&ws=ws_m&perm=1`);
-    await page!.waitForSelector("[data-composer-picker='access']");
     await page!.waitForSelector("text=Loading transcript", { state: "detached" });
-    await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='true']");
+    await page!.locator("[data-prompt-dock='ask_open'] [data-prompt-write]").click();
+    await page!.waitForSelector("[data-prompt-strip]");
+    await page!.waitForSelector("[data-composer-picker='access']");
     await page!.locator("[data-composer-picker='access']").click();
     await page!.waitForSelector("[data-composer-option='default']");
     // What the pick will do to the turn running now, read over the list before anything is picked.
@@ -696,22 +697,23 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
 
     // Default answers nothing the prompt offers, so the prompt stands and their click on it lands
     // rather than being eaten by a menu that stayed up.
-    const allow = page!.locator("[data-permission-prompt='ask_open'] [data-permission-option='allow']");
-    await allow.click({ timeout: 5_000 });
-    await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='false']");
+    await page!.locator("[data-prompt-strip] [data-prompt-open]").click({ timeout: 5_000 });
+    await page!.locator("[data-prompt-dock='ask_open'] [data-prompt-answer]").click({ timeout: 5_000 });
+    await page!.waitForSelector("[data-permission-prompt='ask_open'] [data-permission-outcome='allowed']");
   }, 60_000);
 
   it("an access that answers the open prompt closes it without a click, and says nothing about a next message", async () => {
     await page!.goto(`${base}?theme=dark&local=1&ws=ws_m&perm=1`);
-    await page!.waitForSelector("[data-composer-picker='access']");
     await page!.waitForSelector("text=Loading transcript", { state: "detached" });
-    await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='true']");
+    await page!.locator("[data-prompt-dock='ask_open'] [data-prompt-write]").click();
+    await page!.waitForSelector("[data-composer-picker='access']");
     await page!.locator("[data-composer-picker='access']").click();
     await page!.waitForSelector("[data-composer-option='bypassPermissions']");
     await page!.locator("[data-composer-option='bypassPermissions']").click();
 
     // The prompt the turn was stopped on is answered by the pick itself: the person clicks nothing.
-    await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='false']");
+    await page!.waitForSelector("[data-permission-prompt='ask_open'] [data-permission-outcome='allowed']");
+    expect(await page!.locator("[data-prompt-strip]").count()).toBe(0);
     await page!.waitForSelector(`[data-composer-picker='access'][data-access='bypassPermissions']`);
     expect(await page!.locator("[data-composer-picker='access']").getAttribute("data-access-refused")).toBeNull();
     expect(await page!.locator("[data-composer-refusal]").count()).toBe(0);
@@ -720,8 +722,9 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
   it("an access picked while a turn runs reads back on the picker, and a refusal the harness answered with stands on the picker in the refusal's ink with the sentence on its hover, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&perm=1&access=refused`);
-      await page!.waitForSelector("[data-composer-picker='access']");
       await page!.waitForSelector("text=Loading transcript", { state: "detached" });
+      await page!.locator("[data-prompt-dock='ask_open'] [data-prompt-write]").click();
+      await page!.waitForSelector("[data-composer-picker='access']");
       const trigger = "[data-composer-picker='access']";
       expect(await page!.locator(trigger).getAttribute("data-access")).toBe("bypassPermissions");
       const before = await box("[data-slot=composer-shell]");

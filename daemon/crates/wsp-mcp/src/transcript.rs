@@ -350,19 +350,16 @@ fn row_line(name: &str, input: &Value, moment: Moment) -> Option<Option<String>>
         "WebFetch" => about("fetching", Some("fetched"), "url"),
         "Task" | "Agent" => about("agent:", None, "description"),
         "spawn_agent" => about("agent:", None, "prompt"),
-        "AskUserQuestion" => first_question(input).map(|q| format!("asked: {q}")),
+        // The question itself, no label in front: the tool's own name is no word a person knows (`questionRow`).
+        "AskUserQuestion" => first_question(input).map(str::to_owned),
         _ => return None,
     })
 }
 
-/// The first question a question call carries that offers at least one choice: `questionsIn`'s first.
+/// The first question a question call carries: `questionsIn`'s first. A question with no choices counts, since it
+/// draws as the one field a typed answer goes into.
 fn first_question(input: &Value) -> Option<&str> {
-    input.get("questions")?.as_array()?.iter().filter(|q| q.is_object()).find_map(|q| {
-        let text = field(q, "question")?;
-        let labelled =
-            q.get("options").and_then(Value::as_array).is_some_and(|o| o.iter().any(|o| o.is_object() && field(o, "label").is_some()));
-        labelled.then_some(text)
-    })
+    input.get("questions")?.as_array()?.iter().filter(|q| q.is_object()).find_map(|q| field(q, "question"))
 }
 
 /// The call's input as an object, or nothing while it is still arriving or when it is not one.

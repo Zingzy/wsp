@@ -11,7 +11,7 @@
         "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.permission\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"turnId\":\"turn-2\",\"askId\":\"ask-1\",\"toolName\":\"Bash\",\"input\":\"{\\\"command\\\":\\\"rm -rf \u0085 build\\\",\\\"description\\\":\\\"clean\\\"}\",\"options\":[{\"id\":\"opt-allow\",\"label\":\"Allow\",\"effect\":\"allow\"},{\"id\":\"opt-mode\",\"label\":\"Allow all edits\",\"effect\":\"mode\"},{\"id\":\"opt-deny\",\"label\":\"Deny\",\"effect\":\"deny\"}]}]}",
         "sessions.answer": "{\"id\":1,\"ok\":true,\"outcome\":\"answered\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"allowed on thread thread-7: Run: rm -rf \\u0085 build\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"askId\":\"ask-1\",\"optionId\":\"opt-allow\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"allowed on thread thread-7: Run a command: rm -rf \\u0085 build\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"askId\":\"ask-1\",\"optionId\":\"opt-allow\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "sessions.list"
@@ -38,7 +38,7 @@
         "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.permission\",\"workspaceId\":\"ws-1\",\"sessionId\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"turnId\":\"turn-2\",\"askId\":\"ask-1\",\"toolName\":\"mcp__github__create_pull_request\",\"input\":\"{\\\"title\\\":\\\"x\\\"}\",\"options\":[{\"id\":\"opt-allow\",\"label\":\"Allow\",\"effect\":\"allow\"},{\"id\":\"opt-mode\",\"label\":\"Allow all edits\",\"effect\":\"mode\"},{\"id\":\"opt-deny\",\"label\":\"Deny\",\"effect\":\"deny\"}]}]}",
         "sessions.answer": "{\"id\":1,\"ok\":true,\"outcome\":\"answered\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"allowed on thread thread-7: Use the github tools: create pull request\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"askId\":\"ask-1\",\"optionId\":\"opt-allow\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"allowed on thread thread-7: Use github's create pull request\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"askId\":\"ask-1\",\"optionId\":\"opt-allow\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "sessions.list"

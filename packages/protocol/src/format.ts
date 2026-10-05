@@ -664,6 +664,8 @@ export interface AskedOption {
 export interface AskedQuestion {
   /** What the harness keys the answer by: the question's own text. */
   readonly key: string;
+  /** Where the call put it, which its options' ids and an answer typed for it name it by. */
+  readonly index: number;
   readonly header: string;
   readonly question: string;
   readonly options: readonly AskedOption[];
@@ -689,8 +691,8 @@ function askedOptions(raw: unknown, question: number): AskedOption[] {
 }
 
 /** The questions a call to the question tool carries, in the order it asked them; nothing for every other call and
- * for a question whose input has not finished arriving. A question with no choices is left out: there is no button
- * to draw for it and no pick to send back. */
+ * for a question whose input has not finished arriving. A question with no choices stays: it draws as the one field
+ * a typed answer goes into. */
 export function askedQuestions(toolName: string, input: string): readonly AskedQuestion[] | undefined {
   const fields = toolInput(input);
   return fields === undefined ? undefined : permissionWords(toolName).questions?.(fields);
@@ -705,8 +707,7 @@ function questionsIn(fields: ToolInput): readonly AskedQuestion[] | undefined {
     const text = q === undefined ? undefined : toolField(q, "question");
     if (q === undefined || text === undefined) continue;
     const options = askedOptions(q["options"], at);
-    if (options.length === 0) continue;
-    questions.push({ key: text, header: toolField(q, "header") ?? "", question: text, options, multiSelect: q["multiSelect"] === true });
+    questions.push({ key: text, index: at, header: toolField(q, "header") ?? "", question: text, options, multiSelect: q["multiSelect"] === true });
   }
   return questions.length === 0 ? undefined : questions;
 }
@@ -719,10 +720,30 @@ export function questionOptions(toolName: string, input: string): PermissionOpti
   return questions.flatMap(q => q.options.map(o => ({ id: o.id, label: o.label, effect: "answer" as const })));
 }
 
+/** The pick that answers one question with the person's own words rather than one of its choices: the words ride
+ * the id escaped, so neither the join nor a colon in them splits it. */
+export const otherOptionId = (question: number, words: string): string => `q${question}:other:${encodeURIComponent(words)}`;
+
+/** An answer typed for a question, read back off its id; nothing for any other id. */
+function typedAnswer(id: string): { question: number; words: string } | undefined {
+  const match = /^q(\d+):other:(.*)$/.exec(id);
+  if (match === null) return undefined;
+  try {
+    return { question: Number(match[1]), words: decodeURIComponent(match[2]!) };
+  } catch {
+    return undefined;
+  }
+}
+
 /** One pick as the several options it names, or nothing when any of them is not on this prompt. Every reader of a
- * pick goes through here, so the rule that a multi-select answer is one id holding several lives in one place. */
+ * pick goes through here, so the rule that a multi-select answer is one id holding several lives in one place. A
+ * question's prompt also takes answers typed for it, each named by its words; a consent prompt takes none. */
 export function pickedOptions(options: readonly PermissionOption[], picked: string): PermissionOption[] | undefined {
-  const named = picked.split(PICK_JOIN).map(id => options.find(o => o.id === id));
+  const asks = options.every(o => o.effect === "answer");
+  const named = picked.split(PICK_JOIN).map(id => {
+    const typed = asks ? typedAnswer(id) : undefined;
+    return options.find(o => o.id === id) ?? (typed === undefined ? undefined : { id, label: typed.words, effect: "answer" as const });
+  });
   return named.length > 0 && named.every((o): o is PermissionOption => o !== undefined) ? named : undefined;
 }
 
@@ -731,14 +752,15 @@ export const pickedOptionId = (ids: readonly string[]): string => ids.join(PICK_
 
 /** The call's input with the person's answer written into it, which is how the harness reads a pick: every question
  * keyed by its own text, a single-select question answered by the one label and a multi-select one by the labels it
- * took. Undefined when the picks name no question on this call. */
+ * took, an answer typed in Other standing as a label. Undefined when the picks name no question on this call. */
 export function questionAnswerInput(toolName: string, input: string, picked: readonly string[]): Record<string, unknown> | undefined {
   const fields = toolInput(input);
   const questions = askedQuestions(toolName, input);
   if (questions === undefined || fields === undefined) return undefined;
   const answers: Record<string, string | string[]> = {};
+  const typed = picked.flatMap(id => typedAnswer(id) ?? []);
   for (const question of questions) {
-    const labels = question.options.filter(o => picked.includes(o.id)).map(o => o.label);
+    const labels = [...question.options.filter(o => picked.includes(o.id)).map(o => o.label), ...typed.filter(t => t.question === question.index).map(t => t.words)];
     if (labels.length === 0) continue;
     answers[question.key] = question.multiSelect ? labels : labels[0]!;
   }
@@ -750,7 +772,7 @@ export function questionAnswerInput(toolName: string, input: string, picked: rea
 const questionRow: ToolRow = {
   line: input => {
     const first = questionsIn(input)?.[0];
-    return first === undefined ? undefined : `asked: ${first.question}`;
+    return first === undefined ? undefined : first.question;
   },
   // No detail: the prompt under this row is the question, whole, and a row that repeated it would put the same
   // sentence on the screen twice.
@@ -3053,6 +3075,15 @@ interface PermissionWords {
   /** Fields the lead says itself, left out of the values shown under it so nothing is read twice. */
   readonly named: readonly string[];
   readonly body?: string;
+  /** A sentence the agent wrote about the call, prose a client draws in the sentence face: the harness's own
+   * reason for a Codex command, the prompt a fetch is read with. Absent on a kind with none. */
+  readonly note?: (input: ToolInput, detail: string | undefined) => string | undefined;
+}
+
+/** A file's name and its folder as a person says them: `health.ts in src`, or the name alone at the root. */
+function fileInFolder(path: string): string {
+  const folder = parentFolderName(path);
+  return `${folderName(path)}${folder === "" ? "" : ` in ${folder}`}`;
 }
 
 const writeAsk: PermissionWords = {
@@ -3068,12 +3099,57 @@ const writeAsk: PermissionWords = {
   body: "content",
 };
 
+/** Claude's Edit and MultiEdit: the file, and how many places change where there are several. The strings that
+ * go and come are the client's to draw as lines; they are never dumped under the lead. */
+const editAsk: PermissionWords = {
+  lead: input => {
+    const path = toolField(input, "file_path");
+    if (path === undefined) return undefined;
+    const edits = input["edits"];
+    const count = Array.isArray(edits) && edits.length > 1 ? ` (${edits.length} places)` : "";
+    return { says: `Edit ${fileInFolder(path)}${count}` };
+  },
+  named: ["file_path", "old_string", "new_string", "replace_all", "edits"],
+};
+
 const commandAsk: PermissionWords = {
   lead: input => {
     const command = toolField(input, "command");
-    return command === undefined ? undefined : { says: "Run:", code: command };
+    return command === undefined ? undefined : { says: "Run a command:", code: command };
   },
   named: ["command", "description"],
+};
+
+/** Codex's command approval: the command and the folder it runs in, with the model's own reason as the note. */
+const codexCommandAsk: PermissionWords = {
+  lead: input => {
+    const command = toolField(input, "command");
+    return command === undefined ? undefined : { says: "Run a command:", code: command };
+  },
+  named: ["command", "cwd"],
+  note: (_input, detail) => (detail === undefined || detail === "" ? undefined : detail),
+};
+
+/** Codex's file-change approval: the files by name, since the wire carries their paths and kinds and no diff. */
+const fileChangeAsk: PermissionWords = {
+  lead: input => {
+    const changes = input["changes"];
+    if (!Array.isArray(changes)) return undefined;
+    const paths = changes.map(c => (typeof c === "object" && c !== null ? toolField(c as ToolInput, "path") : undefined)).filter((p): p is string => p !== undefined);
+    if (paths.length === 0) return undefined;
+    return { says: paths.length === 1 ? `Change ${fileInFolder(paths[0]!)}` : `Change ${paths.length} files: ${paths.map(folderName).join(", ")}` };
+  },
+  named: ["changes"],
+};
+
+/** A page fetched from the web: the address as code, and what the agent will read it for as the note. */
+const fetchAsk: PermissionWords = {
+  lead: input => {
+    const url = toolField(input, "url");
+    return url === undefined ? undefined : { says: "Fetch a page:", code: url };
+  },
+  named: ["url", "prompt"],
+  note: input => toolField(input, "prompt"),
 };
 
 const skillAsk: PermissionWords = {
@@ -3087,7 +3163,7 @@ const skillAsk: PermissionWords = {
 const serverAsk: PermissionWords = {
   lead: (_input, toolName) => {
     const lent = serverTool(toolName);
-    return lent === undefined ? undefined : { says: `Use the ${lent.server} tools: ${lent.tool.replace(/_/g, " ")}` };
+    return lent === undefined ? undefined : { says: `Use ${lent.server}'s ${lent.tool.replace(/_/g, " ")}` };
   },
   named: [],
 };
@@ -3100,9 +3176,15 @@ const plainAsk: PermissionWords = { lead: () => undefined, named: [] };
  * else. A name no row matches is a server's tool where its name carries one, else the plain row. */
 const PERMISSION_ASKS: ReadonlyMap<string, PermissionWords> = new Map<string, PermissionWords>([
   ["Write", writeAsk],
+  ["Edit", editAsk],
+  ["MultiEdit", editAsk],
   ["Bash", commandAsk],
+  ["WebFetch", fetchAsk],
   ["Skill", skillAsk],
   [QUESTION_TOOL, questionAsk],
+  // Codex's two approvals, under the names its adapter gives them.
+  ["command_execution", codexCommandAsk],
+  ["file_change", fileChangeAsk],
 ]);
 
 function permissionWords(toolName: string): PermissionWords {
@@ -3132,7 +3214,8 @@ export function permissionAskLine(toolName: string, input: string, detail?: stri
 
 /** One value as the row reads it: its own whitespace collapsed, so a field holding a paragraph is one line rather
  * than a wall, while the fields stay apart under their separator. */
-const restValue = (value: unknown): string => (typeof value === "string" ? value : JSON.stringify(value) ?? "").replace(/\s+/g, " ").trim();
+const restValue = (value: unknown): string =>
+  (typeof value === "string" ? value : Array.isArray(value) && value.every(v => typeof v === "string" || typeof v === "number") ? value.join(", ") : (JSON.stringify(value) ?? "")).replace(/\s+/g, " ").trim();
 
 /** The whole of a relayed permission prompt as a client draws it: the lead in its two parts, the input values that
  * lead does not already carry, and the file body folded away behind its own disclosure. Nothing here is cut, since
@@ -3147,6 +3230,12 @@ export interface PermissionPromptWords {
   readonly code?: string;
   readonly rest: string;
   readonly body?: { readonly label: string; readonly text: string };
+  /** A sentence the agent wrote about the call, drawn in the sentence face under the lead; absent where there is none. */
+  readonly note?: string;
+  /** The file the call writes or edits, whole, where it names one. */
+  readonly file?: string;
+  /** The text an edit takes out and the text it puts in, off its first edit where it makes several. */
+  readonly edit?: { readonly old: string; readonly next: string };
   /** Set only on a call that asks the person something: the row draws these and nothing else, since a question's
    * whole input is the question. */
   readonly questions?: readonly AskedQuestion[];
@@ -3162,11 +3251,31 @@ export function permissionPromptWords(toolName: string, input: string, detail?: 
   const words = permissionWords(toolName);
   const named = new Set(words.named);
   const body = words.body === undefined ? undefined : toolField(fields, words.body);
+  const note = words.note?.(fields, detail);
+  const file = toolField(fields, "file_path");
+  const edit = editStrings(fields);
   const rest = Object.entries(fields)
     .filter(([key]) => !named.has(key))
     .map(([key, value]) => `${key}: ${restValue(value)}`)
     .join("\n");
-  return { ...parts, rest, ...(body === undefined ? {} : { body: { label: BODY_LABEL, text: body } }) };
+  return {
+    ...parts,
+    rest,
+    ...(body === undefined ? {} : { body: { label: BODY_LABEL, text: body } }),
+    ...(note === undefined ? {} : { note }),
+    ...(file === undefined ? {} : { file }),
+    ...(edit === undefined ? {} : { edit }),
+  };
+}
+
+/** The strings an edit swaps, off any call that carries them: the first of several edits, else the call's own. Read
+ * raw rather than trimmed, since a blank line taken out is part of the change. */
+function editStrings(fields: ToolInput): { old: string; next: string } | undefined {
+  const edits = fields["edits"];
+  const first = Array.isArray(edits) && typeof edits[0] === "object" && edits[0] !== null ? (edits[0] as ToolInput) : fields;
+  const old = first["old_string"];
+  const next = first["new_string"];
+  return typeof old === "string" && typeof next === "string" ? { old, next } : undefined;
 }
 
 /** That lead taken off the prompt itself, which is what a thread's row says it is waiting on and what the app says
@@ -3200,6 +3309,10 @@ export function permissionOutcomeLine(outcome: PermissionOutcome, picked?: { lab
 /** What the harness is told when a person picked deny in the chat: the agent reads it as the call's result, so it
  * says who refused rather than reading as a tool that failed. */
 export const PERMISSION_DENIED_LINE = "the person denied this in the chat";
+
+/** The same line with the person's reason, where they gave one: what they want done instead, in their own words. */
+export const deniedLine = (reason: string | undefined): string =>
+  reason === undefined || reason.trim() === "" ? PERMISSION_DENIED_LINE : `${PERMISSION_DENIED_LINE}, and said what to do instead: ${reason.trim()}`;
 
 /** One option on a prompt that also puts the rest of the turn in another access mode, as the row shows it; the mode
  * arrives as the CLI's own slug and the runtime's harness table lends it the words the picker uses. */

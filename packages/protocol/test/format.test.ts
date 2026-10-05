@@ -33,6 +33,8 @@ import {
   askedQuestions,
   questionOptions,
   questionAnswerInput,
+  otherOptionId,
+  deniedLine,
   pickedOptions,
   pickedOptionId,
   internalToolResult,
@@ -1759,15 +1761,15 @@ describe("the words a relayed permission prompt shows", () => {
   it("words a command as the whole command, kept apart from the words so a client can draw it as code", () => {
     // A command goes in whole, its later lines and its length alike: one cut anywhere is one nobody can judge.
     const long = `cat > out.py <<'PY'\nprint(${"1 + ".repeat(60)}1)\nPY`;
-    expect(permissionAskLine("Bash", JSON.stringify({ command: long, description: "Write and run a sum" }))).toBe(`Run: ${long}`);
+    expect(permissionAskLine("Bash", JSON.stringify({ command: long, description: "Write and run a sum" }))).toBe(`Run a command: ${long}`);
     // The two parts are apart, so a face that blurs two hyphens into one dash never draws the command.
     const gate = "pnpm exec vitest run --minWorkers=1 --maxWorkers=1";
-    expect(permissionPromptWords("Bash", JSON.stringify({ command: gate }))).toMatchObject({ says: "Run:", code: gate, lead: `Run: ${gate}` });
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: gate }))).toMatchObject({ says: "Run a command:", code: gate, lead: `Run a command: ${gate}` });
   });
 
   it("words a tool a server lends as the server and the tool, and never the server's own paragraph", () => {
-    expect(permissionAskLine("mcp__wsp__workspaces", "{}", "wsp runs cloud machines called workspaces, forked in seconds")).toBe("Use the wsp tools: workspaces");
-    expect(permissionAskLine("mcp__wsp__run", "{}")).toBe("Use the wsp tools: run");
+    expect(permissionAskLine("mcp__wsp__workspaces", "{}", "wsp runs cloud machines called workspaces, forked in seconds")).toBe("Use wsp's workspaces");
+    expect(permissionAskLine("mcp__wsp__run", "{}")).toBe("Use wsp's run");
     expect(permissionPromptWords("mcp__wsp__workspaces", "{}", "wsp runs cloud machines").code).toBeUndefined();
   });
 
@@ -1863,7 +1865,7 @@ describe("the words a relayed permission prompt shows", () => {
     expect(words.body).toBeUndefined();
     expect(words.lead).toBe("This working directory is not a repository. What should I do?");
     // The call itself reads as the question too: the tool's own name is no word a person knows.
-    expect(toolActivityLine(QUESTION_TOOL, input)).toBe("asked: This working directory is not a repository. What should I do?");
+    expect(toolActivityLine(QUESTION_TOOL, input)).toBe("This working directory is not a repository. What should I do?");
     expect(toolActivityLine(QUESTION_TOOL, input)).not.toContain(QUESTION_TOOL);
     // And the transcript's own row for it reads the same way: words a person knows, then the question under them.
     const facts = toolCallFacts(QUESTION_TOOL, input);
@@ -1904,6 +1906,30 @@ describe("the words a relayed permission prompt shows", () => {
     expect(pickedOptions(plain, "allow")!.map(o => o.id)).toEqual(["allow"]);
     // A closed question says what was picked, since "Allowed" says nothing about an answer.
     expect(permissionOutcomeLine("allowed", { label: "Types, Lint", effect: "answer" })).toBe("You answered: Types, Lint");
+  });
+
+  it("an answer typed in Other is the answer the harness reads, beside the ticked labels and for its own question alone", () => {
+    const form = JSON.stringify({
+      questions: [
+        { question: "Which one?", header: "Pick", options: [{ label: "A" }, { label: "B" }], multiSelect: false },
+        { question: "Which checks?", header: "Checks", options: [{ label: "Types" }, { label: "Lint" }], multiSelect: true },
+        { question: "A name?", header: "Name", options: [], multiSelect: false },
+      ],
+    });
+    const options = questionOptions(QUESTION_TOOL, form);
+    // Words carrying the join and the id's own colon still travel as one pick each.
+    const picks = [otherOptionId(0, "C | or D: either"), options[2]!.id, otherOptionId(1, "Format"), otherOptionId(2, "Webby")];
+    expect(pickedOptions(options, pickedOptionId(picks))!.map(o => o.label)).toEqual(["C | or D: either", "Types", "Format", "Webby"]);
+    expect(questionAnswerInput(QUESTION_TOOL, form, picks)).toMatchObject({ answers: { "Which one?": "C | or D: either", "Which checks?": ["Types", "Format"], "A name?": "Webby" } });
+    // A consent prompt takes no typed answer: its options are the only picks it has.
+    expect(pickedOptions([{ id: "allow", label: "Allow", effect: "allow" }], otherOptionId(0, "sure"))).toBeUndefined();
+    expect(permissionOutcomeLine("allowed", { label: "Webby", effect: "answer" })).toBe("You answered: Webby");
+  });
+
+  it("a deny the person gave a reason for tells the agent the reason, in their own words", () => {
+    expect(deniedLine(undefined)).toBe(PERMISSION_DENIED_LINE);
+    expect(deniedLine("  ")).toBe(PERMISSION_DENIED_LINE);
+    expect(deniedLine("Run only the thread-rows file")).toBe(`${PERMISSION_DENIED_LINE}, and said what to do instead: Run only the thread-rows file`);
   });
 
   it("shows nobody a tool result the harness marked its own note to the agent, and titles a launch by its task", () => {

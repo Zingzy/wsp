@@ -96,6 +96,7 @@ import { applyTheme, useTransparencyEffect } from "../../src/settings/theme";
 import "../../src/index.css";
 import { caps } from "../caps.js";
 import { noDaemonApi } from "../fake-daemon-api.js";
+import { ACCESS_MODES } from "../fixtures/access-modes";
 
 const params = new URLSearchParams(window.location.search);
 const theme = params.get("theme") === "light" ? "light" : "dark";
@@ -203,11 +204,6 @@ if (switcher) {
 // carries the effort lists its app-server reports, each model with the effort that model runs at, so the effort
 // picker draws its default against a pick rather than against the binary.
 // The access modes are the CLI's own list as the runtime hands it out, the mode a new thread starts at marked.
-const ACCESS_MODES = [
-  { value: "default", label: "Default", description: "Asks in the chat about each action that needs permission" },
-  { value: "acceptEdits", label: "Accept edits", description: "Edits files without asking; asks about commands that need permission" },
-  { value: "bypassPermissions", label: "Bypass", description: "Runs every action without asking" },
-];
 // ?efforts=1 gives the claude row the effort levels and context windows the runtime's table lists for it, so the
 // composer's row carries the effort picker beside the others and is as wide as it gets.
 const efforts = params.get("efforts") === "1";

@@ -1541,7 +1541,7 @@ describe("the init job, agent road", () => {
     expect(f.jobs.view()!.line).toBe("$ wsp recipe scan --json");
     const scan = JSON.stringify({ command: "wsp recipe scan --json", description: "Read what the agents here use" });
     asks.say({ type: "permission.ask", ask: { askId: "ask_1", toolName: "Bash", input: scan, detail: "Read what the agents here use", options: [{ id: "allow", label: "Allow", effect: "allow" }] } });
-    expect(f.jobs.view()!.line).toBe("Run: wsp recipe scan --json");
+    expect(f.jobs.view()!.line).toBe("Run a command: wsp recipe scan --json");
     asks.finish({ status: "completed", text: "done" });
     await expect(f.settled()).resolves.toBeUndefined();
   });

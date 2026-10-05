@@ -703,7 +703,9 @@ describe("the sidebar's list of thread tiles", () => {
       await act(async () => useStore.setState({ sessions: sessions(all) } as never));
       await waitFor(() => expect(screen.getByText("kept on top")).toBeDefined());
       expect(heads()).toEqual(["pinned", "needs-you"]);
+      // Every head names its section in words, Needs you as Pinned and Settled do; the state glyph is the tiles' alone.
       expect([...document.querySelectorAll("[data-section-head]")].map(head => head.textContent)).toEqual(["Pinned (1)", "Needs you (1)"]);
+      expect(document.querySelector("[data-section-head=needs-you] svg.lucide-message-circle-question")).toBeNull();
       expect(rowIds()).toEqual(["thread:th_pinned", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle", "settled"]);
       expect(walkIds()).toEqual(["section:pinned", "thread:th_pinned", "section:needs-you", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle", "settled"]);
       expect(screen.queryByText("snoozed away")).toBeNull();

@@ -228,6 +228,8 @@ export async function turnWords(): Promise<Record<string, unknown>> {
   const unstamped = (await refused(() => startDetached(answering({ "sessions.start": { session: session("s"), outcome: "started", turnId: "t" } }), {}, "agent"))).trim();
   const napping = workspaceStaysAwakeLine("{name}", 60_000);
   const write = permissionAskLine("Write", JSON.stringify({ file_path: "{name}" }));
+  const edit = permissionAskLine("Edit", JSON.stringify({ file_path: "{name}" }));
+  const change = permissionAskLine("file_change", JSON.stringify({ changes: [{ path: "{name}" }] }));
   return {
     severalThreads: several.replace(/^2 /, "{count} "),
     noThread: await refused(() => threadOf(answering({ "sessions.list": { sessions: [] } }), "{ref}")),
@@ -257,6 +259,13 @@ export async function turnWords(): Promise<Record<string, unknown>> {
       write,
       writeIn: permissionAskLine("Write", JSON.stringify({ file_path: "{folder}/{name}" })).slice(write.length),
       writeSize: permissionAskLine("Write", JSON.stringify({ file_path: "{name}", content: "x" })).slice(write.length).replace("1 B", "{size}"),
+      edit,
+      editIn: permissionAskLine("Edit", JSON.stringify({ file_path: "{folder}/{name}" })).slice(edit.length),
+      editPlaces: permissionAskLine("MultiEdit", JSON.stringify({ file_path: "{name}", edits: [{}, {}] })).slice(edit.length).replace("2", "{count}"),
+      fetch: permissionAskLine("WebFetch", JSON.stringify({ url: "{url}" })),
+      change,
+      changeIn: permissionAskLine("file_change", JSON.stringify({ changes: [{ path: "{folder}/{name}" }] })).slice(change.length),
+      changes: permissionAskLine("file_change", JSON.stringify({ changes: [{ path: "a" }, { path: "b" }] })).replace("2", "{count}").replace("a, b", "{names}"),
     },
     finished: notifyLine("{thread}", { status: "{facts}", text: "{body}" } as unknown as TurnResult),
     finishedBare: notifyLine("{thread}", { status: "{facts}" } as unknown as TurnResult),
@@ -425,7 +434,13 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
     { case: "a write", arguments: { thread: THREAD }, replies: asked([ask("Write", { file_path: "/root/wsp/src/é.ts", content: "x".repeat(2048) }, CONSENT)]) },
     { case: "a write at the root", arguments: { thread: THREAD }, replies: asked([ask("Write", { file_path: "notes.md" }, CONSENT)]) },
     { case: "a plain call with the harness's words", arguments: { thread: THREAD }, replies: asked([ask("WebFetch", "not json", CONSENT, "fetch \u0085 example.com")]) },
-    { case: "a plain call without", arguments: { thread: THREAD }, replies: asked([ask("Edit", { file_path: "a" }, CONSENT)]) },
+    { case: "a plain call without", arguments: { thread: THREAD }, replies: asked([ask("Read", { file_path: "a" }, CONSENT)]) },
+    { case: "an edit", arguments: { thread: THREAD }, replies: asked([ask("Edit", { file_path: "/root/api/src/health.ts", old_string: "a", new_string: "b" }, CONSENT)]) },
+    { case: "several edits", arguments: { thread: THREAD }, replies: asked([ask("MultiEdit", { file_path: "health.ts", edits: [{ old_string: "a", new_string: "b" }, { old_string: "c", new_string: "d" }, { old_string: "e", new_string: "f" }] }, CONSENT)]) },
+    { case: "a fetch", arguments: { thread: THREAD }, replies: asked([ask("WebFetch", { url: "https://example.com/é", prompt: "read it" }, CONSENT)]) },
+    { case: "a codex command", arguments: { thread: THREAD }, replies: asked([ask("command_execution", { command: "touch hi.txt", cwd: "/w" }, CONSENT, "Allow me to create hi.txt?")]) },
+    { case: "a codex file change", arguments: { thread: THREAD }, replies: asked([ask("file_change", { changes: [{ path: "/w/src/a.rs", kind: "update" }] }, CONSENT)]) },
+    { case: "several codex file changes", arguments: { thread: THREAD }, replies: asked([ask("file_change", { changes: [{ path: "/w/a.rs", kind: "update" }, { path: "b.rs", kind: "add" }] }, CONSENT)]) },
     { case: "no option by that id", arguments: { thread: THREAD }, replies: asked([ask("Bash", { command: "ls" }, CONSENT)], { "sessions.answer": answer("no-option") }) },
     { case: "unsupported", arguments: { thread: THREAD }, replies: asked([ask("Bash", { command: "ls" }, CONSENT)], { "sessions.answer": answer("unsupported") }) },
     { case: "not found", arguments: { thread: THREAD }, replies: asked([ask("Bash", { command: "ls" }, CONSENT)], { "sessions.answer": answer("not-found") }) },

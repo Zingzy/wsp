@@ -15,7 +15,7 @@
 // host's own requests, and the CLI answers each with a control_response
 // carrying the request's id.
 
-import { PERMISSION_ALLOW, PERMISSION_DENY, pickedOptions, questionAnswerInput, questionOptions } from "@wsp/protocol";
+import { PERMISSION_ALLOW, PERMISSION_DENY, askedQuestions, pickedOptions, questionAnswerInput, questionOptions } from "@wsp/protocol";
 import type { PermissionAsk, PermissionOption } from "@wsp/protocol";
 
 /** The one flag that routes the CLI's permission prompts to this process instead of having it deny them itself. */
@@ -92,7 +92,7 @@ export function controlLine(event: Record<string, unknown>): ControlLine {
   const input = JSON.stringify(request.input ?? null);
   // A call that only asks the person something carries the question's own choices and no allow: there is nothing to
   // consent to, and the CLI reads the pick off the input it hands back.
-  const asked = questionOptions(toolName, input);
+  const asked = askedQuestions(toolName, input) === undefined ? undefined : questionOptions(toolName, input);
   return {
     kind: "ask",
     ...(agentId !== undefined ? { agentId } : {}),
@@ -103,7 +103,7 @@ export function controlLine(event: Record<string, unknown>): ControlLine {
       input,
       ...(detail !== undefined && detail !== "" ? { detail } : {}),
       options:
-        asked.length > 0
+        asked !== undefined
           ? asked
           : [
               { id: PERMISSION_ALLOW, label: "Allow", effect: "allow" },

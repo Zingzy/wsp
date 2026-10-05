@@ -862,7 +862,8 @@ describe("a reload while a turn runs", () => {
       row.kind === "message" ? `${row.message.role}: ${row.message.text}` : row.kind === "turn-fold" ? row.label : row.kind === "permission" ? `permission: ${row.permission.toolName}` : row.kind,
     );
   };
-  const ORDER = ["user: /", "Worked for 3.1s", "assistant: Nothing to run.", "user: add the banner", "working", "assistant: On it.", "permission: Bash", "thinking"];
+  // The running turn is stopped on its prompt, so it waits rather than thinks and no live thinking row follows it.
+  const ORDER = ["user: /", "Worked for 3.1s", "assistant: Nothing to run.", "user: add the banner", "working", "assistant: On it.", "permission: Bash"];
 
   it("a live row that reached the socket before the history reply keeps its place: the completed turn renders first and the running turn's prompt last", () => {
     const early = reduceEvent(state([]), PROMPT, SEEN);
@@ -900,9 +901,8 @@ describe("a reload while a turn runs", () => {
     const later: SessionEvent = { type: "session.delta", ...second, at: R0 + 62_500, line: 2, kind: "text", text: "Then the banner." };
     const held = reduceEvent(reloadTranscript(state([]), HISTORY, LANDED), PROMPT, SEEN);
     expect(rendered(reloadTranscript(held, [...HISTORY, later], LANDED))).toEqual([
-      ...ORDER.slice(0, -1),
+      ...ORDER,
       "assistant: Then the banner.",
-      "thinking",
     ]);
   });
 });

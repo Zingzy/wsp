@@ -281,7 +281,7 @@ describe("the words the clients print for the job", () => {
     expect(threadWorkingLine({ type: "session.delta", ...scope, kind: "tool_use", toolName: "Bash", text: JSON.stringify({ command: "wsp recipe scan --json" }) })).toBe("$ wsp recipe scan --json");
     // The prompt reads here in the same words the chat row leads with: one table words them, and both read it.
     const scan = JSON.stringify({ command: "wsp recipe scan --json", description: "Read what the agents here use" });
-    expect(threadWorkingLine({ type: "session.permission", ...scope, askId: "a1", toolName: "Bash", input: scan, detail: "Read what the agents here use", options: [] })).toBe("Run: wsp recipe scan --json");
+    expect(threadWorkingLine({ type: "session.permission", ...scope, askId: "a1", toolName: "Bash", input: scan, detail: "Read what the agents here use", options: [] })).toBe("Run a command: wsp recipe scan --json");
     expect(threadWorkingLine({ type: "session.permission", ...scope, askId: "a1", toolName: "Bash", input: scan, options: [] })).toBe(permissionAskLine("Bash", scan));
     expect(threadWorkingLine({ type: "session.delta", ...scope, kind: "tool_result", text: "ok" })).toBeUndefined();
     expect(threadWorkingLine({ type: "session.end", ...scope, exitCode: 0, sawResult: true })).toBeUndefined();

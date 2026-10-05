@@ -210,17 +210,25 @@ export function PluginsPicks({ picks, options, onChange, onlyTicked = false }: P
   );
 }
 
-/** A radio list in the card: the radio, the mark in its frame, the name over a note, a fact at the right. */
-export function Choice({ id, picked, glyph, name, note, fact }: { id: string; picked: boolean; glyph: ReactNode; name: string; note?: string; fact?: string }) {
+/** A radio list in the card: the radio, the mark in its frame where the choice has one, the name over a note, and
+ * at the right a fact or the one control. Below 640 px the control stands under the words, as a row's does. */
+export function Choice({ id, picked, glyph, name, note, fact, slot, hover, attrs, title = LIST_TITLE }: { id: string; picked: boolean; glyph?: ReactNode; name: string; note?: string; fact?: string; slot?: ReactNode; /** One sentence on hover: the keys that pick the row. */ hover?: string; attrs?: Record<string, string>; /** The name's type, as PickRow takes it. */ title?: string }) {
   return (
-    <label data-choice={id} className={cn("flex cursor-pointer items-center gap-3 py-3", CARD_INSET, ROW_FLOOR)}>
-      <Radio value={id} />
-      <GlyphFrame>{glyph}</GlyphFrame>
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className={cn(LIST_TITLE, "min-w-0 break-words", !picked && "text-muted-foreground")}>{name}</span>
-        {note === undefined ? null : <span className={NOTE}>{note}</span>}
+    <label data-choice={id} {...(hover === undefined ? {} : { title: hover })} {...attrs} className={cn("flex cursor-pointer flex-col justify-center gap-3 py-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5", CARD_INSET, ROW_FLOOR)}>
+      <span className="flex min-w-0 items-center gap-3">
+        <Radio value={id} />
+        {glyph === undefined ? null : <GlyphFrame>{glyph}</GlyphFrame>}
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className={cn(title, "min-w-0 break-words", !picked && "text-muted-foreground")}>{name}</span>
+          {note === undefined ? null : <span className={NOTE}>{note}</span>}
+        </span>
+        {fact === undefined ? null : <span className={cn(FACT, "shrink-0")}>{fact}</span>}
       </span>
-      {fact === undefined ? null : <span className={cn(FACT, "shrink-0")}>{fact}</span>}
+      {slot === undefined ? null : (
+        <span data-choice-slot className="flex min-w-0 shrink-0 items-center gap-3 max-sm:pl-7 sm:justify-end" onClick={event => event.preventDefault()}>
+          {slot}
+        </span>
+      )}
     </label>
   );
 }

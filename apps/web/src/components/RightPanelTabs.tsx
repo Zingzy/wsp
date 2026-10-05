@@ -167,7 +167,7 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
       const action = surfaceShortcutActionForKey(shortcutActionsRef.current, event);
       if (!action) return;
       const target = event.target;
-      if (keyBelongsElsewhere(target)) return;
+      if (keyBelongsElsewhere(target, event.key)) return;
       // With a composer on screen the thread's own area is the composer's, where a letter starts a message, so the
       // launcher answers only to a key pressed inside its own panel.
       const panel = launcherRef.current?.closest("[data-preview-panel-mode]");

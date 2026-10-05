@@ -3,7 +3,8 @@
 // whose lead is the sentence its kind of call is worded by, whose remaining
 // input is the muted mono every tool row wears, whose file body is folded
 // away, and whose options are plain buttons while the turn waits on them,
-// replaced by one muted line once the prompt is closed. No chip, no badge and
+// replaced by one muted line once the prompt is closed. The prompt the
+// thread's own turn waits on is answered in the dock, its row the record. No chip, no badge and
 // no colour of its own on either state, in both themes, with the rows
 // photographed for review. Like the other render tests it runs only when
 // asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
@@ -46,49 +47,34 @@ describe.skipIf(renderSkipped !== undefined)("the relayed permission prompt row 
 
   afterAll(() => stopRender(browser, vite?.child));
 
-  it.each(["dark", "light"] as const)("in the %s theme the open prompt offers its options and the closed one states its outcome, neither as a chip", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme the open prompt is answered in the dock and both rows keep a record, neither as a chip", async theme => {
     await page!.goto(`${base}&theme=${theme}`);
     const open = '[data-permission-prompt="ask_open"]';
     const closed = '[data-permission-prompt="ask_done"]';
-    await page!.waitForSelector(open);
+    const dock = '[data-prompt-dock="ask_open"]';
+    await page!.waitForSelector(dock);
 
-    // The open prompt: what the call does in words, the command itself beside them, and every option the harness
-    // offered as a plain button.
-    expect(await page!.locator(open).getAttribute("data-permission-open")).toBe("true");
-    expect(await page!.locator(`${open} [data-permission-says]`).textContent()).toBe("Run:");
+    // The open prompt stands where the composer would: what the call does, the command whole in its copy row, and
+    // every option the harness offered as a row of the card.
+    expect(await page!.locator(`${dock} [data-prompt-title]`).textContent()).toBe("Run a command");
+    expect(await page!.locator(`${dock} [data-copy-row] [data-k]`).textContent()).toBe(COMMAND);
+    const names = await page!.evaluate(`[...document.querySelectorAll('${dock} [data-prompt-option]')].map(row => row.innerText.split('\\n')[0])`);
+    expect(names).toEqual(["Allow", "Deny", "Allow, then Accept edits"]);
+
+    // Its row in the timeline says what is asked and offers nothing, so the same prompt is never two sets of buttons.
+    expect(await page!.locator(open).getAttribute("data-permission-open")).toBe("false");
+    expect(await page!.locator(`${open} [data-permission-option]`).count()).toBe(0);
+    expect(await page!.locator(`${open} [data-permission-says]`).textContent()).toBe("Run a command:");
     expect(await page!.locator(`${open} [data-permission-code]`).textContent()).toBe(COMMAND);
-    expect(await page!.locator(`${open} [data-permission-option]`).allTextContents()).toEqual(["Allow", "Deny", "Allow, then Accept edits"]);
 
-    // The file write leads on the file, its folder and its size, and its text is behind the fold until it is asked for.
+    // The file write leads on the file, its folder and its size, and says what closed it after it in one muted line.
     expect(await page!.locator(`${closed} [data-permission-says]`).textContent()).toBe("Write health.ts in src (44 B)");
-    expect(await page!.locator(`${closed} [data-permission-code]`).count()).toBe(0);
-    expect(await page!.locator(`${closed} [data-permission-body]`).count()).toBe(0);
-    expect(await page!.locator(`${closed} [data-permission-body-trigger]`).textContent()).toBe("show the file");
-    await page!.locator(`${closed} [data-permission-body-trigger]`).click();
-    expect(await page!.locator(`${closed} [data-permission-body]`).textContent()).toBe("export const health = () => ({ ok: true });\n");
-
-    // The closed one has no option left and says what closed it, in one muted line.
     expect(await page!.locator(closed).getAttribute("data-permission-open")).toBe("false");
     expect(await page!.locator(`${closed} [data-permission-option]`).count()).toBe(0);
     expect(await page!.locator(`${closed} [data-permission-outcome]`).textContent()).toBe("Allowed");
     const outcome = await page!.evaluate(skinOf(`${closed} [data-permission-outcome]`));
     expect(outcome).toMatchObject({ background: "rgba(0, 0, 0, 0)", border: "0px", radius: "0px" });
     expect(String((outcome as { font: string }).font).toLowerCase()).not.toMatch(/mono/);
-
-    // The text the decision rests on is shown whole: every other tool row can afford to truncate, this is the row
-    // where consent is given. Read off the element rather than the class: nothing is clipped, nothing is elided,
-    // and it took more than one line to say it, so the wrap is what is on screen.
-    const input = await page!.evaluate(`(() => {
-      const el = document.querySelector('${open} [data-permission-code]');
-      const s = getComputedStyle(el);
-      return { text: el.textContent, clipped: el.scrollWidth > el.clientWidth + 1, overflow: s.textOverflow, whiteSpace: s.whiteSpace, lines: Math.round(el.getBoundingClientRect().height / parseFloat(s.lineHeight)) };
-    })()`);
-    const shown = input as { text: string; clipped: boolean; overflow: string; whiteSpace: string; lines: number };
-    expect(shown.text).toBe(COMMAND);
-    expect(shown.clipped).toBe(false);
-    expect(shown.overflow).toBe("clip");
-    expect(shown.whiteSpace).toBe("pre-wrap");
-    expect(shown.lines).toBeGreaterThan(1);
 
     // The command is drawn in the mono face, and that is the point of keeping it out of the sentence: in the
     // sentence face two hyphens measure what one long dash measures, so --minWorkers reads as one dash, while in
@@ -116,7 +102,7 @@ describe.skipIf(renderSkipped !== undefined)("the relayed permission prompt row 
     expect(Math.abs(pair.says - 1)).toBeLessThan(0.1);
     expect(pair.code).toBeGreaterThan(1.2);
 
-    // Both rows sit in the timeline at the same width and wear the same rule under them as the rows around them.
+    // Both records sit in the timeline at the same width and wear the same rule under them as the rows around them.
     const widths = await page!.evaluate(`[document.querySelector('${open}').getBoundingClientRect().width, document.querySelector('${closed}').getBoundingClientRect().width]`);
     expect((widths as number[])[0]).toBe((widths as number[])[1]);
     for (const selector of [open, closed]) {

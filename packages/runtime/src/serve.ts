@@ -1636,7 +1636,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await rt.sessions.interrupt(msg.sessionId, origin, msg.task)) });
               return;
             case "sessions.answer":
-              send({ id: msg.id, ok: true, ...(await rt.sessions.answer(msg.sessionId, { askId: msg.askId, optionId: msg.optionId }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.sessions.answer(msg.sessionId, { askId: msg.askId, optionId: msg.optionId, ...(msg.reason === undefined ? {} : { reason: msg.reason }) }, origin)) });
               return;
             case "sessions.access":
               send({ id: msg.id, ok: true, ...(await rt.sessions.access(msg.sessionId, msg.permissionMode, origin)) });
