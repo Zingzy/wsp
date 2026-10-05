@@ -42,6 +42,8 @@ const ANSWER_CAP = 1024 * 1024;
  * dd a byte at a time, since head holds a small answer in its buffer where the wait for it cannot see it. */
 const OUT_CAP = 4 * ANSWER_CAP;
 const ERR_CAP = 64 * 1024;
+/** How long the readers may take to reach a gone server's end of file, beside its answer's own deadline. */
+const DRAIN_SECONDS = 2;
 const PROTOCOL_VERSION = "2025-06-18";
 
 const INITIALIZE = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "wsp", version: "1" } } });
@@ -58,7 +60,9 @@ const stdioScript = (seconds: string): string =>
     'd=$(mktemp -d "${TMPDIR:-/tmp}/wsp-tools.XXXXXX") || exit 1',
     "trap 'rm -rf \"$d\"' EXIT",
     "trap '' PIPE",
-    'mkfifo "$d/in" "$d/o" "$d/e" || exit 1',
+    // The files stand before their readers do, so a reader that never got going costs the server's words, not the
+    // verdict: a missing file would fail the last line and the whole run would read as one that never started.
+    'mkfifo "$d/in" "$d/o" "$d/e" && : > "$d/out" && : > "$d/err" || exit 1',
     "m=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')",
     '[ -n "$m" ] || exit 1',
     `printf 'WSP_TOOLS_RUN=%s' "$m" > "$d/m"`,
@@ -66,7 +70,7 @@ const stdioScript = (seconds: string): string =>
     'sweep() { local l; if [ -d /proc/self ]; then l=$(grep -lzxF -f "$d/m" /proc/[0-9]*/environ 2>/dev/null | cut -d/ -f3); ' +
       'else l=$(ps eww -U "$(id -u)" -o pid=,command= | M="WSP_TOOLS_RUN=$m" awk \'index($0 " ", " " ENVIRON["M"] " ") { print $1 }\'); fi; [ -n "$l" ] && kill "-$1" $l 2>/dev/null; }',
     // The host's bound on the run sends TERM to this shell's group alone, and set -m puts every job in its own.
-    'trap \'kill "$t" 2>/dev/null; kill -KILL -- "-$p" "-$ro" "-$re" 2>/dev/null; sweep KILL; exit 143\' TERM',
+    'trap \'kill "$t" "$g" 2>/dev/null; kill -KILL -- "-$p" "-$ro" "-$re" 2>/dev/null; sweep KILL; exit 143\' TERM',
     "set -m",
     `{ dd bs=1 count=${OUT_CAP} of="$d/out" 2>/dev/null; cat > /dev/null; } < "$d/o" &`,
     "ro=$!",
@@ -85,7 +89,12 @@ const stdioScript = (seconds: string): string =>
     "exec 3>&-",
     'kill "$t" 2>/dev/null; kill -TERM -- "-$p" 2>/dev/null; sweep TERM; sleep 0.2; kill -KILL -- "-$p" 2>/dev/null; sweep KILL',
     'wait "$p" 2>/dev/null; x=$?',
-    'kill -KILL -- "-$ro" "-$re" 2>/dev/null',
+    // The readers end at the server's end of file and may not have opened their files yet on a loaded computer. A
+    // child that escaped both kills can hold a pipe open, so the drain has a short bound of its own.
+    `sleep ${DRAIN_SECONDS} &`,
+    "g=$!",
+    'while { kill -0 "$ro" || kill -0 "$re"; } 2>/dev/null && kill -0 "$g" 2>/dev/null; do sleep 0.1; done',
+    'kill "$g" 2>/dev/null; kill -KILL -- "-$ro" "-$re" 2>/dev/null',
     "printf '\\036%s %s\\n' \"$r\" \"$x\"",
     `grep -E '"id"[[:space:]]*:[[:space:]]*2[[:space:]]*[,}]' "$d/out" | head -c ${ANSWER_CAP + 1}`,
     "printf '\\036'",

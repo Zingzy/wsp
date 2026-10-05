@@ -105,14 +105,7 @@ function tokenAdapter(): { factory: HarnessAdapterFactory; said: string[]; steer
     start: ({ resume, onEvent }) => {
       const sessionId = resume ?? randomUUID();
       const result: TurnResult = { status: "completed", text: "handed off" };
-      const finished = new Promise<TurnResult>(resolve => {
-        ends.push(() => {
-          onEvent({ type: "turn.done", sessionId, result });
-          onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
-          resolve(result);
-        });
-      });
-      void (async () => {
+      const launched = (async () => {
         const stream = ctx.execStream(`printf %s "$${TURN_TOKEN_ENV}"`, { env: { ...ctx.env } });
         let out = "";
         for await (const line of stream.lines) out += line;
@@ -120,6 +113,20 @@ function tokenAdapter(): { factory: HarnessAdapterFactory; said: string[]; steer
         said.push(out);
         onEvent({ type: "session.start", sessionId });
       })();
+      // A turn ends after its child has exited and its run is reaped, as a real agent's does: a child still writing
+      // its run when the case removes the folder fails the removal.
+      const finished = new Promise<TurnResult>(resolve => {
+        ends.push(() => {
+          void launched.then(
+            () => {
+              onEvent({ type: "turn.done", sessionId, result });
+              onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+              resolve(result);
+            },
+            (e: unknown) => resolve({ status: "failed", error: String(e) }),
+          );
+        });
+      });
       return {
         localId: sessionId,
         finished,
@@ -326,6 +333,7 @@ describe("local workspace", () => {
     held.end(0);
     await turn.finished;
     await rt.close();
+    expect(readdirSync(join(root, "runs")), "a run still on disk when the case ends").toEqual([]);
   });
 
   it("a turn on this computer runs its real child with the vault's token in its environment, through the agent's own adapter", async () => {

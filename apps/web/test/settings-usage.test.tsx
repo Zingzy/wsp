@@ -114,6 +114,9 @@ const hover = async (el: HTMLElement): Promise<void> => {
 };
 
 beforeEach(() => {
+  // The page and these fixtures each read the clock, and a minute turning between two reads moves every "ago".
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(Date.parse("2026-10-01T09:30:20Z"));
   resetSettings();
   useStore.setState({ places: [here, boat] });
 });
@@ -122,6 +125,7 @@ afterEach(() => {
   // Unmounted before the body is cleared, so a tooltip still open takes its portal out of a body that still holds it.
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
   document.body.innerHTML = "";
 });
 
