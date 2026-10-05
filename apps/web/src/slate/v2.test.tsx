@@ -68,7 +68,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 function openThread(slates: SlateApi) {
-  useStore.setState({ api: { slates, subscribe: () => () => {} } as unknown as Api, selectedId: "ws", selectedThreadId: ROW.threadId!, sessions: { ws: [ROW] } });
+  useStore.setState({ api: { slates, subscribe: () => () => {} } as unknown as Api, selectedId: "ws", selectedThreadId: ROW.threadId!, sessions: { ws: [ROW] }, conn: "live" });
   return render(<SlateSurface />);
 }
 const tid = () => ROW.threadId!;
@@ -189,6 +189,10 @@ describe("schema 2 in the Slate tab", () => {
     const view = openThread(slates);
     await screen.findByText("Step 1 of 4");
     expect(slates.subscribe).toHaveBeenCalledWith(tid(), ["slate"]);
+    // The hold is the socket's: a connection that drops and comes back takes it again.
+    act(() => useStore.setState({ conn: "reconnecting" }));
+    act(() => useStore.setState({ conn: "live" }));
+    expect(vi.mocked(slates.subscribe).mock.calls.filter(c => c[1][0] === "slate")).toHaveLength(2);
     view.unmount();
     expect(slates.unsubscribe).toHaveBeenCalledWith(tid(), ["slate"]);
   });

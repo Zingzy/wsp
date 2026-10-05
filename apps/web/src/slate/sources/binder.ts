@@ -168,6 +168,13 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
     setTick(paths.some(path => path === "time.now") ? TICK_MS : heads.has("time") ? IDLE_TICK_MS : 0);
   };
 
+  // A hold dies with the socket that took it, so a connection that comes back is asked for every hold again.
+  let live = deps.app().conn === "live";
+  const offConn = deps.subscribeApp(() => {
+    const now = deps.app().conn === "live";
+    if (now && !live && held.size > 0) void deps.api()?.subscribe(threadId, [...held]).catch(() => {});
+    live = now;
+  });
   const offReads = engine.onReadsChanged(rebind);
   const offApp = deps.subscribeApp(checkInputs);
   const offSlates = deps.subscribeSlates(checkInputs);
@@ -176,6 +183,7 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
   return () => {
     disposed = true;
     offReads();
+    offConn();
     offApp();
     offSlates();
     setTick(0);

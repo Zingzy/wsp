@@ -71,6 +71,7 @@ function ThreadSlate({ threadId }: { threadId: string }) {
     void loadSlate(threadId);
   }, [threadId]);
   const drawn = entry?.record?.document != null && entry.newer === undefined;
+  const live = useStore(s => s.conn === "live");
   useEffect(() => {
     if (!drawn) return;
     return bindSources(bundle.engine, threadId, {
@@ -82,12 +83,13 @@ function ThreadSlate({ threadId }: { threadId: string }) {
     });
   }, [bundle, threadId, drawn]);
   useEffect(() => {
-    if (!drawn) return;
+    if (!drawn || !live) return;
     // The tab on screen is what "shown" means to the host: its `every` runs tick while any window holds the slate.
+    // The hold is the socket's, so a connection that comes back takes it again.
     const api = useStore.getState().api?.slates ?? null;
     void api?.subscribe(threadId, [SHOWN_HOLD]).catch(() => {});
     return () => void api?.unsubscribe(threadId, [SHOWN_HOLD]).catch(() => {});
-  }, [threadId, drawn]);
+  }, [threadId, drawn, live]);
   if (entry === undefined) return null;
   if (!drawn) return <EmptySlate threadId={threadId} entry={entry} />;
   return (
