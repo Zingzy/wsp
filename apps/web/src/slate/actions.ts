@@ -129,6 +129,9 @@ export class ActionRunner {
   readonly #engine: SlateEngine;
   readonly #link: () => SlateLink;
   #counter = 0;
+  /** This window's own part of every request id: the host keeps ids from every window for minutes, and a counter
+   * alone starts at 1 again in each window and after each reload, answering a new press with an old one's result. */
+  readonly #me = crypto.randomUUID();
 
   constructor(engine: SlateEngine, link: () => SlateLink) {
     this.#engine = engine;
@@ -145,7 +148,7 @@ export class ActionRunner {
         version: engine.version,
         piece: pieceId,
         event,
-        requestId: `${engine.threadId}:${engine.version}:${pieceId}:${this.#counter}`,
+        requestId: `${engine.threadId}:${engine.version}:${pieceId}:${this.#me}:${this.#counter}`,
         ...(options.row !== undefined ? { scope: options.row } : {}),
         ...(options.rowAction !== undefined ? { rowAction: options.rowAction } : {}),
       };
