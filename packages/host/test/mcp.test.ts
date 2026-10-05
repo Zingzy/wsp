@@ -697,7 +697,8 @@ describe("the MCP server over the host", () => {
     expect(claude.starts.at(-1)!.resume).toBeDefined();
     const kept = await call("send", { thread: threadId, message: "go on" });
     expect(kept.isError).toBe(false);
-    expect(claude.starts.at(-1)!.model).toBeUndefined();
+    // A send that names neither runs on the thread's last picks, not the CLI's default.
+    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-fable-5-1", effort: "max" });
     // The send tool takes no access, so one named here is not read and the turn runs at the thread's own.
     const own = claude.starts.at(-1)!.permissionMode;
     const named = await call("send", { thread: threadId, message: "and now", access: "acceptEdits" });
