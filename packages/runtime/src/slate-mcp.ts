@@ -8,7 +8,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { McpTransport } from "@wsp/catalog";
-import { runOutputTail } from "@wsp/protocol";
+import { EXEC_OUTPUT_MAX, runOutputTail } from "@wsp/protocol";
 import type { SlateAsk, SlateJson, SlateRunDecl } from "@wsp/protocol";
 import type { Reshape, RunApprovals, RunBy, RunRecord, RunStartAnswer } from "./slate-runs.js";
 
@@ -118,6 +118,62 @@ const HELD_APPROVAL = "needs your approval";
 export const HELD_CONFIRM = "asks every time";
 const HELD_BUDGET = `started ${STARTS_PER_MINUTE} times in a minute; press to run it again`;
 const DOTS = "••••";
+/** The most one message from a server may be, on either transport: a command's own cap, eight times what a slate's
+ * values hold, so any answer worth keeping fits and a runaway one is cut off before it is parsed. */
+const MESSAGE_MAX_BYTES = EXEC_OUTPUT_MAX;
+const TOO_BIG = `the server sent a message over ${MESSAGE_MAX_BYTES / 1024 / 1024} MB`;
+/** How deep and how wide a parsed answer may be before anything walks it. */
+const DEPTH_MAX = 64;
+const ITEMS_MAX = 100_000;
+
+/** Why a parsed answer is too deep or too wide to walk, or nothing. Iterative, so a deep one cannot take the stack. */
+function shapeRefusal(value: unknown): string | undefined {
+  const stack: [unknown, number][] = [[value, 0]];
+  let items = 0;
+  while (stack.length > 0) {
+    const [v, depth] = stack.pop()!;
+    if (v === null || typeof v !== "object") continue;
+    if (depth >= DEPTH_MAX) return `the server's answer is nested over ${DEPTH_MAX} deep`;
+    const children = Array.isArray(v) ? v : Object.values(v);
+    items += children.length;
+    if (items > ITEMS_MAX) return `the server's answer holds over ${ITEMS_MAX} entries`;
+    for (const c of children) stack.push([c, depth + 1]);
+  }
+  return undefined;
+}
+
+/** JSON a tool put in its text, or nothing where it does not parse or is too deep or wide to walk. */
+function parsedText(text: string): SlateJson | undefined {
+  try {
+    const value = JSON.parse(text) as SlateJson;
+    return shapeRefusal(value) === undefined ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** An HTTP answer's body, read no further than one message may be. */
+async function boundedText(res: Response): Promise<string> {
+  if (Number(res.headers.get("content-length") ?? 0) > MESSAGE_MAX_BYTES) {
+    await res.body?.cancel();
+    throw new Error(TOO_BIG);
+  }
+  const reader = res.body?.getReader();
+  if (reader === undefined) return "";
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MESSAGE_MAX_BYTES) {
+      await reader.cancel();
+      throw new Error(TOO_BIG);
+    }
+    parts.push(value);
+  }
+  return Buffer.concat(parts).toString("utf8");
+}
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -180,7 +236,7 @@ function stdioClient(t: Extract<McpTransport, { kind: "stdio" }>, spec: McpServe
   let next = 1;
   let closed = false;
   let err = "";
-  let buffer = "";
+  let buffer = Buffer.alloc(0);
   const finish = (why: string): void => {
     if (closed) return;
     closed = true;
@@ -204,13 +260,14 @@ function stdioClient(t: Extract<McpTransport, { kind: "stdio" }>, spec: McpServe
   child.stdin?.on("error", () => {});
   child.stderr?.setEncoding("utf8");
   child.stderr?.on("data", (chunk: string) => (err = (err + chunk).slice(-ERR_KEPT)));
-  child.stdout?.setEncoding("utf8");
-  child.stdout?.on("data", (chunk: string) => {
-    buffer += chunk;
+  child.stdout?.on("data", (chunk: Buffer) => {
+    if (closed) return;
+    buffer = Buffer.concat([buffer, chunk]);
     let at: number;
-    while ((at = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, at).trim();
-      buffer = buffer.slice(at + 1);
+    while ((at = buffer.indexOf(10)) >= 0) {
+      if (at > MESSAGE_MAX_BYTES) return finish(TOO_BIG);
+      const line = buffer.subarray(0, at).toString("utf8").trim();
+      buffer = buffer.subarray(at + 1);
       if (line === "") continue;
       let msg: { id?: unknown; method?: unknown; result?: unknown; error?: RpcError };
       try {
@@ -228,9 +285,13 @@ function stdioClient(t: Extract<McpTransport, { kind: "stdio" }>, spec: McpServe
       if (w === undefined) continue;
       waiting.delete(msg.id);
       clearTimeout(w.timer);
+      const bad = shapeRefusal(msg.result);
       if (msg.error !== undefined) w.no(new RpcFailed(msg.error));
+      else if (bad !== undefined) w.no(new Error(bad));
       else w.ok(msg.result);
     }
+    // A message still unended past the cap is never going to be one worth reading.
+    if (buffer.length > MESSAGE_MAX_BYTES) finish(TOO_BIG);
   });
   child.on("error", e => finish(`${t.command} could not be started: ${e.message}`));
   child.on("exit", (code, signal) => finish(`the server exited${code !== null ? ` with ${code}` : signal !== null ? ` on ${signal}` : ""}`));
@@ -282,7 +343,7 @@ function httpClient(t: Extract<McpTransport, { kind: "http" }>, onClose: () => v
         const res = await post({ jsonrpc: "2.0", id, method, params }, ms);
         if (res.status === 401 || res.status === 403) throw new Error(`its address wants a sign-in (${res.status}); sign in where the agent keeps it`);
         if (!res.ok) throw new Error(`its address answered ${method} with ${res.status}`);
-        const text = await res.text();
+        const text = await boundedText(res);
         const lines = (res.headers.get("content-type") ?? "").includes("event-stream") ? text.split("\n").filter(l => l.startsWith("data:")).map(l => l.slice(5).trim()) : [text];
         for (const line of lines) {
           let msg: { id?: unknown; result?: unknown; error?: RpcError };
@@ -293,6 +354,8 @@ function httpClient(t: Extract<McpTransport, { kind: "http" }>, onClose: () => v
           }
           if (msg.id !== id) continue;
           if (msg.error !== undefined) throw new RpcFailed(msg.error);
+          const bad = shapeRefusal(msg.result);
+          if (bad !== undefined) throw new Error(bad);
           return msg.result;
         }
         throw new Error(`its answer to ${method} could not be read`);
@@ -568,14 +631,8 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
       const contents = Array.isArray((got as { contents?: unknown })?.contents) ? ((got as { contents: { text?: unknown; mimeType?: unknown; blob?: unknown }[] }).contents) : [];
       const texts = contents.flatMap(c => (typeof c.text === "string" ? [c.text] : []));
       const out = scrubbed(texts.join("\n"));
-      let json: SlateJson | undefined;
-      if (texts.length === 1) {
-        try {
-          json = mapStrings(JSON.parse(texts[0]!) as SlateJson, scrubbed);
-        } catch {
-          json = undefined;
-        }
-      }
+      const parsed = texts.length === 1 ? parsedText(texts[0]!) : undefined;
+      const json = parsed === undefined ? undefined : mapStrings(parsed, scrubbed);
       return { record: { state: "done", exit: 0, out: runOutputTail(out), ...(json !== undefined ? { json } : {}) }, raw: out };
     }
     const r = (got ?? {}) as { content?: { type?: unknown; text?: unknown }[]; structuredContent?: unknown; isError?: unknown };
@@ -587,15 +644,8 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
       const at = seenKey(threadId, decl.server, decl.tool);
       seen.set(at, seen.get(at) === true || structured);
     }
-    let json: SlateJson | undefined;
-    if (structured) json = mapStrings(r.structuredContent as SlateJson, scrubbed);
-    else if (texts.length > 0) {
-      try {
-        json = mapStrings(JSON.parse(texts.length === 1 ? texts[0]! : texts.join("\n")) as SlateJson, scrubbed);
-      } catch {
-        json = undefined;
-      }
-    }
+    const parsed = structured ? (r.structuredContent as SlateJson) : texts.length > 0 ? parsedText(texts.length === 1 ? texts[0]! : texts.join("\n")) : undefined;
+    const json = parsed === undefined ? undefined : mapStrings(parsed, scrubbed);
     return { record: { state: "done", exit: 0, out: runOutputTail(text), ...(json !== undefined ? { json } : {}), ...(structured ? {} : { text: true as const }) }, raw: structured ? JSON.stringify(json) : text };
   };
 

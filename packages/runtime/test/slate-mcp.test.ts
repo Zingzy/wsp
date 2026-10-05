@@ -3,6 +3,8 @@
 // asked for once per thread, a timer's tool run fills its json, a destructive tool confirms on every press, a secret
 // reaches the call and comes back scrubbed, one connection serves every call, and slate_catalog answers its tools.
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +14,7 @@ import type { AdapterEvent, Caller, EventUnion, SlateView, TurnResult } from "@w
 import { createRuntime, type AgentsReader, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/index.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
-import { createSlateMcp, foldSchema } from "../src/slate-mcp.js";
+import { createSlateMcp, foldSchema, type McpServerSpec } from "../src/slate-mcp.js";
 import type { RunRecord } from "../src/slate-runs.js";
 import { stubBackend, testPlatform } from "./stub-backend.js";
 
@@ -165,6 +167,55 @@ describe("a slate's MCP runs", () => {
     await call(4);
     expect(spawned()).toBe(2);
     mcp.close();
+  }, 30_000);
+
+  it("cuts a server off past 2 MB in one message, and fails an answer too deep or too wide before walking it", async () => {
+    const big = createServer((req, res) => {
+      let body = "";
+      req.on("data", c => (body += c));
+      req.on("end", () => {
+        const msg = JSON.parse(body) as { id?: number; method: string };
+        if (msg.id === undefined) return void res.writeHead(202).end();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        if (msg.method === "initialize") return void res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "big", version: "1" } } }));
+        if (msg.method === "tools/list") return void res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { tools: [{ name: "huge", annotations: { readOnlyHint: true }, inputSchema: { type: "object" } }] } }));
+        res.end(`{"jsonrpc":"2.0","id":${msg.id},"result":{"content":[{"type":"text","text":"${"x".repeat(3 * 1024 * 1024)}"}]}}`);
+      });
+    });
+    await new Promise<void>(r => big.listen(0, "127.0.0.1", r));
+    const records: Record<string, RunRecord> = {};
+    const mcp = createSlateMcp({
+      server: async (_t, name): Promise<McpServerSpec> =>
+        name === "big"
+          ? { transport: { kind: "http", url: `http://127.0.0.1:${(big.address() as AddressInfo).port}/mcp`, headers: {} }, cwd: tmpdir(), env: {}, secrets: [] }
+          : { transport: { kind: "stdio", command: process.execPath, args: [fileURLToPath(new URL("./fixtures/stub-flood-mcp.mjs", import.meta.url))], env: {} }, cwd: tmpdir(), env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" }, secrets: [] },
+      onRecord: (_t, run, r) => (records[run] = r),
+      approvals: { has: () => true, allow: () => {}, revoke: () => {}, list: () => [] },
+      secrets: { plaintext: () => undefined, scrub: (_t, text) => text },
+      reshape: () => {
+        throw new Error("no run here reshapes");
+      },
+      computer: () => "this computer",
+    });
+    try {
+      mcp.servers("t", ["flood", "big"], []);
+      const ended = async (run: string, server: string, tool: string): Promise<RunRecord> => {
+        mcp.start({ threadId: "t", run, decl: { kind: "tool", server, tool }, by: "person", args: () => ({}) });
+        await vi.waitFor(() => expect(["done", "failed"]).toContain(records[run]?.state), { timeout: 10_000 });
+        return records[run]!;
+      };
+      expect(await ended("deep", "flood", "deep")).toMatchObject({ state: "failed", why: expect.stringContaining("nested over 64 deep") });
+      expect(await ended("wide", "flood", "wide")).toMatchObject({ state: "failed", why: expect.stringContaining("over 100000 entries") });
+      // Deep JSON inside a text is kept as the text it is, never walked as data.
+      const text = await ended("deeptext", "flood", "deeptext");
+      expect(text).toMatchObject({ state: "done", text: true });
+      expect(text).not.toHaveProperty("json");
+      expect(await ended("endless", "flood", "endless")).toMatchObject({ state: "failed", why: expect.stringContaining("over 2 MB") });
+      expect(await ended("huge", "big", "huge")).toMatchObject({ state: "failed", why: expect.stringContaining("over 2 MB") });
+    } finally {
+      mcp.close();
+      big.close();
+    }
   }, 30_000);
 
   it("asks once per server, fills json on a timer, confirms a destructive tool every press, scrubs the secret and lists the tools", async () => {
