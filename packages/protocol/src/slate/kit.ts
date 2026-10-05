@@ -296,7 +296,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   diagram: {
     type: "diagram", level: "core", purpose: "A Mermaid diagram: a flow, a sequence or a state machine; value={`...${$step}`} shows the live step.", holdsChildren: false, textProp: "value", rawText: true,
-    props: { value: { type: "string", binds: "yes", required: true, about: "Mermaid source; a text child is taken as written, braces and all. Labels a few words, decisions short questions; detail goes in a text beside it" }, label: str() }, items: {}, events: [],
+    props: { value: { type: "string", binds: "yes", required: true, about: "Mermaid source; a text child is taken as written, braces and all. Labels a few words, decisions short questions; detail goes in a text beside it. Under about 15 nodes; past that, split it or summarize" }, label: str() }, items: {}, events: [],
     sketch: v => { const lines = shown(v.prop("value")).split("\n"); const label = shown(v.prop("label")); return `${label === "" ? "" : `${label}  `}${lines[0]}${lines.length > 1 ? ` (+${lines.length - 1} line${lines.length === 2 ? "" : "s"})` : ""}`; },
     fallback: "its source as code", example: "<diagram label=\"Deploy\" value={`flowchart LR\n  build --> test --> ship\n  classDef now stroke-width:3px\n  class ${$step} now`} />",
   },

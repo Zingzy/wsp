@@ -210,6 +210,6 @@ describe("the catalog's patch entry", () => {
       expect(applied.errors, p).toEqual([]);
       d = applied.document!;
     }
-    expect(slateCatalog()).toContain("slate_catalog patch");
+    expect(slateCatalog()).toContain("runs, patch, functions");
   });
 });

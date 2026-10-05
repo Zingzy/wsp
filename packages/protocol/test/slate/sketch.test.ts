@@ -106,8 +106,13 @@ describe("the catalog", () => {
   });
 
   it("answers runs, functions, steps, handlers and examples within their budgets", () => {
-    // A line for each run attribute, after small models guessed what always and once did, took it from 590 to 660.
-    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(660);
+    // A line for each run attribute, after small models guessed what always and once did, took it from 590 to 660;
+    // once, stream and when the person is asked, as ruled (6, 7), to 720.
+    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(720);
+    expect(slateCatalog("runs")).toContain("once: a start while it still runs is skipped; without once it stops and starts again.");
+    expect(slateCatalog("runs")).toContain("at the write for an every= run, at the first press or <when> for the rest. Until then it reads held; allowing it starts it at once.");
+    expect(slateCatalog()).toContain("bigger: resend the whole slate with if_version.");
+    expect(slateCatalog("diagram")).toContain("Under about 15 nodes");
     for (const n of ["functions", "steps", "handlers"]) expect(slateTokens(slateCatalog(n)), n).toBeLessThan(600);
     expect(slateTokens(slateCatalog("examples"))).toBeLessThan(3500);
     for (const e of SLATE_EXAMPLES) expect(parseSlate(e.text).errors, e.title).toEqual([]);

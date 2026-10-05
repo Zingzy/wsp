@@ -24,7 +24,7 @@ export const SLATE_RULES: readonly string[] = [
   "Props are meaning, never style. held is a sentence that disables: bind it to a condition.",
   "A list binds to items; item and index read the row.",
   "A press reaches you only through send(\"literal text\", $path); <when> chains run without you.",
-  "Write once, then patch by id: <props id=\"price\" value={$spot.json.v} />; never resend the whole slate; slate_catalog patch.",
+  "Small edit: patch by id, <props id=\"price\" value={$spot.json.v} />; bigger: resend the whole slate with if_version.",
   "Simple and airy unless asked for more: few pieces, one idea per section, short labels. Separate things by layout, never by ·, • or |.",
   "One heading per section: its title or a heading, never bold text.",
   "Status and last-checked lines small and muted, beside their subject.",
@@ -101,7 +101,7 @@ function index(): string {
     "Rules:",
     ...SLATE_RULES.map((r, i) => `${i + 1}. ${r}`),
     SLATE_INDEX_EXAMPLE,
-    "More: slate_catalog <piece, source, runs, functions, steps, handlers, icons or examples>.",
+    "More: slate_catalog <piece, source, runs, patch, functions, steps, handlers, icons or examples>.",
   ].join("\n");
 }
 
@@ -159,13 +159,14 @@ cmd: the literal command, run by bash -c in the thread's folder. Single quotes o
 env={{ ID: $id }}: values it reads as $ID. args={[$a]}: as $1. stdin={$x}: on standard input. A secret goes only in env or stdin.
 every={60}: starts it again every 60 seconds, at least 10, while the Slate tab is on screen in the app.
 always: with every, ticks while the tab is not on screen too.
-once: no restart while it runs.
+once: a start while it still runs is skipped; without once it stops and starts again.
+stream: fills lines as it prints, the last 500, so an output piece shows them live.
 timeout={60}: seconds before it is stopped, at most 600.
 on="host": runs on the host's computer, not the thread's.
 confirm="Stop it?": asks the person every start; a formula works too.
 then='python3 x.py': pipes its raw result to that command; its stdout as JSON becomes json, out stays raw.
 tool="server.tool" args={{ id: $id }}, or resource="server:uri": calls an MCP tool instead; slate_catalog <server> lists its tools.
-start($run) in a handler or <when> starts one. The person allows each command once on the slate; until then it reads held, an every= run from the write, and starts once allowed. slate_state start runs only what they allowed "Always in this thread".
+start($run) in a handler or <when> starts one. The person allows each command once, on the slate, when it first wants to start: at the write for an every= run, at the first press or <when> for the rest. Until then it reads held; allowing it starts it at once. slate_state start runs only what they allowed "Always in this thread".
 $run reads ${SLATE_RUN_FIELDS.join(" ")}; state is idle (never started) held running done failed cancelled.
 json is out parsed as JSON. A failed run's out and json are its own, often empty: show a figure with when={$run.exit == 0}. stale: the command changed since this result. Output is scrubbed of secrets.
 <value> state and each run's last result outlive an app or host restart.
@@ -180,7 +181,8 @@ const PATCH = `patch: elements without <slate>, sent as text to slate_write; one
 <move id="new" under="other" at={1} />: moves a piece.
 <remove id="new" />: removes a piece and what it holds. <remove name="hist" /> removes a declaration.
 <value name="hist" start={[]} />, <run ...>, <derived ...>, <file name="x.py">...</file>: adds the declaration or replaces the one of that name.
-<clear /> empties the slate; <undo /> goes back one write. Each stands alone in its write.`;
+<clear /> empties the slate; <undo /> goes back one write. Each stands alone in its write.
+For anything bigger, resend the whole <slate> with if_version set to the version you read.`;
 
 function functionsEntry(): string {
   const shown = new Set(["percent", "pct", "tokens", "usd", "duration", "ago", "until", "date", "plural", "word", "short", "num", "json", "contains", "orElse", "len", "first", "pluck"]);
@@ -213,7 +215,7 @@ export function slateCatalog(name?: string): string {
     default: {
       const options = [...Object.keys(SLATE_PIECES), ...Object.keys(SLATE_SOURCES), "runs", "functions", "steps", "handlers", "patch", "icons", "examples"];
       const fix = nearest(n, options);
-      return `${n} is not in the catalog${fix !== undefined ? `; did you mean ${fix}?` : "."} Ask for a piece, a source, runs, functions, steps, handlers, icons or examples; a server's tools are the host's to answer.`;
+      return `${n} is not in the catalog${fix !== undefined ? `; did you mean ${fix}?` : "."} Ask for a piece, a source, runs, patch, functions, steps, handlers, icons or examples; a server's tools are the host's to answer.`;
     }
   }
 }
