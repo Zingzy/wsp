@@ -137,6 +137,14 @@ export class SlateEngine {
     for (const id of changed) for (const child of doc?.pieces[id]?.children ?? []) placed.add(child);
     for (const id of placed) if (doc?.pieces[id]?.type === "table") for (const other of this.tablesBeside(id)) placed.add(other);
     for (const id of placed) this.#reads.delete(id);
+    // A piece's reads go through the derived values it names to what those read, so a changed formula changes what
+    // every piece reads, and each redraws with the new formula.
+    const derivedMoved = JSON.stringify(before?.derived ?? {}) !== JSON.stringify(doc?.derived ?? {});
+    if (derivedMoved) {
+      this.#reads.clear();
+      for (const id of this.#mounted.keys()) placed.add(id);
+      changed.add(DOC);
+    }
     if (before?.root !== doc?.root || before?.title !== doc?.title || (before === null) !== (doc === null)) changed.add(DOC);
     this.#loud = loudOf(doc);
     if (!stale) this.#revision = revision;

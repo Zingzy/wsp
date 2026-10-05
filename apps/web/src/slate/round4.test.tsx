@@ -243,6 +243,21 @@ describe("what the kit adds", () => {
     expect(segments().join(" ")).toContain("Errors");
   });
 
+  it("redraws a piece when only the derived formula it shows changes, and follows the values the new formula reads", () => {
+    const doc = (formula: string) => compiled(`<slate>
+<value name="a" start={1} /><value name="b" start={10} /><value name="c" start={100} />
+<derived name="total" value={${formula}} />
+<column><text id="t" value={$total} /></column>
+</slate>`);
+    const { engine, view, push } = draw(doc("$a + $b"));
+    expect(piece(view.container, "t").textContent).toBe("11");
+    act(() => engine.setRecord(doc("$a + $c"), { a: 1, b: 10, c: 100 }, 4, 3));
+    act(() => engine.flush());
+    expect(piece(view.container, "t").textContent).toBe("101");
+    push({ $c: 200 });
+    expect(piece(view.container, "t").textContent).toBe("201");
+  });
+
   it("starts a section shut on a literal open={false}, keeps the person's fold, and follows a new literal", () => {
     const doc = (open: boolean) => slate({ root: "root", pieces: { root: { type: "column", children: ["sec"] }, sec: { type: "section", props: { title: "Logs", open }, children: ["body"] }, body: { type: "text", props: { value: "inside" } } } });
     const { engine, view } = draw(doc(false));
