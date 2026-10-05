@@ -11,8 +11,8 @@ import type { PieceView } from "../SlateView.js";
 import { figure, NOTE, str, TONE_INK, toneOf } from "./look.js";
 import { isStatCell, ridersOf } from "./riders.js";
 import { placeOf } from "./runs.js";
+import { capitalised } from "../../settings/format.js";
 
-const capitalised = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
 
 /** Redraws when any of these pieces changes; subscribing also keeps them read while they draw nothing themselves. */
 export function usePiecesVersion(slate: SlateEngine, ids: readonly string[]): string {
@@ -37,10 +37,11 @@ export const number: PieceView = {
     const note = str(props["note"]);
     const riders = ridersOf(slate, id);
     usePiecesVersion(slate, riders.all);
-    const statePiece = riders.state === undefined ? undefined : slate.piece(riders.state);
+    // A rider whose when does not hold says nothing in the cell, as it would say nothing on its own.
+    const statePiece = riders.state === undefined || !slate.isShown(riders.state) ? undefined : slate.piece(riders.state);
     const word = statePiece === undefined ? undefined : str(slate.resolve(statePiece.props?.["value"]));
     const stateTone = statePiece === undefined ? "default" : toneOf(slate.resolve(statePiece.props?.["tone"]), slate, riders.state!);
-    const parts = [...riders.texts.map(text => str(slate.resolve(slate.piece(text)?.props?.["value"]))), note].filter((part): part is string => part !== undefined && part !== "");
+    const parts = [...riders.texts.filter(text => slate.isShown(text)).map(text => str(slate.resolve(slate.piece(text)?.props?.["value"]))), note].filter((part): part is string => part !== undefined && part !== "");
     // As a row of a card, or the one thing in a row of one, the cell keeps the stat strip's own padding.
     const parent = slate.parentId(id);
     const own = placeOf(slate, id) === "row" || (parent !== undefined && isStatCell(slate, parent) && placeOf(slate, parent) === "row");

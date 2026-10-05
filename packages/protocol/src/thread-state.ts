@@ -95,12 +95,14 @@ export interface SettleFacts {
  * happening since, or it was seen after it ended and has been quiet `settleMs` since the later of its last activity
  * and that showing. A null `settleMs` is never, so only a hand settles; a thread nobody has seen since it finished, one
  * that failed, and one `held` (open, or in a pinned tree) never fold by time; one with no times has no quiet to read. */
+/** Whether a window has shown the thread since its latest turn ended. */
+export const threadSeen = (t: { endedAt: number | null; readAt: number | null }): boolean => t.endedAt === null || (t.readAt !== null && t.readAt >= t.endedAt);
+
 export function threadSettled(t: SettleFacts, nowMs: number, settleMs: number | null, held = false): boolean {
   if (t.asking || t.working) return false;
   const times = [t.startedAt, t.endedAt].filter((at): at is number => at !== null);
   const last = times.length === 0 ? null : Math.max(...times);
   if (t.settledAt !== null && (last === null || t.settledAt >= last)) return true;
-  const seen = t.endedAt === null || (t.readAt !== null && t.readAt >= t.endedAt);
-  if (held || settleMs === null || t.failed || last === null || !seen) return false;
+  if (held || settleMs === null || t.failed || last === null || !threadSeen(t)) return false;
   return nowMs - Math.max(last, t.readAt ?? last) >= settleMs;
 }

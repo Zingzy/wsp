@@ -4,6 +4,9 @@
 // holds, the Problem every error, warning and runtime fault is reported in, and the patch ops.
 import { z } from "zod";
 
+/** The document format this build writes and draws; a newer one is held untouched. */
+export const SLATE_SCHEMA = 2;
+
 export type SlateJson = null | boolean | number | string | SlateJson[] | { [key: string]: SlateJson };
 export const SlateJson: z.ZodType<SlateJson> = z.lazy(() =>
   z.union([z.null(), z.boolean(), z.number(), z.string(), z.array(SlateJson), z.record(SlateJson)]),
@@ -136,7 +139,7 @@ export interface SlatePiece {
 export interface SlateRowAction { label: SlatePropValue; when?: SlateExpression; on?: { press?: SlateStep[] } }
 
 export interface SlateDoc {
-  schema: 2;
+  schema: typeof SLATE_SCHEMA;
   kit?: string;
   title?: string;
   root: SlateId;

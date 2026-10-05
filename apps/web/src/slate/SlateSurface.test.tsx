@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Slate tab against a fake host: keyed by the selected thread, every empty state, a fetch on session.slate,
 // the tab opened once on the agent's first write, and state pushes folded in place.
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView } from "@wsp/protocol";
 import type { Api, ProtocolEvent } from "../protocol/client";
@@ -10,6 +10,7 @@ import { useRightPanelStore } from "../rightPanelStore";
 import { SlateSurface } from "./SlateSurface";
 import { useSlateStore } from "./store";
 import { slate } from "./testing";
+import { COALESCE_MS } from "./pieces/press";
 import type { SlateApi, SlateRecord } from "./wire";
 
 const DOC = slate({
@@ -175,6 +176,24 @@ describe("a link a press opens", () => {
     opened.mockRestore();
   });
 
+  it("opens nothing and allows nothing on Don't, and opens once with no standing allowance on Open once", async () => {
+    const opened = vi.spyOn(window, "open").mockImplementation(() => null);
+    const api = host([record({ document: LINKED, values: {} })]);
+    select(api, "t1");
+    render(<SlateSurface />);
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Don't" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(opened).not.toHaveBeenCalled();
+    // A second press inside the double-press window is the same press, so the next one waits it out.
+    await act(async () => new Promise(r => setTimeout(r, COALESCE_MS + 50)));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open once" }));
+    expect(opened).toHaveBeenCalledWith("https://example.com/x?d=1", "_blank", "noopener,noreferrer");
+    expect(api.approve).not.toHaveBeenCalled();
+    opened.mockRestore();
+  });
+
   it("opens a domain this thread was allowed with no prompt", async () => {
     const opened = vi.spyOn(window, "open").mockImplementation(() => null);
     select(host([record({ document: LINKED, values: {}, approvals: { "domain:example.com": { state: "allowed", at: 1 } } })]), "t1");
@@ -187,8 +206,51 @@ describe("a link a press opens", () => {
 });
 
 describe("the tab's Approvals", () => {
+  it("stops every running run from the menu, and leaves the rest", async () => {
+    const runDoc = slate({ title: "Runs", runs: { a: { kind: "cmd", cmd: "sleep 9" }, b: { kind: "cmd", cmd: "true" } }, root: "root", pieces: { root: { type: "column", children: ["said"] }, said: { type: "text", props: { value: "Runs" } } } });
+    const api = host([record({ threadId: "t7", document: runDoc, values: { a: { state: "running", runs: 1 }, b: { state: "done", exit: 0, runs: 1 } } })]);
+    select(api, "t7");
+    render(<SlateSurface />);
+    fireEvent.click(await screen.findByRole("button", { name: "Slate menu" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Stop runs" }));
+    await waitFor(() => expect(api.cancel).toHaveBeenCalledWith("t7", "a"));
+    expect(api.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks before forgetting the slate's secrets, and forgets nothing until the person says so", async () => {
+    const secretDoc = slate({ title: "Deploy", values: { token: { start: "", secret: true } }, root: "root", pieces: { root: { type: "column", children: ["said"] }, said: { type: "text", props: { value: "Deploy" } } } });
+    const api = host([record({ threadId: "t9", document: secretDoc, values: {} })]);
+    select(api, "t9");
+    render(<SlateSurface />);
+    fireEvent.click(await screen.findByRole("button", { name: "Slate menu" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Forget secrets" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Forget this slate's secrets?" });
+    expect(api.state).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Forget secrets" })));
+    await waitFor(() => expect(api.state).toHaveBeenCalledWith("t9", { $token: "" }));
+  });
+
+  it("shows what the host refused: a revoke keeps its row and says why, a refused Clear says why under the title", async () => {
+    const api = host([record({ threadId: "t8", approvals: { k1: { state: "allowed", at: 1, run: "deploy", cmd: "bash deploy.sh" } } })]);
+    api.revoke = vi.fn(async () => Promise.reject(new Error("the host is restarting")));
+    api.clear = vi.fn(async () => Promise.reject(new Error("the slate moved on; read it again")));
+    select(api, "t8");
+    render(<SlateSurface />);
+    fireEvent.click(await screen.findByRole("button", { name: "Slate menu" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Clear" }));
+    expect(await screen.findByText("the slate moved on; read it again")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Slate menu" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Approvals" }));
+    await act(async () => fireEvent.click(document.querySelector<HTMLElement>('[data-slate-revoke="k1"]')!));
+    expect(await screen.findByText("the host is restarting")).toBeTruthy();
+    expect(document.querySelector('[data-slate-revoke="k1"]')).not.toBeNull();
+  });
+
   it("lists each standing approval as a row with Revoke, and revoking asks the host", async () => {
-    const api = host([record({ approvals: { k1: { state: "allowed", at: 1, run: "deploy", cmd: "bash deploy.sh" }, "domain:example.com": { state: "allowed", at: 2, cmd: "links to example.com" }, k2: { state: "refused", at: 3, run: "x", cmd: "rm -rf x" } } })]);
+    const api = host([
+      record({ approvals: { k1: { state: "allowed", at: 1, run: "deploy", cmd: "bash deploy.sh" }, "domain:example.com": { state: "allowed", at: 2, cmd: "links to example.com" }, k2: { state: "refused", at: 3, run: "x", cmd: "rm -rf x" } } }),
+      record({ approvals: { "domain:example.com": { state: "allowed", at: 2, cmd: "links to example.com" }, k2: { state: "refused", at: 3, run: "x", cmd: "rm -rf x" } } }),
+    ]);
     select(api, "t1");
     render(<SlateSurface />);
     fireEvent.click(await screen.findByRole("button", { name: "Slate menu" }));
@@ -199,5 +261,8 @@ describe("the tab's Approvals", () => {
     expect(screen.queryByText("rm -rf x")).toBeNull();
     fireEvent.click(document.querySelector<HTMLElement>('[data-slate-revoke="k1"]')!);
     await waitFor(() => expect(api.revoke).toHaveBeenCalledWith("t1", "k1"));
+    // The record read again after the revoke no longer holds it, and its row goes.
+    await waitFor(() => expect(screen.queryByText("bash deploy.sh")).toBeNull());
+    expect(screen.getByText("links to example.com")).toBeTruthy();
   });
 });

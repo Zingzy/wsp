@@ -5,7 +5,7 @@
 // which model state wsp's wire does not carry. Contract types are hand-written
 // against the wsp thread snapshot (startedAt and endedAt instead of createdAt,
 // updatedAt and the turn projection).
-import { DEFAULT_PREFERENCES, SETTLE_MS, threadSettled, type SessionStatus, type ThreadSection } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, SETTLE_MS, threadSeen, threadSettled, type SessionStatus, type ThreadSection } from "@wsp/protocol";
 import { cn } from "../lib/utils";
 import { activeThreadAnchorTimestampMs, toSortableTimestamp } from "./threadSort";
 
@@ -248,9 +248,7 @@ export interface SettleInput extends SidebarThreadStatusInput, ThreadTimestamps 
 /** Whether a window has shown the thread since its latest turn ended, which a failed turn needs as much as a
     finished one before it may fold by time. */
 function isThreadSeen(thread: SettleInput): boolean {
-  const ended = toSortableTimestamp(thread.endedAt ?? undefined);
-  const read = toSortableTimestamp(thread.readAt ?? undefined);
-  return ended === null || (read !== null && read >= ended);
+  return threadSeen({ endedAt: toSortableTimestamp(thread.endedAt ?? undefined), readAt: toSortableTimestamp(thread.readAt ?? undefined) });
 }
 
 /** Whether the thread belongs in the Settled fold, by the protocol's one rule (threadSettled), the one the host stops

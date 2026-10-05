@@ -4,8 +4,8 @@ import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { str, TONE_INK, toneOf } from "./look.js";
 import { riddenBy } from "./riders.js";
+import { capitalised } from "../../settings/format.js";
 
-const capitalised = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
 
 export const status: PieceView = {
   type: "status",

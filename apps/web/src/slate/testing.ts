@@ -36,7 +36,7 @@ export function slate(parts: Partial<SlateDoc> & Pick<SlateDoc, "root" | "pieces
 
 export function fakeLink(over: Partial<SlateLink> = {}): SlateLink {
   return {
-    event: vi.fn(async () => ({ outcome: "started" })),
+    event: vi.fn(async () => ({ outcome: "started" as const, said: "Sent to the agent" })),
     writeState: vi.fn(async () => ({ version: 4 })),
     approve: vi.fn(async () => ({ ok: true })),
     cancel: vi.fn(async () => ({ ok: true })),

@@ -21,7 +21,7 @@ export const SLATE_STEPS: Readonly<Record<string, SlateStepModule>> = slateTable
   steer: { kind: "steer", runs: "host", sig: "steer(\"text\", $path, ...)", purpose: "as send, into the running turn", consent: "as send", example: "steer(\"Look at the failing check first.\")" },
   queue: { kind: "queue", runs: "host", sig: "queue(\"text\", $path, ...)", purpose: "as send, after the running turn (a send until the flag lands)", consent: "as send", example: "queue(\"Then open the pull request.\")" },
   fill: { kind: "fill", runs: "window", sig: "fill(\"text\", $path, ...)", purpose: "puts the text in the composer, not sent", consent: "none; a press only", example: "fill(\"About this branch:\", git.branch)" },
-  open: { kind: "open", runs: "window", sig: "open(url or path)", purpose: "opens a URL or a file in the thread's folder", consent: "once per domain; a press only", example: "open(pr.url)" },
+  open: { kind: "open", runs: "window", sig: "open(url)", purpose: "opens an http, https or mailto link", consent: "once per domain; a press only", example: "open(pr.url)" },
   copy: { kind: "copy", runs: "window", sig: "copy(text)", purpose: "copies to the clipboard", consent: "none; a press only", example: "copy(git.head)" },
   pane: { kind: "pane", runs: "window", sig: "pane(\"kind\")", purpose: "opens a right panel tab", consent: "none; a press only", example: "pane(\"pr\")" },
 });

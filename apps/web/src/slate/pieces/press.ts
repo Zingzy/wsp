@@ -2,10 +2,10 @@
 // A press from a slate control: held until the host answers, a second press within 500 ms folded into the first,
 // and the outcome or the refusal said under the control for two seconds.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isSlateBinding, type SlatePropValue } from "@wsp/protocol";
+import { isSlateBinding, parseSlateOwnPath, type SlatePropValue } from "@wsp/protocol";
 import type { RaiseResult } from "../actions.js";
 
-const COALESCE_MS = 500;
+export const COALESCE_MS = 500;
 const SAID_MS = 2_000;
 
 export function usePress(run: () => Promise<RaiseResult>): { busy: boolean; said: string | undefined; refused: string | undefined; press: () => void } {
@@ -41,5 +41,5 @@ export function usePress(run: () => Promise<RaiseResult>): { busy: boolean; said
 export function twoWayPath(value: SlatePropValue | undefined): string | undefined {
   if (!isSlateBinding(value)) return undefined;
   const path = value.bind.trim();
-  return /^\$[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[-?\d+\])*$/.test(path) ? path : undefined;
+  return parseSlateOwnPath(path) !== undefined ? path : undefined;
 }

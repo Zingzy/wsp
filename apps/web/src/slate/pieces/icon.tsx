@@ -29,8 +29,6 @@ import {
   WalletIcon, WebhookIcon, WifiIcon, WifiOffIcon, WindIcon, WorkflowIcon, WrenchIcon, XIcon, ZapIcon,
   type LucideIcon,
 } from "lucide-react";
-import type { SlateJson } from "@wsp/protocol";
-import { cn } from "../../lib/utils.js";
 
 export const SLATE_ICON_VIEWS: Readonly<Record<string, LucideIcon>> = {
   activity: ActivityIcon, "alarm-clock": AlarmClockIcon, archive: ArchiveIcon, "arrow-down": ArrowDownIcon,
@@ -83,10 +81,3 @@ export const SLATE_ICON_VIEWS: Readonly<Record<string, LucideIcon>> = {
   upload: UploadIcon, user: UserIcon, users: UsersIcon, wallet: WalletIcon, webhook: WebhookIcon, wifi: WifiIcon,
   "wifi-off": WifiOffIcon, wind: WindIcon, workflow: WorkflowIcon, wrench: WrenchIcon, x: XIcon, zap: ZapIcon,
 };
-
-/** A named icon at the size its place takes, in the muted ink unless the caller gives one; nothing for no name. */
-export function SlateIcon({ name, className }: { name: SlateJson | undefined; className?: string }) {
-  const Icon = typeof name === "string" ? SLATE_ICON_VIEWS[name] : undefined;
-  if (Icon === undefined) return null;
-  return <Icon aria-hidden data-slate-icon={name} className={cn("size-3.5 shrink-0 text-muted-foreground", className)} />;
-}

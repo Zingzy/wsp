@@ -10,7 +10,7 @@ import { Outcome } from "./outcome.js";
 import { usePress } from "./press.js";
 
 /** The hover title a press shows before it is pressed: what each step does, a send's literal text and the paths it
- * carries (05, "button"). */
+ * carries. */
 export function pressTitle(steps: SlateStep | SlateStep[] | undefined, resolve?: (value: unknown) => unknown): string | undefined {
   const lines = stepsOf(steps).map(step => {
     switch (step.do) {
@@ -27,7 +27,7 @@ export function pressTitle(steps: SlateStep | SlateStep[] | undefined, resolve?:
       case "toggle":
         return `Changes ${step.path}`;
       case "open": {
-        // The domain a press would contact, said before it is pressed (12, links).
+        // The domain a press would contact, said before it is pressed.
         const href = resolve?.(step.target);
         const domain = typeof href === "string" ? slateLinkDomain(href) : undefined;
         return domain === undefined ? "Opens a link" : `Opens ${domain}`;
@@ -50,6 +50,8 @@ function hoverTitle(note: string | undefined, steps: SlateStep | SlateStep[] | u
 
 export const button: PieceView = {
   type: "button",
+  card: false,
+  control: true,
   component: function ButtonPiece({ id, piece, props, slate, raise }) {
     const { busy, said, refused, press } = usePress(() => raise("press"));
     const label = str(props["label"]) ?? "";

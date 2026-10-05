@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Rows of a list as rows of the card, each a 16 px checkbox, the title and its note; a done title muted, not struck. When editable,
-// a tick writes the row's done field into the value the list binds: $items[index].<field> (05, "checklist").
+// a tick writes the row's done field into the value the list binds: $items[index].<field>.
 import type { SlateJson, SlatePropValue } from "@wsp/protocol";
 import { isSlateBinding } from "@wsp/protocol";
 import { Checkbox } from "../../components/ui/checkbox.js";
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { truthy } from "../actions.js";
-import { str } from "./look.js";
+import { rowKeys, str } from "./look.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
 import { placeOf } from "./runs.js";
 import { twoWayPath } from "./press.js";
@@ -29,18 +29,18 @@ export const checklist: PieceView = {
     const editable = props["editable"] === true && list !== undefined && field !== undefined;
     const place = placeOf(slate, id);
     const inset = place === "inside" ? "" : "px-(--settings-inset,20px)";
+    const keys = rowKeys(items.map((item: SlateJson, index) => slate.resolve(piece.props?.["key"], { item, index })));
     if (items.length === 0) return <p className={cn("flex min-h-11 items-center py-3 text-[13px] leading-5 text-muted-foreground", inset, place === "page" && CARD_SURFACE)}>{str(props["empty"]) ?? "Nothing here"}</p>;
     return (
       <ul data-slate-checklist={id} className={cn("flex min-w-0 flex-col [&>*+*]:border-t [&>*+*]:border-border/50", place === "page" && CARD_SURFACE)}>
         {items.map((item: SlateJson, index) => {
           const row = { item, index };
-          const key = slate.resolve(piece.props?.["key"], row);
           const done = truthy(slate.resolve(piece.props?.["done"], row));
           const note = str(slate.resolve(piece.props?.["note"], row));
           // A row that is a plain word is its own title; a title written once would name every row alike.
           const title = typeof item === "string" || typeof item === "number" ? String(item) : str(slate.resolve(piece.props?.["title"], row));
           return (
-            <li key={key === undefined || key === null ? `#${index}` : String(key)} className={cn("flex min-h-11 min-w-0 items-start gap-3 py-3", inset)}>
+            <li key={keys[index]} className={cn("flex min-h-11 min-w-0 items-start gap-3 py-3", inset)}>
               <Checkbox
                 className="mt-0.5"
                 checked={done}

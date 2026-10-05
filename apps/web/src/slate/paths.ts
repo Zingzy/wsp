@@ -1,26 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The path grammar the renderer walks itself: a head name, then ".field" and "[index]" steps, as the expression
 // language writes them. Sources answer the steps after the head; the dependency sets compare paths as text.
-import { getSlateValue, isSlateBinding, isSlateFormat, parseSlateOwnPath, setSlateValue, type SlateJson, type SlatePropValue } from "@wsp/protocol";
+import { getSlateValue, isSlateBinding, isSlateFormat, parseSlateOwnPath, setSlateValue, slateSegments, slateStep, type SlateJson, type SlatePropValue } from "@wsp/protocol";
 import { dependencies } from "./expr.js";
 import type { SlatePiece } from "./model.js";
-
-const STEP = /^(?:\.([a-zA-Z_][a-zA-Z0-9_]*)|\[(-?\d+)\])/;
 
 /** The head and the steps of a path, or undefined for text that is not one. */
 export function splitPath(path: string): { head: string; steps: (string | number)[] } | undefined {
   const head = /^[a-zA-Z_][a-zA-Z0-9_]*/.exec(path);
-  if (head === null) return undefined;
-  const steps: (string | number)[] = [];
-  let rest = path.slice(head[0].length);
-  while (rest.length > 0) {
-    const m = STEP.exec(rest);
-    if (m === null) return undefined;
-    steps.push(m[1] !== undefined ? m[1] : Number(m[2]));
-    rest = rest.slice(m[0].length);
-  }
-  return { head: head[0], steps };
+  const steps = head === null ? undefined : slateSegments(path.slice(head[0].length));
+  return head === null || steps === undefined ? undefined : { head: head[0], steps };
 }
+
+/** A literal "$name" with no steps: a value named whole, as an output names its run. */
+export const isOwnName = (v: unknown): v is string => typeof v === "string" && parseSlateOwnPath(v)?.segs.length === 0;
 
 /** An own path, "$name" then steps: the value's name and the steps into it. */
 export function ownPath(path: string): { name: string; steps: (string | number)[] } | undefined {
@@ -33,22 +26,9 @@ export const getOwn = (values: Readonly<Record<string, SlateJson>>, path: string
 /** A copy of the values with one path written; a path that cannot be written leaves them as they were. */
 export const setOwn = (values: Readonly<Record<string, SlateJson>>, path: string, value: SlateJson): Record<string, SlateJson> => setSlateValue(values, path, value) ?? { ...values };
 
-const UNSAFE = new Set(["__proto__", "constructor", "prototype"]);
-
-/** Walks steps into a value; a step into nothing, or into the wrong kind of value, is undefined. */
+/** Steps into a value, each a record's own field or a list's item, never a prototype key. */
 export function walk(value: unknown, steps: readonly (string | number)[]): SlateJson | undefined {
-  let at: unknown = value;
-  for (const step of steps) {
-    if (at === null || at === undefined || typeof at !== "object") return undefined;
-    if (Array.isArray(at)) {
-      if (typeof step !== "number") return undefined;
-      at = at[step < 0 ? at.length + step : step];
-    } else {
-      if (typeof step !== "string" || UNSAFE.has(step) || !Object.prototype.hasOwnProperty.call(at, step)) return undefined;
-      at = (at as Record<string, unknown>)[step];
-    }
-  }
-  return at === undefined ? undefined : (at as SlateJson);
+  return steps.reduce<SlateJson | undefined>((at, step) => slateStep(at, step), value as SlateJson | undefined);
 }
 
 /** Whether a change at one path can move a value read at another: either is the other or under it. */
@@ -120,7 +100,7 @@ export function whenOf(item: SlatePropValue | undefined): string | undefined {
  * "$name" prop names a value the piece reads whole (an output's run). */
 export function pieceReads(piece: SlatePiece): { when: string[]; props: string[] } {
   const values = Object.values(piece.props ?? {});
-  const named = values.filter((v): v is string => typeof v === "string" && /^\$[a-zA-Z_][a-zA-Z0-9_]*$/.test(v));
+  const named = values.filter(isOwnName);
   // A fact, a column, an option or a row action written out carries its own when, a formula as text.
   const whens = values.flatMap(v => (Array.isArray(v) ? v.flatMap(item => whenOf(item) ?? []) : []));
   return {

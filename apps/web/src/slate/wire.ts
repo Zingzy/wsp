@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The window's slate ops (01-architecture, "Wire operations"), each answer parsed against the wire type.
-import { SlateEventAnswer, SlateReadAnswer, SlatesGetAnswer, SlatesResolveAnswer, SlateStateAnswer, SlateWriteAnswer, type SlateDoc, type SlateJson, type SlateView } from "@wsp/protocol";
+// The window's slate ops, each answer parsed against the wire type.
+import { SLATE_SCHEMA, SlateEventAnswer, SlateReadAnswer, SlatesGetAnswer, SlatesResolveAnswer, SlateStateAnswer, SlateWriteAnswer, type SlateDoc, type SlateJson, type SlateOpName, type SlateOpParams, type SlateView } from "@wsp/protocol";
 import type { SlateEventAsk } from "./actions.js";
 import type { SlateApproval } from "./model.js";
 
@@ -8,8 +8,7 @@ interface Requester {
   request<T = Record<string, unknown>>(op: string, params?: Record<string, unknown>): Promise<T>;
 }
 
-/** The schema this renderer draws; a newer document is held untouched and the tab says so (13, "Versioning"). */
-export const SLATE_SCHEMA = 2;
+export { SLATE_SCHEMA };
 
 /** One thread's slate as the window draws it: the host's record with its document checked for a slate's frame. */
 export type SlateRecord = Omit<SlateView, "document" | "values"> & { document: SlateDoc | null; values: Record<string, SlateJson> };
@@ -38,7 +37,7 @@ export interface SlateApi {
   /** The person withdraws one of the thread's standing approvals. */
   revoke(threadId: string, key: string): Promise<void>;
   shown(threadId: string): Promise<void>;
-  /** The slate as text, the sketch the agent reads (10). */
+  /** The slate as text, the sketch the agent reads. */
   sketch(threadId: string): Promise<string>;
   undo(threadId: string): Promise<{ version: number }>;
   clear(threadId: string): Promise<{ version: number }>;
@@ -48,20 +47,22 @@ export interface SlateApi {
 }
 
 export function slateApi(c: Requester): SlateApi {
-  const write = async (threadId: string, text: string) => SlateWriteAnswer.parse(await c.request<unknown>("slates.write", { threadId, text }));
+  /** One op with its params checked against the protocol's, so a renamed field does not compile. */
+  const ask = <O extends SlateOpName>(op: O, params: SlateOpParams<O>): Promise<unknown> => c.request<unknown>(op, params as Record<string, unknown>);
+  const write = async (threadId: string, text: string) => SlateWriteAnswer.parse(await ask("slates.write", { threadId, text }));
   return {
-    get: async threadId => recordOf(SlatesGetAnswer.parse(await c.request<unknown>("slates.get", { threadId })).slate),
-    state: async (threadId, values) => SlateStateAnswer.parse(await c.request<unknown>("slates.state", { threadId, values })),
-    event: async (threadId, ask) => SlateEventAnswer.parse(await c.request<unknown>("slates.event", { threadId, ...ask })),
-    approve: async (threadId, key, scope) => void (await c.request("slates.approve", { threadId, key, scope })),
-    cancel: async (threadId, run) => void (await c.request("slates.cancel", { threadId, run })),
-    revoke: async (threadId, key) => void (await c.request("slates.revoke", { threadId, key })),
-    shown: async threadId => void (await c.request("slates.shown", { threadId })),
-    sketch: async threadId => SlateReadAnswer.parse(await c.request<unknown>("slates.read", { threadId, sketch: true, text: false })).text,
+    get: async threadId => recordOf(SlatesGetAnswer.parse(await ask("slates.get", { threadId })).slate),
+    state: async (threadId, values) => SlateStateAnswer.parse(await ask("slates.state", { threadId, values })),
+    event: async (threadId, press) => SlateEventAnswer.parse(await ask("slates.event", { threadId, ...press })),
+    approve: async (threadId, key, scope) => void (await ask("slates.approve", { threadId, key, scope })),
+    cancel: async (threadId, run) => void (await ask("slates.cancel", { threadId, run })),
+    revoke: async (threadId, key) => void (await ask("slates.revoke", { threadId, key })),
+    shown: async threadId => void (await ask("slates.shown", { threadId })),
+    sketch: async threadId => SlateReadAnswer.parse(await ask("slates.read", { threadId, sketch: true, text: false })).text,
     undo: threadId => write(threadId, "<undo />"),
     clear: threadId => write(threadId, "<clear />"),
-    subscribe: async (threadId, sources) => void (await c.request("slates.subscribe", { threadId, sources: [...sources] })),
-    unsubscribe: async (threadId, sources) => void (await c.request("slates.unsubscribe", { threadId, sources: [...sources] })),
-    resolve: async (threadId, paths) => SlatesResolveAnswer.parse(await c.request<unknown>("slates.resolve", { threadId, paths: [...paths] })).values,
+    subscribe: async (threadId, sources) => void (await ask("slates.subscribe", { threadId, sources: [...sources] })),
+    unsubscribe: async (threadId, sources) => void (await ask("slates.unsubscribe", { threadId, sources: [...sources] })),
+    resolve: async (threadId, paths) => SlatesResolveAnswer.parse(await ask("slates.resolve", { threadId, paths: [...paths] })).values,
   };
 }

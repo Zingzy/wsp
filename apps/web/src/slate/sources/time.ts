@@ -6,6 +6,7 @@ import type { SourceModule } from "./source.js";
 export const time: SourceModule = {
   name: "time",
   input: ctx => ctx.now,
+  tick: paths => (paths.includes("time.now") ? 1_000 : 30_000),
   select(steps, ctx) {
     const at = new Date(ctx.now);
     const today = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;

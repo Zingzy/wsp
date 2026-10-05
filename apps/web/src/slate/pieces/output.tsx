@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A run's output as it streams (05, "The output of a run"): a row of the card with its label and its state as one word,
+// A run's output as it streams: a row of the card with its label and its state as one word,
 // a quiet Cancel in the slot while it runs, then the tail of its lines as the next row in 12 px mono, `lines` rows
 // tall, following the end while it runs, no box of its own; why under them when held or failed.
 // A finished run keeps its last lines until it next starts; after the agent changed its command they read as stale.
@@ -16,6 +16,7 @@ import { str } from "./look.js";
 import { placeOf } from "./runs.js";
 import { Quiet } from "./quiet.js";
 import { Refreshing } from "./refreshing.js";
+import { isOwnName } from "../paths.js";
 
 /** A run state as the status mark's grammar says it. */
 export const RUN_WORDS: Record<SlateRunState, string> = {
@@ -45,10 +46,11 @@ function recordLines(record: { lines?: string[]; out?: SlateJson; err?: string }
   return text === "" ? [] : text.replace(/\n$/, "").split("\n");
 }
 
-const runName = (value: unknown): string | undefined => (typeof value === "string" && /^\$[a-zA-Z_][a-zA-Z0-9_]*$/.test(value) ? value.slice(1) : undefined);
+const runName = (value: unknown): string | undefined => (isOwnName(value) ? value.slice(1) : undefined);
 
 export const output: PieceView = {
   type: "output",
+  saysRefreshing: true,
   rowScoped: ["run"],
   fills: true,
   component: function OutputPiece({ id, piece, props, slate, raise, cancel, sender }) {

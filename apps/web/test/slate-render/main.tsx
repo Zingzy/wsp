@@ -5,7 +5,7 @@
 import { createRoot } from "react-dom/client";
 import { ActionRunner, StateSender, type SlateLink } from "../../src/slate/actions";
 import { SlateEngine } from "../../src/slate/engine";
-import { DIAGRAM_TEXT, REACH_TEXT, REACH_VALUES, todaySlate } from "../fixtures/slate/today";
+import { DIAGRAM_TEXT, REACH_TEXT, REACH_VALUES, kitSlate } from "../fixtures/slate/kit-slates";
 import { RENDER_CASES } from "./cases";
 import { SLATE_VIEWS } from "../../src/slate/pieces";
 import { SlateView } from "../../src/slate/SlateView";
@@ -14,7 +14,7 @@ import "./harness.css";
 const query = new URLSearchParams(location.search);
 const width = Number(query.get("w") ?? 400);
 const named = RENDER_CASES[query.get("doc") ?? ""];
-const { doc, values } = named !== undefined ? todaySlate(named.text, named.values) : query.get("doc") === "diagram" ? todaySlate(DIAGRAM_TEXT) : todaySlate(REACH_TEXT, REACH_VALUES);
+const { doc, values } = named !== undefined ? kitSlate(named.text, named.values) : query.get("doc") === "diagram" ? kitSlate(DIAGRAM_TEXT) : kitSlate(REACH_TEXT, REACH_VALUES);
 const engine = new SlateEngine("t1");
 engine.setRecord(doc, values, 3, 3);
 (window as unknown as { slateEngine: SlateEngine }).slateEngine = engine;

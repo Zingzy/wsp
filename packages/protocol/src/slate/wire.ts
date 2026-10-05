@@ -103,6 +103,9 @@ export const SlateToolAsk = z.object({
 export const SlateAsk = z.discriminatedUnion("kind", [SlateCmdAsk, SlateServerAsk, SlateToolAsk]);
 export type SlateAsk = z.infer<typeof SlateAsk>;
 
+/** The approval key that lets a slate's reactions message the agent, listed and revoked beside the run approvals. */
+export const SLATE_SEND_KEY = "send";
+
 /** An approval as a window or a read sees it: allowed or refused, never whether once or for the thread. */
 export const SlateApprovalView = z.object({ run: z.string().optional(), cmd: z.string().optional(), scripts: z.record(z.string(), z.string()).optional(), state: z.enum(["allowed", "refused"]), at: z.number() });
 export type SlateApprovalView = z.infer<typeof SlateApprovalView>;
@@ -205,6 +208,8 @@ export const SLATE_OPS = {
   "slates.resolve": SlatesResolveParams,
 } as const;
 export type SlateOpName = keyof typeof SLATE_OPS;
+/** Each slate op's params as a client sends them. */
+export type SlateOpParams<O extends SlateOpName> = z.input<(typeof SLATE_OPS)[O]>;
 
 // --- answers ---
 

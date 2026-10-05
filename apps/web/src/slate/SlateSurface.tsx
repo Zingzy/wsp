@@ -4,7 +4,8 @@
 // state is the panel's own Empty, quiet, with no spinner while the record is on its way.
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Button } from "../components/ui/button.js";
+import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
+import { Button, NEUTRAL_RING } from "../components/ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
 import { cn } from "../lib/utils.js";
@@ -13,12 +14,13 @@ import { useSelectedThreadId, useStore } from "../protocol/store.js";
 import { requestComposerFocus } from "../shell/shellRequests.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { ApprovalsSheet, batchable } from "./approvals.js";
-import { cadenceOf, ConsentSheet, HeldRuns, LinkConsent } from "./consent.js";
+import { askKind } from "./askKinds.js";
+import { cadenceOf, HeldRuns, LinkConsent } from "./consent.js";
 import { slateDomainKey } from "@wsp/protocol";
 import { DOC, RUNS } from "./engine.js";
-import { ServerConsentSheet, ToolConfirmSheet } from "./mcp.js";
 import { isRunRecord, type SlateApproval, type SlateAsk } from "./model.js";
 import { SLATE_VIEWS } from "./pieces/index.js";
+import { viewOf } from "./pieces/registry.js";
 import { Refreshing } from "./pieces/refreshing.js";
 import { bindSources } from "./sources/binder.js";
 import { SlateView, usePieceVersion } from "./SlateView.js";
@@ -26,7 +28,7 @@ import { askConsent, closeLink, loadSlate, markSeen, slateBundle, slateLink, use
 import { threadWorkspace } from "./SlateHost.js";
 import { STANDING_WORDS, StandingApprovals } from "./standing.js";
 
-/** The hold a drawn slate keeps on the host while the tab shows it (07, "A timer"). */
+/** The hold a drawn slate keeps on the host while the tab shows it. */
 export const SHOWN_HOLD = "slate";
 
 export const SLATE_WORDS = {
@@ -43,6 +45,8 @@ export const SLATE_WORDS = {
   copy: "Copy as text",
   stop: "Stop runs",
   forget: "Forget secrets",
+  forgetTitle: "Forget this slate's secrets?",
+  forgetBody: "A secret it kept does not come back. The slate asks you to type it again.",
   menu: "Slate menu",
 } as const;
 
@@ -71,6 +75,7 @@ function ThreadSlate({ threadId }: { threadId: string }) {
     void loadSlate(threadId);
   }, [threadId]);
   const drawn = entry?.record?.document != null && entry.newer === undefined;
+  const live = useStore(s => s.conn === "live");
   useEffect(() => {
     if (!drawn) return;
     return bindSources(bundle.engine, threadId, {
@@ -82,12 +87,13 @@ function ThreadSlate({ threadId }: { threadId: string }) {
     });
   }, [bundle, threadId, drawn]);
   useEffect(() => {
-    if (!drawn) return;
+    if (!drawn || !live) return;
     // The tab on screen is what "shown" means to the host: its `every` runs tick while any window holds the slate.
+    // The hold is the socket's, so a connection that comes back takes it again.
     const api = useStore.getState().api?.slates ?? null;
     void api?.subscribe(threadId, [SHOWN_HOLD]).catch(() => {});
     return () => void api?.unsubscribe(threadId, [SHOWN_HOLD]).catch(() => {});
-  }, [threadId, drawn]);
+  }, [threadId, drawn, live]);
   if (entry === undefined) return null;
   if (!drawn) return <EmptySlate threadId={threadId} entry={entry} />;
   return (
@@ -112,7 +118,7 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   usePieceVersion(engine, RUNS);
   const api = useStore(s => s.api?.slates ?? null);
   const root = engine.document?.root;
-  const refreshing = root !== undefined && engine.piece(root)?.type !== "section" && engine.refreshingUnder(root);
+  const refreshing = root !== undefined && viewOf(engine.piece(root)?.type)?.saysRefreshing !== true && engine.refreshingUnder(root);
   const title = engine.document?.title ?? "Slate";
   const copy = () => void api?.sketch(threadId).then(text => navigator.clipboard?.writeText(text));
   const [standing, setStanding] = useState(false);
@@ -121,11 +127,17 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   const stop = () => {
     for (const run of runs) if (isRunRecord(engine.values[run]) && engine.values[run].state === "running") void api?.cancel(threadId, run);
   };
-  const forget = () => {
-    for (const path of secrets) void bundle.sender.secret(path, "");
+  const [forgetting, setForgetting] = useState(false);
+  const forget = () => Promise.all(secrets.map(path => bundle.sender.secret(path, "")));
+  // What the host refused of the menu's acts stays under the title until the next one, as a sheet keeps its refusal.
+  const [refused, setRefused] = useState<string | undefined>(undefined);
+  const act = (asked: Promise<unknown> | undefined) => {
+    setRefused(undefined);
+    void asked?.then(() => loadSlate(threadId), (error: unknown) => setRefused(refusalOf(error)));
   };
   return (
-    <div data-slate-version={engine.version} className={cn(COLUMN, "mt-3 mb-4 flex h-7 shrink-0 items-center gap-2")} title={engine.document?.title}>
+    <>
+    <div data-slate-version={engine.version} className={cn(COLUMN, "mt-3 flex h-7 shrink-0 items-center gap-2", refused === undefined && "mb-4")} title={engine.document?.title}>
       <h2 className="min-w-0 flex-1 truncate text-[13px] leading-5 font-normal text-muted-foreground">{title}</h2>
       {refreshing ? <Refreshing /> : null}
       <Menu>
@@ -133,18 +145,62 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
           <MoreHorizontal />
         </MenuTrigger>
         <MenuPopup align="end">
-          <MenuItem disabled={entry.record?.canUndo !== true} onClick={() => void api?.undo(threadId).then(() => loadSlate(threadId))}>
+          <MenuItem disabled={entry.record?.canUndo !== true} onClick={() => act(api?.undo(threadId))}>
             {SLATE_WORDS.undo(engine.version)}
           </MenuItem>
-          <MenuItem onClick={() => void api?.clear(threadId).then(() => loadSlate(threadId))}>{SLATE_WORDS.clear}</MenuItem>
+          <MenuItem onClick={() => act(api?.clear(threadId))}>{SLATE_WORDS.clear}</MenuItem>
           {runs.length > 0 ? <MenuItem onClick={stop}>{SLATE_WORDS.stop}</MenuItem> : null}
-          {secrets.length > 0 ? <MenuItem onClick={forget}>{SLATE_WORDS.forget}</MenuItem> : null}
+          {secrets.length > 0 ? <MenuItem onClick={() => setForgetting(true)}>{SLATE_WORDS.forget}</MenuItem> : null}
           <MenuItem onClick={() => setStanding(true)}>{STANDING_WORDS.menu}</MenuItem>
           <MenuItem onClick={copy}>{SLATE_WORDS.copy}</MenuItem>
         </MenuPopup>
       </Menu>
+      {forgetting ? <ForgetSecrets forget={forget} onClose={() => setForgetting(false)} /> : null}
       {standing ? <StandingApprovals record={entry.record} revoke={key => slateLink(threadId).revoke(key).then(() => loadSlate(threadId))} onClose={() => setStanding(false)} /> : null}
     </div>
+    {refused === undefined ? null : (
+      <p data-slate-refused className={cn(COLUMN, "mb-4 text-[13px] leading-5 text-error-foreground")}>
+        {refused}
+      </p>
+    )}
+    </>
+  );
+}
+
+/** A refused act's words, as the host said them. */
+const refusalOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** Forgetting the slate's secrets asks first: a kept secret does not come back, and the person types it again. */
+function ForgetSecrets({ forget, onClose }: { forget(): Promise<unknown>; onClose(): void }) {
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | undefined>(undefined);
+  return (
+    <AlertDialog open onOpenChange={open => (open ? undefined : onClose())}>
+      <AlertDialogPopup>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{SLATE_WORDS.forgetTitle}</AlertDialogTitle>
+          <AlertDialogDescription>{SLATE_WORDS.forgetBody}</AlertDialogDescription>
+        </AlertDialogHeader>
+        {refused === undefined ? null : <p className="px-5 text-[13px] leading-5 text-error-foreground">{refused}</p>}
+        <AlertDialogFooter>
+          <AlertDialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>Cancel</AlertDialogClose>
+          <Button
+            variant="destructive"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              setRefused(undefined);
+              void forget().then(onClose, (error: unknown) => {
+                setBusy(false);
+                setRefused(error instanceof Error ? error.message : String(error));
+              });
+            }}
+          >
+            {SLATE_WORDS.forget}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogPopup>
+    </AlertDialog>
   );
 }
 
@@ -158,17 +214,46 @@ function refuse(threadId: string, ask: SlateAsk): void {
  * waiting and one this window has not shown, one sheet for all of them; else the first held run whose sheet this
  * window has not shown yet, so a run a timer or a reaction wants asks as soon as the tab shows it. A sheet closed,
  * answered or not, does not open on its own again; a row's Review opens it. */
+/** Whether the person is typing somewhere other than the slate: a sheet that would open on its own waits until they
+ * stop, and the held run's row still offers Review meanwhile. */
+function useTypingElsewhere(): boolean {
+  const typingNow = (): boolean => {
+    const at = document.activeElement;
+    if (!(at instanceof HTMLElement) || at.closest("[data-slate-surface]") !== null) return false;
+    return at.isContentEditable || at instanceof HTMLTextAreaElement || (at instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit"].includes(at.type));
+  };
+  const [typing, setTyping] = useState(typingNow);
+  useEffect(() => {
+    const read = () => setTyping(typingNow());
+    const left = () => queueMicrotask(read);
+    document.addEventListener("focusin", read);
+    document.addEventListener("focusout", left);
+    return () => {
+      document.removeEventListener("focusin", read);
+      document.removeEventListener("focusout", left);
+    };
+  }, []);
+  return typing;
+}
+
 function Consent({ threadId }: { threadId: string }) {
   const asking = useSlateStore(s => s.asking[threadId]);
+  const typing = useTypingElsewhere();
   const asks = useSlateStore(s => s.byThread[threadId]?.record?.asks);
   const seen = useSlateStore(s => s.seen[threadId]);
   const unseen = (asks ?? []).filter(a => !(seen ?? []).includes(a.key));
-  const ask = asking === undefined ? unseen[0] : (asking.ask ?? asks?.find(a => a.run === asking.run));
+  const ask = asking === undefined ? (typing ? undefined : unseen[0]) : (asking.ask ?? asks?.find(a => a.run === asking.run));
   useEffect(() => {
-    if (asking !== undefined && ask === undefined) void loadSlate(threadId);
+    if (asking === undefined || ask !== undefined) return;
+    // A run held for the start limit or the four-at-once cap has no sheet: once the record says so, stop asking, or
+    // no later sheet in this thread would open.
+    void loadSlate(threadId).then(entry => {
+      const found = entry?.record?.asks.some(a => a.run === asking.run) === true;
+      if (!found && useSlateStore.getState().asking[threadId] === asking) askConsent(threadId, undefined);
+    });
   }, [asking, ask, threadId]);
   const batch = batchable(asks ?? []);
-  if (asking === undefined && batch.length > 1 && batch.some(a => !(seen ?? []).includes(a.key))) {
+  if (asking === undefined && !typing && batch.length > 1 && batch.some(a => !(seen ?? []).includes(a.key))) {
     const document = slateBundle(threadId).engine.document;
     const closeAll = () => {
       for (const a of batch) markSeen(threadId, a.key);
@@ -183,9 +268,7 @@ function Consent({ threadId }: { threadId: string }) {
   };
   const cadence = cadenceOf(slateBundle(threadId).engine.document, ask.run);
   const answer = (scope: SlateApproval) => slateLink(threadId).approve(ask.key, scope).then(() => void loadSlate(threadId));
-  if (ask.kind === "server") return <ServerConsentSheet key={ask.key} ask={ask} cadence={cadence} answer={answer} onClose={close} />;
-  if (ask.kind === "tool") return <ToolConfirmSheet key={ask.key} ask={ask} answer={answer} onClose={close} />;
-  return <ConsentSheet key={ask.key} ask={ask} cadence={cadence} more={unseen.filter(a => a.key !== ask.key).length} answer={answer} onClose={close} />;
+  return askKind(ask).sheet({ ask, cadence, more: unseen.filter(a => a.key !== ask.key).length, answer, onClose: close });
 }
 
 /** The prompt a press's link waits on, until the person opens it, allows its domain, or says no. */
@@ -205,6 +288,7 @@ function LinkPrompt({ threadId }: { threadId: string }) {
 /** No slate yet, cleared, rewound to before it, or newer than this build: the panel's own empty state. */
 function EmptySlate({ threadId, entry }: { threadId: string; entry: SlateEntry }) {
   const api = useStore(s => s.api?.slates ?? null);
+  const [refused, setRefused] = useState<string | undefined>(undefined);
   const first = entry.newer !== undefined ? SLATE_WORDS.newer(entry.newer) : entry.record?.empty === "cleared" ? SLATE_WORDS.cleared : entry.record?.empty === "rewound-before" ? SLATE_WORDS.rewound : null;
   const ask = () => {
     const workspaceId = threadWorkspace(threadId);
@@ -227,12 +311,20 @@ function EmptySlate({ threadId, entry }: { threadId: string; entry: SlateEntry }
             {SLATE_WORDS.askButton}
           </Button>
           {entry.record?.canUndo === true ? (
-            <Button variant="ghost" size="xs" onClick={() => void api?.undo(threadId).then(() => loadSlate(threadId))}>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => {
+                setRefused(undefined);
+                void api?.undo(threadId).then(() => loadSlate(threadId), (error: unknown) => setRefused(refusalOf(error)));
+              }}
+            >
               Undo
             </Button>
           ) : null}
         </div>
       ) : null}
+      {refused === undefined ? null : <p data-slate-refused className="text-[13px] leading-5 text-error-foreground">{refused}</p>}
     </Empty>
   );
 }

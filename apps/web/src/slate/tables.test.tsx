@@ -2,7 +2,7 @@
 // A table is a list in the settings grammar: it fills the card it stands in, the first column the row's name at the
 // left taking the room, figure columns right-aligned at the end; stacked tables share one column template.
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseSlate, slateStartValues, type SlateDoc } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
@@ -29,6 +29,29 @@ const ends = (t: HTMLElement) => [...cells(t)].map(td => td.className.includes("
 const tracks = (t: HTMLElement) => t.style.gridTemplateColumns;
 
 describe("a table in its card", () => {
+  it("gives every row its own key when two rows give the same one or a key is an object", () => {
+    const said = vi.spyOn(console, "error").mockImplementation(() => {});
+    const c = draw(`<slate><column>
+<table id="t" items={[{ n: 'a', v: 1 }, { n: 'a', v: 2 }]} key={item.n}><col title="Name" value={item.n} /><col title="V" value={item.v} /></table>
+<checklist id="c" items={[{ id: { x: 1 }, t: 'one' }, { id: { x: 2 }, t: 'two' }]} key={item.id} title={item.t} done={false} />
+</column></slate>`);
+    const keyed = said.mock.calls.filter(call => call.some(arg => typeof arg === "string" && arg.includes("same key")));
+    said.mockRestore();
+    expect(keyed).toEqual([]);
+    expect(table(c, "t").querySelectorAll("[role=row]:not([data-slate-head])")).toHaveLength(2);
+    expect(c.querySelector('[data-slate-checklist="c"]')!.querySelectorAll("li")).toHaveLength(2);
+  });
+
+  it("draws at most 200 rows and says how many more there are", () => {
+    const doc = parseSlate(`<slate><value name="rows" start={[]} /><table id="t" items={$rows}><col title="Name" value={item.n} /></table></slate>`).document!;
+    const engine = new SlateEngine("t1", () => undefined, manualScheduler());
+    engine.setRecord(doc, { rows: Array.from({ length: 1000 }, (_, at) => ({ n: `row ${at}` })) }, 3, 3);
+    const link = fakeLink();
+    const c = render(<SlateView engine={engine} views={SLATE_VIEWS} runner={new ActionRunner(engine, () => link)} sender={new StateSender(engine, () => link)} />).container;
+    expect(table(c, "t").querySelectorAll("[role=row]:not([data-slate-head])")).toHaveLength(200);
+    expect(c.textContent).toContain("and 800 more");
+  });
+
   it("puts its header over its own card: the name's column takes the room, the figures end-aligned after it", () => {
     const c = draw(`<slate title="Gold">
 <value name="karats" start={[{ k: "24K", g: "₹14,918" }, { k: "22K", g: "₹13,675" }, { k: "18K", g: "₹11,189" }]} />
@@ -79,7 +102,7 @@ describe("a table in its card", () => {
 
   it("folds a row with more than two text columns to its name over a note, and opens a row whose one action every row takes", () => {
     const c = draw(`<slate>
-<value name="mail" start={[{ when: "2026-10-03 22:21", from: "PostHog", subject: "Here's a macro pad for the terminal", unread: "unread" }]} />
+<value name="mail" start={[{ when: "2026-10-03 22:21", from: "Acme Store", subject: "Your order has shipped", unread: "unread" }]} />
 <column><section title="Inbox"><table id="t" items={$mail}>
   <col title="When" value={item.when} mono /><col title="From" value={item.from} /><col title="Subject" value={item.subject} /><col title="Unread" value={item.unread} />
   <action label="Open" onPress={send("Open this message", item.when)} />
@@ -87,8 +110,8 @@ describe("a table in its card", () => {
     const t = c.querySelector<HTMLElement>('[data-slate-piece="t"] [data-slate-folded]')!;
     expect(t.querySelector("[role=columnheader]")).toBeNull();
     const open = t.querySelector<HTMLButtonElement>("[data-slate-row-open]")!;
-    expect(open.getAttribute("aria-label")).toBe("Open, Here's a macro pad for the terminal");
-    expect(open.textContent).toBe("Here's a macro pad for the terminalPostHogunread2026-10-03 22:21");
+    expect(open.getAttribute("aria-label")).toBe("Open, Your order has shipped");
+    expect(open.textContent).toBe("Your order has shippedAcme Storeunread2026-10-03 22:21");
     expect(c.querySelector("[data-slate-row-action]")).toBeNull();
   });
 

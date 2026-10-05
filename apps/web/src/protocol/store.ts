@@ -486,6 +486,8 @@ export const GOLDEN_FRAMES_KEPT = 64;
 
 /** Whether usage.accounts was asked since the last gap, so every slate binding usage asks once between them. */
 let usageAccountsAsked = false;
+/** The rows pushed since usage.accounts was last asked: newer than its answer, so they stand over it. */
+let usageAccountsPushed: Record<string, AccountRow> = {};
 
 export const useStore = create<State>((set, get) => {
   /** A record the host answered, and its agent lists read again where it moved what they are marked by. */
@@ -762,8 +764,11 @@ export const useStore = create<State>((set, get) => {
     loadUsageAccounts() {
       if (usageAccountsAsked) return;
       usageAccountsAsked = true;
+      usageAccountsPushed = {};
+      // The answer is the whole list as it is now: it replaces what was kept, so an account gone since the last answer
+      // goes too, and only a push that came after the ask stands over it.
       void get().api?.usageAccounts?.().then(
-        answer => set(s => ({ usageAccounts: { ...Object.fromEntries(answer.accounts.map(row => [row.key, row])), ...s.usageAccounts } })),
+        answer => set({ usageAccounts: { ...Object.fromEntries(answer.accounts.map(row => [row.key, row])), ...usageAccountsPushed } }),
         () => {
           usageAccountsAsked = false;
         },
@@ -1430,6 +1435,7 @@ export const useStore = create<State>((set, get) => {
           slateEvent(e);
           return;
         case "usage.account":
+          usageAccountsPushed = { ...usageAccountsPushed, [e.key]: e.row };
           set(s => ({ usageAccounts: { ...s.usageAccounts, [e.key]: e.row } }));
           return;
         case "release.changed":
@@ -1489,8 +1495,11 @@ export function useLaunches(): Record<string, Launch> {
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }
 export function useSelectedThreadId(): string | null { return useStore(s => s.selectedThreadId); }
 /** The selected workspace's id, or null while a creation row is selected: no command may act on a creation's key. */
+/** The workspace selected, or none while the selection is a workspace still being made. */
+export const selectedWorkspaceIdOf = (s: Pick<State, "selectedId" | "creations">): string | null => (s.selectedId !== null && s.creations.some(c => c.key === s.selectedId) ? null : s.selectedId);
+
 export function useSelectedWorkspaceId(): string | null {
-  return useStore(s => (s.selectedId !== null && s.creations.some(c => c.key === s.selectedId) ? null : s.selectedId));
+  return useStore(selectedWorkspaceIdOf);
 }
 export function useCreation(key: string | null): Creation | null {
   return useStore(s => (key ? s.creations.find(c => c.key === key) ?? null : null));
@@ -1610,6 +1619,12 @@ export function threadRows(sessions: ReadonlyArray<SessionView>, workspaceId: st
   if (own.length > 0 || threadKey !== workspaceId) return own;
   const latest = sessions.at(-1);
   return latest === undefined ? NO_SESSIONS : [latest];
+}
+
+/** The workspace whose rows hold a thread, where its composer keeps its draft. */
+export function threadWorkspaceIn(sessions: Readonly<Record<string, ReadonlyArray<SessionView>>>, threadId: string): string | null {
+  for (const [workspaceId, rows] of Object.entries(sessions)) if (rows.some(row => threadKeyOf(row) === threadId)) return workspaceId;
+  return null;
 }
 
 /** Subscribe a component to raw protocol events (the thread, terminal and browser surfaces use this). */

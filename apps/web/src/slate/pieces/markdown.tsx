@@ -9,6 +9,7 @@ const PR_BODY = "pr-md [&_strong]:!font-medium [&_:not(pre)>code]:!rounded-md [&
 
 export const markdown: PieceView = {
   type: "markdown",
+  card: false,
   component: function MarkdownPiece({ props }) {
     const dark = useAppDark();
     const value = str(props["value"]);

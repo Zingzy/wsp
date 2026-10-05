@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Round 4 in the renderer: a refreshing run keeps what it drew and says so quietly, and the layout defaults that
+// The renderer: a refreshing run keeps what it drew and says so quietly, and the layout defaults that
 // make a good slate without the agent asking.
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,6 +10,8 @@ import { SLATE_VIEWS } from "./pieces";
 import { SlateView } from "./SlateView";
 import { ConsentSheet } from "./consent";
 import { fakeLink, manualScheduler, slate } from "./testing";
+import { registerViews } from "./pieces/registry";
+import { isCardRow, isGroup, isToolbar } from "./pieces/runs";
 
 afterEach(cleanup);
 
@@ -221,6 +223,69 @@ describe("what the kit adds", () => {
     expect(piece(c, "c").querySelectorAll("[role=radio]")).toHaveLength(2);
   });
 
+  it("leaves a hidden piece out of a number's cell, a strip and a bar switch, and brings it in when its when holds", () => {
+    const doc = compiled(`<slate>
+<value name="bad" start={false} />
+<column>
+  <number id="up" label="Uptime" value={99} /><status id="down" tone="bad" when={$bad}>Down</status>
+  <row id="strip"><number id="a" label="Alpha" value={1} /><number id="b" label="Beta" value={2} when={$bad} /><number id="g" label="Gamma" value={3} /></row>
+  <bars id="countries" label="Countries" items={[{ n: 'in', v: 4 }]} name={item.n} value={item.v} /><bars id="errors" label="Errors" items={[{ n: 'x', v: 1 }]} name={item.n} value={item.v} when={$bad} />
+</column>
+</slate>`);
+    const { view, push } = draw(doc);
+    const c = view.container;
+    const segments = () => [...c.querySelectorAll("[data-slate-bar-switch] [role=radio], [data-slate-bar-switch] button")].map(b => b.textContent);
+    expect(piece(c, "up").textContent).not.toContain("Down");
+    expect(c.querySelector("[data-slate-strip]")!.textContent).not.toContain("Beta");
+    expect(c.querySelector("[data-slate-strip]")!.getAttribute("data-across")).toBe("2 2");
+    expect(c.textContent).not.toContain("Errors");
+    push({ $bad: true });
+    expect(piece(c, "up").textContent).toContain("Down");
+    expect(c.querySelector("[data-slate-strip]")!.textContent).toContain("Beta");
+    expect(segments().join(" ")).toContain("Errors");
+  });
+
+  it("redraws a piece when only the derived formula it shows changes, and follows the values the new formula reads", () => {
+    const doc = (formula: string) => compiled(`<slate>
+<value name="a" start={1} /><value name="b" start={10} /><value name="c" start={100} />
+<derived name="total" value={${formula}} />
+<column><text id="t" value={$total} /></column>
+</slate>`);
+    const { engine, view, push } = draw(doc("$a + $b"));
+    expect(piece(view.container, "t").textContent).toBe("11");
+    act(() => engine.setRecord(doc("$a + $c"), { a: 1, b: 10, c: 100 }, 4, 3));
+    act(() => engine.flush());
+    expect(piece(view.container, "t").textContent).toBe("101");
+    push({ $c: 200 });
+    expect(piece(view.container, "t").textContent).toBe("201");
+  });
+
+  it("works out each derived value once per evaluation, however many times a chain reads it", () => {
+    const derived: Record<string, string> = { d0: "src.x" };
+    for (let n = 1; n <= 16; n++) derived[`d${n}`] = `$d${n - 1} + $d${n - 1}`;
+    let reads = 0;
+    const engine = new SlateEngine("t1", () => (reads += 1, 1), manualScheduler());
+    engine.setRecord(slate({ derived, root: "root", pieces: { root: { type: "column", children: [] } } }), {}, 1, 1);
+    expect(engine.evaluate("$d16")).toBe(2 ** 16);
+    expect(reads).toBe(1);
+  });
+
+  it("reads a value named toString or constructor as the value it is, plain and through a derived", () => {
+    const doc = slate({
+      values: { toString: { start: "own words" }, constructor: { start: 7 } },
+      derived: { valueOf: "$constructor + 1" },
+      root: "root",
+      pieces: {
+        root: { type: "column", children: ["a", "b"] },
+        a: { type: "text", props: { value: { bind: "$toString" } } },
+        b: { type: "text", props: { value: { bind: "$valueOf" } } },
+      },
+    });
+    const { view } = draw(doc);
+    expect(piece(view.container, "a").textContent).toBe("own words");
+    expect(piece(view.container, "b").textContent).toBe("8");
+  });
+
   it("starts a section shut on a literal open={false}, keeps the person's fold, and follows a new literal", () => {
     const doc = (open: boolean) => slate({ root: "root", pieces: { root: { type: "column", children: ["sec"] }, sec: { type: "section", props: { title: "Logs", open }, children: ["body"] }, body: { type: "text", props: { value: "inside" } } } });
     const { engine, view } = draw(doc(false));
@@ -258,7 +323,40 @@ describe("what the kit adds", () => {
   });
 });
 
-describe("kit4's syntax, parsed and drawn", () => {
+describe("a piece's layout read off its view", () => {
+  it("lays out a new kind of piece by the flags its view gives, with nothing else told of it", () => {
+    registerViews({
+      knob: { type: "knob", component: () => null, control: true },
+      ledger: { type: "ledger", component: () => null, card: false, aligns: true },
+      panel: { type: "panel", component: () => null, card: false, group: true, bounds: true },
+    });
+    const engine = new SlateEngine("t1", () => undefined, manualScheduler());
+    engine.setRecord(
+      slate({
+        root: "root",
+        pieces: {
+          root: { type: "column", children: ["tools", "p"] },
+          tools: { type: "row", children: ["k1", "k2"] },
+          k1: { type: "knob" },
+          k2: { type: "knob" },
+          p: { type: "panel", children: ["l1", "l2"] },
+          l1: { type: "ledger" },
+          l2: { type: "ledger" },
+        },
+      }),
+      {},
+      1,
+      1,
+    );
+    expect(isToolbar(engine, "tools")).toBe(true);
+    expect(isCardRow(engine, "tools")).toBe(false);
+    expect(isGroup(engine, "p")).toBe(true);
+    expect(isCardRow(engine, "l1")).toBe(false);
+    expect(engine.tablesBeside("l1").sort()).toEqual(["l1", "l2"]);
+  });
+});
+
+describe("the kit's syntax, parsed and drawn", () => {
   it("draws when on facts, columns and options, a shut section, icon formulas and the larger icon set", () => {
     const doc = compiled(`<slate>
 <value name="pro" start={false} />

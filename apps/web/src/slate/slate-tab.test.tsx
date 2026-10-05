@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Schema 2 in the Slate tab against a fake host: appendix C draws and moves with pushed values, typing writes
+// The Slate tab against a fake host: the deploy slate draws and moves with pushed values, typing writes
 // through slates.state, a held run shows its row and the consent sheet, an output streams and cancels, and a
 // secret's text never stays in the window once the host has it.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -8,7 +8,7 @@ import { SLATE_PIECES, slateStartValues, type SessionView, type SlateDoc, type S
 import type { Api, ProtocolEvent } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { useRightPanelStore } from "../rightPanelStore";
-import { APPENDIX_C } from "../../test/fixtures/slate/appendixC";
+import { DEPLOY_SLATE } from "../../test/fixtures/slate/deploy";
 import type { SlateAsk } from "./model";
 import { SLATE_VIEWS } from "./pieces";
 import { SlateSurface } from "./SlateSurface";
@@ -68,20 +68,20 @@ beforeEach(() => {
 afterEach(cleanup);
 
 function openThread(slates: SlateApi) {
-  useStore.setState({ api: { slates, subscribe: () => () => {} } as unknown as Api, selectedId: "ws", selectedThreadId: ROW.threadId!, sessions: { ws: [ROW] } });
+  useStore.setState({ api: { slates, subscribe: () => () => {} } as unknown as Api, selectedId: "ws", selectedThreadId: ROW.threadId!, sessions: { ws: [ROW] }, conn: "live" });
   return render(<SlateSurface />);
 }
 const tid = () => ROW.threadId!;
 const flush = () => act(() => slateBundle(tid()).engine.flush());
 
-describe("schema 2 in the Slate tab", () => {
+describe("the Slate tab", () => {
   it("has a view for every core piece the protocol registers", () => {
     const core = Object.entries(SLATE_PIECES).flatMap(([type, piece]) => (piece.level === "core" ? [type] : []));
     expect(Object.keys(SLATE_VIEWS).sort()).toEqual(core.sort());
   });
 
-  it("draws appendix C and moves through its steps on pushed values", async () => {
-    openThread(host(record(APPENDIX_C)));
+  it("draws the deploy slate and moves through its steps on pushed values", async () => {
+    openThread(host(record(DEPLOY_SLATE)));
     expect(await screen.findByText("Step 1 of 4")).toBeTruthy();
     expect(screen.getByText("Deploy setup")).toBeTruthy();
     const token = screen.getByLabelText("Vercel token") as HTMLInputElement;
@@ -105,7 +105,7 @@ describe("schema 2 in the Slate tab", () => {
   it("writes the project name through slates.state, 300 ms after the last keystroke", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      const slates = host(record(APPENDIX_C, { step: 2 }));
+      const slates = host(record(DEPLOY_SLATE, { step: 2 }));
       openThread(slates);
       const field = (await screen.findByLabelText("Project name on Vercel")) as HTMLInputElement;
       fireEvent.focus(field);
@@ -121,7 +121,7 @@ describe("schema 2 in the Slate tab", () => {
   });
 
   it("shows a held run's row and its consent sheet, the command whole and the secret as dots, and approves by key", async () => {
-    const slates = host(record(APPENDIX_C, { step: 2, project: "wsp-landing", vercelToken: HANDLE, check: { state: "held", why: "needs your approval", runs: 0 } }, { asks: [CHECK_ASK] }));
+    const slates = host(record(DEPLOY_SLATE, { step: 2, project: "wsp-landing", vercelToken: HANDLE, check: { state: "held", why: "needs your approval", runs: 0 } }, { asks: [CHECK_ASK] }));
     openThread(slates);
     const row = (await screen.findByText("This slate wants to run")).closest("[data-slate-held]") as HTMLElement;
     expect(row.dataset["slateHeld"]).toBe("check");
@@ -150,7 +150,7 @@ describe("schema 2 in the Slate tab", () => {
 
   it("opens the sheet at once when a press held a run, from the host's answer", async () => {
     const ask: SlateAsk = { ...CHECK_ASK, key: "k-env", run: "env", cmd: "printf ... >> .env.tmp; mv .env.tmp .env", env: { VERCEL_TOKEN: "•••••••• (8 characters)" } };
-    const slates = host(record(APPENDIX_C, { step: 3, project: "wsp-landing", vercelToken: HANDLE }), { event: vi.fn(async () => ({ outcome: "held" as const, said: "", ask })) });
+    const slates = host(record(DEPLOY_SLATE, { step: 3, project: "wsp-landing", vercelToken: HANDLE }), { event: vi.fn(async () => ({ outcome: "held" as const, said: "", ask })) });
     openThread(slates);
     fireEvent.click(await screen.findByRole("button", { name: "Write .env" }));
     const sheet = await screen.findByRole("dialog");
@@ -185,17 +185,21 @@ describe("schema 2 in the Slate tab", () => {
   });
 
   it("holds the slate on the host while the tab draws it, so its timers tick only while shown", async () => {
-    const slates = host(record(APPENDIX_C));
+    const slates = host(record(DEPLOY_SLATE));
     const view = openThread(slates);
     await screen.findByText("Step 1 of 4");
     expect(slates.subscribe).toHaveBeenCalledWith(tid(), ["slate"]);
+    // The hold is the socket's: a connection that drops and comes back takes it again.
+    act(() => useStore.setState({ conn: "reconnecting" }));
+    act(() => useStore.setState({ conn: "live" }));
+    expect(vi.mocked(slates.subscribe).mock.calls.filter(c => c[1][0] === "slate")).toHaveLength(2);
     view.unmount();
     expect(slates.unsubscribe).toHaveBeenCalledWith(tid(), ["slate"]);
   });
 
   it("sends a secret's text once and keeps none of it in the window after", async () => {
     let answer: () => void = () => {};
-    const slates = host(record(APPENDIX_C), { state: vi.fn(() => new Promise<{ version: number }>(resolve => (answer = () => resolve({ version: 2 })))) });
+    const slates = host(record(DEPLOY_SLATE), { state: vi.fn(() => new Promise<{ version: number }>(resolve => (answer = () => resolve({ version: 2 })))) });
     openThread(slates);
     const field = (await screen.findByLabelText("Vercel token")) as HTMLInputElement;
     fireEvent.focus(field);
@@ -220,7 +224,7 @@ describe("schema 2 in the Slate tab", () => {
   });
 });
 
-describe("round 2: held runs ask on their own, held buttons say why, submit is Enter", () => {
+describe("held runs ask on their own, held buttons say why, submit is Enter", () => {
   const TIMERS = slate({
     root: "root",
     runs: {
@@ -251,14 +255,14 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
   });
 
   it("opens the sheet when a reaction holds a run after the tab is already showing", async () => {
-    const first = record(APPENDIX_C, { step: 2, vercelToken: HANDLE });
+    const first = record(DEPLOY_SLATE, { step: 2, vercelToken: HANDLE });
     const get = vi.fn(async () => ({ record: first }));
     const slates = host(first, { get });
     openThread(slates);
     await screen.findByText("Step 2 of 4");
     expect(screen.queryByRole("dialog")).toBeNull();
     // The host's reaction held $check; the push names it held and the record read after carries its sheet.
-    get.mockResolvedValue({ record: record(APPENDIX_C, { step: 2, vercelToken: HANDLE, project: "wsp-landing", check: held }, { asks: [CHECK_ASK] }) });
+    get.mockResolvedValue({ record: record(DEPLOY_SLATE, { step: 2, vercelToken: HANDLE, project: "wsp-landing", check: held }, { asks: [CHECK_ASK] }) });
     push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 1, revision: 5, values: { $project: "wsp-landing", $check: held } });
     const sheet = await screen.findByRole("dialog");
     expect(sheet.querySelector("[data-slate-consent-cmd]")?.textContent).toBe(CHECK_ASK.cmd);
@@ -312,6 +316,9 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
     expect(hints[1]).toMatch(/^(⌘|Ctrl) ↵Save$/);
     fireEvent.focus(field);
     fireEvent.change(field, { target: { value: "WSP-12" } });
+    // The Enter that commits a word typed through an input method submits nothing.
+    await act(async () => fireEvent.keyDown(field, { key: "Enter", isComposing: true }));
+    expect(slates.event).not.toHaveBeenCalled();
     await act(async () => fireEvent.keyDown(field, { key: "Enter" }));
     await waitFor(() => expect(slates.event).toHaveBeenCalledWith(tid(), expect.objectContaining({ piece: "ask", event: "submit" })));
   });
@@ -319,7 +326,7 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
   const version = () => document.querySelector("[data-slate-version]")?.getAttribute("data-slate-version");
 
   it("shows the document's version on the tab; values and run results never move it", async () => {
-    openThread(host(record(APPENDIX_C, {}, { version: 3, revision: 10 })));
+    openThread(host(record(DEPLOY_SLATE, {}, { version: 3, revision: 10 })));
     await screen.findByText("Step 1 of 4");
     expect(version()).toBe("3");
     push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 3, revision: 11, values: { $step: 2 } });
@@ -330,7 +337,7 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
   });
 
   it("orders pushes by the data revision and drops one older than what it drew", async () => {
-    openThread(host(record(APPENDIX_C, {}, { revision: 10 })));
+    openThread(host(record(DEPLOY_SLATE, {}, { revision: 10 })));
     await screen.findByText("Step 1 of 4");
     push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 1, revision: 12, values: { $step: 3 } });
     push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 1, revision: 11, values: { $step: 2 } });
@@ -341,13 +348,13 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
 
   it("takes a newer document from a record read before a push, and keeps the push's values", async () => {
     let answer: (r: { record: SlateRecord }) => void = () => {};
-    const get = vi.fn(async () => ({ record: record(APPENDIX_C, { step: 1 }, { revision: 5 }) }));
-    openThread(host(record(APPENDIX_C), { get }));
+    const get = vi.fn(async () => ({ record: record(DEPLOY_SLATE, { step: 1 }, { revision: 5 }) }));
+    openThread(host(record(DEPLOY_SLATE), { get }));
     await screen.findByText("Step 1 of 4");
     get.mockImplementationOnce(() => new Promise(resolve => (answer = resolve)));
     push({ type: "session.slate", workspaceId: "ws", sessionId: "s1", threadId: tid(), cause: "write", version: 2, by: "agent", pieces: [] });
     push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 2, revision: 8, values: { $step: 3 } });
-    const titled = { ...APPENDIX_C, title: "Deploy setup, again", values: { ...APPENDIX_C.values, team: { start: "wsp" } } };
+    const titled = { ...DEPLOY_SLATE, title: "Deploy setup, again", values: { ...DEPLOY_SLATE.values, team: { start: "wsp" } } };
     await act(async () => answer({ record: record(titled, { step: 2 }, { version: 2, revision: 7 }) }));
     flush();
     expect(await screen.findByText("Deploy setup, again")).toBeTruthy();

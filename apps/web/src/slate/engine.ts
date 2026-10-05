@@ -3,10 +3,14 @@
 // piece only when something it reads moved. Pieces are keyed by id, so a new document redraws the pieces whose JSON
 // changed and nothing else; a binding change marks the pieces whose dependency set holds the path and redraws them
 // on the next frame, at most ten times a second. Nothing here knows React; the views subscribe by piece id.
-import type { SlateJson, SlatePropValue } from "@wsp/protocol";
+import { slateEqual, slateSegments, slateTruthy, type SlateJson, type SlatePropValue } from "@wsp/protocol";
 import { evaluate, resolveProp, type Resolve, type Row } from "./expr.js";
 import type { SlateDoc, SlatePiece } from "./model.js";
+import { viewOf } from "./pieces/registry.js";
 import { expandDerived, getOwn, ownPath, pieceReads, setOwn, touches, walk } from "./paths.js";
+
+/** A slate's own entry by name, never one off Object.prototype: a value may be called toString. */
+const own = <T>(map: Readonly<Record<string, T>> | undefined, name: string): T | undefined => (map !== undefined && Object.hasOwn(map, name) ? map[name] : undefined);
 
 /** Reads a source path ("pr.checks", "time.now") off whatever the window holds; undefined is not there yet. */
 export type SourceReader = (path: string) => SlateJson | undefined;
@@ -35,13 +39,13 @@ export const browserScheduler: Scheduler = {
   now: () => Date.now(),
 };
 
-/** At most ten redraws a second per slate (12-rendering, budgets). */
+/** At most ten redraws a second per slate. */
 const MIN_FLUSH_GAP_MS = 100;
 /** The document's own listeners: the root, the title, the version. */
 export const DOC = "";
 /** Listeners on any run's record: the held-run rows under the header. */
 export const RUNS = "#runs";
-/** The lines a streaming run keeps (07, "Timeouts, output, streaming, cancel"). */
+/** The lines a streaming run keeps. */
 const LINES_KEPT = 500;
 
 type Loud = "primary" | "large" | "accent";
@@ -135,8 +139,16 @@ export class SlateEngine {
     // its children, and a table reads what the tables beside it read.
     const placed = new Set(changed);
     for (const id of changed) for (const child of doc?.pieces[id]?.children ?? []) placed.add(child);
-    for (const id of placed) if (doc?.pieces[id]?.type === "table") for (const other of this.tablesBeside(id)) placed.add(other);
+    for (const id of placed) if (viewOf(doc?.pieces[id]?.type)?.aligns === true) for (const other of this.tablesBeside(id)) placed.add(other);
     for (const id of placed) this.#reads.delete(id);
+    // A piece's reads go through the derived values it names to what those read, so a changed formula changes what
+    // every piece reads, and each redraws with the new formula.
+    const derivedMoved = JSON.stringify(before?.derived ?? {}) !== JSON.stringify(doc?.derived ?? {});
+    if (derivedMoved) {
+      this.#reads.clear();
+      for (const id of this.#mounted.keys()) placed.add(id);
+      changed.add(DOC);
+    }
     if (before?.root !== doc?.root || before?.title !== doc?.title || (before === null) !== (doc === null)) changed.add(DOC);
     this.#loud = loudOf(doc);
     if (!stale) this.#revision = revision;
@@ -183,10 +195,10 @@ export class SlateEngine {
     return moved;
   }
 
-  /** A run that starts again begins its streamed lines afresh; a finished one keeps its last until then (11). */
+  /** A run that starts again begins its streamed lines afresh; a finished one keeps its last until then. */
   #restarted(path: string, value: SlateJson | undefined): void {
     const name = ownPath(path)?.name;
-    if (name === undefined || path !== `$${name}` || this.#doc?.runs?.[name] === undefined) return;
+    if (name === undefined || path !== `$${name}` || own(this.#doc?.runs, name) === undefined) return;
     if (walk(value, ["state"]) !== "running") {
       // A refresh that streamed nothing ends on its record's own lines.
       if (this.#fresh.delete(name)) this.#lines.delete(name);
@@ -219,7 +231,7 @@ export class SlateEngine {
   /** Whether a run is refreshing: started again, its last result still in its record until the new one lands. */
   refreshing(run: string): boolean {
     const record = this.#remote[run];
-    return this.#doc?.runs?.[run] !== undefined && walk(record, ["state"]) === "running" && walk(record, ["refreshing"]) === true;
+    return own(this.#doc?.runs, run) !== undefined && walk(record, ["state"]) === "running" && walk(record, ["refreshing"]) === true;
   }
 
   /** Whether a piece under this one reads a refreshing run, short of a nested section and of the run's own output,
@@ -245,7 +257,7 @@ export class SlateEngine {
       if (seen.has(at)) return;
       seen.add(at);
       const piece = this.piece(at);
-      if (piece === undefined || (!top && (piece.type === "section" || piece.type === "output"))) return;
+      if (piece === undefined || (!top && viewOf(piece.type)?.saysRefreshing === true)) return;
       const own = this.#readsOf(at);
       own.when.forEach(note);
       own.props.forEach(note);
@@ -255,10 +267,10 @@ export class SlateEngine {
     return runs.filter(run => found.has(run));
   }
 
-  /** A secret's path: the person types it, the host keeps it, the window holds only its handle (08). */
+  /** A secret's path: the person types it, the host keeps it, the window holds only its handle. */
   isSecret(path: string): boolean {
     const name = ownPath(path)?.name;
-    return name !== undefined && this.#doc?.values?.[name]?.secret === true;
+    return name !== undefined && own(this.#doc?.values, name)?.secret === true;
   }
 
   /** A write from elsewhere onto a path this window holds a value for: its own echo is dropped, a focused field
@@ -267,7 +279,7 @@ export class SlateEngine {
     const mine = this.#mine.get(path);
     if (mine === undefined) return;
     const echoes = this.#sent.get(path) ?? [];
-    if (echoes.some(sent => same(sent, theirs))) return;
+    if (echoes.some(sent => slateEqual(sent, theirs))) return;
     if (this.#focused.has(path)) this.#held.set(path, theirs);
     else {
       this.#mine.delete(path);
@@ -302,7 +314,7 @@ export class SlateEngine {
   /** The host took the value. */
   settle(path: string, value: SlateJson): void {
     this.#remote = setOwn(this.#remote, path, value);
-    if (!this.#focused.has(path) && same(this.#mine.get(path), value)) {
+    if (!this.#focused.has(path) && slateEqual(this.#mine.get(path), value)) {
       this.#mine.delete(path);
       this.#sent.delete(path);
     }
@@ -328,8 +340,9 @@ export class SlateEngine {
     return theirs === undefined || mine === undefined || this.#focused.has(path) ? undefined : { mine, theirs };
   }
 
-  /** Take theirs: the held value replaces the person's. */
-  takeTheirs(path: string): void {
+  /** Take theirs: the held value replaces the person's, and is answered for the caller to send, since the host may
+   * hold what the person typed after it. */
+  takeTheirs(path: string): SlateJson | undefined {
     const theirs = this.#held.get(path);
     this.#held.delete(path);
     this.#mine.delete(path);
@@ -337,6 +350,7 @@ export class SlateEngine {
     if (theirs !== undefined) this.#remote = setOwn(this.#remote, path, theirs);
     this.#view = null;
     this.invalidate([path]);
+    return theirs;
   }
 
   /** Keep mine: the person's value stands and goes to the host again. */
@@ -350,17 +364,23 @@ export class SlateEngine {
    * or a source. A derived value that reads itself through others is missing, never a loop. */
   reader(row?: Row): Resolve {
     const evaluating = new Set<string>();
+    // A derived value is worked out once per evaluation however many times the chain reads it: a chain of 24 that
+    // reads each step twice would otherwise be 2^24 evaluations on every redraw.
+    const worked = new Map<string, SlateJson | undefined>();
     const read: Resolve = path => {
-      const own = ownPath(path);
-      if (own !== undefined) {
-        const formula = this.#doc?.derived?.[own.name];
-        if (formula === undefined) return walk(this.values[own.name], own.steps);
-        if (evaluating.has(own.name)) return undefined;
-        evaluating.add(own.name);
+      const mine = ownPath(path);
+      if (mine !== undefined) {
+        const formula = own(this.#doc?.derived, mine.name);
+        if (formula === undefined) return walk(own(this.values, mine.name), mine.steps);
+        if (worked.has(mine.name)) return walk(worked.get(mine.name), mine.steps);
+        if (evaluating.has(mine.name)) return undefined;
+        evaluating.add(mine.name);
         try {
-          return walk(evaluate(formula, read, undefined, this.#scheduler.now()), own.steps);
+          const value = evaluate(formula, read, undefined, this.#scheduler.now());
+          worked.set(mine.name, value);
+          return walk(value, mine.steps);
         } finally {
-          evaluating.delete(own.name);
+          evaluating.delete(mine.name);
         }
       }
       if (row !== undefined) {
@@ -416,6 +436,13 @@ export class SlateEngine {
     return this.#versions.get(id) ?? 0;
   }
 
+  /** Whether the piece shows now: it is in the document and its `when`, if any, holds. Every place that draws a piece
+   * or reads one to lay out another asks this, so a hidden piece is hidden everywhere. */
+  isShown(id: string): boolean {
+    const piece = this.piece(id);
+    return piece !== undefined && (piece.when === undefined || slateTruthy(this.evaluate(piece.when)));
+  }
+
   /** The piece's `when` held or not on its last draw: a hidden piece does not read its props. */
   setShown(id: string, shown: boolean): void {
     if (this.#shown.get(id) === shown) return;
@@ -434,18 +461,20 @@ export class SlateEngine {
     return this.#parents.get(id);
   }
 
-  /** The tables drawn in the same section as this one (the slate's root where there is none), itself included,
-   * so stacked tables can share their column widths. */
+  /** The pieces of this one's type drawn within the same bound (the slate's root where there is none), itself
+   * included, so stacked tables can share their column widths. */
   tablesBeside(id: string): string[] {
+    const type = this.piece(id)?.type;
+    const bounds = (at: string): boolean => viewOf(this.piece(at)?.type)?.bounds === true;
     let group = this.#parents.get(id);
-    while (group !== undefined && this.piece(group)?.type !== "section" && this.#parents.has(group)) group = this.#parents.get(group);
+    while (group !== undefined && !bounds(group) && this.#parents.has(group)) group = this.#parents.get(group);
     if (group === undefined) return [id];
     const out: string[] = [];
     const visit = (at: string) => {
       const piece = this.piece(at);
       if (piece === undefined) return;
-      if (piece.type === "table") out.push(at);
-      if (at === group || piece.type !== "section") for (const child of piece.children ?? []) visit(child);
+      if (piece.type === type) out.push(at);
+      if (at === group || !bounds(at)) for (const child of piece.children ?? []) visit(child);
     };
     visit(group);
     return out;
@@ -457,7 +486,7 @@ export class SlateEngine {
       const piece = this.piece(id);
       const derived = this.#doc?.derived ?? {};
       let own = piece === undefined ? { when: [], props: [] } : pieceReads(piece);
-      if (piece?.type === "table") {
+      if (viewOf(piece?.type)?.aligns === true) {
         const beside = this.tablesBeside(id).flatMap(other => (other === id ? [] : pieceReads(this.piece(other)!).props));
         own = { when: own.when, props: [...new Set([...own.props, ...beside])] };
       }
@@ -542,37 +571,17 @@ export class SlateEngine {
   }
 
   /** Whether this piece is the slate's one primary button, one large figure or one accent: the first in display
-   * order keeps it and the rest draw quiet (05-styling). */
+   * order keeps it and the rest draw quiet. */
   isLoud(kind: Loud, id: string): boolean {
     return this.#loud.get(kind) === id;
   }
 
-  dispose(): void {
-    this.#cancel?.();
-    this.#cancel = null;
-  }
 }
 
-function same(a: SlateJson | undefined, b: SlateJson | undefined): boolean {
-  return a === b || JSON.stringify(a) === JSON.stringify(b);
-}
 
 function walkFrom(item: SlateJson, rest: string): SlateJson | undefined {
-  let at: SlateJson | undefined = item;
-  const steps = rest.match(/\.[a-zA-Z_][a-zA-Z0-9_]*|\[-?\d+\]/g) ?? [];
-  for (const step of steps) {
-    if (at === null || at === undefined || typeof at !== "object") return undefined;
-    if (step.startsWith("[")) {
-      if (!Array.isArray(at)) return undefined;
-      const n = Number(step.slice(1, -1));
-      at = at[n < 0 ? at.length + n : n];
-    } else {
-      if (Array.isArray(at)) return undefined;
-      const key = step.slice(1);
-      at = Object.prototype.hasOwnProperty.call(at, key) ? at[key] : undefined;
-    }
-  }
-  return at;
+  const steps = slateSegments(rest);
+  return steps === undefined ? undefined : walk(item, steps);
 }
 
 function parentsOf(doc: SlateDoc | null): Map<string, string> {
@@ -595,7 +604,7 @@ function loudOf(doc: SlateDoc | null): Map<Loud, string> {
     if (props["variant"] === "primary" && !out.has("primary")) out.set("primary", id);
     if (props["size"] === "large" && !out.has("large")) out.set("large", id);
     // A chart draws its line in the accent unless it names another tone, so the first chart takes the slate's one hue.
-    if ((props["tone"] === "accent" || (piece.type === "chart" && props["tone"] === undefined)) && !out.has("accent")) out.set("accent", id);
+    if ((props["tone"] === "accent" || (viewOf(piece.type)?.accent === true && props["tone"] === undefined)) && !out.has("accent")) out.set("accent", id);
     for (const child of piece.children ?? []) visit(child);
   };
   visit(doc.root);

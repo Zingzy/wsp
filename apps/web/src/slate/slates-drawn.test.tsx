@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The owner's three slates of 2026-10-03 drawn from fixture documents in the locked settings grammar: heads with their
+// Three slates drawn from fixture documents in the settings grammar: heads with their
 // meta and refresh glyph, soft cards with hairlined rows, the stat cell, the chart under its head, lists with their
 // header over the card, and state as a word.
 import { readFileSync } from "node:fs";
@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
-import { DIAGRAM_TEXT, GOLD_TEXT, GOLD_VALUES, INBOX_TEXT, INBOX_VALUES, QUIZ_TEXT, REACH_TEXT, REACH_VALUES, SPOO_TEXT, SPOO_VALUES, todaySlate } from "../../test/fixtures/slate/today";
+import { DIAGRAM_TEXT, GOLD_TEXT, GOLD_VALUES, INBOX_TEXT, INBOX_VALUES, QUIZ_TEXT, REACH_TEXT, REACH_VALUES, SPOO_TEXT, SPOO_VALUES, kitSlate } from "../../test/fixtures/slate/kit-slates";
 import { SLATE_VIEWS } from "./pieces";
 import { SlateView } from "./SlateView";
 import { fakeLink, manualScheduler } from "./testing";
@@ -17,7 +17,7 @@ import { fakeLink, manualScheduler } from "./testing";
 afterEach(cleanup);
 
 function draw(text: string, values: Record<string, SlateJson> = {}) {
-  const { doc, values: start } = todaySlate(text, values);
+  const { doc, values: start } = kitSlate(text, values);
   const engine = new SlateEngine("t1", () => undefined, manualScheduler());
   engine.setRecord(doc, start, 3, 3);
   const link = fakeLink();
@@ -45,7 +45,7 @@ describe("the gold and traffic slate", () => {
     const c = draw(GOLD_TEXT, GOLD_VALUES);
     const card = cards(c)[0]!;
     expect(card.className).toContain("rounded-xl");
-    expect(card.textContent).toBe("Spot, per troy ounce$4,141.80Closedopens Mon 3:30 AM IST");
+    expect(card.textContent).toBe("Spot, per troy ounce$4,141.80Closedopens Mon 10:00 PM UTC");
     expect(card.querySelector(".text-\\[26px\\]")!.textContent).toBe("$4,141.80");
     expect(card.querySelector("[data-slate-status]")!.className).toContain("text-foreground");
   });
@@ -87,7 +87,7 @@ describe("the networking quiz and the Zoho inbox", () => {
     expect(c.querySelector("[data-slot=segmented-control]")!.textContent).toBe("AllUnread");
     const open = [...c.querySelectorAll("[data-slate-row-open]")];
     expect(open).toHaveLength(8);
-    expect(open[0]!.textContent).toBe("Here's a 'dangerously-skip-permissions' macro padPostHogunread2026-10-03 22:21");
+    expect(open[0]!.textContent).toBe("Your order has shippedAcme Storeunread2026-10-03 22:21");
   });
 });
 
@@ -101,15 +101,15 @@ describe("what the live gold slate wrote", () => {
 </slate>`;
 
   for (const [name, beside] of [
-    ["a column of a status and a text beside the number", `<column id="market"><status id="state">Closed</status><text id="when" tone="muted">opens Mon 3:30 AM IST</text></column>`],
-    ["a status and a text beside the number in its row", `<status id="state">Closed</status><text id="when" tone="muted">opens Mon 3:30 AM IST</text>`],
+    ["a column of a status and a text beside the number", `<column id="market"><status id="state">Closed</status><text id="when" tone="muted">opens Mon 10:00 PM UTC</text></column>`],
+    ["a status and a text beside the number in its row", `<status id="state">Closed</status><text id="when" tone="muted">opens Mon 10:00 PM UTC</text>`],
   ]) {
     it(`draws ${name} as the stat cell's note`, () => {
       const c = draw(spot(beside!));
       const card = cards(c)[0]!;
-      expect(card.textContent).toBe("Spot, per troy ounce$4,141.80Closedopens Mon 3:30 AM IST");
+      expect(card.textContent).toBe("Spot, per troy ounce$4,141.80Closedopens Mon 10:00 PM UTC");
       const note = c.querySelector('[data-slate-piece="spot"] [data-slate-status]')!.parentElement!;
-      expect([...note.children].map(part => part.textContent)).toEqual(["Closed", "opens Mon 3:30 AM IST"]);
+      expect([...note.children].map(part => part.textContent)).toEqual(["Closed", "opens Mon 10:00 PM UTC"]);
       for (const rider of ["market", "state", "when"]) expect(c.querySelector(`[data-slate-piece="${rider}"]`)?.textContent ?? "").toBe("");
       // The row is the stat cell: it takes no row inset of its own and the cell keeps the strip's padding.
       expect(card.firstElementChild!.hasAttribute("data-slate-rows")).toBe(true);
@@ -266,14 +266,14 @@ describe("a series that holds one value", () => {
   });
 });
 
-describe("the old design's spacing and tables, and the bar lists' switch (the owner's word of 2026-10-05)", () => {
+describe("the spacing and tables, and the bar lists' switch", () => {
   it("stands sections 32 px apart and pieces 12, with no stylesheet rule adding its own margin over a section", () => {
     const c = draw(GOLD_TEXT, GOLD_VALUES);
     const group = c.querySelector<HTMLElement>("[data-slate-group]")!;
     expect(group.className).toContain("gap-3");
     expect(group.className).toContain("[&>[data-slate-type=section]:not(:first-child)]:mt-5");
     expect(c.querySelector<HTMLElement>("[data-slate-section] > div:last-child")!.className).toContain("gap-3");
-    // The first proof of concept's rule gave every section 12 px over its head and outranked the column's own margin.
+    // A section adds no room of its own over its head, so the column's gap is the only one.
     expect(readFileSync(join(__dirname, "../index.css"), "utf8")).not.toMatch(/slate-piece\[data-slate-type="section"\]/);
     // A row or column of pieces stands them 12 px apart at its normal gap.
     const row = draw(`<slate><column><row><button label="One" onPress={send("1")} /><button label="Two" onPress={send("2")} /></row></column></slate>`);
@@ -328,7 +328,7 @@ describe("the old design's spacing and tables, and the bar lists' switch (the ow
   });
 
   it("holds the pick across a value push and a redraw", () => {
-    const { doc, values } = todaySlate(REACH_TEXT, REACH_VALUES);
+    const { doc, values } = kitSlate(REACH_TEXT, REACH_VALUES);
     const engine = new SlateEngine("t1", () => undefined, manualScheduler());
     engine.setRecord(doc, values, 3, 3);
     const link = fakeLink();
@@ -346,7 +346,7 @@ describe("the old design's spacing and tables, and the bar lists' switch (the ow
 
 describe("the diagram", () => {
   it("names its diagram, keeps MermaidBlock's line under a source that does not parse, and follows its step's value", async () => {
-    const { doc, values } = todaySlate(DIAGRAM_TEXT);
+    const { doc, values } = kitSlate(DIAGRAM_TEXT);
     const scheduler = manualScheduler();
     const engine = new SlateEngine("t1", () => undefined, scheduler);
     engine.setRecord(doc, values, 3, 3);

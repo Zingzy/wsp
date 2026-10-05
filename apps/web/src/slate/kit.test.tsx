@@ -3,7 +3,7 @@
 // the quiz's choices write the pick, and every icon a slate may name has its component.
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { parseSlate, slateChartAxis, slateStartValues, SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { parseSlate, sketchSlate, slateChartAxis, slateStartValues, SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { SLATE_VIEWS } from "./pieces";
@@ -73,10 +73,73 @@ describe("the richer kit in the renderer", () => {
     expect(view.container.querySelector("[data-slate-status=muted]")!.textContent).toBe("Waiting");
   });
 
+  it("draws a sparkline's line and last figure, says not read yet with no points, and an empty piece's title and body", () => {
+    const { view } = draw(compiled(`<slate><column>
+<sparkline id="s" label="Requests" values={[3, 9, 4, 1200]} />
+<sparkline id="none" label="Errors" values={[]} />
+<empty id="e" title="No pull request yet" body="Open one and it shows here." />
+</column></slate>`));
+    const line = piece(view.container, "s");
+    expect(line.querySelector("[data-slate-sparkline] polyline")!.getAttribute("points")!.split(" ")).toHaveLength(4);
+    expect(line.textContent).toBe("Requests1,200");
+    expect(piece(view.container, "none").textContent).toBe("ErrorsNot read yet");
+    expect(piece(view.container, "e").textContent).toContain("No pull request yet");
+    expect(piece(view.container, "e").textContent).toContain("Open one and it shows here.");
+  });
+
+  it("draws a ring as the meter row", () => {
+    const { view } = draw(compiled(`<slate><column>
+<ring id="r" label="Disk" value={40} max={80} />
+<meter id="m" label="Disk" value={40} max={80} />
+</column></slate>`));
+    const ring = piece(view.container, "r");
+    expect(ring.querySelector("circle")).toBeNull();
+    expect(ring.textContent).toBe(piece(view.container, "m").textContent);
+  });
+
+  it("draws each figure as the sketch the agent reads prints it", () => {
+    const doc = compiled(`<slate><column>
+<number id="n1" label="Plain" value={2.5} />
+<number id="n2" label="Count" value={1234} format="integer" />
+<number id="n3" label="Took" value={3600} format="duration" />
+<number id="n4" label="Spent" value={12.5} format="usd" />
+<number id="n5" label="Used" value={1500000} format="tokens" />
+<number id="n6" label="Disk" value={2048} format="bytes" />
+<meter id="m1" label="Seats" value={1234} max={5000} format="fraction" />
+<bars id="b1" label="Load" items={[{ n: 'web', v: 2.5 }]} name={item.n} value={item.v} />
+</column></slate>`);
+    const { view } = draw(doc);
+    const sketch = sketchSlate(doc, slateStartValues(doc));
+    const drawn = [
+      ...["n1", "n2", "n3", "n4", "n5", "n6"].map(id => piece(view.container, id).querySelector(".tabular-nums")!.textContent!.trim()),
+      piece(view.container, "m1").textContent!.match(/[\d,.]+\/[\d,.]+/)![0],
+      piece(view.container, "b1").querySelector(".tabular-nums")!.textContent!.trim(),
+    ];
+    expect(drawn).toEqual(["2.5", "1,234", "3.6s", "$12.50", "1.5M", "2 KB", "1,234/5,000", "2.5"]);
+    for (const figure of drawn) expect(sketch).toContain(figure);
+  });
+
   describe("the chart's axis", () => {
     const GOLD = `<slate><value name="hist" start={[]} /><column><chart label="Spot gold" items={$hist} x={item.at} value={item.v} format="usd" /></column></slate>`;
     const ticks = (c: HTMLElement): string[] => [...c.querySelectorAll<HTMLElement>("[data-k=y-axis] > span.absolute")].map(t => t.textContent ?? "");
     const at = (v: number, i: number) => ({ at: 1_759_000_000_000 + i * 60_000, v });
+
+    it("says a zero and a negative figure in the hover, as it says any other", async () => {
+      const { view } = draw(compiled(`<slate><value name="hist" start={[]} /><column><chart label="Change" items={$hist} x={item.at} value={item.v} format="integer" /></column></slate>`), { hist: [3, 0, -5].map(at) });
+      const points = [...view.container.querySelectorAll<HTMLElement>("[data-k=point]")];
+      const figureAt = async (i: number): Promise<string[]> => {
+        fireEvent.pointerEnter(points[i]!, { pointerType: "mouse" });
+        fireEvent.mouseEnter(points[i]!);
+        fireEvent.mouseMove(points[i]!);
+        await act(async () => new Promise(r => setTimeout(r, 0)));
+        const shown = [...document.querySelectorAll("[data-k=point-figure]")].map(e => e.textContent ?? "");
+        fireEvent.mouseLeave(points[i]!);
+        fireEvent.pointerLeave(points[i]!, { pointerType: "mouse" });
+        return shown;
+      };
+      expect((await figureAt(1)).join(" ")).toContain("0");
+      expect((await figureAt(2)).join(" ")).toContain("-5");
+    });
 
     // A series that holds one value draws no plot: the legend's line says the value, and the plot returns once it moves.
     for (const [name, hist] of [

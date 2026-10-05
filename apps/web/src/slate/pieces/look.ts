@@ -1,10 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The meaning words a slate may say, drawn in the app's own tokens (05-styling). The agent picks a word; this file
+// The meaning words a slate may say, drawn in the app's own tokens. The agent picks a word; this file
 // is the whole of how each one looks, in every theme, since every class reads a theme token.
 import { slateFigure, type SlateJson, type SlatePropValue } from "@wsp/protocol";
 import type { SlateEngine } from "../engine.js";
 import { truthy } from "../actions.js";
 import { whenOf } from "../paths.js";
+
+/** Each row's React key off the key it was given: the index where it has none, its text where it is one, its JSON
+ * otherwise, and the index added where two rows give the same, so no two rows share a key. */
+export function rowKeys(given: readonly (SlateJson | undefined)[]): string[] {
+  const seen = new Set<string>();
+  return given.map((value, index) => {
+    const base = value === undefined || value === null ? `#${index}` : typeof value === "string" ? value : JSON.stringify(value);
+    const key = seen.has(base) ? `${base}#${index}` : base;
+    seen.add(key);
+    return key;
+  });
+}
 
 export type Tone = "default" | "muted" | "good" | "warning" | "bad" | "info" | "accent";
 const TONES: ReadonlySet<string> = new Set(["default", "muted", "good", "warning", "bad", "info", "accent"]);
@@ -38,7 +50,7 @@ export function toneOf(value: SlateJson | undefined, slate: SlateEngine, id: str
   return value as Tone;
 }
 
-/** The steps a layout's children stand apart: 4, 12 (pieces, the owner's spacing of 2026-10-05) and 16. */
+/** The steps a layout's children stand apart: 4, 12 (pieces) and 16. */
 export const GAP: Record<string, string> = { tight: "gap-1", normal: "gap-3", loose: "gap-4" };
 export const gapOf = (value: SlateJson | undefined): string => GAP[typeof value === "string" ? value : "normal"] ?? GAP["normal"]!;
 
@@ -46,7 +58,11 @@ export const str = (value: SlateJson | undefined): string | undefined =>
   value === undefined || value === null ? undefined : typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" ? String(value) : JSON.stringify(value);
 
 /** The sentence a control is held by: a non-empty text holds it, anything else (null, false, "") lets it go. */
-export const heldBy = (value: SlateJson | undefined): string | undefined => (typeof value === "string" && value.trim() !== "" ? value : undefined);
+export { slateHeldText as heldBy } from "@wsp/protocol";
+
+/** A cell or a fact that reads as a figure: a number, or text that is one with a unit or a rate after it. */
+const FIGURE = /^[-+]?[$€£₹¥]?\d[\d,]*(\.\d+)?\s?(%|[A-Za-z]{1,5}(\/[A-Za-z]+)?)?$/;
+export const isFigure = (value: SlateJson | undefined): boolean => typeof value === "number" || (typeof value === "string" && FIGURE.test(value.trim()));
 
 const WORD = /^[A-Za-z][a-z]*[,.:;!?]?$/;
 /** Text that reads as a sentence, three plain words or more, rather than a figure, an id, a time or a path: mono on

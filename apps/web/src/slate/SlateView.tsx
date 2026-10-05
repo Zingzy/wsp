@@ -7,7 +7,6 @@ import type { SlateJson } from "@wsp/protocol";
 import { RenderErrorBoundary } from "../components/RenderErrorBoundary.js";
 import { DOC, type SlateEngine } from "./engine.js";
 import type { ActionRunner, RaiseOptions, RaiseResult, StateSender } from "./actions.js";
-import { truthy } from "./actions.js";
 import type { SlateEventName, SlatePiece } from "./model.js";
 import { Quiet } from "./pieces/quiet.js";
 
@@ -32,7 +31,27 @@ export interface PieceView {
   rowScoped?: readonly string[];
   /** As a row of a section's card, the piece draws its own rows edge to edge rather than taking the row's inset. */
   fills?: boolean | ((slate: SlateEngine, id: string) => boolean);
+  /** In a group, whether the piece is a row of a card; absent, it is. A piece that stands bare between cards says no. */
+  card?: boolean | ((slate: SlateEngine, id: string) => boolean);
+  /** Whether the piece lays its children out in cards. */
+  group?: boolean | ((slate: SlateEngine, id: string) => boolean);
+  /** Heads what stands beside it: a row holding it is a head row, not a row of a card. */
+  heads?: true;
+  /** A piece a person acts with: a row of nothing else is the slate's toolbar. */
+  control?: true;
+  /** Lines its columns up with the pieces of its type beside it, which read each other's props to do so. */
+  aligns?: true;
+  /** The edge of what lines up: pieces that align do so within it. */
+  bounds?: true;
+  /** Says its own refreshing, so a refreshing run under it is not said again above it. */
+  saysRefreshing?: true;
+  /** Takes the slate's one accent when it names no tone. */
+  accent?: true;
 }
+
+/** A flag of a piece view that is either fixed or read off the piece's place. */
+export const flagOf = (flag: boolean | ((slate: SlateEngine, id: string) => boolean) | undefined, slate: SlateEngine, id: string, absent: boolean): boolean =>
+  flag === undefined ? absent : typeof flag === "function" ? flag(slate, id) : flag;
 
 export type PieceViews = Readonly<Record<string, PieceView>>;
 
@@ -56,6 +75,21 @@ export function usePieceVersion(engine: SlateEngine, id: string): number {
     useMemo(() => (listener: () => void) => engine.subscribe(id, listener), [engine, id]),
     () => engine.pieceVersion(id),
   );
+}
+
+/** Those of these pieces that show now. The caller redraws when one of them appears or hides, and not when a value
+ * one of them reads moves. */
+export function useShown(engine: SlateEngine, ids: readonly string[]): string[] {
+  const key = ids.join(" ");
+  const subscribe = useMemo(
+    () => (listener: () => void) => {
+      const offs = key === "" ? [] : key.split(" ").map(id => engine.subscribe(id, listener));
+      return () => offs.forEach(off => off());
+    },
+    [engine, key],
+  );
+  const flags = useSyncExternalStore(subscribe, () => ids.map(id => (engine.isShown(id) ? "1" : "0")).join(""));
+  return ids.filter((_, at) => flags[at] === "1");
 }
 
 export function SlateView({ engine, views, runner, sender }: SlateScope) {
@@ -90,7 +124,7 @@ function PieceBody({ id }: { id: string }) {
   const { engine, views, runner, sender } = useScope();
   const piece = engine.piece(id);
   if (piece === undefined) return null;
-  const shown = piece.when === undefined || truthy(engine.evaluate(piece.when));
+  const shown = engine.isShown(id);
   engine.setShown(id, shown);
   if (!shown) return null;
   const view = views[piece.type];
@@ -111,10 +145,13 @@ function PieceBody({ id }: { id: string }) {
   );
 }
 
-/** What a type this build does not know draws: its fallback piece, nothing, its sentence, or the one quiet line. */
+/** What a type this build does not know draws: its fallback piece, nothing, its sentence, or the one quiet line. A
+ * fallback this build cannot draw either, itself or a loop back to it included, is the quiet line. */
 function Fallback({ piece }: { piece: SlatePiece }) {
+  const { engine, views } = useScope();
   const fallback = piece.fallback;
   if (fallback === "drop") return null;
-  if (typeof fallback === "string") return <PieceHost id={fallback} />;
-  return <Quiet data-slate-unknown={piece.type}>{fallback?.text ?? "This part needs a newer wsp"}</Quiet>;
+  const target = typeof fallback === "string" ? engine.piece(fallback) : undefined;
+  if (typeof fallback === "string" && target !== undefined && views[target.type] !== undefined) return <PieceHost id={fallback} />;
+  return <Quiet data-slate-unknown={piece.type}>{typeof fallback === "object" ? fallback.text : "This part needs a newer wsp"}</Quiet>;
 }

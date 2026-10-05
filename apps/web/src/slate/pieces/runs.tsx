@@ -6,55 +6,30 @@
 import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
 import type { SlateEngine } from "../engine.js";
-import { PieceHost } from "../SlateView.js";
+import { flagOf, PieceHost, useShown } from "../SlateView.js";
+import { viewOf } from "./registry.js";
 import { isNoteText } from "./look.js";
 import { isStrip, riddenBy } from "./riders.js";
 import { BarSwitch } from "./barswitch.js";
 
-/** Pieces a person acts with, which make a row of their own a toolbar when it holds nothing else. */
-const CONTROLS: ReadonlySet<string> = new Set(["button", "select", "toggle", "input"]);
-
 /** Whether a group lays its children out in cards: a section, the slate's root column, and a column standing in such
  * a group. A column in a card's row is layout alone. */
 export function isGroup(slate: SlateEngine, id: string): boolean {
-  const type = slate.piece(id)?.type;
-  if (type === "section") return true;
-  if (type !== "column" || isStrip(slate, id)) return false;
-  const parent = slate.parentId(id);
-  return parent === undefined || isGroup(slate, parent);
+  return flagOf(viewOf(slate.piece(id)?.type)?.group, slate, id, false);
 }
 
 /** A row of controls and no words: the slate's toolbar, bare above the cards. */
 export function isToolbar(slate: SlateEngine, id: string): boolean {
   const piece = slate.piece(id);
   if (piece?.type !== "row") return false;
-  const types = (piece.children ?? []).map(child => slate.piece(child)?.type ?? "");
-  return types.length > 0 && types.every(type => CONTROLS.has(type));
+  const children = piece.children ?? [];
+  return children.length > 0 && children.every(child => viewOf(slate.piece(child)?.type)?.control === true);
 }
 
 /** Whether a piece in a group is a row of a card. */
 export function isCardRow(slate: SlateEngine, id: string): boolean {
   const piece = slate.piece(id);
-  if (piece === undefined) return false;
-  switch (piece.type) {
-    case "section":
-    case "heading":
-    case "chart":
-    case "diagram":
-    case "markdown":
-    case "button":
-    case "table":
-    case "bars":
-      return false;
-    case "column":
-      return !isGroup(slate, id);
-    case "row":
-      return !isToolbar(slate, id) && !(piece.children ?? []).some(child => slate.piece(child)?.type === "heading");
-    case "text":
-      return false;
-    default:
-      return true;
-  }
+  return piece !== undefined && flagOf(viewOf(piece.type)?.card, slate, id, true);
 }
 
 /** Where a piece stands: a row of a card, inside such a row, or bare on the page between cards. */
@@ -73,7 +48,7 @@ export function isBarHolder(slate: SlateEngine, id: string): boolean {
   return (piece?.type === "grid" || piece?.type === "row") && children.length > 0 && children.every(child => slate.piece(child)?.type === "bars");
 }
 
-/** Bar lists switched in one card under a segmented control (the owner's pick C, 2026-10-05): two or more written one
+/** Bar lists switched in one card under a segmented control: two or more written one
  * after another, or any held in a grid or row of nothing else. */
 export function inBarSwitch(slate: SlateEngine, id: string): boolean {
   if (slate.piece(id)?.type !== "bars") return false;
@@ -93,7 +68,9 @@ const CARD = cn(
 );
 
 /** A group's children, the rows among them gathered into cards and the rest bare between. */
-export function Runs({ slate, ids }: { slate: SlateEngine; ids: readonly string[] }) {
+export function Runs({ slate, ids: all }: { slate: SlateEngine; ids: readonly string[] }) {
+  // A hidden piece takes no place among its siblings: it neither starts a card nor joins one.
+  const ids = useShown(slate, all);
   const runs: { key: string; card?: string[]; lists?: string[] }[] = [];
   for (const id of ids) {
     const last = runs.at(-1);

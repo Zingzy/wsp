@@ -31,7 +31,7 @@ const LINE_FIELD = cn(ROW_FIELD, "w-full basis-full");
 const fieldFor = (placeholder: string | undefined, mono: boolean): string => ((placeholder?.length ?? 0) > (mono ? 17 : 20) ? LINE_FIELD : SLOT_FIELD);
 
 /** A secret's field: a password field whatever `kind` says. The text lives in the field until the host takes it,
- * then the field is empty again and draws the handle's dots (08). Emptying a filled field clears the secret. */
+ * then the field is empty again and draws the handle's dots. Emptying a filled field clears the secret. */
 function SecretInput({ path, label, props, slate, sender }: { path: string; label: string } & Pick<PieceViewProps, "props" | "slate" | "sender">) {
   const fieldId = useId();
   const [draft, setDraft] = useState("");
@@ -76,7 +76,8 @@ function SecretInput({ path, label, props, slate, sender }: { path: string; labe
         }}
         onBlur={send}
         onKeyDown={event => {
-          if (event.key !== "Enter") return;
+          // The Enter that commits a word typed through an input method is the input method's, not a send.
+          if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
           event.preventDefault();
           send();
         }}
@@ -89,6 +90,7 @@ function SecretInput({ path, label, props, slate, sender }: { path: string; labe
 
 export const input: PieceView = {
   type: "input",
+  control: true,
   component: function InputPiece(view) {
     const { piece, props, slate, sender, raise } = view;
     const path = twoWayPath(piece.props?.["value"]);
@@ -119,7 +121,7 @@ function TextInput({ piece, props, slate, sender, raise, path }: PieceViewProps 
     sender.type(path, value);
   };
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== "Enter" || piece.on?.submit === undefined) return;
+    if (event.key !== "Enter" || event.nativeEvent.isComposing || piece.on?.submit === undefined) return;
     if (lines > 1 && !(event.metaKey || event.ctrlKey)) return;
     event.preventDefault();
     submit.press();
@@ -174,7 +176,8 @@ function TextInput({ piece, props, slate, sender, raise, path }: PieceViewProps 
             variant="ghost"
             size="xs"
             onClick={() => {
-              slate.takeTheirs(path);
+              const theirs = slate.takeTheirs(path);
+              if (theirs !== undefined) void sender.now(path, theirs);
               setConflict(undefined);
             }}
           >

@@ -1,29 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What a press, a submit or a change does. The host runs set, toggle, start, cancel and the sends off its own stored
 // version through slates.event, and answers an outcome, with the consent sheet's content when it held a run; fill,
-// open, copy and pane run here (02-model, "Reactions"). The person's value writes go to the host through one sender
+// open, copy and pane run here. The person's value writes go to the host through one sender
 // per slate, typing debounced and every other change at once; a secret's text goes once and is not kept.
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateEventAnswer, SlateJson, SlateOpParams } from "@wsp/protocol";
 import type { SlateEngine } from "./engine.js";
 import { isHostStep, stepsOf, type SlateApproval, type SlateAsk, type SlateEventName, type SlateStep } from "./model.js";
 import { getOwn } from "./paths.js";
 
-export interface SlateEventAsk {
-  version: number;
-  piece: string;
-  event: SlateEventName;
-  requestId: string;
-  /** The row of a repeating piece the press came from. */
-  scope?: { item: SlateJson; index: number };
-  /** Which of a table's row actions, where the press came from one. */
-  rowAction?: number;
-}
-
-export interface SlateEventAnswer {
-  outcome: string;
-  said?: string;
-  ask?: SlateAsk;
-}
+export type SlateEventAsk = Omit<SlateOpParams<"slates.event">, "threadId">;
+export type { SlateEventAnswer };
 
 /** The window's roads out for one slate, so a test draws a slate against a fake. */
 export interface SlateLink {
@@ -54,15 +40,6 @@ export interface RaiseResult {
   said?: string;
   refused?: string;
 }
-
-/** The send outcomes, in the copy voice (09-events, "Delivery"); any other outcome says nothing. */
-const OUTCOME_WORDS: Record<string, string> = {
-  started: "Sent",
-  sent: "Sent",
-  steered: "Sent into the running turn",
-  queued: "Waiting for the turn to end",
-};
-export const outcomeWord = (outcome: string): string | undefined => OUTCOME_WORDS[outcome];
 
 const DEBOUNCE_MS = 300;
 
@@ -100,7 +77,7 @@ export class StateSender {
   }
 
   /** A secret's text, sent once and never written into the window's values: once the host has it, the window
-   * holds the handle alone (08, "Where the plaintext lives"). An empty text clears it. */
+   * holds the handle alone. An empty text clears it. */
   async secret(path: string, text: string): Promise<void> {
     await this.#link().writeState({ [path]: text });
     this.#engine.settle(path, { secret: true, set: text !== "", len: text.length, at: Date.now() });
@@ -117,11 +94,6 @@ export class StateSender {
       // The value stays drawn as typed; the next keystroke or a reconnect's fetch sends or replaces it.
     }
   }
-
-  dispose(): void {
-    for (const timer of this.#timers.values()) clearTimeout(timer);
-    this.#timers.clear();
-  }
 }
 
 /** Runs one event's steps: the host's part as one slates.event, then the window's own in order. */
@@ -129,6 +101,9 @@ export class ActionRunner {
   readonly #engine: SlateEngine;
   readonly #link: () => SlateLink;
   #counter = 0;
+  /** This window's own part of every request id: the host keeps ids from every window for minutes, and a counter
+   * alone starts at 1 again in each window and after each reload, answering a new press with an old one's result. */
+  readonly #me = crypto.randomUUID();
 
   constructor(engine: SlateEngine, link: () => SlateLink) {
     this.#engine = engine;
@@ -145,14 +120,14 @@ export class ActionRunner {
         version: engine.version,
         piece: pieceId,
         event,
-        requestId: `${engine.threadId}:${engine.version}:${pieceId}:${this.#counter}`,
+        requestId: `${engine.threadId}:${engine.version}:${pieceId}:${this.#me}:${this.#counter}`,
         ...(options.row !== undefined ? { scope: options.row } : {}),
         ...(options.rowAction !== undefined ? { rowAction: options.rowAction } : {}),
       };
       try {
         const answer = await this.#link().event(ask);
         if (answer.ask !== undefined) this.#link().consent(answer.ask);
-        said = answer.said ?? outcomeWord(answer.outcome);
+        said = answer.said;
       } catch (error) {
         return { refused: error instanceof Error ? error.message : String(error) };
       }
@@ -200,7 +175,4 @@ export class ActionRunner {
   }
 }
 
-export function truthy(value: SlateJson | undefined): boolean {
-  if (value === undefined || value === null || value === false || value === 0 || value === "") return false;
-  return !(Array.isArray(value) && value.length === 0);
-}
+export { slateTruthy as truthy } from "@wsp/protocol";

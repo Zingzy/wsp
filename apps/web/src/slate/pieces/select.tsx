@@ -6,7 +6,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { SELECT_WIDTH } from "../../settings/layout.js";
 import type { PieceView } from "../SlateView.js";
 import { getOwn } from "../paths.js";
-import { heldBy, present, str } from "./look.js";
+import { heldBy, present, rowKeys, str } from "./look.js";
 import { twoWayPath } from "./press.js";
 import { isToolbar } from "./runs.js";
 
@@ -22,9 +22,11 @@ function optionsOf(value: SlateJson | undefined): { value: string; label: string
 
 export const select: PieceView = {
   type: "select",
+  control: true,
   component: function SelectPiece({ id, piece, props, slate, sender, raise }) {
     const path = twoWayPath(piece.props?.["value"]);
     const options = optionsOf(Array.isArray(props["options"]) ? present(slate, piece.props?.["options"], props["options"]) : undefined);
+    const optionKeys = rowKeys(options.map(o => o.value));
     const current = str(path === undefined ? props["value"] : getOwn(slate.values, path)) ?? null;
     const label = str(props["label"]) ?? "";
     const held = heldBy(props["held"]);
@@ -46,8 +48,8 @@ export const select: PieceView = {
             <SelectValue placeholder={str(props["placeholder"]) ?? "Pick one"}>{(value: string | null) => options.find(o => o.value === value)?.label ?? value}</SelectValue>
           </SelectTrigger>
           <SelectPopup>
-            {options.map(option => (
-              <SelectItem key={option.value} value={option.value}>
+            {options.map((option, at) => (
+              <SelectItem key={optionKeys[at]} value={option.value}>
                 {option.label}
               </SelectItem>
             ))}

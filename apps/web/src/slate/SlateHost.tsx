@@ -3,19 +3,15 @@
 // (the api, the selection, the right panel, the composer), and the first showing of a thread's slate when the person
 // opens a thread whose agent wrote one while it was not on screen.
 import { useEffect } from "react";
-import { threadKeyOf } from "@wsp/protocol";
 import { insertIntoComposer } from "../components/chat/composerInsert.js";
-import { useSelectedThreadId, useStore } from "../protocol/store.js";
+import { selectedWorkspaceIdOf, threadWorkspaceIn, useSelectedThreadId, useStore } from "../protocol/store.js";
 import { isOpenable, useRightPanelStore } from "../rightPanelStore.js";
 import { PANE_KINDS, type RightPanelKind } from "../panes.js";
 import { workspaceOrHere } from "../terminal/computer.js";
 import { bindSlates, loadSlate, showOnce } from "./store.js";
 
 /** The workspace a thread's rows live under, where its composer keeps its draft. */
-export function threadWorkspace(threadId: string): string | null {
-  for (const [workspaceId, rows] of Object.entries(useStore.getState().sessions)) if (rows.some(row => threadKeyOf(row) === threadId)) return workspaceId;
-  return null;
-}
+export const threadWorkspace = (threadId: string): string | null => threadWorkspaceIn(useStore.getState().sessions, threadId);
 
 const isKind = (kind: string): kind is RightPanelKind => (PANE_KINDS as readonly string[]).includes(kind);
 
@@ -23,8 +19,7 @@ bindSlates({
   api: () => useStore.getState().api?.slates ?? null,
   selected: () => {
     const s = useStore.getState();
-    const workspaceId = s.selectedId !== null && s.creations.some(c => c.key === s.selectedId) ? null : s.selectedId;
-    return { threadId: s.settingsOpen ? null : s.selectedThreadId, panelKey: workspaceOrHere(workspaceId) };
+    return { threadId: s.settingsOpen ? null : s.selectedThreadId, panelKey: workspaceOrHere(selectedWorkspaceIdOf(s)) };
   },
   openPane: (panelKey, kind) => {
     if (!isKind(kind) || !isOpenable(kind)) return false;

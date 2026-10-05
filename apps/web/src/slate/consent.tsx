@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The person's approval before a slate's command first runs (07, "Consent"; 11, "The consent sheet"): the row under
+// The person's approval before a slate's command first runs: the row under
 // the header while a run is held, and the 440 px sheet that shows the host's ask: the whole command text, each
 // environment name with the value it carries now (a secret as dots), the computer and the folder, the timeout and who
 // wrote it, with Don't, Run once and Always in this thread. A run that names `confirm` asks in the destructive tier.
@@ -9,11 +9,11 @@ import { Button } from "../components/ui/button.js";
 import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { RUNS, type SlateEngine } from "./engine.js";
 import { cn } from "../lib/utils.js";
-import { isRunRecord, type SlateApproval, type SlateAsk, type SlateDoc } from "./model.js";
-import { ThenCommand } from "./mcp.js";
+import { isRunRecord, type SlateApproval, type SlateAsk, type SlateDoc, type SlateRunDecl } from "./model.js";
+import { AskFiles, AskWhy, dots, ThenCommand, useAnswer } from "./mcp.js";
 import { usePieceVersion } from "./SlateView.js";
 
-/** The prompt before a press opens a link to a domain this thread was not allowed to open (12, links). */
+/** The prompt before a press opens a link to a domain this thread was not allowed to open. */
 export const LINK_WORDS = {
   title: (domain: string) => `Open ${domain} from this slate?`,
   always: "Always for this domain",
@@ -24,6 +24,7 @@ export const LINK_WORDS = {
  * domain and Open once. */
 export function LinkConsent({ link, onOpen, onAlways, onClose }: { link: { href: string; domain: string }; onOpen(): void; onAlways(): Promise<unknown>; onClose(): void }) {
   const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | undefined>(undefined);
   return (
     <Dialog open onOpenChange={open => (open ? undefined : onClose())}>
       <DialogPopup>
@@ -34,6 +35,7 @@ export function LinkConsent({ link, onOpen, onAlways, onClose }: { link: { href:
           <code data-slate-link-href className="block min-w-0 truncate font-mono text-xs text-muted-foreground" title={link.href}>
             {link.href}
           </code>
+          {refused === undefined ? null : <p data-slate-refused className="pt-2 text-[13px] leading-5 text-error-foreground">{refused}</p>}
         </DialogPanel>
         <DialogFooter>
           <Button variant="outline" disabled={busy} onClick={onClose}>
@@ -44,10 +46,17 @@ export function LinkConsent({ link, onOpen, onAlways, onClose }: { link: { href:
             disabled={busy}
             onClick={() => {
               setBusy(true);
-              void onAlways().finally(() => {
-                onOpen();
-                onClose();
-              });
+              setRefused(undefined);
+              void onAlways().then(
+                () => {
+                  onOpen();
+                  onClose();
+                },
+                (error: unknown) => {
+                  setBusy(false);
+                  setRefused(error instanceof Error ? error.message : String(error));
+                },
+              );
             }}
           >
             {LINK_WORDS.always}
@@ -77,6 +86,7 @@ export const CONSENT_WORDS = {
   run: "Run",
   wrote: "Written by the agent in this thread",
   reach: "If a script it names changes, it asks again. The command can read anything you can.",
+  agent: "With Always in this thread, the agent can start it too.",
   more: (n: number) => (n === 1 ? "1 more command waits after this one" : `${n} more commands wait after this one`),
 } as const;
 
@@ -96,14 +106,21 @@ export function cadenceOf(doc: SlateDoc | null, run: string): string {
   return when.length > 0 ? `Runs each time ${when.join(" or ")}` : "Runs when you press it";
 }
 
+/** What a held run's row names it by, for each kind of run. */
+const RUN_LINE: { [K in SlateRunDecl["kind"]]: (decl: Extract<SlateRunDecl, { kind: K }>) => string } = {
+  cmd: decl => decl.cmd,
+  tool: decl => `${decl.server}.${decl.tool}`,
+  resource: decl => `${decl.server}:${decl.uri}`,
+};
+
 /** The slate's held runs in document order, each with the host's sheet where the record carries one. */
-export function heldRuns(engine: SlateEngine, asks: readonly SlateAsk[]): { run: string; cmd: string; ask: SlateAsk | undefined }[] {
+export function heldRuns(engine: SlateEngine, asks: readonly SlateAsk[]): { run: string; cmd: string; ask: SlateAsk | undefined; why: string | undefined }[] {
   return Object.entries(engine.document?.runs ?? {}).flatMap(([run, decl]) => {
     const record = engine.values[run];
     if (!isRunRecord(record) || record.state !== "held") return [];
     const ask = asks.find(a => a.run === run);
-    const cmd = ask?.kind === "cmd" ? ask.cmd : decl.kind === "cmd" ? decl.cmd : decl.kind === "tool" ? `${decl.server}.${decl.tool}` : `${decl.server}:${decl.uri}`;
-    return [{ run, cmd: cmd.split("\n")[0] ?? cmd, ask }];
+    const cmd = ask?.kind === "cmd" ? ask.cmd : (RUN_LINE[decl.kind] as (d: SlateRunDecl) => string)(decl);
+    return [{ run, cmd: cmd.split("\n")[0] ?? cmd, ask, why: record.why }];
   });
 }
 
@@ -114,47 +131,45 @@ export function HeldRuns({ engine, asks, review, refuse }: { engine: SlateEngine
   if (held.length === 0) return null;
   return (
     <div className="flex shrink-0 flex-col gap-1 px-3 pb-1">
-      {held.map(({ run, cmd, ask }) => (
+      {held.map(({ run, cmd, ask, why }) => (
         <div key={run} data-slate-held={run} className="flex h-7 min-w-0 items-center gap-2 text-[13px]">
           <span className="shrink-0 text-muted-foreground">{CONSENT_WORDS.wants}</span>
           <code className="min-w-0 flex-1 truncate font-mono text-xs tabular-nums text-foreground" title={cmd}>
             {cmd}
           </code>
-          <Button variant="outline" size="xs" onClick={() => review(run)}>
-            {CONSENT_WORDS.review}
-          </Button>
-          <Button variant="ghost" size="xs" disabled={ask === undefined} onClick={() => (ask === undefined ? undefined : refuse(ask))}>
-            {CONSENT_WORDS.dont}
-          </Button>
+          {ask === undefined ? (
+            // Held for a limit, not for the person: there is nothing to review, only why it waits.
+            <span data-slate-held-why className="shrink-0 text-xs text-muted-foreground">
+              {why}
+            </span>
+          ) : (
+            <>
+              <Button variant="outline" size="xs" onClick={() => review(run)}>
+                {CONSENT_WORDS.review}
+              </Button>
+              <Button variant="ghost" size="xs" onClick={() => refuse(ask)}>
+                {CONSENT_WORDS.dont}
+              </Button>
+            </>
+          )}
         </div>
       ))}
     </div>
   );
 }
 
-const dots = (value: string): boolean => /^•+/.test(value);
 
-export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask: Extract<SlateAsk, { kind: "cmd" }>; cadence: string; more?: number; answer(scope: SlateApproval): Promise<unknown>; onClose(): void }) {
+/** What a held command will run, as every sheet that approves one shows it: the text, its reshape, how often it runs,
+ * each value it is handed, and where and how long it runs. */
+export function CommandBody({ ask, cadence, lines }: { ask: Extract<SlateAsk, { kind: "cmd" }>; cadence: string; lines: 4 | 12 }) {
   const env = Object.entries(ask.env);
-  const [busy, setBusy] = useState(false);
-  const [refused, setRefused] = useState<string | undefined>(undefined);
-  const decide = (scope: SlateApproval) => {
-    setBusy(true);
-    setRefused(undefined);
-    void answer(scope).then(
-      () => onClose(),
-      (error: unknown) => {
-        setBusy(false);
-        setRefused(error instanceof Error ? error.message : String(error));
-      },
-    );
-  };
-  const body = (
-    <div data-slate-consent={ask.run} className="flex min-w-0 flex-col gap-3 text-[13px] leading-5">
-      <pre data-slate-consent-cmd className="max-h-[calc(12*1rem+1rem)] overflow-auto whitespace-pre-wrap break-all rounded-md bg-accent px-2.5 py-2 font-mono text-xs leading-4 tabular-nums text-foreground">
+  return (
+    <>
+      <pre data-slate-consent-cmd className={cn("overflow-auto whitespace-pre-wrap break-all rounded-md bg-accent px-2.5 py-2 font-mono text-xs leading-4 tabular-nums text-foreground", lines === 12 ? "max-h-[calc(12*1rem+1rem)]" : "max-h-[calc(4*1rem+1rem)]")}>
         {ask.cmd}
       </pre>
       <ThenCommand then={ask.then} />
+      <AskFiles files={ask.files} />
       <p data-slate-consent-cadence className="text-foreground">
         {cadence}
       </p>
@@ -167,27 +182,35 @@ export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask:
             </div>
           ))}
           {ask.args.map((arg, at) => (
-            <div key={`arg-${at}`} className="contents">
+            <div key={`arg-${at}`} data-slate-consent-arg={at + 1} className="contents">
               <dt className="text-muted-foreground">${at + 1}</dt>
               <dd className="min-w-0 break-all text-foreground">{arg}</dd>
             </div>
           ))}
           {ask.stdin === undefined ? null : (
-            <div className="contents">
+            <div data-slate-consent-stdin className="contents">
               <dt className="text-muted-foreground">stdin</dt>
-              <dd className="min-w-0 truncate text-foreground">{ask.stdin}</dd>
+              <dd className="min-w-0 break-all text-foreground">{ask.stdin}</dd>
             </div>
           )}
         </dl>
       )}
-      <p className="text-muted-foreground">
-        <span data-slate-consent-where className="text-foreground">
-          on {ask.computer}, in {ask.folder}, {ask.timeoutS} s at most
-        </span>
-        <br />
-        {CONSENT_WORDS.wrote}.
+      <p data-slate-consent-where className="text-foreground">
+        on {ask.computer}, in {ask.folder}, {ask.timeoutS} s at most
       </p>
+      <AskWhy why={ask.why} />
+    </>
+  );
+}
+
+export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask: Extract<SlateAsk, { kind: "cmd" }>; cadence: string; more?: number; answer(scope: SlateApproval): Promise<unknown>; onClose(): void }) {
+  const { busy, refused, decide } = useAnswer(answer, onClose);
+  const body = (
+    <div data-slate-consent={ask.run} className="flex min-w-0 flex-col gap-3 text-[13px] leading-5">
+      <CommandBody ask={ask} cadence={cadence} lines={12} />
+      <p className="text-muted-foreground">{CONSENT_WORDS.wrote}.</p>
       <p data-slate-consent-reach className="text-muted-foreground">{CONSENT_WORDS.reach}</p>
+      {ask.confirm === undefined ? <p data-slate-consent-agent className="text-muted-foreground">{CONSENT_WORDS.agent}</p> : null}
       {more > 0 ? <p data-slate-consent-more className="text-muted-foreground">{CONSENT_WORDS.more(more)}</p> : null}
       {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}
     </div>

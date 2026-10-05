@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Appendix C of the spec, "A step-by-step setup the person performs", as the agent writes it, with the two
-// corrections the proof of concept applies: the token reaches vercel through its environment and gh through stdin,
-// never as an argument. Parsed by the protocol's own parser, so the renderer draws what a write would store.
+// A step-by-step deploy setup the person performs, as the agent writes it: the token reaches vercel through its
+// environment and gh through stdin, never as an argument. Parsed by the protocol's own parser, so the renderer draws
+// what a write would store.
 import { parseSlate, type SlateDoc } from "@wsp/protocol";
 
-export const APPENDIX_C_TEXT = `<slate title="Deploy setup">
+export const DEPLOY_SLATE_TEXT = `<slate title="Deploy setup">
   <value name="step" start={1} />
   <value name="repo" start="acme/landing" />
   <value name="project" start="" />
@@ -62,9 +62,9 @@ export const APPENDIX_C_TEXT = `<slate title="Deploy setup">
 `;
 
 function parsed(): SlateDoc {
-  const { document, errors } = parseSlate(APPENDIX_C_TEXT);
-  if (document === undefined) throw new Error(`appendix C does not parse: ${errors.map(e => e.message).join("; ")}`);
+  const { document, errors } = parseSlate(DEPLOY_SLATE_TEXT);
+  if (document === undefined) throw new Error(`the deploy slate does not parse: ${errors.map(e => e.message).join("; ")}`);
   return document;
 }
 
-export const APPENDIX_C: SlateDoc = parsed();
+export const DEPLOY_SLATE: SlateDoc = parsed();

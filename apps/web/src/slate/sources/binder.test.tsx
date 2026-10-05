@@ -125,6 +125,18 @@ describe("the window's sources", () => {
     expect(api.unsubscribe).toHaveBeenCalledWith("t1", expect.arrayContaining(["pr", "git"]));
   });
 
+  it("asks the host for its holds again when the connection comes back, since a hold dies with its socket", async () => {
+    const app = fakeApp({ conn: "live" } as Partial<AppState>);
+    const api = fakeHost({});
+    const doc = slate({ root: "root", pieces: { root: { type: "column", children: ["a"] }, ...text("a", "#${pr.number}") } });
+    drawBound(doc, app, api);
+    await act(async () => {});
+    expect(vi.mocked(api.subscribe).mock.calls).toEqual([["t1", ["pr"]]]);
+    act(() => app.set({ conn: "reconnecting" } as Partial<AppState>));
+    act(() => app.set({ conn: "live" } as Partial<AppState>));
+    expect(vi.mocked(api.subscribe).mock.calls).toEqual([["t1", ["pr"]], ["t1", ["pr"]]]);
+  });
+
   it("says pr.number is null while the workspace has no pull request", async () => {
     const app = fakeApp();
     const statuses = app.get().statuses;

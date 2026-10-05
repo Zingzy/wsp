@@ -16,7 +16,7 @@ import type { PieceViewProps, PieceView } from "../SlateView.js";
 import { truthy } from "../actions.js";
 import { placeOf } from "./runs.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
-import { isSentence, NOTE, present, str, TONE_INK, toneOf } from "./look.js";
+import { isFigure, isSentence, NOTE, present, rowKeys, str, TONE_INK, toneOf } from "./look.js";
 import { Outcome } from "./outcome.js";
 import { usePress } from "./press.js";
 import { pressTitle } from "./button.js";
@@ -31,8 +31,6 @@ type Row = { item: SlateJson; index: number };
 const shownColumns = (slate: SlateEngine, raw: SlatePropValue | undefined): Template[] => present(slate, raw, records(raw)).slice(0, 8);
 
 /** A figure as a cell shows it: a number, or text like 524 MB, 12%, $4.20 or 3 days. */
-const FIGURE = /^[-+]?[$€£₹¥]?\d[\d,]*(\.\d+)?\s?(%|[A-Za-z]{1,5}(\/s)?)?$/;
-const isFigure = (value: SlateJson | undefined): boolean => typeof value === "number" || (typeof value === "string" && FIGURE.test(value.trim()));
 
 function RowAction({ id, template, at, row, slate, raise }: Pick<PieceViewProps, "id" | "slate" | "raise"> & { template: Template; at: number; row: Row }) {
   const on = template["on"] as unknown as { press?: SlateStep | SlateStep[] } | undefined;
@@ -59,8 +57,7 @@ function tightWidths(slate: SlateEngine, id: string): (number | undefined)[] {
   if (piece === undefined) return [];
   const items = slate.resolve(piece.props?.["items"]);
   const list = Array.isArray(items) ? items : [];
-  const cap = slate.resolve(piece.props?.["rows"]);
-  const shown = typeof cap === "number" ? list.slice(0, Math.max(0, Math.floor(cap))) : list;
+  const shown = list.slice(0, drawnRows(slate.resolve(piece.props?.["rows"]), list.length));
   return shownColumns(slate, piece.props?.["columns"]).map(column => {
     const cells = shown.map((item, index) => slate.resolve(column["value"], { item, index }));
     const mono = column["mono"] === true && !cells.some(isSentence);
@@ -78,10 +75,12 @@ function sharedWidths(slate: SlateEngine, id: string, own: (number | undefined)[
   return own.map((width, at) => (width === undefined ? undefined : Math.max(width, ...fellows.map(widths => widths[at] ?? 0))));
 }
 
-function rowKey(slate: SlateEngine, key: SlatePropValue | undefined, row: Row): string {
-  const value = key === undefined ? undefined : slate.resolve(key, row);
-  return value === undefined || value === null ? `#${row.index}` : typeof value === "string" ? value : JSON.stringify(value);
-}
+/** Past this many rows a table says how many more there are rather than draw them all on every push. */
+export const ROWS_DRAWN = 200;
+
+/** How many of a table's rows draw: what its rows prop asks for, never past ROWS_DRAWN. */
+const drawnRows = (asked: SlateJson | undefined, length: number): number => Math.min(typeof asked === "number" ? Math.max(0, Math.floor(asked)) : length, ROWS_DRAWN);
+
 
 const NAME = "text-sm leading-5 text-foreground";
 const WORD = "text-[13px] leading-5 text-muted-foreground";
@@ -106,13 +105,16 @@ function OpenRow({ id, template, row, raise, className, label, children }: Pick<
 
 export const table: PieceView = {
   type: "table",
+  card: false,
+  aligns: true,
   rowScoped: ["columns", "rowActions", "key"],
   component: function TablePiece({ id, piece, props, slate, raise }) {
     const items = Array.isArray(props["items"]) ? props["items"] : [];
     const columns = shownColumns(slate, piece.props?.["columns"]);
     const actions = records(piece.props?.["rowActions"]).slice(0, 3);
-    const cap = typeof props["rows"] === "number" ? Math.max(0, Math.floor(props["rows"])) : items.length;
-    const shown = items.slice(0, cap);
+    const shown = items.slice(0, drawnRows(props["rows"], items.length));
+    const keyProp = piece.props?.["key"];
+    const keys = rowKeys(shown.map((item, index) => (keyProp === undefined ? undefined : slate.resolve(keyProp, { item, index }))));
     const place = placeOf(slate, id);
     const inset = place === "inside" ? "" : INSET;
     const card = place === "inside" ? "" : CARD_SURFACE;
@@ -155,7 +157,6 @@ export const table: PieceView = {
       return (
         <div role="table" aria-label={header(title)} data-slate-folded className="flex min-w-0 flex-col gap-2.5">
           {header(title) === undefined || slate.parent(id)?.type === "section" ? null : <span className={SECTION_HEAD}>{header(title)}</span>}
-          {shown.length === 0 ? null : (
             <div className={cn("grid min-w-0 grid-cols-[minmax(0,1fr)_auto] [&>*+*]:border-t [&>*+*]:border-border/50", card)}>
               {shown.map((item, index) => {
                 const row = { item, index };
@@ -185,17 +186,16 @@ export const table: PieceView = {
                 );
                 const className = cn("col-span-full grid grid-cols-subgrid items-start gap-x-4", ROW, inset);
                 return opens ? (
-                  <OpenRow key={rowKey(slate, piece.props?.["key"], row)} id={id} template={actions[0]!} row={row} raise={raise} className={className} label={`${str(slate.resolve(actions[0]!["label"], row)) ?? ""}, ${name}`}>
+                  <OpenRow key={keys[index]} id={id} template={actions[0]!} row={row} raise={raise} className={className} label={`${str(slate.resolve(actions[0]!["label"], row)) ?? ""}, ${name}`}>
                     {body}
                   </OpenRow>
                 ) : (
-                  <div key={rowKey(slate, piece.props?.["key"], row)} role="row" className={className}>
+                  <div key={keys[index]} role="row" className={className}>
                     {body}
                   </div>
                 );
               })}
             </div>
-          )}
           {below}
         </div>
       );
@@ -263,11 +263,11 @@ export const table: PieceView = {
               );
               const className = cn("col-span-full grid grid-cols-subgrid items-baseline", ROW);
               return opens ? (
-                <OpenRow key={rowKey(slate, piece.props?.["key"], row)} id={id} template={actions[0]!} row={row} raise={raise} className={className} label={`${str(slate.resolve(actions[0]!["label"], row)) ?? ""}, ${str(slate.resolve(columns[title]?.["value"], row)) ?? ""}`}>
+                <OpenRow key={keys[index]} id={id} template={actions[0]!} row={row} raise={raise} className={className} label={`${str(slate.resolve(actions[0]!["label"], row)) ?? ""}, ${str(slate.resolve(columns[title]?.["value"], row)) ?? ""}`}>
                   {body}
                 </OpenRow>
               ) : (
-                <div key={rowKey(slate, piece.props?.["key"], row)} role="row" className={className}>
+                <div key={keys[index]} role="row" className={className}>
                   {body}
                 </div>
               );

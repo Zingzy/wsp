@@ -3,7 +3,8 @@
 // each source whose input moved; the clock ticks once a second only while a drawn piece reads time.now; host-held
 // sources are held through slates.subscribe while bound and let go after; and a path the window does not hold is
 // asked of slates.resolve once and drawn as it comes. Nothing is held for a slate that is not on screen.
-import { foldThreads, threadKeyOf, type SlateJson, type ThreadView } from "@wsp/protocol";
+import { foldThreads, type SlateJson, type ThreadView } from "@wsp/protocol";
+import { threadWorkspaceIn } from "../../protocol/store.js";
 import type { SlateEngine } from "../engine.js";
 import { splitPath } from "../paths.js";
 import type { SlateApi, SlateRecord } from "../wire.js";
@@ -19,8 +20,6 @@ export interface BinderDeps {
   now?(): number;
 }
 
-const TICK_MS = 1_000;
-const IDLE_TICK_MS = 30_000;
 
 export function bindSources(engine: SlateEngine, threadId: string, deps: BinderDeps): () => void {
   const now = deps.now ?? (() => Date.now());
@@ -35,12 +34,8 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
   let threadCache: { sessions: unknown; out: { workspaceId: string | null; thread: ThreadView | null } } | null = null;
   const threadOf = (app: AppState) => {
     if (threadCache !== null && threadCache.sessions === app.sessions) return threadCache.out;
-    let out: { workspaceId: string | null; thread: ThreadView | null } = { workspaceId: null, thread: null };
-    for (const [workspaceId, rows] of Object.entries(app.sessions)) {
-      if (!rows.some(row => threadKeyOf(row) === threadId)) continue;
-      out = { workspaceId, thread: foldThreads(rows).find(t => (t.threadId ?? t.id) === threadId) ?? null };
-      break;
-    }
+    const workspaceId = threadWorkspaceIn(app.sessions, threadId);
+    const out = { workspaceId, thread: workspaceId === null ? null : (foldThreads(app.sessions[workspaceId] ?? []).find(t => (t.threadId ?? t.id) === threadId) ?? null) };
     threadCache = { sessions: app.sessions, out };
     return out;
   };
@@ -112,6 +107,8 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
   let held = new Set<string>();
   let tick: ReturnType<typeof setInterval> | null = null;
   let tickMs = 0;
+  /** The sources a tick reads again. */
+  let ticking: string[] = [];
 
   const sameInput = (a: unknown, b: unknown) =>
     a === b || (Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]));
@@ -140,14 +137,14 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
     if (ms === 0) return;
     tick = setInterval(() => {
       clock = now();
-      engine.invalidate(["time"]);
+      engine.invalidate(ticking);
     }, ms);
   };
 
   const rebind = () => {
     if (disposed) return;
     const paths = engine.boundPaths();
-    const heads = new Set(paths.map(path => splitPath(path)?.head ?? "").filter(head => head !== "" && head !== "state"));
+    const heads = new Set(paths.map(path => splitPath(path)?.head ?? "").filter(head => head !== ""));
     const ctx = context();
     for (const name of heads) {
       if (bound.has(name)) continue;
@@ -165,9 +162,23 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
       if (drop.length > 0) void api.unsubscribe(threadId, drop).catch(() => {});
     }
     held = nextHeld;
-    setTick(paths.some(path => path === "time.now") ? TICK_MS : heads.has("time") ? IDLE_TICK_MS : 0);
+    // The fastest tick any bound source asks for, reading those sources again.
+    const ticks = [...heads].flatMap(name => {
+      const ms = SLATE_SOURCE_VIEWS[name]?.tick?.(paths.filter(path => splitPath(path)?.head === name));
+      return ms === undefined || ms <= 0 ? [] : [{ name, ms }];
+    });
+    const fastest = ticks.length === 0 ? 0 : Math.min(...ticks.map(t => t.ms));
+    ticking = ticks.map(t => t.name);
+    setTick(fastest);
   };
 
+  // A hold dies with the socket that took it, so a connection that comes back is asked for every hold again.
+  let live = deps.app().conn === "live";
+  const offConn = deps.subscribeApp(() => {
+    const now = deps.app().conn === "live";
+    if (now && !live && held.size > 0) void deps.api()?.subscribe(threadId, [...held]).catch(() => {});
+    live = now;
+  });
   const offReads = engine.onReadsChanged(rebind);
   const offApp = deps.subscribeApp(checkInputs);
   const offSlates = deps.subscribeSlates(checkInputs);
@@ -176,6 +187,7 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
   return () => {
     disposed = true;
     offReads();
+    offConn();
     offApp();
     offSlates();
     setTick(0);

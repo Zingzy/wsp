@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The person's approval before a slate reaches an MCP server (07, "Consent"; 11, "The consent sheet"): once per
+// The person's approval before a slate reaches an MCP server: once per
 // server per thread, a sheet naming the server, the call that asked and every tool the server lists, with Once,
 // Always in this thread and Don't; and on every start of a tool that changes things, the destructive dialog with the
 // tool and its arguments as they will be sent.
@@ -8,6 +8,7 @@ import { AlertDialog, AlertDialogDescription, AlertDialogFooter, AlertDialogHead
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { cn } from "../lib/utils.js";
+import { capitalised } from "../settings/format.js";
 import type { SlateApproval, SlateAsk } from "./model.js";
 
 export type SlateServerAsk = Extract<SlateAsk, { kind: "server" }>;
@@ -28,9 +29,12 @@ export const MCP_WORDS = {
   dont: "Don't",
   call: "Call",
   then: "Then its result goes on stdin to",
+  file: (name: string) => `It reads ${name}, which holds`,
+  use: (server: string) => `Use ${server}`,
 } as const;
 
-const dots = (value: unknown): boolean => typeof value === "string" && /^•+/.test(value);
+/** A value the host sent as dots: a secret, shown muted. */
+export const dots = (value: unknown): boolean => typeof value === "string" && /^•+/.test(value);
 const shown = (value: unknown): string => (typeof value === "string" ? value : JSON.stringify(value));
 
 /** Each argument by name with the value it carries, a secret as dots, in mono. */
@@ -49,6 +53,27 @@ export function ArgList({ args }: { args: Record<string, unknown> | undefined })
   );
 }
 
+/** Each of the slate's files a run reads, by name with its whole text, since an approval covers that text too. */
+export function AskFiles({ files }: { files: Record<string, string> | undefined }) {
+  const entries = Object.entries(files ?? {});
+  if (entries.length === 0) return null;
+  return (
+    <>
+      {entries.map(([name, text]) => (
+        <div key={name} data-slate-consent-file={name} className="flex min-w-0 flex-col gap-1">
+          <p className="text-muted-foreground">{MCP_WORDS.file(name)}</p>
+          <pre className="max-h-[calc(12*1rem+1rem)] overflow-auto whitespace-pre-wrap break-all rounded-md bg-accent px-2.5 py-2 font-mono text-xs leading-4 tabular-nums text-foreground">{text}</pre>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** Why the host holds the run: waiting for approval, or what changed since the person allowed it. */
+export function AskWhy({ why }: { why: string }) {
+  return <p data-slate-consent-why className="text-muted-foreground">{capitalised(why)}.</p>;
+}
+
 /** A run's reshape: the literal command its raw result is piped to, as it will run. */
 export function ThenCommand({ then }: { then: string | undefined }) {
   if (then === undefined) return null;
@@ -61,10 +86,10 @@ export function ThenCommand({ then }: { then: string | undefined }) {
 }
 
 /** Calls answer and closes, or keeps the sheet open with the host's refusal under it. */
-function useAnswer(answer: (scope: SlateApproval) => Promise<unknown>, onClose: () => void) {
+export function useAnswer<T>(answer: (scope: T) => Promise<unknown>, onClose: () => void) {
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | undefined>(undefined);
-  const decide = (scope: SlateApproval) => {
+  const decide = (scope: T) => {
     setBusy(true);
     setRefused(undefined);
     void answer(scope).then(
@@ -96,6 +121,7 @@ export function ServerConsentSheet({ ask, cadence, answer, onClose }: { ask: Sla
                 </p>
                 <ArgList args={ask.args} />
                 <ThenCommand then={ask.then} />
+                <AskFiles files={ask.files} />
                 <p data-slate-consent-cadence className="text-muted-foreground">
                   {cadence}
                 </p>
@@ -128,6 +154,7 @@ export function ServerConsentSheet({ ask, cadence, answer, onClose }: { ask: Sla
               <br />
               {MCP_WORDS.covers(ask.server)}
             </p>
+            <AskWhy why={ask.why} />
             {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}
           </div>
         </DialogPanel>
@@ -159,6 +186,7 @@ export function ToolConfirmSheet({ ask, answer, onClose }: { ask: SlateToolAsk; 
         <div data-slate-consent={ask.run} data-slate-confirm-tool={ask.tool} className="flex min-w-0 flex-col gap-3 px-5 pt-2 text-[13px] leading-5">
           <ArgList args={ask.args} />
           <ThenCommand then={ask.then} />
+          <AskWhy why={ask.why} />
           {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}
         </div>
         <AlertDialogFooter>
@@ -171,5 +199,37 @@ export function ToolConfirmSheet({ ask, answer, onClose }: { ask: SlateToolAsk; 
         </AlertDialogFooter>
       </AlertDialogPopup>
     </AlertDialog>
+  );
+}
+
+/** A server waiting for consent as a row of the several-at-once sheet: what the one-server sheet would show. */
+export function ServerRow({ ask, cadence }: { ask: SlateServerAsk; cadence: string }) {
+  const resource = ask.tool !== undefined && ask.tool.includes("://");
+  return (
+    <>
+      <p className="text-foreground">
+        {MCP_WORDS.use(ask.server)}
+        {ask.tool === undefined ? null : (
+          <span className="text-muted-foreground">
+            {" "}
+            {resource ? MCP_WORDS.reads.toLowerCase() : MCP_WORDS.calls.toLowerCase()} <code data-slate-consent-tool className="font-mono text-xs tabular-nums text-foreground">{ask.tool}</code>
+          </span>
+        )}
+      </p>
+      <ArgList args={ask.args} />
+      <ThenCommand then={ask.then} />
+      <AskFiles files={ask.files} />
+      <p data-slate-consent-cadence className="text-muted-foreground">
+        {cadence}
+      </p>
+      <p data-slate-consent-where className="text-foreground">
+        on {ask.computer}
+      </p>
+      <AskWhy why={ask.why} />
+      <p className="text-muted-foreground">
+        {ask.tools.length === 0 ? null : <>{MCP_WORDS.lists(ask.server, ask.tools.length)}. </>}
+        {MCP_WORDS.covers(ask.server)}
+      </p>
+    </>
   );
 }

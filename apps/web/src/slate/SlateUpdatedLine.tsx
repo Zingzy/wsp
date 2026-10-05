@@ -4,7 +4,7 @@ import { useRightPanelStore } from "../rightPanelStore.js";
 import { workspaceOrHere } from "../terminal/computer.js";
 import { TimelineRuleLine } from "../components/chat/TimelineRuleLine.js";
 
-/** The one quiet line under a turn the agent wrote the slate in (decision 11); pressing it opens the tab. */
+/** The one quiet line under a turn the agent wrote the slate in; pressing it opens the tab. */
 export function SlateUpdatedLine() {
   const workspaceId = useSelectedWorkspaceId();
   return (

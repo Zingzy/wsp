@@ -3,11 +3,12 @@
 // again on every session.slate and after a gap, and folded in place on slate.state. Each thread's engine lives for
 // the window's life, so switching threads and back keeps a section's fold and a field's unsent text.
 import { create } from "zustand";
-import { slateDomainKey, slateLinkDomain, type SlateJson, type TurnResult } from "@wsp/protocol";
+import { slateDomainKey, slateLinkDomain, type SessionSlateEvent, type SlateJson, type SlateRunEvent, type SlateValuesEvent, type TurnResult } from "@wsp/protocol";
 import { ActionRunner, StateSender, type SlateLink } from "./actions.js";
 import { SlateEngine } from "./engine.js";
 import { isRunRecord, type SlateAsk, type SlateDoc } from "./model.js";
 import type { SlateApi, SlateRecord } from "./wire.js";
+import { isOwnName } from "./paths.js";
 
 /** What the tab draws for a thread: nothing asked yet, the host's record, or no slate at all. */
 export interface SlateEntry {
@@ -131,13 +132,26 @@ function applyRecord(engine: SlateEngine, entry: SlateEntry): void {
 }
 
 const inFlight = new Map<string, Promise<SlateEntry | undefined>>();
+/** One more get for a thread asked for again while its get was out, which may have been read before the write that
+ * asked: it runs once that get settles, and every ask in the meantime shares it. */
+const again = new Map<string, Promise<SlateEntry | undefined>>();
 
 /** Asks the host for the thread's record and folds it in; a new document diffs by piece id in its engine. */
 export function loadSlate(threadId: string): Promise<SlateEntry | undefined> {
   const api = host?.api() ?? null;
   if (api === null) return Promise.resolve(undefined);
   const running = inFlight.get(threadId);
-  if (running !== undefined) return running;
+  if (running !== undefined) {
+    let follow = again.get(threadId);
+    if (follow === undefined) {
+      follow = running.then(() => {
+        again.delete(threadId);
+        return loadSlate(threadId);
+      });
+      again.set(threadId, follow);
+    }
+    return follow;
+  }
   const ask = api
     .get(threadId)
     .then(answer => {
@@ -154,7 +168,7 @@ export function loadSlate(threadId: string): Promise<SlateEntry | undefined> {
 }
 
 /** Opens the Slate tab once, the first time a thread's slate is on screen, and tells the host so another window
- * and a later write do not open it again (decision 7). */
+ * and a later write do not open it again. */
 const shownHere = new Set<string>();
 
 export function showOnce(threadId: string, entry: SlateEntry | undefined): void {
@@ -170,13 +184,7 @@ export function showOnce(threadId: string, entry: SlateEntry | undefined): void 
 }
 
 /** A slate event off the socket, from the protocol store's one subscription. */
-export function slateEvent(
-  e:
-    | { type: "session.slate"; threadId: string; by: string }
-    | { type: "slate.values"; threadId: string; version: number; revision: number; values: Record<string, unknown> }
-    | { type: "slate.run"; threadId: string; run: string; lines: readonly string[] }
-    | { type: "session.done"; threadId?: string | undefined; result: TurnResult },
-): void {
+export function slateEvent(e: SessionSlateEvent | SlateValuesEvent | SlateRunEvent | { type: "session.done"; threadId?: string | undefined; result: TurnResult }): void {
   switch (e.type) {
     case "session.slate": {
       // A write by the agent is the first-write moment; the person's and the host's own never open the tab.
@@ -193,7 +201,7 @@ export function slateEvent(
       bundles.get(e.threadId)?.engine.applyValues(values, e.revision);
       // A run newly held is a sheet the record does not carry yet: the header row and Review read it from there.
       const asks = useSlateStore.getState().byThread[e.threadId]?.record?.asks ?? [];
-      const held = Object.entries(values).some(([path, value]) => /^\$[a-zA-Z_]\w*$/.test(path) && isRunRecord(value) && value.state === "held" && !asks.some(ask => `$${ask.run}` === path));
+      const held = Object.entries(values).some(([path, value]) => isOwnName(path) && isRunRecord(value) && value.state === "held" && !asks.some(ask => `$${ask.run}` === path));
       // An empty push is the host saying the asks changed: a server's tools arrived, or a call held for its confirm.
       const asked = Object.keys(values).length === 0 && useSlateStore.getState().byThread[e.threadId] !== undefined;
       if (held || asked) void loadSlate(e.threadId);

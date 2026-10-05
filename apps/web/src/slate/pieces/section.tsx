@@ -21,6 +21,10 @@ const AFTER_CHART = "[&>[data-slate-type=chart]+[data-slate-type=text]]:-mt-0.5 
 
 export const section: PieceView = {
   type: "section",
+  card: false,
+  group: true,
+  bounds: true,
+  saysRefreshing: true,
   component: function SectionPiece({ id, piece, props, slate, sender, raise }) {
     const title = str(props["title"]);
     const note = str(props["note"]);

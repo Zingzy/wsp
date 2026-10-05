@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Bar lists written one after another or held in a grid or row of nothing else (the owner's pick C, 2026-10-05): one
+// Bar lists written one after another or held in a grid or row of nothing else: one
 // card holding every list, a segmented control over it naming them, one list shown at a time. Every list stays in the card's one grid cell, the others
 // invisible, so the card is the tallest list's height whatever is picked and nothing under it moves on a switch. The
 // pick is kept per slate for the window's life, so a value push or a redraw keeps it.
@@ -8,7 +8,7 @@ import { SegmentedControl } from "../../components/ui/segmented-control.js";
 import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
 import type { SlateEngine } from "../engine.js";
-import { PieceHost } from "../SlateView.js";
+import { PieceHost, useShown } from "../SlateView.js";
 import { useState } from "react";
 import { NOTE, SEGMENT, SEGMENTED, str } from "./look.js";
 import { usePiecesVersion } from "./number.js";
@@ -29,8 +29,9 @@ export function listNames(slate: SlateEngine, ids: readonly string[]): { names: 
   return { names: tails.map(match => match![1]!), shared: tail };
 }
 
-export function BarSwitch({ slate, ids }: { slate: SlateEngine; ids: readonly string[] }) {
-  usePiecesVersion(slate, ids);
+export function BarSwitch({ slate, ids: all }: { slate: SlateEngine; ids: readonly string[] }) {
+  usePiecesVersion(slate, all);
+  const ids = useShown(slate, all);
   const kept = picks.get(slate) ?? new Map<string, string>();
   picks.set(slate, kept);
   const [picked, setPicked] = useState(() => kept.get(ids[0]!) ?? ids[0]!);
@@ -39,6 +40,7 @@ export function BarSwitch({ slate, ids }: { slate: SlateEngine; ids: readonly st
     kept.set(ids[0]!, id);
     setPicked(id);
   };
+  if (ids.length === 0) return null;
   const { names, shared } = listNames(slate, ids);
   return (
     <div data-slate-bar-switch className="flex min-w-0 flex-col gap-2.5">

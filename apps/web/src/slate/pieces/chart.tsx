@@ -38,6 +38,8 @@ function useWidth(): [(node: HTMLElement | null) => (() => void) | undefined, nu
 
 export const chart: PieceView = {
   type: "chart",
+  card: false,
+  accent: true,
   rowScoped: ["x", "value"],
   component: function ChartPiece({ id, piece, props, slate }) {
     const [ref, width] = useWidth();
@@ -87,6 +89,7 @@ export const chart: PieceView = {
             label={label}
             axis={axisFor(values, props["format"])}
             small
+            everyFigure
           />
         )}
       </figure>

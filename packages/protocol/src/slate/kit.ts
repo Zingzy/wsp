@@ -44,7 +44,7 @@ export interface SlatePropSpec {
   of?: "number";
   /** A path prop that names a run, never a value. */
   names?: "run";
-  /** Free text, whose words may sit beside a mark like "·", as markdown's do. */
+  /** Free text, whose words may sit beside a mark such as a middle dot, as markdown's do. */
   marks?: true;
   /** A head, in sentence case, never Title Case. */
   head?: true;
@@ -170,8 +170,9 @@ function bar(value: SlateJson | undefined, max: SlateJson | undefined): string {
   return `[${"#".repeat(cells)}${".".repeat(10 - cells)}]`;
 }
 
-/** A figure in the word its format names, the one rule for the sketch and the panel: percent of max when there is
- * one, a fraction over max, none as nothing, and a word this build does not know as the plain number. */
+/** A number in the words a piece's format names, the one rule the panel and the sketch both draw it by: a percent of
+ * max where there is one, a fraction over max (the number alone with none), a duration from milliseconds, an integer
+ * with its thousands grouped, none as nothing, and any other format the number itself to two places. */
 export function slateFigure(value: number, format: string, max?: number): string {
   const plain = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
   switch (format) {
@@ -189,7 +190,7 @@ export function slateFigure(value: number, format: string, max?: number): string
 }
 
 function figure(format: string, value: SlateJson | undefined, max: SlateJson | undefined): string {
-  return isNum(value) ? slateFigure(value, format, isNum(max) ? max : undefined) : shown(value);
+  return isNum(value) && Number.isFinite(value) ? slateFigure(value, format, isNum(max) ? max : undefined) : shown(value);
 }
 
 /** The items of a list prop whose when holds; a check with no thread keeps them all. */
@@ -259,7 +260,7 @@ const PIECES: Record<string, SlatePieceModule> = {
   },
   number: {
     type: "number", level: "core", purpose: "A figure with a label.", holdsChildren: false,
-    props: { label: str(req), value: { type: "text", binds: "yes", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), note: str(), size: enm(["normal", "large"]), icon: icon(), trend: { type: "list", binds: "yes", of: "number" } },
+    props: { label: str(req), value: { type: "text", binds: "yes", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), note: str(), size: enm(["normal", "large"]), icon: icon(), trend: { type: "list", binds: "yes", of: "number", about: "read in the sketch alone; the panel's stat cell draws its figure alone, so a trend the person sees is a sparkline beside it" } },
     items: {}, events: [],
     sketch: v => {
       const value = v.prop("value");
@@ -267,7 +268,7 @@ const PIECES: Record<string, SlatePieceModule> = {
       const line = numbers(v.prop("trend"));
       return join2(shown(v.prop("label")), [fig, shown(v.prop("unit"))].filter(Boolean).join(" "), shown(v.prop("note")), line.length > 1 ? `trend ${line.at(0)} to ${line.at(-1)}` : "");
     },
-    fallback: "text", example: `<number label="Spent" value={thread.cost.usd} format="usd" icon="zap" trend={pluck($hist, 'v')} />`,
+    fallback: "text", example: `<number label="Spent" value={thread.cost.usd} format="usd" icon="zap" />`,
   },
   meter: {
     type: "meter", level: "core", purpose: "One value against a maximum.", holdsChildren: false,
@@ -334,7 +335,7 @@ const PIECES: Record<string, SlatePieceModule> = {
     fallback: "its source as code", example: "<diagram label=\"Deploy\" value={`flowchart LR\n  build --> test --> ship\n  classDef now stroke-width:3px\n  class ${$step} now`} />",
   },
   sparkline: {
-    type: "sparkline", level: "core", purpose: "A small line beside text; number's trend draws one beside a figure.", holdsChildren: false,
+    type: "sparkline", level: "core", purpose: "A small line beside text, the way to show a figure's trend.", holdsChildren: false,
     props: { label: str(req), values: { type: "list", binds: "yes", required: true, of: "number" }, tone: tone() }, items: {}, events: [],
     sketch: v => trend(shown(v.prop("label")), numbers(v.prop("values"))),
     fallback: "text", example: `<sparkline label="Load" values={pluck($hist, 'v')} />`,

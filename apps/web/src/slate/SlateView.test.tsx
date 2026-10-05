@@ -4,7 +4,7 @@
 // and a press raises slates.event with the host's params.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { slateStartValues, SLATE_PANE_KINDS, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { slateStartValues, SLATE_PANE_KINDS, SLATE_PIECES, type SlateDoc, type SlateEventAnswer, type SlateJson } from "@wsp/protocol";
 import { PANES } from "../panes";
 import { ActionRunner, StateSender, type SlateLink } from "./actions";
 import { SlateEngine } from "./engine";
@@ -185,6 +185,24 @@ describe("the slate renderer", () => {
     expect(screen.getByText("A chart goes here")).toBeTruthy();
   });
 
+  it("draws a fallback this build cannot draw either as the quiet line: one that names itself, a loop, an unknown target", () => {
+    const doc = slate({
+      root: "root",
+      pieces: {
+        root: { type: "column", children: ["self", "x", "far", "known"] },
+        self: { type: "future-thing", fallback: "self" },
+        x: { type: "future-thing", fallback: "y" },
+        y: { type: "other-thing", fallback: "x" },
+        far: { type: "future-thing", fallback: "nowhere" },
+        known: { type: "future-thing", fallback: "words" },
+        words: { type: "text", props: { value: "Drawn instead" } },
+      },
+    });
+    draw(doc, {});
+    expect(screen.getAllByText("This part needs a newer wsp")).toHaveLength(3);
+    expect(screen.getByText("Drawn instead")).toBeTruthy();
+  });
+
   it("draws quiet placeholders for values that have not arrived", () => {
     draw(EVERY_PIECE, {});
     // The chart and every number whose figure has not come.
@@ -194,19 +212,29 @@ describe("the slate renderer", () => {
     expect(screen.queryByText("null")).toBeNull();
   });
 
+  it("gives a press in a second window, or after a reload, an id of its own, never the first window's", async () => {
+    const first = draw(EVERY_PIECE, VALUES);
+    fireEvent.click(screen.getByRole("button", { name: "Go on" }));
+    cleanup();
+    const second = draw(EVERY_PIECE, VALUES);
+    fireEvent.click(screen.getByRole("button", { name: "Go on" }));
+    const idOf = (link: typeof first.link): string => (vi.mocked(link.event).mock.calls[0]![0] as { requestId: string }).requestId;
+    expect(idOf(first.link)).not.toBe(idOf(second.link));
+  });
+
   it("raises slates.event with the host's params on a press, held until the answer, then says the outcome", async () => {
-    let answer: (v: { outcome: string }) => void = () => {};
-    const eventFn = vi.fn(() => new Promise<{ outcome: string }>(resolve => (answer = resolve)));
+    let answer: (v: SlateEventAnswer) => void = () => {};
+    const eventFn = vi.fn(() => new Promise<SlateEventAnswer>(resolve => (answer = resolve)));
     const { link } = draw(EVERY_PIECE, VALUES, { link: { event: eventFn } });
     const button = screen.getByRole("button", { name: "Go on" }) as HTMLButtonElement;
     expect(button.title).toBe("Go on to the next step. (with $note)");
     fireEvent.click(button);
     fireEvent.click(button);
     expect(link.event).toHaveBeenCalledTimes(1);
-    expect(link.event).toHaveBeenCalledWith({ version: 3, piece: "go", event: "press", requestId: "t1:3:go:1" });
+    expect(link.event).toHaveBeenCalledWith({ version: 3, piece: "go", event: "press", requestId: expect.stringMatching(/^t1:3:go:[0-9a-f-]{36}:1$/) });
     await act(async () => {});
     expect(button.disabled).toBe(true);
-    await act(async () => answer({ outcome: "steered" }));
+    await act(async () => answer({ outcome: "steered", said: "Sent into the running turn" }));
     expect(button.disabled).toBe(false);
     expect(screen.getByText("Sent into the running turn")).toBeTruthy();
   });
@@ -230,7 +258,7 @@ describe("the slate renderer", () => {
     expect(buttons).toHaveLength(1);
     expect(buttons[0]!.getAttribute("aria-label")).toBe("Send to agent, lint");
     await act(async () => fireEvent.click(buttons[0]!));
-    expect(link.event).toHaveBeenCalledWith({ version: 3, piece: "checks", event: "press", requestId: "t1:3:checks:1", scope: { item: { name: "lint", state: "fail" }, index: 1 }, rowAction: 0 });
+    expect(link.event).toHaveBeenCalledWith({ version: 3, piece: "checks", event: "press", requestId: expect.stringMatching(/^t1:3:checks:[0-9a-f-]{36}:1$/), scope: { item: { name: "lint", state: "fail" }, index: 1 }, rowAction: 0 });
   });
 
   it("hands set, toggle and start to the host as one event and runs the window's own steps here", async () => {
@@ -248,7 +276,7 @@ describe("the slate renderer", () => {
     expect(screen.getByText("open false")).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Flip" })));
     expect(link.event).toHaveBeenCalledTimes(1);
-    expect(link.event).toHaveBeenCalledWith({ version: 3, piece: "flip", event: "press", requestId: "t1:3:flip:1" });
+    expect(link.event).toHaveBeenCalledWith({ version: 3, piece: "flip", event: "press", requestId: expect.stringMatching(/^t1:3:flip:[0-9a-f-]{36}:1$/) });
     expect(link.fill).toHaveBeenCalledWith("Look at this");
     expect(link.writeState).not.toHaveBeenCalled();
     act(() => engine.applyValues({ $open: true }, 4));
@@ -279,6 +307,9 @@ describe("the slate renderer", () => {
       fireEvent.click(screen.getByRole("button", { name: "Take theirs" }));
       frame();
       expect((screen.getByLabelText("Note for the agent") as HTMLInputElement).value).toBe("from the agent");
+      // The blur sent abc; taking theirs sends the agent's value back, so the host holds what the window shows.
+      await act(async () => vi.advanceTimersByTime(300));
+      expect(vi.mocked(link.writeState).mock.calls.at(-1)).toEqual([{ $note: "from the agent" }]);
     } finally {
       vi.useRealTimers();
     }
