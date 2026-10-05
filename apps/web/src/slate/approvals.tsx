@@ -63,10 +63,12 @@ function ServerRow({ ask, cadence }: { ask: Extract<SlateAsk, { kind: "server" }
 }
 
 export function ApprovalsSheet({ asks, cadence, answer, onClose }: { asks: readonly BatchAsk[]; cadence(run: string): string; answer(key: string, scope: SlateApproval): Promise<unknown>; onClose(): void }) {
-  const [off, setOff] = useState<ReadonlySet<string>>(new Set());
+  // The rows on the sheet as it opened start switched on; one that arrives while it is open starts off, so Allow all
+  // never answers a row the person has not looked at.
+  const [on, setOn] = useState<ReadonlySet<string>>(() => new Set(asks.map(ask => ask.key)));
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | undefined>(undefined);
-  const chosen = asks.filter(ask => !off.has(ask.key));
+  const chosen = asks.filter(ask => on.has(ask.key));
   const decide = (scope: SlateApproval) => {
     setBusy(true);
     setRefused(undefined);
@@ -80,11 +82,11 @@ export function ApprovalsSheet({ asks, cadence, answer, onClose }: { asks: reado
         },
       );
   };
-  const toggle = (key: string, on: boolean) =>
-    setOff(was => {
+  const toggle = (key: string, checked: boolean) =>
+    setOn(was => {
       const next = new Set(was);
-      if (on) next.delete(key);
-      else next.add(key);
+      if (checked) next.add(key);
+      else next.delete(key);
       return next;
     });
   return (
@@ -96,10 +98,10 @@ export function ApprovalsSheet({ asks, cadence, answer, onClose }: { asks: reado
         <DialogPanel className="pt-1 pb-0">
           <div data-slate-approvals className="flex min-w-0 flex-col gap-5 text-[13px] leading-5">
             {asks.map(ask => {
-              const on = !off.has(ask.key);
+              const picked = on.has(ask.key);
               return (
-                <div key={ask.key} data-slate-approval={ask.key} data-on={on} className={cn("flex min-w-0 gap-3", on ? undefined : "opacity-60")}>
-                  <Switch checked={on} onCheckedChange={checked => toggle(ask.key, checked)} aria-label={ask.kind === "cmd" ? ask.cmd : APPROVALS_WORDS.server(ask.server)} className="mt-1.5" />
+                <div key={ask.key} data-slate-approval={ask.key} data-on={picked} className={cn("flex min-w-0 gap-3", picked ? undefined : "opacity-60")}>
+                  <Switch checked={picked} onCheckedChange={checked => toggle(ask.key, checked)} aria-label={ask.kind === "cmd" ? ask.cmd : APPROVALS_WORDS.server(ask.server)} className="mt-1.5" />
                   <div className="flex min-w-0 flex-1 flex-col gap-2">{ask.kind === "cmd" ? <CommandBody ask={ask} cadence={cadence(ask.run)} lines={4} /> : <ServerRow ask={ask} cadence={cadence(ask.run)} />}</div>
                 </div>
               );

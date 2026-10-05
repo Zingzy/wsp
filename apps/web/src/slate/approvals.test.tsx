@@ -113,6 +113,21 @@ describe("several commands waiting", () => {
     shows(sheet.querySelector('[data-slate-approval="mcp:zoho-mail"]')!, "shape.py", "print('shaped')", "Needs your approval.");
   });
 
+  it("starts a row that arrives while the sheet is open switched off, so Allow answers only the rows the person saw", async () => {
+    const slates = open(record(DOC, held("link", "disk"), [LINK, DISK]));
+    const sheet = await screen.findByRole("dialog", { name: "Run these 2 commands?" });
+    act(() =>
+      useSlateStore.setState(s => {
+        const entry = s.byThread[row.threadId!]!;
+        return { byThread: { ...s.byThread, [row.threadId!]: { ...entry, record: { ...entry.record!, asks: [LINK, DISK, INBOX], values: { ...entry.record!.values, ...held("inbox") } } } } };
+      }),
+    );
+    const late = await within(document.body).findByRole("switch", { name: "Use zoho-mail" });
+    expect(late.getAttribute("aria-checked")).toBe("false");
+    await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Allow 2" })));
+    expect(vi.mocked(slates.approve).mock.calls.map(c => c[1])).toEqual(["k-link", "k-disk"]);
+  });
+
   it("Allow all writes each command's own approval for the thread, the same call one sheet at a time makes", async () => {
     const slates = open(record(DOC, held("link", "disk"), [LINK, DISK]));
     const sheet = await screen.findByRole("dialog", { name: "Run these 2 commands?" });
