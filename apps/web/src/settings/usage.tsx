@@ -14,6 +14,7 @@ import { Button, NEUTRAL_RING } from "../components/ui/button.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { cn } from "../lib/utils.js";
+import { keepHeld, useHeld } from "../protocol/held.js";
 import { useStore } from "../protocol/store.js";
 import { PROJECT_HUES, ProjectGlyph } from "../projects/look.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
@@ -55,68 +56,37 @@ export function usageCards(ctx: SettingsContext): SettingsCardData[] {
   return [{ id: "usage", items: [], body: <UsagePage ctx={ctx} /> }];
 }
 
+/** How long a Usage read stands: both tabs and a second visit inside it draw the one answer. */
+const USAGE_HOLD_MS = 60_000;
+const ACCOUNTS_KEY = "usage:accounts";
+
 function UsagePage({ ctx }: { ctx: SettingsContext }) {
   const { api } = ctx;
   const tab = useSettingsStore(state => state.usageTab);
   const [range, setRange] = useState<UsageRange>("week");
   const [split, setSplit] = useState<UsageSplit>("agent");
-  const [accounts, setAccounts] = useState<AccountsAnswer | null>(null);
-  const [used, setUsed] = useState<UsedAnswer | null>(null);
-  const [accountsRefused, setAccountsRefused] = useState<string | null>(null);
-  const [usedRefused, setUsedRefused] = useState<string | null>(null);
-
+  const readAccounts = api?.usageAccounts;
+  const readUsed = api?.usageUsed;
+  const accounts = useHeld<AccountsAnswer>(ACCOUNTS_KEY, readAccounts === undefined ? undefined : () => readAccounts(), { holdMs: USAGE_HOLD_MS });
+  const asked = useHeld<UsedAnswer>(`usage:used:${range}:${split}`, readUsed === undefined ? undefined : () => readUsed(range, split), { holdMs: USAGE_HOLD_MS });
+  // The last range's figures stand while the next range is read, so the digits roll from them rather than a skeleton.
+  const [used, setUsed] = useState<UsedAnswer | null>(asked.value ?? null);
   useEffect(() => {
-    let live = true;
-    void api?.usageAccounts?.().then(
-      answer => {
-        if (!live) return;
-        setAccountsRefused(null);
-        setAccounts(answer);
-      },
-      (e: unknown) => live && setAccountsRefused(saidOf(e)),
-    );
-    return () => {
-      live = false;
-    };
-  }, [api]);
-
-  useEffect(() => {
-    let live = true;
-    void api?.usageUsed?.(range, split).then(
-      answer => {
-        if (!live) return;
-        setUsedRefused(null);
-        setUsed(answer);
-      },
-      (e: unknown) => {
-        if (!live) return;
-        setUsed(null);
-        setUsedRefused(saidOf(e));
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [api, range, split]);
+    if (asked.value !== undefined) setUsed(asked.value);
+    else if (asked.error !== undefined) setUsed(null);
+  }, [asked.value, asked.error]);
 
   // By agent, each agent's models stand under it, read as the model split of the same range.
-  const [models, setModels] = useState<readonly UsedRow[]>([]);
   const nested = split === "agent";
-  useEffect(() => {
-    if (!nested) return setModels([]);
-    let live = true;
-    void api?.usageUsed?.(range, "model").then(
-      answer => live && setModels(answer.rows),
-      () => live && setModels([]),
-    );
-    return () => {
-      live = false;
-    };
-  }, [api, range, nested]);
+  const models = useHeld<UsedAnswer>(nested ? `usage:used:${range}:model` : null, readUsed === undefined ? undefined : () => readUsed(range, "model"), { holdMs: USAGE_HOLD_MS });
 
   return (
     <div key={tab} className="flex animate-settle-in flex-col gap-8 motion-reduce:animate-none">
-      {tab === "limits" ? <Limits accounts={accounts?.accounts ?? null} refused={accountsRefused} now={ctx.now} onAccount={row => setAccounts(held => (held === null ? held : { ...held, accounts: held.accounts.map(a => (a.key === row.key ? row : a)) }))} /> : <Used used={used} refused={usedRefused} models={models} range={range} split={split} onRange={setRange} onSplit={setSplit} ctx={ctx} />}
+      {tab === "limits" ? (
+        <Limits accounts={accounts.value?.accounts ?? null} refused={accounts.error === undefined ? null : saidOf(accounts.error)} now={ctx.now} onAccount={row => keepHeld<AccountsAnswer | undefined>(ACCOUNTS_KEY, held => (held === undefined ? held : { ...held, accounts: held.accounts.map(a => (a.key === row.key ? row : a)) }))} />
+      ) : (
+        <Used used={used} refused={asked.error === undefined || asked.value !== undefined ? null : saidOf(asked.error)} models={nested && models.error === undefined ? (models.value?.rows ?? []) : []} range={range} split={split} onRange={setRange} onSplit={setSplit} ctx={ctx} />
+      )}
     </div>
   );
 }

@@ -685,3 +685,31 @@ describe("ProtocolClient request envelope", () => {
     client.close();
   });
 });
+
+describe("ProtocolClient reads in flight", () => {
+  it("sends one request for two identical reads in flight and answers both, and sends a write every time", async () => {
+    ScriptedSocket.instances.length = 0;
+    ScriptedSocket.authOk = true;
+    ScriptedSocket.serverUp = true;
+    const held: Frame[] = [];
+    ScriptedSocket.reply = f => void held.push(f);
+    const client = new ProtocolClient({ url: "ws://test", token: "tok", WebSocketCtor: ScriptedSocket as unknown as typeof WebSocket });
+    await client.connect();
+    const sock = ScriptedSocket.instances[0]!;
+    const checkout = makeApi(client).workspaceCheckout!;
+    const first = checkout("ws_1");
+    const second = checkout("ws_1");
+    const other = checkout("ws_2");
+    expect(sock.frames("workspaces.checkout").map(f => f["workspaceId"])).toEqual(["ws_1", "ws_2"]);
+    for (const f of held) sock.onmessage?.({ data: JSON.stringify({ id: f["id"], ok: true }) });
+    await Promise.all([first, second, other]);
+    // Settled, the read is asked again: what is shared is the ask in flight, never an answer.
+    const dropped = (asking: Promise<unknown>): void => void asking.catch(() => {});
+    dropped(checkout("ws_1"));
+    expect(sock.frames("workspaces.checkout")).toHaveLength(3);
+    dropped(client.request("workspaces.touch", { workspaceId: "ws_1" }));
+    dropped(client.request("workspaces.touch", { workspaceId: "ws_1" }));
+    expect(sock.frames("workspaces.touch")).toHaveLength(2);
+    client.close();
+  });
+});

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The small pieces every tab of the Pull request pane draws with: a face wherever a person or a bot is named (24 px on
-// the timeline, 18 px in a row, 16 px in a sentence, GitHub's by login with the initial until it loads), the state word
-// with its dot, a body under the 12-line clamp, a body in the pane's markdown, and the mark of the agent the pull
-// request's thread runs on.
+// the timeline, 18 px in a row, 16 px in a sentence, one address per person with the initial until it loads), the
+// state word with its dot, a body under the 12-line clamp, a body in the pane's markdown, and the mark of the agent the
+// pull request's thread runs on.
 import { useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { agentName } from "@wsp/catalog";
 import { capitalised } from "@wsp/protocol";
@@ -21,14 +21,39 @@ import { PR_WORDS, TONE_INK, authorName } from "./words.js";
 export type FaceSize = 16 | 18 | 20 | 24;
 const FACE_BOX: Record<FaceSize, string> = { 16: "size-4 text-[8px]", 18: "size-[18px] text-[8px]", 20: "size-5 text-[9px]", 24: "size-6 text-[10px]" };
 
-/** GitHub serves every login's face at this address, which answers with the avatar host. */
-export const faceUrl = (login: string, size: FaceSize): string => `https://github.com/${encodeURIComponent(login)}.png?size=${size * 2}`;
+/** Every face is asked at the largest size drawn, twice over for a dense screen, and the box scales it. */
+const FACE_PX = 48;
 
-/** A face: GitHub's for the login, or the one the host read for an app, which its login cannot give. */
+/** The address each person's face was first drawn from, so every size and every remount asks the one URL the avatar
+ * host lets the browser hold; github.com/<login>.png answers each ask with an uncached redirect to it. */
+const faceUrls = new Map<string, string>();
+const loadedFaces = new Set<string>();
+
+const sized = (src: string): string => {
+  if (!URL.canParse(src)) return src;
+  const url = new URL(src);
+  url.searchParams.set("s", String(FACE_PX));
+  return url.href;
+};
+
+/** The face to draw for a login: the address the host read off the API, else the avatar host's by login. A deleted
+ * account has no login to ask by, and an app's login answers with its owner's face or nothing. */
+function faceUrl(login: string, src?: string): string | undefined {
+  const kept = faceUrls.get(login);
+  if (kept !== undefined) return kept;
+  const url = src !== undefined ? sized(src) : login.trim() === "" || login.endsWith("[bot]") ? undefined : `https://avatars.githubusercontent.com/${encodeURIComponent(login)}?s=${FACE_PX}`;
+  if (url !== undefined) faceUrls.set(login, url);
+  return url;
+}
+
+/** A face: the person's from the avatar host, the initial standing until it loads. */
 export function Face({ login, size, stacked = false, src }: { login: string; size: FaceSize; stacked?: boolean; src?: string | undefined }) {
-  const [shown, setShown] = useState(false);
-  // A deleted account has no login to ask by, and an app's login answers with its owner's face or nothing.
-  const face = src ?? (login.trim() === "" || login.endsWith("[bot]") ? undefined : faceUrl(login, size));
+  const face = faceUrl(login, src);
+  const [shown, setShown] = useState(() => face !== undefined && loadedFaces.has(face));
+  const loaded = (): void => {
+    if (face !== undefined) loadedFaces.add(face);
+    setShown(true);
+  };
   return (
     <span
       data-pr-face={login}
@@ -39,7 +64,7 @@ export function Face({ login, size, stacked = false, src }: { login: string; siz
       )}
     >
       {shown ? null : <span aria-hidden>{login.slice(0, 1).toUpperCase()}</span>}
-      {face === undefined ? null : <img ref={img => void (img?.complete === true && img.naturalWidth > 0 && setShown(true))} src={face} alt="" onLoad={() => setShown(true)} className={cn("absolute inset-0 size-full object-cover", !shown && "opacity-0")} />}
+      {face === undefined ? null : <img ref={img => void (img?.complete === true && img.naturalWidth > 0 && loaded())} src={face} alt="" onLoad={loaded} className={cn("absolute inset-0 size-full object-cover", !shown && "opacity-0")} />}
     </span>
   );
 }
