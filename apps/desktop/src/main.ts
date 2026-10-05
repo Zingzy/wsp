@@ -23,7 +23,7 @@ import { QUIT_WORD, quitAnswer, quitChoice, quitPrompt } from "./quit.js";
 import { bundleOf, discardStage, inPlaceRefusal, settleStage, stageOf, stageUpdate, startSwap } from "./self-update.js";
 import { installShim, shimText } from "./shim.js";
 import { trayModel, trayNotice, type TrayAct, type TrayModel, type TrayRow } from "./tray.js";
-import { vibrancyFor, windowOptions, type UpdateRoad } from "./window.js";
+import { desktopOf, setsMenu, titleBarOverlayFor, vibrancyFor, windowOptions, type UpdateRoad } from "./window.js";
 import { isShellZoomChord, shellChordOf } from "./zoom.js";
 
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
@@ -42,7 +42,10 @@ const updateWhy = ownBundle === undefined ? undefined : inPlaceRefusal(ownBundle
 const inPlaceBundle = updateWhy === undefined ? ownBundle : undefined;
 const updateRoad: UpdateRoad = { inPlace: inPlaceBundle !== undefined, ...(updateWhy !== undefined ? { why: updateWhy } : {}) };
 
-const newWindow = (preload?: string): BrowserWindow => new BrowserWindow(windowOptions(process.platform, app.getVersion(), preload, updateRoad));
+/** The desktop session the app runs in, read once: a Linux window draws its controls only where the desktop draws
+ * title bars. */
+const DESKTOP = desktopOf(process.env);
+const newWindow = (preload?: string): BrowserWindow => new BrowserWindow(windowOptions(process.platform, app.getVersion(), preload, updateRoad, DESKTOP));
 
 function launch(): Launch {
   const env = process.env["WSP_HOME"];
@@ -75,10 +78,11 @@ function answer(channel: string, run: (event: IpcMainInvokeEvent, ...args: unkno
   });
 }
 
-/** The same gate on a message the page sends: a refused one is dropped, since a send waits for no answer. */
-function listen(channel: string, run: (event: IpcMainEvent, ...args: unknown[]) => void): void {
+/** The same gate on a message the page sends: a refused one is dropped, since a send waits for no answer. A channel
+ * the first launch's page sends on too takes that page beside the app's own. */
+function listen(channel: string, run: (event: IpcMainEvent, ...args: unknown[]) => void, firstRun = false): void {
   ipcMain.on(channel, (event, ...args: unknown[]) => {
-    if (!may(event, channel)) return;
+    if (!may(event, channel) && !(firstRun && fromOnboardingPage(event.senderFrame?.url, ONBOARDING_PAGE))) return;
     run(event, ...args);
   });
 }
@@ -130,6 +134,17 @@ listen("glass:set", (event, glass) => {
   const vibrancy = vibrancyFor(process.platform, glass === true);
   if (vibrancy !== undefined) BrowserWindow.fromWebContents(event.sender)?.setVibrancy(vibrancy);
 });
+
+// The controls a Linux frame draws over the page take the ground and ink of the page's header row, which the page
+// says as its theme moves. The first launch's page says it too, so the gate takes that page beside the app's own.
+listen(
+  "titlebar:set",
+  (event, colors) => {
+    const overlay = titleBarOverlayFor(process.platform, DESKTOP, colors);
+    if (overlay !== undefined) BrowserWindow.fromWebContents(event.sender)?.setTitleBarOverlay(overlay);
+  },
+  true,
+);
 
 /** Whether the window's page is up and which host serves it; nothing until the app window's first page has loaded. */
 let pageUp = false;
@@ -257,11 +272,14 @@ answer("hosts:switch", async (_event, alias) => {
   return moved;
 });
 
+// Said before Electron's launch would set its default menu in the place of one the shell never sets.
+if (!setsMenu(process.platform)) Menu.setApplicationMenu(null);
+
 /** The shell's own menu bar: the platform's rows by their roles, and Hosts, drawn from the same list the sidebar's
  * foot draws its menu from. Rebuilt whenever the list or the current host moves, since a native menu is a copy. */
 function refreshMenu(): void {
   const hostsHeld = switcher;
-  if (hostsHeld === undefined) return;
+  if (hostsHeld === undefined || !setsMenu(process.platform)) return;
   const hosts = contextMenuTemplate(hostsMenuItems(hostsHeld.view()), id => {
     const action = hostMenuAction(id);
     if (action === undefined) return;

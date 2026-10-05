@@ -579,6 +579,21 @@ describe("the macOS desktop window", () => {
     expect(container.className).not.toContain("sidebar-glass");
   });
 
+  it("with the wco class a Linux window carries: both header rows drag the window and the sidebar keeps its own paint, with no Mac glass", async () => {
+    document.documentElement.classList.add("wco");
+    try {
+      await mountShell();
+      expect(sidebarHeader().className).toContain("drag-region");
+      expect(banner().querySelector("[data-header-row]")!.className).toContain("drag-region");
+      expect(noDrag(sidebarHeader()).every(Boolean)).toBe(true);
+      const container = document.querySelector('[data-slot="sidebar-container"]')!;
+      expect(container.className).toContain("sidebar-glass");
+      expect(container.className).not.toContain("sidebar-vibrancy");
+    } finally {
+      document.documentElement.classList.remove("wco");
+    }
+  });
+
   it("without the class, a browser tab or another platform: nothing drags and the sidebar paints its own glass", async () => {
     await mountShell();
     expect(sidebarHeader().className).not.toContain("drag-region");
