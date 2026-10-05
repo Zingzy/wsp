@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
-import { DIAGRAM_TEXT, GOLD_TEXT, GOLD_VALUES, INBOX_TEXT, INBOX_VALUES, QUIZ_TEXT, REACH_TEXT, REACH_VALUES, SPOO_TEXT, SPOO_VALUES, todaySlate } from "./fixtures/today";
+import { DIAGRAM_TEXT, GOLD_TEXT, GOLD_VALUES, INBOX_TEXT, INBOX_VALUES, QUIZ_TEXT, REACH_TEXT, REACH_VALUES, SPOO_TEXT, SPOO_VALUES, todaySlate } from "../../test/fixtures/slate/today";
 import { SLATE_VIEWS } from "./pieces";
 import { SlateView } from "./SlateView";
 import { fakeLink, manualScheduler } from "./testing";

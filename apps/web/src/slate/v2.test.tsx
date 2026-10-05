@@ -8,7 +8,7 @@ import { SLATE_PIECES, slateStartValues, type SessionView, type SlateDoc, type S
 import type { Api, ProtocolEvent } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { useRightPanelStore } from "../rightPanelStore";
-import { APPENDIX_C } from "./fixtures/appendixC";
+import { APPENDIX_C } from "../../test/fixtures/slate/appendixC";
 import type { SlateAsk } from "./model";
 import { SLATE_VIEWS } from "./pieces";
 import { SlateSurface } from "./SlateSurface";

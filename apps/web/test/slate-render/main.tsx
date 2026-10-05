@@ -5,7 +5,7 @@
 import { createRoot } from "react-dom/client";
 import { ActionRunner, StateSender, type SlateLink } from "../../src/slate/actions";
 import { SlateEngine } from "../../src/slate/engine";
-import { DIAGRAM_TEXT, REACH_TEXT, REACH_VALUES, todaySlate } from "../../src/slate/fixtures/today";
+import { DIAGRAM_TEXT, REACH_TEXT, REACH_VALUES, todaySlate } from "../fixtures/slate/today";
 import { RENDER_CASES } from "./cases";
 import { SLATE_VIEWS } from "../../src/slate/pieces";
 import { SlateView } from "../../src/slate/SlateView";
