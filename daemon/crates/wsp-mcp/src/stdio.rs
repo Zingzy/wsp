@@ -231,7 +231,7 @@ mod tests {
         let said = |cloud, scoped| serde_json::from_str::<Value>(&greeting(None, cloud, scoped)).unwrap()["instructions"].as_str().unwrap().to_owned();
         let server = record::server();
         for cloud in [false, true] {
-            assert!(said(cloud, true).starts_with("This session is a wsp thread, and it has a slate"));
+            assert!(said(cloud, true).starts_with("This session is a wsp thread with a slate"));
             assert!(!said(cloud, false).contains("This session is a wsp thread"));
         }
         assert_eq!(said(false, false), server.instructions.cloud_off);
