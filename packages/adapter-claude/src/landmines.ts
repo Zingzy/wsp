@@ -166,7 +166,7 @@ function permissionFlags(mode: string | undefined): string[] {
  * The servers a turn is handed, as this CLI takes them: one --mcp-config carrying the JSON a config file would hold.
  * Not --strict-mcp-config, which would drop the config dir's own servers and leave the turn with these alone.
  */
-function mcpConfigFlag(servers: Readonly<Record<string, McpServerSpec>> | undefined): string[] {
+export function mcpConfigFlag(servers: Readonly<Record<string, McpServerSpec>> | undefined): string[] {
   if (servers === undefined || Object.keys(servers).length === 0) return [];
   const mcpServers = Object.fromEntries(Object.entries(servers).map(([name, s]) => [name, { command: s.command, args: [...s.args] }]));
   return [`--mcp-config ${shellQuote(JSON.stringify({ mcpServers }))}`];

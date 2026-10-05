@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A side question on Claude Code: the thread's session resumed as a fork with
-// every built-in tool off, the answer read off the stream-json result.
+// every tool and hook off, the answer read off the stream-json result.
 // --no-session-persistence is not used: nothing read on 2.1.283 says it holds
 // for the file a fork copies the transcript into. The fork's id is pinned with
 // --session-id instead (the 2.1.283 binary refuses --session-id beside --resume
@@ -8,8 +8,8 @@
 // CLI's run has ended, since the kill a stuck one gets takes its shell with it.
 
 import { inFolder, programWord, shellQuote } from "@wsp/protocol";
-import type { AgentLaunch, AsideAnswer } from "@wsp/protocol";
-import { UUID_RE, slugFlag } from "./landmines.js";
+import type { AgentLaunch, AsideAnswer, McpServerSpec } from "@wsp/protocol";
+import { UUID_RE, mcpConfigFlag, slugFlag } from "./landmines.js";
 
 export interface AsideCommandOptions {
   /** The thread's own session, as the CLI keys it. */
@@ -20,17 +20,22 @@ export interface AsideCommandOptions {
   configDir: string;
   cwd?: string;
   model?: string;
+  /** The servers the thread's turns are handed on their launch. */
+  mcpServers?: Readonly<Record<string, McpServerSpec>>;
   launch?: AgentLaunch;
 }
 
 /**
- * The one shell line a side question runs. --safe-mode leaves the person's hooks, MCP servers, plugins and skills out
- * and --strict-mcp-config leaves out any server a managed config adds, since --tools governs the built-in set alone
- * and an MCP tool or a SessionStart hook would run a command on the copy. The question is the one stream-json user
- * line on stdin, the same channel a turn takes.
+ * The one shell line a side question runs. A resumed session is told every CLAUDE.md and MCP server it announced that
+ * this launch dropped, and the model opened each answer on that notice (2.1.289: "Instructions no longer present",
+ * "The following MCP servers have disconnected"), so the fork loads what the thread's turns load, their servers
+ * included, and is kept from acting by other flags: --tools '' empties the built-in set, --disallowedTools 'mcp__*'
+ * takes every MCP tool off the list while its server stays connected, and disableAllHooks keeps a SessionStart hook
+ * from running a command on the copy. The question is the one stream-json user line on stdin, the same channel a
+ * turn takes.
  */
 export function asideCommand(options: AsideCommandOptions): string {
-  const { session, fork, configDir, cwd, model } = options;
+  const { session, fork, configDir, cwd, model, mcpServers } = options;
   for (const id of [session, fork]) if (!UUID_RE.test(id)) throw new Error(`session identifier must be a UUID, got "${id}"`);
   const claude = [
     `${programWord("claude", options.launch)} -p`,
@@ -38,8 +43,9 @@ export function asideCommand(options: AsideCommandOptions): string {
     "--output-format stream-json",
     "--verbose",
     "--tools ''",
-    "--safe-mode",
-    "--strict-mcp-config",
+    "--disallowedTools 'mcp__*'",
+    `--settings ${shellQuote(JSON.stringify({ disableAllHooks: true }))}`,
+    ...mcpConfigFlag(mcpServers),
     ...slugFlag("--model", "model", model),
     `--resume ${session}`,
     "--fork-session",
