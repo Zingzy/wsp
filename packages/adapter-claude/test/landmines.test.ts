@@ -196,12 +196,13 @@ describe("buildCommand", () => {
     expect(buildCommand({ sessionId, mcpServers: {} })).not.toContain("--mcp-config");
   });
 
-  it("a thread's own scoped wsp server brings the slate's brief to the end of the system prompt, and no other launch does", () => {
+  it("a launch whose wsp server gives the thread a slate brings the slate's brief to the end of the system prompt, and no other launch does", () => {
     const scoped = buildCommand({ sessionId, mcpServers: { wsp: { command: "/opt/wsp", args: ["mcp", "--scoped"] } } });
     expect(scoped).toContain(`--append-system-prompt ${shellQuote(SLATE_BRIEF)}`);
     expect(SLATE_BRIEF).toContain("your first tool call is mcp__wsp__slate_catalog");
     expect(SLATE_BRIEF).toContain("Never read that file or put its value in a tool call.");
-    expect(buildCommand({ sessionId, mcpServers: { wsp: { command: "/opt/wsp", args: ["mcp"] } } })).not.toContain("--append-system-prompt");
+    // A thread on a box has a slate too, though its server there is the unscoped one the host serves as a guest.
+    expect(buildCommand({ sessionId, mcpServers: { wsp: { command: "wsp", args: ["mcp"] } } })).toContain(`--append-system-prompt ${shellQuote(SLATE_BRIEF)}`);
     // A thread another thread started has no slate, so nothing tells it of one.
     expect(buildCommand({ sessionId, mcpServers: { wsp: { command: "/opt/wsp", args: ["mcp", "--scoped", "--no-slate"], noSlate: true } } })).not.toContain("--append-system-prompt");
     expect(buildCommand({ sessionId })).not.toContain("--append-system-prompt");

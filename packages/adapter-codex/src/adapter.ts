@@ -376,7 +376,8 @@ function itemDeltas(done: boolean, item: Item, sessionId: string): AdapterEvent[
       if (!done) return [delta({ kind: "tool_use", text: JSON.stringify(item.arguments ?? {}), toolName: `${str(item.server) ?? "mcp"}.${str(item.tool) ?? "tool"}`, toolUseId: item.id })];
       // A tool that answers isError fails the call with its words in the result and no error message.
       const said = str(rec(item.error)?.message);
-      const text = failed() && said !== undefined && said !== "" ? said : JSON.stringify(rec(item.result)?.content ?? []);
+      const content = rec(item.result)?.content;
+      const text = failed() && said !== undefined && said !== "" ? said : failed() && content === undefined ? "" : JSON.stringify(content ?? []);
       return [delta({ kind: "tool_result", text, toolUseId: item.id, isError: failed() })];
     }
     case "collabAgentToolCall":

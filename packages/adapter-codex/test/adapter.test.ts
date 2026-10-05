@@ -316,17 +316,18 @@ describe("CodexAdapter over codex app-server", () => {
     expect(answer).toEqual({ id: "wsp-steer-1", result: { turnId: RECORDED_TURN } });
   });
 
-  it("an MCP call the tool failed keeps the tool's words, and one that never reached it keeps the error", async () => {
+  it("an MCP call the tool failed keeps the tool's words, one that never reached it keeps the error, and one with neither says nothing", async () => {
     const item = (body: Record<string, unknown>) => `{"method":"item/completed","params":{"item":${JSON.stringify(body)},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`;
     const said = [{ type: "text", text: "slate refused: 1 error: P100 bad-syntax" }];
     const launch = launcher(scripted([
       item({ type: "mcpToolCall", id: "call_4", server: "wsp", tool: "slate_write", arguments: {}, status: "failed", result: { content: said }, error: null }),
       item({ type: "mcpToolCall", id: "call_5", server: "wsp", tool: "slate_write", arguments: {}, status: "failed", result: null, error: { message: "server gone" } }),
+      item({ type: "mcpToolCall", id: "call_6", server: "wsp", tool: "slate_write", arguments: {}, status: "failed", result: null, error: null }),
       completed("completed"),
     ]));
     const { events, onEvent } = collect();
     await adapterOver(launch).start({ prompt: "x", onEvent }).finished;
-    expect(deltasOf(events).filter(d => d.kind === "tool_result").map(d => [d.toolUseId, d.text, d.isError])).toEqual([["call_4", JSON.stringify(said), true], ["call_5", "server gone", true]]);
+    expect(deltasOf(events).filter(d => d.kind === "tool_result").map(d => [d.toolUseId, d.text, d.isError])).toEqual([["call_4", JSON.stringify(said), true], ["call_5", "server gone", true], ["call_6", "", true]]);
   });
 
   it("file changes, MCP calls and web searches, which that turn made none of, draw as codex exec's calls did", async () => {

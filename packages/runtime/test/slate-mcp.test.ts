@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import type { AdapterEvent, Caller, EventUnion, SlateView, TurnResult } from "@wsp/protocol";
 import { createRuntime, type AgentsReader, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/index.js";
+import { HELD_PRESSED, STARTS_PER_MINUTE } from "../src/slate-runs.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
 import { createSlateMcp, foldSchema, type McpServerSpec } from "../src/slate-mcp.js";
@@ -369,7 +370,44 @@ describe("a slate's MCP runs", () => {
     // Allowed for the thread, the next press runs with no sheet.
     expect((await press("s")).ask).toBeUndefined();
     await vi.waitFor(async () => expect((await get()).values["shaped"]).toMatchObject({ state: "done", runs: 2 }), { timeout: 10_000 });
+    // Revoking the server takes the reshapes allowed under it too, so the next press asks again.
+    await rt.slates.revoke({ threadId, key: "mcp:notes" });
+    expect((await press("s")).ask).toMatchObject({ kind: "server", server: "notes", then: SHAPE });
   }, 60_000);
+
+  it("a tool run started again keeps its last result in view, marked refreshing, until the new one lands", async () => {
+    const { rt, threadId, asThread, events } = await host();
+    await rt.slates.write({ text: `<slate title="Count"><run name="count" tool="notes.count" /><column><button id="c" label="Count" onPress={start($count)} /></column></slate>` }, asThread);
+    const view = async (): Promise<SlateView> => {
+      await rt.slates.settled();
+      return (await rt.slates.get(threadId))!;
+    };
+    const press = async (n: number) => rt.slates.event({ threadId, version: (await view()).version, piece: "c", event: "press", requestId: `k-${n}` });
+    await rt.slates.approve({ threadId, key: (await press(0)).ask!.key, scope: "thread" });
+    await vi.waitFor(async () => expect((await view()).values["count"]).toMatchObject({ state: "done", runs: 1 }), { timeout: 10_000 });
+    const first = (await view()).values["count"] as { json: unknown };
+    await press(1);
+    await vi.waitFor(async () => expect((await view()).values["count"]).toMatchObject({ state: "done", runs: 2 }), { timeout: 10_000 });
+    const running = events.flatMap(e => (e.type === "slate.values" && e.threadId === threadId ? [e.values["$count"]] : [])).find(v => (v as { state?: string; runs?: number } | undefined)?.state === "running" && (v as { runs: number }).runs === 2);
+    expect(running).toMatchObject({ state: "running", runs: 2, refreshing: true, json: first.json });
+  }, 30_000);
+
+  it("the person's presses on a tool run meet the same start budget a command's do", async () => {
+    const { rt, threadId, asThread } = await host();
+    await rt.slates.write({ text: `<slate title="Count"><run name="count" tool="notes.count" /><column><button id="c" label="Count" onPress={start($count)} /></column></slate>` }, asThread);
+    const view = async (): Promise<SlateView> => {
+      await rt.slates.settled();
+      return (await rt.slates.get(threadId))!;
+    };
+    const press = async (n: number) => rt.slates.event({ threadId, version: (await view()).version, piece: "c", event: "press", requestId: `c-${n}` });
+    await rt.slates.approve({ threadId, key: (await press(0)).ask!.key, scope: "thread" });
+    // Spaced past the five events a second a window may send, so each press reaches the run.
+    for (let n = 1; n <= STARTS_PER_MINUTE; n++) {
+      await new Promise(r => setTimeout(r, 220));
+      await press(n);
+    }
+    expect((await view()).values["count"]).toMatchObject({ state: "held", why: HELD_PRESSED });
+  }, 30_000);
 
   it("a then that reads the slate's own file runs it from SLATE_DIR, with the file's text in its consent", async () => {
     const { rt, threadId, asThread } = await host();

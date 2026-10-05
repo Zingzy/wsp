@@ -61,7 +61,7 @@ import { mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, w
 import { isAbsolute, join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import type { Store } from "./store.js";
-import { createSlateRuns, lastResult, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
+import { createSlateRuns, HELD_APPROVAL, lastResult, mapStrings, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
 import { boxLedger, boxRoad, boxSlateDir } from "./slate-box.js";
 import { HELD_CONFIRM, consentKey, createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
 import { HOST_SLATE_SOURCES, resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
@@ -202,7 +202,6 @@ const ERRORS_LISTED = 20;
 const PROBLEMS_KEPT = 20;
 const PIECES_NAMED = 20;
 const SOURCE_NAMES = [...HOST_SLATE_SOURCES.keys()];
-const HELD_APPROVAL = "needs your approval";
 /** Why a command did not start: it starts in its thread's folder, never the host's own, and none is known. */
 const NO_FOLDER = "this host knows no folder for the thread, so the command did not start";
 /** The approval key that lets a slate's reactions message the agent. */
@@ -282,6 +281,11 @@ function withFiles(doc: SlateDoc | null, decl: SlateRunDecl): SlateRunDecl & { f
 const SCRIPTS_MAX = 32;
 const SCRIPT_BYTES = 4 * 1024 * 1024;
 
+/** The words of a run's cmd or then that read as a path: what an Always has to cover the content of. */
+function pathsNamed(decl: Extract<SlateRunDecl, { kind: "cmd" }>): string[] {
+  return [decl.cmd, decl.then ?? ""].join("\n").split(/[\s'"`;|&()<>=,]+/).filter(w => w !== "" && !w.startsWith("-") && !w.includes("$") && /[./]/.test(w));
+}
+
 /** Every file a run's cmd or then names that exists under the thread's folder, by its path there, with a hash of its
  * content: an "Always" covers the script the person read, and an edit to it asks again. A file the command reaches
  * some other way (an import, a glob, a path it builds) is out of reach, and the sheet says so. */
@@ -289,7 +293,7 @@ function scriptsNamed(folder: string | undefined, decl: SlateRunDecl): Record<st
   if (folder === undefined || decl.kind !== "cmd") return undefined;
   let root: string;
   try { root = realpathSync(folder); } catch { return undefined; }
-  const words = [decl.cmd, decl.then ?? ""].join("\n").split(/[\s'"`;|&()<>=,]+/).filter(w => w !== "" && !w.startsWith("-") && !w.includes("$") && /[./]/.test(w));
+  const words = pathsNamed(decl);
   const found: Record<string, string> = {};
   for (const word of words) {
     if (Object.keys(found).length >= SCRIPTS_MAX) break;
@@ -320,13 +324,6 @@ function defanged(value: SlateJson): SlateJson {
   return value;
 }
 
-/** Every string inside a value passed through fn. */
-function mapStrings(value: SlateJson, fn: (s: string) => string): SlateJson {
-  if (typeof value === "string") return fn(value);
-  if (Array.isArray(value)) return value.map(v => mapStrings(v, fn));
-  if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, mapStrings(v, fn)]));
-  return value;
-}
 
 /** The longest string inside a value, by the path to it, for cutting a message down to its cap. */
 function longest(value: SlateJson, at: (string | number)[] = []): { at: (string | number)[]; length: number } | undefined {
@@ -510,7 +507,8 @@ export function createSlates(deps: SlatesDeps): Slates {
    * the thread's folder, read again at every start. */
   function approvalDecl(r: SlateRecord, declared: SlateRunDecl): SlateRunDecl & { files?: Record<string, string>; scripts?: Record<string, string> } {
     const decl = withFiles(r.document, declared);
-    const scripts = scriptsNamed(deps.thread(r.threadId)?.folder, declared);
+    // The files are hashed where the command runs; a folder on the thread's machine is not on this disk to read.
+    const scripts = onMachine(r.threadId, declared) ? undefined : scriptsNamed(folderFor(r.threadId, declared), declared);
     return scripts === undefined ? decl : { ...decl, scripts };
   }
 
@@ -901,6 +899,9 @@ export function createSlates(deps: SlatesDeps): Slates {
   const viewsNow = new Map<string, ReadonlyMap<string, SlateJson | undefined>>();
 
   /** Where a command starts: the thread's own folder on its own computer, or this computer's for one `on` the host. */
+  /** Whether a run's command runs on the thread's own machine rather than on this computer. */
+  const onMachine = (threadId: string, decl: SlateRunDecl): boolean => decl.kind === "cmd" && decl.on !== "host" && deps.machineOf?.(threadId) !== undefined;
+
   const folderFor = (threadId: string, decl: SlateRunDecl): string | undefined => {
     const facts = deps.thread(threadId);
     return decl.kind === "cmd" && decl.on === "host" ? (facts?.hostFolder ?? facts?.folder) : facts?.folder;
@@ -922,7 +923,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       const asked = { ...approvalDecl(r, decl), ...(confirm !== undefined ? { confirm } : {}) };
       const answer =
         asked.kind !== "cmd"
-          ? mcp.start({ threadId: r.threadId, run, decl: asked as McpRunDecl, by, args: mcpArgsOf(r, asked as McpRunDecl), runs: count })
+          ? mcp.start({ threadId: r.threadId, run, decl: asked as McpRunDecl, by, args: mcpArgsOf(r, asked as McpRunDecl), ...(isRunRecord(prior) ? { last: prior as unknown as RunRecord } : {}) })
           : runs.start({
               threadId: r.threadId,
               run,
@@ -947,7 +948,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     const decl = r.document?.runs[run];
     const prior = r.values[run];
     const count = isRunRecord(prior) ? prior.runs : 0;
-    if (decl !== undefined && decl.kind !== "cmd") return mcp.provisional(r.threadId, withFiles(r.document, decl) as McpRunDecl, count) as SlateRunRecord;
+    if (decl !== undefined && decl.kind !== "cmd") return mcp.provisional(r.threadId, withFiles(r.document, decl) as McpRunDecl, isRunRecord(prior) ? (prior as unknown as RunRecord) : undefined) as SlateRunRecord;
     return approvedAlways(r, run) ? (runningRecord(isRunRecord(prior) ? lastResult(prior as unknown as RunRecord) : undefined, count + 1, deps.now()) as SlateRunRecord) : { state: "held", why: HELD_APPROVAL, runs: count };
   };
 
@@ -1146,6 +1147,12 @@ export function createSlates(deps: SlatesDeps): Slates {
     if (next !== null) {
       // A timed run the person has not allowed asks now, shown or not, so this answer and their slate both say it waits.
       const asking = await viewsFor(r);
+      // A start held on the sheet whose command the write changed is held again as declared now, so the sheet shows
+      // the new command and Run once or Don't answers it.
+      for (const a of runs.held(r.threadId)) {
+        const decl = next.runs[a.run];
+        if (decl?.kind === "cmd" && runs.key(approvalDecl(r, decl) as CmdRunDecl) !== a.key) r.values[a.run] = asJson(startNow(r, a.run, "person", asking).record);
+      }
       for (const [run, decl] of Object.entries(next.runs)) {
         const rec = r.values[run];
         if (decl.every !== undefined && isRunRecord(rec) && rec.state === "idle" && provisional(r, run).state === "held") r.values[run] = asJson(startNow(r, run, "timer", asking).record);
@@ -1295,7 +1302,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         }
         if (by === "agent") {
           spendWrite(threadId);
-          runs.release(threadId);
+          // The agent's write frees a run its start budget held (02), but a call that starts runs spends that budget.
+          if (input.length > 0 && starts.length === 0) runs.release(threadId);
         }
         const out = input.length > 0 ? await batch(r, input, by, paired ? { react: false } : {}) : { asks: [], sends: [] };
         if (by === "agent" && input.length > 0) announce(r, "state", by, []);
@@ -1460,6 +1468,14 @@ export function createSlates(deps: SlatesDeps): Slates {
       }
       const named = Object.entries(r.document?.runs ?? {}).filter(([, decl]) => decl.kind === "cmd" && runs.key(approvalDecl(r, decl) as CmdRunDecl) === p.key).map(([name]) => name);
       if (named.length === 0) throw usageRefusal(`this slate declares no command with approval key ${p.key}.`, "Read the slate again and approve what it asks now.");
+      // An Always covers the content of the files a command names, which this computer cannot read on the thread's machine.
+      if (p.scope === "thread") {
+        for (const run of named) {
+          const decl = r.document!.runs[run] as Extract<SlateRunDecl, { kind: "cmd" }>;
+          const paths = pathsNamed(decl).filter(w => !w.includes("://"));
+          if (onMachine(p.threadId, decl) && paths.length > 0) throw usageRefusal(`$${run} runs on the thread's machine and names ${paths.join(", ")} there, which this computer cannot read to hold an Always to.`, "Approve it with scope once.");
+        }
+      }
       await serial(p.threadId, async () => {
         if (p.scope === "refuse") {
           r.approvals[p.key] = { state: "refused", at: deps.now(), ...approvalNames(r, p.key) };
@@ -1472,9 +1488,9 @@ export function createSlates(deps: SlatesDeps): Slates {
         viewsNow.set(p.threadId, views);
         for (const run of named) {
           const rec = r.values[run];
-          if (!isRunRecord(rec) || rec.state !== "held") continue;
+          if (!isRunRecord(rec) || (rec.state !== "held" && rec.state !== "running")) continue;
           startedBy.set(byKey(p.threadId, run), "person");
-          if (runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once") !== undefined) continue;
+          if (runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once") !== undefined || rec.state === "running") continue;
           // The hold was a host's before a restart, which this process never saw: hold it again, then answer it.
           const decl = r.document!.runs[run] as Extract<SlateRunDecl, { kind: "cmd" }>;
           const folder = folderFor(p.threadId, decl);
@@ -1502,6 +1518,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         }
         if (r.approvals[p.key] === undefined) throw usageRefusal(`this thread holds no approval ${p.key}.`, "Read its approvals again.");
         delete r.approvals[p.key];
+        // A server's own consent goes with the reshapes allowed under it, each kept as a key of its own.
+        if (p.key.startsWith("mcp:") && !p.key.includes("#then:")) for (const key of Object.keys(r.approvals)) if (key.startsWith(`${p.key}#then:`)) delete r.approvals[key];
         // What it covered stops now: each run started under it is cancelled, out of the queue, and off its timer.
         const covered = Object.entries(r.document?.runs ?? {}).flatMap(([name, declared]) => {
           const decl = approvalDecl(r, declared);
@@ -1609,6 +1627,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         holds.delete(threadId);
         skipped.delete(threadId);
         windows.delete(threadId);
+        for (const map of [writes, pressSentAt, reactionSentAt, eventBuckets, viewsNow]) map.delete(threadId);
+        for (const key of startedBy.keys()) if (key.startsWith(byKey(threadId, ""))) startedBy.delete(key);
         await deps.store.delete(SLATES, threadId);
       });
     },

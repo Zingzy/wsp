@@ -81,10 +81,11 @@ describe("buildCommand", () => {
     expect(command).not.toContain("default_tools_approval_mode");
   });
 
-  it("serves a thread another thread started no slate server, and keeps the slate tools off its wsp one", () => {
+  it("serves a thread another thread started no slate server, and leaves its wsp one as the server lists it", () => {
     for (const wsp of [{ command: "/opt/wsp/bin/wsp", args: ["mcp", "--scoped", "--no-slate"], noSlate: true as const }, { command: "wsp", args: ["mcp"], noSlate: true as const }]) {
       const command = buildCommand({ mcpServers: { wsp } });
-      expect(command).toContain(`-c mcp_servers.wsp.disabled_tools='${JSON.stringify(["slate_catalog", "slate_write", "slate_state", "slate_read"])}'`);
+      // The server told no slate lists none of the slate's tools, so there is nothing here to hide.
+      expect(command).not.toContain("disabled_tools");
       expect(command).not.toContain("wsp_slate");
       // The mark is the adapter's to read, never a word on the line a box's wsp would have to take.
       expect(command).not.toContain("noSlate");

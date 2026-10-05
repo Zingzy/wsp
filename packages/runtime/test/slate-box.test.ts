@@ -3,7 +3,7 @@
 // it, the road over a machine whose exec and run are this computer's bash (putFiles and all), and a box thread's run
 // reaching its machine through the runtime while one `on` the host stays here.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -132,6 +132,24 @@ describe("the road to a thread's machine", () => {
     expect(readFileSync(join(dir, "hi.sh"), "utf8")).toBe("echo from the file");
     expect(existsSync(join(dir, "stale.py"))).toBe(false);
     expect(execFileSync("bash", ["-c", `ls -a ${JSON.stringify(dir)}`], { encoding: "utf8" })).not.toContain(".run-");
+  });
+
+  it("the folder a run's values go up in is the account's alone before they are decoded into it", async () => {
+    const base = bashMachine();
+    const modes: number[] = [];
+    const machine: Machine = {
+      ...base,
+      run: (script, opts) => {
+        const payload = /^p='([^']+)'$/m.exec(script)?.[1];
+        if (payload !== undefined) modes.push(statSync(payload).mode & 0o777);
+        return base.run(script, opts);
+      },
+    };
+    const thread = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    made.push(boxSlateDir(thread));
+    const end = await ended(done => boxRoad(machine, thread, () => ({})).start({ cmd: "true", args: [], cwd: temp(), env: { TOKEN: "s" }, stdin: "", timeoutS: 20, stream: false }, { line: () => {}, end: done }));
+    expect(end).toMatchObject({ code: 0 });
+    expect(modes).toEqual([0o700]);
   });
 
   it("values a box left when it stopped answering go once it answers, and every contact sweeps stale values but a run's in flight", async () => {
@@ -314,6 +332,49 @@ describe("a box thread's slate", () => {
     for (let i = 0; i < 100 && (await feed()).state !== "done"; i++) await new Promise(r => setTimeout(r, 50));
     expect(await feed()).toMatchObject({ state: "done", out: "fed\n" });
     expect({ woke, scripts: scripts.length }).toEqual({ woke: 1, scripts: 1 });
+    slates.close();
+  }, 30_000);
+});
+
+describe("an Always for a box thread's command", () => {
+  it("covers the script an on=host command names in this computer's folder, and is refused for one that names a file on the box", async () => {
+    const machine = bashMachine();
+    const thread = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    made.push(boxSlateDir(thread));
+    const hereFolder = temp();
+    writeFileSync(join(hereFolder, "deploy.sh"), "echo one");
+    const slates = createSlates({
+      store: memoryStore(),
+      now: () => Date.now(),
+      record: () => {},
+      emit: () => {},
+      thread: () => ({ workspaceId: "w1", rootThreadId: thread, sessionId: "s1", folder: "/root/project", hostFolder: hereFolder, computer: "spoo" }),
+      machineOf: () => machine,
+      under: lead => [lead],
+      threadOfToken: () => thread,
+      sources: (threadId, workspaceId) => ({ threadId, workspaceId, now: Date.now(), rows: () => [] }) as never,
+      deliver: async () => ({ outcome: "started" }),
+      runEnv: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+    });
+    const asThread: Caller = { origin: "here", by: { kind: "thread", threadId: thread, workspaceId: "w1", rootThreadId: thread } };
+    await slates.write({ text: `<slate title="Deploy">
+  <run name="here" cmd="bash deploy.sh" on="host" timeout={20} />
+  <run name="there" cmd="bash deploy.sh" timeout={20} />
+  <column><button id="h" label="Here" onPress={start($here)} /><button id="t" label="There" onPress={start($there)} /></column>
+</slate>` }, asThread);
+    const press = async (piece: string) => slates.event({ threadId: thread, version: (await slates.get(thread))!.version, piece, event: "press", requestId: `${piece}-${Math.random()}` });
+    const value = async (run: string) => (await slates.get(thread))!.values[run] as { state: string; out?: string };
+
+    const here = await press("h");
+    await slates.approve({ threadId: thread, key: here.ask!.key, scope: "thread" });
+    for (let i = 0; i < 100 && (await value("here")).state !== "done"; i++) await new Promise(r => setTimeout(r, 100));
+    expect(await value("here")).toMatchObject({ state: "done", out: "one\n" });
+    writeFileSync(join(hereFolder, "deploy.sh"), "echo two");
+    expect((await press("h")).ask).toBeDefined();
+
+    const there = await press("t");
+    await expect(slates.approve({ threadId: thread, key: there.ask!.key, scope: "thread" })).rejects.toThrow(/deploy\.sh/);
+    await slates.approve({ threadId: thread, key: there.ask!.key, scope: "once" });
     slates.close();
   }, 30_000);
 });
