@@ -16,7 +16,7 @@ export const GOLD_TEXT = `<slate title="Gold and traffic">
       <table items={$retail.json.rates} key={item.karat}><col title="" value={item.karat} /><col title="" value={item.gram} /></table>
     </section>
     <section title="Cloudflare requests" note="checked 22s">
-      <chart label="spoo.me, requests a minute, last hour" items={$cf.json.minutes} x={item.at} value={item.n} format="integer" />
+      <chart label="example.com, requests a minute, last hour" items={$cf.json.minutes} x={item.at} value={item.n} format="integer" />
       <text size="small">Ends two minutes back, since Cloudflare fills the newest minutes late.</text>
       <table items={$cf.json.zones} key={item.zone}>
         <col title="Zone" value={item.zone} />
@@ -38,10 +38,10 @@ export const GOLD_VALUES: Record<string, SlateJson> = {
   cf: done({
     minutes: RPM.map((n, i) => ({ at: clock(21 * 60 + 48 + Math.round((i * 59) / (RPM.length - 1))), n })),
     zones: [
-      { zone: "spoo.me", hour: "59,961", minute: "1,224" },
-      { zone: "wakeupba.be", hour: "83", minute: "2" },
-      { zone: "pickuptheph.one", hour: "7", minute: "0" },
-      { zone: "singhi.me", hour: "0", minute: "0" },
+      { zone: "example.com", hour: "59,961", minute: "1,224" },
+      { zone: "example.org", hour: "83", minute: "2" },
+      { zone: "example.net", hour: "7", minute: "0" },
+      { zone: "example.dev", hour: "0", minute: "0" },
     ],
   }),
 };

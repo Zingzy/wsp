@@ -46,7 +46,7 @@ describe("a table in its card", () => {
 
   it("draws no header row when no column names itself, and the name 14 px, words 13 px muted, figures 12 px mono", () => {
     const c = draw(`<slate>
-<value name="z" start={[{ zone: "spoo.me", plan: "Pro", rpm: 1240 }]} />
+<value name="z" start={[{ zone: "example.com", plan: "Pro", rpm: 1240 }]} />
 <column>
   <table id="t" items={$z}><col title="Zone" value={item.zone} /><col title="Plan" value={item.plan} /><col title="Requests" value={item.rpm} /></table>
   <table id="bare" items={$z}><col title="" value={item.zone} /><col title="" value={item.rpm} /></table>

@@ -3,7 +3,7 @@ import { parseSlate, printSlate, sketchSlate, slateResultShape, slateStartValues
 
 const EMAILS = [
   { messageId: "m1", fromAddress: "billing@vercel.com", subject: "Your invoice", receivedTime: "2026-10-04 09:12", flags: { seen: true } },
-  { messageId: "m2", fromAddress: "ops@spoo.me", subject: "Traffic report", receivedTime: "2026-10-04 08:40", flags: { seen: false } },
+  { messageId: "m2", fromAddress: "ops@example.com", subject: "Traffic report", receivedTime: "2026-10-04 08:40", flags: { seen: false } },
 ];
 
 const doc = (): SlateDoc =>

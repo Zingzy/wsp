@@ -62,13 +62,13 @@ describe("the gold and traffic slate", () => {
     const c = draw(GOLD_TEXT, GOLD_VALUES);
     const chart = c.querySelector("[data-slate-chart]")!;
     expect(chart.closest("[data-slate-card]")).toBeNull();
-    expect(chart.querySelector("figcaption")!.textContent).toBe("spoo.merequests a minute, last hour");
+    expect(chart.querySelector("figcaption")!.textContent).toBe("example.comrequests a minute, last hour");
     expect(chart.querySelector("[data-line] polyline")!.getAttribute("points")!.split(" ")).toHaveLength(51);
     const foot = c.querySelector('[data-slate-type="chart"] + [data-slate-type="text"] p')!;
     expect(foot.className).toContain("text-xs");
     expect(foot.className).toContain("text-muted-foreground");
     expect(c.querySelector("[data-slate-head]")!.textContent).toBe("ZoneLast hourLatest minute");
-    expect([...c.querySelectorAll("[data-slate-head] + div [role=row]")].map(row => row.textContent)).toEqual(["spoo.me59,9611,224", "wakeupba.be832", "pickuptheph.one70", "singhi.me00"]);
+    expect([...c.querySelectorAll("[data-slate-head] + div [role=row]")].map(row => row.textContent)).toEqual(["example.com59,9611,224", "example.org832", "example.net70", "example.dev00"]);
   });
 });
 

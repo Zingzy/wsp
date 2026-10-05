@@ -36,7 +36,7 @@ it("draws no half sentence while the zone has not come, and the whole one once i
   expect(piece(before, "rpm").textContent).not.toContain("requests per minute");
   expect(piece(before, "line").textContent).toBe("Waiting for the first read");
   cleanup();
-  const after = draw([{ zone: "spoo.me" }]);
-  expect(piece(after, "rpm").textContent).toContain("spoo.me, requests per minute");
-  expect(piece(after, "line").textContent).toBe("spoo.me is up");
+  const after = draw([{ zone: "example.com" }]);
+  expect(piece(after, "rpm").textContent).toContain("example.com, requests per minute");
+  expect(piece(after, "line").textContent).toBe("example.com is up");
 });

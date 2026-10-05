@@ -4,7 +4,7 @@ import { evaluateSlateExpression, parseSlate, resolveSlateProp, sketchSlate, sla
 const now = Date.parse("2026-10-04T12:00:00Z");
 const at = (world: Record<string, SlateJson>) => ({ resolve: (p: string) => world[p], now });
 const NONE = at({ $t: [] });
-const ZONE = at({ $t: [{ zone: "spoo.me" }] });
+const ZONE = at({ $t: [{ zone: "example.com" }] });
 
 describe("text joined from the values it reads", () => {
   it("is missing when everything it reads is missing, so no half sentence draws", () => {
@@ -14,9 +14,9 @@ describe("text joined from the values it reads", () => {
   });
 
   it("reads whole once its data comes", () => {
-    expect(evaluateSlateExpression("concat($t[0].zone, ', requests per minute')", ZONE)).toBe("spoo.me, requests per minute");
-    expect(evaluateSlateExpression("`${$t[0].zone}, requests per minute`", ZONE)).toBe("spoo.me, requests per minute");
-    expect(resolveSlateProp({ format: "${$t[0].zone}, requests per minute" }, ZONE)).toBe("spoo.me, requests per minute");
+    expect(evaluateSlateExpression("concat($t[0].zone, ', requests per minute')", ZONE)).toBe("example.com, requests per minute");
+    expect(evaluateSlateExpression("`${$t[0].zone}, requests per minute`", ZONE)).toBe("example.com, requests per minute");
+    expect(resolveSlateProp({ format: "${$t[0].zone}, requests per minute" }, ZONE)).toBe("example.com, requests per minute");
   });
 
   it("joins what it has when only some of what it reads is missing, and literal words alone stay text", () => {
@@ -33,7 +33,7 @@ describe("text joined from the values it reads", () => {
 </slate>`).document!;
     const before = sketchSlate(d, slateStartValues(d), { version: 1, now });
     expect(before).not.toContain("requests per minute");
-    const after = sketchSlate(d, { ...slateStartValues(d), t: [{ zone: "spoo.me" }] }, { version: 1, now });
-    expect(after).toContain("spoo.me, requests per minute");
+    const after = sketchSlate(d, { ...slateStartValues(d), t: [{ zone: "example.com" }] }, { version: 1, now });
+    expect(after).toContain("example.com, requests per minute");
   });
 });

@@ -6,7 +6,7 @@ import { parseSlate, type SlateDoc } from "@wsp/protocol";
 
 export const APPENDIX_C_TEXT = `<slate title="Deploy setup">
   <value name="step" start={1} />
-  <value name="repo" start="Zingzy/wsp-landing" />
+  <value name="repo" start="acme/landing" />
   <value name="project" start="" />
   <secret name="vercelToken" />
   <run name="check" cmd='vercel project inspect "$PROJECT" 2>&1 | head -c 4000'

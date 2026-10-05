@@ -212,7 +212,7 @@ describe("the richer kit in the renderer", () => {
 
   it("sets a facts list's values in one face: mono only when every value is a figure, else sans, unless one asks for mono", () => {
     const doc = compiled(`<slate><column>
-      <facts id="mixed"><fact label="Domain" value="spoo.me" /><fact label="Expires" value="2026-12-29" /><fact label="Days left" value="85" /><fact label="Checked" value="Tue 29 Dec" /></facts>
+      <facts id="mixed"><fact label="Domain" value="example.com" /><fact label="Expires" value="2026-12-29" /><fact label="Days left" value="85" /><fact label="Checked" value="Tue 29 Dec" /></facts>
       <facts id="figures"><fact label="CPU" value="12%" /><fact label="Memory" value="524 MB" /><fact label="Uptime" value="13s" /></facts>
       <facts id="asked"><fact label="Path" value="/usr/local/bin" mono /><fact label="Days left" value="85" /></facts>
     </column></slate>`);
