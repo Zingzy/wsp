@@ -94,6 +94,10 @@ describe("the wsp skill", () => {
     expect(THREAD_SLATE_WORDS).toContain("Build and read it with the slate tools, never wsp from a shell, which may be another install.");
     // Rulings 11 and 13: a one-off answer stays in chat, and the reply after a write is short and checked first.
     expect(THREAD_SLATE_WORDS).toContain("A one-off answer, a comparison or an explanation, stays in chat unless they ask to see it.");
+    // At medium effort agents fetched with another tool and answered in chat: the first call is the catalog, whatever fetches.
+    expect(THREAD_SLATE_WORDS).toContain("your first tool call is slate_catalog, then slate_write; a list in chat is not a slate.");
+    expect(THREAD_SLATE_WORDS).toContain("Fetching data with another tool is no reason to answer in chat; show it on the slate.");
+    for (const said of ["tick off", "as it goes", "keep an eye on", "what's unread", "live"]) expect(THREAD_SLATE_WORDS.slice(0, THREAD_SLATE_WORDS.indexOf("your first tool call")), said).toContain(said);
     expect(THREAD_SLATE_WORDS).toContain("Read the sketch a write answers before saying it works, then reply briefly: what you built and what waits on the person.");
     const text = wspSkill();
     const section = text.slice(text.indexOf("### slate\n"), text.indexOf("\n## ", text.indexOf("### slate\n")));
@@ -289,7 +293,7 @@ describe("the wsp skill", () => {
 
   it("the MCP instructions are what another agent is, the slate, what wsp is and where the skill is, the agents, and the roads to a child's end, whole inside what Claude Code keeps", () => {
     expect(instructions()).toBe(instructionsOf(THREAD_AGENTS));
-    expect(instructions().startsWith(`${ANOTHER_AGENT_WORDS}. ${SLATE_WORDS}. A project is a folder on one computer`)).toBe(true);
+    expect(instructions().startsWith(`${ANOTHER_AGENT_WORDS}. ${SLATE_WORDS}. Agents work on a project, a folder on one computer`)).toBe(true);
     // The slate's sentence is second and under 220 characters with its full stop (10).
     expect(`${SLATE_WORDS}.`.length).toBeLessThan(220);
     expect(instructions().indexOf(`${SLATE_WORDS}.`)).toBe(ANOTHER_AGENT_WORDS.length + 2);
@@ -299,7 +303,7 @@ describe("the wsp skill", () => {
     expect(section.length / 4).toBeLessThan(600);
     // The setup walkthrough and the other rules are the skill's alone: Claude Code cut them off and Codex copied them
     // into every deferred tool's entry.
-    expect(instructions()).toContain("Setting a person up, every verb and the rules for running work well are in the wsp skill");
+    expect(instructions()).toContain("Setup, every verb and the rules are in the wsp skill");
     expect(instructions()).not.toContain("The road is a health check");
     expect(wspSkill()).toContain("The road is a health check");
     // Everything but the rules is one line, so a client that shows the instructions as a paragraph shows them whole.

@@ -399,6 +399,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       expect(write["document"]!.description).toContain("not for writing");
       expect(write["check"]!.description).toBe("validate, write nothing");
       expect(slate.find(t => t.name === "slate_read")!.description).toContain("the panel's words as the person sees them");
+      expect(slate.find(t => t.name === "slate_catalog")!.description).toContain("Call it first whenever the person wants to see, watch, monitor or keep an eye on something, tick things off as they go, or see what's unread, even when another tool fetches the data.");
     } finally {
       await client.close();
     }

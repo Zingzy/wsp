@@ -68,7 +68,7 @@ export const SHELL_HEADING = "### For a shell script";
  * rules past these three are the skill's, since the whole of them was cut off by Claude Code and copied into every
  * deferred tool's entry by Codex. */
 const ESSENTIALS =
-  "A project is a folder on one computer, and agents work on it as threads, each shown in the person's sidebar. Setting a person up, every verb and the rules for running work well are in the wsp skill, which `wsp mcp install --agent <id>` writes; read it before setting anyone up.";
+  "Agents work on a project, a folder on one computer, as threads in the person's sidebar. Setup, every verb and the rules are in the wsp skill (`wsp mcp install --agent <id>` writes it).";
 
 /** The agents a thread runs on, from the adapter registry, so the instructions promise no agent the host refuses. */
 export function agentsLine(agents: readonly string[]): string {
@@ -87,7 +87,7 @@ export const SLATE_WORDS = "This thread can own a slate, a live panel the person
  * beside it, keyed on what the person wants to do rather than on the names of pieces, since they say "I wanna see
  * this live" and never "a panel". The slate tools' descriptions carry the same words, since tool search reads those. */
 export const THREAD_SLATE_WORDS =
-  "This session is a wsp thread with a slate: a live panel shown here, beside this conversation, that the person sees while you work. Show on it whatever they want to see, watch, monitor or keep an eye on that changes (live data, traffic, metrics, a price, logs, a PR, progress, status), want a dashboard, something to fill in or tick off (a form, a checklist, a walkthrough), or a flow laid out (a diagram): call slate_catalog, then slate_write. A one-off answer, a comparison or an explanation, stays in chat unless they ask to see it. Build and read it with the slate tools, never wsp from a shell, which may be another install. Once the slate is written, a request to see something lands there. A run with every={60} refreshes it with no turns; never poll in the chat. Read the sketch a write answers before saying it works, then reply briefly: what you built and what waits on the person.";
+  "This session is a wsp thread with a slate, a live panel shown here that the person sees while you work. When they want to see, watch, monitor or keep an eye on something (live data, traffic, metrics, a price, logs, a PR, what's unread, progress as it goes), a dashboard, something to fill in or tick off (a form, a checklist, a walkthrough) or a flow laid out (a diagram), your first tool call is slate_catalog, then slate_write; a list in chat is not a slate. Fetching data with another tool is no reason to answer in chat; show it on the slate. A one-off answer, a comparison or an explanation, stays in chat unless they ask to see it. Build and read it with the slate tools, never wsp from a shell, which may be another install. Once the slate is written, a request to see something lands there. A run with every={60} refreshes it with no turns; never poll in the chat. Read the sketch a write answers before saying it works, then reply briefly: what you built and what waits on the person.";
 
 /** The MCP server's instructions, whole inside what Claude Code keeps: a thread's slate first, then what another agent
  * is, since it is the one fact an agent acts on before it has read anything else, what wsp is and where the skill is,

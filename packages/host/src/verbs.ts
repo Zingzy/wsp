@@ -3834,7 +3834,7 @@ const SLATE_VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: "What a slate can hold: pieces for a live dashboard, metrics, logs, progress, diagrams, forms or checklists, and the runs that keep it fresh. Read it before slate_write whenever the person wants to see, watch or monitor something here.",
+      description: "What a slate, the live panel beside the chat, can hold: dashboards, metrics, logs, progress, diagrams, forms, checklists, and runs that keep it fresh. Call it first whenever the person wants to see, watch, monitor or keep an eye on something, tick things off as they go, or see what's unread, even when another tool fetches the data.",
       input: { name: z.string().optional().describe("an entry, like runs") },
       output: { text: z.string() },
       call: async ({ name }, deps) => {
