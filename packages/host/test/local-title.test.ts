@@ -89,7 +89,7 @@ describe("the title a thread on this computer gets", () => {
     expect((await rt.sessions.list(ws.id))[0]?.titleSource).toBe("auto");
 
     // The question is the one call that allows no tool; the others on this road are the catalog probe's.
-    const asked = calls().find(call => call.argv.includes("--allowed-tools"));
+    const asked = calls().find(call => call.argv.includes("--tools"));
     if (asked === undefined) throw new Error(`no title question reached the binary: ${JSON.stringify(calls())}`);
     expect(asked.store).toBe(store);
     expect(asked.store).not.toBe(join(home, ".claude"));
