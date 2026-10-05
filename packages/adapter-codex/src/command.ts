@@ -80,6 +80,9 @@ function serverFlags(servers: Readonly<Record<string, McpServerSpec>>): string[]
       ...entry(SLATE_SERVER_NAME, spec),
       configRaw(`mcp_servers.${SLATE_SERVER_NAME}.enabled_tools`, slate),
       configRaw(`mcp_servers.${SLATE_SERVER_NAME}.omit_tools_from`, JSON.stringify(["deferred"])),
+      // The slate's own four run without an ask in any sandbox or approval policy, each by name, so nothing else on
+      // the wsp server ever does (approval_mode, codex-rs/codex-mcp/src/mcp/mod.rs at rust-v0.155.1).
+      ...SLATE_TOOLS.map(tool => config(`mcp_servers.${SLATE_SERVER_NAME}.tools.${tool}.approval_mode`, "approve")),
     ];
   });
 }

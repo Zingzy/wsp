@@ -75,6 +75,10 @@ describe("buildCommand", () => {
     expect(command).toContain(`-c mcp_servers.wsp_slate.enabled_tools='${slate}'`);
     expect(command).toContain(`-c mcp_servers.wsp_slate.omit_tools_from='["deferred"]'`);
     expect(buildCommand({ mcpServers: { docs: { command: "npx", args: [] } } })).not.toContain("wsp_slate");
+    // The four slate tools are called without an ask in read-only and workspace-write, each named; no other tool is.
+    for (const tool of ["slate_catalog", "slate_write", "slate_state", "slate_read"]) expect(command).toContain(`-c mcp_servers.wsp_slate.tools.${tool}.approval_mode='"approve"'`);
+    expect(command.match(/approval_mode/g)).toHaveLength(4);
+    expect(command).not.toContain("default_tools_approval_mode");
   });
 
   it("serves a thread another thread started no slate server, and keeps the slate tools off its wsp one", () => {
