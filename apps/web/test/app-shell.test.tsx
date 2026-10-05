@@ -396,26 +396,28 @@ describe("the header row", () => {
     expect(sidebarHeader().getAttribute("data-header-row")).toBe("frame");
     expect(toggleIn(banner())).toBeNull();
     expect(banner().querySelector("[role=img][aria-label=wsp]")).toBeNull();
-    expect(banner().textContent).toContain("New thread");
-    expect(banner().textContent).not.toContain("/");
+    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("the-project/New thread");
   });
 
-  it("collapsed: the page's row takes the toggle in front of the breadcrumb, which is the open thread.s title alone with no glyph before it", async () => {
+  it("collapsed: the page's row takes the toggle in front of the breadcrumb, which is the project's glyph and name, a slash and the open thread's title", async () => {
     await mountShell();
     act(() => useStore.setState({ sessions: { ws_a: [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "make me a simple server", threadId: "thr_1" }, { id: "s2", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "add a health route", threadId: "thr_2" }] } }));
     await collapse();
     expect(toggleIn(banner())).not.toBeNull();
     expect(banner().querySelector("[data-header-row]")!.getAttribute("data-header-row")).toBe("frame");
     const crumb = banner().querySelector("[data-thread-breadcrumb]")!;
-    // No folder before the name: the sidebar's folder means project, and a workspace there wears no glyph.
-    expect(crumb.querySelector("svg")).toBeNull();
+    // The project's own glyph, the one its sidebar row wears, is the crumb's one glyph; the agent is the composer's to say.
+    expect(crumb.querySelectorAll("svg")).toHaveLength(1);
+    expect(crumb.querySelector("[data-breadcrumb-project] svg")).not.toBeNull();
+    // Where the name shows, no hover repeats it.
+    expect(crumb.querySelector("[data-breadcrumb-project]")!.getAttribute("title")).toBeNull();
     // The crumb names the thread the centre is on, which is the one the address names, and New thread until one is,
     // never the workspace's name.
-    expect(crumb.textContent).toBe("New thread");
+    expect(crumb.textContent).toBe("the-project/New thread");
     act(() => useStore.getState().select("ws_a", "thr_2"));
-    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("add a health route");
+    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("the-project/add a health route");
     act(() => useStore.getState().select("ws_a", "thr_1"));
-    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("make me a simple server");
+    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("the-project/make me a simple server");
     act(() => useStore.getState().select(null));
     expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("No task selected");
   });
@@ -437,13 +439,13 @@ describe("the header row", () => {
     // The crumb names the thread the centre is on, so the thread is opened before its state is read off the header.
     act(() => useStore.getState().select("ws_a", "thr_1"));
     const crumb = () => banner().querySelector("[data-thread-breadcrumb]")!;
-    expect(crumb().textContent).toBe("add a health route");
+    expect(crumb().textContent).toBe("the-project/add a health route");
     act(() => useStore.setState({ sessions: rows("Run: wsp --version") }));
-    expect(crumb().textContent).toBe("add a health routeNeeds you");
+    expect(crumb().textContent).toBe("the-project/add a health routeNeeds you");
     // The whole sentence is the hover text; the header shows the word alone.
-    expect(crumb().querySelector("[title]")!.getAttribute("title")).toBe("Run: wsp --version");
+    expect(crumb().querySelector("[data-breadcrumb-thread] + [title]")!.getAttribute("title")).toBe("Run: wsp --version");
     act(() => useStore.setState({ sessions: rows() }));
-    expect(crumb().textContent).toBe("add a health route");
+    expect(crumb().textContent).toBe("the-project/add a health route");
   });
 
   it("the compose glyph sits in the search row and opens New thread on the selected workspace's project rather than inside it, and stays live on New thread itself", async () => {
@@ -487,9 +489,9 @@ describe("the breadcrumb of a thread an agent opened", () => {
   it("names the thread that opened it before its own title, and a thread nobody opened names no opener", async () => {
     await mountTwo();
     act(() => useStore.getState().select("ws_b", "thr_child"));
-    await waitFor(() => expect(crumb().textContent).toBe("queue migration across three services/double redirect on short links"));
+    await waitFor(() => expect(crumb().textContent).toBe("the-project/queue migration across three services/double redirect on short links"));
     act(() => useStore.getState().select("ws_a", LEAD));
-    expect(crumb().textContent).toBe("queue migration across three services");
+    expect(crumb().textContent).toBe("the-project/queue migration across three services");
     expect(crumb().querySelector("[data-breadcrumb-opener]")).toBeNull();
   });
 
@@ -498,7 +500,7 @@ describe("the breadcrumb of a thread an agent opened", () => {
     const grandchild = { id: "s3", workspaceId: "ws_b", harness: "claude", status: "running" as const, startedBy: "agent" as const, prompt: "pin the redirect order", threadId: "thr_grand", parentThreadId: "thr_child" };
     act(() => useStore.setState({ sessions: { ws_a: [rows[0]!], ws_b: [rows[1]!, grandchild] } }));
     act(() => useStore.getState().select("ws_b", "thr_grand"));
-    await waitFor(() => expect(crumb().textContent).toBe("double redirect on short links/pin the redirect order"));
+    await waitFor(() => expect(crumb().textContent).toBe("the-project/double redirect on short links/pin the redirect order"));
   });
 
   it("the thread on screen keeps its whole name beside an opener, and the opener is what the room comes out of", async () => {
@@ -511,11 +513,12 @@ describe("the breadcrumb of a thread an agent opened", () => {
     expect(crumb().querySelector<HTMLElement>("[data-breadcrumb-opener]")!.className).toContain("truncate");
     // A cut opener is still readable: the whole name rides its hover text, the rule every cut line in the app follows.
     expect(crumb().querySelector<HTMLElement>("[data-breadcrumb-opener]")!.getAttribute("title")).toBe("queue migration across three services");
-    // With no opener the name takes the line as it always did.
+    // With no opener the project is what gives way, by the same measure.
     act(() => useStore.getState().select("ws_a", LEAD));
     const alone = crumb().querySelector<HTMLElement>("[data-breadcrumb-thread]")!;
-    expect(alone.className).not.toContain("shrink-0");
-    expect(alone.className).not.toContain("max-w-");
+    expect(alone.className).toContain("shrink-0");
+    expect(alone.className).toContain("max-w-[70%]");
+    expect(crumb().querySelector<HTMLElement>("[data-breadcrumb-project]")!.className).toContain("min-w-0");
   });
 
   it("the open thread's title leaves the window's drag region, and a double-click makes it the name box with the title selected", async () => {
@@ -548,7 +551,7 @@ describe("the breadcrumb of a thread an agent opened", () => {
     expect(opener.getAttribute("href")).toBe(`${window.location.origin}${window.location.pathname}#w/ws_a/t/${LEAD}`);
     fireEvent.click(opener);
     await waitFor(() => expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_a", LEAD]));
-    expect(crumb().textContent).toBe("queue migration across three services");
+    expect(crumb().textContent).toBe("the-project/queue migration across three services");
   });
 });
 
