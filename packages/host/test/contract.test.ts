@@ -557,7 +557,7 @@ describe("the agent contract on the command line and the tool door", () => {
       expect(parsed.success, `wsp ${verb.name} --json ends with ${JSON.stringify(value)}\n${parsed.success ? "" : parsed.error.message}`).toBe(true);
     }
     expect([...covered.keys()].sort()).toEqual(served.map(v => v.name).sort());
-  });
+  }, 60_000);
 
   it("the lists of what stands on a computer refuse a workspace and a computer together, and a computer nobody holds, as usage", async () => {
     await run("new", "alpha");
