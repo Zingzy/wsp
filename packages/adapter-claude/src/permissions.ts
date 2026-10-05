@@ -15,7 +15,7 @@
 // host's own requests, and the CLI answers each with a control_response
 // carrying the request's id.
 
-import { PERMISSION_ALLOW, PERMISSION_DENY, askedQuestions, pickedOptions, questionAnswerInput, questionOptions } from "@wsp/protocol";
+import { PERMISSION_ALLOW, PERMISSION_DENY, pickedOptions, questionAnswerInput, questionOptions } from "@wsp/protocol";
 import type { PermissionAsk, PermissionOption } from "@wsp/protocol";
 
 /** The one flag that routes the CLI's permission prompts to this process instead of having it deny them itself. */
@@ -92,7 +92,7 @@ export function controlLine(event: Record<string, unknown>): ControlLine {
   const input = JSON.stringify(request.input ?? null);
   // A call that only asks the person something carries the question's own choices and no allow: there is nothing to
   // consent to, and the CLI reads the pick off the input it hands back.
-  const asked = askedQuestions(toolName, input) === undefined ? undefined : questionOptions(toolName, input);
+  const asked = questionOptions(toolName, input);
   return {
     kind: "ask",
     ...(agentId !== undefined ? { agentId } : {}),
@@ -103,7 +103,7 @@ export function controlLine(event: Record<string, unknown>): ControlLine {
       input,
       ...(detail !== undefined && detail !== "" ? { detail } : {}),
       options:
-        asked !== undefined
+        asked.length > 0
           ? asked
           : [
               { id: PERMISSION_ALLOW, label: "Allow", effect: "allow" },
@@ -163,6 +163,13 @@ export function setModeLine(requestId: string, mode: string): string {
  * registry says stop_task is not supported in this context (read off the 2.1.288 binary, 2026-10-03). */
 export function stopTaskLine(requestId: string, task: string): string {
   return JSON.stringify({ type: "control_request", request_id: requestId, request: { subtype: "stop_task", task_id: task } });
+}
+
+/** The request that stops the turn the CLI is running and leaves its process up for the next message: it answers with
+ * the turn's result, stamped aborted (measured on 2.1.289 at 4 to 19 ms). To an idle process it answers success and
+ * prints no result, so it goes only to a turn that is running. */
+export function interruptLine(requestId: string): string {
+  return JSON.stringify({ type: "control_request", request_id: requestId, request: { subtype: "interrupt" } });
 }
 
 /** The answer to a control_request this adapter cannot serve: the CLI stops waiting on it and says why in its log. */

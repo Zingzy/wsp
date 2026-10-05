@@ -7,6 +7,7 @@ import { loginPathLine, STATE_SHAPE } from "@wsp/protocol";
 import { createRuntime, jsonFileStore, STATE_SHAPE_KEY } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { up, type CliIO } from "../src/cli.js";
+import { STARTED_BY_ENV } from "../src/host-lock.js";
 import { stateWriterHere } from "../src/version.js";
 import { LAUNCHD_PATH, loginEnvOf, needsLoginPath, takeLoginPath } from "../src/login-path.js";
 import type { HostHandle } from "../src/server.js";
@@ -79,6 +80,22 @@ describe("the login shell PATH", () => {
     // chosen, so the rc files are never read over it.
     expect(needsLoginPath({ PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" })).toBe(false);
     expect(needsLoginPath({})).toBe(false);
+  });
+
+  it("on Linux the host the service started and an AppImage launch read the login shell, since neither PATH is the person's", async () => {
+    // systemd hands a user unit its manager's PATH, and a desktop launch hands an AppImage the session's with the
+    // image's own mount in front; neither has the folders a person's profile adds, ~/.local/bin among them.
+    const systemd = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+    expect(needsLoginPath({ PATH: systemd, [STARTED_BY_ENV]: "service" }, "linux")).toBe(true);
+    expect(needsLoginPath({ PATH: `/tmp/.mount_wsp.Ab12Cd:/tmp/.mount_wsp.Ab12Cd/usr/sbin:${systemd}`, APPIMAGE: "/home/dev/wsp.AppImage" }, "linux")).toBe(true);
+    // A line typed in a terminal, and a host such a line started, run on the PATH that terminal chose.
+    expect(needsLoginPath({ PATH: systemd }, "linux")).toBe(false);
+    expect(needsLoginPath({ PATH: systemd, [STARTED_BY_ENV]: "verb" }, "linux")).toBe(false);
+    // On a Mac launchd's own four folders stay the whole trigger.
+    expect(needsLoginPath({ PATH: "/opt/homebrew/bin:/usr/bin:/bin", [STARTED_BY_ENV]: "service" }, "darwin")).toBe(false);
+    const env: NodeJS.ProcessEnv = { PATH: systemd, [STARTED_BY_ENV]: "service", SHELL: "/bin/bash" };
+    await takeLoginPath({ env, log: () => {}, read: printing("/home/dev/.local/bin:/usr/local/bin:/usr/bin:/bin"), platform: "linux" });
+    expect(env["PATH"]).toBe("/home/dev/.local/bin:/usr/local/bin:/usr/bin:/bin");
   });
 
   it("a host whose PATH is not launchd's set never runs the shell", async () => {

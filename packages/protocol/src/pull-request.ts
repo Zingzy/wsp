@@ -110,10 +110,13 @@ export function isPullRequestNamed(seen: PullRequestSeen | undefined): seen is P
   return seen !== undefined && "number" in seen;
 }
 
-/** How often the host reads an open pull request again, whatever its checks say: just after a push the git host still
- * answers the old head with none, and a merge made on its own page is seen by nothing else. A merged or closed one is
- * never read again. */
+/** How often the host reads an open pull request again while a window is open, whatever its checks say: just after a
+ * push the git host still answers the old head with none, and a merge made on its own page is seen by nothing else. A
+ * merged or closed one is never read again. */
 export const PR_POLL_MS = 3 * 60_000;
+
+/** The same read while no window is open: with nobody looking, a merge seen within a quarter hour costs nothing. */
+export const PR_POLL_IDLE_MS = 15 * 60_000;
 
 /** One word table for a pull request, on a tile, the thread's row, the pane and the command line alike. */
 export const PULL_REQUEST_WORDS = {
@@ -503,7 +506,7 @@ export const GitPrViewReply = z.object({
 export type GitPrViewReply = z.infer<typeof GitPrViewReply>;
 
 /** The pull request a git.prRead found, absent where the host knows none. */
-export const GitPrReadReply = z.object({ pr: PullRequest.optional() });
+export const GitPrReadReply = z.object({ pr: PullRequest.optional(), seen: z.string().optional(), unchanged: z.boolean().optional() });
 export type GitPrReadReply = z.infer<typeof GitPrReadReply>;
 /** The failed steps of one job's log, its last CHECK_LOG_LINES lines; truncated where there were more. */
 export const GitRunLogReply = z.object({ lines: z.array(text), truncated: z.boolean() });
