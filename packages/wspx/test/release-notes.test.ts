@@ -88,6 +88,7 @@ describe("the lines about opening a downloaded bundle", () => {
     expect(bundleNote(readme, false)).toContain("Open Anyway");
     expect(bundleNote(readme, false)).toContain("drag wsp onto the Applications folder");
     expect(bundleNote(readme, false)).toContain("chmod +x");
+    expect(bundleNote(readme, false)).toContain("install `fuse3`");
     expect(bundleNote(readme, false)).not.toContain("<!--");
   });
 

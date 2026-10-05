@@ -12,10 +12,9 @@ use base64::Engine;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, GitPrReadReply, GuestOpen, GuestOpenReply,
-    InboxRescanReply, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply,
-    PortsWatchReply, PtyAttachReply, PtyCreateReply, PtyListReply, Reply, RequestId, DAEMON_OPS, GUEST_OPS, MACHINE_OPS,
-    MACHINE_OPS_ON_ANY_ROAD,
+    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, GuestOpen, GuestOpenReply, InboxRescanReply,
+    ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, PtyAttachReply,
+    PtyCreateReply, PtyListReply, Reply, RequestId, DAEMON_OPS, GUEST_OPS, MACHINE_OPS, MACHINE_OPS_ON_ANY_ROAD,
 };
 
 use crate::exec::{run_exec, ExecOptions};
@@ -979,7 +978,7 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
         // The reads and the merge below name the repository by the remote the frame carries, which the host took off
         // the project's own record: the folder is only where gh runs, and nothing in it is read, so an agent writing
         // its copy's configuration cannot point a read, and still less a merge, at another repository.
-        DaemonOp::GitPrRead { cwd, remote, branch, number, machine_id } => {
+        DaemonOp::GitPrRead { cwd, remote, branch, number, seen, machine_id } => {
             let read = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
                 let pick = match (number, branch.as_deref()) {
@@ -989,7 +988,7 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                         return Err(OpError::coded(DaemonErrorCode::BadRequest, "git.prRead names a branch or a number".to_owned()))
                     }
                 };
-                Ok(GitPrReadReply { pr: hosts::read(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, &pick).await? })
+                hosts::read(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, &pick, seen.as_deref()).await
             };
             answer(id, read.await)
         }

@@ -111,10 +111,14 @@ describe("default shortcuts", () => {
     expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new", LINUX)).toBe("Ctrl+N");
   });
 
-  it("opens the palette from a focused terminal on macOS and leaves ctrl+k to the shell elsewhere", () => {
+  it("opens the palette from a focused terminal on macOS and leaves ctrl+k to the shell elsewhere, where ctrl+shift+p opens it", () => {
     expect(resolve(cmd("k"), MAC, { terminalFocus: true })).toBe("commandPalette.toggle");
     expect(resolve(ctrl("k"), LINUX, { terminalFocus: true })).toBeNull();
     expect(resolve(ctrl("k"), LINUX)).toBe("commandPalette.toggle");
+    expect(resolve(ctrl("P", { shiftKey: true }), LINUX, { terminalFocus: true })).toBe("commandPalette.toggle");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "commandPalette.toggle", { platform: LINUX })).toBe("Ctrl+K");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "commandPalette.toggle", { platform: LINUX, context: { terminalFocus: true } })).toBe("Ctrl+Shift+P");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "commandPalette.toggle", { platform: MAC, context: { terminalFocus: true } })).toBe("⌘K");
   });
 
   it("finds a file on mod+p and searches the files on mod+shift+f, from a focused terminal on macOS and never over ctrl in a shell elsewhere", () => {
@@ -459,8 +463,10 @@ describe("a person's own chords over the defaults", () => {
   it("gives an override the when of its command's default on that chord, else the command's first default's", () => {
     const whens = new Map<string, Set<string | undefined>>();
     for (const rule of DEFAULT_KEYBINDINGS) whens.set(rule.command, (whens.get(rule.command) ?? new Set()).add(rule.when));
-    // The switch is the one command whose chords differ: its Tab pair stands down inside a panel of several tabs.
-    expect([...whens].filter(([, set]) => set.size > 1).map(([command]) => command)).toEqual(["workspace.previous", "workspace.next"]);
+    // The switch's Tab pair stands down inside a panel of several tabs, and the palette's ctrl+k is a shell's while its
+    // ctrl+shift+p reaches it from a terminal.
+    expect([...whens].filter(([, set]) => set.size > 1).map(([command]) => command)).toEqual(["commandPalette.toggle", "workspace.previous", "workspace.next"]);
+    expect(rulesWith(DEFAULT_KEYBINDINGS, { "commandPalette.toggle": "mod+alt+k" }, LINUX).find(rule => rule.command === "commandPalette.toggle")?.when).toBeUndefined();
     const whenOf = (overrides: Record<string, string>, platform: string) => rulesWith(DEFAULT_KEYBINDINGS, overrides, platform).find(rule => rule.command === "workspace.next")?.when;
     expect(whenOf({ "workspace.next": "ctrl+tab" }, MAC)).toBe("!terminalFocus && !panelTabsFocus");
     // Off macOS a captured Control chord is spelled with mod, and it is the same chord.
