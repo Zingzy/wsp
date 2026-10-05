@@ -223,10 +223,12 @@ fn names_under(dir: &Path) -> Vec<String> {
     out
 }
 
-/// How much room is left on the volume the folder sits on, or nothing when this computer will not say.
-fn disk_free(folder: &Path) -> Option<u64> {
+/// How much room is left on the volume the folder sits on and how big it is, or nothing when this computer will
+/// not say.
+fn disk_room(folder: &Path) -> Option<(u64, u64)> {
     let fs = nix::sys::statfs::statfs(folder).ok()?;
-    Some(fs.blocks_available() * u64::try_from(fs.block_size()).ok()?)
+    let block = u64::try_from(fs.block_size()).ok()?;
+    Some((fs.blocks_available() * block, fs.blocks() * block))
 }
 
 /// node's os.arch() words for the machines wsp runs on; anything else travels as Rust names it.
@@ -331,7 +333,7 @@ fn workspaces_blocked_by(its_own: Option<String>, runtime_root: &Path) -> Option
 pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
     let path = input.unit_path.unwrap_or_default().to_owned();
     let work = input.home.join("wsp-work");
-    let free = disk_free(if work.exists() { &work } else { input.home });
+    let room = disk_room(if work.exists() { &work } else { input.home });
     let wsp = if input.wsp_argv.is_empty() { vec!["wsp".to_owned()] } else { input.wsp_argv.to_vec() };
     let doctor = wsp_runtime::doctor::assess(&wsp_runtime::doctor::read_facts());
     let blocked = workspaces_blocked_by(doctor.blocked.clone(), input.runtime_root);
@@ -345,7 +347,8 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
             cpu: std::thread::available_parallelism().map_or(1.0, |n| n.get() as f64),
             mem_mb: (total_memory_bytes() as f64 / (1024.0 * 1024.0)).round() as u64,
         },
-        disk_free_bytes: free,
+        disk_free_bytes: room.map(|(free, _)| free),
+        disk_size_bytes: room.map(|(_, size)| size),
         model: mac_model(),
         login: [
             ("HOME".to_owned(), input.home.to_string_lossy().into_owned()),
@@ -1030,6 +1033,7 @@ mod tests {
         assert_eq!(report.dialed, "http://h:1");
         assert!(report.shape.cpu > 0.0 && report.shape.mem_mb > 0);
         assert!(report.disk_free_bytes.is_some());
+        assert!(report.disk_size_bytes.is_some_and(|size| size > 0 && size >= report.disk_free_bytes.unwrap_or(0)));
         assert_eq!(report.daemon_version, numbers::DAEMON_VERSION);
         // runs_workspaces and engine are the doctor's reading of this box; on this Linux test box it runs them.
         assert_eq!(report.engine, wsp_runtime::doctor::engine_on_path(&std::env::var("PATH").unwrap_or_default()).word());

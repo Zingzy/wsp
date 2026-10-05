@@ -231,8 +231,8 @@ export function weigh(api: Api, placeId: string, picks: RecipeFile): void {
   );
 }
 
-/** Whether the picks need more room than the computer has free, as last weighed. */
-export const tooBig = (estimate: PlaceEstimate | null): boolean => estimate?.freeBytes !== undefined && estimate.freeBytes < estimate.neededBytes;
+/** Whether the picks with the room the setup keeps free need more than the computer has free, as last weighed. */
+export const tooBig = (estimate: PlaceEstimate | null): boolean => estimate?.freeBytes !== undefined && estimate.freeBytes < estimate.neededBytes + estimate.keptBytes;
 
 export function setSaveAs(next: Partial<SaveAs>): void {
   useAddFlow.setState(s => ({ saveAs: { ...s.saveAs, ...next } }));

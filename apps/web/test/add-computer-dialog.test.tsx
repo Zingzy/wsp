@@ -293,27 +293,28 @@ describe("Add a computer, from the address to Set up", () => {
     const fake = host({
       placesEstimate: async (ref: string, choices: RecipeFile) => {
         weighed.push({ ref, choices });
-        return { neededBytes: 3.9 * GB, freeBytes: free, unmeasured: 2 };
+        return { neededBytes: 2 * GB, keptBytes: 7.5 * GB, freeBytes: free, unmeasured: 2 };
       },
     } as Partial<Api>);
     useStore.setState({ places: [here, studio] });
     mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
     act(() => useAddFlow.setState({ open: true, step: "summary", placeId: studio.id, pendingId: "a_1", address: "studio" }));
     await settle();
-    await waitFor(() => expect(dialog()!.querySelector("[data-k=disk]")?.textContent).toBe("3.9 GB needed, 61 GB free"));
+    await waitFor(() => expect(dialog()!.querySelector("[data-k=disk]")?.textContent).toBe("2 GB needed, 7.5 GB kept free, 61 GB free"));
     expect(weighed.at(-1)!.ref).toBe(studio.id);
     expect(Object.keys(weighed.at(-1)!.choices.agents)).toEqual(["claude", "codex"]);
     expect(dialog()!.querySelector("[data-k=disk]")?.getAttribute("title")).toBe("2 picked rows were not measured");
     expect(dialog()!.querySelector("[data-k=disk-short]")).toBeNull();
     expect(primary().hasAttribute("data-held")).toBe(false);
-    free = 2.1 * GB;
+    // The picks alone fit in 9 GB; with the room the setup keeps free past them they do not.
+    free = 9 * GB;
     act(() => useAddFlow.setState({ step: "other" }));
     await settle();
     act(() => useAddFlow.setState({ step: "summary" }));
     await settle();
-    await waitFor(() => expect(dialog()!.querySelector("[data-k=disk]")?.textContent).toBe("3.9 GB needed, 2.1 GB free"));
+    await waitFor(() => expect(dialog()!.querySelector("[data-k=disk]")?.textContent).toBe("2 GB needed, 7.5 GB kept free, 9 GB free"));
     expect(dialog()!.querySelector("[data-k=disk]")?.getAttribute("data-short")).toBe("true");
-    expect(dialog()!.querySelector("[data-k=disk-short]")?.textContent).toBe("studio has 2.1 GB free; these picks need 3.9 GB. Untick some rows, or free room on studio.");
+    expect(dialog()!.querySelector("[data-k=disk-short]")?.textContent).toBe("studio has 9 GB free; these picks need 2 GB, and wsp keeps 7.5 GB free there. Untick some rows, or free room on studio.");
     expect(primary().hasAttribute("data-held")).toBe(true);
   });
 
