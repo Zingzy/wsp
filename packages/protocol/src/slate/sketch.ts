@@ -2,6 +2,7 @@
 // The slate as text with its values filled in (10, "The sketch"), returned after every write and read so an agent
 // with no eyes knows what the person sees. Each piece type writes its own line; this file walks the tree, hides
 // what is hidden, tags each line with its id and type, lists the values, runs and problems, and caps the whole.
+import { fmtBytes } from "../format.js";
 import { evaluateSlateExpression, parseSlateFormat, resolveSlateProp, slateDependencies, slatePropDependencies, slateTruthy, type SlateEvalContext } from "./expr.js";
 import { isSlateIcon } from "./icons.js";
 import { SLATE_PIECES, slateHeldText, type SlatePieceModule, type SlatePropSpec, type SlateSketchView } from "./kit.js";
@@ -50,8 +51,6 @@ function cut(text: string, room: number): string {
   if (text.length <= room) return text;
   return room <= 1 ? "…" : `${text.slice(0, room - 1)}…`;
 }
-
-const size = (bytes: number): string => (bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`);
 
 const SECRET_DOTS = "••••";
 
@@ -276,7 +275,7 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
   if (runLines.length > 0) lines.push("runs:", ...runLines);
   if ((ctx.waiting ?? []).length > 0) lines.push(`waiting for the person's approval: ${ctx.waiting!.join(", ")}; each starts once they allow it on the slate. Until then nothing they feed has data: ask the person to allow them, and never call the panel live or ready`);
   const files = Object.entries(doc.files ?? {});
-  if (files.length > 0) lines.push(`files in $SLATE_DIR: ${files.map(([name, text]) => `${name} (${size(new TextEncoder().encode(text).length)})`).join(", ")}`);
+  if (files.length > 0) lines.push(`files in $SLATE_DIR: ${files.map(([name, text]) => `${name} (${fmtBytes(new TextEncoder().encode(text).length)})`).join(", ")}`);
   if (problems.length > 0) {
     lines.push("problems:");
     for (const p of problems) lines.push(`  ${p.code} ${p.piece ?? "slate"}${p.prop !== undefined ? `.${p.prop}` : ""}${p.line !== undefined ? ` (line ${p.line})` : ""}: ${p.message}`);

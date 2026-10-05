@@ -2,6 +2,7 @@
 // The validator (10, "The compile and validate loop"): one pass over a stored document that lists every error up to
 // 20 and the warnings beside them, each with its piece, prop, line and a fix where one is computable. The same pass
 // serves a JSX-like write, the JSON form, a check and a patched result.
+import { fmtBytes } from "../format.js";
 import { checkSlateExpression, parseSlateExpression, parseSlateFormat, slateDependencies, type SlateCheckScope, type SlateType } from "./expr.js";
 import { isSlateIcon, nearestSlateIcon } from "./icons.js";
 import { SLATE_PIECES, SLATE_RESERVED_PROPS, type SlateItemSpec, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
@@ -152,7 +153,7 @@ class Validator {
       const token = tokenIn(text);
       if (token !== undefined) this.add("S520", `${file} holds a token written out (${token}...); let the code read it from the file it lives in, or from an env the run hands it`, { piece: file });
     }
-    if (JSON.stringify({ ...d, files: undefined }).length > SLATE_LIMITS.documentBytes) this.add("D208", `the document is over ${SLATE_LIMITS.documentBytes / 1024} KB`);
+    if (JSON.stringify({ ...d, files: undefined }).length > SLATE_LIMITS.documentBytes) this.add("D208", `the document is over ${fmtBytes(SLATE_LIMITS.documentBytes)}`);
     this.names();
     this.limits();
     for (const [name, v] of Object.entries(d.values)) this.value(name, v.start, v.secret === true, v.keep === true);
@@ -189,7 +190,7 @@ class Validator {
     over(d.reactions.length, SLATE_LIMITS.reactions, "A611", "reactions");
     over(Object.keys(d.pieces).length, SLATE_LIMITS.pieces, "D207", "pieces", "bind a list to a table or a list instead of writing rows");
     const starts = JSON.stringify(Object.values(d.values).map(v => v.start)).length;
-    if (starts > SLATE_LIMITS.valuesBytes) this.add("S500", `the values' starts are over ${SLATE_LIMITS.valuesBytes / 1024} KB`);
+    if (starts > SLATE_LIMITS.valuesBytes) this.add("S500", `the values' starts are over ${fmtBytes(SLATE_LIMITS.valuesBytes)}`);
   }
 
   // ---- expressions ----
