@@ -5194,6 +5194,7 @@ const DAEMON_CONTENTS = [
   "2d3c09680f6c9dca01d8915f8d7be7306ba0db7fc6e1734353a86bf5afaa4e4e",
   "1557c21f49fe3ec9248ca8c405e450b0f201e9bc4fd3f552bfd0f36132272b17",
   "1ee653af3b44dc450246290cc7bb7617da6ec8f062d9e859452472019e52e51e",
+  "1fb569928a97d7ba40fd54d251dc4202f267133344e7da3153f3f4aa723e180e",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5528,7 +5529,12 @@ const DAEMON_CONTENTS = [
  * Version 118: A leave run as root first takes what the setup wrote under /usr/local and /opt, read off the list in
  * /opt/wsp: each path still as wsp left it, hashed in one pass, a folder once empty, and nothing the computer had
  * before wsp; the list goes last, and while it still holds lines /opt/wsp stays and the leave says so.
- * Version 119: setup sign-ins, cut syncs and the size check survive their edges. */
+ * Version 119: setup sign-ins, cut syncs and the size check survive their edges.
+ * Version 120: git.prRead asks a pull request named by number with what its last read saw (its last update, head commit
+ * and state): one REST read compares them, and where none moved it answers unchanged with nothing else run and none of
+ * the GraphQL budget spent; a read with nothing seen makes no such read. A read the git host refused for its rate limit
+ * carries the code rate-limited, and a branch so refused never reads as having no pull request. git.prView reads the
+ * page on one GraphQL call in place of four, the newest 100 conversation comments with the rest marked cut. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
