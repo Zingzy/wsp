@@ -363,15 +363,21 @@ export class SlateEngine {
    * or a source. A derived value that reads itself through others is missing, never a loop. */
   reader(row?: Row): Resolve {
     const evaluating = new Set<string>();
+    // A derived value is worked out once per evaluation however many times the chain reads it: a chain of 24 that
+    // reads each step twice would otherwise be 2^24 evaluations on every redraw.
+    const worked = new Map<string, SlateJson | undefined>();
     const read: Resolve = path => {
       const mine = ownPath(path);
       if (mine !== undefined) {
         const formula = own(this.#doc?.derived, mine.name);
         if (formula === undefined) return walk(own(this.values, mine.name), mine.steps);
+        if (worked.has(mine.name)) return walk(worked.get(mine.name), mine.steps);
         if (evaluating.has(mine.name)) return undefined;
         evaluating.add(mine.name);
         try {
-          return walk(evaluate(formula, read, undefined, this.#scheduler.now()), mine.steps);
+          const value = evaluate(formula, read, undefined, this.#scheduler.now());
+          worked.set(mine.name, value);
+          return walk(value, mine.steps);
         } finally {
           evaluating.delete(mine.name);
         }

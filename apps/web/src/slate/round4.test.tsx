@@ -258,6 +258,16 @@ describe("what the kit adds", () => {
     expect(piece(view.container, "t").textContent).toBe("201");
   });
 
+  it("works out each derived value once per evaluation, however many times a chain reads it", () => {
+    const derived: Record<string, string> = { d0: "src.x" };
+    for (let n = 1; n <= 16; n++) derived[`d${n}`] = `$d${n - 1} + $d${n - 1}`;
+    let reads = 0;
+    const engine = new SlateEngine("t1", () => (reads += 1, 1), manualScheduler());
+    engine.setRecord(slate({ derived, root: "root", pieces: { root: { type: "column", children: [] } } }), {}, 1, 1);
+    expect(engine.evaluate("$d16")).toBe(2 ** 16);
+    expect(reads).toBe(1);
+  });
+
   it("reads a value named toString or constructor as the value it is, plain and through a derived", () => {
     const doc = slate({
       values: { toString: { start: "own words" }, constructor: { start: 7 } },
