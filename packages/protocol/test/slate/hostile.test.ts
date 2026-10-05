@@ -44,4 +44,8 @@ describe("hostile slate inputs", () => {
     expect(codes(`<slate><text>{toString(1)}</text></slate>`)).toContain("X404");
     expect(parseSlate(`<slate><constructor /></slate>`).errors[0]!.message).not.toContain("function");
   });
+
+  it("refuses an env key with RegExp characters instead of throwing", () => {
+    expect(codes(`<slate><secret name="tok" /><run name="r" cmd="echo" env={{ "A(": $tok }} /><text>x</text></slate>`)).toContain("K702");
+  });
 });

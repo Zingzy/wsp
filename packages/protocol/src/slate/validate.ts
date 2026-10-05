@@ -3,6 +3,7 @@
 // 20 and the warnings beside them, each with its piece, prop, line and a fix where one is computable. The same pass
 // serves a JSX-like write, the JSON form, a check and a patched result.
 import { fmtBytes } from "../format.js";
+import { escapeRegExp } from "../regexp.js";
 import { checkSlateExpression, parseSlateExpression, parseSlateFormat, slateDependencies, type SlateCheckScope, type SlateType } from "./expr.js";
 import { isSlateIcon, nearestSlateIcon } from "./icons.js";
 import { SLATE_PIECES, SLATE_RESERVED_PROPS, type SlateItemSpec, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
@@ -322,7 +323,7 @@ class Validator {
       });
       if (r.stdin !== undefined) this.propValue(r.stdin, w("stdin"), { secretOk: true });
       for (const [envName, secret] of secretEnv) {
-        const flag = new RegExp(`(?:^|\\s)(-{1,2}[A-Za-z][\\w-]*)(?:=|\\s+)["']?\\$\\{?${envName}\\b`);
+        const flag = new RegExp(`(?:^|\\s)(-{1,2}[A-Za-z][\\w-]*)(?:=|\\s+)["']?\\$\\{?${escapeRegExp(envName)}\\b`);
         const m = flag.exec(r.cmd);
         if (m !== null) {
           this.add("W011", `${envName} carries the secret $${secret}, and the command passes it after ${m[1]}, as an argument ps can read; hand it on stdin={$${secret}}, or let the program read ${envName} from its environment`, w("cmd"), `drop ${m[1]} "$${envName}" and use stdin={$${secret}} or the program's own ${envName}`);
@@ -346,7 +347,7 @@ class Validator {
     for (const [name, text] of Object.entries(files)) {
       if (!SLATE_FILE_NAME.test(name)) this.add("K708", `"${name}" is not a file name: letters, digits, dots, dashes and _, no slashes, not starting with a dot`, { piece: name }, name.replace(/^.*\//, "").replace(/^[.]+/, "").replace(/[^A-Za-z0-9._-]/g, "_") || undefined);
       for (const secret of secrets) {
-        if (new RegExp(`\\$\\{?${secret}\\b`).test(text)) this.add("S520", `${name} names the secret $${secret}; a file is stored as written, so a run hands the secret to it on stdin or in env`, { piece: name }, `env={{ ${secret.toUpperCase()}: $${secret} }} on the run, read from the environment in ${name}`);
+        if (new RegExp(`\\$\\{?${escapeRegExp(secret)}\\b`).test(text)) this.add("S520", `${name} names the secret $${secret}; a file is stored as written, so a run hands the secret to it on stdin or in env`, { piece: name }, `env={{ ${secret.toUpperCase()}: $${secret} }} on the run, read from the environment in ${name}`);
       }
     }
     for (const [run, r] of Object.entries(this.doc.runs)) {
