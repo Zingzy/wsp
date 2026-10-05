@@ -3,13 +3,13 @@
 // it, the road over a machine whose exec and run are this computer's bash (putFiles and all), and a box thread's run
 // reaching its machine through the runtime while one `on` the host stays here.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExecResult, Machine, RunOptions } from "@wsp/engine";
 import type { Caller } from "@wsp/protocol";
-import { boxLauncher, boxRoad, boxSlateDir } from "../src/slate-box.js";
+import { boxLauncher, boxLedger, boxRoad, boxSlateDir } from "../src/slate-box.js";
 import type { RoadEnd } from "../src/slate-runs.js";
 import { createSlates } from "../src/slates.js";
 import { memoryStore } from "../src/store.js";
@@ -83,9 +83,10 @@ describe("the launcher a machine runs", () => {
     const dir = temp();
     const p = join(dir, ".run-x");
     const value = 'two\nlines "$HOME" `touch pwned-env` $(touch pwned-env2)';
-    writeFileSync(`${p}.env`, nul(["NAME", value, "SLATE_DIR", "/tmp/s"]));
-    writeFileSync(`${p}.args`, nul(["a b", "$(touch pwned-arg)", ""]));
-    writeFileSync(`${p}.in`, Buffer.from("in put\nsecond").toString("base64"));
+    mkdirSync(p);
+    writeFileSync(`${p}/env`, nul(["NAME", value, "SLATE_DIR", "/tmp/s"]));
+    writeFileSync(`${p}/args`, nul(["a b", "$(touch pwned-arg)", ""]));
+    writeFileSync(`${p}/in`, Buffer.from("in put\nsecond").toString("base64"));
     const cmd = `printf '%s|' "$NAME" "$1" "$2" "$3" "$#" "$SLATE_DIR"; echo; cat; echo; pwd; ls -a ${JSON.stringify(dir)} | grep -c run || true`;
     const out = execFileSync("bash", ["-c", boxLauncher({ payload: p, cwd: dir, cmd })], { cwd: tmpdir(), encoding: "utf8" });
     // The values whole, the arguments counted, stdin as typed, the folder, and no file of the values left behind.
@@ -96,7 +97,8 @@ describe("the launcher a machine runs", () => {
   it("says plainly when the folder is not on the machine", () => {
     const dir = temp();
     const p = join(dir, ".run-y");
-    for (const ext of ["env", "args", "in"]) writeFileSync(`${p}.${ext}`, "");
+    mkdirSync(p);
+    for (const name of ["env", "args", "in"]) writeFileSync(`${p}/${name}`, "");
     let said = "";
     try {
       execFileSync("bash", ["-c", boxLauncher({ payload: p, cwd: "/nowhere/at/all", cmd: "true" })], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -130,6 +132,51 @@ describe("the road to a thread's machine", () => {
     expect(readFileSync(join(dir, "hi.sh"), "utf8")).toBe("echo from the file");
     expect(existsSync(join(dir, "stale.py"))).toBe(false);
     expect(execFileSync("bash", ["-c", `ls -a ${JSON.stringify(dir)}`], { encoding: "utf8" })).not.toContain(".run-");
+  });
+
+  it("values a box left when it stopped answering go once it answers, and every contact sweeps stale values but a run's in flight", async () => {
+    const machine = bashMachine();
+    let down = false;
+    let gate: (() => void) | undefined;
+    const exec = machine.exec.bind(machine);
+    const run = machine.run.bind(machine);
+    machine.exec = (cmd, opts) => (down ? Promise.reject(new Error("the link went")) : exec(cmd, opts));
+    machine.run = async (script, opts) => {
+      if (script.includes("LINK_GOES")) {
+        down = true;
+        throw new Error("the link went");
+      }
+      if (script.includes("GATED")) await new Promise<void>(r => (gate = r));
+      return run(script, opts);
+    };
+    const ledger = boxLedger(200);
+    const [one, two, three] = [1, 2, 3].map(n => `t-${n}-${Date.now()}-${Math.random().toString(36).slice(2)}`) as [string, string, string];
+    for (const t of [one, two, three]) made.push(boxSlateDir(t));
+    const runsIn = (t: string): string[] => (existsSync(boxSlateDir(t)) ? readdirSync(boxSlateDir(t)).filter(n => n.startsWith(".run-")) : []);
+    const go = (t: string, cmd: string, env: Record<string, string> = {}): Promise<RoadEnd> =>
+      ended(done => boxRoad(machine, t, () => ({}), async () => {}, ledger).start({ cmd, args: [], cwd: temp(), env, timeoutS: 20, stream: false }, { line: () => {}, end: done }));
+
+    // The link goes after the values went up: they stay, owed, and go on the retry once the box answers again.
+    expect((await go(one, "echo LINK_GOES", { TOKEN: "s3cret" })).error?.message).toBe("the link went");
+    expect(runsIn(one)).toHaveLength(1);
+    expect(ledger.owed(machine)).toHaveLength(1);
+    down = false;
+    await vi.waitFor(() => expect(runsIn(one)).toHaveLength(0), { timeout: 5_000 });
+    expect(ledger.owed(machine)).toHaveLength(0);
+
+    // Stale values in another thread's folder go at the next contact; the values of a run still starting stay.
+    mkdirSync(join(boxSlateDir(two), ".run-stale"), { recursive: true });
+    writeFileSync(join(boxSlateDir(two), ".run-stale", "env"), "s3cret");
+    const gated = go(one, 'echo GATED "$TOKEN"', { TOKEN: "still here" });
+    await vi.waitFor(() => expect(gate).toBeDefined());
+    expect(runsIn(one)).toHaveLength(1);
+    expect((await go(three, "echo hi")).out).toBe("hi\n");
+    expect(runsIn(two)).toHaveLength(0);
+    expect(runsIn(one)).toHaveLength(1);
+    gate!();
+    expect((await gated).out).toBe("GATED still here\n");
+    expect(runsIn(one)).toHaveLength(0);
+    ledger.close();
   });
 
   it("a kill cancels the command on the machine, and a then reshapes there", async () => {

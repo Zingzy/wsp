@@ -54,14 +54,13 @@ import {
   type SlateValuesEvent,
   type SlateView,
   type SlateWriteAnswer,
-  shellQuote,
 } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Store } from "./store.js";
 import { createSlateRuns, lastResult, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
-import { boxRoad, boxSlateDir } from "./slate-box.js";
+import { boxLedger, boxRoad, boxSlateDir } from "./slate-box.js";
 import { HELD_CONFIRM, consentKey, createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
 import { HOST_SLATE_SOURCES, resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
 
@@ -405,6 +404,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     if (capturing?.threadId === threadId && capturing.run === run) return;
     void serial(threadId, () => runMoved(threadId, run, record)).catch((e: unknown) => console.warn(`the slate of thread ${threadWord(threadId)} lost a record of $${run}: ${e instanceof Error ? e.message : String(e)}`));
   };
+  const ledger = boxLedger();
   const runs: SlateRuns = (deps.runs ?? createSlateRuns)({
     env: deps.runEnv,
     now: deps.now,
@@ -415,9 +415,15 @@ export function createSlates(deps: SlatesDeps): Slates {
       const machine = deps.machineOf?.(threadId);
       return machine === undefined
         ? undefined
-        : boxRoad(machine, threadId, () => records.get(threadId)?.document?.files ?? {}, async () => {
-            if (deps.asleep?.(threadId) === true) await deps.wake?.(threadId);
-          });
+        : boxRoad(
+            machine,
+            threadId,
+            () => records.get(threadId)?.document?.files ?? {},
+            async () => {
+              if (deps.asleep?.(threadId) === true) await deps.wake?.(threadId);
+            },
+            ledger,
+          );
     },
     approvals,
     onRecord: moved,
@@ -1119,6 +1125,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     close() {
       runs.close();
       mcp.close();
+      ledger.close();
     },
 
     async get(threadId) {
@@ -1488,8 +1495,9 @@ export function createSlates(deps: SlatesDeps): Slates {
         records.delete(threadId);
         const dir = folderOf(threadId);
         if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
-        // Its folder on the thread's own machine goes too, where that machine still answers.
-        void deps.machineOf?.(threadId)?.exec(`rm -rf ${shellQuote(boxSlateDir(threadId))}`).catch(() => undefined);
+        // Its folder on the thread's own machine goes too, now or once that machine answers again.
+        const machine = deps.machineOf?.(threadId);
+        if (machine !== undefined) void ledger.remove(machine, boxSlateDir(threadId));
         holds.delete(threadId);
         skipped.delete(threadId);
         windows.delete(threadId);
