@@ -142,7 +142,10 @@ pub const TOOLS: &[Tool] = &[
 /// The tool of that name the state lists, with its entry there; none where that state lists no such tool, which the
 /// TypeScript server does not register.
 pub fn named(name: &str, cloud: bool, guest: bool, no_slate: bool) -> Option<(&'static Tool, &'static str)> {
-    TOOLS.iter().filter(|tool| tool.name == name && served(tool, guest, no_slate)).find_map(|tool| Some((tool, entry_in(tool.listed, cloud)?)))
+    TOOLS
+        .iter()
+        .filter(|tool| tool.name == name && served(tool, guest, no_slate))
+        .find_map(|tool| Some((tool, entry_in(tool.listed, cloud)?)))
 }
 
 /// Every tool the state lists, by its entry there.
@@ -366,7 +369,9 @@ mod tests {
     #[test]
     fn a_server_for_a_thread_with_no_slate_lists_none_of_its_tools() {
         let names = |no_slate| -> Vec<String> {
-            listed(false, false, no_slate).map(|entry| serde_json::from_str::<Value>(entry).unwrap()["name"].as_str().unwrap().to_owned()).collect()
+            listed(false, false, no_slate)
+                .map(|entry| serde_json::from_str::<Value>(entry).unwrap()["name"].as_str().unwrap().to_owned())
+                .collect()
         };
         for name in slate::NAMES {
             assert!(names(false).iter().any(|n| n == name), "{name} is served with a slate");
