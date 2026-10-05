@@ -147,3 +147,31 @@ describe("infinity", () => {
     expect(evaluateSlateExpression("[percent(1e307), 1]", { resolve: () => undefined })).toEqual([null, 1]);
   });
 });
+
+describe("smaller expression rules", () => {
+  it("points an error inside a template hole at its place in the whole expression", () => {
+    const [e] = parseSlateExpression("`a ${1 $}`").errors;
+    expect(e).toMatchObject({ code: "X400", at: 7 });
+    expect(e!.message).toContain("column 8");
+  });
+
+  it("places Q424 at its step when the checker is given an offset", () => {
+    expect(checkSlateExpression("1 | first", scope, 10).problems[0]).toMatchObject({ code: "Q424", at: 14 });
+  });
+
+  it("counts one level of nesting per paren", () => {
+    expect(parseSlateExpression(`${"(".repeat(8)}1${")".repeat(8)}`).errors).toEqual([]);
+    expect(parseSlateExpression(`${"(".repeat(16)}1${")".repeat(16)}`).errors.map(e => e.code)).toEqual(["X407"]);
+  });
+
+  it("takes first(list, n) as spec 04 writes it", () => {
+    expect(ev("first([1, 2, 3], 2)")).toEqual([1, 2]);
+    expect(check("first([1, 2, 3], 2)")).toEqual([]);
+  });
+
+  it("joins on item.id as on id, and refuses a key that is not a field", () => {
+    const rows = { a: [{ id: 1 }], b: [{ id: 1, n: 5 }] };
+    expect(evaluateSlateExpression("$a | join($b, item.id)", { resolve: p => rows[p.slice(1) as "a" | "b"] })).toEqual([{ id: 1, b: { id: 1, n: 5 } }]);
+    expect(check("[{ id: 1 }] | join([{ id: 1 }], item.id + 1)", true)).toContain("Q425");
+  });
+});

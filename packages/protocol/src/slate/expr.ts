@@ -50,6 +50,8 @@ const HANDLER_STEPS = new Set(["set", "toggle", "start", "cancel", "send", "stee
 interface Token { t: "num" | "str" | "tpl" | "own" | "name" | "op" | "end"; v: string; parts?: (string | { src: string; at: number })[]; at: number }
 
 class Fault extends Error {
+  /** Set once at and the message's columns count from the whole expression rather than a hole inside it. */
+  absolute = false;
   constructor(readonly code: SlateCode, message: string, readonly at: number, readonly fix?: string) { super(message); }
 }
 
@@ -333,9 +335,7 @@ class Parser {
           node = node.k === "path" ? { ...node, segs: [...node.segs, index] } : { k: "field", of: node, name: index, at: n.at + this.base };
           continue;
         }
-        this.enter(open.at);
         const index = this.pipeline();
-        this.depth--;
         this.expect("]");
         node = { k: "index", of: node, index, at: open.at + this.base };
         continue;
@@ -366,14 +366,11 @@ class Parser {
     }
     if (t.t === "own") return { k: "path", head: t.v, own: true, segs: [], at };
     if (t.t === "op" && t.v === "(") {
-      this.enter(t.at);
       const e = this.pipeline();
-      this.depth--;
       this.expect(")");
       return e;
     }
     if (t.t === "op" && t.v === "[") {
-      this.enter(t.at);
       const items: SlateExpr[] = [];
       while (!this.isOp("]")) {
         items.push(this.pipeline());
@@ -381,11 +378,9 @@ class Parser {
         this.next();
       }
       this.expect("]");
-      this.depth--;
       return { k: "list", items, at };
     }
     if (t.t === "op" && t.v === "{") {
-      this.enter(t.at);
       const fields: { name: string; expr: SlateExpr }[] = [];
       while (!this.isOp("}")) {
         const key = this.next();
@@ -396,7 +391,6 @@ class Parser {
         this.next();
       }
       this.expect("}");
-      this.depth--;
       return { k: "rec", fields, at };
     }
     if (t.t === "op" && t.v === "/") throw new Fault("X420", "no regular expressions; use contains, startsWith or endsWith", t.at);
@@ -424,8 +418,15 @@ class Parser {
 }
 
 function parseAt(src: string, base: number): SlateExpr {
-  if (src.trim() === "") throw new Fault("X400", "a hole is empty", 0);
-  return new Parser(tokenize(src), base).parseAll();
+  try {
+    if (src.trim() === "") throw new Fault("X400", "a hole is empty", 0);
+    return new Parser(tokenize(src), base).parseAll();
+  } catch (e) {
+    if (!(e instanceof Fault) || e.absolute) throw e;
+    const shifted = new Fault(e.code, e.message.replace(/column (\d+)/g, (_, n: string) => `column ${Number(n) + base}`), e.at + base, e.fix);
+    shifted.absolute = true;
+    throw shifted;
+  }
 }
 
 const parsed = new Map<string, { ast?: SlateExpr; errors: SlateProblem[] }>();
@@ -711,7 +712,8 @@ const F: Record<string, FnSpec> = slateTable<FnSpec>({
     fn: ([l, f], env) => (isList(l) ? numbersOf(env, l, f).reduce((a, b) => a + b, 0) : null) },
   avg: { min: 1, max: 2, returns: ret(T.num), listFirst: true, sig: "avg(list, field?)", example: "avg(thread.changes.files, 'additions')",
     fn: ([l, f], env) => { const ns = numbersOf(env, l, f); return ns.length === 0 ? null : ns.reduce((a, b) => a + b, 0) / ns.length; } },
-  first: { min: 1, max: 1, returns: elemOf, listFirst: true, sig: "first(list)", example: "first(pr.checks).name", fn: ([l]) => (isList(l) ? (l[0] ?? null) : null) },
+  first: { min: 1, max: 2, returns: a => (a.length > 1 ? (a[0] ?? T.list) : elemOf(a)), listFirst: true, sig: "first(list, n?)", example: "first(pr.checks).name",
+    fn: ([l, n]) => (!isList(l) ? null : n === undefined ? (l[0] ?? null) : isNum(n) ? l.slice(0, Math.max(0, Math.floor(n))) : null) },
   last: { min: 1, max: 2, returns: a => (a.length > 1 ? (a[0] ?? T.list) : elemOf(a)), listFirst: true, sig: "last(list, n?)", example: "last(append($hist, $spot.json.v), 60)",
     fn: ([l, n]) => (!isList(l) ? null : n === undefined ? (l[l.length - 1] ?? null) : isNum(n) ? (n >= 1 ? l.slice(-Math.floor(n)) : []) : null) },
   at: { min: 2, max: 2, returns: elemOf, listFirst: true, sig: "at(list, i)", example: "at($questions, $i).text", fn: ([l, i]) => pick(l, i) },
@@ -844,6 +846,7 @@ function keyText(v: Val): string { return JSON.stringify(v ?? null); }
 
 function fieldName(e: SlateExpr): string | undefined {
   if (e.k === "path" && !e.own && e.segs.length === 0) return e.head;
+  if (e.k === "path" && !e.own && e.head === "item" && e.segs.length === 1 && typeof e.segs[0] === "string") return e.segs[0];
   if (e.k === "lit" && typeof e.v === "string") return e.v;
   return undefined;
 }
@@ -1190,12 +1193,13 @@ export function checkSlateExpression(src: string, scope: SlateCheckScope, base =
         for (const step of node.steps) {
           const spec = PIPE[step.name]!;
           if (spec.needsList && ["number", "string", "boolean", "record"].includes(cur.t)) {
-            add("Q424", `${step.name} takes a list; this is ${cur.t === "string" ? "text" : `a ${cur.t}`}`, step.at - base);
+            add("Q424", `${step.name} takes a list; this is ${cur.t === "string" ? "text" : `a ${cur.t}`}`, step.at);
           }
           const elem = cur.t === "list" ? (cur.of ?? T.any) : T.any;
           const argTypes: SlateType[] = [];
           for (const [i, a] of step.args.entries()) {
             if ((step.name === "pick" || (step.name === "join" && i > 0) || step.name === "flatten") && fieldName(a.expr) !== undefined) { argTypes.push(T.str); continue; }
+            if (step.name === "join" && i > 0) add("Q425", "join's keys are field names: join($other, id) or join($other, id, ownerId)", a.expr.at);
             argTypes.push(type(a.expr, step.name === "join" && i === 0 ? row : elem));
           }
           cur = spec.out(cur, argTypes);
