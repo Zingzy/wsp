@@ -155,6 +155,8 @@ export interface ClaudeAdapter {
   draftFor: CommitDrafter;
   /** Answers a question on a fork of a session with no tools, the fork's file removed once the answer is read. */
   aside: SessionAsker;
+  /** The fork loads the servers a turn of the thread is handed, so the CLI does not tell the model they went away. */
+  readonly asideServers: true;
   /** What every session's command is exported with; the one environment a turn on the machine gets. */
   readonly env: Readonly<Record<string, string>>;
 }
@@ -1204,7 +1206,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   /** One run on the turn's road and environment, read to its end so the answer lands after the fork's file is gone. */
   const aside = async (q: AsideQuestion): Promise<AsideAnswer> => {
     const fork = newSessionId();
-    const command = asideCommand({ session: q.session, fork, configDir: deps.configDir, ...(q.cwd !== undefined ? { cwd: q.cwd } : {}), ...(q.model !== undefined ? { model: q.model } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
+    const command = asideCommand({ session: q.session, fork, configDir: deps.configDir, ...(q.cwd !== undefined ? { cwd: q.cwd } : {}), ...(q.model !== undefined ? { model: q.model } : {}), ...(q.mcpServers !== undefined ? { mcpServers: q.mcpServers } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
     const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(q.question, fork)] });
     const wallMs = deps.asideWallMs ?? ASIDE_WALL_MS;
     let walled = false;
@@ -1286,6 +1288,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         }),
       ).then(parseDraftFor),
     aside,
+    asideServers: true,
     env,
   };
 }

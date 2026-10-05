@@ -69,6 +69,10 @@ export const FAKE_RECORDS_ENV = "WSP_FAKE_RECORDS";
  * login's and not a shell's. */
 export const UPDATE_CHECK_ENV = "WSP_UPDATE_CHECK";
 
+/** The switch that stops the host sending usage counts to PostHog whatever Settings > Privacy says: `0` here, or on a
+ * line of the .env beside the state file, read the way the update check's is. */
+export const ANALYTICS_ENV = "WSP_ANALYTICS";
+
 /** The base the host asks for the newest release instead of GitHub's API, for a smoke serving a release of its
  * own. Unset everywhere else. */
 export const RELEASE_API_ENV = "WSP_RELEASE_API";

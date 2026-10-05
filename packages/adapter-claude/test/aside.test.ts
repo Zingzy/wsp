@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The side question on Claude Code: one print-mode run that resumes the
-// thread's session as a fork with every tool off, the answer read off its
+// thread's session as a fork with every tool and hook off, the answer read off its
 // result, and the fork's own file removed by a second run once the CLI's has
 // ended, whichever way it ended.
 import { execFileSync } from "node:child_process";
@@ -12,7 +12,7 @@ import { asideWallLine } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { createClaudeAdapter } from "../src/adapter.js";
 import { asideCommand, forkCleanupCommand } from "../src/aside.js";
-import { userMessageLine } from "../src/landmines.js";
+import { buildCommand, userMessageLine } from "../src/landmines.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 const SESSION = "e16ed170-8257-4668-879e-fe836341633c";
@@ -75,7 +75,7 @@ function scripted(lines: string[], opts: { exitCode?: number; hang?: boolean } =
 const forkOf = (command: string): string => /--session-id ([0-9a-f-]+)/.exec(command)?.[1] ?? "";
 
 describe("asideCommand", () => {
-  it("resumes the thread's session as a fork with no tool, no hook and no MCP server, in the thread's folder", () => {
+  it("resumes the thread's session as a fork that keeps everything the thread loaded and runs no tool and no hook, in the thread's folder", () => {
     const line = asideCommand({ session: SESSION, fork: FORK, configDir: CONFIG, cwd: "/root/spoo", model: "claude-opus-5" });
     expect(line.startsWith("cd '/root/spoo' && claude -p ")).toBe(true);
     for (const part of [
@@ -83,15 +83,26 @@ describe("asideCommand", () => {
       "--output-format stream-json",
       "--verbose",
       "--tools ''",
-      "--safe-mode",
-      "--strict-mcp-config",
+      "--disallowedTools 'mcp__*'",
+      `--settings '{"disableAllHooks":true}'`,
       "--model 'claude-opus-5'",
       `--resume ${SESSION}`,
       "--fork-session",
       `--session-id ${FORK}`,
     ]) expect(line, part).toContain(part);
-    // Nothing that lets a tool run, and no flag whose reach over a fork is unmeasured.
-    for (const absent of ["--dangerously-skip-permissions", "--permission-prompt-tool", "--allowed-tools", "--mcp-config ", "--no-session-persistence"]) expect(line, absent).not.toContain(absent);
+    // A flag that drops a CLAUDE.md or an MCP server the thread loaded makes the CLI tell the model it is gone, and
+    // every answer opened on that notice; nothing that lets a tool run either.
+    for (const absent of ["--safe-mode", "--strict-mcp-config", "--bare", "--dangerously-skip-permissions", "--permission-prompt-tool", "--allowed-tools", "--mcp-config ", "--no-session-persistence"]) expect(line, absent).not.toContain(absent);
+  });
+
+  it("hands the fork the servers the thread's turns are handed, on the flag a turn takes them on", () => {
+    const servers = { wsp: { command: "wsp", args: ["mcp", "--scoped"] } };
+    const line = asideCommand({ session: SESSION, fork: FORK, configDir: CONFIG, mcpServers: servers });
+    const turn = buildCommand({ resume: SESSION, mcpServers: servers });
+    const flag = /--mcp-config '[^']*'/.exec(turn)?.[0];
+    expect(flag).toBeDefined();
+    expect(line).toContain(flag!);
+    expect(line).not.toContain("--strict-mcp-config");
   });
 
   it("the cleanup refuses a fork id that is not the CLI's shape, so a glob never reaches rm", () => {
@@ -154,13 +165,14 @@ describe("the adapter's aside", () => {
       JSON.stringify({ type: "assistant", message: { id: "m1", content: [{ type: "text", text: "You are in /root/spoo" }] }, session_id: FORK }),
       JSON.stringify(RESULT),
     ]);
-    const answer = await adapter(exec.factory).aside!({ session: SESSION, question: "which folder, and what did I last ask?", cwd: "/root/spoo", model: "claude-opus-5" });
+    const servers = { wsp: { command: "wsp", args: ["mcp"] } };
+    const answer = await adapter(exec.factory).aside!({ session: SESSION, question: "which folder, and what did I last ask?", cwd: "/root/spoo", model: "claude-opus-5", mcpServers: servers });
     expect(answer).toEqual({ text: RESULT.result, usage: RESULT.usage });
     const call = exec.calls[0]!;
     const fork = forkOf(call.command);
     expect(fork).toMatch(/^[0-9a-f-]{36}$/);
     expect(fork).not.toBe(SESSION);
-    expect(call.command).toBe(asideCommand({ session: SESSION, fork, configDir: CONFIG, cwd: "/root/spoo", model: "claude-opus-5" }));
+    expect(call.command).toBe(asideCommand({ session: SESSION, fork, configDir: CONFIG, cwd: "/root/spoo", model: "claude-opus-5", mcpServers: servers }));
     // The turn's own environment: the login it signs in with and the folder key the thread's session is stored under.
     expect(call.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat-x", CLAUDE_CODE_PROJECT_DIR_NAME: "-root-spoo", PATH: "/bin" });
     expect(call.env["CLAUDE_CODE_ENTRYPOINT"]).toBeUndefined();
