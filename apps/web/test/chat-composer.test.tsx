@@ -897,6 +897,74 @@ describe("a side question from the composer", () => {
     expect(started).toHaveLength(0);
   });
 
+  it("a /btw sent before the app knows the thread's row is held, starts no turn, and asks once the row is in", async () => {
+    const asked: Array<{ sessionId: string; question: string }> = [];
+    // A host still coming back refuses the first read of the rows; the transcript is in all the same.
+    let restarting = true;
+    const { api, started } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() }, [], {
+      listSessions: async () => {
+        if (restarting) throw new Error("the host is starting");
+        return [row];
+      },
+      listHarnesses: async () => [{ ...CLAUDE_CATALOG, asides: true }],
+      askAside: async (sessionId, question) => {
+        asked.push({ sessionId, question });
+        return { text: "/root" };
+      },
+    });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/btw x");
+    await press(editor, "Escape");
+    await press(editor, "Enter");
+    await waitFor(() => expect(heldHover()).toBe(COMPOSER_WORDS.asideUnknown));
+    expect(started).toHaveLength(0);
+    expect(asked).toEqual([]);
+    expect(draft()).toBe("/btw x");
+    restarting = false;
+    await act(() => useStore.getState().reloadSessions(WS));
+    await waitFor(() => expect(heldHover()).toBeNull());
+    await press(editor, "Enter");
+    await waitFor(() => expect(asked).toEqual([{ sessionId: "sess_local_1", question: "x" }]));
+    expect(started).toHaveLength(0);
+  });
+
+  it("a /btw on a thread past the 200-row index is refused with the reason once the rows are read, never held for good", async () => {
+    // The runtime keeps 200 finished rows a workspace, oldest dropped first, while the transcript keeps the thread.
+    const others: SessionView[] = Array.from({ length: 200 }, (_, i) => ({ ...row, id: `sess_other_${i}`, claudeSessionId: `sess_o${i}`, threadId: `thr_other_${i}`, startedAt: 1000 + i }));
+    // The window has held the old thread open while the newer ones pushed its rows off the index.
+    useStore.setState({ selectedId: WS, selectedThreadId: "thr_old" });
+    const { api, started } = fixtureApi([workspace], { [WS]: CHAT_STREAM.map(e => ({ ...e, threadId: "thr_old" })) }, [], {
+      listSessions: async () => others,
+      listHarnesses: async () => [{ ...CLAUDE_CATALOG, asides: true }],
+      askAside: async () => ({ text: "/root" }),
+    });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/btw x");
+    await press(editor, "Escape");
+    await press(editor, "Enter");
+    await waitFor(() => expect(heldHover()).toBe(COMPOSER_WORDS.asideRowsGone));
+    expect(started).toHaveLength(0);
+    expect(draft()).toBe("/btw x");
+    useStore.setState({ selectedThreadId: null });
+  });
+
+  it("a /btw to an agent that takes no side question is refused with the reason and starts no turn", async () => {
+    const { api, started } = asking(false);
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/btw x");
+    await press(editor, "Escape");
+    await press(editor, "Enter");
+    await waitFor(() => expect(heldHover()).toBe(COMPOSER_WORDS.asideUnsupported(CLAUDE_CATALOG.label)));
+    expect(started).toHaveLength(0);
+    expect(draft()).toBe("/btw x");
+  });
+
   it("a side question goes when the composer leaves the thread it was asked from", async () => {
     const { api } = asking(true);
     await setup(api);
