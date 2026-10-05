@@ -1214,7 +1214,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (text.length > 0 && said.push(text) > STDERR_TAIL_LINES) said.shift();
           continue;
         }
-        if (event.type !== "result" || answer !== undefined) continue;
+        if (event.type !== "result" || answer !== undefined || drainedNotice(event)) continue;
         answer = asideAnswer(event);
         stream.closeInput();
         void endAfterResult(stream, deps.resultExitMs ?? RUN_EXIT_MS, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});

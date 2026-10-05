@@ -173,6 +173,20 @@ describe("the adapter's aside", () => {
     expect(exec.calls).toHaveLength(2);
   });
 
+  it("answers with the question's result, past the empty one a resume gives a background command the thread left running", async () => {
+    // As 2.1.289 printed it, forking a thread whose last turn ended with a command still running in the background.
+    const exec = scripted([
+      JSON.stringify({ type: "system", subtype: "task_notification", task_id: "b1we0t1su", status: "stopped", summary: "Background shell command didn't finish before the previous session ended", session_id: FORK }),
+      JSON.stringify({ type: "system", subtype: "init", session_id: FORK, tools: [] }),
+      JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 0, duration_ms: 174, result: "", origin: { kind: "task-notification" }, session_id: FORK, usage: { input_tokens: 0, output_tokens: 0 } }),
+      JSON.stringify({ type: "system", subtype: "init", session_id: FORK, tools: [] }),
+      JSON.stringify({ ...RESULT, num_turns: 1 }),
+    ]);
+    const answer = await adapter(exec.factory).aside!({ session: SESSION, question: "what is going on?" });
+    expect(answer.text).toBe(RESULT.result);
+    expect(exec.order.indexOf("closeInput")).toBeGreaterThan(-1);
+  });
+
   it("rejects with the CLI's own words when its result is an error", async () => {
     const exec = scripted([JSON.stringify({ ...RESULT, subtype: "success", is_error: true, result: "Not logged in · Please run /login" })]);
     await expect(adapter(exec.factory).aside!({ session: SESSION, question: "hi" })).rejects.toThrow("Not logged in · Please run /login");
