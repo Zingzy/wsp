@@ -1106,7 +1106,10 @@ describe("a side question on a Codex thread", () => {
       const w = wire({
         ...opts,
         onWrite: (message, self) => {
-          if (message.method === "thread/fork")
+          // 0.155.1 refuses an ephemeral fork that would hand back the thread's whole history, in these words.
+          if (message.method === "thread/fork" && (message.params as Json).excludeTurns !== true)
+            self.push('{"id":"wsp-initialize","result":{}}', '{"error":{"code":-32600,"message":"ephemeral paginated thread/fork requires `excludeTurns: true`"},"id":"wsp-thread"}');
+          else if (message.method === "thread/fork")
             self.push('{"id":"wsp-initialize","result":{}}', `{"id":"wsp-thread","result":{"thread":{"id":"${FORK}","ephemeral":true,"forkedFromId":"${THREAD_ID}"},"model":"gpt-5.6-sol"}}`);
           if (message.method === "turn/start") onTurn(self);
         },

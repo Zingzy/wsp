@@ -4,13 +4,13 @@
 // and this computer's link all read this table; what a pane draws is the one
 // line each kind has in RightPanel's view table. This module imports no
 // component, since the store reads it and every pane imports the store.
-import { Activity, Bot, Cpu, File, FileDiff, Folder, GitPullRequest, Globe2, TerminalSquare, type LucideIcon } from "lucide-react";
+import { Activity, Bot, Cpu, File, FileDiff, Folder, GitPullRequest, Globe2, MessageSquareDashed, TerminalSquare, type LucideIcon } from "lucide-react";
 import { isPullRequestNamed, type AbsentComputer, type PullRequestSeen, type WorkspaceView } from "@wsp/protocol";
 import type { PreviewTabSnapshot } from "./components/RightPanelTabs";
 import { baseName } from "./files/entries";
 import type { RightPanelSurface } from "./rightPanelStore";
 
-export type RightPanelKind = "preview" | "terminal" | "diff" | "pr" | "files" | "machine" | "processes" | "agents";
+export type RightPanelKind = "preview" | "terminal" | "diff" | "pr" | "files" | "machine" | "processes" | "agents" | "aside";
 
 /** What decides whether a pane can open: the panel's workspace, or this computer's own panel. */
 export interface PaneContext {
@@ -43,6 +43,8 @@ export interface Pane<K extends RightPanelKind = RightPanelKind> {
   readsHere?: true;
   /** The launcher leaves the pane out until it can open, rather than drawing it held. */
   onlyWhenAvailable?: true;
+  /** What the pane shows lives in memory alone, so its tab is not kept across a reload. */
+  unkept?: true;
 }
 
 const NO_PROJECT_HERE = "Pick a project to review its changes.";
@@ -137,6 +139,17 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
     hint: "Pick a thread to use it.",
     // A paused workspace answers its last report and is never woken for it.
     available: at => at.workspace !== null,
+  },
+  aside: {
+    label: "Side question",
+    description: "A question the thread never keeps.",
+    icon: MessageSquareDashed,
+    shortcut: "",
+    hint: "Ask one with /btw in the composer.",
+    // Only /btw opens it, with the question it asks, so the launcher and the add menu never offer it.
+    available: () => false,
+    onlyWhenAvailable: true,
+    unkept: true,
   },
 };
 

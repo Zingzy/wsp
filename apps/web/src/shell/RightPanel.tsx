@@ -5,9 +5,9 @@
 // surfaces mount the Ghostty drawer in panel mode over the workspace's daemon
 // link. The diff and the files run in their own worker pool, themed for the
 // side the page is drawing. With no workspace selected the panel is this
-// computer's own. A side question asked with /btw takes the panel while it
-// stands, opening it if it was shut.
-import { useCallback, useEffect, useMemo, type ReactNode } from "react";
+// computer's own. A side question asked with /btw stands on a tab of its own,
+// opening the panel if it was shut.
+import { useEffect, useMemo, type ReactNode } from "react";
 import { useWorkspacePorts } from "../browser/model.js";
 import { previewTabSnapshots, useBrowserTabs, useWorkspaceBrowserTabs } from "../browser/tabs.js";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider.js";
@@ -17,7 +17,7 @@ import { MachineSurface } from "../components/machine/MachineSurface.js";
 import { ProcessesSurface } from "../components/procs/ProcessesSurface.js";
 import { AgentsSurface } from "../components/agents/AgentsSurface.js";
 import { BrowserSurface } from "../components/preview/BrowserSurface.js";
-import { PreviewPanelShell, type PreviewPanelMode } from "../components/preview/PreviewPanelShell.js";
+import type { PreviewPanelMode } from "../components/preview/PreviewPanelShell.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { DiffSurface } from "../diffs/DiffSurface.js";
 import { FilePreviewSurface } from "../files/FilePreviewSurface.js";
@@ -37,6 +37,8 @@ interface PaneView<K extends RightPanelKind> {
   Surface(props: { workspaceId: string; surface: Extract<RightPanelSurface, { kind: K }>; theme: "light" | "dark" }): ReactNode;
   /** How the pane opens when the store cannot open it alone. */
   open?(workspaceId: string): void;
+  /** How the pane's tab closes when what it shows has to go with it. */
+  close?(workspaceId: string): void;
 }
 
 /** What each pane kind draws, the one line per kind the registry in panes.ts cannot hold without importing every
@@ -68,8 +70,18 @@ const PANE_VIEWS: { readonly [K in RightPanelKind]: PaneView<K> } = {
   machine: { Surface: ({ workspaceId }) => <MachineSurface workspaceId={workspaceId} /> },
   processes: { Surface: ({ workspaceId }) => <ProcessesSurface workspaceId={workspaceId} /> },
   agents: { Surface: ({ workspaceId }) => <AgentsSurface workspaceId={workspaceId} /> },
+  aside: {
+    Surface: ({ workspaceId }) => <AsidePane workspaceId={workspaceId} />,
+    close: workspaceId => useAsideStore.getState().close(workspaceId),
+  },
 };
 const viewOf = (kind: RightPanelKind): PaneView<RightPanelKind> => PANE_VIEWS[kind] as PaneView<RightPanelKind>;
+
+function AsidePane({ workspaceId }: { workspaceId: string }) {
+  const aside = useAside(workspaceId);
+  if (aside === null) return null;
+  return <AsideSurface question={aside.question} answer={aside.answer} error={aside.error} onClose={() => useAsideStore.getState().close(workspaceId)} />;
+}
 
 export function RightPanel({
   workspaceId,
@@ -117,14 +129,8 @@ export function RightPanel({
   ) as Partial<Record<RightPanelKind, string>>;
 
   const ActiveSurface = active === null ? null : viewOf(active.kind).Surface;
-  const aside = useAside(workspaceId);
-  const closeAside = useCallback(() => useAsideStore.getState().close(workspaceId), [workspaceId]);
 
-  const tabs = aside !== null ? (
-    <PreviewPanelShell mode={mode}>
-      <AsideSurface question={aside.question} answer={aside.answer} error={aside.error} onClose={closeAside} controls={layoutControls} />
-    </PreviewPanelShell>
-  ) : (
+  const tabs = (
     <RightPanelTabs
       mode={mode}
       {...(layoutControls !== undefined ? { layoutControls } : {})}
@@ -133,7 +139,11 @@ export function RightPanel({
       previewSessions={previewSessions}
       terminalLabelsById={terminalLabelsById}
       onActivate={surface => activateSurface(workspaceId, surface.id)}
-      onCloseSurface={surface => closeSurface(workspaceId, surface.id)}
+      onCloseSurface={surface => {
+        const closes = viewOf(surface.kind).close;
+        if (closes) closes(workspaceId);
+        else closeSurface(workspaceId, surface.id);
+      }}
       onAdd={kind => {
         const opens = viewOf(kind).open;
         if (opens) opens(workspaceId);
