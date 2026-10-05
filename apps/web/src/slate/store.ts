@@ -131,13 +131,26 @@ function applyRecord(engine: SlateEngine, entry: SlateEntry): void {
 }
 
 const inFlight = new Map<string, Promise<SlateEntry | undefined>>();
+/** One more get for a thread asked for again while its get was out, which may have been read before the write that
+ * asked: it runs once that get settles, and every ask in the meantime shares it. */
+const again = new Map<string, Promise<SlateEntry | undefined>>();
 
 /** Asks the host for the thread's record and folds it in; a new document diffs by piece id in its engine. */
 export function loadSlate(threadId: string): Promise<SlateEntry | undefined> {
   const api = host?.api() ?? null;
   if (api === null) return Promise.resolve(undefined);
   const running = inFlight.get(threadId);
-  if (running !== undefined) return running;
+  if (running !== undefined) {
+    let follow = again.get(threadId);
+    if (follow === undefined) {
+      follow = running.then(() => {
+        again.delete(threadId);
+        return loadSlate(threadId);
+      });
+      again.set(threadId, follow);
+    }
+    return follow;
+  }
   const ask = api
     .get(threadId)
     .then(answer => {
