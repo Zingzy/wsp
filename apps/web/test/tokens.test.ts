@@ -382,6 +382,21 @@ describe("index.css", () => {
           animation: none;
         }
       }
+
+      /* A slate piece fades in once as it arrives; nothing in a slate moves at rest or under reduced motion. */
+      @keyframes slate-piece-in {
+        from {
+          opacity: 0;
+        }
+      }
+      .slate-piece {
+        animation: slate-piece-in 150ms ease-out;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .slate-piece {
+          animation: none;
+        }
+      }
       "
     `);
   });
