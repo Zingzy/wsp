@@ -12,6 +12,6 @@ export const markdown: PieceView = {
   component: function MarkdownPiece({ props }) {
     const dark = useAppDark();
     const value = str(props["value"]);
-    return value === undefined || value === "" ? null : <ChatMarkdown text={value} cwd={undefined} resolvedTheme={dark ? "dark" : "light"} restricted className={PR_BODY} />;
+    return value === undefined || value === "" ? null : <ChatMarkdown text={value} cwd={undefined} resolvedTheme={dark ? "dark" : "light"} restricted noImages className={PR_BODY} />;
   },
 };

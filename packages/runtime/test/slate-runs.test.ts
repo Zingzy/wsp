@@ -265,6 +265,21 @@ describe("consent", () => {
     h.runs.release(THREAD);
     expect(h.start("r", decl, {}, "reaction").outcome).toBe("running");
   });
+
+  it("the person's starts have a budget of their own, 12 a minute, which no press or release frees", async () => {
+    const h = harness();
+    const decl = cmd("true");
+    h.start("r", decl);
+    h.runs.approve(THREAD, "r", "always");
+    await h.until("r", ["done"]);
+    for (let i = 1; i < 12; i++) {
+      const ended = h.until("r", ["done"]);
+      expect(h.start("r", decl, {}, "person").outcome).toBe("running");
+      await ended;
+    }
+    h.runs.release(THREAD);
+    expect(h.start("r", decl, {}, "person")).toMatchObject({ outcome: "held", record: { why: "pressed 12 times in a minute; it can start again in a minute" } });
+  });
 });
 
 /** Every process in a process group, by ps. */

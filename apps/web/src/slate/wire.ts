@@ -35,6 +35,8 @@ export interface SlateApi {
   event(threadId: string, ask: SlateEventAsk): Promise<SlateEventAnswer>;
   approve(threadId: string, key: string, scope: SlateApproval): Promise<void>;
   cancel(threadId: string, run: string): Promise<void>;
+  /** The person withdraws one of the thread's standing approvals. */
+  revoke(threadId: string, key: string): Promise<void>;
   shown(threadId: string): Promise<void>;
   /** The slate as text, the sketch the agent reads (10). */
   sketch(threadId: string): Promise<string>;
@@ -53,6 +55,7 @@ export function slateApi(c: Requester): SlateApi {
     event: async (threadId, ask) => SlateEventAnswer.parse(await c.request<unknown>("slates.event", { threadId, ...ask })),
     approve: async (threadId, key, scope) => void (await c.request("slates.approve", { threadId, key, scope })),
     cancel: async (threadId, run) => void (await c.request("slates.cancel", { threadId, run })),
+    revoke: async (threadId, key) => void (await c.request("slates.revoke", { threadId, key })),
     shown: async threadId => void (await c.request("slates.shown", { threadId })),
     sketch: async threadId => SlateReadAnswer.parse(await c.request<unknown>("slates.read", { threadId, sketch: true, text: false })).text,
     undo: threadId => write(threadId, "<undo />"),

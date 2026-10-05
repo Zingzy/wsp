@@ -14,7 +14,7 @@ export {
 export { SLATE_PIECES, SLATE_TONES, SLATE_ITEM_KINDS, SLATE_RESERVED_PROPS, type SlatePieceModule, type SlatePropSpec, type SlatePropType, type SlateItemSpec, type SlateSketchView } from "./kit.js";
 export { SLATE_ICONS, isSlateIcon, nearestSlateIcon, type SlateIcon } from "./icons.js";
 export { SLATE_SOURCES, slateSourceType, slateShapeText, slateShapeType, slateIsSeries, type SlateSourceModule, type SlateShape } from "./sources.js";
-export { SLATE_STEPS, type SlateStepModule } from "./steps.js";
+export { SLATE_STEPS, slateDomainKey, slateLinkDomain, type SlateStepModule } from "./steps.js";
 export { parseSlate, parseSlatePatch, printSlate, compileSlateText } from "./syntax.js";
 export { validateSlate, validateDocument, type SlateLines } from "./validate.js";
 export { applySlatePatch, carrySlateValues, slateStartValues } from "./patch.js";

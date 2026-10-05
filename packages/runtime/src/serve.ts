@@ -1721,6 +1721,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               await rt.slates.cancel({ threadId: msg.threadId, run: msg.run });
               send({ id: msg.id, ok: true });
               return;
+            case "slates.revoke":
+              await rt.slates.revoke({ threadId: msg.threadId, key: msg.key });
+              send({ id: msg.id, ok: true });
+              return;
             case "slates.subscribe": {
               // Held until the window lets go, or its socket closes and every hold it took goes with it.
               const release = rt.slates.subscribe({ threadId: msg.threadId, sources: msg.sources });

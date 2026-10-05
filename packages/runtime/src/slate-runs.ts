@@ -66,6 +66,8 @@ export interface CmdRunDecl {
   then?: string;
   /** The text of each of the slate's files the command or its then reads, by name: part of what the person approves. */
   files?: Record<string, string>;
+  /** A hash of each file in the thread's folder the command or its then names, by its path there: an edit asks again. */
+  scripts?: Record<string, string>;
 }
 
 /** One value as it reaches a command, evaluated by the host at the moment the run starts. A secret is named, never
@@ -396,10 +398,11 @@ const DOTS = "••••";
 const HELD_APPROVAL = "needs your approval";
 const HELD_BUSY = `${RUNNING_MAX} runs are already running`;
 const HELD_BUDGET = `started ${STARTS_PER_MINUTE} times in a minute; press to run it again`;
+const HELD_PRESSED = `pressed ${STARTS_PER_MINUTE} times in a minute; it can start again in a minute`;
 const HELD_ASLEEP = "the box was asleep, so this tick did not wake it; press to run it now";
 const SECRET_IN_ARGS = "a secret reaches a command through env or stdin, never as an argument, which ps can read";
 
-type HeldFor = "approval" | "busy" | "budget";
+type HeldFor = "approval" | "busy" | "budget" | "pressed";
 
 interface Live {
   record: RunRecord;
@@ -414,6 +417,8 @@ interface Live {
   held?: { req: RunStart; for: HeldFor };
   /** When reactions and timers started it, for the start budget. */
   starts: number[];
+  /** When the person started it, for their own budget, which no press releases. */
+  pressed?: number[];
 }
 
 interface Timer {
@@ -633,7 +638,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     const env = Object.entries(decl.env ?? {})
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([name, expr]) => [name, stableJson(expr)]);
-    const what = [decl.kind, decl.cmd, env, (decl.args ?? []).map(stableJson), decl.stdin === undefined ? null : stableJson(decl.stdin), decl.on ?? "thread", decl.cwd ?? "", decl.stream === true, decl.every ?? null, decl.always === true, ...(decl.then !== undefined ? [decl.then] : []), ...(decl.files !== undefined ? [stableJson(decl.files)] : [])];
+    const what = [decl.kind, decl.cmd, env, (decl.args ?? []).map(stableJson), decl.stdin === undefined ? null : stableJson(decl.stdin), decl.on ?? "thread", decl.cwd ?? "", decl.stream === true, decl.every ?? null, decl.always === true, decl.timeout ?? DEFAULT_TIMEOUT_S, decl.once === true, ...(decl.then !== undefined ? [decl.then] : []), ...(decl.files !== undefined ? [stableJson(decl.files)] : []), ...(decl.scripts !== undefined ? [stableJson(decl.scripts)] : [])];
     return createHash("sha256").update(JSON.stringify(what)).digest("hex").slice(0, 32);
   };
 
@@ -675,7 +680,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     l.held = { req, for: why };
     const t = thread(req.threadId);
     if (why === "busy" && !t.queue.includes(req.run)) t.queue.push(req.run);
-    const record = write(req.threadId, req.run, l, { state: "held", why: why === "approval" ? HELD_APPROVAL : why === "busy" ? HELD_BUSY : HELD_BUDGET, runs: l.record.runs });
+    const record = write(req.threadId, req.run, l, { state: "held", why: why === "approval" ? HELD_APPROVAL : why === "busy" ? HELD_BUSY : why === "pressed" ? HELD_PRESSED : HELD_BUDGET, runs: l.record.runs });
     return why === "approval" ? { outcome: "held", record, ask: ask(req) } : { outcome: "held", record };
   };
 
@@ -848,11 +853,16 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
         stop(req.threadId, req.run, l, undefined);
       }
       delete l.held;
+      const at = now();
       if (req.by !== "person") {
-        const at = now();
         l.starts = l.starts.filter(s => at - s < 60_000);
         if (l.starts.length >= STARTS_PER_MINUTE) return hold(req, l, "budget");
         l.starts.push(at);
+      } else {
+        // The person's starts have a budget of their own: a scripted window pressing fast restarts nothing past it.
+        l.pressed = (l.pressed ?? []).filter(s => at - s < 60_000);
+        if (l.pressed.length >= STARTS_PER_MINUTE) return hold(req, l, "pressed");
+        l.pressed.push(at);
       }
       if (req.decl.confirm !== undefined || !approvals.has(req.threadId, key(req.decl))) return hold(req, l, "approval");
       return launch(req, l);

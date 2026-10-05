@@ -50,11 +50,11 @@ describe("several commands waiting", () => {
     thread += 1;
     row.threadId = `a${thread}`;
     first.threadId = row.threadId;
-    useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {} });
+    useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {}, linking: {} });
     useRightPanelStore.setState({ byWorkspaceId: {} });
     const slates: SlateApi = {
       get: vi.fn(async () => ({ record: first })), state: vi.fn(async () => ({ version: 2 })), event: vi.fn(async () => ({ outcome: "done" as const, said: "" })),
-      approve: vi.fn(async () => {}), cancel: vi.fn(async () => {}), shown: vi.fn(async () => {}), sketch: vi.fn(async () => ""),
+      approve: vi.fn(async () => {}), cancel: vi.fn(async () => {}), revoke: vi.fn(async () => {}), shown: vi.fn(async () => {}), sketch: vi.fn(async () => ""),
       undo: vi.fn(async () => ({ version: 2 })), clear: vi.fn(async () => ({ version: 2 })), subscribe: vi.fn(async () => {}), unsubscribe: vi.fn(async () => {}),
       resolve: vi.fn(async () => ({})),
     };
@@ -70,6 +70,8 @@ describe("several commands waiting", () => {
     expect(rows.map(r => r.dataset["slateApproval"])).toEqual(["k-link", "k-disk", "mcp:zoho-mail"]);
     const [link, disk, inbox] = rows as [HTMLElement, HTMLElement, HTMLElement];
     expect(link.querySelector("[data-slate-consent-cmd]")!.textContent).toBe('vercel link --yes --project "$PROJECT"');
+    // What an Always cannot cover is said on the sheet: a script it names is bound, anything else it reads is not.
+    expect(document.querySelector("[data-slate-consent-reach]")?.textContent).toBe("If a script it names changes, it asks again. The command can read anything you can.");
     expect(link.querySelector("[data-slate-consent-cadence]")!.textContent).toBe("Runs when you press it");
     expect(link.querySelector('[data-slate-consent-env="PROJECT"] dd')!.textContent).toBe("spoo-web");
     expect(link.querySelector('[data-slate-consent-env="VERCEL_TOKEN"] dd')!.textContent).toBe("•••••••••••• (24)");
