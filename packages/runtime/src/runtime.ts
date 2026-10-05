@@ -3771,19 +3771,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (workspaceId === undefined) return undefined;
       const running = [...sessions.values()].find(s => s.view.threadId === threadId && s.view.status === "running");
       const entry = live.get(workspaceId);
+      // A run starts where the thread's next turn would: the folder its session ran in, a --cwd or a worktree.
+      const ranIn = latest?.cwd ?? (latest?.claudeSessionId === undefined ? undefined : folderOf(workspaceId, latest.claudeSessionId));
       return {
         workspaceId,
         rootThreadId: rootOf(threadId),
         sessionId: latest?.claudeSessionId ?? latest?.id ?? threadId,
         ...(running !== undefined ? { turnId: running.turnId } : {}),
-        ...(entry !== undefined ? { folder: checkoutOf(entry.record), computer: computerOf(entry) } : {}),
+        ...(entry !== undefined ? { folder: runsIn(entry, ranIn, checkoutOf(entry.record)), computer: computerOf(entry) } : {}),
       };
     },
+    loaded: () => ready(),
     under: lead => treeUnder(lead),
     threadOfToken: token => threadOfToken(token),
     mcpServer: async (threadId, name) => {
-      // The slates recover at boot before the workspaces are loaded, and a held run asks for its server then.
-      await ready();
       const workspaceId = latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
       const harness = latestOn(threadId)?.harness ?? threadRecords.get(threadId)?.harness;
       const entry = workspaceId === undefined ? undefined : live.get(workspaceId);

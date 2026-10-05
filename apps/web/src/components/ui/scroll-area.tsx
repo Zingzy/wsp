@@ -22,6 +22,11 @@ function getVirtualizedScrollFadeClassName({ top, bottom }: { top: boolean; bott
   );
 }
 
+/** Fades each edge with more beyond it, over the distance left to scroll up to 1.5rem, read off the four
+ * --scroll-area-overflow-* lengths Base UI sets on a viewport (or anything that sets them itself). */
+export const SCROLL_FADE =
+  "mask-t-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-y-start)))] mask-b-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-y-end)))] mask-l-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-x-start)))] mask-r-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-x-end)))] [--fade-size:1.5rem]";
+
 function ScrollArea({
   className,
   children,
@@ -45,8 +50,7 @@ function ScrollArea({
         className={cn(
           "h-full max-h-[inherit] overflow-auto overscroll-contain rounded-[inherit] outline-none transition-shadows focus-visible:ring-2 focus-visible:ring-ring data-has-overflow-x:overscroll-x-contain",
           chainVerticalScroll && "overscroll-y-auto",
-          scrollFade &&
-            "scroll-p-[var(--fade-size)] mask-t-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-y-start)))] mask-b-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-y-end)))] mask-l-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-x-start)))] mask-r-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-x-end)))] [--fade-size:1.5rem]",
+          scrollFade && cn("scroll-p-[var(--fade-size)]", SCROLL_FADE),
           scrollbarGutter && "scrollbar-gutter-stable",
           hideScrollbars &&
             "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",

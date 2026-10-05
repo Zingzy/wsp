@@ -80,6 +80,49 @@ function iconProblems(doc: SlateDoc, read: SlateEvalContext): SlateProblem[] {
   return out;
 }
 
+const kindOf = (v: SlateJson): string => (Array.isArray(v) ? "a list" : typeof v === "object" ? "an object" : typeof v === "string" ? "a string" : "a boolean");
+
+/** A value a piece plots that is not a number: the piece draws no point for it, and the agent hears what it read and,
+ * where the value holds one, the number it most likely meant. A null is a gap in the line and draws as one. */
+function plotProblems(doc: SlateDoc, read: SlateEvalContext): SlateProblem[] {
+  const out: SlateProblem[] = [];
+  const wrong = (v: SlateJson | undefined): v is Exclude<SlateJson, null | number> => v !== undefined && v !== null && typeof v !== "number";
+  const field = (v: SlateJson): string | undefined => (typeof v === "object" && v !== null && !Array.isArray(v) ? Object.keys(v).find(k => typeof v[k] === "number") : undefined);
+  const numeric = (v: SlateJson): boolean => typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v));
+  for (const [id, piece] of Object.entries(doc.pieces)) {
+    const module: SlatePieceModule | undefined = SLATE_PIECES[piece.type];
+    if (module === undefined) continue;
+    for (const [prop, spec] of Object.entries(module.props)) {
+      const raw = piece.props?.[prop];
+      if (!isSlateBinding(raw)) continue;
+      const bind = raw.bind.trim();
+      /** The binding that reads the number the wrong value holds: its one numeric field, or the number a string spells. */
+      const meant = (v: SlateJson, list: boolean): string | undefined => {
+        const key = field(v);
+        if (key !== undefined) return list ? `pluck(${bind}, '${key}')` : `${bind}.${key}`;
+        return !list && numeric(v) ? `num(${bind})` : undefined;
+      };
+      const add = (said: string, rule: string, got: SlateJson, list = false): void => {
+        const fix = meant(got, list);
+        out.push(slateProblem("R905", `${prop}={${bind}} ${said}; ${rule}${fix !== undefined ? `, like ${prop}={${fix}}` : ""}`, { piece: id, prop, ...(fix !== undefined ? { fix: `${prop}={${fix}}` } : {}) }));
+      };
+      if (spec.of === "number") {
+        const list = resolveSlateProp(raw, read);
+        const bad = Array.isArray(list) ? list.filter(wrong) : [];
+        if (bad.length > 0) add(`holds ${kindOf(bad[0]!)} in ${bad.length} of ${(list as SlateJson[]).length} places, like ${shownValue(bad[0])}, so it draws no point for them`, "a plotted list holds numbers", bad[0]!, true);
+      } else if ((spec.type === "number" || spec.type === "integer") && spec.binds === "item") {
+        const items = resolveSlateProp(piece.props?.["items"] ?? null, read);
+        const bad = Array.isArray(items) ? items.map((item, index) => resolveSlateProp(raw, { ...read, item, index })).filter(wrong) : [];
+        if (bad.length > 0) add(`read ${kindOf(bad[0]!)} on ${bad.length} of ${(items as SlateJson[]).length} rows, like ${shownValue(bad[0])}, so it draws no point for them`, "a plotted value is a number", bad[0]!);
+      } else if ((spec.type === "number" || spec.type === "integer") && spec.binds === "yes") {
+        const value = resolveSlateProp(raw, read);
+        if (wrong(value)) add(`read ${kindOf(value)}, ${shownValue(value)}, so it draws nothing`, "a plotted value is a number", value);
+      }
+    }
+  }
+  return out;
+}
+
 /** The fields a run's result fills; reading one before the run has ended reads null. */
 const RESULT_FIELDS: ReadonlySet<string> = new Set(["out", "err", "json", "exit", "lines", "ms", "endedAt", "cut", "text"]);
 
@@ -122,7 +165,7 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
   };
   const pieces = Object.keys(doc.pieces).length;
   const bound = Object.values(doc.pieces).reduce((n, p) => n + Object.values(p.props ?? {}).reduce<number>((m, v) => m + boundCount(v), 0), 0);
-  const problems = [...(ctx.problems ?? []), ...(unbound ? [] : iconProblems(doc, read))];
+  const problems = [...(ctx.problems ?? []), ...(unbound ? [] : [...iconProblems(doc, read), ...plotProblems(doc, read)])];
   const head = `slate${version}${doc.title !== undefined ? ` ${JSON.stringify(doc.title)}` : ""}, ${plural(pieces, "piece")}, ${bound} bound, ${plural(problems.length, "problem")}`;
 
   const lines: string[] = [];

@@ -2226,6 +2226,30 @@ describe("wsp verbs over the host", () => {
     expect(prompts).toEqual(["FOO for Claude Code"]);
   });
 
+  it("a run on a project here takes a model the agent installed here offers beyond wsp's table, and refuses one it does not by its own list", async () => {
+    // The claude here is newer than the table's pin: it offers Sonnet 5.5 and no longer lists Sonnet 5.
+    const described: HarnessCatalogAnswer = {
+      version: "2.1.289",
+      models: [
+        { slug: "claude-opus-5-5", label: "Opus 5.5", contextWindows: [], isDefault: true },
+        { slug: "claude-sonnet-5-5", label: "Sonnet", contextWindows: [], isDefault: false },
+      ],
+      efforts: [],
+      permissionModes: [],
+    };
+    await restartHost({ claude: ctx => ({ ...claude.adapter(ctx), probeCatalog: async () => described }), codex: probing(codex.adapter) });
+    await macProject("mac");
+    const took = await run("run", "mac", "--agent", "claude", "--model", "claude-sonnet-5-5", "--detach", "say ok");
+    expect(took.io.errors).toEqual([]);
+    expect(took.code).toBe(0);
+    expect(claude.starts.at(-1)!.model).toBe("claude-sonnet-5-5");
+    const before = claude.starts.length;
+    const refused = await run("run", "mac", "--agent", "claude", "--model", "claude-sonnet-5", "--detach", "say ok");
+    expect(refused.code).toBe(3);
+    expect(refused.io.errors[0]).toBe('wsp run: model "claude-sonnet-5" is not one claude takes; one of: Opus 5.5 (claude-opus-5-5), Sonnet (claude-sonnet-5-5); legacy: Opus 5 (claude-opus-5), Opus 4.8 (claude-opus-4-8), Opus 4.7 (claude-opus-4-7), Opus 4.6 (claude-opus-4-6), Opus 4.5 (claude-opus-4-5), Fable 5 (claude-fable-5), Sonnet 4.6 (claude-sonnet-4-6), Sonnet 4.5 (claude-sonnet-4-5)');
+    expect(claude.starts.length).toBe(before);
+  });
+
   it("an agent turned off on this computer leaves its lists, and a run naming it is refused naming the computer", async () => {
     await macProject("mac");
     expect((await run("agents", "setup", "codex", "--disable")).code).toBe(0);
