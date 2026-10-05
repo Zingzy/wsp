@@ -220,6 +220,7 @@ jobs:
   linux:
     name: Linux AppImage
     needs: [draft, daemon]
+    if: ${{ !cancelled() && needs.daemon.result == 'success' && (github.event_name != 'push' || needs.draft.result == 'success') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -260,10 +261,28 @@ jobs:
           cp "$APPIMAGE" "$APPIMAGE_STABLE"
       # The file this job ships, started once on a virtual display as its desktop entry starts it, until its window
       # has loaded its page; a library missing from the bundle or a launch that dies on boot fails the release here.
+      - name: Proof only, what this runner has
+        run: |
+          set +e
+          command -v xvfb-run
+          dpkg -s zlib1g-dev | head -2
+          ls -l /usr/lib/x86_64-linux-gnu/libz.so*
+          readelf -d "$APPIMAGE" | grep NEEDED
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"; systemctl --user is-system-running
+          unshare -Ur true && echo "unprivileged user namespaces: yes" || echo "unprivileged user namespaces: no"
+          ls -l /dev/fuse /usr/lib/x86_64-linux-gnu/libfuse.so.2; node --version
       - name: Start the AppImage once and wait for its window's page
         timeout-minutes: 5
         run: xvfb-run --auto-servernum node apps/desktop/scripts/appimage-launch.mjs "$APPIMAGE"
+      - name: Proof only, the same check on the build without libffmpeg.so fails
+        run: |
+          cp -a apps/desktop/dist/linux-unpacked /tmp/broken
+          rm /tmp/broken/libffmpeg.so
+          pnpm --filter @wsp/desktop exec electron-builder --config electron-builder.yml --linux --publish never --prepackaged /tmp/broken -c.directories.output=/tmp/broken-dist
+          if xvfb-run --auto-servernum node apps/desktop/scripts/appimage-launch.mjs /tmp/broken-dist/*.AppImage; then echo "the broken build passed the check"; exit 1; fi
+          echo "the broken build failed the check, as it should"
       - name: Attach them to the draft
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" "$APPIMAGE" "$APPIMAGE_STABLE" --clobber
