@@ -231,7 +231,7 @@ describe("in the Slate tab", () => {
   const next = () => {
     thread += 1;
     row.threadId = `m${thread}`;
-    useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {} });
+    useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {}, linking: {} });
     useRightPanelStore.setState({ byWorkspaceId: {} });
   };
 

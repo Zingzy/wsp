@@ -61,7 +61,7 @@ beforeEach(() => {
   // Each test its own thread id, so the window-lifetime engines of one test never meet the next's.
   thread += 1;
   ROW.threadId = `t${thread}`;
-  useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {} });
+  useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {}, linking: {} });
   useRightPanelStore.setState({ byWorkspaceId: {} });
 });
 afterEach(cleanup);

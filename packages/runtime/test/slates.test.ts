@@ -438,6 +438,14 @@ describe("the slate v2 host", () => {
     expect(view.asks).toMatchObject([{ run: "deploy", why: "deploy.sh changed since you allowed it, so it asks again" }]);
   });
 
+  it("keeps a link's domain the person allowed for the thread, and refuses a key that names no domain", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-domain-");
+    await rt.slates.write({ text: `<slate><column><button id="go" label="Go" onPress={open("https://example.com")} /></column></slate>` }, asThread);
+    await rt.slates.approve({ threadId, key: "domain:example.com", scope: "thread" });
+    expect((await rt.slates.get(threadId))!.approvals["domain:example.com"]).toMatchObject({ state: "allowed", cmd: "links to example.com" });
+    await expect(rt.slates.approve({ threadId, key: "domain:../x y", scope: "thread" })).rejects.toThrow(/names no domain/);
+  });
+
   it("takes five of the person's events a second, answers a resend of one it took, and refuses the sixth", async () => {
     const { rt, threadId, asThread } = await threadOn("wsp-slates-event-rate-");
     await rt.slates.write({ text: `<slate><value name="n" start={0} /><column><button id="up" label="Up" onPress={set($n, $n + 1)} /></column></slate>` }, asThread);

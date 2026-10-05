@@ -13,6 +13,60 @@ import { isRunRecord, type SlateApproval, type SlateAsk, type SlateDoc } from ".
 import { ThenCommand } from "./mcp.js";
 import { usePieceVersion } from "./SlateView.js";
 
+/** The prompt before a press opens a link to a domain this thread was not allowed to open (12, links). */
+export const LINK_WORDS = {
+  title: (domain: string) => `Open ${domain} from this slate?`,
+  always: "Always for this domain",
+  once: "Open once",
+} as const;
+
+/** The link a press would open, its domain in the title and the whole address under it, with Don't, Always for this
+ * domain and Open once. */
+export function LinkConsent({ link, onOpen, onAlways, onClose }: { link: { href: string; domain: string }; onOpen(): void; onAlways(): Promise<unknown>; onClose(): void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Dialog open onOpenChange={open => (open ? undefined : onClose())}>
+      <DialogPopup>
+        <DialogHeader>
+          <DialogTitle>{LINK_WORDS.title(link.domain)}</DialogTitle>
+        </DialogHeader>
+        <DialogPanel className="pt-1 pb-0">
+          <code data-slate-link-href className="block min-w-0 truncate font-mono text-xs text-muted-foreground" title={link.href}>
+            {link.href}
+          </code>
+        </DialogPanel>
+        <DialogFooter>
+          <Button variant="outline" disabled={busy} onClick={onClose}>
+            {CONSENT_WORDS.dont}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void onAlways().finally(() => {
+                onOpen();
+                onClose();
+              });
+            }}
+          >
+            {LINK_WORDS.always}
+          </Button>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              onOpen();
+              onClose();
+            }}
+          >
+            {LINK_WORDS.once}
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
 export const CONSENT_WORDS = {
   title: "Run this command?",
   wants: "This slate wants to run",

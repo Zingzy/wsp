@@ -3,7 +3,7 @@
 // again on every session.slate and after a gap, and folded in place on slate.state. Each thread's engine lives for
 // the window's life, so switching threads and back keeps a section's fold and a field's unsent text.
 import { create } from "zustand";
-import type { SlateJson, TurnResult } from "@wsp/protocol";
+import { slateDomainKey, slateLinkDomain, type SlateJson, type TurnResult } from "@wsp/protocol";
 import { ActionRunner, StateSender, type SlateLink } from "./actions.js";
 import { SlateEngine } from "./engine.js";
 import { isRunRecord, type SlateAsk, type SlateDoc } from "./model.js";
@@ -30,9 +30,25 @@ interface SlateStoreState {
   seen: Record<string, readonly string[] | undefined>;
   /** Each thread's latest ended turn as session.done carried it, for thread.context, thread.lastTurn and tokens. */
   lastTurn: Record<string, TurnResult | undefined>;
+  /** A link a press would open, waiting on the person's word for its domain. */
+  linking: Record<string, { href: string; domain: string } | undefined>;
 }
 
-export const useSlateStore = create<SlateStoreState>(() => ({ byThread: {}, asking: {}, seen: {}, lastTurn: {} }));
+export const useSlateStore = create<SlateStoreState>(() => ({ byThread: {}, asking: {}, seen: {}, lastTurn: {}, linking: {} }));
+
+/** Opens a link a press named: a domain the person allowed for this thread at once, any other after they say so. */
+export function openLink(threadId: string, href: string): void {
+  const domain = slateLinkDomain(href);
+  if (domain === undefined || useSlateStore.getState().byThread[threadId]?.record?.approvals[slateDomainKey(domain)]?.state === "allowed") {
+    window.open(href, "_blank", "noopener,noreferrer");
+    return;
+  }
+  useSlateStore.setState(s => ({ linking: { ...s.linking, [threadId]: { href, domain } } }));
+}
+
+export function closeLink(threadId: string): void {
+  useSlateStore.setState(s => ({ linking: { ...s.linking, [threadId]: undefined } }));
+}
 
 export function askConsent(threadId: string, asking: SlateAsking | undefined): void {
   useSlateStore.setState(s => ({ asking: { ...s.asking, [threadId]: asking } }));
@@ -81,7 +97,7 @@ function linkFor(threadId: string): SlateLink {
     writeState: values => (api === null ? gone() : api.state(threadId, values)),
     fill: text => host?.fill(threadId, text),
     pane: kind => (host === null ? false : host.openPane(host.selected().panelKey, kind)),
-    open: href => void window.open(href, "_blank", "noopener,noreferrer"),
+    open: href => openLink(threadId, href),
   };
 }
 

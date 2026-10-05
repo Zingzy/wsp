@@ -23,6 +23,7 @@ import {
   slateDependencies,
   slateEqual,
   slateNearest,
+  slateDomainKey,
   setSlateValue,
   SLATE_SOURCES,
   slateStep,
@@ -1410,6 +1411,17 @@ export function createSlates(deps: SlatesDeps): Slates {
         await serial(p.threadId, async () => {
           if (p.scope === "refuse") delete r.sendsAllowed;
           else r.sendsAllowed = deps.now();
+          await save(r);
+        });
+        return;
+      }
+      if (p.key.startsWith(slateDomainKey(""))) {
+        // A link's domain, allowed for the thread from the window's prompt; nothing runs, so once leaves nothing to keep.
+        const domain = p.key.slice(slateDomainKey("").length);
+        if (!/^[a-z0-9.-]+$/.test(domain)) throw usageRefusal(`${p.key} names no domain:`, "approve a link as domain:example.com.");
+        await serial(p.threadId, async () => {
+          if (p.scope === "thread") r.approvals[p.key] = { state: "allowed", at: deps.now(), cmd: `links to ${domain}` };
+          else if (p.scope === "refuse") delete r.approvals[p.key];
           await save(r);
         });
         return;

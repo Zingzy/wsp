@@ -50,7 +50,7 @@ describe("several commands waiting", () => {
     thread += 1;
     row.threadId = `a${thread}`;
     first.threadId = row.threadId;
-    useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {} });
+    useSlateStore.setState({ byThread: {}, asking: {}, seen: {}, lastTurn: {}, linking: {} });
     useRightPanelStore.setState({ byWorkspaceId: {} });
     const slates: SlateApi = {
       get: vi.fn(async () => ({ record: first })), state: vi.fn(async () => ({ version: 2 })), event: vi.fn(async () => ({ outcome: "done" as const, said: "" })),
