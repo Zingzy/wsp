@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, computerNameHere, placeWiring, serve, serviceManagerFor, servingHost, shimPath, startHost, stopService, systemRunner, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { DAEMON_VERSION, GET_THE_APP_WORD, HOST_WORDS, LAUNCH_ENV, STATE_SHAPE } from "@wsp/protocol";
-import { createRuntime, memoryStore, STATE_SHAPE_KEY, tokenDigest, type Runtime } from "@wsp/runtime";
+import { DAEMON_VERSION, GET_THE_APP_WORD, HOST_WORDS, LAUNCH_ENV, STATE_SHAPE, type TurnResult } from "@wsp/protocol";
+import { createRuntime, memoryStore, STATE_SHAPE_KEY, tokenDigest, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
@@ -176,13 +176,13 @@ function fakeWebDir(): string {
  * the run. The settings page is one of the surfaces behind labs, so a case that opens it turns labs on. */
 const LABS_ON = { WSP_LABS: "1" };
 
-function testRuntime(seedGolden = false, env: Record<string, string> = {}): Runtime {
+function testRuntime(seedGolden = false, env: Record<string, string> = {}, adapters: Record<string, HarnessAdapterFactory> = {}): Runtime {
   const store = memoryStore();
   if (seedGolden) void store.put("goldens", "default", GOLDEN);
   // The place wiring every host a person starts has: the key it proves is what a pairing code names and what the
   // computer taking that code holds it to, so a fixture host without one hands out a code nothing can spend.
   const statePath = join(mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-state-")), "state.json");
-  return createRuntime({ backend: stubBackend(), store, adapters: {}, env, placeLinks: placeWiring(statePath) });
+  return createRuntime({ backend: stubBackend(), store, adapters, env, placeLinks: placeWiring(statePath) });
 }
 
 function fixtureHost(): Promise<HostHandle> {
@@ -1266,6 +1266,103 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
     });
     expect(await win.locator("[data-notice]", { hasText: VERSION_LINE }).count()).toBe(0);
+  });
+
+  it("a turn that finished while the window was away is a system notification with the page's line by default, held past a collection, its click raises the window on that thread, and a click after the window closed opens it again", async () => {
+    // A harness whose turn ends when the case says, so it ends with the window hidden.
+    const ends: (() => void)[] = [];
+    const claude: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: ({ onEvent }) => {
+        const sessionId = `sess_${ends.length}`;
+        const finished = new Promise<TurnResult>(resolve =>
+          ends.push(() => {
+            const result: TurnResult = { status: "completed", text: "done" };
+            onEvent({ type: "session.start", sessionId, cwd: "/root", model: "claude-opus-5" });
+            onEvent({ type: "turn.done", sessionId, result });
+            onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+            resolve(result);
+          }),
+        );
+        return { localId: sessionId, finished, interrupt: async () => {} };
+      },
+    });
+    const runtime = testRuntime(true, {}, { claude });
+    existing = await startHost({ runtime, webDir: workspaceAsset("web"), port: 0 });
+    await seedProject(existing);
+    const first = await existing.createWorkspace("first");
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
+    const { app } = launched;
+    const win = await windowAt(app, APP_URL);
+    const threads: string[] = [];
+    for (const prompt of ["fix the cart", "fix the login"]) threads.push((await runtime.sessions.start(first.id, { prompt, harness: "claude", startedBy: "cli" })).view().threadId!);
+    await win.waitForSelector(`[data-row-id='${threadRowId(threads[1]!)}']`);
+    // Every Notification the shell shows, by a weak hold, with what it was built with and what the system said; once
+    // the collections are read, the next ones are held here too, so a refused one can still be clicked.
+    await app.evaluate(({ Notification }) => {
+      type Seen = { note: WeakRef<Electron.Notification>; title: string; body: string; silent: boolean; said?: string };
+      const seen: Seen[] = [];
+      const clickable: Electron.Notification[] = [];
+      Object.assign(globalThis, { __notes: seen, __clickable: clickable });
+      const show = Notification.prototype.show;
+      Notification.prototype.show = function (this: Electron.Notification) {
+        const at: Seen = { note: new WeakRef(this), title: this.title, body: this.body, silent: this.silent };
+        seen.push(at);
+        if ((globalThis as { __hold?: boolean }).__hold === true) clickable.push(this);
+        this.on("show", () => (at.said = "shown"));
+        this.on("failed", (_event, error) => (at.said = error));
+        show.call(this);
+      };
+    });
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach(w => w.hide()));
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(w => w.isFocused()))).toBe(false);
+    ends[0]!();
+    ends[1]!();
+    type Seen = { title: string; body: string; silent: boolean; said?: string; alive: boolean };
+    const notes = (): Promise<Seen[]> =>
+      app.evaluate(async () => {
+        const gc = process.getBuiltinModule("node:vm").runInNewContext("gc") as () => void;
+        for (let i = 0; i < 3; i++) {
+          await new Promise(resolve => setImmediate(resolve));
+          gc();
+        }
+        return (globalThis as unknown as { __notes: { note: WeakRef<object>; title: string; body: string; silent: boolean; said?: string }[] }).__notes.map(({ note, ...rest }) => ({ ...rest, alive: note.deref() !== undefined }));
+      });
+    await app.evaluate(() => process.getBuiltinModule("node:v8").setFlagsFromString("--expose-gc"));
+    const said = await vi.waitFor(
+      async () => {
+        const seen = await notes();
+        expect(seen.map(n => n.title)).toEqual(["fix the cart finished", "fix the login finished"]);
+        expect(seen.every(n => n.said !== undefined)).toBe(true);
+        return seen;
+      },
+      { timeout: 15_000, interval: 200 },
+    );
+    // What macOS answered, which this case reads and does not judge: a bundle with no Developer ID is refused, and the
+    // shell says so on its log. One it showed is held past the collections; one it refused is let go.
+    console.error(`the system said: ${said.map(n => `${n.title} / ${n.body}: ${n.said}`).join(" | ")}`);
+    expect(said.map(n => n.silent)).toEqual([true, true]);
+    for (const n of said) expect(n.alive).toBe(n.said === "shown");
+    for (const n of said) if (n.said !== "shown") expect(launched.said).toContain(`notification not shown: ${n.said}`);
+
+    // A second turn on each, then a click on the older line: the window comes back and the page opens the thread that
+    // line named, not the one said after it.
+    await app.evaluate(() => Object.assign(globalThis, { __hold: true }));
+    for (const [i, thread] of threads.entries()) await runtime.sessions.start(first.id, { prompt: `again ${i}`, thread, harness: "claude", startedBy: "cli" });
+    ends[2]!();
+    ends[3]!();
+    await vi.waitFor(async () => expect(await app.evaluate(() => (globalThis as unknown as { __clickable: unknown[] }).__clickable.length)).toBe(2), { timeout: 15_000, interval: 200 });
+    await app.evaluate(() => (globalThis as unknown as { __clickable: Electron.Notification[] }).__clickable[0]!.emit("click"));
+    await vi.waitFor(async () => expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(w => w.isVisible()))).toBe(true), { timeout: 10_000, interval: 100 });
+    await win.waitForSelector(`[data-row-id='${threadRowId(threads[0]!)}'][data-active='true']`, { timeout: 10_000 });
+
+    // The window closed, as a Mac closes it to the menu bar, and a held notification clicked after: Electron throws on
+    // the destroyed window, so the app opens a window again instead.
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach(w => w.close()));
+    await vi.waitFor(() => expect(appWindows(app)).toHaveLength(0), { timeout: 10_000, interval: 100 });
+    await app.evaluate(() => (globalThis as unknown as { __clickable: Electron.Notification[] }).__clickable[1]!.emit("click"));
+    await windowAt(app, APP_URL);
+    expect(launched.said.filter(line => /destroyed|uncaught/i.test(line))).toEqual([]);
   });
 
   it("attaches to a host serving a custom home when that home is named on its launch, with no port hint", async () => {

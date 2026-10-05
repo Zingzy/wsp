@@ -7,15 +7,15 @@ import { NEEDS_YOU, oneLine, threadFinishedLine, threadStoppedLine, workspaceAwa
 import { notifyBy, type GeneralPreferences } from "./general-prefs.js";
 import { planAlertLine, type PlanAlert } from "./plan-alerts.js";
 
-/** What a click on a line opens: a computer's setup at the step it speaks of. Absent opens whatever the page said
- * last. */
-export const OutsideOpen = z.object({ computer: z.string(), step: z.string().optional() });
-export type OutsideOpen = z.infer<typeof OutsideOpen>;
-
 /** One moment said outside the app: its title, its line, whether a notification shows it, and whether it makes a
- * sound, which with no notification is the sound alone. */
-export const OutsideLine = z.object({ title: z.string(), body: z.string(), show: z.boolean(), sound: z.boolean(), open: OutsideOpen.optional() });
+ * sound, which with no notification is the sound alone. The id is the page's own for the line, handed back on a
+ * click so the click opens what that line was about and not whatever was said after it. */
+export const OutsideLine = z.object({ title: z.string(), body: z.string(), show: z.boolean(), sound: z.boolean(), id: z.string().optional() });
 export type OutsideLine = z.infer<typeof OutsideLine>;
+
+/** How many lines the shell holds a notification for and the page holds a click's opener for, one number for both so
+ * neither keeps one the other has let go; a click on an older line only raises the window. */
+export const OUTSIDE_HELD = 50;
 
 /** The moments said outside the app, each with what its line is made of. */
 export type OutsideMoment =
@@ -28,9 +28,6 @@ export type OutsideMoment =
   | { kind: "setupFailed"; computer: string; said: string }
   | { kind: "setupNeedsYou"; computer: string; what: string }
   | { kind: "setupReady"; computer: string; missed?: string };
-
-/** A setup's line opens that computer's setup when clicked. */
-const opens = (line: OutsideLine | undefined, computer: string): OutsideLine | undefined => (line === undefined ? undefined : { ...line, open: { computer } });
 
 /** What a setup's three moments say. */
 export const setupFailedLine = (computer: string): string => `${computer}: setup failed`;
@@ -57,10 +54,10 @@ export function outsideLine(moment: OutsideMoment, choices: Pick<GeneralPreferen
     case "plan":
       return said(choices.planAlerts ? { show: true, sound: false } : undefined, planAlertLine(moment.label, moment.alert), "");
     case "setupFailed":
-      return opens(said(notifyBy(choices.notifyNeeds), setupFailedLine(moment.computer), oneLine(moment.said)), moment.computer);
+      return said(notifyBy(choices.notifyNeeds), setupFailedLine(moment.computer), oneLine(moment.said));
     case "setupNeedsYou":
-      return opens(said(notifyBy(choices.notifyNeeds), NEEDS_YOU, setupNeedsYouLine(moment.computer, moment.what)), moment.computer);
+      return said(notifyBy(choices.notifyNeeds), NEEDS_YOU, setupNeedsYouLine(moment.computer, moment.what));
     case "setupReady":
-      return opens(said(notifyBy(choices.notifyDone), setupReadyLine(moment.computer, moment.missed), ""), moment.computer);
+      return said(notifyBy(choices.notifyDone), setupReadyLine(moment.computer, moment.missed), "");
   }
 }

@@ -10,7 +10,7 @@ describe("the preferences record", () => {
     expect(preferencesFrom({})).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom({ theme: "sepia" })).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom("nonsense")).toEqual(DEFAULT_PREFERENCES);
-    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "off", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask", labs: false });
+    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "notify", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask", labs: false });
   });
 
   it("a stored record keeps what it has and takes the defaults for the rest", () => {
@@ -19,11 +19,11 @@ describe("the preferences record", () => {
 
   it("a patch lands field by field, a null width clears the width, and the zoom lands per workspace, a null entry dropping that workspace's", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { theme: "dark", sidebarWidth: 300, terminalZoom: { ws_a: 2 } });
-    expect(one).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "off", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask", labs: false });
+    expect(one).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "notify", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask", labs: false });
     const two = applyPreferencesPatch(one, { terminalZoom: { ws_b: -1 } });
     expect(two.terminalZoom).toEqual({ ws_a: 2, ws_b: -1 });
     const three = applyPreferencesPatch(two, { sidebarWidth: null, terminalZoom: { ws_a: null } });
-    expect(three).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "off", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask", labs: false });
+    expect(three).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "notify", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask", labs: false });
     expect(applyPreferencesPatch(one, {})).toEqual(one);
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
   });
@@ -244,7 +244,7 @@ describe("keeping the computer awake while threads work", () => {
 
 describe("the General choices on the preferences record", () => {
   it("each takes its default on a record that names none, the owner's ruling among them: a finished thread says nothing", () => {
-    expect(preferencesFrom({ theme: "dark" })).toMatchObject({ sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "off", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask" });
+    expect(preferencesFrom({ theme: "dark" })).toMatchObject({ sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "notify", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", newThreadIn: "ask" });
     const { sendWith: _s, notifyDone: _n, onQuit: _q, newThreadIn: _t, ...older } = DEFAULT_PREFERENCES;
     expect(Preferences.parse(older)).toEqual(DEFAULT_PREFERENCES);
   });

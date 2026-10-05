@@ -326,16 +326,16 @@ describe("General", () => {
     expect(descriptionOf("send-with")).toBe("The other key makes a new line. ⌘ on a Mac, Ctrl elsewhere.");
     expect(descriptionOf("mid-turn")).toBe("Queue waits for the turn to end; steer hands it to the agent now.");
     expect(descriptionOf("notify-needs")).toBe("A question, a permission prompt, a sign-in.");
-    expect(descriptionOf("notify-done")).toBe("Off keeps ten running threads from pinging you ten times.");
+    expect(descriptionOf("notify-done")).toBe("A thread you or the command line started; one an agent started reports to that agent.");
     expect(descriptionOf("plan-alerts")).toBe("At 70% and 90% of a window, once each, and when an account is blocked.");
     expect(descriptionOf("new-thread-in")).toBe("Ask every time lists your projects before a new thread opens.");
     expect(descriptionOf("settle-after")).toBe("A read thread moves to Settled once it has been quiet this long.");
     expect(descriptionOf("ask-delete")).toBe("A workspace with unpushed work always asks.");
-    // The defaults: Enter, Queue, notify and sound for a need, nothing for a finish, alerts on, two hours, asks.
+    // The defaults: Enter, Queue, notify and sound for a need, a silent notification for a finish, alerts on, two hours, asks.
     const checked = (k: string) => document.querySelector(`[data-k=${k}] [data-checked]`)?.textContent;
     expect([checked("send-with"), checked("mid-turn")]).toEqual(["Enter", "Queue"]);
     const said = (k: string) => document.querySelector(`[data-settings-page] [data-k=${k}]`)?.textContent;
-    expect([said("notify-needs"), said("notify-done"), said("new-thread-in"), said("settle-after")]).toEqual(["Notify and sound", "Off", "Ask every time", "2 hours"]);
+    expect([said("notify-needs"), said("notify-done"), said("new-thread-in"), said("settle-after")]).toEqual(["Notify and sound", "Notify", "Ask every time", "2 hours"]);
     expect(document.querySelector("[data-k=plan-alerts]")!.getAttribute("aria-checked")).toBe("true");
     expect(document.querySelector("[data-k=ask-delete]")!.getAttribute("aria-checked")).toBe("true");
   });
@@ -394,8 +394,8 @@ describe("General", () => {
   });
 
   it("puts an arrow on each row off its default, and the arrow writes that one field back", async () => {
-    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>, { ...DEFAULT_PREFERENCES, labs: false, sendWith: "mod-enter", notifyDone: "notify", newThreadIn: "current", settleAfter: "1d", askDelete: false });
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sendWith: "mod-enter", notifyDone: "notify", newThreadIn: "current", settleAfter: "1d", askDelete: false } });
+    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>, { ...DEFAULT_PREFERENCES, labs: false, sendWith: "mod-enter", notifyDone: "notify-sound", newThreadIn: "current", settleAfter: "1d", askDelete: false });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sendWith: "mod-enter", notifyDone: "notify-sound", newThreadIn: "current", settleAfter: "1d", askDelete: false } });
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
     const arrowed = [...document.querySelectorAll("[data-settings-page] [data-k=row-reset]")].map(b => b.closest("[data-settings-row]")!.getAttribute("data-settings-row"));
