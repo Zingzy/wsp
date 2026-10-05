@@ -10,7 +10,7 @@ import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTit
 import { RUNS, type SlateEngine } from "./engine.js";
 import { cn } from "../lib/utils.js";
 import { isRunRecord, type SlateApproval, type SlateAsk, type SlateDoc } from "./model.js";
-import { ThenCommand } from "./mcp.js";
+import { AskFiles, AskWhy, ThenCommand } from "./mcp.js";
 import { usePieceVersion } from "./SlateView.js";
 
 /** The prompt before a press opens a link to a domain this thread was not allowed to open (12, links). */
@@ -144,6 +144,7 @@ export function CommandBody({ ask, cadence, lines }: { ask: Extract<SlateAsk, { 
         {ask.cmd}
       </pre>
       <ThenCommand then={ask.then} />
+      <AskFiles files={ask.files} />
       <p data-slate-consent-cadence className="text-foreground">
         {cadence}
       </p>
@@ -172,6 +173,7 @@ export function CommandBody({ ask, cadence, lines }: { ask: Extract<SlateAsk, { 
       <p data-slate-consent-where className="text-foreground">
         on {ask.computer}, in {ask.folder}, {ask.timeoutS} s at most
       </p>
+      <AskWhy why={ask.why} />
     </>
   );
 }

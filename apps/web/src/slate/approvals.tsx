@@ -9,7 +9,7 @@ import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTit
 import { Switch } from "../components/ui/switch.js";
 import { cn } from "../lib/utils.js";
 import { CommandBody, CONSENT_WORDS } from "./consent.js";
-import { ArgList, MCP_WORDS, ThenCommand } from "./mcp.js";
+import { ArgList, AskFiles, AskWhy, MCP_WORDS, ThenCommand } from "./mcp.js";
 import type { SlateApproval, SlateAsk } from "./model.js";
 
 export type BatchAsk = Extract<SlateAsk, { kind: "cmd" | "server" }>;
@@ -46,12 +46,14 @@ function ServerRow({ ask, cadence }: { ask: Extract<SlateAsk, { kind: "server" }
       </p>
       <ArgList args={ask.args} />
       <ThenCommand then={ask.then} />
+      <AskFiles files={ask.files} />
       <p data-slate-consent-cadence className="text-muted-foreground">
         {cadence}
       </p>
       <p data-slate-consent-where className="text-foreground">
         on {ask.computer}
       </p>
+      <AskWhy why={ask.why} />
       <p className="text-muted-foreground">
         {ask.tools.length === 0 ? null : <>{MCP_WORDS.lists(ask.server, ask.tools.length)}. </>}
         {MCP_WORDS.covers(ask.server)}

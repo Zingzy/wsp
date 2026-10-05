@@ -94,6 +94,25 @@ describe("several commands waiting", () => {
     expect(link.querySelector("[data-slate-consent-where]")!.textContent).toBe("on zingzy's MacBook Pro, in ~/spoo, 300 s at most");
   });
 
+  it("shows each file a run reads, whole, and why it waits, on the one-command, several-commands and server sheets", async () => {
+    const parse: SlateAsk = { ...DISK, cmd: 'python3 "$SLATE_DIR/parse.py"', files: { "parse.py": "import json\nprint(json.dumps({}))" }, why: "parse.py changed since you allowed it" };
+    const shaped: SlateAsk = { ...(INBOX as Extract<SlateAsk, { kind: "server" }>), then: 'python3 "$SLATE_DIR/shape.py"', files: { "shape.py": "print('shaped')" } };
+    const shows = (at: Element, file: string, text: string, why: string) => {
+      expect(at.querySelector(`[data-slate-consent-file="${file}"] pre`)!.textContent).toBe(text);
+      expect(at.querySelector("[data-slate-consent-why]")!.textContent).toBe(why);
+    };
+    open(record(DOC, held("disk"), [parse]));
+    shows(await screen.findByRole("dialog", { name: "Run this command?" }), "parse.py", "import json\nprint(json.dumps({}))", "Parse.py changed since you allowed it.");
+    cleanup();
+    open(record(DOC, held("inbox"), [shaped]));
+    shows(await screen.findByRole("dialog", { name: "Let this slate use zoho-mail?" }), "shape.py", "print('shaped')", "Needs your approval.");
+    cleanup();
+    open(record(DOC, held("disk", "inbox"), [parse, shaped]));
+    const sheet = await screen.findByRole("dialog", { name: "Let this slate run these 2?" });
+    shows(sheet.querySelector('[data-slate-approval="k-disk"]')!, "parse.py", "import json\nprint(json.dumps({}))", "Parse.py changed since you allowed it.");
+    shows(sheet.querySelector('[data-slate-approval="mcp:zoho-mail"]')!, "shape.py", "print('shaped')", "Needs your approval.");
+  });
+
   it("Allow all writes each command's own approval for the thread, the same call one sheet at a time makes", async () => {
     const slates = open(record(DOC, held("link", "disk"), [LINK, DISK]));
     const sheet = await screen.findByRole("dialog", { name: "Run these 2 commands?" });
