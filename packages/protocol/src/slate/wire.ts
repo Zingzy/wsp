@@ -211,8 +211,8 @@ export type SlateOpName = keyof typeof SLATE_OPS;
 export const SlatesGetAnswer = z.object({ slate: SlateView.nullable() });
 export type SlatesGetAnswer = z.infer<typeof SlatesGetAnswer>;
 
-/** What every write answers: the version stored and the sketch as text. */
-/** waiting: the runs held for the person's approval, which is no fault of the slate's, so never among its problems. */
+/** What every write answers: the version stored and the sketch as text. waiting is the runs held for the person's
+ * approval, which is no fault of the slate's, so never among its problems. */
 export const SlateWriteAnswer = z.object({ version: z.number().int(), text: z.string(), warnings: z.array(SlateWireProblem), problems: z.array(SlateWireProblem), waiting: z.array(z.string()).optional() });
 export type SlateWriteAnswer = z.infer<typeof SlateWriteAnswer>;
 
