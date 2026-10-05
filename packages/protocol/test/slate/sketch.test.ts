@@ -89,8 +89,12 @@ describe("the catalog", () => {
   it("keeps the index near 1,000 tokens and its example valid", () => {
     // What ago and until print and what a chart's x takes, after agents guessed both, took it from 1,060 to 1,090;
     // tool= runs on the first page and what a formula holds, after agents missed both, to 1,110; every enum's
-    // values and every required mark, after 13 cells guessed them (ruling 8), to 1,310.
-    expect(slateTokens(slateCatalog())).toBeLessThan(1310);
+    // values and every required mark, after 13 cells guessed them (ruling 8), to 1,310; what turns held off, to 1,320.
+    expect(slateTokens(slateCatalog())).toBeLessThan(1320);
+    expect(slateCatalog()).toContain(`held is a sentence that disables: bind it to a condition; "" or false enables.`);
+    expect(slateCatalog("patch")).toContain("version, which every write and read answers, counts the slate's edits and is what if_version takes");
+    expect(slateCatalog("patch")).toContain("check with press walks a press and its <when> chain on a copy: nothing runs and nothing is sent");
+    expect(slateCatalog("output")).toContain("how many of the newest lines show, out then err, 8 by default");
     expect(slateCatalog()).toContain("then tool resource>");
     expect(slateCatalog()).toContain("with operators, a ? b : c, [lists], {records} and functions, never methods or =>.");
     expect(slateCatalog("pipes")).toBe(slateCatalog("steps"));

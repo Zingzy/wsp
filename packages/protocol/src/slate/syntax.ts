@@ -1093,7 +1093,9 @@ export function printSlate(doc: SlateDoc): string {
     const parts = [`<${p.type}`, `id="${id}"`];
     for (const name of [...new Set(order)]) {
       if (!(name in props) || itemProps.has(name) || ATTR_ORDER_LAST.includes(name)) continue;
-      parts.push(attrText(name, props[name]!));
+      const v = props[name]!;
+      // A run or value named by a path prop reads as the formula it is: quotes would say the literal text "$tests".
+      parts.push(spec?.props[name]?.type === "path" && typeof v === "string" && v.startsWith("$") ? `${name}={${v}}` : attrText(name, v));
     }
     for (const [ev, steps] of Object.entries(p.on ?? {})) if (steps !== undefined) parts.push(stepsAttr(`on${ev[0]!.toUpperCase()}${ev.slice(1)}`, steps));
     if (p.fallback !== undefined) parts.push(typeof p.fallback === "string" ? `fallback=${quoteAttr(p.fallback)}` : `fallback={${exprString(p.fallback.text)}}`);

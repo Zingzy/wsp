@@ -383,7 +383,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   output: {
     type: "output", level: "core", purpose: "A run's output as it streams, with its state and a Cancel.", holdsChildren: false,
-    props: { run: { type: "path", binds: "no", required: true }, label: str(), lines: { type: "integer", binds: "no", min: 3, max: 40 }, wrap: flag() },
+    props: { run: { type: "path", binds: "no", required: true }, label: str(), lines: { type: "integer", binds: "no", min: 3, max: 40, about: "how many of the newest lines show, out then err, 8 by default" }, wrap: flag() },
     items: {}, events: [],
     sketch: v => {
       const name = shown(v.raw("run") as SlateJson);

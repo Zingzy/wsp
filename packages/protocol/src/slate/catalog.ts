@@ -21,7 +21,7 @@ export function slateTokens(text: string): number {
 export const SLATE_RULES: readonly string[] = [
   "One <slate>, one root piece, declarations beside it. Give an id to a piece you will change.",
   "prop=\"text\" is literal; prop={formula} reads live data or $values with operators, a ? b : c, [lists], {records} and functions, never methods or =>. A text child with {holes} fills a sentence.",
-  "Props are meaning, never style. held is a sentence that disables: bind it to a condition.",
+  "Props are meaning, never style. held is a sentence that disables: bind it to a condition; \"\" or false enables.",
   "A list binds to items; item and index read the row.",
   "A press reaches you only through send(\"literal text\", $path); <when> chains run without you.",
   "Small edit: patch by id, <props id=\"price\" value={$spot.json.v} />; bigger: resend the whole slate with if_version.",
@@ -182,7 +182,9 @@ const PATCH = `patch: elements without <slate>, sent as text to slate_write; one
 <remove id="new" />: removes a piece and what it holds. <remove name="hist" /> removes a declaration.
 <value name="hist" start={[]} />, <run ...>, <derived ...>, <file name="x.py">...</file>: adds the declaration or replaces the one of that name.
 <clear /> empties the slate; <undo /> goes back one write. Each stands alone in its write.
-For anything bigger, resend the whole <slate> with if_version set to the version you read.`;
+For anything bigger, resend the whole <slate> with if_version set to the version you read.
+version, which every write and read answers, counts the slate's edits and is what if_version takes; wsp/2 and schema 2 name the format.
+check with press walks a press and its <when> chain on a copy: nothing runs and nothing is sent, and it says what would start.`;
 
 function functionsEntry(): string {
   const shown = new Set(["percent", "pct", "tokens", "usd", "duration", "ago", "until", "date", "plural", "word", "short", "num", "json", "contains", "orElse", "len", "first", "pluck"]);

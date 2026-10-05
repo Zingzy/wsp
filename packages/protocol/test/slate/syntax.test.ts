@@ -213,3 +213,12 @@ describe("the catalog's patch entry", () => {
     expect(slateCatalog()).toContain("runs, patch, functions");
   });
 });
+
+describe("the printed slate", () => {
+  it("prints a run a piece names as the formula it is, in braces, and reads it back the same", () => {
+    const doc = parseSlate(`<slate><run name="tests" cmd="echo" /><output run={$tests} /></slate>`).document!;
+    const printed = printSlate(doc);
+    expect(printed).toContain("run={$tests}");
+    expect(parseSlate(printed).document!.pieces).toEqual(doc.pieces);
+  });
+});
