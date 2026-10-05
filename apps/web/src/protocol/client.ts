@@ -588,8 +588,9 @@ export interface Api {
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
    * options; takes the runtime's session id, as interruptSession does. answered means the tool call it blocks ran or
    * was refused and the closing event is on the wire; every other outcome closed nothing here. Optional so fixtures
-   * whose harness raises no prompt need not fake it; without it a prompt row's options do nothing. */
-  answerPermission?(sessionId: string, askId: string, optionId: string): Promise<SessionAnswerOutcome>;
+   * whose harness raises no prompt need not fake it; without it a prompt row's options do nothing. A deny may carry the
+   * person's reason, what the agent should do instead. */
+  answerPermission?(sessionId: string, askId: string, optionId: string, reason?: string): Promise<SessionAnswerOutcome>;
   /** Moves the session's running turn to another access mode, from its next tool call on; takes the runtime's session
    * id, as interruptSession does. set means the turn in front of the person now runs at the picked mode; every other
    * outcome moved nothing, and the pick reaches the agent with the next message instead. Optional so fixtures without
@@ -929,8 +930,8 @@ export function makeApi(c: ProtocolClient): Api {
       SessionInterruptOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.interrupt", { sessionId })).outcome),
     steerSession: async (sessionId, prompt, requestId) =>
       SessionSteerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.steer", { sessionId, prompt, requestId })).outcome),
-    answerPermission: async (sessionId, askId, optionId) =>
-      SessionAnswerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.answer", { sessionId, askId, optionId })).outcome),
+    answerPermission: async (sessionId, askId, optionId, reason) =>
+      SessionAnswerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.answer", { sessionId, askId, optionId, ...(reason === undefined ? {} : { reason }) })).outcome),
     setSessionAccess: async (sessionId, permissionMode) =>
       SessionAccessOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.access", { sessionId, permissionMode })).outcome),
     // Parsed, not trusted: an outcome outside the enum must not read as renamed.
