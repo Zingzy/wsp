@@ -799,8 +799,9 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
         finish({ state: ok ? "done" : "failed", ...(why !== undefined ? { why } : {}), exit, err, ...(json !== undefined ? { json } : {}) });
         return;
       }
-      // A then gets the raw result and nothing the command was given (12): on a box, its login and SLATE_DIR alone.
-      const shaping = road === undefined ? reshape(threadId, decl.then, raw, cwd, timeout) : road.reshape({ cmd: decl.then, input: raw, cwd, env: { SLATE_DIR: road.slateDir }, timeoutS: timeout, scrub: text => secrets.scrub(threadId, text) });
+      // A then gets the raw result and nothing the command was given (12): on a box, its login and SLATE_DIR alone. It
+      // has 60 s whatever the command's own timeout, as a tool run's then has.
+      const shaping = road === undefined ? reshape(threadId, decl.then, raw, cwd) : road.reshape({ cmd: decl.then, input: raw, cwd, env: { SLATE_DIR: road.slateDir }, timeoutS: DEFAULT_TIMEOUT_S, scrub: text => secrets.scrub(threadId, text) });
       l.reshaping = shaping;
       void shaping.done.then(answer => {
         if (l.gen !== gen) return;
