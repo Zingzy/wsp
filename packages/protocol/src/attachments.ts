@@ -10,7 +10,6 @@
 // same four everywhere, so they sit here once and the adapters read them.
 import { z } from "zod";
 import type { AttachmentRoad } from "./adapter-port.js";
-import { GUEST_WSP_HOME } from "./daemon-contract.js";
 import { fmtBytes } from "./format.js";
 import { shellQuote } from "./shell-quote.js";
 
@@ -57,8 +56,8 @@ export function attachmentBytes(image: { bytes: string }): number {
 }
 
 /** One file of a person's message as a transcript keeps it: what it was, what it weighed and what it was called.
- * The bytes are not here. They go to the machine and nowhere else, so a transcript costs the same however large the
- * file was, and none of it is written to this computer's disk. */
+ * The bytes are not here, so a transcript costs the same however large the file was; the host keeps an image's bytes
+ * beside it, under attachmentKey, until its thread goes, and a file's go to the machine alone. */
 export const AttachmentRecord = z.object({
   mediaType: z.string(),
   bytes: z.number().int().nonnegative(),
@@ -147,24 +146,29 @@ export function filesBlocked(files: readonly AttachmentRecord[], road: Attachmen
   return filesRefusal(files) ?? (road === undefined && files.some(f => isImage(f.mediaType)) ? noImagesLine(harness) : null);
 }
 
-/** Where one thread's image copies live on a machine: every send of that thread has a folder under this one, so a
- * thread's copies go together and removing the thread removes all of them at once. Under the folder the daemon
- * inside a machine keeps its own files in, which on a computer somebody joined is the workspace's own. */
-export function threadImagesDir(threadId: string): string {
-  return `${GUEST_WSP_HOME}/threads/${threadId}/images`;
-}
-
 /** A folder name that is one path segment and nothing else. A request id is a string a client chose, and it travels
  * into a path on a machine, so one shaped like anything else is not used. */
 const PLAIN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-/** Where one send's images live on a machine: its own folder under its thread's, named by the request id the client
- * minted for it, so two sends on one thread never write to the same path and the first turn cannot be handed the
- * second's picture. `minted` stands in when the send carried no request id, and when the one it carried is not a
- * plain id, since that string would otherwise be a path of the client's choosing. */
-export function turnImagesDir(threadId: string, requestId: string | undefined, minted: string): string {
-  const name = requestId !== undefined && PLAIN_ID.test(requestId) ? requestId : minted;
-  return `${threadImagesDir(threadId)}/${name}`;
+/** What the host keeps one image of a message under, so any client draws it again after a restart, whoever sent it:
+ * the thread, the request id the transcript's start carries and the image's place in the message. None where the
+ * request id or the thread id is not a plain id, since no client could name that send by a path-safe key. */
+export function attachmentKey(threadId: string, requestId: string | undefined, index: number): string | undefined {
+  return requestId !== undefined && PLAIN_ID.test(requestId) && PLAIN_ID.test(threadId) ? `${threadId}.${requestId}.${index}` : undefined;
+}
+
+/** One image of a message as the host kept it: its type and the bytes, base64, as the wire carried them. */
+export const KeptAttachment = z.object({ mediaType: z.string(), bytes: z.string() });
+export type KeptAttachment = z.infer<typeof KeptAttachment>;
+
+/** Where one send's images land for an agent that reads them as files: a folder of their own beside the send's
+ * files in the folder the thread works in, which every kind of machine has, where a computer the person owns has no
+ * /root to land under. Named by the request id the client minted, so two sends on one thread never write to the
+ * same path and the first turn cannot be handed the second's picture, and the turn's end removes it leaving nothing
+ * empty behind. `minted` stands in when the send carried no request id, and when the one it carried is not a plain
+ * id, since that string would otherwise be a path of the client's choosing. */
+export function turnImagesDir(folder: string, threadId: string, requestId: string | undefined, minted: string): string {
+  return `${threadFilesDir(folder, threadId)}/${plainOr(requestId, minted)}.images`;
 }
 
 /** Where one image of a message lands inside its send's folder: named by its place in the message and its own type,
