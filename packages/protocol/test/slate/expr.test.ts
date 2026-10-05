@@ -139,3 +139,11 @@ describe("ago and until", () => {
     expect(evaluateSlateExpression(`until(${now + 240_000})`, ctx)).toBe("in 4m");
   });
 });
+
+describe("infinity", () => {
+  it("never leaves the evaluator: a literal past the largest number is refused, and an overflowing call is null", () => {
+    expect(parseSlateExpression("[1e999]").errors.map(p => p.code)).toEqual(["X400"]);
+    expect(evaluateSlateExpression("percent(1e307)", { resolve: () => undefined })).toBeNull();
+    expect(evaluateSlateExpression("[percent(1e307), 1]", { resolve: () => undefined })).toEqual([null, 1]);
+  });
+});

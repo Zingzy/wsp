@@ -336,7 +336,11 @@ class Parser {
   private primary(): SlateExpr {
     const t = this.next();
     const at = t.at + this.base;
-    if (t.t === "num") return { k: "lit", v: Number(t.v), at };
+    if (t.t === "num") {
+      const v = Number(t.v);
+      if (!Number.isFinite(v)) throw new Fault("X400", `${t.v} is past the largest number, at column ${t.at + 1}`, t.at);
+      return { k: "lit", v, at };
+    }
     if (t.t === "str") return { k: "lit", v: t.v, at };
     if (t.t === "tpl") {
       const parts: SlateTemplatePart[] = [];
@@ -607,7 +611,7 @@ const elemOf = (args: SlateType[]): SlateType => args[0]?.of ?? T.any;
 
 const F: Record<string, FnSpec> = slateTable<FnSpec>({
   percent: { min: 1, max: 2, returns: ret(T.str), numberFirst: true, sig: "percent(fraction, places?)", example: "percent(thread.context.used / thread.context.window)",
-    fn: ([x, p]) => { if (!isNum(x)) return null; const v = x * 100; return `${v.toFixed(places(p, Math.abs(v) < 10 && v !== 0 ? 1 : 0))}%`; } },
+    fn: ([x, p]) => { const v = isNum(x) ? finite(x * 100) : null; if (v === null) return null; return `${v.toFixed(places(p, Math.abs(v) < 10 && v !== 0 ? 1 : 0))}%`; } },
   pct: { min: 1, max: 2, returns: ret(T.str), numberFirst: true, sig: "pct(points, places?)", example: "pct(usage.week.percent)",
     fn: ([x, p]) => (isNum(x) ? `${x.toFixed(places(p, 0))}%` : null) },
   tokens: { min: 1, max: 1, returns: ret(T.str), numberFirst: true, sig: "tokens(n)", example: "tokens(thread.context.free)", fn: ([x]) => (isNum(x) ? fmtTokens(x) : null) },
@@ -927,10 +931,10 @@ function runPipe(node: Extract<SlateExpr, { k: "pipe" }>, env: Env): Val {
   return cur;
 }
 
-/** A text no formula may build past: the most the slate's values hold. */
+/** What a call or a template may hand on: no text past the most the slate's values hold, and no infinity. */
 function heldText(v: Val): Val {
   if (typeof v === "string" && v.length > SLATE_LIMITS.valuesBytes) throw new OverBudget();
-  return v;
+  return typeof v === "number" ? finite(v) : v;
 }
 
 function run(node: SlateExpr, env: Env): Val {
