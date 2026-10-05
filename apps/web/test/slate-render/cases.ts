@@ -19,4 +19,7 @@ export const RENDER_CASES: Readonly<Record<string, { text: string; values?: Reco
   form: {
     text: `<slate><value name="url" start="" /><value name="slug" start="" /><column><section title="New link"><input id="url" label="Long URL" value={$url} placeholder="https://example.com/some/long/path" mono /><input id="slug" label="Alias" value={$slug} placeholder="optional, 3-16 letters" /></section></column></slate>`,
   },
+  "row-figure": {
+    text: `<slate><value name="go" start={0} /><column><section title="Inbox"><row id="figure-row"><number id="unread" label="Unread" value={12} /><text id="ago">32s ago</text><button id="refresh" label="Refresh" onPress={set($go, 1)} /></row><row id="ring-row"><ring id="tests" label="Tests run" value={3} max={10} /><facts id="state"><fact label="State" value="idle" /></facts></row></section></column></slate>`,
+  },
 };

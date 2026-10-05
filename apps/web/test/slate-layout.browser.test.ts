@@ -109,4 +109,16 @@ describe.skipIf(renderSkipped !== undefined)("the slate's layout in Chromium", (
     }
   });
 
+  it("sets a text beside a number on the figure's line, and a facts list after a ring at the row's end", async () => {
+    const page = await open("row-figure", 600);
+    const at = await page.evaluate(() => {
+      const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+      const figure = [...document.querySelectorAll('[data-slate-piece="unread"] span')].find(s => s.textContent === "12")!.getBoundingClientRect();
+      return { figureBottom: figure.bottom, agoBottom: r('[data-slate-piece="ago"]').bottom, factsRight: r('[data-slate-piece="state"]').right, rowRight: r('[data-slate-piece="refresh"]').right };
+    });
+    expect(Math.abs(at.agoBottom - at.figureBottom)).toBeLessThan(6);
+    // The Refresh button above ends on the card's inset, where a row's end is.
+    expect(Math.abs(at.factsRight - at.rowRight)).toBeLessThan(1);
+    await page.close();
+  });
 });
