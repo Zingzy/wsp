@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseCatalogProbe } from "@wsp/adapter-claude";
 import { CLAUDE_CODE, THREAD_AGENTS } from "@wsp/catalog";
-import { HarnessCatalog, catalogSourceLine, effortsFor, everyModel, listedPick, markedDefault, modelOf, noModelsLine, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
+import { HarnessCatalog, catalogSourceLine, effortsFor, exitClassOf, everyModel, listedPick, markedDefault, modelOf, noModelsLine, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "../src/harness-catalog.js";
 
 /** The agents whose models no table can list: the machine's own providers, or an account's. */
@@ -306,6 +306,17 @@ describe("startPicks", () => {
     expect(() => startPicks(claude, { permissionMode: "yolo" }, true)).toThrow(
       'access mode "yolo" is not one claude takes; one of: Default (default), Accept edits (acceptEdits), Bypass (bypassPermissions), Auto (auto), Manual (manual), Don\'t ask (dontAsk)',
     );
+    // A usage refusal where it is born, so the start's own check exits 3 as the checks before it do.
+    const thrown = (pick: () => unknown): unknown => {
+      try {
+        pick();
+      } catch (e) {
+        return e;
+      }
+      return undefined;
+    };
+    expect(exitClassOf(thrown(() => startPicks(claude, { model: "claude-opus-4-1" }, true)))).toBe("usage");
+    expect(exitClassOf(thrown(() => startPicks(narrowed, { model: "claude-haiku-4-5", effort: "high" }, true)))).toBe("usage");
   });
 
   it("a model that takes no effort at all is given none, and one that takes some runs the default its own list carries", () => {

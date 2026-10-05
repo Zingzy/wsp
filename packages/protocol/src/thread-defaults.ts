@@ -8,6 +8,7 @@
 // how each agent is set up to run on one computer, which carries the names of
 // its environment variables and never a value.
 import { z } from "zod";
+import { refusal, usageRefusal } from "./exit.js";
 import { effortsFor, everyModel, markedDefault, modelOf } from "./harness-picks.js";
 import type { HarnessCatalog, HarnessModel, HarnessOption, Preferences } from "./index.js";
 
@@ -286,6 +287,26 @@ export function accessRefusal(catalog: Pick<HarnessCatalog, "label" | "access" |
   if (accessMode(catalog, word) !== undefined) return null;
   const takes = ACCESS_CHOICES.filter(w => accessMode(catalog, w) !== undefined);
   return takes.length === 0 ? noAccessWordsLine(catalog.label) : accessNotTakenLine(catalog.label, word, takes.join(", "));
+}
+
+/** What a refusal adds when the list it quotes is wsp's own table rather than the machine's own answer: a person
+ * reading a model they know their agent takes has to be told the list is not that agent's. */
+export const BUILT_IN_LIST_CLAUSE = "; that list is wsp's built-in one, since no agent there described itself, and the agent on that computer may take more";
+/** The same for a refusal that quotes no list, a model the table says takes no effort: "that list" would point at nothing. */
+export const BUILT_IN_TABLE_CLAUSE = "; wsp's built-in table says so, since no agent there described itself";
+
+/** A model, effort or fast startPicks refused against a catalog, said with whose list it quotes and what to do, so the
+ * host's check before a machine is woken and the runtime's before a folder is made refuse in one sentence. */
+export function pickRefusal(e: unknown, catalog: Pick<HarnessCatalog, "source"> | undefined): Error {
+  const said = e instanceof Error ? e.message : String(e);
+  const clause = catalog?.source !== "table" ? "" : (e as { offered?: number }).offered === 0 ? BUILT_IN_TABLE_CLAUSE : BUILT_IN_LIST_CLAUSE;
+  return refusal(`${said}${clause}`, "Drop the flag, or give it a value the agent offers.", (e as { kind?: string }).kind);
+}
+
+/** An access word the agent maps to none of its modes, refused with what to do; null where it maps one. */
+export function accessWordRefusal(catalog: Pick<HarnessCatalog, "label" | "access" | "permissionModes">, word: AccessChoice): Error | null {
+  const refused = accessRefusal(catalog, word);
+  return refused === null ? null : usageRefusal(refused, "Name one it takes, or drop --access.");
 }
 
 /** Why --access was refused before anything was asked: a harness's own spelling, or no word at all. */
