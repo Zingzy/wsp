@@ -144,6 +144,10 @@ class Validator {
     if ((d.schema as number) !== 2) this.add("D200", `schema ${String(d.schema)} is not a version this host knows; this host reads schema 2`, {}, "update wsp");
     if (d.kit !== undefined && d.kit !== "wsp/2") this.add("D201", `kit ${d.kit} is not one this host has; it has wsp/2`);
     if (d.title !== undefined && titleCased(d.title)) this.add("W018", `the slate's title "${d.title}" is in Title Case; heads take sentence case`, {}, `title="${sentenceCase(d.title)}"`);
+    // Anywhere else a token is written out (an env or args literal, a value's start, a label), the slate keeps it too.
+    const runTexts = Object.values(d.runs).flatMap(r => (r.kind === "cmd" ? [r.cmd, r.then ?? ""] : []));
+    const elsewhere = tokenIn(JSON.stringify({ ...d, files: undefined, runs: Object.fromEntries(Object.entries(d.runs).map(([n, r]) => [n, { ...r, ...(r.kind === "cmd" ? { cmd: "", then: undefined } : {}) }])) }));
+    if (elsewhere !== undefined && !runTexts.some(t => tokenIn(t) !== undefined)) this.add("S520", `the slate holds a token written out (${elsewhere}...), which it keeps and shows the person; let a run's command read it from the file it lives in, or take it from a <secret> the person types`, {});
     for (const [file, text] of Object.entries(d.files ?? {})) {
       const token = tokenIn(text);
       if (token !== undefined) this.add("S520", `${file} holds a token written out (${token}...); let the code read it from the file it lives in, or from an env the run hands it`, { piece: file });

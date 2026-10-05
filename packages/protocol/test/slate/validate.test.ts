@@ -323,6 +323,7 @@ describe("what round three's Haiku wrote", () => {
     expect(token.errors[0]!.message).not.toContain("dd233a3a-85a9");
     expect(parseSlate(`<slate><file name="q.py">KEY = "sk-ant-api03-abcdefghijklmnopqrst"</file><column><text>x</text></column></slate>`).errors).toMatchObject([{ code: "S520", piece: "q.py" }]);
     expect(parseSlate(`<slate><run name="a" cmd='curl -H "Authorization: Bearer $TOKEN" https://x' /><column><text>x</text></column></slate>`).errors).toEqual([]);
+    expect(parseSlate(`<slate><run name="a" cmd='curl -H "Authorization: Bearer $T" https://x' env={{ T: "xapt-dd233a3a-85a9-45d2-9a1c-a4608f2b9eeb" }} /><column><text>x</text></column></slate>`).errors).toMatchObject([{ code: "S520", message: expect.stringMatching(/^the slate holds a token written out \(xapt-d\.\.\.\)/) }]);
     expect(parseSlate(`<slate><column><piece id="rates"><text>x</text></piece></column></slate>`).errors[0]!.message).toBe(`"piece" is not a piece; the tag is the piece's own type, like <number ...> or <text>`);
     expect(parseSlate(`<slate><run name="a" cmd="echo \\"hi\\"" /><column><text>x</text></column></slate>`).errors[0]!.fix).toContain(`with both quotes inside, the block form <run name="x">{\`...\`}</run>`);
   });
