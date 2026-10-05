@@ -231,8 +231,8 @@ describe("the richer kit in the renderer", () => {
     expect(piece(c, "zero").textContent).toContain("0");
   });
 
-  it("titles a checklist row that is a plain string with the string itself, not the title written for every row", () => {
-    const doc = compiled(`<slate><column><checklist id="release" title="Release checklist" done={false} items={["Run all tests", "Run linter", "Tag the release"]} /></column></slate>`);
+  it("titles a checklist of plain strings with each string, through title={item}", () => {
+    const doc = compiled(`<slate><column><checklist id="release" title={item} done={false} items={["Run all tests", "Run linter", "Tag the release"]} /></column></slate>`);
     const c = draw(doc).view.container;
     expect([...piece(c, "release").querySelectorAll("li")].map(li => li.textContent)).toEqual(["Run all tests", "Run linter", "Tag the release"]);
   });
