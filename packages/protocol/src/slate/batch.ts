@@ -4,6 +4,7 @@
 // acts on what comes back: runs to start and cancel, messages to send, window steps to hand back. Derived values
 // recompute before reactions fire, reactions fire in document order, a set in one round is seen by the next, and
 // past 8 rounds the batch stops with R910.
+import { fmtBytes } from "../format.js";
 import { evaluateSlateExpression, resolveSlateProp, type SlateEvalContext } from "./expr.js";
 import { SLATE_LIMITS, slateBytes } from "./limits.js";
 import { getSlateValue, parseSlateOwnPath, setSlateValue, slateEqual } from "./paths.js";
@@ -129,7 +130,7 @@ class Batch {
   private set(path: string, value: SlateJson): { code: SlateCode; why: string } | undefined {
     const next = setSlateValue(this.values, path, value);
     if (next === undefined) return { code: "A607", why: `${path} steps into a value that is not a list or a record, or past ${SLATE_LIMITS.listItems} items` };
-    if (slateBytes(JSON.stringify(next)) > SLATE_LIMITS.valuesBytes) return { code: "S500", why: `the values would pass ${SLATE_LIMITS.valuesBytes / 1024} KB` };
+    if (slateBytes(JSON.stringify(next)) > SLATE_LIMITS.valuesBytes) return { code: "S500", why: `the values would pass ${fmtBytes(SLATE_LIMITS.valuesBytes)}` };
     if (!slateEqual(getSlateValue(this.values, path), value)) this.values = next;
     return undefined;
   }
