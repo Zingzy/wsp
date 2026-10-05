@@ -7,7 +7,7 @@ import { createServer, type Server } from "node:http";
 import { createRuntime, memoryStore, serveRuntime, type RuntimeServer } from "@wsp/runtime";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { openingHash, WS_PATH, type BootPayload } from "@wsp/protocol";
+import { openingHash, PAIR_CODE_SHAPE_REFUSAL, pairToken, shownPairCode, WS_PATH, type BootPayload } from "@wsp/protocol";
 import { BootGate } from "../src/BootGate.js";
 import { PAIR_HEADING } from "../src/PairScreen.js";
 import { DEVICE_TOKEN_KEY, deviceName, redeemPairingCode, runtimeUrl, storedDeviceToken } from "../src/protocol/pairing.js";
@@ -122,6 +122,44 @@ describe("the screen a page with no token shows", () => {
     });
     await waitFor(() => expect(storedDeviceToken(window.localStorage)).toBeDefined());
     expect(screen.queryByText(PAIR_HEADING)).toBeNull();
+  });
+
+  it.each([
+    ["the line wsp host pair prints", (code: string) => `  ${pairToken(code, "aBc+fingerprint/9=")}\n`],
+    ["the code a screen shows, dash and all", (code: string) => ` ${shownPairCode(code).toLowerCase()} `],
+  ])("takes %s as pasted, and the pair goes through", async (_form, printed) => {
+    const { port } = await serving();
+    const code = await codeFrom(port);
+    mount(boot({ tokenHash: undefined, paired: false }), port);
+    const field = screen.getByLabelText<HTMLInputElement>("Pairing code");
+    // A browser cuts a paste at the field's maxLength before any handler sees it; jsdom does not, so the test cuts it.
+    const pasted = printed(code);
+    await act(async () => {
+      fireEvent.change(field, { target: { value: field.maxLength < 0 ? pasted : pasted.slice(0, field.maxLength) } });
+      fireEvent.click(screen.getByRole("button", { name: "Pair" }));
+    });
+    await waitFor(() => expect(storedDeviceToken(window.localStorage)).toBeDefined());
+    expect(screen.queryByText(PAIR_HEADING)).toBeNull();
+  });
+
+  it("says in its own words that a paste holding more than the code is no code, asks no host, and the code still pairs after", async () => {
+    const { port } = await serving();
+    const code = await codeFrom(port);
+    mount(boot({ tokenHash: undefined, paired: false }), port);
+    const field = screen.getByLabelText<HTMLInputElement>("Pairing code");
+    // A terminal's triple click takes the whole line wsp host pair printed, its label too.
+    await act(async () => {
+      fireEvent.change(field, { target: { value: `code        ${pairToken(code, "aBc+fingerprint/9=")}` } });
+      fireEvent.click(screen.getByRole("button", { name: "Pair" }));
+    });
+    expect((await screen.findByRole("alert")).textContent).toBe(PAIR_CODE_SHAPE_REFUSAL);
+    expect(screen.getByText(PAIR_HEADING)).toBeTruthy();
+    // The host was never asked, so the code it is holding is still unspent.
+    await act(async () => {
+      fireEvent.change(field, { target: { value: shownPairCode(code) } });
+      fireEvent.click(screen.getByRole("button", { name: "Pair" }));
+    });
+    await waitFor(() => expect(storedDeviceToken(window.localStorage)).toBeDefined());
   });
 
   it("shows the host's refusal on a code it will not take, and stays on the screen", async () => {
