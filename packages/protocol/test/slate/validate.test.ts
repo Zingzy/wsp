@@ -216,7 +216,7 @@ describe("writes the sessions were refused", () => {
     for (const n of ["mail", "gem", "inbox", "trending-up", "trending-down", "thermometer", "cloud-rain", "sun", "dollar-sign", "indian-rupee"]) expect(SLATE_ICONS, n).toContain(n);
     clean(wrap(`<heading icon="gem">Gold</heading><number label="Change" value={$d} icon={$d >= 0 ? 'trending-up' : 'trending-down'} />`, `  <value name="d" start={1} />`));
     clean(wrap(`<facts><fact label="Mail" value="3" icon={'inbox'} /></facts>`));
-    expect(all(wrap(`<heading icon="gold-bar">Gold</heading>`))).toContain("T306");
+    expect(all(wrap(`<heading icon="gold-bar">Gold</heading>`))).toContain("W016");
   });
 
   it("takes camelCase piece ids, and a piece id may be a run's name", () => {

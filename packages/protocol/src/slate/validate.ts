@@ -608,7 +608,8 @@ class Validator {
       case "icon": {
         if (isSlateIcon(v)) return;
         const fix = typeof v === "string" ? nearestSlateIcon(v) : undefined;
-        this.add("T306", `${JSON.stringify(v)} is not an icon in the kit${fix !== undefined ? `; did you mean ${fix}?` : ""} slate_catalog icons lists them`, w, fix !== undefined ? `icon="${fix}"` : undefined);
+        // An icon is decoration: a name the kit lacks draws none and never stops the write.
+        this.add("W016", `${JSON.stringify(v)} is not an icon in the kit, so it draws none${fix !== undefined ? `; did you mean ${fix}?` : ""} slate_catalog icons lists them`, w, fix !== undefined ? `icon="${fix}"` : undefined);
         return;
       }
       case "string": case "text":
