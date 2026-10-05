@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What a person sets on one of their own computers, off the row the host keeps for it: the older wsp it runs and
-// the update that brings it level, threads at once, how long a quiet workspace waits before it naps, and whether
-// its threads may open threads. Every set goes through places.set and the row comes back as the host now reads it;
-// a row off its default carries the arrow that takes it back.
+// the update that brings it level, threads at once, how long a quiet workspace waits before it naps, how long one
+// turn may run, and whether its threads may open threads. Every set goes through places.set and the row comes back
+// as the host now reads it; a row off its default carries the arrow that takes it back.
 import { useState } from "react";
 import { MinusIcon, PlusIcon } from "lucide-react";
-import { HERE_PLACE_ID, NAP_AFTER_MAX_MS, fmtMemGb, placeSettingNamed, type PlaceSettingWord, type PlaceSettingsAsk, type PlaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, NAP_AFTER_MAX_MS, TURN_LIMIT_MAX_MS, fmtMemGb, placeSettingNamed, type PlaceSettingWord, type PlaceSettingsAsk, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
@@ -17,6 +17,7 @@ import { Card, Row } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 
 const NAP_CHOICES: ReadonlyArray<number | null> = [10, 20, 30, 60, 120, 180].map(m => m * 60_000).filter(ms => ms <= NAP_AFTER_MAX_MS).concat([null] as never);
+const TURN_LIMIT_CHOICES: ReadonlyArray<number | null> = [1, 2, 4, 6, 8, 12, 24].map(h => h * 3_600_000).filter(ms => ms <= TURN_LIMIT_MAX_MS).concat([null] as never);
 const NEVER = "never";
 
 const setOn = (place: PlaceView, ask: PlaceSettingsAsk): Promise<void> => useStore.getState().setPlace(place.id, ask);
@@ -79,25 +80,47 @@ function Stepper({ k, value, label, onChange }: { k: string; value: number; labe
   );
 }
 
-/** A nap window in words a select reads: 20 minutes, 1 hour, never. */
-function napWord(ms: number | null): string {
-  if (ms === null) return W.napNever;
+/** A stretch of time in words a select reads, 20 minutes or 1 hour, and the word for none. */
+function spanWord(ms: number | null, none: string): string {
+  if (ms === null) return none;
   const minutes = Math.round(ms / 60_000);
   if (minutes % 60 !== 0) return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
   const hours = minutes / 60;
   return `${hours} ${hours === 1 ? "hour" : "hours"}`;
 }
 
-/** Limits: threads at once on any computer that has said its shape, and the nap window wherever workspaces nap. */
+/** The choices a select offers: its own, with a value set some other way standing among them in order. */
+const withValue = (choices: ReadonlyArray<number | null>, now: number | null): ReadonlyArray<number | null> =>
+  choices.includes(now) ? choices : [...choices.filter(ms => ms !== null), now, null].sort((a, b) => (a ?? Infinity) - (b ?? Infinity));
+
+/** A select over stretches of time, none among them, which sets the one it is handed. */
+function SpanSelect({ k, label, value, choices, none, onChange }: { k: string; label: string; value: number | null; choices: ReadonlyArray<number | null>; none: string; onChange: (ms: number | null) => void }) {
+  return (
+    <Select value={value === null ? NEVER : String(value)} onValueChange={v => onChange(v === NEVER ? null : Number(v))}>
+      <SelectTrigger size="sm" aria-label={label} data-k={k} className={SELECT_WIDTH}>
+        <SelectValue>{(v: string) => spanWord(v === NEVER ? null : Number(v), none)}</SelectValue>
+      </SelectTrigger>
+      <SelectPopup>
+        {withValue(choices, value).map(ms => (
+          <SelectItem key={ms ?? NEVER} value={ms === null ? NEVER : String(ms)}>
+            {spanWord(ms, none)}
+          </SelectItem>
+        ))}
+      </SelectPopup>
+    </Select>
+  );
+}
+
+/** Limits: threads at once on any computer that has said its shape, the nap window wherever workspaces nap, and the
+ * turn limit wherever the host says one. */
 export function LimitsCard({ place }: { place: PlaceView }) {
   const name = placeName(place);
   const threads = place.cap !== undefined && "threads" in place.cap ? place.cap.threads : undefined;
   const fallback = place.capDefault !== undefined && "threads" in place.capDefault ? place.capDefault.threads : undefined;
   const set = place.settings ?? {};
   const naps = place.napMs !== undefined;
-  if (threads === undefined && !naps) return null;
-  const napNow = place.napMs ?? null;
-  const choices = NAP_CHOICES.includes(napNow) ? NAP_CHOICES : [...NAP_CHOICES.filter(ms => ms !== null), napNow, null].sort((a, b) => (a ?? Infinity) - (b ?? Infinity));
+  const limited = place.turnLimitMs !== undefined;
+  if (threads === undefined && !naps && !limited) return null;
   return (
     <Card id="computer-limits" head={W.limits}>
       {threads === undefined ? null : (
@@ -114,21 +137,17 @@ export function LimitsCard({ place }: { place: PlaceView }) {
           id="nap-after"
           title={W.napTitle}
           description={W.napLine}
-          control={
-            <Select value={napNow === null ? NEVER : String(napNow)} onValueChange={v => void setOn(place, { napMs: v === NEVER ? null : Number(v) })}>
-              <SelectTrigger size="sm" aria-label={W.napTitle} data-k="nap-after" className={SELECT_WIDTH}>
-                <SelectValue>{(v: string) => napWord(v === NEVER ? null : Number(v))}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup>
-                {choices.map(ms => (
-                  <SelectItem key={ms ?? NEVER} value={ms === null ? NEVER : String(ms)}>
-                    {napWord(ms)}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
+          control={<SpanSelect k="nap-after" label={W.napTitle} value={place.napMs ?? null} choices={NAP_CHOICES} none={W.napNever} onChange={ms => void setOn(place, { napMs: ms })} />}
           {...(set.napMs === undefined ? {} : { reset: resetOn(place, "nap") })}
+        />
+      )}
+      {!limited ? null : (
+        <Row
+          id="turn-limit"
+          title={W.turnLimitTitle}
+          description={W.turnLimitLine}
+          control={<SpanSelect k="turn-limit" label={W.turnLimitTitle} value={place.turnLimitMs ?? null} choices={TURN_LIMIT_CHOICES} none={W.turnLimitOff} onChange={ms => void setOn(place, { turnLimitMs: ms })} />}
+          {...(set.turnLimitMs === undefined ? {} : { reset: resetOn(place, "turn-limit") })}
         />
       )}
     </Card>
