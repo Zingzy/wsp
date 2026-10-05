@@ -583,7 +583,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   const scrub = (r: SlateRecord, text: string): string => runs.secrets.scrub(r.threadId, text);
 
   const sketched = (r: SlateRecord, views: ReadonlyMap<string, SlateJson | undefined>, check = false, asked: SlateProblem[] = []): string => {
-    const text = sketchSlate(r.document, r.values, { ...contextOf(r, views), version: r.version, ...(check ? { check: true } : { problems: [...asked, ...problemsOf(r, views)] }) });
+    const text = sketchSlate(r.document, r.values, { ...contextOf(r, views), version: r.version, ...(check ? { check: true } : { problems: [...asked, ...problemsOf(r, views)], waiting: waitingOf(r) }) });
     return scrub(r, /^slate v\d/.test(text) ? text : text.replace(/^slate\b/, `slate v${r.version}`));
   };
   const sketchOf = async (r: SlateRecord): Promise<string> => sketched(r, await viewsFor(r));
@@ -615,15 +615,16 @@ export function createSlates(deps: SlatesDeps): Slates {
     if (r.document === null && r.empty === "rewound-before") found.push(problem("Z804", "rewound-before", "the thread was rewound to before this slate existed; write one with slate_write"));
     if (r.document !== null) {
       for (const path of boundPaths(r.document)) if (!path.startsWith("$") && resolveIn(views, path) === undefined) found.push(problem("R900", "data-missing", `${path} has no value yet`));
-      for (const name of Object.keys(r.document.runs)) {
-        const rec = r.values[name];
-        if (!isRunRecord(rec) || rec.state !== "held") continue;
-        const why = rec.why ?? HELD_APPROVAL;
-        found.push(problem("R913", "run-held", why === HELD_APPROVAL || why === HELD_CONFIRM ? `$${name} waits for the person to allow it on the slate, which asks them; it starts once they do` : `$${name} waits: ${why}`));
-      }
     }
     return found;
   };
+
+  /** The runs held for the person's approval, by name: what the slate waits on, never a fault of it. */
+  const waitingOf = (r: SlateRecord): string[] =>
+    Object.keys(r.document?.runs ?? {}).filter(name => {
+      const rec = r.values[name];
+      return isRunRecord(rec) && rec.state === "held" && (rec.why === undefined || rec.why === HELD_APPROVAL || rec.why === HELD_CONFIRM);
+    }).map(name => `$${name}`);
 
   const asksOf = (r: SlateRecord): SlateAsk[] => {
     const facts = deps.thread(r.threadId);
@@ -1004,7 +1005,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     if (next !== null && /\bpr\.checks\b/.test(JSON.stringify(next))) deps.watchPr?.(r.workspaceId);
     push(r, Object.keys(values));
     const views = await viewsFor(r);
-    return { version: r.version, text: sketched(r, views), warnings, problems: problemsOf(r, views) };
+    return { version: r.version, text: sketched(r, views), warnings, problems: problemsOf(r, views), waiting: waitingOf(r) };
   };
 
   const undo = async (r: SlateRecord, by: "agent" | "person"): Promise<SlateWriteAnswer> => {
@@ -1102,7 +1103,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         if (Object.keys(p.values ?? {}).length === 0 && (p.start ?? []).length === 0) throw usageRefusal("slate state sets values or starts runs, and this one names neither:", "give values, start, or both.");
         // The agent starts only what the person already let run every time; anything else waits for their press.
         const starts: { run: string; by: RunBy }[] = [];
-        const held: SlateProblem[] = [];
+        const notStarted: string[] = [];
         for (const named of p.start ?? []) {
           const run = named.replace(/^\$/, "");
           if (doc.runs[run] === undefined) {
@@ -1112,9 +1113,9 @@ export function createSlates(deps: SlatesDeps): Slates {
           const decl = doc.runs[run]!;
           const rec = r.values[run];
           if (approvedAlways(r, run)) starts.push({ run, by: by === "agent" ? "agent" : "person" });
-          else if (isRunRecord(rec) && rec.state === "held") held.push(problem("R913", "run-held", `$${run} was not started: it already waits for the person to allow it on the slate, and starts once they do`));
-          else if (decl.kind !== "resource" && decl.confirm !== undefined) held.push(problem("R913", "run-held", `$${run} was not started: it has confirm, so it asks the person every start and only a press or a <when> starts it`));
-          else held.push(problem("R913", "run-held", `$${run} was not started: you start only a run the person allowed "Always in this thread"; a press, a <when> or every= starts it and the slate asks them`));
+          else if (isRunRecord(rec) && rec.state === "held") notStarted.push(`$${run}: it already waits for the person to allow it on the slate, and starts once they do`);
+          else if (decl.kind !== "resource" && decl.confirm !== undefined) notStarted.push(`$${run}: it has confirm, so it asks the person every start and only a press or a <when> starts it`);
+          else notStarted.push(`$${run}: you start only a run the person allowed "Always in this thread"; a press, a <when> or every= starts it and the slate asks them`);
         }
         const input: { path: string; value: SlateJson }[] = [];
         for (const [written, value] of Object.entries(p.values ?? {})) {
@@ -1146,7 +1147,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         if (starts.length > 0) await batch(r, [], "run", { starts });
         void deliverAll(r, out.sends).catch((e: unknown) => console.warn(`a slate send in thread ${threadWord(threadId)} was not delivered: ${e instanceof Error ? e.message : String(e)}`));
         const views = await viewsFor(r);
-        return { version: r.version, text: sketched(r, views), problems: [...held, ...problemsOf(r, views)] };
+        const text = sketched(r, views);
+        return { version: r.version, text: notStarted.length > 0 ? `${text}\nnot started:\n${notStarted.map(n => `  ${n}`).join("\n")}` : text, problems: problemsOf(r, views), waiting: waitingOf(r), ...(notStarted.length > 0 ? { notStarted } : {}) };
       });
     },
 
@@ -1171,6 +1173,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         derived: Object.fromEntries(Object.keys(doc?.derived ?? {}).map(name => [`$${name}`, clean(ctx.resolve(`$${name}`) ?? null)])),
         runs: Object.fromEntries(Object.keys(doc?.runs ?? {}).map(name => [`$${name}`, clean(runShown(r.values[name], name, paths.length > 0))])),
         problems: [...misreads, ...problemsOf(r, views)],
+        waiting: waitingOf(r),
         comments: r.comments,
         // By the run each approval is for, which is what the agent writes; the key only where no run declares it now.
         approvals: Object.fromEntries(Object.entries(r.approvals).map(([k, a]) => { const run = approvalNames(r, k).run; return [run !== undefined ? `$${run}` : k, a.state]; })),

@@ -228,6 +228,7 @@ mod tests {
         text: String,
         warnings: Option<Value>,
         problems: Option<Value>,
+        waiting: Option<Value>,
     }
 
     #[derive(schemars::JsonSchema)]
@@ -236,6 +237,9 @@ mod tests {
         version: i64,
         text: String,
         problems: Option<Value>,
+        waiting: Option<Value>,
+        #[serde(rename = "notStarted")]
+        not_started: Option<Value>,
     }
 
     #[derive(schemars::JsonSchema)]
@@ -249,6 +253,7 @@ mod tests {
         runs: Option<Value>,
         state: Option<Value>,
         problems: Option<Value>,
+        waiting: Option<Value>,
         comments: Option<Value>,
         approvals: Option<Value>,
     }
@@ -263,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn the_four_entries_fit_the_budget_of_4150_characters() {
+    fn the_four_entries_fit_the_budget_of_4300_characters() {
         for cloud in [false, true] {
             let total: usize = TOOLS
                 .iter()
@@ -275,7 +280,7 @@ mod tests {
                     serde_json::to_string(&entry).unwrap().chars().count()
                 })
                 .sum();
-            assert!(total < 4150, "the slate tools list {total} characters with the cloud {}", if cloud { "on" } else { "off" });
+            assert!(total < 4300, "the slate tools list {total} characters with the cloud {}", if cloud { "on" } else { "off" });
         }
     }
 

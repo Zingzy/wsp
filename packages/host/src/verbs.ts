@@ -3880,7 +3880,7 @@ const SLATE_VERBS: readonly Verb[] = [
         action: z.number().int().optional().describe("row action, from 0"),
         if_version: SlateIfVersionIn,
       },
-      output: slateOut("warnings", "problems"),
+      output: slateOut("warnings", "problems", "waiting"),
       stream: ["text"],
       call: async ({ thread, text, document, check, values, press, row, action, if_version }, deps) => {
         const client = await deps.client();
@@ -3915,7 +3915,7 @@ const SLATE_VERBS: readonly Verb[] = [
     tool: tool({
       description: "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire. start starts a run the person allowed to run always.",
       input: { thread: SlateThreadIn, values: z.record(z.string(), z.unknown()).optional().describe("$path: new value"), start: z.array(z.string()).optional().describe("runs allowed always"), if_version: SlateIfVersionIn },
-      output: slateOut("problems"),
+      output: slateOut("problems", "waiting", "notStarted"),
       stream: ["text"],
       call: async ({ thread, values, start, if_version }, deps) => {
         const client = await deps.client();
@@ -3941,7 +3941,7 @@ const SLATE_VERBS: readonly Verb[] = [
     tool: tool({
       description: "Reads this thread's slate: what the person filled in or pressed, live values, run output and logs, and the sketch: the panel's words as the person sees them.",
       input: { thread: SlateThreadIn, values: z.array(z.string()).optional().describe("$run.json, $value, source path, or *"), text: z.boolean().optional().describe("false: no JSX-like form"), sketch: z.boolean().optional().describe("false: no sketch"), document: z.boolean().optional().describe("true: add stored JSON") },
-      output: slateOut("document", "values", "derived", "runs", "state", "problems", "comments", "approvals"),
+      output: slateOut("document", "values", "derived", "runs", "state", "problems", "waiting", "comments", "approvals"),
       stream: ["text"],
       call: async ({ thread, values, text, sketch, document }, deps) => {
         const client = await deps.client();

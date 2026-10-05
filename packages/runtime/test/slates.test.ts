@@ -352,17 +352,21 @@ describe("the slate v2 host", () => {
   it("a timed run the person has not allowed reads held from the write, and the write's sketch says it waits on them", async () => {
     const { rt, threadId, asThread } = await threadOn("wsp-slates-timed-held-");
     const wrote = await rt.slates.write({ text: TICKER }, asThread);
-    const waits = "$tick waits for the person to allow it on the slate, which asks them; it starts once they do";
-    expect(wrote.problems).toContainEqual(expect.objectContaining({ code: "R913", message: waits }));
-    expect(wrote.text).toContain(`R913 slate: ${waits}`);
+    // Waiting on the person is no fault of the slate's: its own field and line, never a problem.
+    expect(wrote.problems).toEqual([]);
+    expect(wrote.waiting).toEqual(["$tick"]);
+    expect(wrote.text).toMatch(/^slate v1 "Ticker", \d+ pieces, \d+ bound, 0 problems/);
+    expect(wrote.text).toContain("waiting for the person's approval: $tick; each starts once they allow it on the slate");
     expect(wrote.text).toContain("$tick: held needs your approval");
     const view = (await rt.slates.get(threadId))!;
     expect(view.values["tick"]).toMatchObject({ state: "held" });
     expect(view.asks.map(a => a.run)).toEqual(["tick"]);
     const read = await rt.slates.read({}, asThread);
     expect(read.runs).toMatchObject({ $tick: { state: "held" } });
+    expect(read).toMatchObject({ problems: [], waiting: ["$tick"] });
     const again = await rt.slates.state({ start: ["tick"] }, asThread);
-    expect(again.problems).toContainEqual(expect.objectContaining({ code: "R913", message: "$tick was not started: it already waits for the person to allow it on the slate, and starts once they do" }));
+    expect(again).toMatchObject({ problems: [], waiting: ["$tick"], notStarted: ["$tick: it already waits for the person to allow it on the slate, and starts once they do"] });
+    expect(again.text).toContain("not started:\n  $tick: it already waits");
   });
 
   it("a read names each approval by the run it is for, not by its key", async () => {
@@ -641,7 +645,8 @@ describe("the slate v2 host, round 4", () => {
     await rt.slates.write({ text: PROBE }, asThread);
 
     const before = await rt.slates.state({ start: ["probe"] }, asThread);
-    expect(before.problems).toContainEqual(expect.objectContaining({ code: "R913", message: `$probe was not started: you start only a run the person allowed "Always in this thread"; a press, a <when> or every= starts it and the slate asks them` }));
+    expect(before.notStarted).toEqual([`$probe: you start only a run the person allowed "Always in this thread"; a press, a <when> or every= starts it and the slate asks them`]);
+    expect(before.problems).toEqual([]);
     const untouched = (await rt.slates.get(threadId))!;
     expect(untouched.values["probe"]).toMatchObject({ state: "idle" });
     expect(untouched.asks).toEqual([]);
@@ -659,7 +664,7 @@ describe("the slate v2 host, round 4", () => {
 
     // Now the agent's start runs it, the done reaction fires, and no turn starts.
     const started = await rt.slates.state({ start: ["$probe"] }, asThread);
-    expect(started.problems.filter(p => p.code === "R913")).toEqual([]);
+    expect(started.notStarted).toBeUndefined();
     expect(started.text).toMatch(/\$probe: (running|done)/);
     await vi.waitFor(async () => {
       await rt.slates.settled();
@@ -670,7 +675,7 @@ describe("the slate v2 host, round 4", () => {
 
     // A run that asks every time waits for the person whoever starts it.
     const ask = await rt.slates.state({ start: ["ask"] }, asThread);
-    expect(ask.problems).toContainEqual(expect.objectContaining({ code: "R913", message: "$ask was not started: it has confirm, so it asks the person every start and only a press or a <when> starts it" }));
+    expect(ask.notStarted).toEqual(["$ask: it has confirm, so it asks the person every start and only a press or a <when> starts it"]);
     expect((await rt.slates.get(threadId))!.values["ask"]).toMatchObject({ state: "idle" });
 
     // A held that reads false holds nothing, and the sketch says nothing of it.

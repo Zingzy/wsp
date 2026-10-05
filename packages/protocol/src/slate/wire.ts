@@ -208,10 +208,12 @@ export const SlatesGetAnswer = z.object({ slate: SlateView.nullable() });
 export type SlatesGetAnswer = z.infer<typeof SlatesGetAnswer>;
 
 /** What every write answers: the version stored and the sketch as text. */
-export const SlateWriteAnswer = z.object({ version: z.number().int(), text: z.string(), warnings: z.array(SlateWireProblem), problems: z.array(SlateWireProblem) });
+/** waiting: the runs held for the person's approval, which is no fault of the slate's, so never among its problems. */
+export const SlateWriteAnswer = z.object({ version: z.number().int(), text: z.string(), warnings: z.array(SlateWireProblem), problems: z.array(SlateWireProblem), waiting: z.array(z.string()).optional() });
 export type SlateWriteAnswer = z.infer<typeof SlateWriteAnswer>;
 
-export const SlateStateAnswer = z.object({ version: z.number().int(), text: z.string(), problems: z.array(SlateWireProblem) });
+/** notStarted: each run a start named that did not start, with why; the person's to start, not a fault. */
+export const SlateStateAnswer = z.object({ version: z.number().int(), text: z.string(), problems: z.array(SlateWireProblem), waiting: z.array(z.string()).optional(), notStarted: z.array(z.string()).optional() });
 export type SlateStateAnswer = z.infer<typeof SlateStateAnswer>;
 
 /** 10, "Read back": the record, each derived value and run, the paths asked for, and the sketch as text. */
@@ -228,6 +230,7 @@ export const SlateReadAnswer = z.object({
   derived: SlateWireValues,
   runs: SlateWireValues,
   problems: z.array(SlateWireProblem),
+  waiting: z.array(z.string()).optional(),
   comments: z.array(z.record(z.string(), z.unknown())),
   approvals: z.record(z.string(), z.enum(["allowed", "refused"])),
 });
