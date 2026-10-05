@@ -418,6 +418,14 @@ describe("the slate v2 host", () => {
     expect(read.text).not.toContain("<slate");
   });
 
+  it("a run that nothing can start warns in the write's text, and the slate is still stored", async () => {
+    const { rt, asThread } = await threadOn("wsp-slates-dead-run-");
+    const wrote = await rt.slates.write({ text: `<slate title="Error log"><run name="tail" cmd="tail -n 100 -F logs/error.log" stream once /><column><output run={$tail} lines={40} /></column></slate>` }, asThread);
+    expect(wrote.version).toBe(1);
+    expect(wrote.warnings.map(w => w.code)).toEqual(["W019"]);
+    expect(wrote.text).toContain("W019 slate: nothing starts $tail: give it a button, a when, or every.");
+  });
+
   it("a write's warnings are in its text, with their fixes, not only in the structured answer", async () => {
     const { rt, asThread } = await threadOn("wsp-slates-warnings-text-");
     const wrote = await rt.slates.write({ text: `<slate title="Live Gold Prices"><column><text>a · b</text></column></slate>` }, asThread);

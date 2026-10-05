@@ -78,15 +78,15 @@ describe("a slate's files", () => {
   });
 
   it("refuses a file that names a secret, which it would hold as written", () => {
-    const text = (body: string): string => `<slate><secret name="token" /><run name="go" cmd='bash "$SLATE_DIR/go.sh"' env={{ TOKEN: $token }} /><column><input label="Token" value={$token} /></column><file name="go.sh">{\`${body}\`}</file></slate>`;
+    const text = (body: string): string => `<slate><secret name="token" /><run name="go" cmd='bash "$SLATE_DIR/go.sh"' env={{ TOKEN: $token }} /><column><input label="Token" value={$token} /><button label="Go" onPress={start($go)} /></column><file name="go.sh">{\`${body}\`}</file></slate>`;
     expect(problems(text('curl -H "Authorization: $token" x'))).toEqual([expect.stringMatching(/^S520 go.sh names the secret \$token/)]);
     expect(problems(text("curl -H @- x <<< \"$TOKEN\""))).toEqual([]);
   });
 
   it("warns when a run runs a file no <file> declares", () => {
-    expect(problems('<slate><run name="go" cmd=\'python3 "$SLATE_DIR/trafic.py"\' /><column /><file name="traffic.py">{`print(1)`}</file></slate>'))
+    expect(problems('<slate><run name="go" cmd=\'python3 "$SLATE_DIR/trafic.py"\' /><column><button label="Go" onPress={start($go)} /></column><file name="traffic.py">{`print(1)`}</file></slate>'))
       .toEqual(['W015 $go runs $SLATE_DIR/trafic.py, and no <file name="trafic.py"> is declared']);
-    expect(problems('<slate><run name="go" cmd="echo hi" then=\'python3 ${SLATE_DIR}/shape.py\' /><column /></slate>'))
+    expect(problems('<slate><run name="go" cmd="echo hi" then=\'python3 ${SLATE_DIR}/shape.py\' /><column><button label="Go" onPress={start($go)} /></column></slate>'))
       .toEqual(['W015 $go runs $SLATE_DIR/shape.py, and no <file name="shape.py"> is declared']);
   });
 

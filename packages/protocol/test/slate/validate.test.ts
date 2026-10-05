@@ -92,6 +92,21 @@ describe("the validator", () => {
     }
   });
 
+  it("warns W019 on a run that no button, reaction or timer can start, and on no run that one of them starts", () => {
+    const dead = parseSlate(wrap(`<output run={$tail} lines={40} />`, `<run name="tail" cmd="tail -n 100 -F logs/error.log" stream once />`)).warnings.filter(w => w.code === "W019");
+    expect(dead.map(w => w.message)).toEqual(["nothing starts $tail: give it a button, a when, or every"]);
+    const started = [
+      [`<button label="Tail" onPress={start($tail)} />`, ""],
+      [`<text>x</text>`, `<value name="go" start={0} /><when change={$go} do={start($tail)} />`],
+      [`<table items={[{ n: 1 }]}><col title="N" value={item.n} /><action label="Tail" onPress={start($tail)} /></table>`, ""],
+      [`<input label="Path" value={$p} onSubmit={start($tail)} />`, `<value name="p" start="" />`],
+    ] as const;
+    for (const [piece, decls] of started) {
+      expect(parseSlate(wrap(`<output run={$tail} />${piece}`, `<run name="tail" cmd="tail logs/error.log" />${decls}`)).warnings.map(w => w.code), piece).not.toContain("W019");
+    }
+    expect(parseSlate(wrap(`<output run={$tail} />`, `<run name="tail" cmd="tail logs/error.log" every={60} />`)).warnings.map(w => w.code)).not.toContain("W019");
+  });
+
   it("warns W011 on the uncorrected setup example and not on the corrected one (correction 1)", () => {
     const c = SPEC_EXAMPLES.find(e => e.text.includes("Deploy setup") && e.text.includes("vercelToken"))!.text;
     expect(parseSlate(c).warnings.map(w => w.code)).not.toContain("W011");

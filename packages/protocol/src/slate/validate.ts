@@ -97,6 +97,8 @@ class Validator {
   readonly errors: SlateProblem[] = [];
   readonly warnings: SlateProblem[] = [];
   private readonly kinds = new Map<string, Kind>();
+  /** The runs some step starts: a press, a submit or change, a row's action, or a reaction. */
+  private readonly started = new Set<string>();
   private readonly derivedTypes = new Map<string, SlateType>();
   private readonly seenErrors = new Set<string>();
 
@@ -158,6 +160,8 @@ class Validator {
     this.reactionCycles();
     this.tree();
     this.loud();
+    // A run starts by a step or a timer and nothing else, so one with neither never runs and never asks the person.
+    for (const [name, r] of Object.entries(d.runs)) if (r.every === undefined && !this.started.has(name)) this.add("W019", `nothing starts $${name}: give it a button, a when, or every`, {}, `<button label="..." onPress={start($${name})} />`);
   }
 
   private names(): void {
@@ -401,6 +405,7 @@ class Validator {
           break;
         }
         case "start": case "cancel":
+          if (s.do === "start") this.started.add(s.run);
           if (this.kinds.get(s.run) !== "run") this.add("K702", `${s.do} names a run: $${s.run} is ${this.kinds.get(s.run) ?? "not declared"}`, w, nearest(s.run, [...this.kinds].filter(([, k]) => k === "run").map(([n]) => n)));
           break;
         case "send": case "steer": case "queue": case "fill":
