@@ -153,6 +153,8 @@ export interface StatusApi {
   /** Refcounted: while at least one watcher holds this, the poller and cost
    * ticker run and their events ride the runtime bus. Returns the release. */
   watch(opts?: StatusWatchOptions): () => void;
+  /** Whether a watcher holds it now, which is a window open on this host. */
+  watched(): boolean;
   /** The workspace's cost ticks since metering began, across host restarts, folded to the rate changes and the newest tick. */
   history(workspaceId: string): Promise<WorkspaceCostEvent[]>;
   /** What each row of the places list has cost since midnight and since the first of the month, over every workspace
@@ -735,8 +737,12 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   let stopCost: (() => void) | undefined;
   let stopPoll: (() => void) | undefined;
   const lastEmitted = new Map<string, string>();
-  // A machine's uptime ticks on every read and no client reads it, so it alone never makes a row new.
-  const rowKey = (status: WorkspaceStatus): string => JSON.stringify(status, (field, value: unknown) => (field === "uptimeMs" ? undefined : value));
+  /** Per workspace, the phase, rate and total the last cost frame carried. */
+  const sentFigures = new Map<string, string>();
+  // A machine's uptime and facts, its route and the stamps of a read move on every read and no client draws them; a
+  // pushed row carries neither facts nor route, so counting them had every poll after a push resend the row.
+  const rowKey = (status: WorkspaceStatus): string =>
+    JSON.stringify({ ...status, facts: undefined, reach: { ...status.reach, url: undefined, expiresAt: undefined } }, (field, value: unknown) => (field === "uptimeMs" || field === "readAt" ? undefined : value));
   // A status the runtime pushed between polls is a row a client has already been given, so it belongs in the
   // baseline the next poll is held against. Without this a push moves the row and the poll's own word for the same
   // machine reads as a repeat and is dropped: a line the runtime meant to flash once then sat on the row until
@@ -745,9 +751,9 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     if (e.type === "workspace.status") lastEmitted.set(e.status.id, rowKey(e.status));
   });
 
-  /** The timer's tick samples every workspace and always rides the bus. An event's tick is one workspace's: it pins
-   * a boundary in the meter and rides the bus only when it changed the rate, so a create, a wake and a size change
-   * report at once and a rebuild at the same rate reports nothing. */
+  /** The timer's tick samples every workspace and rides the bus, once only for one nobody bills. An event's tick is
+   * one workspace's: it pins a boundary in the meter and rides the bus only when it changed the rate, so a create, a
+   * wake and a size change report at once and a rebuild at the same rate reports nothing. */
   const costTick = async (only?: string): Promise<void> => {
     await loading;
     const now = clock.now();
@@ -778,7 +784,14 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       // A tick that replaced the newest point lies on the stored line; only an added point changes the document.
       const added = before.length === 0 || next[next.length - 2] === before[before.length - 1];
       if (added) persist(() => o.store.put(COST_HISTORIES, view.id, document(view.id)));
-      if (only === undefined || last?.rateUsdPerHour !== tick.rateUsdPerHour) o.emit(tick);
+      // A workspace nobody bills says its zeros once: 125 folders on this computer ticking sent 25 frames a second.
+      const figures = `${tick.phase} ${tick.rateUsdPerHour} ${tick.accruedUsd}`;
+      const unbilled = tick.rateUsdPerHour === 0 && tick.accruedUsd === 0;
+      const due = only === undefined ? !unbilled || sentFigures.get(view.id) !== figures : last?.rateUsdPerHour !== tick.rateUsdPerHour;
+      if (due) {
+        sentFigures.set(view.id, figures);
+        o.emit(tick);
+      }
     }
   };
 
@@ -831,6 +844,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         stopPoll?.();
         stopCost = stopPoll = undefined;
         lastEmitted.clear();
+        sentFigures.clear();
       }
     };
   };
@@ -869,5 +883,5 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     });
   };
 
-  return { list, watch, history, spend };
+  return { list, watch, watched: () => watchers > 0, history, spend };
 }

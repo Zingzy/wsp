@@ -96,7 +96,7 @@ import { opensThread, ComposerCheckoutRow, HomeCheckoutRow, ROW_ITEM_CLASS } fro
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import type { ComposerCommandGroup } from "./composerCommandGroups";
 import { fileGroups, referenceGroups, skillGroups, slashGroups } from "./composerMenuItems";
-import { prefetchComposerList, useComposerList } from "./useComposerList";
+import { useComposerList } from "./useComposerList";
 import { useComposerTriggerState } from "./useComposerTriggerState";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { ChatFileTile, ChatImageThumb, ChatRefusedFile } from "./ChatFiles";
@@ -130,6 +130,9 @@ const noop = () => {};
 
 /** The row a start names to carry none of the box's files: no queued card holds it, so its file list is empty. */
 const NO_FILES_ROW = "no-files";
+
+/** How long one read of a repository's open pull requests and issues answers every # after it. */
+const HOST_LIST_HOLD_MS = 5 * 60_000;
 
 /** A list read whose refusal is the computer's wsp not knowing the read yet reads as that, in the person's words. */
 const inPersonsWords = <T,>(read: Promise<T>, computer: string): Promise<T> =>
@@ -406,14 +409,12 @@ export function ChatComposer({
   const folder = opening ? startFolder : (viewCwd ?? startFolder);
   const listed = onStart === undefined && unavailable === null && wire !== null && folder !== null;
   const session = trigger === null ? "" : `${trigger.kind}:${trigger.rangeStart}`;
-  const itemsKey = listed ? `${workspaceId}\0items\0${folder}` : null;
+  const project = useStore(s => s.projects.find(p => p.id === workspace?.project.id));
+  // The pull requests and issues are the repository's, so every thread of a remote on one computer shares one read.
+  const itemsKey = listed && project !== undefined ? `${project.computer}\0items\0${project.remote}` : null;
   const readItems = useCallback(() => inPersonsWords(gitPrList(wire!, folder!), computer), [computer, folder, wire]);
-  // The pull requests and issues are asked for as the thread opens, so the first # draws from an answer in hand.
-  useEffect(() => {
-    if (itemsKey !== null && wire !== null) prefetchComposerList(wire, itemsKey, readItems);
-  }, [itemsKey, readItems, wire]);
   const checkout = useComposerList(wire, listed && trigger?.kind === "path" ? `${workspaceId}\0files\0${folder}` : null, session, () => inPersonsWords(fsFiles(wire!, folder!), computer));
-  const references = useComposerList(wire, trigger?.kind === "pull-request" ? itemsKey : null, session, readItems);
+  const references = useComposerList(api, trigger?.kind === "pull-request" ? itemsKey : null, session, readItems, HOST_LIST_HOLD_MS);
   const skillsWanted = onStart === undefined && (trigger?.kind === "slash-command" || trigger?.kind === "skill");
   const skills = useAgentsReport(skillsWanted ? { workspaceId } : null).report?.skills;
   const groups = useMemo<ComposerCommandGroup[]>(() => {

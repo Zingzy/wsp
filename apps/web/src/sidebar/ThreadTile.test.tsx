@@ -5,7 +5,6 @@ import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { threadIndicator } from "../adapt/index.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
 import { ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
-import type { LinkDown } from "../terminal/paneWords.js";
 import type { TileCheckout } from "./tileCheckout.js";
 import type { PlaceView } from "@wsp/protocol";
 
@@ -18,7 +17,7 @@ const thread = (over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapsho
 const HERE: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", mac: "macbook", default: true, present: true, takesForks: false, engine: "none", shape: { cpu: 8, memMb: 16384 }, diskFreeBytes: 210 * 1024 ** 3 };
 const PLACE: TilePlace = { projectId: "pr_1", project: "spoo-landing", computer: "zingzy's MacBook Pro", at: HERE };
 
-function mount({ over = {}, checkout = { branch: "fix/cart-rounding", counts: [] }, active = false, settled = false, snoozedWorking, linkDown, onSelect = () => {} }: { over?: Partial<SidebarThreadSnapshot>; checkout?: TileCheckout; active?: boolean; settled?: boolean; snoozedWorking?: number; linkDown?: LinkDown; onSelect?: () => void } = {}) {
+function mount({ over = {}, checkout = { branch: "fix/cart-rounding", counts: [] }, active = false, settled = false, snoozedWorking, onSelect = () => {} }: { over?: Partial<SidebarThreadSnapshot>; checkout?: TileCheckout; active?: boolean; settled?: boolean; snoozedWorking?: number; onSelect?: () => void } = {}) {
   return render(
     <SidebarProvider defaultOpen>
       <ThreadTile
@@ -31,7 +30,6 @@ function mount({ over = {}, checkout = { branch: "fix/cart-rounding", counts: []
         active={active}
         settled={settled}
         {...(snoozedWorking === undefined ? {} : { snoozedWorking })}
-        {...(linkDown === undefined ? {} : { linkDown })}
         renaming={false}
         saving={false}
         onSelect={onSelect}
@@ -50,24 +48,6 @@ const slot = (): HTMLElement => tile().querySelector<HTMLElement>("[data-thread-
 afterEach(cleanup);
 
 describe("a thread tile", () => {
-  const DOWN: LinkDown = { word: "Reconnecting", sentence: "Reconnecting to zingzy's MacBook Pro" };
-
-  it("a resting tile whose workspace's link is down says so in its slot, one quiet word with the sentence on its hover", () => {
-    mount({ over: { status: "completed", endedAt: "2026-09-17T00:05:00.000Z" }, linkDown: DOWN });
-    expect(slot().textContent).toBe("Reconnecting");
-    expect(slot().getAttribute("title")).toBe(DOWN.sentence);
-    expect(slot().dataset["tone"]).toBeUndefined();
-    expect([...slot().classList].filter(c => c.startsWith("text-status-"))).toEqual([]);
-  });
-
-  it("a thread that is working or waits on the person keeps its own status over a link that is down", () => {
-    mount({ over: { status: "running" }, linkDown: DOWN });
-    expect(slot().textContent).not.toContain("Reconnecting");
-    cleanup();
-    mount({ over: { status: "failed", endedAt: "2026-09-17T00:05:00.000Z" }, linkDown: DOWN });
-    expect(slot().textContent).toContain("Failed");
-  });
-
   it("a thread whose agent the host refuses to start there says Refused in its slot with the host's sentence on its hover and its card", () => {
     const sentence = "Claude Code does not start with its config folder ~/claude-wsp: it is not under the home folder /Users/dev. Set another with wsp agents setup claude --config, or put its own back with --reset config.";
     mount({ over: { status: "failed", endedAt: "2026-09-17T00:05:00.000Z", setupRefusal: sentence } });
