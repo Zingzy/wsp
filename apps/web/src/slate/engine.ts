@@ -3,7 +3,7 @@
 // piece only when something it reads moved. Pieces are keyed by id, so a new document redraws the pieces whose JSON
 // changed and nothing else; a binding change marks the pieces whose dependency set holds the path and redraws them
 // on the next frame, at most ten times a second. Nothing here knows React; the views subscribe by piece id.
-import type { SlateJson, SlatePropValue } from "@wsp/protocol";
+import { slateTruthy, type SlateJson, type SlatePropValue } from "@wsp/protocol";
 import { evaluate, resolveProp, type Resolve, type Row } from "./expr.js";
 import type { SlateDoc, SlatePiece } from "./model.js";
 import { expandDerived, getOwn, ownPath, pieceReads, setOwn, touches, walk } from "./paths.js";
@@ -414,6 +414,13 @@ export class SlateEngine {
 
   pieceVersion(id: string): number {
     return this.#versions.get(id) ?? 0;
+  }
+
+  /** Whether the piece shows now: it is in the document and its `when`, if any, holds. Every place that draws a piece
+   * or reads one to lay out another asks this, so a hidden piece is hidden everywhere. */
+  isShown(id: string): boolean {
+    const piece = this.piece(id);
+    return piece !== undefined && (piece.when === undefined || slateTruthy(this.evaluate(piece.when)));
   }
 
   /** The piece's `when` held or not on its last draw: a hidden piece does not read its props. */

@@ -6,7 +6,7 @@
 import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
 import type { SlateEngine } from "../engine.js";
-import { PieceHost } from "../SlateView.js";
+import { PieceHost, useShown } from "../SlateView.js";
 import { isNoteText } from "./look.js";
 import { isStrip, riddenBy } from "./riders.js";
 import { BarSwitch } from "./barswitch.js";
@@ -93,7 +93,9 @@ const CARD = cn(
 );
 
 /** A group's children, the rows among them gathered into cards and the rest bare between. */
-export function Runs({ slate, ids }: { slate: SlateEngine; ids: readonly string[] }) {
+export function Runs({ slate, ids: all }: { slate: SlateEngine; ids: readonly string[] }) {
+  // A hidden piece takes no place among its siblings: it neither starts a card nor joins one.
+  const ids = useShown(slate, all);
   const runs: { key: string; card?: string[]; lists?: string[] }[] = [];
   for (const id of ids) {
     const last = runs.at(-1);

@@ -221,6 +221,28 @@ describe("what the kit adds", () => {
     expect(piece(c, "c").querySelectorAll("[role=radio]")).toHaveLength(2);
   });
 
+  it("leaves a hidden piece out of a number's cell, a strip and a bar switch, and brings it in when its when holds", () => {
+    const doc = compiled(`<slate>
+<value name="bad" start={false} />
+<column>
+  <number id="up" label="Uptime" value={99} /><status id="down" tone="bad" when={$bad}>Down</status>
+  <row id="strip"><number id="a" label="Alpha" value={1} /><number id="b" label="Beta" value={2} when={$bad} /><number id="g" label="Gamma" value={3} /></row>
+  <bars id="countries" label="Countries" items={[{ n: 'in', v: 4 }]} name={item.n} value={item.v} /><bars id="errors" label="Errors" items={[{ n: 'x', v: 1 }]} name={item.n} value={item.v} when={$bad} />
+</column>
+</slate>`);
+    const { view, push } = draw(doc);
+    const c = view.container;
+    const segments = () => [...c.querySelectorAll("[data-slate-bar-switch] [role=radio], [data-slate-bar-switch] button")].map(b => b.textContent);
+    expect(piece(c, "up").textContent).not.toContain("Down");
+    expect(c.querySelector("[data-slate-strip]")!.textContent).not.toContain("Beta");
+    expect(c.querySelector("[data-slate-strip]")!.getAttribute("data-across")).toBe("2 2");
+    expect(c.textContent).not.toContain("Errors");
+    push({ $bad: true });
+    expect(piece(c, "up").textContent).toContain("Down");
+    expect(c.querySelector("[data-slate-strip]")!.textContent).toContain("Beta");
+    expect(segments().join(" ")).toContain("Errors");
+  });
+
   it("starts a section shut on a literal open={false}, keeps the person's fold, and follows a new literal", () => {
     const doc = (open: boolean) => slate({ root: "root", pieces: { root: { type: "column", children: ["sec"] }, sec: { type: "section", props: { title: "Logs", open }, children: ["body"] }, body: { type: "text", props: { value: "inside" } } } });
     const { engine, view } = draw(doc(false));

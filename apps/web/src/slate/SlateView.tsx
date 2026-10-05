@@ -7,7 +7,6 @@ import type { SlateJson } from "@wsp/protocol";
 import { RenderErrorBoundary } from "../components/RenderErrorBoundary.js";
 import { DOC, type SlateEngine } from "./engine.js";
 import type { ActionRunner, RaiseOptions, RaiseResult, StateSender } from "./actions.js";
-import { truthy } from "./actions.js";
 import type { SlateEventName, SlatePiece } from "./model.js";
 import { Quiet } from "./pieces/quiet.js";
 
@@ -58,6 +57,21 @@ export function usePieceVersion(engine: SlateEngine, id: string): number {
   );
 }
 
+/** Those of these pieces that show now. The caller redraws when one of them appears or hides, and not when a value
+ * one of them reads moves. */
+export function useShown(engine: SlateEngine, ids: readonly string[]): string[] {
+  const key = ids.join(" ");
+  const subscribe = useMemo(
+    () => (listener: () => void) => {
+      const offs = key === "" ? [] : key.split(" ").map(id => engine.subscribe(id, listener));
+      return () => offs.forEach(off => off());
+    },
+    [engine, key],
+  );
+  const flags = useSyncExternalStore(subscribe, () => ids.map(id => (engine.isShown(id) ? "1" : "0")).join(""));
+  return ids.filter((_, at) => flags[at] === "1");
+}
+
 export function SlateView({ engine, views, runner, sender }: SlateScope) {
   const scope = useMemo(() => ({ engine, views, runner, sender }), [engine, views, runner, sender]);
   usePieceVersion(engine, DOC);
@@ -90,7 +104,7 @@ function PieceBody({ id }: { id: string }) {
   const { engine, views, runner, sender } = useScope();
   const piece = engine.piece(id);
   if (piece === undefined) return null;
-  const shown = piece.when === undefined || truthy(engine.evaluate(piece.when));
+  const shown = engine.isShown(id);
   engine.setShown(id, shown);
   if (!shown) return null;
   const view = views[piece.type];

@@ -5,7 +5,7 @@
 import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
 import type { SlateEngine } from "../engine.js";
-import { PieceHost, type PieceView } from "../SlateView.js";
+import { PieceHost, useShown, type PieceView } from "../SlateView.js";
 import { figure, str } from "./look.js";
 import { isStrip, stripCells } from "./riders.js";
 import { BarSwitch } from "./barswitch.js";
@@ -57,7 +57,7 @@ const WIDE_PAD = (c: number): string => (c >= 3 ? "@min-[34rem]:[&>*]:px-3" : "@
 /** The stat strip: a number cell per number, the words riding their notes drawn by the numbers. */
 export function Strip({ id, slate }: { id: string; slate: SlateEngine }) {
   // The panel decides how many cells stand across, never the agent's columns: at most three in the narrow panel.
-  const cells = stripCells(slate, id) ?? [];
+  const cells = useShown(slate, stripCells(slate, id) ?? []);
   const widest = Math.max(0, ...cells.map(child => {
     const p = slate.piece(child)?.props ?? {};
     const unit = str(slate.resolve(p["unit"]));
