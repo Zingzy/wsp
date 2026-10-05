@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { compareVersions } from "../../protocol/src/semver.mjs";
 import { bundleNames } from "../scripts/bundles.mjs";
-import { bundleNote, changeLines, cliArgs, previousTag, releaseNotes, renameNote } from "../scripts/release-notes.mjs";
+import { PERMISSIONS_AGAIN, bundleNote, changeLines, cliArgs, previousTag, releaseNotes, renameNote } from "../scripts/release-notes.mjs";
 
 const readme = readFileSync(fileURLToPath(new URL("../../../README.md", import.meta.url)), "utf8");
 const published = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")).name as string;
@@ -18,7 +18,7 @@ const FAKE_LOG = [
 ];
 
 function notes(signed = false): string {
-  return releaseNotes({ version: "0.1.4", previous: "v0.1.3", changes: changeLines(FAKE_LOG), bundles: bundleNote(readme, signed) });
+  return releaseNotes({ version: "0.1.4", previous: "v0.1.3", changes: changeLines(FAKE_LOG), bundles: bundleNote(readme, signed), signed });
 }
 
 describe("what the draft job can load", () => {
@@ -147,12 +147,19 @@ describe("the notes on the draft release", () => {
     expect(notes()).not.toContain("chore: v0.1.4");
   });
 
-  it("name every bundle and the command line install for this version", () => {
-    const names = bundleNames("0.1.4");
+  it("name every bundle a person downloads and the command line install for this version, and not the zip the app updates itself from", () => {
+    const { macZip, ...names } = bundleNames("0.1.4");
     expect(names).toEqual({ mac: "wsp-0.1.4-mac.dmg", appImage: "wsp-0.1.4.AppImage" });
     for (const name of Object.values(names)) expect(notes()).toContain(name);
+    expect(notes()).not.toContain(macZip);
     expect(published).toBe("@zingzy/wsp");
     expect(notes()).toContain(`npm i -g ${published}@0.1.4`);
+  });
+
+  it("say once, while each release is signed on its own, that macOS may ask again for permissions given to wsp", () => {
+    expect(notes()).toContain(`\n${PERMISSIONS_AGAIN}\n`);
+    expect(PERMISSIONS_AGAIN).toBe("macOS may ask again for permissions you gave wsp, since each update is signed on its own.");
+    expect(notes(true)).not.toContain(PERMISSIONS_AGAIN);
   });
 
   it("carry the README's lines on opening a downloaded bundle, for the signing the release got", () => {

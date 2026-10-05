@@ -501,6 +501,7 @@ export const ABOUT_WORDS = {
   get: (version: string): string => `Get ${version}`,
   downloading: "Downloading",
   quitAndOpen: "Quit and open",
+  restartToUpdate: "Restart to update",
   restartHost: "Restart host",
   restartHover: "Drops open terminal panes, localhost forwards and any sign-in in progress; running turns continue.",
   restartRuns: "Restart host runs them.",

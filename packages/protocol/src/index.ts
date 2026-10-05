@@ -2588,6 +2588,12 @@ export interface DesktopBridge {
   readonly version?: string;
   /** The words over Get on this shell's platform, from the shell's own bundle row; absent where none is built. */
   readonly bundleHover?: string;
+  /** True where this shell replaces itself with a release: getBundle stages the release beside the app and
+   * quitAndOpen restarts into it. Absent on every other shell, which keeps the disk image road. */
+  readonly updatesInPlace?: boolean;
+  /** Why an installed mac app cannot replace itself where it runs (from its disk image, a translocated copy, a folder
+   * it cannot write), for the notice that a release is out; absent where it can, or where it never would. */
+  readonly updateWhy?: string;
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */
   localFonts(family: string): Promise<LocalFontFace[]>;
   /** Every font family installed on this computer, by name: what the app and code font pickers offer. */
@@ -2637,11 +2643,14 @@ export interface DesktopBridge {
   /** Puts the window on a saved host, or on the app's own computer for null. */
   switchHost(alias: string | null): Promise<HostOutcome>;
   /** Downloads this release's bundle for this computer from the repo's release and keeps it only where its sha256
-   * matches the one GitHub publishes. The version is all the page hands over; the shell builds every URL itself. */
+   * matches the one GitHub publishes. The version is all the page hands over; the shell builds every URL itself.
+   * Where the shell updates in place, the bundle is the release's zip, unpacked and checked beside the app. */
   getBundle(ask: { version: string }): Promise<BundleOutcome>;
   /** Opens the bundle the last getBundle kept and quits the app, so the new one is never swapped in under a
-   * running host. */
+   * running host; where the shell updates in place, quits and restarts into the new version instead. */
   quitAndOpen(): Promise<BundleOutcome>;
+  /** Deletes the checked update a shell that updates in place holds, which the ready notice's Later asks for. */
+  discardUpdate(): Promise<BundleOutcome>;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------

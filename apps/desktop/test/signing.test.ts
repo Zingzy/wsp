@@ -46,8 +46,12 @@ describe("the mac signing config", () => {
   });
 
   it("builds one bundle for both chips, so nothing has to guess which one a download lands on", () => {
-    expect([...mac.matchAll(/^ {6}arch: \[(.*)\]$/gm)].map(m => m[1])).toEqual(["universal", "universal"]);
-    expect([...mac.matchAll(/^ {4}- target: (.*)$/gm)].map(m => m[1])).toEqual(["dmg", "dir"]);
+    expect([...mac.matchAll(/^ {6}arch: \[(.*)\]$/gm)].map(m => m[1])).toEqual(["universal", "universal", "universal"]);
+    expect([...mac.matchAll(/^ {4}- target: (.*)$/gm)].map(m => m[1])).toEqual(["dmg", "zip", "dir"]);
+  });
+
+  it("writes no update feed beside the zip, which needs a repository it may not detect and which nothing reads", () => {
+    expect(config).toMatch(/^publish: null$/m);
   });
 
   it("signs under the hardened runtime with one entitlements file for the app and everything inside it", () => {
