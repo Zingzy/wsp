@@ -440,6 +440,7 @@ describe("the agent contract on the command line and the tool door", () => {
     // The read is off the transcript the host holds: the same turn, its rows, and its reply whole under --last.
     expect(await last("thread read", "thread", "read", opened.threadId, "--last")).toEqual({ threadId: opened.threadId, messages: [{ who: "agent", at: expect.any(Number), text: "re: again" }] });
     await last("thread read", "thread", "read", opened.threadId);
+    expect(await last("thread head", "thread", "head", opened.threadId)).toMatchObject({ facts: { id: opened.threadId, status: "completed" }, pos: expect.any(Number), total: expect.any(Number) });
     await last("stop", "stop", opened.threadId);
     // One subagent of a turn that is over: nothing to stop, which is an answer, and it names the task.
     expect(await last("stop", "stop", opened.threadId, "--task", "a1b2")).toEqual({ threadId: opened.threadId, task: "a1b2", outcome: "not-running" });

@@ -180,8 +180,7 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
 
   if (input.isWorking && activeTurnHeaderIndex === entries.length) pushWorking();
   if (behind !== null) rows.push({ kind: "permission", id: `waiting-on:${behind.threadId}:${behind.prompt.askId}`, createdAt: input.activeTurnStartedAt ?? "", permission: borrowedPrompt(behind), asker: waitingAskerLine(behind.title) });
-  // A turn stopped on a prompt is waiting, not thinking: the live row would say the agent is at work while it is not.
-  else if (input.isWorking && !waitingOnYou && (!hasActivityRow || latestToolFailed)) {
+  else if (input.isWorking && (!hasActivityRow || latestToolFailed)) {
     rows.push({ kind: "thinking", id: LIVE_ACTIVITY_ROW_ID, createdAt: input.activeTurnStartedAt });
   }
   return rows;

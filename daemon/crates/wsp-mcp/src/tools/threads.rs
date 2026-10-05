@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! `threads` and `thread read`: the session index folded into threads as packages/protocol's `foldThreads` folds it,
-//! the sidebar's rows with their project, folder, branch and computer beside them, and one thread's messages
-//! off the transcript the host holds.
+//! `threads`, `thread read` and `thread head`: the session index folded into threads as packages/protocol's
+//! `foldThreads` folds it, the sidebar's rows with their project, folder, branch and computer beside them, one
+//! thread's messages off the transcript the host holds, and the head the host answers for one thread.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,6 +25,11 @@ pub const THREAD_READ: Tool = Tool {
     name: "thread_read",
     listed: include_str!("../../record/tools/thread_read.json"),
     call: |host, args| Box::pin(thread_read(host, args)),
+};
+pub const THREAD_HEAD: Tool = Tool {
+    name: "thread_head",
+    listed: include_str!("../../record/tools/thread_head.json"),
+    call: |host, args| Box::pin(thread_head(host, args)),
 };
 
 /// One turn's row of the session index, as much of it as a thread is folded from.
@@ -207,6 +212,44 @@ pub struct ReadOut {
     pub thread_id: String,
     #[cfg_attr(test, schemars(with = "Vec<serde_json::Value>"))]
     pub messages: Vec<Message>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct HeadIn {
+    pub thread: String,
+}
+
+/// The head as the host answers it, its facts and events passed on as the host wrote them.
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct HeadOut {
+    #[cfg_attr(test, schemars(with = "serde_json::Map<String, serde_json::Value>"))]
+    pub facts: Box<RawValue>,
+    #[cfg_attr(test, schemars(with = "Vec<serde_json::Value>"))]
+    pub events: Vec<Box<RawValue>>,
+    #[cfg_attr(test, schemars(with = "u64"))]
+    pub pos: Box<RawValue>,
+    #[cfg_attr(test, schemars(with = "u64"))]
+    pub total: Box<RawValue>,
+}
+
+/// As much of a head's facts as its text reads.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Facts {
+    id: String,
+    #[serde(default)]
+    thread_id: Option<String>,
+    harness: String,
+    status: String,
+    title: String,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    permission_mode: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
 }
 
 /// `foldThreads`: the index grouped by thread, in the order each thread's first turn appears.
@@ -474,6 +517,37 @@ async fn thread_read(host: Arc<Host>, arguments: Value) -> Result<Answer, Refuse
     Ok(Answer::text(text, &ReadOut { thread_id, messages }))
 }
 
+/// `headLine`: the title, what the thread runs on and where it stands, its folder, how much of it the head carries,
+/// and those events as a read lists them.
+fn head_text(facts: &Facts, events: &[Box<RawValue>], total: &str) -> String {
+    let mut runs = vec![match &facts.model {
+        Some(model) => format!("{} on {}", facts.harness, model),
+        None => facts.harness.clone(),
+    }];
+    runs.extend(facts.permission_mode.clone());
+    runs.push(facts.status.clone());
+    let mut lines = vec![facts.title.clone(), runs.join(", ")];
+    lines.extend(facts.cwd.clone());
+    lines.push(format!("the newest {} of {} events", events.len(), total));
+    let messages = transcript::messages(events, facts.thread_id.as_deref().unwrap_or(&facts.id));
+    if !messages.is_empty() {
+        lines.push(String::new());
+        lines.push(transcript::read_text(&messages));
+    }
+    lines.join("\n")
+}
+
+async fn thread_head(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
+    let asked: HeadIn = input("thread_head", arguments)?;
+    let client = host.client().await?;
+    let thread = pick(threads_of(&client, None).await?, &asked.thread)?;
+    let mut params = Map::new();
+    params.insert("threadId".to_owned(), Value::from(thread.id.as_str()));
+    let head = client.request::<HeadOut>("sessions.head", params).await?;
+    let facts: Facts = serde_json::from_str(head.facts.get()).map_err(|e| Failure::new(e.to_string()))?;
+    Ok(Answer::text(head_text(&facts, &head.events, head.total.get()), &head))
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::held::to_the_record;
@@ -483,5 +557,6 @@ mod tests {
     fn its_structs_are_the_recorded_schemas() {
         to_the_record::<ThreadsIn, ThreadsOut>(THREADS.listed);
         to_the_record::<ReadIn, ReadOut>(THREAD_READ.listed);
+        to_the_record::<HeadIn, HeadOut>(THREAD_HEAD.listed);
     }
 }

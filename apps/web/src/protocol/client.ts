@@ -493,8 +493,9 @@ export interface Api {
   commitDraft?(id: string, paths?: readonly string[]): Promise<CommitDraft>;
   /** The workspace's viewed marks; with a path, sets the mark on that file against the blob, or takes it off at null. */
   viewed?(id: string, mark?: { path: string; blob: string | null }): Promise<ViewedMarks>;
-  /** The workspace's pull request page, read anew on every ask, with the merge methods the repository allows. */
-  pullRequestView?(id: string): Promise<PullRequestPage>;
+  /** The workspace's pull request page, with the merge methods the repository allows; the host holds a read a minute,
+   * and fresh reads it anew. */
+  pullRequestView?(id: string, fresh?: boolean): Promise<PullRequestPage>;
   /** The workspace's pull request's diff against its base as the git host holds it, cut on a file's boundary. */
   pullRequestDiff?(id: string): Promise<GitPrDiffReply>;
   /** Sends items of the pull request's page to the workspace's agent as one message, as a fix is sent. */
@@ -628,9 +629,8 @@ export interface Api {
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
    * options; takes the runtime's session id, as interruptSession does. answered means the tool call it blocks ran or
    * was refused and the closing event is on the wire; every other outcome closed nothing here. Optional so fixtures
-   * whose harness raises no prompt need not fake it; without it a prompt row's options do nothing. A deny may carry the
-   * person's reason, what the agent should do instead. */
-  answerPermission?(sessionId: string, askId: string, optionId: string, reason?: string): Promise<SessionAnswerOutcome>;
+   * whose harness raises no prompt need not fake it; without it a prompt row's options do nothing. */
+  answerPermission?(sessionId: string, askId: string, optionId: string): Promise<SessionAnswerOutcome>;
   /** Moves the session's running turn to another access mode, from its next tool call on; takes the runtime's session
    * id, as interruptSession does. set means the turn in front of the person now runs at the picked mode; every other
    * outcome moved nothing, and the pick reaches the agent with the next message instead. Optional so fixtures without
@@ -925,7 +925,7 @@ export function makeApi(c: ProtocolClient): Api {
     commit: async (id, message, paths) => GitCommitReply.parse(await c.request("workspaces.commit", { workspaceId: id, message, ...(paths !== undefined ? { paths: [...paths] } : {}) })),
     commitDraft: async (id, paths) => CommitDraft.parse(await c.request("workspaces.commitDraft", { workspaceId: id, ...(paths !== undefined ? { paths: [...paths] } : {}) })),
     viewed: async (id, mark) => ViewedMarks.parse(await c.request("workspaces.viewed", { workspaceId: id, ...(mark ?? {}) })),
-    pullRequestView: async id => PullRequestPage.parse(await c.request("workspaces.pullRequestView", { workspaceId: id })),
+    pullRequestView: async (id, fresh) => PullRequestPage.parse(await c.request("workspaces.pullRequestView", { workspaceId: id, ...(fresh === true ? { fresh } : {}) })),
     pullRequestDiff: async id => GitPrDiffReply.parse(await c.request("workspaces.pullRequestDiff", { workspaceId: id })),
     pullRequestReply: async (id, o) => GitPrReplyReply.parse(await c.request("workspaces.pullRequestReply", { workspaceId: id, ...o })),
     pullRequestResolve: async (id, threadId, resolved) => GitPrResolveReply.parse(await c.request("workspaces.pullRequestResolve", { workspaceId: id, threadId, resolved })),
@@ -969,8 +969,8 @@ export function makeApi(c: ProtocolClient): Api {
       SessionInterruptOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.interrupt", { sessionId })).outcome),
     steerSession: async (sessionId, prompt, requestId) =>
       SessionSteerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.steer", { sessionId, prompt, requestId })).outcome),
-    answerPermission: async (sessionId, askId, optionId, reason) =>
-      SessionAnswerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.answer", { sessionId, askId, optionId, ...(reason === undefined ? {} : { reason }) })).outcome),
+    answerPermission: async (sessionId, askId, optionId) =>
+      SessionAnswerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.answer", { sessionId, askId, optionId })).outcome),
     setSessionAccess: async (sessionId, permissionMode) =>
       SessionAccessOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.access", { sessionId, permissionMode })).outcome),
     // Parsed, not trusted: an outcome outside the enum must not read as renamed.

@@ -161,7 +161,7 @@ afterEach(() => {
 describe("the Pull request pane's head", () => {
   it("names the title, who opened it with their face and when, the number as a quiet link out, the word, the branches, the labels and who was asked", async () => {
     const { container, api } = await pane();
-    expect(api.pullRequestView).toHaveBeenCalledWith(WS);
+    expect(api.pullRequestView).toHaveBeenCalledWith(WS, false);
     const head = q(container, "[data-pr-head]");
     expect(said(q(head, "[data-pr-by]"))).toMatch(/^cass opened \d+ d ago$/);
     expect(q(head, "[data-pr-by] [data-pr-face='cass'] img").getAttribute("src")).toBe("https://avatars.githubusercontent.com/cass?s=48");
@@ -210,6 +210,8 @@ describe("the Pull request pane's head", () => {
     expect(document.querySelector("[data-pr-tabs] [data-pr-refresh]")).toBeNull();
     fireEvent.click(q(strip, "[data-pr-refresh]"));
     await waitFor(() => expect(api.pullRequestView).toHaveBeenCalledTimes(2));
+    // The refresh asks past the minute the host holds a page for.
+    expect(api.pullRequestView).toHaveBeenLastCalledWith(WS, true);
   });
 
   it("keeps the page five minutes: a reopen draws it with no read, and a status that moved, the refresh or a reopen past the hold reads again", async () => {
@@ -304,9 +306,9 @@ describe("the Conversation tab", () => {
     expect(q(app.container, "[data-pr-face='renovate[bot]']").querySelector("img")).toBeNull();
   });
 
-  it("says once where the host read only the latest reviews and review threads, and not where it read them all", async () => {
-    const { container } = await pane(fact(), { ...PAGE, cut: { reviews: true, threads: true } });
-    expect([...container.querySelectorAll("[data-pr-cut]")].map(n => n.textContent)).toEqual(["Showing the latest 100 reviews", "Showing the latest 100 review threads"]);
+  it("says once where the host read only the latest reviews, review threads and comments, and not where it read them all", async () => {
+    const { container } = await pane(fact(), { ...PAGE, cut: { reviews: true, threads: true, comments: true } });
+    expect([...container.querySelectorAll("[data-pr-cut]")].map(n => n.textContent)).toEqual(["Showing the latest 100 reviews", "Showing the latest 100 review threads", "Showing the latest 100 comments"]);
     cleanup();
     forgetHeld();
     const whole = await pane();

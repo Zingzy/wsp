@@ -177,8 +177,9 @@ export function terminalPaneHints(pane: TerminalPaneState, size: WorkspaceSize |
     case "absent":
       // A reading whose daemon this host owns carries a button instead of a second sentence; the pane draws it.
       return pane.absent.will === undefined ? [] : [pane.absent.will];
-    case "no-daemon":
     case "refused":
+      return pane.reason === "" ? [] : [pane.reason];
+    case "no-daemon":
       return [];
     case "gone":
       return [REBUILD_HINT];
@@ -264,15 +265,16 @@ export function terminalInputRefusal(pane: TerminalPaneState): string | null {
   }
 }
 
-/** The sentence a resting tile's hover carries while its workspace's link is not open. It is the pane's own title,
- * not a second sentence: the states that belong to the machine (paused, waking, gone, a computer that is not
- * answering) are left out, since the row's state word and the composer's held send already carry those, and so is
- * a link still inside its first-answer bound, which is not down. */
+/** Why a workspace's link is down, as the muted line a surface that reads over it shows: what turned the link away in
+ * its own words, else the pane's own title. The states that belong to the machine (paused, waking, gone, a computer
+ * that is not answering) are left out, since those surfaces say them already, and so is a link still inside its
+ * first-answer bound, which is not down. */
 export function linkDownLine(pane: TerminalPaneState): string | null {
   switch (pane.kind) {
+    case "refused":
+      return pane.reason === "" ? terminalPaneTitle(pane) : pane.reason;
     case "unanswered":
     case "reconnecting":
-    case "refused":
     case "reauth":
       return terminalPaneTitle(pane);
     case "live":
@@ -291,7 +293,8 @@ export function linkDownLine(pane: TerminalPaneState): string | null {
   }
 }
 
-/** The word a resting tile wears in its slot while its workspace's link is down, one per kind of down. */
+/** The word for a workspace's link that is down, one per kind of down. A thread's tile never wears one: the turns
+ * ride another road, so a link down here says nothing about the thread. */
 export const LINK_DOWN_WORDS = { reconnecting: "Reconnecting", unanswered: "Unreachable", refused: "Refused" } as const;
 
 /** That word for a pane, or null while the link is not down. */
