@@ -6453,15 +6453,18 @@ const aboutLines = (verb: CliVerb | CliOnlyVerb, indent: string): string[] => wr
  * value. `lead` is what the first line opens with, so a page that opens it with `usage: ` is wrapped to the columns
  * it will actually stand in rather than to two spaces and then widened by five. */
 export function usageLines(usage: string, indent: string, lead = "  "): string[] {
-  let depth = 0;
-  const grouped = [...usage]
-    .map(c => {
-      if (c === "[") depth++;
-      if (c === "]") depth--;
-      return c === " " && depth > 0 ? "\u00a0" : c;
-    })
-    .join("");
-  return wrap(`${lead}${grouped}`, HELP_WIDTH, indent).map(line => line.replaceAll("\u00a0", " "));
+  // Each line of a usage that has more than one is wrapped on its own: wrap reads a newline as one more character.
+  return usage.split("\n").flatMap((line, at) => {
+    let depth = 0;
+    const grouped = [...line]
+      .map(c => {
+        if (c === "[") depth++;
+        if (c === "]") depth--;
+        return c === " " && depth > 0 ? "\u00a0" : c;
+      })
+      .join("");
+    return wrap(`${at === 0 ? lead : ""}${grouped}`, HELP_WIDTH, indent).map(l => l.replaceAll("\u00a0", " "));
+  });
 }
 
 /** The lines of one page: each usage, then what it does indented under it, so no line runs wide. */
