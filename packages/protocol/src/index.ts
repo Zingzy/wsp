@@ -5082,6 +5082,7 @@ const DAEMON_CONTENTS = [
   "81b16217319586241e368d7cb84fa0383a11b8d056a03053c700140422ff5e71",
   "2d3c09680f6c9dca01d8915f8d7be7306ba0db7fc6e1734353a86bf5afaa4e4e",
   "1557c21f49fe3ec9248ca8c405e450b0f201e9bc4fd3f552bfd0f36132272b17",
+  "1ee653af3b44dc450246290cc7bb7617da6ec8f062d9e859452472019e52e51e",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5415,7 +5416,8 @@ const DAEMON_CONTENTS = [
  * /usr/local/bin pointing under it, and nothing else of either; a prefix that is itself a link stays and is said.
  * Version 118: A leave run as root first takes what the setup wrote under /usr/local and /opt, read off the list in
  * /opt/wsp: each path still as wsp left it, hashed in one pass, a folder once empty, and nothing the computer had
- * before wsp; the list goes last, and while it still holds lines /opt/wsp stays and the leave says so. */
+ * before wsp; the list goes last, and while it still holds lines /opt/wsp stays and the leave says so.
+ * Version 119: setup sign-ins, cut syncs and the size check survive their edges. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5634,9 +5636,9 @@ export const UNLAND_FAILED_LINE = "its files could not be taken off there; wsp r
 /** What a row the recipe took out says where the box had it before wsp: it stays. */
 export const wasThereLine = (name: string): string => `${name} had it before wsp, so it stays`;
 
-/** What a computer's picks weigh against the room it has, before Set up: the bytes the picks and the room past them
- * need, the bytes free there as it last said, and how many picked rows nobody measured. */
-export const PlaceEstimate = z.object({ neededBytes: z.number().int().nonnegative(), freeBytes: z.number().int().nonnegative().optional(), unmeasured: z.number().int().nonnegative() });
+/** What a computer's picks weigh against the room it has, before Set up: the bytes the picks need, the bytes a setup
+ * keeps free there past them, the bytes free there as it last said, and how many picked rows nobody measured. */
+export const PlaceEstimate = z.object({ neededBytes: z.number().int().nonnegative(), keptBytes: z.number().int().nonnegative(), freeBytes: z.number().int().nonnegative().optional(), unmeasured: z.number().int().nonnegative() });
 export type PlaceEstimate = z.infer<typeof PlaceEstimate>;
 
 /** How much of the end of a computer's setup log one read takes: a step's output for the running view, never the
@@ -6057,6 +6059,8 @@ export const PlaceReport = z.object({
   os: z.string().max(200),
   shape: WorkspaceSize,
   diskFreeBytes: z.number().int().nonnegative().optional(),
+  /** The size of that same disk, off the same read: what a setup keeps free there is a share of it. */
+  diskSizeBytes: z.number().int().nonnegative().optional(),
   /** Which Mac this is, as its registry names the product, else its model identifier; absent off a Mac. */
   model: z.string().max(200).optional(),
   /** HOME, USER, PATH and each harness's store variable, as the ssh read records them. */

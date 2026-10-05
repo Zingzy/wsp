@@ -90,12 +90,12 @@ export function wspArgvOf(run: RunningWsp = runningWsp()): string[] {
   return [command, ...args];
 }
 
-/** How much room is left on the volume the work folder sits on, or nothing when this computer will not say. It is
- * the one number a person asks about before they send a long job to a laptop. */
-function diskFree(folder: string): number | undefined {
+/** How much room is left on the volume the work folder sits on, the one number a person asks about before they send
+ * a long job to a laptop, and how big it is; nothing when this computer will not say. */
+function diskRoom(folder: string): { free: number; size: number } | undefined {
   try {
     const fs = statfsSync(folder);
-    return Number(fs.bavail) * Number(fs.bsize);
+    return { free: Number(fs.bavail) * Number(fs.bsize), size: Number(fs.blocks) * Number(fs.bsize) };
   } catch {
     return undefined;
   }
@@ -176,18 +176,18 @@ function readTextOr(path: string): string | undefined {
 
 /** What this computer is, read off the machine alone with no shell started: the part of the report the host's own
  * row of the places list shows, which every verb that lists places reads. */
-export function placeFacts(opts: Omit<PlaceReportOptions, "run">): Pick<PlaceSelfReport, "name" | "platform" | "arch" | "os" | "shape" | "diskFreeBytes" | "runsWorkspaces" | "engine" | "workspacesBlocked"> {
+export function placeFacts(opts: Omit<PlaceReportOptions, "run">): Pick<PlaceSelfReport, "name" | "platform" | "arch" | "os" | "shape" | "diskFreeBytes" | "diskSizeBytes" | "runsWorkspaces" | "engine" | "workspacesBlocked"> {
   const home = opts.home ?? homedir();
   const env = opts.env ?? process.env;
   const work = workFolderIn(home);
-  const free = diskFree(existsSync(work) ? work : home);
+  const room = diskRoom(existsSync(work) ? work : home);
   return {
     name: opts.name,
     platform: platform() === "darwin" ? "darwin" : "linux",
     arch: osArch(),
     os: `${osType()} ${release()}`,
     shape: localShape(),
-    ...(free !== undefined ? { diskFreeBytes: free } : {}),
+    ...(room !== undefined ? { diskFreeBytes: room.free, diskSizeBytes: room.size } : {}),
     // Whether the daemon runs workspaces here, and the engine a project's own containers would run on: the read-only
     // twin of the daemon's self check, so what the doctor says and what a create does cannot part ways.
     ...selfDoctor(env),

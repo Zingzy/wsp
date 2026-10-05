@@ -210,6 +210,13 @@ describe("what a computer says about its agents, and what a person reads off it"
     expect(wire.PlaceReport.safeParse({ ...said, agentVersions: Object.fromEntries(Object.entries(many).slice(0, 32)) }).success).toBe(true);
   });
 
+  it("a report carries its disk's size beside its free bytes, and one from a daemon that sends none reads unknown", () => {
+    const sized = { ...report, diskFreeBytes: 9 * 1024 ** 3, diskSizeBytes: 75 * 1024 ** 3 };
+    expect(wire.PlaceReport.parse(sized).diskSizeBytes).toBe(75 * 1024 ** 3);
+    expect(wire.PlaceReport.parse(report).diskSizeBytes).toBeUndefined();
+    expect(wire.PlaceReport.safeParse({ ...sized, diskSizeBytes: -1 }).success).toBe(false);
+  });
+
   it("a computer's row carries those versions and the one word the host worked out per agent", () => {
     const row = { id: "p_1", kind: "computer" as const, name: "spoo", default: false, agents: ["claude", "codex"], agentVersions: { claude: "2.1.270 (Claude Code)" }, signIns: { claude: "vault-key" as const, codex: "none" as const } };
     expect(wire.PlaceView.parse(row)).toEqual(row);
