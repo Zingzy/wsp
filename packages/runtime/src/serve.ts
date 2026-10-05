@@ -1364,7 +1364,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               });
               return;
             case "workspaces.pullRequestView":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestView({ workspaceId: msg.workspaceId }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestView({ workspaceId: msg.workspaceId, ...(msg.fresh === true ? { fresh: true } : {}) }, origin)) });
               return;
             case "workspaces.pullRequestDiff":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestDiff({ workspaceId: msg.workspaceId }, origin)) });
