@@ -236,6 +236,10 @@ describe("the release workflow", () => {
     expect(macJob).not.toContain("dist/mac");
   });
 
+  it("builds the AppImage on the static runtime, which opens where libfuse.so.2 is not installed", () => {
+    expect(builderConfig).toMatch(/^toolsets:\n {2}appimage: "(?!0\.0\.0")[\d.]+"$/m);
+  });
+
   it("hands the signing secrets by name to the step that builds, tells the step that checks whether one signed, and no value anywhere", () => {
     const [header, ...steps] = macJob.split("\n      - ");
     const secretOf = (name: string) => `${name}: \${{ secrets.${name} }}`;
