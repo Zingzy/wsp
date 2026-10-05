@@ -85,6 +85,12 @@ class Reader {
         if (end < 0) this.fail(`the string for ${an[0]} at line ${aline} never closes`);
         const raw = this.src.slice(this.i + 1, end);
         if (raw.endsWith("\\")) this.fail(`attribute strings take no escapes (${an[0]} at line ${aline}): a backslash does not hide a ${q} inside ${q}...${q}`, q === '"' ? `${an[0]}='echo "hi"', single quotes outside the double ones` : `${an[0]}="echo 'hi'", double quotes outside the single ones`);
+        const entity = /&(?:[A-Za-z]+|#\d+|#x[0-9A-Fa-f]+);/.exec(raw);
+        if (entity !== null) {
+          // Nothing decodes an entity here: &quot; reaches a command as the five letters, and bash runs "quot".
+          const quote = /^&(?:quot|apos|#34|#39|#x22|#x27);$/.test(entity[0]);
+          this.fail(`attribute strings take no HTML entities (${an[0]} at line ${aline}): ${entity[0]} stays as written, nothing decodes it`, quote ? `${an[0]}='python3 "$SLATE_DIR/x.py"', single quotes outside the double ones` : `write the character itself: ${an[0]}="... & ..."`);
+        }
         this.i = end + 1;
         attrs.push({ name: an[0], kind: "string", value: raw, line: aline });
         continue;

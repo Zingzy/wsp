@@ -16,7 +16,7 @@ afterEach(cleanup);
 
 const DOC = (() => {
   const r = parseSlate(`<slate title="Deploy">
-  <run name="link" cmd="vercel link --yes --project &quot;$PROJECT&quot;" env={{ PROJECT: "spoo-web", VERCEL_TOKEN: $token }} />
+  <run name="link" cmd='vercel link --yes --project "$PROJECT"' env={{ PROJECT: "spoo-web", VERCEL_TOKEN: $token }} />
   <run name="disk" cmd="df -h /" every={60} always />
   <run name="wipe" cmd="rm -rf .vercel" confirm="Remove the local link?" />
   <run name="inbox" tool="zoho-mail.zoho_list_emails" every={300} />
