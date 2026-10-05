@@ -365,6 +365,27 @@ describe("the slate v2 host", () => {
     expect(again.problems).toContainEqual(expect.objectContaining({ code: "R913", message: "$tick was not started: it already waits for the person to allow it on the slate, and starts once they do" }));
   });
 
+  it("a read carries each run's json without its out twice, cuts long output, and only a summary when it names paths", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-read-size-");
+    await rt.slates.write({ text: `<slate><run name="big" cmd='python3 -c "import json; print(json.dumps({\\"rows\\": [\\"x\\" * 50] * 200}))"' /><run name="raw" cmd='python3 -c "print(\\"y\\" * 9000)"' /><column><button id="go" label="Go" onPress={[start($big), start($raw)]} /></column></slate>` }, asThread);
+    await rt.slates.event({ threadId, version: (await rt.slates.get(threadId))!.version, piece: "go", event: "press", requestId: "r-size" });
+    await rt.slates.settled();
+    for (const ask of (await rt.slates.get(threadId))!.asks) await rt.slates.approve({ threadId, key: ask.key, scope: "once" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      const v = (await rt.slates.get(threadId))!.values;
+      expect([v["big"], v["raw"]]).toMatchObject([{ state: "done" }, { state: "done" }]);
+    }, { timeout: 10_000 });
+    const whole = await rt.slates.read({}, asThread);
+    const runs = whole.runs as Record<string, Record<string, unknown>>;
+    expect(runs["$big"]).toHaveProperty("json");
+    expect(runs["$big"]).not.toHaveProperty("out");
+    expect(String(runs["$raw"]!["out"])).toMatch(/… \(9001 characters; values \["\$raw\.out"\] reads it whole\)$/);
+    const named = await rt.slates.read({ values: ["$raw.out"] }, asThread);
+    expect((named.runs as Record<string, unknown>)["$big"]).toEqual(expect.not.objectContaining({ json: expect.anything() }));
+    expect(String((named.values as Record<string, unknown>)["$raw.out"]).length).toBe(9001);
+  });
+
   it("a start into a folder that is not there is refused before the agent is launched", async () => {
     const { rt, root, workspaceId } = await threadOn("wsp-slates-no-cwd-");
     await expect(rt.sessions.start(workspaceId, { prompt: "two", cwd: join(root, "plain", "nowhere") })).rejects.toThrow(/^there is no folder at .*nowhere; name one that exists$/);

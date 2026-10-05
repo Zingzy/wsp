@@ -183,6 +183,26 @@ export const SLATE_SEND_KEY = "send";
 
 const problem = (code: string, name: string, message: string, extra: Partial<SlateProblem> = {}): SlateProblem => ({ code, name, message, ...extra });
 
+/** How much of a run's output a read carries before it says where the rest is. */
+const READ_OUTPUT_CHARS = 4_000;
+
+/** A run's record as a read answers it: its summary alone when the read named paths, else the record with out left
+ * out where json was parsed from it and each long output cut, saying how to read it whole. */
+function runShown(rec: SlateJson | undefined, name: string, named: boolean): SlateJson {
+  if (!isRunRecord(rec)) return rec ?? null;
+  const full = rec as unknown as Record<string, SlateJson>;
+  if (named) return Object.fromEntries(Object.entries(full).filter(([k]) => ["state", "why", "exit", "ms", "runs", "stale", "refreshing", "endedAt"].includes(k)));
+  const cut = (field: string, text: string): string => (text.length <= READ_OUTPUT_CHARS ? text : `${text.slice(0, READ_OUTPUT_CHARS)}… (${text.length} characters; values ["$${name}.${field}"] reads it whole)`);
+  const out: Record<string, SlateJson> = {};
+  for (const [k, v] of Object.entries(full)) {
+    if (k === "out" && full["json"] !== undefined) continue;
+    if ((k === "out" || k === "err") && typeof v === "string") out[k] = cut(k, v);
+    else if (k === "lines" && Array.isArray(v)) out[k] = v.slice(-50);
+    else out[k] = v;
+  }
+  return out;
+}
+
 /** A path a read named that can only read null: one of the slate's own names without its $, or no source at all. */
 function misread(doc: SlateDoc | null, path: string): SlateProblem[] {
   if (!/^[A-Za-z_]\w*(\.\w+|\[\d+\])*$/.test(path)) return [];
@@ -1149,7 +1169,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         values: Object.fromEntries(paths.map(path => [path, clean(evaluateSlateExpression(path, ctx) ?? null)])),
         state: Object.fromEntries(Object.entries(r.values).filter(([name]) => doc?.runs[name] === undefined).map(([name, v]) => [`$${name}`, clean(v)])),
         derived: Object.fromEntries(Object.keys(doc?.derived ?? {}).map(name => [`$${name}`, clean(ctx.resolve(`$${name}`) ?? null)])),
-        runs: Object.fromEntries(Object.keys(doc?.runs ?? {}).map(name => [`$${name}`, clean(r.values[name] ?? null)])),
+        runs: Object.fromEntries(Object.keys(doc?.runs ?? {}).map(name => [`$${name}`, clean(runShown(r.values[name], name, paths.length > 0))])),
         problems: [...misreads, ...problemsOf(r, views)],
         comments: r.comments,
         approvals: Object.fromEntries(Object.entries(r.approvals).map(([k, a]) => [k, a.state])),
