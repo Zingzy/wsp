@@ -228,7 +228,9 @@ mod tests {
 
     #[test]
     fn a_scoped_server_greets_with_the_threads_own_instructions() {
-        let said = |cloud, scoped| serde_json::from_str::<Value>(&greeting(None, cloud, scoped)).unwrap()["instructions"].as_str().unwrap().to_owned();
+        let said = |cloud, scoped| {
+            serde_json::from_str::<Value>(&greeting(None, cloud, scoped)).unwrap()["instructions"].as_str().unwrap().to_owned()
+        };
         let server = record::server();
         for cloud in [false, true] {
             assert!(said(cloud, true).starts_with("This session is a wsp thread with a slate"));

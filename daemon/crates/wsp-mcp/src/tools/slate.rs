@@ -22,10 +22,16 @@ pub const CATALOG: Tool = Tool {
     listed: include_str!("../../record/tools/slate_catalog.json"),
     call: |host, args| Box::pin(catalog(host, args)),
 };
-pub const WRITE: Tool =
-    Tool { name: "slate_write", listed: include_str!("../../record/tools/slate_write.json"), call: |host, args| Box::pin(write(host, args)) };
-pub const STATE: Tool =
-    Tool { name: "slate_state", listed: include_str!("../../record/tools/slate_state.json"), call: |host, args| Box::pin(state(host, args)) };
+pub const WRITE: Tool = Tool {
+    name: "slate_write",
+    listed: include_str!("../../record/tools/slate_write.json"),
+    call: |host, args| Box::pin(write(host, args)),
+};
+pub const STATE: Tool = Tool {
+    name: "slate_state",
+    listed: include_str!("../../record/tools/slate_state.json"),
+    call: |host, args| Box::pin(state(host, args)),
+};
 pub const READ: Tool =
     Tool { name: "slate_read", listed: include_str!("../../record/tools/slate_read.json"), call: |host, args| Box::pin(read(host, args)) };
 
