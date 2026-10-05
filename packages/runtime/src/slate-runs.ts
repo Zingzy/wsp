@@ -399,7 +399,7 @@ export const SECRET_DOTS = "••••";
 export const HELD_APPROVAL = "needs your approval";
 const HELD_BUSY = `${RUNNING_MAX} runs are already running`;
 export const HELD_BUDGET = `started ${STARTS_PER_MINUTE} times in a minute; press to run it again`;
-const HELD_PRESSED = `pressed ${STARTS_PER_MINUTE} times in a minute; it can start again in a minute`;
+export const HELD_PRESSED = `pressed ${STARTS_PER_MINUTE} times in a minute; it can start again in a minute`;
 const HELD_ASLEEP = "the box was asleep, so this tick did not wake it; press to run it now";
 const SECRET_IN_ARGS = "a secret reaches a command through env or stdin, never as an argument, which ps can read";
 
@@ -447,6 +447,13 @@ interface Kept {
 }
 
 const filesUnwritten = (e: unknown): string => `the slate's files were not written: ${e instanceof Error ? e.message : String(e)}`;
+
+/** One more start against a budget of STARTS_PER_MINUTE a minute: the start times kept with this one, or undefined
+ * when this one is past the budget. Every run kind, and the person's presses and the agent's starts each, spend one. */
+export function spent(times: readonly number[] | undefined, at: number): number[] | undefined {
+  const kept = (times ?? []).filter(s => at - s < 60_000);
+  return kept.length >= STARTS_PER_MINUTE ? undefined : [...kept, at];
+}
 
 export function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -865,17 +872,12 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
       const beside = l.record.state === "running";
       if (beside && req.decl.once === true) return { outcome: "noop", record: l.record };
       delete l.held;
-      const at = now();
-      if (req.by !== "person") {
-        l.starts = l.starts.filter(s => at - s < 60_000);
-        if (l.starts.length >= STARTS_PER_MINUTE) return hold(req, l, "budget", beside);
-        l.starts.push(at);
-      } else {
-        // The person's starts have a budget of their own: a scripted window pressing fast restarts nothing past it.
-        l.pressed = (l.pressed ?? []).filter(s => at - s < 60_000);
-        if (l.pressed.length >= STARTS_PER_MINUTE) return hold(req, l, "pressed", beside);
-        l.pressed.push(at);
-      }
+      // The person's starts have a budget of their own: a scripted window pressing fast restarts nothing past it.
+      const person = req.by === "person";
+      const times = spent(person ? l.pressed : l.starts, now());
+      if (times === undefined) return hold(req, l, person ? "pressed" : "budget", beside);
+      if (person) l.pressed = times;
+      else l.starts = times;
       if (req.decl.confirm !== undefined || !approvals.has(req.threadId, key(req.decl))) return hold(req, l, "approval", beside);
       return launch(req, l);
     },

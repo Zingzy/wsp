@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import type { McpTransport } from "@wsp/catalog";
 import { EXEC_OUTPUT_MAX, fmtBytes, runOutputTail } from "@wsp/protocol";
 import type { SlateAsk, SlateJson, SlateRunDecl } from "@wsp/protocol";
-import { HELD_APPROVAL, HELD_BUDGET, mapStrings, SECRET_DOTS, stableJson, STARTS_PER_MINUTE, type Reshape, type RunApprovals, type RunBy, type RunRecord, type RunStartAnswer } from "./slate-runs.js";
+import { HELD_APPROVAL, HELD_BUDGET, HELD_PRESSED, mapStrings, SECRET_DOTS, spent, stableJson, type Reshape, type RunApprovals, type RunBy, type RunRecord, type RunStartAnswer } from "./slate-runs.js";
 
 /** `files` is the text of each slate file its then reads, as on a command. */
 export type McpRunDecl = Extract<SlateRunDecl, { kind: "tool" | "resource" }> & { files?: Record<string, string> };
@@ -446,9 +446,13 @@ interface Live {
   /** The call in flight, for a cancel to tell the server. */
   inflight?: { conn: Conn; id: number };
   reshaping?: Reshape;
-  held?: { req: McpRunStart; ask: "server" | "tool" | "budget" };
+  held?: { req: McpRunStart; ask: HeldAsk };
   starts: number[];
+  /** The person's own starts, on a budget of their own. */
+  pressed?: number[];
 }
+
+type HeldAsk = "server" | "tool" | "budget" | "pressed";
 
 interface ThreadMcp {
   runs: Map<string, Live>;
@@ -585,12 +589,12 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
     return { key: toolKey(d), run, kind: "tool", server: d.server, tool: tool.tool, computer, why: HELD_CONFIRM, args: args ?? {}, ...(typeof tool.confirm === "string" ? { confirm: tool.confirm } : {}), ...(tool.then !== undefined ? { then: tool.then } : {}) };
   };
 
-  const hold = (req: McpRunStart, l: Live, ask: "server" | "tool" | "budget", runs: number, beside = false): RunStartAnswer => {
+  const hold = (req: McpRunStart, l: Live, ask: HeldAsk, runs: number, beside = false): RunStartAnswer => {
     l.held = { req, ask };
     // A start held beside a call still running leaves that call and its record be: it stops only once the new start
     // launches.
-    const record = beside ? l.record : write(req.threadId, req.run, l, { state: "held", why: ask === "server" ? HELD_APPROVAL : ask === "tool" ? HELD_CONFIRM : HELD_BUDGET, runs });
-    if (ask === "budget") return { outcome: "held", record };
+    const record = beside ? l.record : write(req.threadId, req.run, l, { state: "held", why: ask === "server" ? HELD_APPROVAL : ask === "tool" ? HELD_CONFIRM : ask === "pressed" ? HELD_PRESSED : HELD_BUDGET, runs });
+    if (ask === "budget" || ask === "pressed") return { outcome: "held", record };
     if (ask === "server" && !lists.has(listKey(req.threadId, req.decl.server))) void listFor(req.threadId, req.decl.server).then(() => deps.onAsks?.(req.threadId));
     return { outcome: "held", record };
   };
@@ -741,7 +745,7 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
   sweep.unref();
 
   const heldOn = (threadId: string, key: string): [string, Live][] =>
-    [...(threads.get(threadId)?.runs ?? [])].filter(([, l]) => l.held !== undefined && l.held.ask !== "budget" && (l.held.ask === "server" ? consentKey(l.held.req.decl) : toolKey(l.held.req.decl)) === key);
+    [...(threads.get(threadId)?.runs ?? [])].filter(([, l]) => l.held !== undefined && l.held.ask !== "budget" && l.held.ask !== "pressed" && (l.held.ask === "server" ? consentKey(l.held.req.decl) : toolKey(l.held.req.decl)) === key);
 
   return {
     provisional(threadId, decl, runs) {
@@ -758,12 +762,12 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
       const beside = l.record.state === "running";
       if (beside && req.decl.kind === "tool" && req.decl.once === true) return { outcome: "noop", record: l.record };
       delete l.held;
-      if (req.by !== "person") {
-        const at = now();
-        l.starts = l.starts.filter(s => at - s < 60_000);
-        if (l.starts.length >= STARTS_PER_MINUTE) return hold(req, l, "budget", l.record.runs, beside);
-        l.starts.push(at);
-      }
+      // The person's starts have a budget of their own, as a command's do.
+      const person = req.by === "person";
+      const times = spent(person ? l.pressed : l.starts, now());
+      if (times === undefined) return hold(req, l, person ? "pressed" : "budget", l.record.runs, beside);
+      if (person) l.pressed = times;
+      else l.starts = times;
       if (!deps.approvals.has(req.threadId, consentKey(req.decl))) return hold(req, l, "server", l.record.runs, beside);
       // The call still running read the server's tools, so a confirm this start needs is asked before that call stops.
       if (beside && req.decl.kind === "tool" && (req.decl.confirm !== undefined || isDestructive(lists.get(listKey(req.threadId, req.decl.server))?.find(t => t.name === (req.decl as { tool: string }).tool)))) {
@@ -804,7 +808,7 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
     held(threadId) {
       const t = threads.get(threadId);
       if (t === undefined) return [];
-      return [...t.runs].flatMap(([run, l]) => (l.held !== undefined && l.held.ask !== "budget" ? [askOf(threadId, run, l.held.req, l.held.ask)] : []));
+      return [...t.runs].flatMap(([run, l]) => (l.held !== undefined && (l.held.ask === "server" || l.held.ask === "tool") ? [askOf(threadId, run, l.held.req, l.held.ask)] : []));
     },
 
     async pending(threadId, ms = CONNECT_MS) {
