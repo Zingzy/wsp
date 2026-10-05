@@ -121,4 +121,22 @@ describe.skipIf(renderSkipped !== undefined)("the slate's layout in Chromium", (
     expect(Math.abs(at.factsRight - at.rowRight)).toBeLessThan(1);
     await page.close();
   });
+
+  it("stands only as many stat cells across as keep every label on one line and every figure on one line", async () => {
+    const page = await open("six-strip", 600);
+    const cells = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-slate-piece="six"] [data-slate-type=number]')].map(cell => {
+        const label = cell.querySelector("span")!;
+        const figure = label.nextElementSibling!.getBoundingClientRect();
+        return { label: label.textContent, lines: Math.round(label.getBoundingClientRect().height / 20), rowTop: Math.round(cell.getBoundingClientRect().top), figureTop: Math.round(figure.top) };
+      }),
+    );
+    expect(cells).toHaveLength(6);
+    for (const cell of cells) expect(cell.lines, cell.label!).toBe(1);
+    // The cells of each row share their figure's line.
+    const rows = new Map<number, Set<number>>();
+    for (const cell of cells) rows.set(cell.rowTop, (rows.get(cell.rowTop) ?? new Set()).add(cell.figureTop));
+    for (const tops of rows.values()) expect(tops.size).toBe(1);
+    await page.close();
+  });
 });

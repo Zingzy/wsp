@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Children in equal columns 16 px apart. Numbers alone in a grid, row or column are the Usage page's stat strip: one card split into equal
 // cells with hairlines between them, at most three across in the 400 px panel and more once widened, as many as
-// their figures fit, wrapping to further rows with a hairline between rows.
+// their figures and one-line labels fit, wrapping to further rows with a hairline between rows.
 import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
 import type { SlateEngine } from "../engine.js";
@@ -21,6 +21,8 @@ const WIDE = 542;
 /** One character of the 26 px mono figure, and a 12 px unit with its 4 px gap per character. */
 const FIGURE_CH = 15.6;
 const UNIT_CH = 7.2;
+/** One character of the 13 px sans label, which keeps to one line so the figures under it share theirs. */
+const LABEL_CH = 6.4;
 
 /** Cells per row: the most whose figures fit their cells (at most three in the narrow panel), then the count near it
  * that leaves the last row fullest, the larger on a tie. */
@@ -59,7 +61,9 @@ export function Strip({ id, slate }: { id: string; slate: SlateEngine }) {
   const widest = Math.max(0, ...cells.map(child => {
     const p = slate.piece(child)?.props ?? {};
     const unit = str(slate.resolve(p["unit"]));
-    return (figure(slate.resolve(p["value"]), slate.resolve(p["format"]))?.length ?? 0) * FIGURE_CH + (unit === undefined ? 0 : unit.length * UNIT_CH + 4);
+    const label = str(slate.resolve(p["label"]));
+    const figureWidth = (figure(slate.resolve(p["value"]), slate.resolve(p["format"]))?.length ?? 0) * FIGURE_CH + (unit === undefined ? 0 : unit.length * UNIT_CH + 4);
+    return Math.max(figureWidth, (label?.length ?? 0) * LABEL_CH);
   }));
   const narrow = across(cells.length, widest, NARROW, 3);
   const wide = across(cells.length, widest, WIDE, 6);
