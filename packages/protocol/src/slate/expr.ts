@@ -554,6 +554,10 @@ const T = {
 interface Env {
   ctx: SlateEvalContext;
   steps: number;
+  visits: number;
+  /** One node evaluated; a row's own nodes count as visits instead, so a pipeline is held by the visits budget. */
+  step(): void;
+  /** Rows or items visited. */
   charge(n: number): void;
   now(): number | null;
 }
@@ -749,9 +753,13 @@ function makeEnv(ctx: SlateEvalContext): Env {
   const env: Env = {
     ctx,
     steps: 0,
+    visits: 0,
+    step() {
+      if (++env.steps > SLATE_LIMITS.evalSteps) throw new OverBudget();
+    },
     charge(n) {
-      env.steps += n;
-      if (env.steps > SLATE_LIMITS.pipelineVisits) throw new OverBudget();
+      env.visits += n;
+      if (env.visits > SLATE_LIMITS.pipelineVisits) throw new OverBudget();
     },
     now() {
       const v = ctx.resolve("time.now");
@@ -831,7 +839,7 @@ function runPipe(node: Extract<SlateExpr, { k: "pipe" }>, env: Env): Val {
     const spec = PIPE[step.name]!;
     if (spec.needsList && !isList(cur)) return null;
     const list = isList(cur) ? cur.slice(0, SLATE_LIMITS.listItems) : [];
-    const per = (e: SlateExpr, item: SlateJson, index: number): Val => { env.charge(1); return run(e, { ...env, ctx: { ...env.ctx, item, index } } as Env); };
+    const per = (e: SlateExpr, item: SlateJson, index: number): Val => { env.charge(1); return run(e, { ...env, ctx: { ...env.ctx, item, index }, step: () => env.charge(1) }); };
     const arg = (n: number): SlateExpr => step.args[n]!.expr;
     switch (step.name) {
       case "where": cur = list.filter((item, i) => slateTruthy(per(arg(0), item, i))); break;
@@ -903,10 +911,12 @@ function runPipe(node: Extract<SlateExpr, { k: "pipe" }>, env: Env): Val {
         const under = otherExpr.k === "path" ? String(otherExpr.segs.filter(s => typeof s === "string").at(-1) ?? otherExpr.head) : "other";
         const pool = isList(other) ? other : [];
         env.charge(pool.length);
+        const byKey = new Map<string, SlateJson>();
+        if (otherKey !== undefined) for (const o of pool) { const k = keyText(slateStep(o, otherKey) ?? null); if (!byKey.has(k)) byKey.set(k, o); }
         cur = list.map(item => {
           env.charge(1);
           const mine = key !== undefined ? slateStep(item, key) : undefined;
-          const hit = pool.find(o => otherKey !== undefined && slateEqual(slateStep(o, otherKey), mine ?? null)) ?? null;
+          const hit = byKey.get(keyText(mine ?? null)) ?? null;
           return isRecord(item) ? { ...item, [under]: hit } : { value: item, [under]: hit };
         });
         break;
@@ -917,8 +927,14 @@ function runPipe(node: Extract<SlateExpr, { k: "pipe" }>, env: Env): Val {
   return cur;
 }
 
+/** A text no formula may build past: the most the slate's values hold. */
+function heldText(v: Val): Val {
+  if (typeof v === "string" && v.length > SLATE_LIMITS.valuesBytes) throw new OverBudget();
+  return v;
+}
+
 function run(node: SlateExpr, env: Env): Val {
-  env.charge(1);
+  env.step();
   switch (node.k) {
     case "lit": return node.v;
     case "path": return readPath(node, env);
@@ -926,7 +942,7 @@ function run(node: SlateExpr, env: Env): Val {
     case "neg": { const v = run(node.arg, env); return isNum(v) ? -v : null; }
     case "not": return !slateTruthy(run(node.arg, env));
     case "cond": return slateTruthy(run(node.test, env)) ? run(node.then, env) : run(node.else, env);
-    case "tpl": return joined(node.parts.map(p => (typeof p === "string" ? { read: false, v: p } : { read: p.expr.k !== "lit", v: run(p.expr, env) })));
+    case "tpl": return heldText(joined(node.parts.map(p => (typeof p === "string" ? { read: false, v: p } : { read: p.expr.k !== "lit", v: run(p.expr, env) }))));
     case "pipe": return runPipe(node, env);
     case "list": return node.items.map(e => run(e, env) ?? null);
     case "index": return pick(run(node.of, env), run(node.index, env));
@@ -946,7 +962,7 @@ function run(node: SlateExpr, env: Env): Val {
       if (spec === undefined || node.args.length < spec.min || node.args.length > spec.max) return null;
       const args = node.args.map(a => run(a, env));
       if (spec.nullSafe !== true && missing(args[0])) return null;
-      return spec.fn(args, env, node.args);
+      return heldText(spec.fn(args, env, node.args));
     }
   }
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Inputs from the agent or a paired device that once hung or crashed the host, which runs all of this on its event loop.
 import { describe, expect, it } from "vitest";
-import { compileSlateText, evaluateSlateExpression, parseSlate, runSlateBatch, setSlateValue, sketchSlate, slateCatalog, slateChartAxis, validateSlate, SLATE_LIMITS } from "../../src/slate/index.js";
+import { compileSlateText, evaluateSlateExpression, parseSlate, runSlateBatch, setSlateValue, sketchSlate, slateCatalog, slateChartAxis, validateSlate, SLATE_LIMITS, type SlateJson } from "../../src/slate/index.js";
 
 const codes = (text: string): string[] => { const r = parseSlate(text); return [...r.errors, ...r.warnings].map(p => p.code); };
 
@@ -62,5 +62,20 @@ describe("hostile slate inputs", () => {
     expect(over.errors.map(e => e.code)).toEqual(["D208"]);
     const deep = `<slate>${"<column>".repeat(3_000)}<text>x</text>${"</column>".repeat(3_000)}</slate>`;
     expect(compileSlateText(deep).errors.map(e => e.code)).toEqual(["D206"]);
+  });
+
+  it("charges a call for the text it builds, enforces the step budget, and joins through a lookup", () => {
+    const nested = Array.from({ length: 8 }).reduce<string>(inner => `replace(${inner}, 'a', 'aaaaaaaaaa')`, "'a'");
+    let started = performance.now();
+    expect(evaluateSlateExpression(nested, { resolve: () => undefined })).toBeNull();
+    expect(performance.now() - started).toBeLessThan(200);
+    const many = { k: "list" as const, items: Array.from({ length: SLATE_LIMITS.evalSteps }, () => ({ k: "lit" as const, v: 1, at: 0 })), at: 0 };
+    expect(evaluateSlateExpression(many, { resolve: () => undefined })).toBeNull();
+    const rows = Array.from({ length: 5_000 }, (_, i) => ({ id: i }));
+    const values: Record<string, SlateJson> = { a: rows, b: rows.map(r => ({ id: r.id, n: r.id * 2 })) };
+    started = performance.now();
+    const joined = evaluateSlateExpression("$a | join($b, id)", { resolve: p => values[p.slice(1)] }) as { b: { n: number } }[];
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(joined[4_999]!.b.n).toBe(9_998);
   });
 });
