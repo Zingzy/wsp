@@ -273,7 +273,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   chart: {
     type: "chart", level: "core", purpose: "A line over a list, oldest first: x and value read each row.", holdsChildren: false, repeating: true,
-    props: { label: str(req), items: { type: "list", binds: "yes", required: true }, x: { type: "any", binds: "item", about: "a time on x (ISO or ms) labels the axis by clock, a number by its value" }, value: { type: "number", binds: "item", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), height: enm(SIZE, "normal") },
+    props: { label: str(req), items: { type: "list", binds: "yes", required: true }, x: { type: "any", binds: "item", about: "a time on x (ISO or ms) labels the axis by clock, in this computer's time zone; a number by its value" }, value: { type: "number", binds: "item", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), height: enm(SIZE, "normal") },
     items: {}, events: [],
     sketch: v => {
       const label = shown(v.prop("label"));

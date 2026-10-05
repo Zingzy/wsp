@@ -34,6 +34,7 @@ export const SLATE_RULES: readonly string[] = [
   "Nothing centered but a lone figure or card.",
   "Use the slate tools, never wsp from a shell.",
   "A secret the person types goes in a <secret> input, never a file or the chat.",
+  "A button asked for where the project has no UI goes here: the slate is its UI, and the reply says so.",
 ];
 
 export const SLATE_INDEX_EXAMPLE = `<slate title="Issue">

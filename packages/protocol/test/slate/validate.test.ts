@@ -143,7 +143,7 @@ describe("the validator", () => {
       expect(w[0]!.message).toContain("give each row its time, for example x={item.at}");
     }
     expect(all(wrap(`<chart label="Requests" items={$hits} x={item.at} value={item.n} />`, decls))).not.toContain("W013");
-    expect(slateCatalog("chart")).toContain("x: any, per row; a time on x (ISO or ms) labels the axis by clock, a number by its value");
+    expect(slateCatalog("chart")).toContain("x: any, per row; a time on x (ISO or ms) labels the axis by clock, in this computer's time zone; a number by its value");
   });
 
   it("refuses always without every as K703 and takes it with every (correction 2)", () => {
