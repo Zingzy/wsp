@@ -646,14 +646,43 @@ describe("the slate v2 host, round 4", () => {
     runtimes.splice(runtimes.indexOf(rt), 1);
     const again = host(root, store, [], []);
     await again.slates.ready();
-    // The thread's facts come from the workspaces, which a host loads on first use.
-    await again.workspaces.list();
     await again.slates.state({ threadId, values: { $go: 2 } });
     await vi.waitFor(async () => {
       await again.slates.settled();
       expect((await again.slates.get(threadId))!.values["where"]).toMatchObject({ state: "done", runs: 2 });
     }, { timeout: 10_000 });
     expect(realpathSync(String(((await again.slates.get(threadId))!.values["where"] as { out: string }).out).split("\n")[0]!)).toBe(realpathSync(inner));
+  }, 30_000);
+
+  it("a timer that ticks as the host boots starts its run in the thread's folder, never the host process's", async () => {
+    let inner = "";
+    const store = memoryStore();
+    const { rt, root, threadId, asThread } = await threadOn("wsp-slates-boot-", {
+      store,
+      cwd: folder => {
+        inner = join(folder, "cell");
+        mkdirSync(inner, { recursive: true });
+        return inner;
+      },
+    });
+    await rt.slates.write({ text: `<slate title="Where"><run name="where" cmd="pwd" every={3600} always timeout={20} /><column><text id="t">{$where.out}</text></column></slate>` }, asThread);
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.asks).toHaveLength(1);
+    }, { timeout: 5_000 });
+    await rt.slates.approve({ threadId, key: (await rt.slates.get(threadId))!.asks[0]!.key, scope: "thread" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["where"]).toMatchObject({ state: "done", runs: 1 });
+    }, { timeout: 10_000 });
+    await rt.close();
+    runtimes.splice(runtimes.indexOf(rt), 1);
+
+    // The new host's own recovery, begun as it is made, arms the timer, which ticks at once.
+    const again = host(root, store, [], []);
+    await vi.waitFor(async () => expect((await again.slates.get(threadId))!.values["where"]).toMatchObject({ state: "done", runs: 2 }), { timeout: 10_000 });
+    const out = String(((await again.slates.get(threadId))!.values["where"] as { out: string }).out).trim();
+    expect(realpathSync(out)).toBe(realpathSync(inner));
   }, 30_000);
 
   it("the agent starts a run the person said always to, and an unapproved or ask-every-time run answers held without starting", async () => {

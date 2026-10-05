@@ -123,6 +123,8 @@ export interface SlatesDeps {
   /** Pushes an event to the windows and nowhere else. */
   emit(event: SlateValuesEvent | SlateRunEvent): void;
   thread(threadId: string): SlateThreadFacts | undefined;
+  /** The host's workspaces loaded, which a thread's facts are read off; the slates recover only after. */
+  loaded?(): Promise<void>;
   /** Every thread under the lead, the lead included. */
   under(lead: string): string[];
   threadOfToken(token: string): string;
@@ -177,6 +179,8 @@ const PROBLEMS_KEPT = 20;
 const PIECES_NAMED = 20;
 const SOURCE_NAMES = [...HOST_SLATE_SOURCES.keys()];
 const HELD_APPROVAL = "needs your approval";
+/** Why a command did not start: it starts in its thread's folder, never the host's own, and none is known. */
+const NO_FOLDER = "this host knows no folder for the thread, so the command did not start";
 /** The approval key that lets a slate's reactions message the agent. */
 export const SLATE_SEND_KEY = "send";
 
@@ -380,7 +384,10 @@ export function createSlates(deps: SlatesDeps): Slates {
     },
     approvals,
     secrets: runs.secrets,
-    reshape: (threadId, cmd, input) => runs.reshape(threadId, cmd, input, deps.thread(threadId)?.folder ?? process.cwd()),
+    reshape: (threadId, cmd, input) => {
+      const folder = deps.thread(threadId)?.folder;
+      return folder === undefined ? { done: Promise.resolve({ why: NO_FOLDER, exit: null, err: "" }), kill: () => {} } : runs.reshape(threadId, cmd, input, folder);
+    },
     computer: threadId => deps.thread(threadId)?.computer ?? "this computer",
     now: deps.now,
   });
@@ -398,11 +405,14 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   let loaded: Promise<void> | undefined;
   const ready = (): Promise<void> =>
-    (loaded ??= deps.store.list(SLATES).then(async list => {
-      // Schema 1 was the first proof's and never shipped: no migration is owed, so its records are not read.
-      for (const stored of list as SlateRecord[]) if (stored.schema === 2 && !records.has(stored.threadId)) records.set(stored.threadId, { ...stored, revision: stored.revision ?? stored.version });
-      for (const r of [...records.values()]) await serial(r.threadId, () => recover(r));
-    }));
+    (loaded ??= Promise.resolve()
+      .then(() => deps.loaded?.())
+      .then(() => deps.store.list(SLATES))
+      .then(async list => {
+        // Schema 1 was the first proof's and never shipped: no migration is owed, so its records are not read.
+        for (const stored of list as SlateRecord[]) if (stored.schema === 2 && !records.has(stored.threadId)) records.set(stored.threadId, { ...stored, revision: stored.revision ?? stored.version });
+        for (const r of [...records.values()]) await serial(r.threadId, () => recover(r));
+      }));
 
   /** A record loaded at start (01, "Host restart"): secrets read off the store, so a memory one reads unfilled; every
    * run that read running is failed and its done fires, one batch per slate; held runs held again so the sheet has
@@ -747,6 +757,8 @@ export function createSlates(deps: SlatesDeps): Slates {
     const decl = r.document?.runs[run];
     const count = isRunRecord(prior) ? prior.runs : 0;
     if (decl === undefined) return { record: { state: "failed", why: `$${run} is not declared`, runs: count } };
+    const folder = deps.thread(r.threadId)?.folder;
+    if (decl.kind === "cmd" && folder === undefined) return { record: { state: "failed", why: NO_FOLDER, runs: count } };
     viewsNow.set(r.threadId, views);
     capturing = { threadId: r.threadId, run };
     try {
@@ -756,7 +768,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       const answer =
         asked.kind !== "cmd"
           ? mcp.start({ threadId: r.threadId, run, decl: asked as McpRunDecl, by, args: mcpArgsOf(r, asked as McpRunDecl), runs: count })
-          : runs.start({ threadId: r.threadId, run, decl: asked as CmdRunDecl, by, folder: deps.thread(r.threadId)?.folder ?? process.cwd(), inputs: inputsOf(r, decl as Extract<SlateRunDecl, { kind: "cmd" }>), ...(isRunRecord(prior) ? { last: prior as unknown as RunRecord } : {}) });
+          : runs.start({ threadId: r.threadId, run, decl: asked as CmdRunDecl, by, folder: folder!, inputs: inputsOf(r, decl as Extract<SlateRunDecl, { kind: "cmd" }>), ...(isRunRecord(prior) ? { last: prior as unknown as RunRecord } : {}) });
       startedBy.set(byKey(r.threadId, run), by);
       if (answer.record.state === "running") announce(r, "run", by, [], run);
       return { record: answer.record as SlateRunRecord, ...(answer.outcome === "held" && answer.ask !== undefined ? { ask: answer.ask } : {}) };
@@ -1247,7 +1259,12 @@ export function createSlates(deps: SlatesDeps): Slates {
           if (runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once") !== undefined) continue;
           // The hold was a host's before a restart, which this process never saw: hold it again, then answer it.
           const decl = r.document!.runs[run] as Extract<SlateRunDecl, { kind: "cmd" }>;
-          const again = runs.start({ threadId: p.threadId, run, decl: withFiles(r.document, decl) as CmdRunDecl, by: "person", folder: deps.thread(p.threadId)?.folder ?? process.cwd(), inputs: inputsOf(r, decl), last: rec as unknown as RunRecord });
+          const folder = deps.thread(p.threadId)?.folder;
+          if (folder === undefined) {
+            moved(p.threadId, run, { state: "failed", why: NO_FOLDER, exit: null, runs: rec.runs, endedAt: deps.now() });
+            continue;
+          }
+          const again = runs.start({ threadId: p.threadId, run, decl: withFiles(r.document, decl) as CmdRunDecl, by: "person", folder, inputs: inputsOf(r, decl), last: rec as unknown as RunRecord });
           if (again.outcome === "held") runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once");
         }
         await save(r);

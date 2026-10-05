@@ -3781,11 +3781,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(entry !== undefined ? { folder: runsIn(entry, ranIn, checkoutOf(entry.record)), computer: computerOf(entry) } : {}),
       };
     },
+    loaded: () => ready(),
     under: lead => treeUnder(lead),
     threadOfToken: token => threadOfToken(token),
     mcpServer: async (threadId, name) => {
-      // The slates recover at boot before the workspaces are loaded, and a held run asks for its server then.
-      await ready();
       const workspaceId = latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
       const harness = latestOn(threadId)?.harness ?? threadRecords.get(threadId)?.harness;
       const entry = workspaceId === undefined ? undefined : live.get(workspaceId);
