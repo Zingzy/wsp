@@ -100,6 +100,13 @@ export const TURN_IDLE_MS = 10 * 60_000;
  * percent of one core clears it, which a vitest batch or a packager does many times over; a harness process waking
  * on its own timers stays under it, so a turn nothing is working on is still cut at TURN_IDLE_MS. */
 export const TURN_WORK_TICKS_PER_S = 5;
+/** How long a thread's agent process is kept up after its turn on the computer the host runs on, for the next send
+ * to skip the agent's boot. Half of the gaps from a turn's end to the thread's next send were under 30 minutes across
+ * 299 turns on 147 threads (2026-09-27 to 10-04). */
+export const AGENT_KEEP_MS = 30 * 60_000;
+/** The most agent processes kept up between turns on that computer at once, the one idle longest ended first: an
+ * idle one holds 200 to 400 MB with its MCP servers. */
+export const AGENTS_KEPT = 6;
 /** How long a harness gets to exit on its own after the result its turn ended on, before the runtime ends it and its
  * tree. Long enough for the harness to flush its own session store and go, short enough that a machine running turns
  * all day never carries more than the one it is on: seven finished turns' processes were found alive on one guest,
@@ -1439,7 +1446,7 @@ function listed(subject: string, word: string, options: ReadonlyArray<HarnessOpt
   if (value === undefined || options.some(o => o.value === value) || legacy.some(o => o.value === value) || hidden.some(o => o.value === value)) return;
   const older = legacy.length === 0 ? "" : `; legacy: ${optionWords(legacy)}`;
   const said = options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}${older}`;
-  throw Object.assign(new Error(said), { kind: "usage", offered: options.length });
+  throw Object.assign(new Error(said), { offered: options.length });
 }
 
 function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined, runsOn: string | undefined): void {
@@ -5118,7 +5125,6 @@ const DAEMON_CONTENTS = [
   "2d3c09680f6c9dca01d8915f8d7be7306ba0db7fc6e1734353a86bf5afaa4e4e",
   "1557c21f49fe3ec9248ca8c405e450b0f201e9bc4fd3f552bfd0f36132272b17",
   "1ee653af3b44dc450246290cc7bb7617da6ec8f062d9e859452472019e52e51e",
-  "bcf75f81f3ab2483afc7ef7efcd930c2fa3747cdfe31117a02d119a3c120c4c3",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5453,10 +5459,7 @@ const DAEMON_CONTENTS = [
  * Version 118: A leave run as root first takes what the setup wrote under /usr/local and /opt, read off the list in
  * /opt/wsp: each path still as wsp left it, hashed in one pass, a folder once empty, and nothing the computer had
  * before wsp; the list goes last, and while it still holds lines /opt/wsp stays and the leave says so.
- * Version 119: setup sign-ins, cut syncs and the size check survive their edges.
- * Version 120: A place report reads its free disk and its size off the volume a setup installs onto, wsp's install
- * folder or the nearest folder above it that is there, where it read the work folder's or the home's, so the size check
- * and the install loop read one volume. */
+ * Version 119: setup sign-ins, cut syncs and the size check survive their edges. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -6097,7 +6100,6 @@ export const PlaceReport = z.object({
   arch: z.string().max(32),
   os: z.string().max(200),
   shape: WorkspaceSize,
-  /** What is free on the volume a setup installs onto: wsp's install folder's, or the nearest folder above it that is there. */
   diskFreeBytes: z.number().int().nonnegative().optional(),
   /** The size of that same disk, off the same read: what a setup keeps free there is a share of it. */
   diskSizeBytes: z.number().int().nonnegative().optional(),
@@ -6946,9 +6948,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.steer"), sessionId: z.string(), prompt: z.string(), requestId: z.string().optional() }),
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
-   * options; replies with a SessionAnswerResult. Takes the runtime's session id, as sessions.interrupt does. A deny
-   * may carry the person's reason, what the agent should do instead. */
-  z.object({ id: reqId, op: z.literal("sessions.answer"), sessionId: z.string(), askId: z.string(), optionId: z.string(), reason: z.string().optional() }),
+   * options; replies with a SessionAnswerResult. Takes the runtime's session id, as sessions.interrupt does. */
+  z.object({ id: reqId, op: z.literal("sessions.answer"), sessionId: z.string(), askId: z.string(), optionId: z.string() }),
   /** Puts the session's running turn into another access mode from its next tool call on; replies with a
    * SessionAccessResult. Takes the runtime's session id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.access"), sessionId: z.string(), permissionMode: z.string() }),
@@ -7785,5 +7786,7 @@ export * from "./app-ports.js";
 export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, launchWords, PERMISSION_ALLOW, PERMISSION_DENY, programWord } from "./adapter-port.js";
+export { keepRun } from "./kept-run.js";
+export type { KeptAgent, KeptRun, KeptTurn } from "./kept-run.js";
 export { ANALYTICS_ENV, CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TaskStop, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";
