@@ -10,7 +10,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, threadForgetRefusal, type ContextMenuItem, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, threadForgetRefusal, type ContextMenuItem, type ProjectView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -336,6 +336,29 @@ describe("a project's menu", () => {
     fireEvent.click(item(PROJECT_WORDS.settings));
     await waitFor(() => expect(useStore.getState().settingsOpen).toBe(true));
     expect(useSettingsStore.getState().at).toEqual({ kind: "project", id: "pr_1" });
+  });
+
+  it("on a project whose folder holds no thread, carries the folder's own acts after the project's, the entries a tile offers for its copy, so the terminal opens there", async () => {
+    window.localStorage.setItem("wsp:sidebar-project", JSON.stringify("pr_1"));
+    const folder: WorkspaceView = { ...view("ws_f", "the-project"), kind: "local" };
+    const project: ProjectView = { id: "pr_1", name: "the-project", computer: "here", source: { kind: "folder", path: "/root" }, path: "/root", createdAt: "2026-09-01T00:00:00Z" } as ProjectView;
+    await mountSidebar({ ...fakeApi([folder], [statusOf(folder)]), projectsList: async () => [project] }, "the-project");
+    // No tile stands for a folder no thread runs in, so the project's row is the one way to it.
+    expect(document.querySelector('[data-row-id="workspace:ws_f"]')).toBeNull();
+    rightClick(Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-search] button")).find(b => b.textContent?.startsWith("the-project"))!);
+    await screen.findByRole("menu");
+    expect(labels().slice(0, 3)).toEqual([NEW_WORKSPACE, PROJECT_WORDS.settings, PROJECT_WORDS.remove]);
+    expect(labels()).toContain(WORKSPACE_WORDS.openTerminal);
+    expect(labels()).toContain(WORKSPACE_WORDS.openBrowser);
+    // The project's own New thread is the one New thread on the menu.
+    expect(labels().filter(label => label === NEW_WORKSPACE)).toHaveLength(1);
+    // No act on a record nobody sees: the folder has no row to rename and no copy to delete.
+    expect(labels()).not.toContain(WORKSPACE_WORDS.rename);
+    expect(labels()).not.toContain(WORKSPACE_WORDS.delete);
+    fireEvent.click(item(WORKSPACE_WORDS.openTerminal));
+    // The folder is put on screen first, since a drawer opened on a workspace nobody is looking at shows nothing.
+    await waitFor(() => expect(useTerminalDrawerStore.getState().byWorkspaceId["ws_f"]?.terminalOpen).toBe(true));
+    expect(useStore.getState().selectedId).toBe("ws_f");
   });
 });
 

@@ -336,7 +336,7 @@ async function showApp(on: HostSession): Promise<void> {
   links.ready();
 }
 
-const ONBOARDING_CHANNELS = ["onboarding:agents", "onboarding:install", "onboarding:finish"] as const;
+const ONBOARDING_CHANNELS = ["onboarding:here", "onboarding:agents", "onboarding:install", "onboarding:finish"] as const;
 
 /** The ids the page asked to install, as strings and nothing else; the catalog refuses an id it does not know. */
 function agentIds(raw: unknown): string[] {
@@ -356,6 +356,11 @@ async function showOnboarding(): Promise<void> {
   };
   // No version is asked for: the screen names what is here and nothing else, and a `--version` per catalog agent is
   // the one slow thing between a launch and the first thing a person reads.
+  // The page names this computer as its owner did, off the same read the app's own row is named by.
+  ipcMain.handle("onboarding:here", event => {
+    gate(event, "onboarding:here");
+    return computerNameHere();
+  });
   ipcMain.handle("onboarding:agents", event => {
     gate(event, "onboarding:agents");
     return agentsHere(undefined, { versions: false });

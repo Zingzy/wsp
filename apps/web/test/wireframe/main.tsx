@@ -104,7 +104,7 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, type HarnessCatalog, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceApplied, type PlaceView, type ProjectView, type SealedImage, type SessionView, type ThreadDefaults, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, type HarnessCatalog, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceApplied, type PlaceView, type ProjectView, type SealedImage, type SessionView, type ThreadDefaults, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsSurface } from "../../src/components/agents/AgentsSurface";
@@ -127,6 +127,8 @@ import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
 
 const params = new URLSearchParams(window.location.search);
 const screen = params.get("screen") ?? "sidebar";
+// The Computers pages name the release the host runs on its own row, which the page reads off what the host served.
+if (screen.startsWith("settings-computer") || screen === "settings-this-mac") (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: true, version: "0.9.3", tokenHash: "a".repeat(64) };
 /** Each side's theme, by id (?lightTheme=, ?darkTheme=), the record's defaults where the query names none. */
 const picks = { lightTheme: params.get("lightTheme") ?? DEFAULT_PREFERENCES.lightTheme, darkTheme: params.get("darkTheme") ?? DEFAULT_PREFERENCES.darkTheme };
 applyTheme({ theme: params.get("theme") === "light" ? "light" : "dark", ...picks }, false);
@@ -228,6 +230,8 @@ const WORKSPACES: WorkspaceView[] = [
   // what holds the verb rather than a flag this page invents.
   { ...onBox("ws_box", "import from stripe", LANDING, "agent/stripe-import"), ...(screen === "bring-back-paused" ? { phase: "napping" as const } : {}), ...(params.get("fork") === "solari" ? { place: undefined, provider: "solari" } : {}) },
   { ...copyHere("ws_fork", "pricing table", SPOO, 3200, "agent/pricing-table"), parentThreadId: "th_lead" },
+  // wsp's own folder with no thread in it, as a read of its branch leaves it: no tile, and its project's menu the way to it.
+  { id: "ws_wsp", name: "wsp", kind: "local", machineId: "local", project: ref(WSP), phase: "running", golden: "", createdAt: AT },
 ];
 const SESSIONS: Record<string, SessionView[]> = {
   ws_here: [thread("th_quiet", "ws_here", "read the redirect middleware", { status: "completed", endedAt: Date.parse(AT) })],
@@ -285,7 +289,7 @@ const box = (id: string, name: string, over: Partial<PlaceView>): PlaceView =>
 /** The rows the Computers table draws once this wsp holds more than the computer it runs on: three boxes, one job
  * done, one still running and one that lost two rows, and the cloud account whose key this host holds. */
 const COMPUTERS: PlaceView[] = [
-  { id: "here", kind: "computer", name: "zingzy-mbp", default: false, present: true, os: "macOS 26.4", shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 214 * GB, takesForks: false } as PlaceView,
+  { id: "here", kind: "computer", name: "zingzy-mbp", default: false, present: true, os: "macOS 26.4", shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 214 * GB, daemonVersion: DAEMON_VERSION, takesForks: false } as PlaceView,
   // What the host's row says of what a person may set on spoo: threads at once at the shape's default, a nap window
   // set off its default, the agents switch, and the update its older daemon takes.
   box("p_spoo", "spoo", {

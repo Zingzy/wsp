@@ -7,7 +7,7 @@
 // of output, its chevron turning. An item under a step (one sign-in, one skill
 // that did not land) steps in by the mark's width.
 import { ChevronRightIcon, CircleIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { StateMark } from "../../components/status/StateMark.js";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
@@ -21,6 +21,18 @@ export function fmtStepMs(ms: number, ticking = false): string {
   if (!ticking && ms < 950) return `${(ms / 1000).toFixed(1)} s`;
   const s = ticking ? Math.floor(ms / 1000) : Math.round(ms / 1000);
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** The time now, moved once a second while `on`: one interval for every row that ticks, never one per row. */
+export function useNow(on: boolean): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!on) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [on]);
+  return now;
 }
 
 /** Where a row's words start: the mark and its gap. */

@@ -8,7 +8,7 @@
 import type { MarkState } from "../components/status/markState.js";
 import { FREE_WORD, JOINED_COMPUTER, hereName, isHere, isProviderPlace, placeName, placeOf, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, placeWord, SETUP_WORDS, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
-import { PLACE_STATE_WORDS, PROVISION_OUTCOME_WORDS, capitalised } from "./format.js";
+import { PLACE_STATE_WORDS, PROVISION_OUTCOME_WORDS, WHERE_WORDS, capitalised } from "./format.js";
 
 export { hereName, isHere, isProviderPlace, placeName, placeOf };
 
@@ -69,6 +69,13 @@ export const removeTitle = (place: PlaceView): string => `Remove ${placeName(pla
  * of row, so a third kind is a row here and nowhere else. A computer of the person's own is the protocol's own
  * phrase for a joined computer, the one both the row and every sentence about it read. */
 export const PLACE_KIND_WORDS: Record<PlaceKind, string> = { computer: JOINED_COMPUTER, provider: "cloud" };
+
+/** Which wsp and daemon a computer runs, off what the host carries: its own release on the computer it runs on, and
+ * the daemon each computer last reported. Nothing on a cloud, whose machines report no daemon to the places list. */
+export function versionFact(place: PlaceView, hostVersion: string | undefined): string[] | undefined {
+  const parts = WHERE_WORDS.runs(isHere(place) ? hostVersion : undefined, place.daemonVersion);
+  return parts.length === 0 ? undefined : parts;
+}
 
 /** Whether this row is the place a word names, read the one way every reader of a place word reads it: the id the
  * wire keys it by, or the name a person types. The image record's copies and the build's own frames both carry the

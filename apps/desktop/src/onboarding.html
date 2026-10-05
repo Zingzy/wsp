@@ -165,7 +165,7 @@
       <div class="margin" aria-hidden="true"></div>
       <div class="head">
         <h1>Your agents drive wsp</h1>
-        <p class="sentence">Each ticked agent gets the wsp tools and skill, so it can open threads and tasks on this Mac.</p>
+        <p class="sentence" id="sentence">Each ticked agent gets the wsp tools and skill, so it can open threads and tasks.</p>
       </div>
       <div class="content">
         <div class="card" id="rows"></div>
@@ -184,15 +184,15 @@
       const LINES = {
         some: "Agents you install later get the tools from Settings.",
         noneTicked: "Tick at least one agent. wsp works through the agents you give it.",
-        noneFound: "No agent found on this Mac. Install Claude Code or Codex, then press Check again.",
+        noneFound: () => `No agent found${on()}. Install Claude Code or Codex, then press Check again.`,
       };
       /** Each refusal in two halves, what happened and what to do, both written to fit the slot's two lines at 560 px.
        * The shell's own words are never drawn: they are unbounded and would run past the slot into the keycap, so they
        * ride on the slot's title where the whole of one can be read. */
       const REFUSALS = {
-        unread: { happened: "The agents on this Mac could not be read.", fix: "Press Check again to read them again." },
+        unread: { happened: () => `The agents${on()} could not be read.`, fix: "Press Check again to read them again." },
         tools: { fix: "Take the tick off that agent, or fix its config and press again." },
-        shell: { happened: "wsp could not open on this Mac.", fix: "Press Open wsp again." },
+        shell: { happened: () => `wsp could not open${on()}.`, fix: "Press Open wsp again." },
       };
       const text = e => String(e && e.message ? e.message : e).replace(/^.*Error: /, "");
 
@@ -239,6 +239,18 @@
       let found = [];
       /** Whether the last scan refused. A computer whose agents could not be read is not a computer with none. */
       let unread = false;
+      /** The name this computer's owner gave it, from the shell. Until it lands, and where the shell could not read it,
+       * the sentences name no place rather than a word standing in for the name. */
+      let here = null;
+      const on = () => (here === null ? "" : ` on ${here}`);
+      const naming = (async () => {
+        try {
+          here = await window.wsp.here();
+          $("sentence").textContent = `Each ticked agent gets the wsp tools and skill, so it can open threads and tasks${on()}.`;
+        } catch {
+          here = null;
+        }
+      })();
 
       const ticked = () => [...$("rows").querySelectorAll("input:checked")].map(i => i.value);
 
@@ -277,7 +289,7 @@
         slot.className = "slot";
         const state = document.createElement("span");
         state.className = "state";
-        state.textContent = agent.found ? "on this Mac" : "not installed";
+        state.textContent = agent.found ? "installed" : "not installed";
         slot.append(state);
         row.append(check, markOf(agent), name, slot);
         return row;
@@ -289,7 +301,7 @@
         if (unread || found.length === 0) {
           open.firstChild.textContent = "Check again ";
           open.disabled = false;
-          $("line").textContent = unread ? "" : LINES.noneFound;
+          $("line").textContent = unread ? "" : LINES.noneFound();
           return;
         }
         open.firstChild.textContent = "Open wsp ";
@@ -300,7 +312,7 @@
 
       async function scan() {
         try {
-          const agents = await window.wsp.agents();
+          const [agents] = await Promise.all([window.wsp.agents(), naming]);
           found = agents.filter(a => a.found);
           unread = false;
           clearRefusal($("status"));
@@ -310,7 +322,7 @@
           found = [];
           unread = true;
           $("rows").replaceChildren();
-          refuse($("status"), REFUSALS.unread.happened, REFUSALS.unread.fix, text(e));
+          refuse($("status"), REFUSALS.unread.happened(), REFUSALS.unread.fix, text(e));
         }
         settle();
       }
@@ -352,7 +364,7 @@
           await window.wsp.finish();
         } catch (e) {
           leaving = false;
-          refuse(slot, REFUSALS.shell.happened, REFUSALS.shell.fix, text(e));
+          refuse(slot, REFUSALS.shell.happened(), REFUSALS.shell.fix, text(e));
         } finally {
           if (!leaving) settle();
         }
