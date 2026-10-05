@@ -6,10 +6,10 @@ import type { LucideIcon } from "lucide-react";
 import type { SidebarThreadSnapshot } from "../../../adapt/index.js";
 
 /** What a thread's status is read off, the fields every surface that shows a thread holds. */
-export type ThreadStatusInput = Pick<SidebarThreadSnapshot, "status" | "asking" | "startedAt" | "unread">;
+export type ThreadStatusInput = Pick<SidebarThreadSnapshot, "status" | "asking" | "startedAt" | "unread" | "limit" | "resumeAt">;
 
 /** The suffix of the theme token a status is inked in: `input` is drawn in `--status-input`. */
-export type StatusTone = "input" | "working" | "failed" | "done";
+export type StatusTone = "input" | "working" | "failed" | "done" | "limited";
 
 export interface StatusKind {
   readonly id: string;
@@ -21,6 +21,8 @@ export interface StatusKind {
   readonly ink?: string;
   readonly glyph?: LucideIcon;
   readonly word?: string;
+  /** A word read off the thread itself, the reset it goes on at say, standing where the fixed word would. */
+  readonly wordOf?: (thread: ThreadStatusInput) => string;
   /** The elapsed time since the latest turn began stands in the word's place, which is then read to a screen
    * reader alone. */
   readonly timed?: boolean;

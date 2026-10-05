@@ -7,7 +7,7 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import { AFTER_CUT_LINE, NOTIFY_ME, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
+import { AFTER_CUT_LINE, LIMIT_WORDS, NOTIFY_ME, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
   PermissionPrompt,
@@ -232,7 +232,9 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     if (result.status === "completed" && !t.sawText && result.text !== undefined && result.text.length > 0) {
       addMessage(t, "assistant", result.text, at, false);
     }
-    if (result.status === "failed") {
+    // A turn the agent's usage limit stopped is news, not a fault: the turn's footer and the strip over the composer
+    // say it, so no row repeats the agent's words. Any other failure keeps them.
+    if (result.status === "failed" && result.limit === undefined) {
       const label = result.error ?? "session failed";
       addWork(t, { createdAt: at, label, tone: "error", sourceActivityKind: "runtime.error" }, at);
     }
@@ -244,6 +246,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       tokens: result.tokens ?? null,
       model: result.model ?? t.summary.model,
       error: result.error ?? null,
+      limit: result.limit ?? null,
       completedAt: at || null,
     };
     turns[turns.length - 1] = t.summary;
@@ -289,6 +292,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       startedAt: at || null,
       completedAt: null,
       checkpoint: null,
+      limit: null,
     };
     turns.push(summary);
     return { summary, startCount: count, ordinal: 0, openMessage: null, openMessageId: null, sawText: false, tools: new Map(), childCalls: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null, planRow: null };
@@ -321,6 +325,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
           });
         }
         if (event.afterCut === true) addWork(turn, { createdAt: at, label: AFTER_CUT_LINE, tone: "notice", sourceActivityKind: "runtime.resume" }, at);
+        if (event.afterLimit !== undefined) addWork(turn, { createdAt: at, label: LIMIT_WORDS.resumed, tone: "notice", sourceActivityKind: "runtime.resume" }, at);
         continue;
       }
       case "session.delta": {

@@ -113,7 +113,11 @@ const DESCRIPTION_CLASS = "max-w-xl text-[13px] leading-[1.45] text-muted-foregr
 /** The text and what acts on it, each in a column of its own from 640 px, one over the other under it. The slot's
  * floor lines controls up down a page's card; a narrower host moves both floors, --settings-slot and --settings-text,
  * so a name keeps its room and a long state wraps instead. */
-const SPLIT_CLASS = "flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(var(--settings-text,0px),1fr)_minmax(var(--settings-slot,10rem),auto)] sm:items-center sm:gap-5";
+/** A row's slot: beside the words from 640 px, under them below. Under a lead it stands under the words rather than
+ * the glyph: the frame's 32 px and the 12 px gap. */
+export const SLOT_CLASS = "flex min-w-0 items-center gap-3 sm:justify-end";
+export const LED_SLOT_INDENT = "max-sm:pl-11";
+export const SPLIT_CLASS = "flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(var(--settings-text,0px),1fr)_minmax(var(--settings-slot,10rem),auto)] sm:items-center sm:gap-5";
 /** The hover a row that opens a page takes: the sidebar rows' step, in the same 150 ms. */
 const OPENS_CLASS = "w-full cursor-pointer text-left transition-colors duration-150 hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
@@ -146,7 +150,7 @@ export function Card({ id, head, lede, under, body, children }: { id: string; he
 export function Row({ id, title, lead, mark, markWord, description, chips, mono = false, clip = false, word, wordClass = "value", wordK, control, open, reset, tone, attrs }: Omit<SettingsRowData, "kind">) {
   const slot =
     word === undefined && control === undefined && open === undefined ? null : (
-      <div data-settings-slot className="flex min-w-0 items-center gap-3 sm:justify-end">
+      <div data-settings-slot className={cn(SLOT_CLASS, lead !== undefined && LED_SLOT_INDENT)}>
         {word === undefined ? null : (
           <span data-settings-word {...(wordK === undefined ? {} : { "data-k": wordK })} className={cn(WORD_CLASS[wordClass], "min-w-0 break-words sm:text-right")}>
             {word}

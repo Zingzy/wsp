@@ -139,12 +139,14 @@ export function isThreadWorking(thread: SidebarThreadStatusInput): boolean {
 export interface SectionInput extends SidebarThreadStatusInput {
   readonly asking: string | null;
   readonly unread: boolean;
+  /** The reset an armed Resume at reset goes on at; a thread so armed waits on nobody. */
+  readonly resumeAt?: number | null;
 }
 
 /** The section a thread's own state files it under: a question or a failure waits on the person, a running turn
     works, a finish nobody has seen is Done and the rest rests in Idle. */
 export function threadSection(thread: SectionInput): ThreadSection {
-  if (thread.asking !== null || thread.status === "failed") return "needs-you";
+  if (thread.asking !== null || (thread.status === "failed" && (thread.resumeAt ?? null) === null)) return "needs-you";
   if (isThreadWorking(thread)) return "working";
   return thread.unread ? "done" : "idle";
 }

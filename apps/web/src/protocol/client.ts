@@ -581,6 +581,10 @@ export interface Api {
    * accepted means the turn's done is already on the wire; not-running and not-found are answers, not errors. Optional so
    * fixtures that never stop a turn need not fake it; the composer offers no stop without it. */
   interruptSession?(sessionId: string): Promise<SessionInterruptOutcome>;
+  /** Arms or cancels Resume at reset on a turn a usage limit stopped, by the runtime's session id: armed, the host
+   * goes on with the turn at the reset the row names, and sends nothing if by then the thread moved on without it.
+   * Optional so fixtures whose turns never meet a limit need not fake it. */
+  resumeAtReset?(sessionId: string, on: boolean): Promise<void>;
   /** Sends a message into the session's running turn; takes the runtime's session id, as interruptSession does. accepted
    * means a session.steer event is on the wire; not-running means the turn beat it and the caller starts a turn instead.
    * Optional so fixtures without a steering harness need not fake it; the composer keeps the stop road without it. */

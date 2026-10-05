@@ -14,7 +14,7 @@ import { CLOUD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_T
 import { Attachment, AttachmentRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
-import { UsageRange, UsageSplit, UsageTokens } from "./usage.js";
+import { TurnLimit, UsageRange, UsageSplit, UsageTokens } from "./usage.js";
 import { effortsFor, everyModel, markedDefault, modelOf } from "./harness-picks.js";
 import { AccessChoice, AgentDefaults, AgentDefaultsPatch, ProjectOverrides, ProjectOverridesPatch, AgentSetupSet, patchedFields } from "./thread-defaults.js";
 import { GENERAL_DEFAULTS, GENERAL_FIELDS, patchedGeneral } from "./general-prefs.js";
@@ -1030,6 +1030,11 @@ export const SessionView = z.object({
    * turn did none of the work it was asked for, so a row carrying this is a turn that ran nothing. Absent on every
    * turn the agent worked on, however it ended. */
   refusal: TurnRefusal.optional(),
+  /** The usage limit that stopped this turn, off its own result; absent on every turn that ended another way. */
+  limit: TurnLimit.optional(),
+  /** The reset this turn is armed to go on at, ms epoch, where the person pressed Resume at reset; kept on the row
+   * so it survives a restart, and cleared when the turn goes on, is cancelled, or the thread moves on without it. */
+  resumeAt: z.number().optional(),
   /** What the turns that ran on this row have cost together, as each result reported it; absent where no turn of it
    * has ended and on a harness that reports no figure, which is not the same as nothing spent. It rides the row so
    * a listing can say what a thread spent without anyone reading its transcript. */
@@ -1122,6 +1127,9 @@ export const ThreadView = z.object({
   waitingOn: ThreadWaitingOn.optional(),
   /** Why the latest turn's agent cannot start or read its own store there now, as SessionView.setupRefusal carries it. */
   setupRefusal: z.string().optional(),
+  /** The usage limit that stopped the latest turn, and the reset it is armed to go on at, as SessionView carries them. */
+  limit: TurnLimit.optional(),
+  resumeAt: z.number().optional(),
   /** What this thread has cost: its rows' figures added up. Absent where no row of it carries one. */
   costUsd: z.number().optional(),
   /** The latest turn's process on the computer the host runs on, as SessionView.pid carries it. */
@@ -1188,6 +1196,8 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.asking !== undefined ? { asking: latest.asking } : {}),
       ...(latest.waitingOn !== undefined ? { waitingOn: latest.waitingOn } : {}),
       ...(latest.setupRefusal !== undefined ? { setupRefusal: latest.setupRefusal } : {}),
+      ...(latest.limit !== undefined ? { limit: latest.limit } : {}),
+      ...(latest.resumeAt !== undefined ? { resumeAt: latest.resumeAt } : {}),
       ...(latest.pid !== undefined ? { pid: latest.pid } : {}),
       ...(latest.readAt !== undefined ? { readAt: latest.readAt } : {}),
       ...(latest.settledAt !== undefined ? { settledAt: latest.settledAt } : {}),
@@ -1517,6 +1527,9 @@ export const TurnResult = z.object({
   error: z.string().optional(),
   /** Set only on a turn the agent refused outright for a cause wsp knows; the status is failed with it. */
   refusal: TurnRefusal.optional(),
+  /** Set only on a turn the agent's usage limit stopped; the status is failed with it, and the thread offers to go
+   * on at the reset where the agent named one. */
+  limit: TurnLimit.optional(),
 });
 export type TurnResult = z.infer<typeof TurnResult>;
 
@@ -1555,6 +1568,9 @@ export const SessionStartEvent = z.object({
   /** Set when the thread's previous turn ended with no exit code and no result (a deadline, a host restart, a nap
    * that ended it), so clients say the harness resumes a transcript that may be missing context; absent otherwise. */
   afterCut: z.literal(true).optional(),
+  /** Set on a turn Resume at reset opened: the reset it went on at, ms epoch, so the transcript says why a turn
+   * started with nobody writing. */
+  afterLimit: z.number().optional(),
   /** Set on the turn that opened its thread; absent on every later one and on a turn from before it was recorded. */
   opensThread: z.literal(true).optional(),
   /** Who opened this turn's thread, as its row says it. Absent on a turn from before it was recorded. */

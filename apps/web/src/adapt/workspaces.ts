@@ -137,6 +137,8 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     model: model ?? null,
     asking: waitingLine(thread) ?? null,
     ...(thread.setupRefusal !== undefined ? { setupRefusal: thread.setupRefusal } : {}),
+    limit: thread.limit ?? null,
+    resumeAt: thread.resumeAt ?? null,
     costUsd: thread.costUsd ?? null,
     unread: threadUnread(thread),
     readAt: thread.readAt !== undefined ? new Date(thread.readAt).toISOString() : null,
