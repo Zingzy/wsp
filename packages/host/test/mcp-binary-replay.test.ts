@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
-import { CLOUD_ENV, escapeC1, HOST_TOKEN_ENV, HOST_URL_ENV } from "@wsp/protocol";
+import { CLOUD_ENV, escapeC1, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { guestTools } from "../src/guest-tools.js";
 import { mcpServerSpec, toolServerLine, type RunningWsp } from "../src/mcp-install.js";
@@ -131,7 +131,8 @@ suite(`every recorded answer through the line wsp mcp runs${MCP_BIN === undefine
         const session = guestTools(join(dir, "state.json"), MCP_BIN!).open({
           argv: ["mcp"],
           cwd: "/root",
-          env: { [HOST_URL_ENV]: `http://127.0.0.1:${host.port}`, [HOST_TOKEN_ENV]: TOKEN },
+          // A machine's launch carries the turn's token beside the pair, as the record's guest answers were read.
+          env: { [HOST_URL_ENV]: `http://127.0.0.1:${host.port}`, [HOST_TOKEN_ENV]: TOKEN, ...(c.env?.[TURN_TOKEN_ENV] !== undefined ? { [TURN_TOKEN_ENV]: c.env[TURN_TOKEN_ENV] } : {}) },
           reply: message => replies.push(message),
           close: () => {},
         });
