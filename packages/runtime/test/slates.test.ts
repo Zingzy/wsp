@@ -462,7 +462,7 @@ const TICKER = `<slate title="Ticker">
 const events: EventUnion[] = [];
 
 /** A host over a temp root with one finished thread on a plain folder, and that thread as a caller. */
-async function threadOn(prefix: string, o: { picks?: Partial<Record<"model" | "effort" | "permissionMode" | "contextWindow", string>>; store?: Store } = {}): Promise<{ rt: Runtime; root: string; threadId: string; workspaceId: string; asThread: Caller; starts: HarnessStartOptions[]; prompts: string[] }> {
+async function threadOn(prefix: string, o: { picks?: Partial<Record<"model" | "effort" | "permissionMode" | "contextWindow", string>>; store?: Store; cwd?: (folder: string) => string } = {}): Promise<{ rt: Runtime; root: string; threadId: string; workspaceId: string; asThread: Caller; starts: HarnessStartOptions[]; prompts: string[] }> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   roots.push(root);
   const folder = join(root, "plain");
@@ -473,7 +473,7 @@ async function threadOn(prefix: string, o: { picks?: Partial<Record<"model" | "e
   const rt = host(root, o.store ?? memoryStore(), prompts, events, starts);
   const project = await rt.projects.add({ source: folder });
   const { workspace } = await rt.workspaces.folderFor({ project: project.id });
-  const first = await rt.sessions.start(workspace.id, { prompt: "one", ...o.picks });
+  const first = await rt.sessions.start(workspace.id, { prompt: "one", ...o.picks, ...(o.cwd !== undefined ? { cwd: o.cwd(folder) } : {}) });
   await first.finished;
   const threadId = first.view().threadId!;
   return { rt, root, threadId, workspaceId: workspace.id, starts, prompts, asThread: { origin: "here", by: { kind: "thread", threadId, workspaceId: workspace.id, rootThreadId: threadId } } };
@@ -617,6 +617,43 @@ describe("the slate v2 host, round 4", () => {
     expect(fixed.text).not.toContain("R905");
     expect(fixed.text).toContain("over 1 point");
     expect((await rt.slates.write({ text: `<props id="fed" value={item} />` }, asThread)).text).toContain(broken);
+  }, 30_000);
+
+  it("a run starts in the thread's own folder, the one it was started in, not its project's, across a restart too", async () => {
+    let inner = "";
+    const store = memoryStore();
+    const { rt, root, threadId, asThread } = await threadOn("wsp-slates-cwd-", {
+      store,
+      cwd: folder => {
+        inner = join(folder, ".matrix", "cell");
+        mkdirSync(inner, { recursive: true });
+        return inner;
+      },
+    });
+    await rt.slates.write({ text: `<slate title="Where"><value name="go" start={0} /><run name="where" cmd='pwd; printf %s "$SLATE_DIR"' timeout={20} /><when change={$go} do={start($where)} /><column><text id="t">{$where.out}</text></column></slate>` }, asThread);
+    await rt.slates.state({ threadId, values: { $go: 1 } });
+    await rt.slates.approve({ threadId, key: (await rt.slates.get(threadId))!.asks[0]!.key, scope: "thread" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["where"]).toMatchObject({ state: "done" });
+    }, { timeout: 10_000 });
+    const [ran, slateDir] = String(((await rt.slates.get(threadId))!.values["where"] as { out: string }).out).split("\n");
+    expect(realpathSync(ran!)).toBe(realpathSync(inner));
+    expect(slateDir).not.toBe("");
+    expect(slateDir!.startsWith(inner)).toBe(false);
+
+    await rt.close();
+    runtimes.splice(runtimes.indexOf(rt), 1);
+    const again = host(root, store, [], []);
+    await again.slates.ready();
+    // The thread's facts come from the workspaces, which a host loads on first use.
+    await again.workspaces.list();
+    await again.slates.state({ threadId, values: { $go: 2 } });
+    await vi.waitFor(async () => {
+      await again.slates.settled();
+      expect((await again.slates.get(threadId))!.values["where"]).toMatchObject({ state: "done", runs: 2 });
+    }, { timeout: 10_000 });
+    expect(realpathSync(String(((await again.slates.get(threadId))!.values["where"] as { out: string }).out).split("\n")[0]!)).toBe(realpathSync(inner));
   }, 30_000);
 
   it("the agent starts a run the person said always to, and an unapproved or ask-every-time run answers held without starting", async () => {
