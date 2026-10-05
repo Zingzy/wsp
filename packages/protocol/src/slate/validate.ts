@@ -432,27 +432,22 @@ class Validator {
   }
 
   private reactionCycles(): void {
-    const edges = new Map<string, Set<string>>();
-    const why = new Map<string, string>();
-    const add = (from: string, to: string, text: string): void => {
-      (edges.get(from) ?? edges.set(from, new Set()).get(from)!).add(to);
-      if (!why.has(`${from}>${to}`)) why.set(`${from}>${to}`, text);
-    };
-    for (const [name, expr] of Object.entries(this.doc.derived)) for (const d of roots(slateDependencies(expr))) add(d, name, `$${name} reads $${d}`);
+    // Nodes are whole paths: a write wakes a watcher of the same path, of a path above it, or of one under it.
+    const edges: { from: string; to: string; why: string }[] = [];
+    for (const [name, expr] of Object.entries(this.doc.derived)) for (const d of slateDependencies(expr)) edges.push({ from: d, to: `$${name}`, why: `$${name} reads ${d}` });
     for (const r of this.doc.reactions) {
       const change = (r.on as { change?: string[] }).change;
       if (change === undefined) continue;
-      const triggers = roots(change);
-      const targets = r.do.flatMap(s => (s.do === "set" || s.do === "toggle" ? [parseSlateOwnPath(s.path)?.name] : [])).filter((x): x is string => x !== undefined);
-      for (const t of triggers) for (const g of targets) add(t, g, `when change of $${t} sets $${g}`);
+      const targets = r.do.flatMap(s => (s.do === "set" || s.do === "toggle" ? [s.path] : []));
+      for (const t of change) for (const g of targets) edges.push({ from: t, to: g, why: `when change of ${t} sets ${g}` });
     }
+    const next = (n: string) => edges.filter(e => pathsOverlap(e.from, n));
     const state = new Map<string, "on" | "done">();
     let reported = false;
-    const visit = (n: string, stack: string[]): void => {
+    const visit = (n: string, stack: { node: string; why: string }[]): void => {
       if (reported || state.get(n) === "done") return;
       if (state.get(n) === "on") {
-        const cycle = [...stack.slice(stack.indexOf(n)), n];
-        const said = cycle.slice(0, -1).map((x, i) => why.get(`${x}>${cycle[i + 1]}`) ?? "");
+        const said = stack.slice(stack.findIndex(s => s.node === n) + 1).map(s => s.why);
         if (said.some(s => s.startsWith("when"))) {
           reported = true;
           this.add("A610", `reactions and derived values form a cycle: ${said.join("; ")}`, {}, "compute it as a <derived> value instead of setting it back");
@@ -460,10 +455,10 @@ class Validator {
         return;
       }
       state.set(n, "on");
-      for (const m of edges.get(n) ?? []) visit(m, [...stack, n]);
+      for (const e of next(n)) visit(e.to, [...stack, ...(stack.length === 0 ? [{ node: n, why: "" }] : []), { node: e.to, why: e.why }]);
       state.set(n, "done");
     };
-    for (const n of edges.keys()) visit(n, []);
+    for (const e of edges) visit(e.from, []);
   }
 
   // ---- pieces ----
@@ -703,6 +698,12 @@ function readsTime(expr: string): boolean {
 }
 
 /** The names a list of own paths starts from. */
+/** Whether a write to one path can change what the other reads: the same path, or one above the other. */
+function pathsOverlap(a: string, b: string): boolean {
+  const under = (x: string, y: string): boolean => x.startsWith(y) && (x[y.length] === "." || x[y.length] === "[");
+  return a === b || under(a, b) || under(b, a);
+}
+
 function roots(paths: readonly string[]): string[] {
   return [...new Set(paths.filter(p => p.startsWith("$")).map(p => p.slice(1).split(/[.[]/)[0]!))];
 }

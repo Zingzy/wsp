@@ -353,3 +353,13 @@ describe("a secret on a run", () => {
     expect(run(`args={[$tok.len]}`)).toEqual([]);
   });
 });
+
+describe("a reaction cycle", () => {
+  it("is a path writing what triggers it, not two fields under one name", () => {
+    const decl = (when: string) => all(wrap(`<text>x</text>`, `  <value name="x" start={{ a: 1, b: 0 }} />\n  ${when}`)).filter(c => c === "A610");
+    expect(decl(`<when change={$x.a} do={set($x.b, 1)} />`)).toEqual([]);
+    expect(decl(`<when change={$x.a} do={set($x.a, 1)} />`)).toEqual(["A610"]);
+    expect(decl(`<when change={$x} do={set($x.b, 1)} />`)).toEqual(["A610"]);
+    expect(decl(`<when change={$x.b} do={set($x, { a: 1, b: 2 })} />`)).toEqual(["A610"]);
+  });
+});
