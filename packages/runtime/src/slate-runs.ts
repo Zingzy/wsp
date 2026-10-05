@@ -217,7 +217,6 @@ export interface SlateRuns {
   /** Every run of the thread killed. `quiet` drops their completions and writes nothing, for a rewind, whose
    * restored values say what the runs were. */
   stopAll(threadId: string, opts?: { quiet?: boolean; why?: string }): void;
-  /** The declared timers of a slate; replaces what it had. */
   /** The declared timers of a slate; replaces what it had. A timer whose key, every and always are unchanged keeps
    * its period; a new or changed one fires at once. */
   timers(threadId: string, timers: { run: string; every: number; key: string; always?: boolean }[]): void;
