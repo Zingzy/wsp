@@ -23,7 +23,9 @@ const HOST_MEMORY_BUDGET_MB = 40;
  * top threads and the fifteen-minute draw added about 0.1 MB more; the pull request pane's reply, resolve and react
  * shapes took main from 35.9 to 36.1 MB on 2026-10-03. Main read 36.3 MB with the daemon's worktree ops; threads in
  * the project's folder and one turn in a worktree read 36.5, and the skill worked out at each ask rather than held
- * whole brought that to 36.4. */
+ * whole brought that to 36.4. Since 2026-10-06 the host runs under --stress-flush-code, so a reading leaves out the
+ * bytecode of code no turn ran: main read 37.0 without it and 35.5 with it on one Linux runner, the same 1.5 MB of
+ * start-up code either way, which moved the reading from build to build with how often the collector happened to run. */
 const HOST_MEMORY_CAP_MB = 36.5;
 
 /** The one page that quotes the budget. */
@@ -167,7 +169,7 @@ const RUN_CAP_MS = 240_000;
 /** Runs a script under a node of its own with collection exposed, and answers with everything it said. */
 function ran(script: string, home: string): Promise<{ out: string; code: number | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--expose-gc", "--input-type=module", "-e", script], {
+    const child = spawn(process.execPath, ["--expose-gc", "--stress-flush-code", "--input-type=module", "-e", script], {
       cwd: home,
       env: { ...process.env, HOME: home, WSP_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
