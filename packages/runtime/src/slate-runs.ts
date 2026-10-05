@@ -383,6 +383,10 @@ const LINES_KEPT = 500;
 const RUNNING_MAX = 4;
 const STARTS_PER_MINUTE = 12;
 const TIMER_FLOOR_S = 10;
+/** Five failed starts in a row back an `always` timer off to one start every five minutes, until one succeeds (07). */
+const BACKOFF_AFTER = 5;
+const BACKOFF_MS = 5 * 60_000;
+export const BACKED_OFF = "five starts in a row failed, so its timer starts it once every 5 minutes until one succeeds";
 /** After the leader exits and its group is killed, how long the pipes get to close before the run ends anyway: a
  * process that left the group with setsid can hold them open for as long as it lives. */
 const CLOSE_GRACE_MS = 1_000;
@@ -412,11 +416,21 @@ interface Live {
   starts: number[];
 }
 
+interface Timer {
+  every: number;
+  key: string;
+  always: boolean;
+  handle?: ReturnType<typeof setInterval>;
+  /** Failed starts in a row, and when the last one ended. */
+  failures: number;
+  failedAt?: number;
+}
+
 interface ThreadRuns {
   runs: Map<string, Live>;
   /** Runs held because four were running, in the order they asked. */
   queue: string[];
-  timers: Map<string, { every: number; key: string; always: boolean; handle?: ReturnType<typeof setInterval> }>;
+  timers: Map<string, Timer>;
   shown: boolean;
 }
 
@@ -645,6 +659,18 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     };
   };
 
+  /** A run's end as its timer counts it: a success clears the streak, a failure adds to it and, past the fifth on an
+   * `always` timer, says the timer backed off. */
+  const streak = (threadId: string, run: string, state: RunRecord["state"], why: string | undefined): string | undefined => {
+    const timer = thread(threadId).timers.get(run);
+    if (timer === undefined) return why;
+    if (state === "done") timer.failures = 0;
+    if (state !== "failed") return why;
+    timer.failures += 1;
+    timer.failedAt = now();
+    return timer.always && timer.failures >= BACKOFF_AFTER ? `${why ?? "it failed"}; ${BACKED_OFF}` : why;
+  };
+
   const hold = (req: RunStart, l: Live, why: HeldFor): RunStartAnswer => {
     l.held = { req, for: why };
     const t = thread(req.threadId);
@@ -655,7 +681,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
 
   const fail = (req: RunStart, l: Live, why: string): RunStartAnswer => {
     const at = now();
-    const record = write(req.threadId, req.run, l, { state: "failed", why, exit: null, runs: l.record.runs, endedAt: at });
+    const record = write(req.threadId, req.run, l, { state: "failed", why: streak(req.threadId, req.run, "failed", why)!, exit: null, runs: l.record.runs, endedAt: at });
     return { outcome: "failed", record };
   };
 
@@ -728,8 +754,10 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
       const why = o.error !== undefined ? secrets.scrub(threadId, o.error.message) : o.timedOut ? `timed out after ${timeout} s` : exit === 0 ? undefined : exit === null ? `ended by ${o.signal ?? "a signal"}` : `exited with ${exit}`;
       const finish = (fields: Pick<RunRecord, "state" | "why" | "exit" | "err" | "json">): void => {
         const endedAt = now();
+        const said = streak(threadId, run, fields.state, fields.why);
         write(threadId, run, l, {
           ...fields,
+          ...(said !== undefined ? { why: said } : {}),
           out,
           ...(decl.stream === true ? { lines: [...lines] } : {}),
           startedAt,
@@ -787,8 +815,12 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     for (const [run, timer] of t.timers) {
       const on = timer.always || t.shown;
       if (on && timer.handle === undefined) {
-        deps.onTimer?.(threadId, run);
-        timer.handle = setInterval(() => deps.onTimer?.(threadId, run), Math.max(timer.every, TIMER_FLOOR_S) * 1_000);
+        const fire = (): void => {
+          if (timer.always && timer.failures >= BACKOFF_AFTER && timer.failedAt !== undefined && now() - timer.failedAt < BACKOFF_MS) return;
+          deps.onTimer?.(threadId, run);
+        };
+        fire();
+        timer.handle = setInterval(fire, Math.max(timer.every, TIMER_FLOOR_S) * 1_000);
         timer.handle.unref();
       } else if (!on && timer.handle !== undefined) {
         clearInterval(timer.handle);
@@ -859,7 +891,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
       const kept = new Map([...t.timers].filter(([run, was]) => list.some(n => n.run === run && n.key === was.key && n.every === was.every && (n.always === true) === was.always)));
       for (const [run, timer] of t.timers) if (!kept.has(run) && timer.handle !== undefined) clearInterval(timer.handle);
       t.timers = kept;
-      for (const timer of list) if (!kept.has(timer.run)) t.timers.set(timer.run, { every: timer.every, key: timer.key, always: timer.always === true });
+      for (const timer of list) if (!kept.has(timer.run)) t.timers.set(timer.run, { every: timer.every, key: timer.key, always: timer.always === true, failures: 0 });
       tick(threadId);
     },
     shown(threadId, on) {
