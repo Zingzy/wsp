@@ -4096,8 +4096,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     runEnv: () => local?.env() ?? (process.env as Record<string, string>),
     ...(opts.statePath !== undefined ? { secretsFile: join(stateFolder(), "slates.secrets.json"), slatesDir: join(stateFolder(), "slates") } : {}),
   });
-  // A run that was running when the host stopped is failed and its done fires once, at start (02, "Host restart").
-  void slates.ready().catch((e: unknown) => console.warn(`the slates were not loaded: ${e instanceof Error ? e.message : String(e)}`));
 
   /** The harness session a thread's newest start in the transcript announced: what a send resumes once the thread's
    * rows have fallen off the index cap. */
@@ -6559,6 +6557,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Not waited on: a fetch of a big copy's branches takes seconds, and the records it drops leave as they go.
       copiesMoving = moveOldCopies().catch((e: unknown) => console.warn(`the move off old copies stopped: ${e instanceof Error ? e.message : String(e)}`));
       armSweep();
+      // A run that was running when the host stopped is failed and its done fires once, at start (02, "Host restart").
+      void slates.ready().catch((e: unknown) => console.warn(`the slates were not loaded: ${e instanceof Error ? e.message : String(e)}`));
     })();
     return hydrated;
   };
