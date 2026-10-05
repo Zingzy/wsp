@@ -5,7 +5,6 @@ const TRAFFIC = `<slate title="Traffic">
   <run name="traffic" cmd='python3 "$SLATE_DIR/traffic.py"' every={60} />
   <column>
     <number id="hits" label="Hits today" value={$traffic.json.hits} unit="hits" />
-    <file path="README.md" />
   </column>
   <file name="traffic.py">{\`
     import json, re
@@ -27,11 +26,10 @@ const doc = (text: string): SlateDoc => {
 const problems = (text: string) => { const r = parseSlate(text); return [...r.errors, ...r.warnings].map(p => `${p.code} ${p.message}`); };
 
 describe("a slate's files", () => {
-  it("declares code as written, indentation and braces kept, beside the file piece", () => {
+  it("declares code as written, indentation and braces kept", () => {
     const d = doc(TRAFFIC);
     expect(d.files).toEqual({ "traffic.py": PY });
-    expect(Object.values(d.pieces).map(p => p.type)).toEqual(["column", "number", "file"]);
-    expect(d.pieces["file-1"]!.props).toEqual({ path: "README.md" });
+    expect(Object.values(d.pieces).map(p => p.type)).toEqual(["column", "number"]);
   });
 
   it("prints back to the same document", () => {

@@ -248,7 +248,6 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
       for (const more of out.slice(1)) if (pieceLines < SLATE_LIMITS.sketchPieceLines) lines.push(`${indent}${cut(more, SLATE_LIMITS.sketchColumns - indent.length)}`);
     }
     if (piece.type === "section" && v.prop("open") === false) return;
-    if (module.rowTemplate === true) return;
     for (const child of piece.children ?? []) walk(child, transparent ? depth : depth + 1);
   };
   walk(doc.root, 0);

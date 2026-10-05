@@ -216,7 +216,7 @@ const NOT_IN = "is not in the catalog";
 
 function entry(name: string): string {
   const n = name.trim();
-  if (n === "file") return `${pieceEntry(SLATE_PIECES[n]!)}\nThe <file name="x.py"> declaration, code a run calls as $SLATE_DIR/x.py, is in slate_catalog runs.`;
+  if (n === "file") return `The <file name="x.py"> declaration, code a run calls as $SLATE_DIR/x.py, is in slate_catalog runs.`;
   if (SLATE_PIECES[n] !== undefined) return pieceEntry(SLATE_PIECES[n]);
   if (SLATE_SOURCES[n] !== undefined) return sourceEntry(n);
   switch (n) {

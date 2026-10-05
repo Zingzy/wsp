@@ -524,7 +524,6 @@ class Validator {
     for (const [name, ps] of Object.entries(spec.props)) {
       if (ps.required !== true || props[name] !== undefined) continue;
       if (spec.interactive === true && name === "label") this.add("T307", `a ${p.type} needs a label for people using a screen reader`, { piece: id, prop: name }, `label="..."`);
-      else if (p.type === "form" && name === "tool") this.add("T304", `form fills an MCP tool's arguments and needs tool="server.tool"; for fields of your own, use <input label="..." value={$x} /> and a <button>`, { piece: id, prop: name });
       else this.add("T304", `${p.type} "${id}" needs ${name}`, { piece: id, prop: name });
     }
     for (const [tag, is] of Object.entries(spec.items)) {
@@ -543,8 +542,6 @@ class Validator {
       if (children.length > spec.childLimit.max) this.add("T309", `${p.type} takes at most ${spec.childLimit.max} child${spec.childLimit.max === 1 ? "" : "ren"}`, { piece: id });
       if (spec.childLimit.types.length > 0) for (const c of children) { const t = this.doc.pieces[c]?.type; if (t !== undefined && !spec.childLimit.types.includes(t)) this.add("T309", `${p.type} takes ${orList(spec.childLimit.types)} children, not ${t}`, { piece: id }); }
     }
-    if (p.type === "tabs" && children.length === 0) this.add("T309", "tabs holds the pieces its tabs show", { piece: id });
-    if (p.type === "list" && children.length !== 1) this.add("T309", "list holds one child, drawn once per row", { piece: id });
     if (p.type === "checklist" && props.editable === true && !(isSlateBinding(props.items) && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(props.items.bind.trim()) && this.kinds.get(props.items.bind.trim().slice(1)) === "value")) {
       this.add("S502", "an editable checklist writes its ticks back, so items binds a value: items={$steps}", { piece: id, prop: "items" });
     }
@@ -552,7 +549,7 @@ class Validator {
     if (p.type === "chart" && (props.x === undefined || (isSlateBinding(props.x) && props.x.bind.trim() === "index"))) this.add("W013", "the chart's x is each row's index, so its axis reads 0 to the count; give each row its time, for example x={item.at}", { piece: id, prop: "x" }, "x={item.at}");
     if (p.type === "bars" && isSlateBinding(items) && slateIsSeries(items.bind.trim())) this.add("W003", `${items.bind} is a series over time; draw it as a line`, { piece: id, prop: "items" }, "<chart>");
     else if (p.type === "bars" && isSlateBinding(props.name) && readsTime(props.name.bind)) this.add("W003", `bars name each row by ${props.name.bind}, a time: a series over time is a line`, { piece: id, prop: "name" }, "<chart>");
-    return spec.rowTemplate === true ? rowType : row;
+    return row;
   }
 
   /** The row type of a repeating piece's items, where its shape is known. */
@@ -634,7 +631,6 @@ class Validator {
       if (m === null) { this.add("T303", `${name} names a run or a value as $name`, w); return; }
       const kind = this.kinds.get(m[1]!);
       if (type === "output" && kind !== "run") this.add("K702", `run names a run: $${m[1]} is ${kind ?? "not declared"}`, w, nearest(m[1]!, [...this.kinds].filter(([, k]) => k === "run").map(([n]) => `$${n}`)));
-      if (type === "form" && kind !== "value") this.add("S501", `into names a value: $${m[1]} is ${kind ?? "not declared"}`, w);
       return;
     }
     if (enumWords !== undefined) {

@@ -890,7 +890,7 @@ class Compiler {
   }
 }
 
-/** <file name="..."> declares code for the slate; <file path="..."> is the piece that shows a file of the folder. */
+/** <file name="..."> declares code for the slate. */
 const isFileDecl = (el: Pick<El, "tag" | "attrs">): boolean => el.tag === "file" && el.attrs.some(a => a.name === "name");
 const isDeclarationEl = (el: El): boolean => DECLARATIONS.has(el.tag) || isFileDecl(el);
 /** The declarations inside a piece, however deep, taken out of it; the piece keeps its other children. */
