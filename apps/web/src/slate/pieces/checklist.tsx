@@ -37,20 +37,22 @@ export const checklist: PieceView = {
           const key = slate.resolve(piece.props?.["key"], row);
           const done = truthy(slate.resolve(piece.props?.["done"], row));
           const note = str(slate.resolve(piece.props?.["note"], row));
+          // A row that is a plain word is its own title; a title written once would name every row alike.
+          const title = typeof item === "string" || typeof item === "number" ? String(item) : str(slate.resolve(piece.props?.["title"], row));
           return (
             <li key={key === undefined || key === null ? `#${index}` : String(key)} className={cn("flex min-h-11 min-w-0 items-start gap-3 py-3", inset)}>
               <Checkbox
                 className="mt-0.5"
                 checked={done}
                 disabled={!editable}
-                aria-label={str(slate.resolve(piece.props?.["title"], row))}
+                aria-label={title}
                 onCheckedChange={next => {
                   if (!editable) return;
                   void sender.now(`${list}[${index}].${field}`, next === true).then(() => (piece.on?.change !== undefined ? raise("change", { row }) : undefined));
                 }}
               />
               <span className="flex min-w-0 flex-col gap-0.5">
-                <span className={cn("text-sm leading-5", done ? "text-muted-foreground" : "text-foreground")}>{str(slate.resolve(piece.props?.["title"], row))}</span>
+                <span className={cn("text-sm leading-5", done ? "text-muted-foreground" : "text-foreground")}>{title}</span>
                 {note === undefined ? null : <span className="text-[13px] leading-5 text-muted-foreground">{note}</span>}
               </span>
             </li>

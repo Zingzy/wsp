@@ -148,7 +148,8 @@ export const table: PieceView = {
     );
     // The note says the words first, then the figures and dates.
     const noteOrder = [...text, ...columns.map((_, at) => at).filter(at => !text.includes(at))];
-    if (text.length > 2) {
+    // A table with no rows has nothing to fold: it stands as a grid, its header naming every column.
+    if (text.length > 2 && shown.length > 0) {
       // Folded: the name over a note of every other cell, figures and dates in mono, 12 px apart; a section's head names
       // the list, so the column's own header stands only where there is none.
       return (
@@ -212,7 +213,8 @@ export const table: PieceView = {
     const edge = "calc(var(--settings-inset,20px) - 15px)";
     const tracks = [
       ...(edges ? [edge] : []),
-      ...columns.map((_, at) => (at === fill ? "minmax(0,1fr)" : widths[at] !== undefined ? `minmax(${widths[at]}ch,max-content)` : "fit-content(40%)")),
+      // With no rows to size them by, the columns share the card evenly, so the header spans it rather than bunching left.
+      ...columns.map((_, at) => (shown.length === 0 || at === fill ? "minmax(0,1fr)" : widths[at] !== undefined ? `minmax(${widths[at]}ch,max-content)` : "fit-content(40%)")),
       ...(opens || actions.length > 0 ? ["auto"] : []),
       ...(edges ? [edge] : []),
     ];

@@ -38,9 +38,11 @@ export const facts: PieceView = {
     const list = factsOf(slate, piece.props?.["facts"], props["facts"]);
     if (list.length === 0) return null;
     const place = placeOf(slate, id);
-    // A figure or machine text is 12 px mono in the foreground; a word is 13 px sans muted; a tone colours either.
+    // A list of figures is 12 px mono in the foreground, any other 13 px sans muted, one face for every value so a list
+    // never alternates; a value that asks for mono keeps it, and a tone colours either.
+    const figures = list.every(fact => FIGURE.test(fact.value.trim()));
     const ink = (fact: Fact) => {
-      const mono = fact.mono || FIGURE.test(fact.value.trim());
+      const mono = fact.mono || figures;
       return cn(
         mono ? "font-mono text-xs tabular-nums text-foreground" : "text-[13px] text-muted-foreground",
         fact.emphasis === "quiet" ? "text-muted-foreground" : fact.tone !== undefined && TONE_INK[toneOf(fact.tone, slate, id)],

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The settings grammar's one rule for what stands where: a section, and the page around the sections, lay their
 // children out as soft cards whose rows are the children, with a hairline between rows. Pieces that are not rows
-// stand bare between the cards: a head, a chart or diagram, prose, a meta line, a button under its card, a toolbar of
-// controls, a table with its header over its own card, and a section of its own.
+// stand bare between the cards: a head, a chart or diagram, prose (markdown or text), a button under its card, a
+// toolbar of controls, a table with its header over its own card, and a section of its own.
 import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
 import type { SlateEngine } from "../engine.js";
@@ -51,7 +51,7 @@ export function isCardRow(slate: SlateEngine, id: string): boolean {
     case "row":
       return !isToolbar(slate, id) && !(piece.children ?? []).some(child => slate.piece(child)?.type === "heading");
     case "text":
-      return !isNoteText(slate, id);
+      return false;
     default:
       return true;
   }
@@ -105,7 +105,7 @@ export function Runs({ slate, ids }: { slate: SlateEngine; ids: readonly string[
     }
     // A status and its text riding a number's note draw nothing, so they join the number's card, where they take no row.
     else if (riddenBy(slate, id) !== undefined && last?.card !== undefined) last.card.push(id);
-    // A meta line among rows is a row of their card; after a chart or a list it stands bare as its foot.
+    // A meta line among rows is a row of their card; after a chart or a list it stands bare as its foot, as prose does.
     else if (isNoteText(slate, id) && last?.card !== undefined) last.card.push(id);
     else if (!isCardRow(slate, id)) runs.push({ key: id });
     else if (last?.card !== undefined) last.card.push(id);

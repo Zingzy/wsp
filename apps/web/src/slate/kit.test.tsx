@@ -82,7 +82,6 @@ describe("the richer kit in the renderer", () => {
     for (const [name, hist] of [
       ["flat data", [4141.8, 4141.8, 4141.8].map(at)],
       ["two equal points", [4141.8, 4141.8].map(at)],
-      ["one point", [at(4141.8, 0)]],
     ] as const) {
       it(`collapses ${name} to the legend's line, steady at the value`, () => {
         const { view } = draw(compiled(GOLD), { hist: [...hist] });
@@ -92,11 +91,29 @@ describe("the richer kit in the renderer", () => {
       });
     }
 
+    it("draws the plot for one sample, from the first read on, with its axis and its time", () => {
+      const { view } = draw(compiled(GOLD), { hist: [at(4141.8, 0)] });
+      const chart = view.container.querySelector("[data-slate-chart]")!;
+      expect(chart.querySelector("[data-slate-chart-flat]")).toBeNull();
+      expect(chart.querySelector("[data-usage-chart] svg[role=img] polyline")).not.toBeNull();
+      expect(ticks(view.container).length).toBeGreaterThan(1);
+      expect(chart.querySelectorAll("[data-k=tick]")).toHaveLength(1);
+    });
+
     it("draws the plot with its round axis once the value moves", () => {
       const { view } = draw(compiled(GOLD), { hist: [4141.8, 4160, 4141.8].map(at) });
       expect(ticks(view.container)).toEqual(["$4,140.00", "$4,145.00", "$4,150.00", "$4,155.00", "$4,160.00"]);
       expect(view.container.querySelector("[data-slate-chart-flat]")).toBeNull();
       expect(view.container.querySelector("[data-k=y-axis] [role=img], [data-k=y-axis] .digit-strip")).toBeNull();
+    });
+
+    it("says its unit once, in the legend and the hover, never on every figure of the axis", () => {
+      const RATE = `<slate><value name="hist" start={[]} /><column><chart label="Requests" items={$hist} x={item.at} value={item.v} unit="req/min" format="integer" /></column></slate>`;
+      const { view } = draw(compiled(RATE), { hist: [120, 400, 250].map(at) });
+      const chart = view.container.querySelector<HTMLElement>("[data-slate-chart]")!;
+      expect(chart.querySelector("figcaption")!.textContent).toBe("Requestsreq/min");
+      expect(ticks(view.container)).toEqual(["0", "100", "200", "300", "400"]);
+      expect(chart.querySelector("[data-k=y-axis]")!.textContent).not.toContain("req/min");
     });
 
     it("holds every value in four or five round steps", () => {
@@ -169,17 +186,55 @@ describe("the richer kit in the renderer", () => {
   });
 
   it("lines a group up only when align says so, and pads and insets on request", () => {
-    const doc = compiled(`<slate><column><section id="s" title="A" align="center" pad="loose"><text>x</text></section><section id="plain" title="B"><text>y</text></section><column id="inset" surface="inset"><text>z</text></column><grid id="g" columns={2} align="end"><text>1</text><text>2</text></grid></column></slate>`);
+    const doc = compiled(`<slate><column><section id="s" title="A" align="center" pad="loose"><status>x</status></section><section id="plain" title="B"><status>y</status></section><column id="inset" surface="inset"><status>z</status></column><grid id="g" columns={2} align="end"><text>1</text><text>2</text></grid></column></slate>`);
     const c = draw(doc).view.container;
     const inner = (id: string) => piece(c, id).querySelector<HTMLElement>("[data-slate-card], [data-slate-grid] > div")!;
     // A section's rows are a settings card whatever align, pad or surface it names: its rows take the card's inset.
     expect(inner("s").className).toContain("[&>:not([data-slate-rows])]:px-(--settings-inset,20px)");
     expect(inner("s").className).not.toMatch(/items-center|px-5/);
     expect(inner("plain").className).toContain("bg-card/40");
-    // A column standing among the cards takes no surface of its own: its text is a row of a card like any other.
+    // A column standing among the cards takes no surface of its own: its status is a row of a card like any other.
     expect(piece(c, "inset").querySelector("[data-slate-card]")).not.toBeNull();
     expect(inner("g").className).toContain("justify-items-end");
     expect(c.querySelector("[data-slate-piece=s]")!.textContent).toContain("A");
+  });
+
+  it("stands prose bare under its section head, plain, toned or mono, while a meta line still joins the card above it", () => {
+    const doc = compiled(`<slate><column>
+      <section id="prose" title="Feed"><text id="plain">Prices refresh every 60 seconds</text><text id="warn" tone="warning">Awaiting approval</text><text id="mono" mono>true</text></section>
+      <section id="rows" title="Now"><status id="up" tone="good">Up</status><text id="meta" tone="muted">checked 21s ago</text></section>
+    </column></slate>`);
+    const c = draw(doc).view.container;
+    for (const id of ["plain", "warn", "mono"]) expect(piece(c, id).closest("[data-slate-card]"), id).toBeNull();
+    expect(piece(c, "up").closest("[data-slate-card]")).not.toBeNull();
+    expect(piece(c, "meta").closest("[data-slate-card]")).toBe(piece(c, "up").closest("[data-slate-card]"));
+  });
+
+  it("sets a facts list's values in one face: mono only when every value is a figure, else sans, unless one asks for mono", () => {
+    const doc = compiled(`<slate><column>
+      <facts id="mixed"><fact label="Domain" value="spoo.me" /><fact label="Expires" value="2026-12-29" /><fact label="Days left" value="85" /><fact label="Checked" value="Tue 29 Dec" /></facts>
+      <facts id="figures"><fact label="CPU" value="12%" /><fact label="Memory" value="524 MB" /><fact label="Uptime" value="13s" /></facts>
+      <facts id="asked"><fact label="Path" value="/usr/local/bin" mono /><fact label="Days left" value="85" /></facts>
+    </column></slate>`);
+    const c = draw(doc).view.container;
+    const faces = (id: string) => [...piece(c, id).querySelectorAll("[data-settings-word]")].map(w => w.className.includes("font-mono"));
+    expect(faces("mixed")).toEqual([false, false, false, false]);
+    expect(faces("figures")).toEqual([true, true, true]);
+    expect(faces("asked")).toEqual([true, false]);
+  });
+
+  it("says a figure is not read yet rather than drawing a hole, and a zero reads 0", () => {
+    const doc = compiled(`<slate><value name="d" start={{}} /><column><row><number id="empty" label="Requests" value={$d.rpm} unit="req" /><number id="zero" label="Errors" value={0} /></row></column></slate>`);
+    const c = draw(doc).view.container;
+    expect(piece(c, "empty").textContent).toBe("RequestsNot read yet");
+    expect(piece(c, "empty").querySelector("[data-slate-unit]")).toBeNull();
+    expect(piece(c, "zero").textContent).toContain("0");
+  });
+
+  it("titles a checklist row that is a plain string with the string itself, not the title written for every row", () => {
+    const doc = compiled(`<slate><column><checklist id="release" title="Release checklist" done={false} items={["Run all tests", "Run linter", "Tag the release"]} /></column></slate>`);
+    const c = draw(doc).view.container;
+    expect([...piece(c, "release").querySelectorAll("li")].map(li => li.textContent)).toEqual(["Run all tests", "Run linter", "Tag the release"]);
   });
 
   it("draws bars, a status word with no dot, a chip as plain words, and no icon on a button, a text, a fact or a section head", () => {
