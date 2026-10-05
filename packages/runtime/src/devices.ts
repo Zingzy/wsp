@@ -53,6 +53,9 @@ interface DeviceRecord {
   scope?: ThreadScope;
   /** Set beside `scope` at the mint, and on no other road: where the turn that holds the token runs. */
   road?: ScopedRoad;
+  /** Set beside `scope` on a token minted for a side question rather than a turn: it shares the turn's scope, so the
+   * thread running says nothing of whether its answer is still awaited. */
+  aside?: true;
   /** Set on the browser wsp init opened here, whose code init itself minted: read as the owner. */
   here?: true;
   /** Set on a device admitted through the account rather than by a code: which computer it is there, the key it
@@ -141,7 +144,10 @@ export interface DeviceDoor {
   /** A device with no pairing code behind it: the host itself minting a token for a turn it is about to launch,
    * scoped to that turn's thread. The same door as a redeem, so a scoped token is revoked, listed and read by the
    * one road every other token takes. */
-  mint(name: string, scope: ThreadScope, now: number, road?: ScopedRoad): Promise<PairedDevice>;
+  mint(name: string, scope: ThreadScope, now: number, more?: { road?: ScopedRoad; aside?: true }): Promise<PairedDevice>;
+  /** Takes away every side question's token. A host's load calls it before it can mint one of its own, so each it
+   * finds was minted by a process that went down before the answer came. */
+  revokeAsides(): Promise<void>;
   /** The device this token names, or nothing when no device holds it. Reads only: the JSON routes read a token on
    * every request, and a write there would rewrite the whole state file each time. */
   match(token: string): Promise<HeldDevice | undefined>;
@@ -171,7 +177,7 @@ export function makeDevices(store: Store): DeviceDoor {
 
   /** One device record and the one token it will ever hand over. Both roads that make a device come through here,
    * so a scoped token is stored, hashed and named by exactly the rule a paired computer's is. */
-  const admit = async (name: string, scope: ThreadScope | undefined, now: number, more: { here?: true; via?: DeviceVia; road?: ScopedRoad } = {}): Promise<PairedDevice> => {
+  const admit = async (name: string, scope: ThreadScope | undefined, now: number, more: { here?: true; via?: DeviceVia; road?: ScopedRoad; aside?: true } = {}): Promise<PairedDevice> => {
     const deviceToken = randomBytes(24).toString("base64url");
     const at = new Date(now).toISOString();
     const record: DeviceRecord = {
@@ -184,6 +190,7 @@ export function makeDevices(store: Store): DeviceDoor {
       lastSeenAt: at,
       ...(scope !== undefined ? { scope } : {}),
       ...(scope !== undefined && more.road !== undefined ? { road: more.road } : {}),
+      ...(scope !== undefined && more.aside === true ? { aside: true } : {}),
       ...(more.here === true ? { here: true } : {}),
       ...(more.via !== undefined ? { via: more.via } : {}),
     };
@@ -199,6 +206,17 @@ export function makeDevices(store: Store): DeviceDoor {
     await store.delete(PAIRINGS, code);
     return now <= held.expiresAt ? held : undefined;
   };
+
+  const revoke = (id: string): Promise<boolean> =>
+    oneAtATime(async () => {
+      const held = await store.get(DEVICES, id);
+      if (!isDevice(held)) return false;
+      // The key first: a revoke that took the record away and then failed would leave the device free to dial
+      // back in on the admission it still holds.
+      if (held.via !== undefined) await store.put(REVOKED, held.via.fingerprint, { fingerprint: held.via.fingerprint } satisfies RevokedRecord);
+      await store.delete(DEVICES, id);
+      return true;
+    });
 
   return {
     issue: ({ now, ttlMs, here }) =>
@@ -219,7 +237,10 @@ export function makeDevices(store: Store): DeviceDoor {
     spend: (code, now) => oneAtATime(async () => (await spendCode(code, now)) !== undefined),
     admit: (name, now) => oneAtATime(() => admit(name, undefined, now)),
     admitAccount: (name, via, now) => oneAtATime(() => admit(name, undefined, now, { via })),
-    mint: (name, scope, now, road) => oneAtATime(() => admit(name, scope, now, road !== undefined ? { road } : {})),
+    mint: (name, scope, now, more = {}) => oneAtATime(() => admit(name, scope, now, more)),
+    revokeAsides: async () => {
+      for (const record of await devices()) if (record.aside === true) await revoke(record.id);
+    },
     refuses: async fingerprint => isRevoked(await store.get(REVOKED, fingerprint)),
     match: async token => {
       const digest = tokenDigest(token);
@@ -240,15 +261,6 @@ export function makeDevices(store: Store): DeviceDoor {
         return heldOf(moved);
       }),
     list: async () => (await devices()).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(viewOf),
-    revoke: id =>
-      oneAtATime(async () => {
-        const held = await store.get(DEVICES, id);
-        if (!isDevice(held)) return false;
-        // The key first: a revoke that took the record away and then failed would leave the device free to dial
-        // back in on the admission it still holds.
-        if (held.via !== undefined) await store.put(REVOKED, held.via.fingerprint, { fingerprint: held.via.fingerprint } satisfies RevokedRecord);
-        await store.delete(DEVICES, id);
-        return true;
-      }),
+    revoke,
   };
 }
