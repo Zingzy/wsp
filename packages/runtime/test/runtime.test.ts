@@ -722,7 +722,7 @@ describe("runtime session history", () => {
     expect(new Set(history.slice(8).map(e => e.threadId)).size).toBe(1);
     expect(history[8]!.threadId).not.toBe(history[0]!.threadId);
     expect(threads(history)).toBe(2);
-    expect(live.flatMap(e => ("threadId" in e && e.type !== "session.held" ? [e.threadId] : []))).toEqual(history.map(e => e.threadId));
+    expect(live.flatMap(e => ("threadId" in e && e.type !== "session.held" && e.type !== "thread.head" ? [e.threadId] : []))).toEqual(history.map(e => e.threadId));
     // The session rows carry the same ids, so a sidebar can fold rows into the threads the transcript folds into;
     // the resumed turn shares the first one's local id and so its row.
     expect((await rt.sessions.list(ws.id)).map(s => s.threadId)).toEqual([history[0]!.threadId, history[8]!.threadId]);
@@ -1506,9 +1506,10 @@ describe("runtime session history", () => {
     await store.put("transcripts", ws.id, { workspaceId: ws.id, events });
 
     const after = createRuntime({ backend, store, adapters: {} });
-    expect(await after.sessions.history(ws.id)).toEqual(events);
+    // The move gives each event its place in the transcript, in order from one.
+    expect(await after.sessions.history(ws.id)).toEqual(placed(events));
     expect(await store.list("transcripts")).toEqual([]);
-    expect(JSON.parse((await store.getBlob("transcripts", ws.id))!.toString("utf8"))).toEqual({ workspaceId: ws.id, events });
+    expect(JSON.parse((await store.getBlob("transcripts", ws.id))!.toString("utf8"))).toEqual({ workspaceId: ws.id, events: placed(events) });
     await after.close();
   });
 
@@ -1520,6 +1521,8 @@ describe("runtime session history", () => {
     };
     return [...(await read("transcript-heads")), ...(await read("transcripts"))];
   };
+  /** Events as a move writes them: each with its place in the transcript, in order from one. */
+  const placed = <T extends object>(events: readonly T[]): (T & { pos: number })[] => events.map((e, i) => ({ ...e, pos: i + 1 }));
   const delta = (workspaceId: string, i: number, text: string) => ({ type: "session.delta", workspaceId, sessionId: "s1", threadId: "thr_1", kind: "tool_use", text, toolUseId: `u${i}`, at: i });
 
   it("moves every event of a transcript past the byte cap to its files, and holds only the tail", async () => {
@@ -1535,15 +1538,15 @@ describe("runtime session history", () => {
     const after = createRuntime({ backend, store, adapters: {} });
     const history = await after.sessions.history(ws.id);
     expect(jsonBytes(history)).toBeLessThanOrEqual(TRANSCRIPT_BYTES);
-    expect(history.at(-1)).toEqual(events.at(-1));
-    expect(await onDisk(store, ws.id)).toEqual(events);
+    expect(history.at(-1)).toEqual(placed(events).at(-1));
+    expect(await onDisk(store, ws.id)).toEqual(placed(events));
     // A turn after the move rewrites the tail and leaves the head as the move wrote it.
     await after.close();
     const again = createRuntime({ backend, store, adapters: { claude: scripted("more") } });
     await (await again.sessions.start(ws.id, { prompt: "more" })).finished;
     await again.close();
     const kept = await onDisk(store, ws.id);
-    expect(kept.slice(0, events.length - history.length)).toEqual(events.slice(0, events.length - history.length));
+    expect(kept.slice(0, events.length - history.length)).toEqual(placed(events).slice(0, events.length - history.length));
     expect(kept.some(e => (e as { prompt?: string }).prompt === "more")).toBe(true);
   });
 
@@ -1563,13 +1566,13 @@ describe("runtime session history", () => {
     await store.put("transcripts", ws.id, { workspaceId: ws.id, events: older });
 
     const after = createRuntime({ backend, store, adapters: {} });
-    expect(await after.sessions.history(ws.id)).toEqual([...first, ...older]);
+    expect(await after.sessions.history(ws.id)).toEqual(placed([...first, ...older]));
     await after.close();
     // A move cut short after its files were written leaves the same events in both places: they are kept once.
     await store.put("transcripts", ws.id, { workspaceId: ws.id, events: [...first, ...older] });
     const redone = createRuntime({ backend, store, adapters: {} });
-    expect(await redone.sessions.history(ws.id)).toEqual([...first, ...older]);
-    expect(await onDisk(store, ws.id)).toEqual([...first, ...older]);
+    expect(await redone.sessions.history(ws.id)).toEqual(placed([...first, ...older]));
+    expect(await onDisk(store, ws.id)).toEqual(placed([...first, ...older]));
     await redone.close();
   });
 });

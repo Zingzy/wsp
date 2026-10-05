@@ -1542,6 +1542,12 @@ const sessionScope = {
   /** Minted by the runtime at a start without resume and kept by every start that resumes into it, so a
    * transcript folds into threads where it changes. Absent on transcripts from before it: those are one thread. */
   threadId: z.string().optional(),
+  /** Where the event sits in its workspace's transcript, from one, stamped by the runtime as it records the event and
+   * never issued twice in one transcript, a restart and a trim included: a client holding part of a thread places an
+   * event off the bus or out of a page against what it holds with one compare. Not the bus's `seq`, which counts
+   * every event of one host process and starts again with the next. Absent on an event the bus carried that the
+   * transcript never recorded. */
+  pos: z.number().int().positive().optional(),
 };
 
 /** What the CLI announces about itself in system/init, beyond model and tools. */
@@ -1613,6 +1619,9 @@ export const SessionDeltaEvent = z.object({
    * drops its oldest rows, so how many of a turn's rows survive says nothing about how many there were. Absent on a
    * row written before the stamp existed. */
   line: z.number().int().positive().optional(),
+  /** The length of the whole text, on a tool result a thread's head cut short; the rest is in a sessions.history
+   * page. Absent on every row a transcript holds and on a result the head kept whole. */
+  cut: z.number().int().positive().optional(),
 });
 
 export const SessionDoneEvent = z.object({
@@ -2468,6 +2477,62 @@ export const serverIconsLeftLine = (folder: string, reason: string): string =>
  * rows are read again to pick it up. */
 export const ThreadMarkedEvent = z.object({ type: z.literal("thread.marked"), workspaceId: z.string(), threadIds: z.array(z.string()) });
 export type ThreadMarkedEvent = z.infer<typeof ThreadMarkedEvent>;
+
+/** What the composer and the top bar draw of a thread with no event in sight: the thread as foldThreads lists it, less
+ * its subagents, with the model, effort and context window its latest turn runs on and the running turn's id while one
+ * runs. The subagents stay with sessions.list: a builder's list grows by every turn, and every head pushed is kept in
+ * the bus's replay ring, where carrying it cost a day of turns 1.4 MB (measured). */
+export const ThreadFacts = ThreadView.omit({ subagents: true }).extend({
+  model: z.string().optional(),
+  effort: z.string().optional(),
+  contextWindow: z.string().optional(),
+  turnId: z.string().optional(),
+});
+export type ThreadFacts = z.infer<typeof ThreadFacts>;
+
+/** The bytes of JSON a thread's head answers in, facts and events together: a first paint's worth, which a click on a
+ * thread's tile draws without waiting on the rest. */
+export const HEAD_BYTES = 64 * 1024;
+/** The characters of a tool result a head keeps; every reader of a result in a first paint reads its first lines. */
+export const HEAD_RESULT_CHARS = 2 * 1024;
+/** How many events a history page answers when the caller names no limit, and the most it may name. */
+export const HISTORY_PAGE_EVENTS = 200;
+export const HISTORY_PAGE_MAX = 1000;
+/** The bytes of JSON a history page stops at, past its first event: a transcript keeps tool results of up to 16 KB,
+ * so a page bounded by its count alone could be megabytes. */
+export const HISTORY_PAGE_BYTES = 400 * 1024;
+
+/** A thread's head: its facts and the newest of its events, oldest first, cut to what a first paint needs, with every
+ * tool result past its first characters cut and marked. pos is the newest position the workspace's transcript has
+ * issued, so an event off the bus at or under it is one the head already counts; total is how many events of the
+ * thread the transcript holds. */
+export const ThreadHead = z.object({
+  facts: ThreadFacts,
+  events: z.array(SessionEvent),
+  pos: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+});
+export type ThreadHead = z.infer<typeof ThreadHead>;
+
+/** One page of a thread's events out of sessions.history: the newest ones under `before`, oldest first, with pos and
+ * total as ThreadHead carries them. */
+export const HistoryPage = z.object({
+  events: z.array(SessionEvent),
+  pos: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+});
+export type HistoryPage = z.infer<typeof HistoryPage>;
+
+/** A thread's facts moved: a turn started or ended, or its title or access changed. It carries the facts and the
+ * transcript's pos, never events, since every event of the thread rides the bus on its own. */
+export const ThreadHeadEvent = z.object({
+  type: z.literal("thread.head"),
+  workspaceId: z.string(),
+  threadId: z.string(),
+  facts: ThreadFacts,
+  pos: z.number().int().nonnegative(),
+});
+export type ThreadHeadEvent = z.infer<typeof ThreadHeadEvent>;
 
 /** A thread was rewound, or a rewind undone: its transcript lost the turns after the one it kept, so every window
  * holding the thread reads its history and its rows again. */
@@ -3785,6 +3850,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionQueuedEvent.extend(sequenced),
   SessionHeldEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
+  ThreadHeadEvent.extend(sequenced),
   ThreadRewoundEvent.extend(sequenced),
   PortOpenEvent.extend(sequenced),
   PortCloseEvent.extend(sequenced),
@@ -6969,8 +7035,22 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * from the binaries on its machine where they answer; without one, from the runtime's table. */
   z.object({ id: reqId, op: z.literal("harnesses.list"), workspaceId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("sessions.list"), workspaceId: z.string().optional() }),
-  /** Replies with the workspace's persisted SessionEvent[] (oldest first, capped by the runtime). */
-  z.object({ id: reqId, op: z.literal("sessions.history"), workspaceId: z.string() }),
+  /** Replies with the workspace's persisted SessionEvent[] (oldest first, capped by the runtime). With threadId,
+   * replies with a HistoryPage of that thread instead: its newest events under `before` (every one when absent), at
+   * most `limit` of them (HISTORY_PAGE_EVENTS when absent) and no more than HISTORY_PAGE_BYTES of them past the first,
+   * so a client pages back by passing the pos of the oldest event it holds. Refused as usage when before or limit
+   * comes without a thread. */
+  z.object({
+    id: reqId,
+    op: z.literal("sessions.history"),
+    workspaceId: z.string(),
+    threadId: z.string().optional(),
+    before: z.number().int().positive().optional(),
+    limit: z.number().int().positive().max(HISTORY_PAGE_MAX).optional(),
+  }),
+  /** Replies with the thread's ThreadHead, by its fold key as sessions.read takes it; refused as not found where the
+   * caller reaches no such thread. */
+  z.object({ id: reqId, op: z.literal("sessions.head"), threadId: z.string() }),
   /** Replies with { attachment: KeptAttachment }: one image a person's message carried, by the thread, the request id
    * its start carries and its place in the message, which the host keeps until the thread or its workspace goes. */
   z.object({ id: reqId, op: z.literal("sessions.attachment"), workspaceId: z.string(), threadId: z.string(), requestId: z.string(), index: z.number().int().nonnegative() }),
@@ -7407,6 +7487,7 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.start",
   "sessions.list",
   "sessions.history",
+  "sessions.head",
   "sessions.attachment",
   "sessions.interrupt",
   "sessions.steer",
@@ -7483,6 +7564,7 @@ export const DEVICE_OPS: readonly string[] = [
   "harnesses.list",
   "sessions.list",
   "sessions.history",
+  "sessions.head",
   "sessions.attachment",
   "sessions.forget",
   "sessions.read",

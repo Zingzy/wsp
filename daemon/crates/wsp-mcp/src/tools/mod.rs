@@ -125,6 +125,7 @@ pub const TOOLS: &[Tool] = &[
     projects::TOOL,
     threads::THREADS,
     threads::THREAD_READ,
+    threads::THREAD_HEAD,
     folders::TOOL,
     setup::TOOL,
     terminal_config::TOOL,
