@@ -231,6 +231,12 @@ describe("the richer kit in the renderer", () => {
     expect(piece(c, "zero").textContent).toContain("0");
   });
 
+  it("titles a checklist row that is a plain string with the string itself, not the title written for every row", () => {
+    const doc = compiled(`<slate><column><checklist id="release" title="Release checklist" done={false} items={["Run all tests", "Run linter", "Tag the release"]} /></column></slate>`);
+    const c = draw(doc).view.container;
+    expect([...piece(c, "release").querySelectorAll("li")].map(li => li.textContent)).toEqual(["Run all tests", "Run linter", "Tag the release"]);
+  });
+
   it("draws bars, a status word with no dot, a chip as plain words, and no icon on a button, a text, a fact or a section head", () => {
     const doc = compiled(`<slate><value name="n" start={0} /><column>
       <bars label="Busiest" items={[{ n: 'web', v: 4 }, { n: 'host', v: 2 }]} name={item.n} value={item.v} />
