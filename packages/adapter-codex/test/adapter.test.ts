@@ -300,6 +300,19 @@ describe("CodexAdapter over codex app-server", () => {
     expect(answer).toEqual({ id: "wsp-steer-1", result: { turnId: RECORDED_TURN } });
   });
 
+  it("an MCP call the tool failed keeps the tool's words, and one that never reached it keeps the error", async () => {
+    const item = (body: Record<string, unknown>) => `{"method":"item/completed","params":{"item":${JSON.stringify(body)},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`;
+    const said = [{ type: "text", text: "slate refused: 1 error: P100 bad-syntax" }];
+    const launch = launcher(scripted([
+      item({ type: "mcpToolCall", id: "call_4", server: "wsp", tool: "slate_write", arguments: {}, status: "failed", result: { content: said }, error: null }),
+      item({ type: "mcpToolCall", id: "call_5", server: "wsp", tool: "slate_write", arguments: {}, status: "failed", result: null, error: { message: "server gone" } }),
+      completed("completed"),
+    ]));
+    const { events, onEvent } = collect();
+    await adapterOver(launch).start({ prompt: "x", onEvent }).finished;
+    expect(deltasOf(events).filter(d => d.kind === "tool_result").map(d => [d.toolUseId, d.text, d.isError])).toEqual([["call_4", JSON.stringify(said), true], ["call_5", "server gone", true]]);
+  });
+
   it("file changes, MCP calls and web searches, which that turn made none of, draw as codex exec's calls did", async () => {
     // Written from the 0.155.1 schema's ThreadItem variants, since the recorded turn ran one command and no other tool.
     const item = (phase: "started" | "completed", body: Record<string, unknown>) => `{"method":"item/${phase}","params":{"item":${JSON.stringify(body)},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`;
