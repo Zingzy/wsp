@@ -143,6 +143,7 @@ const READINGS = (send: (e: DaemonEvent) => void): void => {
     at: 1,
     daemon: 900,
     total: 43,
+    seq: 1,
     procs: [PROC({ pid: 12, comm: "node", cmdline: "node /root/.local/bin/wsp mcp", cpu: 38.2, rss: 412 * 1024 * 1024, startedAt: 0 }), PROC({ pid: 900, comm: "wsp-daemon", cmdline: "wsp-daemon --kind place", cpu: 1.5, rss: 9 * 1024 * 1024, startedAt: 0 })],
   });
 };
@@ -203,6 +204,52 @@ describe("wsp status on a computer joined as a place", () => {
       held.close();
     }
     expect(daemon.closed).toBe(1);
+  });
+
+  it("applies the changes the daemon pushes after its first snapshot onto the processes it holds", async () => {
+    joined();
+    let send: ((e: DaemonEvent) => void) | undefined;
+    const daemon = fakeDaemon(out => {
+      send = out;
+      READINGS(out);
+    });
+    const held = (await openHere(home, daemon.deps))!;
+    try {
+      const pushed = held.next();
+      send!({ type: "proc.changes", at: 2, daemon: 900, total: 42, procs: [PROC({ pid: 12, comm: "node", cmdline: "node /root/.local/bin/wsp mcp", cpu: 2.5, rss: 412 * 1024 * 1024, startedAt: 0 })], gone: [900], seq: 2, base: 1 } as DaemonEvent);
+      await pushed;
+      expect(held.reading().procs).toMatchObject({ at: 2, total: 42, procs: [{ pid: 12, cpu: 2.5 }] });
+    } finally {
+      held.close();
+    }
+  });
+
+  it("a changes frame that does not follow the processes it holds keeps them and asks the daemon for a whole list", async () => {
+    joined();
+    let send: ((e: DaemonEvent) => void) | undefined;
+    const daemon = fakeDaemon(out => {
+      send = out;
+      READINGS(out);
+    });
+    const held = (await openHere(home, daemon.deps))!;
+    try {
+      expect(daemon.watches).toEqual(["sys.watch", "proc.watch"]);
+      send!({ type: "proc.changes", at: 3, daemon: 900, total: 1, procs: [], gone: [12], seq: 9, base: 8 } as DaemonEvent);
+      await new Promise(r => setTimeout(r, 5));
+      expect(held.reading().procs?.total).toBe(43);
+      expect(daemon.watches).toEqual(["sys.watch", "proc.watch", "proc.watch"]);
+    } finally {
+      held.close();
+    }
+  });
+
+  it("reads a snapshot from a daemon a version behind, which names no seq, as the whole list", async () => {
+    joined();
+    const daemon = fakeDaemon(send => {
+      send({ type: "proc.snapshot", at: 1, daemon: 900, total: 43, procs: [PROC({ pid: 12, comm: "node", cmdline: "node server.js", cpu: 1, startedAt: 0 })] } as DaemonEvent);
+    });
+    const reading = await readHere(home, daemon.deps);
+    expect(reading?.procs).toMatchObject({ total: 43, procs: [{ pid: 12 }] });
   });
 
   it("asks for both watches again on every connect the link makes, so a reconnect does not leave it open and quiet", async () => {

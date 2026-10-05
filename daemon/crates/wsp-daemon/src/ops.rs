@@ -70,7 +70,7 @@ pub(crate) struct Conn {
     /// op still being answered when the socket went undoes itself at once instead of outliving it.
     detaches: Mutex<Option<Vec<Detach>>>,
     /// This socket's proc.watch, so proc.unwatch can end it before the socket does and a second watch on the same
-    /// socket is not a second subscription.
+    /// socket asks for a whole snapshot rather than a second subscription.
     proc_watch: Mutex<Option<(u64, Arc<ProcSampler>)>>,
     /// The one guest session this socket opened, which ends with it.
     guest: Mutex<Option<String>>,
@@ -1114,20 +1114,19 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, read.await)
         }
-        DaemonOp::PortsWatch => {
-            let key = ctx.next_key();
-            ctx.ports.subscribe(Listener { key, out: conn.out.clone() });
-            let ctx2 = Arc::clone(ctx);
-            conn.on_close(Box::new(move || ctx2.ports.unsubscribe(key)));
-            ctx.ports.start(ctx);
-            // The poll and the reading of what it left are one held lock, so the reply carries the seed and not a
-            // state a later poll has already moved on from.
-            let (events, ports) = {
-                let mut watcher = ctx.ports.watcher.lock().await;
-                let events = watcher.poll().await;
-                (events, watcher.current())
-            };
-            ctx.ports.deliver(ctx, events);
+        DaemonOp::PortsWatch { roots, folder } => {
+            let held = Arc::downgrade(ctx);
+            let spot: crate::ports::OnChanges = Arc::new(move |events| {
+                if let Some(ctx) = held.upgrade() {
+                    crate::relay::note_opens(&ctx, events);
+                }
+            });
+            let key = conn.key;
+            let (ports, fresh) = ctx.ports.watch(key, conn.out.clone(), roots, folder, spot).await;
+            if fresh {
+                let ctx2 = Arc::clone(ctx);
+                conn.on_close(Box::new(move || ctx2.ports.unsubscribe(key)));
+            }
             text(&Reply::new(id, PortsWatchReply { ports }))
         }
         DaemonOp::ManifestGet => {
@@ -1228,7 +1227,9 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                 let key = ctx.next_key();
                 conn.while_open(|| {
                     let mut watch = conn.proc_watch.lock().unwrap_or_else(|e| e.into_inner());
-                    if watch.is_some() {
+                    // A socket already watching that watches again missed a frame: its next one is whole.
+                    if let Some((held, sampler)) = watch.as_ref() {
+                        sampler.resend(*held);
                         return None;
                     }
                     sampler.subscribe(key, conn.out.clone());

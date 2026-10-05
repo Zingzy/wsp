@@ -1,26 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! This machine's listening TCP ports, one road per platform: Linux reads /proc/net/tcp and finds each socket's
-//! holder through the /proc/[pid]/fd tables (pgrep is not on every guest); macOS asks lsof. The watcher diffs one
-//! snapshot against the next and says what opened and what closed. A browser's DevTools debugging port is no server
-//! and is dropped here, where every reader of the ports gets them, once it has answered as one. Only a listener a
-//! browser or Electron holds is asked, and on the person's own computer only one of wsp's own processes: a thread's
-//! test servers, and every other server of theirs, get no request from wsp.
+//! holder through the /proc/[pid]/fd tables (pgrep is not on every guest); macOS asks lsof. Each watching socket is
+//! told what opened and what closed against what it was last told. A browser's DevTools debugging port is no server
+//! and is dropped here, where every reader of the ports gets them, once it has answered as one. On a computer
+//! somebody owns, every workspace there shares this daemon, so a workspace's socket names roots and sees only the
+//! listeners they hold: the process groups of its turns and terminals, as the host names them, every process under
+//! those, and every process running in the workspace's folder. A watch that names no roots, which is what the host's
+//! own watchers ask for, sees the whole machine.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use wsp_frames::{numbers, DaemonEvent, ListeningPort, RelayPort};
+use wsp_frames::{numbers, DaemonEvent, ListeningPort};
 
 use crate::sys_local::host_command;
-use crate::{clock, Ctx, Listener};
+use crate::{clock, Outbound};
 
 const TCP_LISTEN: &str = "0A";
-pub(crate) const DEFAULT_INTERVAL: Duration = Duration::from_secs(1);
+/// One read per five seconds, each diffed against the last: a listener that opens and closes between two reads sends
+/// nothing, and what moved goes out as one batch. A read a second sent 14 events a second to every page on a Mac.
+pub(crate) const DEFAULT_INTERVAL: Duration = Duration::from_secs(5);
 /// How long a new listener gets to answer the DevTools question, and how much of its answer is read.
 const DEVTOOLS_PROBE: Duration = Duration::from_millis(500);
 const DEVTOOLS_REPLY_CAP: u64 = 16 * 1024;
@@ -341,119 +344,234 @@ type DevtoolsAnswers = Arc<Mutex<HashMap<(u16, Option<u32>), Option<bool>>>>;
 /// How a listener is asked the DevTools question, by its port.
 type Asker = Arc<dyn Fn(u16) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
-/// The processes whose listeners may be asked the DevTools question, read when a reading holds one not yet asked.
-pub(crate) type OwnPids = Arc<dyn Fn() -> Pin<Box<dyn Future<Output = HashSet<u32>> + Send>> + Send + Sync>;
-
-/// wsp's own processes on the person's computer: this daemon and everything under the process that started it,
-/// which is the host, whose children are the agents and theirs the servers and browsers they start. Init is never
-/// taken for that process, so a daemon whose host is gone asks only its own tree. A ps that fails asks nobody.
-pub(crate) fn own_tree() -> OwnPids {
-    Arc::new(|| {
-        Box::pin(async {
-            let read = tokio::task::spawn_blocking(|| host_command("ps", &["-A", "-o", "pid=,ppid="]).output()).await;
-            let rows = match read {
-                Ok(Ok(out)) if out.status.success() => parse_parents(&String::from_utf8_lossy(&out.stdout)),
-                _ => Vec::new(),
-            };
-            let parent = std::os::unix::process::parent_id();
-            let roots: Vec<u32> = std::iter::once(std::process::id()).chain((parent > 1).then_some(parent)).collect();
-            tree_under(&rows, &roots)
-        })
-    })
+/// One process's place on the computer: its parent and the process group it is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Lineage {
+    pub(crate) pid: u32,
+    pub(crate) ppid: u32,
+    pub(crate) pgid: u32,
 }
 
-/// Each process and its parent, off ps's `pid= ppid=` columns.
-fn parse_parents(text: &str) -> Vec<(u32, u32)> {
+/// Every process's lineage, from whichever road the platform has.
+pub(crate) type LineageSource = Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Vec<Lineage>> + Send>> + Send + Sync>;
+
+/// The Linux road: each /proc/[pid]/stat, read as the processes pane reads it.
+fn proc_lineage(proc_root: &Path) -> Vec<Lineage> {
+    let Ok(dirs) = std::fs::read_dir(proc_root) else { return Vec::new() };
+    dirs.flatten()
+        .filter(|d| d.file_name().to_str().is_some_and(|n| n.parse::<u32>().is_ok()))
+        .filter_map(|d| std::fs::read_to_string(d.path().join("stat")).ok())
+        .filter_map(|text| crate::proc::parse_proc_pid_stat(&text).ok())
+        .map(|st| Lineage { pid: st.pid, ppid: st.ppid, pgid: st.pgrp })
+        .collect()
+}
+
+/// ps's `pid= ppid= pgid=` columns, the darwin road.
+fn parse_lineage(text: &str) -> Vec<Lineage> {
     text.lines()
         .filter_map(|line| {
-            let mut words = line.split_whitespace();
-            Some((words.next()?.parse().ok()?, words.next()?.parse().ok()?))
+            let mut words = line.split_whitespace().map(|w| w.parse::<u32>().ok());
+            Some(Lineage { pid: words.next()??, ppid: words.next()??, pgid: words.next()?? })
         })
         .collect()
 }
 
-/// The roots and every process under them.
-fn tree_under(rows: &[(u32, u32)], roots: &[u32]) -> HashSet<u32> {
-    let mut tree: HashSet<u32> = roots.iter().copied().collect();
-    let mut next: Vec<u32> = roots.to_vec();
+/// The road for this daemon, as source_for picks the ports': a fake /proc when one is given, the platform's own
+/// otherwise. A ps that fails reads as no processes, so a watch that names roots sees nothing rather than everything.
+pub(crate) fn lineage_for(proc_root: Option<&Path>) -> LineageSource {
+    let root = match proc_root {
+        Some(root) => Some(root.to_path_buf()),
+        None if cfg!(target_os = "linux") => Some(PathBuf::from("/proc")),
+        None => None,
+    };
+    match root {
+        Some(root) => Arc::new(move || {
+            let root = root.clone();
+            Box::pin(async move { tokio::task::spawn_blocking(move || proc_lineage(&root)).await.unwrap_or_default() })
+        }),
+        None if cfg!(target_os = "macos") => Arc::new(|| {
+            Box::pin(async {
+                let read = tokio::task::spawn_blocking(|| host_command("ps", &["-A", "-o", "pid=,ppid=,pgid="]).output()).await;
+                match read {
+                    Ok(Ok(out)) if out.status.success() => parse_lineage(&String::from_utf8_lossy(&out.stdout)),
+                    _ => Vec::new(),
+                }
+            })
+        }),
+        None => Arc::new(|| Box::pin(async { Vec::new() })),
+    }
+}
+
+/// The processes a watch's roots hold: each root, every process in a root's process group, and every process under
+/// any of those, a dev server that made a group of its own among them. Init and the kernel are no workspace's, so a
+/// root of 0 or 1 holds nothing.
+fn members(table: &[Lineage], roots: &[u32]) -> HashSet<u32> {
+    let roots: HashSet<u32> = roots.iter().copied().filter(|r| *r > 1).collect();
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for p in table {
+        children.entry(p.ppid).or_default().push(p.pid);
+    }
+    let mut held: HashSet<u32> = table.iter().filter(|p| roots.contains(&p.pid) || roots.contains(&p.pgid)).map(|p| p.pid).collect();
+    let mut next: Vec<u32> = held.iter().copied().collect();
     while let Some(parent) = next.pop() {
-        for &(pid, ppid) in rows {
-            if ppid == parent && tree.insert(pid) {
-                next.push(pid);
+        for child in children.get(&parent).into_iter().flatten() {
+            if held.insert(*child) {
+                next.push(*child);
             }
         }
     }
-    tree
+    held
 }
 
+/// The folder each of these processes runs in, from whichever road the platform has; a process it cannot read is
+/// left out.
+pub(crate) type CwdSource = Arc<dyn Fn(Vec<u32>) -> Pin<Box<dyn Future<Output = HashMap<u32, PathBuf>> + Send>> + Send + Sync>;
+
+/// lsof's field output for `-d cwd`: a process set opens with its pid and names its folder on an `n` line.
+fn parse_lsof_cwds(text: &str) -> HashMap<u32, PathBuf> {
+    let mut cwds = HashMap::new();
+    let mut pid = None;
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix('p') {
+            pid = value.parse::<u32>().ok();
+        } else if let (Some(value), Some(held)) = (line.strip_prefix('n'), pid) {
+            cwds.insert(held, PathBuf::from(value));
+        }
+    }
+    cwds
+}
+
+/// The road for this daemon, as source_for picks the ports': /proc/[pid]/cwd off a fake /proc when one is given or
+/// on Linux, and one lsof for every pid asked about on a Mac.
+pub(crate) fn cwd_for(proc_root: Option<&Path>) -> CwdSource {
+    let root = match proc_root {
+        Some(root) => Some(root.to_path_buf()),
+        None if cfg!(target_os = "linux") => Some(PathBuf::from("/proc")),
+        None => None,
+    };
+    match root {
+        Some(root) => Arc::new(move |pids: Vec<u32>| {
+            let root = root.clone();
+            Box::pin(async move {
+                tokio::task::spawn_blocking(move || {
+                    pids.into_iter()
+                        .filter_map(|pid| std::fs::read_link(root.join(pid.to_string()).join("cwd")).ok().map(|cwd| (pid, cwd)))
+                        .collect()
+                })
+                .await
+                .unwrap_or_default()
+            })
+        }),
+        None if cfg!(target_os = "macos") => Arc::new(|pids: Vec<u32>| {
+            Box::pin(async move {
+                let list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+                let read =
+                    tokio::task::spawn_blocking(move || host_command("lsof", &["-a", "-d", "cwd", "-p", &list, "-Fpn"]).output()).await;
+                match read {
+                    Ok(Ok(out)) => parse_lsof_cwds(&String::from_utf8_lossy(&out.stdout)),
+                    _ => HashMap::new(),
+                }
+            })
+        }),
+        None => Arc::new(|_| Box::pin(async { HashMap::new() })),
+    }
+}
+
+/// Whose listeners one watch sees.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Scope {
+    /// Every listener: what a watch that names no roots sees, the host's own watchers among them, and a cloud
+    /// machine, which is the workspace's whole.
+    Everything,
+    /// The listeners of the processes these roots hold, and with a folder, of every process running in it.
+    Roots { roots: Vec<u32>, folder: Option<PathBuf> },
+}
+
+/// The reads one watch is made of: the listeners and the processes holding them, and the DevTools question put to a
+/// browser's listener once.
 pub(crate) struct PortWatcher {
     source: PortSource,
+    lineage: LineageSource,
+    cwd: CwdSource,
     alive: Box<dyn Fn(u32) -> bool + Send + Sync>,
     now: Box<dyn Fn() -> u64 + Send + Sync>,
-    known: Vec<ListeningPort>,
-    /// The first poll seeds what is already listening without events: a listener that predates the watcher is not
-    /// a change.
-    primed: bool,
     /// Kept while a listener lives, so each is asked once.
     devtools: DevtoolsAnswers,
-    /// Whose listeners are asked; none where the machine is the workspace's and every listener is.
-    own: Option<OwnPids>,
     ask: Asker,
 }
 
 impl PortWatcher {
-    pub(crate) fn new(source: PortSource) -> PortWatcher {
-        PortWatcher::with(source, Box::new(pid_alive), Box::new(clock::now_ms))
+    pub(crate) fn new(source: PortSource, lineage: LineageSource, cwd: CwdSource) -> PortWatcher {
+        PortWatcher::with(source, lineage, cwd, Box::new(pid_alive), Box::new(clock::now_ms))
     }
 
     pub(crate) fn with(
         source: PortSource,
+        lineage: LineageSource,
+        cwd: CwdSource,
         alive: Box<dyn Fn(u32) -> bool + Send + Sync>,
         now: Box<dyn Fn() -> u64 + Send + Sync>,
     ) -> PortWatcher {
         PortWatcher {
             source,
+            lineage,
+            cwd,
             alive,
             now,
-            known: Vec::new(),
-            primed: false,
             devtools: Arc::new(Mutex::new(HashMap::new())),
-            own: None,
             ask: Arc::new(|port| Box::pin(is_devtools(port))),
         }
     }
 
-    /// Asks only the listeners these processes hold; every other one is a server and hears nothing from wsp.
-    pub(crate) fn asking_only(mut self, own: OwnPids) -> PortWatcher {
-        self.own = Some(own);
-        self
-    }
-
-    pub(crate) fn current(&self) -> Vec<ListeningPort> {
-        self.known.clone()
-    }
-
-    /// One reading with the ports that answered as a browser's DevTools left out. A new listener is a server until
-    /// its ask comes back, so a slow or silent one opens on the reading that finds it, and a DevTools port closes on
-    /// the reading after its answer.
-    async fn servers(&mut self) -> Vec<ListeningPort> {
+    /// One reading for every scope, in their order: what listens among the processes each one holds, with the ports
+    /// that answered as a browser's DevTools left out. The processes are read after the listeners, so a listener's
+    /// holder is never newer than the table it is looked up in, and a folder is read only for a listener's holder
+    /// that no root holds. Only a listener some scope sees is asked, and only
+    /// one a browser or Electron holds: a thread's test servers get no request from wsp. A new listener is a server
+    /// until its ask comes back, so a slow or silent one opens on the reading that finds it, and a DevTools port
+    /// closes on the reading after its answer.
+    async fn read(&mut self, scopes: &[Scope]) -> (Vec<ListeningPort>, Vec<Vec<ListeningPort>>) {
         let read = (self.source)().await;
-        let unasked = {
-            let answers = self.devtools.lock().unwrap_or_else(|e| e.into_inner());
-            read.iter().any(|r| browser_held(r.process.as_deref()) && !answers.contains_key(&(r.port, r.pid)))
-        };
-        let mine = match &self.own {
-            Some(own) if unasked => Some(own().await),
-            _ => None,
-        };
+        let rooted = scopes.iter().any(|s| matches!(s, Scope::Roots { .. }));
+        let table = if rooted { (self.lineage)().await } else { Vec::new() };
+        let held: Vec<Option<HashSet<u32>>> = scopes
+            .iter()
+            .map(|scope| match scope {
+                Scope::Everything => None,
+                Scope::Roots { roots, .. } => Some(members(&table, roots)),
+            })
+            .collect();
+        let unheld: HashSet<u32> = scopes
+            .iter()
+            .zip(&held)
+            .filter(|(scope, _)| matches!(scope, Scope::Roots { folder: Some(_), .. }))
+            .flat_map(|(_, held)| read.iter().filter_map(|r| r.pid).filter(|pid| !held.as_ref().is_some_and(|h| h.contains(pid))))
+            .collect();
+        let cwds = if unheld.is_empty() { HashMap::new() } else { (self.cwd)(unheld.into_iter().collect()).await };
+        let seen: Vec<Vec<ListeningPort>> = scopes
+            .iter()
+            .zip(&held)
+            .map(|(scope, held)| match (scope, held) {
+                (Scope::Roots { folder, .. }, Some(held)) => read
+                    .iter()
+                    .filter(|r| {
+                        r.pid.is_some_and(|pid| {
+                            held.contains(&pid) || folder.as_ref().is_some_and(|f| cwds.get(&pid).is_some_and(|cwd| cwd.starts_with(f)))
+                        })
+                    })
+                    .cloned()
+                    .collect(),
+                _ => read.clone(),
+            })
+            .collect();
         let mut answers = self.devtools.lock().unwrap_or_else(|e| e.into_inner());
         answers.retain(|(port, pid), _| read.iter().any(|r| r.port == *port && r.pid == *pid));
-        for r in &read {
+        for r in seen.iter().flatten() {
             let key = (r.port, r.pid);
             if answers.contains_key(&key) {
                 continue;
             }
-            if !browser_held(r.process.as_deref()) || mine.as_ref().is_some_and(|mine| !key.1.is_some_and(|pid| mine.contains(&pid))) {
+            if !browser_held(r.process.as_deref()) {
                 answers.insert(key, Some(false));
                 continue;
             }
@@ -467,115 +585,207 @@ impl PortWatcher {
                 }
             });
         }
-        read.into_iter().filter(|r| answers.get(&(r.port, r.pid)) != Some(&Some(true))).collect()
+        let seen = seen
+            .into_iter()
+            .map(|rows| rows.into_iter().filter(|r| answers.get(&(r.port, r.pid)) != Some(&Some(true))).collect())
+            .collect();
+        (read, seen)
     }
 
-    /// One reading against the last: what opened and what closed since, as the events to push.
-    pub(crate) async fn poll(&mut self) -> Vec<DaemonEvent> {
-        let next = self.servers().await;
-        if !self.primed {
-            self.primed = true;
-            self.known = next;
-            return Vec::new();
-        }
-        let mut events = Vec::new();
-        for row in &next {
-            if !self.known.iter().any(|k| k.port == row.port) {
-                // The wire has no null pid: an owner the fd scan could not name is left out, like its comm.
-                events.push(DaemonEvent::PortOpen {
-                    port: row.port,
-                    pid: row.pid,
-                    process: row.process.clone(),
-                    loopback: Some(row.loopback),
-                });
-            }
-        }
-        for row in &self.known {
-            if !next.iter().any(|n| n.port == row.port) {
-                events.push(self.close_event(row));
-            }
-        }
-        self.known = next;
-        events
+    /// What a watch was last sent against what it sees now: a close for every port it was told of that is gone or
+    /// held by another socket now, then an open for every port it sees that it was not told of in that holder. A
+    /// listener that came and went between two reads was never sent and sends nothing. A close for a port that the
+    /// machine's own reading still holds says it left the view.
+    fn changes(&self, sent: &[ListeningPort], now: &[ListeningPort], listening: &[ListeningPort]) -> Vec<DaemonEvent> {
+        let same = |a: &ListeningPort, b: &ListeningPort| a.port == b.port && a.pid == b.pid && a.inode == b.inode;
+        let closed = sent
+            .iter()
+            .filter(|row| !now.iter().any(|n| same(n, row)))
+            .map(|row| self.close_event(row, listening.iter().any(|l| same(l, row))));
+        // The wire has no null pid: an owner the fd scan could not name is left out, like its comm.
+        let opened = now.iter().filter(|row| !sent.iter().any(|k| same(k, row))).map(|row| DaemonEvent::PortOpen {
+            port: row.port,
+            pid: row.pid,
+            process: row.process.clone(),
+            loopback: Some(row.loopback),
+        });
+        closed.chain(opened).collect()
     }
 
     /// The close names the last row's holder, since /proc no longer has the socket to ask.
-    fn close_event(&self, row: &ListeningPort) -> DaemonEvent {
+    fn close_event(&self, row: &ListeningPort, still_listening: bool) -> DaemonEvent {
         let at = Some(clock::iso_millis((self.now)()));
         match row.pid {
-            None => DaemonEvent::PortClose { port: row.port, pid: None, process: None, command: None, exited: None, at },
+            None => DaemonEvent::PortClose { port: row.port, pid: None, process: None, command: None, exited: None, left: None, at },
             Some(pid) => DaemonEvent::PortClose {
                 port: row.port,
                 pid: Some(pid),
                 process: row.process.clone(),
                 command: row.command.clone(),
                 exited: Some(!(self.alive)(pid)),
+                left: still_listening.then_some(true),
                 at,
             },
         }
     }
 }
 
-/// The one watcher a daemon runs, started by the first ports.watch and polling on its interval from then on; every
-/// subscriber hears every change, and the spotter hears every open.
+/// What each poll's opens go to beside the watchers: in a daemon, the spotter waiting on a sign-in's listener.
+pub(crate) type OnChanges = Arc<dyn Fn(&[DaemonEvent]) + Send + Sync>;
+
+/// How often the watch reads while a sign-in waits on its callback listener: the spotter's window is five seconds,
+/// and a listener read on the coalesced cadence could land after it closed.
+const HURRIED_INTERVAL: Duration = Duration::from_secs(1);
+
+/// The one watch a daemon runs, read for every socket that asked. It reads only while some socket watches: the
+/// first ports.watch starts it, and it stops at the first tick that finds nobody left. Each socket is told what
+/// moved against what it was last sent, never against the read before.
 pub(crate) struct PortWatch {
-    pub(crate) watcher: tokio::sync::Mutex<PortWatcher>,
+    watcher: tokio::sync::Mutex<PortWatcher>,
     interval: Duration,
-    subscribers: Mutex<Vec<Listener>>,
-    started: AtomicBool,
+    watching: Mutex<Watching>,
+    hurried_until: Mutex<Option<tokio::time::Instant>>,
+    hurry: tokio::sync::Notify,
+}
+
+#[derive(Default)]
+struct Watching {
+    listeners: Vec<Watcher>,
+    polling: bool,
+}
+
+/// One socket's watch: whose listeners it sees, and what it was last told; None until its first reply.
+struct Watcher {
+    key: u64,
+    out: Outbound,
+    scope: Scope,
+    sent: Option<Vec<ListeningPort>>,
 }
 
 impl PortWatch {
-    pub(crate) fn new(source: PortSource, interval: Duration, own: Option<OwnPids>) -> PortWatch {
-        let watcher = PortWatcher::new(source);
+    pub(crate) fn new(source: PortSource, lineage: LineageSource, cwd: CwdSource, interval: Duration) -> PortWatch {
         PortWatch {
-            watcher: tokio::sync::Mutex::new(match own {
-                Some(own) => watcher.asking_only(own),
-                None => watcher,
-            }),
+            watcher: tokio::sync::Mutex::new(PortWatcher::new(source, lineage, cwd)),
             interval,
-            subscribers: Mutex::new(Vec::new()),
-            started: AtomicBool::new(false),
+            watching: Mutex::new(Watching::default()),
+            hurried_until: Mutex::new(None),
+            hurry: tokio::sync::Notify::new(),
         }
     }
 
-    pub(crate) fn subscribe(&self, listener: Listener) {
-        self.subscribers.lock().unwrap_or_else(|e| e.into_inner()).push(listener);
+    fn watching(&self) -> std::sync::MutexGuard<'_, Watching> {
+        self.watching.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A socket's watch, or a second one naming its roots again: one read for every watcher under the one lock, so
+    /// the reply carries what this socket now holds and not a state a later read has already moved on from. A socket
+    /// already watching is told what its new roots moved; one watching for the first time is told nothing and holds
+    /// the reply.
+    /// Answers the ports the socket holds now, and whether this was its first watch.
+    pub(crate) async fn watch(
+        self: &Arc<Self>,
+        key: u64,
+        out: Outbound,
+        roots: Option<Vec<u32>>,
+        folder: Option<String>,
+        on: OnChanges,
+    ) -> (Vec<ListeningPort>, bool) {
+        // Held as the kernel names it, so a cwd read off /proc or lsof compares with it whatever links led there.
+        let folder = folder.map(|f| std::fs::canonicalize(&f).unwrap_or_else(|_| PathBuf::from(f)));
+        let scope = match roots {
+            Some(roots) => Scope::Roots { roots, folder },
+            None => Scope::Everything,
+        };
+        let mut watcher = self.watcher.lock().await;
+        let fresh = {
+            let mut watching = self.watching();
+            let fresh = match watching.listeners.iter_mut().find(|w| w.key == key) {
+                Some(held) => {
+                    held.scope = scope;
+                    false
+                }
+                None => {
+                    watching.listeners.push(Watcher { key, out, scope, sent: None });
+                    true
+                }
+            };
+            if !watching.polling {
+                watching.polling = true;
+                tokio::spawn(Arc::clone(self).run(Arc::clone(&on)));
+            }
+            fresh
+        };
+        let mut seen = self.read_all(&mut watcher, &on).await;
+        (seen.remove(&key).unwrap_or_default(), fresh)
     }
 
     pub(crate) fn unsubscribe(&self, key: u64) {
-        self.subscribers.lock().unwrap_or_else(|e| e.into_inner()).retain(|l| l.key != key);
+        self.watching().listeners.retain(|l| l.key != key);
     }
 
-    /// Polls on the interval from the first call on; a poll awaited by an op runs under the same lock, so the reply
-    /// after it carries the seed rather than racing it.
-    pub(crate) fn start(&self, ctx: &Arc<Ctx>) {
-        if self.started.swap(true, Ordering::SeqCst) {
-            return;
+    /// Reads now, and every HURRIED_INTERVAL for the window after.
+    pub(crate) fn hurry(&self, window: Duration) {
+        *self.hurried_until.lock().unwrap_or_else(|e| e.into_inner()) = Some(tokio::time::Instant::now() + window);
+        self.hurry.notify_one();
+    }
+
+    fn wait(&self) -> Duration {
+        let hurried = self.hurried_until.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|until| until > tokio::time::Instant::now());
+        if hurried {
+            self.interval.min(HURRIED_INTERVAL)
+        } else {
+            self.interval
         }
-        let ctx = Arc::clone(ctx);
-        tokio::spawn(async move {
-            loop {
-                let events = ctx.ports.watcher.lock().await.poll().await;
-                ctx.ports.deliver(&ctx, events);
-                tokio::time::sleep(ctx.ports.interval).await;
-            }
-        });
     }
 
-    /// Every change to every subscriber; an open that a browser.open with no port is waiting for becomes the
-    /// callback.port every authed socket hears.
-    pub(crate) fn deliver(&self, ctx: &Ctx, events: Vec<DaemonEvent>) {
-        for event in events {
-            let text = crate::frame_text(&event);
-            self.subscribers.lock().unwrap_or_else(|e| e.into_inner()).retain(|l| l.out.send_text(&text));
-            if let DaemonEvent::PortOpen { port, loopback, .. } = event {
-                let spotted = ctx.spotter.lock().unwrap_or_else(|e| e.into_inner()).note_open(port, loopback == Some(true));
-                if let Some(port) = spotted.and_then(RelayPort::new) {
-                    ctx.broadcast(&DaemonEvent::CallbackPort { port });
+    /// The watcher's lock is taken before the subscribers are looked at, so a watch arriving as the loop stops either
+    /// keeps it going or starts the next one.
+    async fn run(self: Arc<Self>, on: OnChanges) {
+        loop {
+            tokio::select! {
+                () = tokio::time::sleep(self.wait()) => {}
+                () = self.hurry.notified() => {}
+            }
+            let mut watcher = self.watcher.lock().await;
+            {
+                let mut watching = self.watching();
+                if watching.listeners.is_empty() {
+                    watching.polling = false;
+                    return;
                 }
             }
+            self.read_all(&mut watcher, &on).await;
         }
+    }
+
+    /// One read for every watcher, each sent what moved against what it was last sent, and the opens among them to
+    /// the spotter once each. Answers what each watcher holds now, by its key. Watchers only come under the read
+    /// lock the caller holds, so the set read for is the set told; one that went meanwhile is skipped.
+    async fn read_all(&self, watcher: &mut PortWatcher, on: &OnChanges) -> HashMap<u64, Vec<ListeningPort>> {
+        let scopes: Vec<(u64, Scope)> = self.watching().listeners.iter().map(|w| (w.key, w.scope.clone())).collect();
+        let (listening, read) = watcher.read(&scopes.iter().map(|(_, s)| s.clone()).collect::<Vec<_>>()).await;
+        let seen: HashMap<u64, Vec<ListeningPort>> = scopes.into_iter().map(|(key, _)| key).zip(read).collect();
+        let mut opened: Vec<DaemonEvent> = Vec::new();
+        let mut watching = self.watching();
+        watching.listeners.retain_mut(|w| {
+            let Some(now) = seen.get(&w.key) else { return true };
+            let events = w.sent.as_deref().map(|sent| watcher.changes(sent, now, &listening)).unwrap_or_default();
+            w.sent = Some(now.clone());
+            for event in &events {
+                if !w.out.send_text(&crate::frame_text(event)) {
+                    return false;
+                }
+                if let DaemonEvent::PortOpen { port, .. } = event {
+                    if !opened.iter().any(|o| matches!(o, DaemonEvent::PortOpen { port: p, .. } if p == port)) {
+                        opened.push(event.clone());
+                    }
+                }
+            }
+            true
+        });
+        drop(watching);
+        on(&opened);
+        seen
     }
 }
 
@@ -604,8 +814,56 @@ mod tests {
         ListeningPort { process: Some(process.to_owned()), ..row(port, Some(pid), inode, 0, true) }
     }
 
-    fn watcher_with(source: PortSource, alive: bool, at: u64) -> PortWatcher {
-        PortWatcher::with(source, Box::new(move |_| alive), Box::new(move || at))
+    /// A machine whose processes' folders cannot be read.
+    fn no_cwd() -> CwdSource {
+        Arc::new(|_| Box::pin(async { HashMap::new() }))
+    }
+
+    /// Every pid given as a process leading a group of its own under init.
+    fn groups(pids: &[u32]) -> LineageSource {
+        let table: Vec<Lineage> = pids.iter().map(|pid| Lineage { pid: *pid, ppid: 1, pgid: *pid }).collect();
+        Arc::new(move || {
+            let table = table.clone();
+            Box::pin(async move { table })
+        })
+    }
+
+    /// One socket's view over a watcher, read and told what moved as the watch does it for that socket.
+    struct View {
+        w: PortWatcher,
+        scope: Scope,
+        sent: Option<Vec<ListeningPort>>,
+    }
+
+    impl View {
+        async fn poll(&mut self) -> Vec<DaemonEvent> {
+            let (listening, mut seen) = self.w.read(std::slice::from_ref(&self.scope)).await;
+            let now = seen.remove(0);
+            let events = self.sent.as_deref().map(|sent| self.w.changes(sent, &now, &listening)).unwrap_or_default();
+            self.sent = Some(now);
+            events
+        }
+
+        fn current(&self) -> Vec<ListeningPort> {
+            self.sent.clone().unwrap_or_default()
+        }
+    }
+
+    fn view(source: PortSource) -> View {
+        View { w: PortWatcher::new(source, groups(&[]), no_cwd()), scope: Scope::Everything, sent: None }
+    }
+
+    /// A view whose roots are these pids, each leading its own group.
+    fn rooted(source: PortSource, pids: &[u32]) -> View {
+        View { w: PortWatcher::new(source, groups(pids), no_cwd()), scope: Scope::Roots { roots: pids.to_vec(), folder: None }, sent: None }
+    }
+
+    fn watcher_with(source: PortSource, alive: bool, at: u64) -> View {
+        View {
+            w: PortWatcher::with(source, groups(&[]), no_cwd(), Box::new(move |_| alive), Box::new(move || at)),
+            scope: Scope::Everything,
+            sent: None,
+        }
     }
 
     const AT: u64 = 1_788_609_840_000;
@@ -629,7 +887,7 @@ mod tests {
     #[tokio::test]
     async fn the_watcher_emits_port_open_and_port_close_on_diffs_between_polls() {
         let snapshot = Arc::new(Mutex::new(vec![row(8080, Some(123), 45678, 0, false)]));
-        let mut w = PortWatcher::new(fixed(Arc::clone(&snapshot)));
+        let mut w = view(fixed(Arc::clone(&snapshot)));
         // The first poll seeds what is already there without events; only changes after it are events.
         assert!(w.poll().await.is_empty());
         assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [8080]);
@@ -669,30 +927,20 @@ mod tests {
         port
     }
 
-    fn only(pids: &[u32]) -> OwnPids {
-        let pids: HashSet<u32> = pids.iter().copied().collect();
-        Arc::new(move || {
-            let pids = pids.clone();
-            Box::pin(async move { pids })
-        })
-    }
-
     #[tokio::test]
-    async fn a_listener_outside_wsps_own_processes_is_never_asked_and_stays_a_server() {
+    async fn a_browsers_listener_outside_wsps_own_processes_is_never_asked_nor_listed() {
         // Counted at the asker, since any other wsp on this computer may connect to a test's listener on its own.
         let asked = Arc::new(Mutex::new(Vec::new()));
         let count = Arc::clone(&asked);
         let snapshot = Arc::new(Mutex::new(vec![named(4100, 700, 1, "chrome"), named(4200, 1234, 2, "chrome")]));
-        let mut w = PortWatcher::new(fixed(Arc::clone(&snapshot))).asking_only(only(&[1234]));
-        w.ask = Arc::new(move |port| {
+        let mut w = rooted(fixed(Arc::clone(&snapshot)), &[1234]);
+        w.w.ask = Arc::new(move |port| {
             count.lock().unwrap().push(port);
             Box::pin(async { false })
         });
         assert!(w.poll().await.is_empty());
-        snapshot.lock().unwrap().push(row(4101, Some(701), 3, 0, true));
-        assert_eq!(w.poll().await, [DaemonEvent::PortOpen { port: 4101, pid: Some(701), process: None, loopback: Some(true) }]);
         assert!(w.poll().await.is_empty());
-        assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [4100, 4200, 4101]);
+        assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [4200]);
         assert_eq!(*asked.lock().unwrap(), [4200], "only wsp's own listener is asked, and once");
     }
 
@@ -701,11 +949,274 @@ mod tests {
         let devtools = answering(r#"{"Browser":"HeadlessChrome/140.0.7339.16","Protocol-Version":"1.3"}"#).await;
         let server = answering("<!doctype html><title>dev</title>").await;
         let snapshot = Arc::new(Mutex::new(vec![named(devtools, 900, 1, "Google Chrome Helper"), row(server, Some(901), 2, 0, true)]));
-        let mut w = PortWatcher::new(fixed(Arc::clone(&snapshot))).asking_only(only(&[900, 901]));
+        let mut w = rooted(fixed(Arc::clone(&snapshot)), &[900, 901]);
         assert!(w.poll().await.is_empty());
         let dropped = next_change(&mut w).await;
         assert!(matches!(dropped.as_slice(), [DaemonEvent::PortClose { port, .. }] if *port == devtools), "{dropped:?}");
         assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [server]);
+    }
+
+    #[tokio::test]
+    async fn a_port_opened_outside_the_workspaces_tree_sends_nothing() {
+        let snapshot = Arc::new(Mutex::new(vec![row(4200, Some(1234), 1, 0, true)]));
+        let mut w = rooted(fixed(Arc::clone(&snapshot)), &[1234, 1235]);
+        assert!(w.poll().await.is_empty());
+        snapshot.lock().unwrap().extend([row(4100, Some(700), 2, 0, true), row(4101, None, 3, 0, true)]);
+        assert_eq!(w.poll().await, [], "a listener held outside the tree, or by a holder nobody could name, is no change");
+        snapshot.lock().unwrap().push(row(4201, Some(1235), 4, 0, true));
+        assert_eq!(w.poll().await, [DaemonEvent::PortOpen { port: 4201, pid: Some(1235), process: None, loopback: Some(true) }]);
+        assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [4200, 4201]);
+    }
+
+    fn out() -> (crate::Outbound, tokio::sync::mpsc::UnboundedReceiver<crate::Outgoing>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        (crate::Outbound(tx), rx)
+    }
+
+    /// The frames a watcher has been sent so far, as (type, port).
+    fn heard(rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::Outgoing>) -> Vec<(String, u64)> {
+        let mut out = Vec::new();
+        while let Ok(frame) = rx.try_recv() {
+            let v: serde_json::Value = serde_json::from_str(frame.text()).unwrap();
+            out.push((v["type"].as_str().unwrap().to_owned(), v["port"].as_u64().unwrap()));
+        }
+        out
+    }
+
+    fn counted(rows: Arc<Mutex<Vec<ListeningPort>>>, reads: Arc<std::sync::atomic::AtomicUsize>) -> PortSource {
+        Arc::new(move || {
+            reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let rows = rows.lock().unwrap().clone();
+            Box::pin(async move { rows })
+        })
+    }
+
+    async fn until(start: tokio::time::Instant, ms: u64) {
+        tokio::time::sleep_until(start + Duration::from_millis(ms)).await;
+    }
+
+    fn quiet() -> OnChanges {
+        Arc::new(|_| {})
+    }
+
+    /// A watch over the whole machine, as a cloud machine's is.
+    fn whole(source: PortSource) -> Arc<PortWatch> {
+        Arc::new(PortWatch::new(source, groups(&[]), no_cwd(), DEFAULT_INTERVAL))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn events_within_five_seconds_arrive_as_one_batch() {
+        let snapshot = Arc::new(Mutex::new(Vec::new()));
+        let watch = whole(fixed(Arc::clone(&snapshot)));
+        let (o, mut rx) = out();
+        let start = tokio::time::Instant::now();
+        assert_eq!(watch.watch(1, o, None, None, quiet()).await, (vec![], true));
+        until(start, 1_000).await;
+        snapshot.lock().unwrap().push(row(3000, Some(1), 1, 0, true));
+        until(start, 2_000).await;
+        snapshot.lock().unwrap().push(row(3001, Some(2), 2, 0, true));
+        until(start, 3_000).await;
+        snapshot.lock().unwrap().retain(|r| r.port != 3001);
+        snapshot.lock().unwrap().push(row(3002, Some(3), 3, 0, true));
+        until(start, 4_900).await;
+        assert_eq!(heard(&mut rx), [], "nothing goes out before the five seconds are up");
+        until(start, 5_100).await;
+        assert_eq!(
+            heard(&mut rx),
+            [("port.open".to_owned(), 3000), ("port.open".to_owned(), 3002)],
+            "the opens arrive together, and a listener that came and went inside the window, never sent, sends nothing"
+        );
+        until(start, 9_900).await;
+        assert_eq!(heard(&mut rx), []);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_port_the_watcher_was_told_is_open_gets_its_close_however_often_it_reopened_inside_the_window() {
+        let snapshot = Arc::new(Mutex::new(vec![row(3000, Some(1), 1, 0, true)]));
+        let watch = whole(fixed(Arc::clone(&snapshot)));
+        let (o, mut rx) = out();
+        let start = tokio::time::Instant::now();
+        assert_eq!(watch.watch(1, o, None, None, quiet()).await.0.len(), 1, "the watcher was told 3000 is open");
+        until(start, 1_000).await;
+        snapshot.lock().unwrap().clear();
+        until(start, 2_000).await;
+        snapshot.lock().unwrap().push(row(3000, Some(1), 1, 0, true));
+        until(start, 3_000).await;
+        snapshot.lock().unwrap().clear();
+        until(start, 5_100).await;
+        assert_eq!(heard(&mut rx), [("port.close".to_owned(), 3000)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_port_another_holder_took_inside_the_window_closes_for_the_old_one_and_opens_for_the_new() {
+        let snapshot = Arc::new(Mutex::new(vec![row(3000, Some(1), 1, 0, true)]));
+        let watch = whole(fixed(Arc::clone(&snapshot)));
+        let (o, mut rx) = out();
+        let start = tokio::time::Instant::now();
+        watch.watch(1, o, None, None, quiet()).await;
+        until(start, 1_000).await;
+        *snapshot.lock().unwrap() = vec![row(3000, Some(2), 2, 0, true)];
+        until(start, 5_100).await;
+        assert_eq!(heard(&mut rx), [("port.close".to_owned(), 3000), ("port.open".to_owned(), 3000)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn each_watcher_is_told_against_what_it_was_sent_and_a_new_watch_is_told_nothing_but_its_reply() {
+        let snapshot = Arc::new(Mutex::new(vec![row(3000, Some(1), 1, 0, true)]));
+        let watch = whole(fixed(Arc::clone(&snapshot)));
+        let (first, mut heard_first) = out();
+        let (second, mut heard_second) = out();
+        let start = tokio::time::Instant::now();
+        watch.watch(1, first, None, None, quiet()).await;
+        until(start, 2_000).await;
+        // The listener goes and another comes between the first watcher's reply and the second's: the second watch's
+        // read tells the first what moved, and the second only what it holds.
+        *snapshot.lock().unwrap() = vec![row(3001, Some(1), 2, 0, true)];
+        let (ports, fresh) = watch.watch(2, second, None, None, quiet()).await;
+        assert_eq!((ports.iter().map(|p| p.port).collect::<Vec<_>>(), fresh), (vec![3001], true));
+        assert_eq!(heard(&mut heard_first), [("port.close".to_owned(), 3000), ("port.open".to_owned(), 3001)]);
+        assert_eq!(heard(&mut heard_second), []);
+        until(start, 5_100).await;
+        assert_eq!((heard(&mut heard_first), heard(&mut heard_second)), (vec![], vec![]));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_watch_reads_nothing_once_its_last_watcher_has_gone_and_seeds_afresh_for_the_next() {
+        let snapshot = Arc::new(Mutex::new(vec![row(3000, Some(1), 1, 0, true)]));
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let watch = Arc::new(PortWatch::new(counted(Arc::clone(&snapshot), Arc::clone(&reads)), groups(&[]), no_cwd(), DEFAULT_INTERVAL));
+        let read = || reads.load(std::sync::atomic::Ordering::SeqCst);
+        let start = tokio::time::Instant::now();
+        let (o, _rx) = out();
+        watch.watch(1, o, None, None, quiet()).await;
+        until(start, 5_100).await;
+        assert_eq!(read(), 2);
+        watch.unsubscribe(1);
+        until(start, 60_000).await;
+        assert_eq!(read(), 2, "nobody watches, so nothing is read");
+        snapshot.lock().unwrap().push(row(3001, Some(2), 2, 0, true));
+        let (o, mut rx) = out();
+        let (ports, fresh) = watch.watch(2, o, None, None, quiet()).await;
+        assert_eq!((ports.len(), fresh), (2, true), "the next watch is seeded, not told of what moved while nobody watched");
+        until(start, 65_100).await;
+        assert_eq!((read(), heard(&mut rx)), (4, vec![]));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hurry_reads_at_once_and_every_second_through_its_window_then_falls_back() {
+        let snapshot = Arc::new(Mutex::new(Vec::new()));
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let watch =
+            Arc::new(PortWatch::new(counted(Arc::clone(&snapshot), Arc::clone(&reads)), groups(&[]), no_cwd(), Duration::from_secs(5)));
+        let read = || reads.load(std::sync::atomic::Ordering::SeqCst);
+        let start = tokio::time::Instant::now();
+        let (o, mut rx) = out();
+        watch.watch(1, o, None, None, quiet()).await;
+        until(start, 500).await;
+        snapshot.lock().unwrap().push(row(45543, Some(1), 1, 0, true));
+        watch.hurry(Duration::from_secs(5));
+        until(start, 600).await;
+        assert_eq!((read(), heard(&mut rx)), (2, vec![("port.open".to_owned(), 45543)]));
+        until(start, 5_550).await;
+        assert_eq!(read(), 7, "a read a second through the window");
+        until(start, 15_600).await;
+        assert_eq!(read(), 9, "then one every five seconds again");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_watch_sees_what_its_roots_hold_and_one_that_names_none_sees_the_whole_machine() {
+        let snapshot = Arc::new(Mutex::new(vec![
+            row(4000, Some(100), 1, 0, true),
+            row(4001, Some(201), 2, 0, true),
+            row(4002, Some(301), 3, 0, true),
+        ]));
+        // One host (100) running a turn for each of two workspaces; A's server made a group of its own under its turn.
+        let table = vec![
+            Lineage { pid: 100, ppid: 1, pgid: 100 },
+            Lineage { pid: 200, ppid: 100, pgid: 200 },
+            Lineage { pid: 201, ppid: 200, pgid: 201 },
+            Lineage { pid: 300, ppid: 100, pgid: 300 },
+            Lineage { pid: 301, ppid: 300, pgid: 300 },
+        ];
+        let lineage: LineageSource = Arc::new(move || {
+            let table = table.clone();
+            Box::pin(async move { table })
+        });
+        let watch = Arc::new(PortWatch::new(fixed(snapshot), lineage, no_cwd(), DEFAULT_INTERVAL));
+        let ports = |seen: Vec<ListeningPort>| seen.iter().map(|p| p.port).collect::<Vec<_>>();
+        assert_eq!(ports(watch.watch(1, out().0, Some(vec![200]), None, quiet()).await.0), [4001]);
+        assert_eq!(ports(watch.watch(2, out().0, Some(vec![300]), None, quiet()).await.0), [4002]);
+        assert_eq!(
+            ports(watch.watch(3, out().0, None, None, quiet()).await.0),
+            [4000, 4001, 4002],
+            "the host's own watchers see every listener"
+        );
+        assert_eq!(
+            ports(watch.watch(4, out().0, Some(vec![100]), None, quiet()).await.0),
+            [4000, 4001, 4002],
+            "the host holds every workspace"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_port_that_leaves_a_watch_while_it_still_listens_closes_as_left_and_one_that_stopped_does_not() {
+        let snapshot = Arc::new(Mutex::new(vec![row(4202, Some(202), 1, 0, true), row(4203, Some(203), 2, 0, true)]));
+        let table = vec![
+            Lineage { pid: 200, ppid: 1, pgid: 200 },
+            Lineage { pid: 202, ppid: 1, pgid: 200 },
+            Lineage { pid: 203, ppid: 1, pgid: 200 },
+        ];
+        let lineage: LineageSource = Arc::new(move || {
+            let table = table.clone();
+            Box::pin(async move { table })
+        });
+        let watch = Arc::new(PortWatch::new(fixed(Arc::clone(&snapshot)), lineage, no_cwd(), DEFAULT_INTERVAL));
+        let (o, mut rx) = out();
+        watch.watch(1, o.clone(), Some(vec![200]), None, quiet()).await;
+        snapshot.lock().unwrap().retain(|r| r.port != 4203);
+        // The turn's group stops being a root: 4202 still listens, held by a process that is no longer the workspace's.
+        watch.watch(1, o, Some(vec![]), None, quiet()).await;
+        let mut closes = Vec::new();
+        while let Ok(frame) = rx.try_recv() {
+            let v: serde_json::Value = serde_json::from_str(frame.text()).unwrap();
+            closes.push((v["port"].as_u64().unwrap(), v.get("left").cloned()));
+        }
+        closes.sort_by_key(|(port, _)| *port);
+        assert_eq!(closes, [(4202, Some(serde_json::json!(true))), (4203, None)]);
+    }
+
+    #[test]
+    fn a_root_holds_its_group_and_everything_under_it_and_init_holds_nothing() {
+        let table = [
+            Lineage { pid: 1, ppid: 0, pgid: 1 },
+            Lineage { pid: 2, ppid: 0, pgid: 0 },
+            Lineage { pid: 50, ppid: 1, pgid: 50 },
+            Lineage { pid: 51, ppid: 50, pgid: 51 },
+            Lineage { pid: 52, ppid: 51, pgid: 51 },
+            // Reparented to init when the turn's shell went, still in the turn's group.
+            Lineage { pid: 53, ppid: 1, pgid: 50 },
+            Lineage { pid: 60, ppid: 1, pgid: 60 },
+        ];
+        let mut held: Vec<u32> = members(&table, &[50]).into_iter().collect();
+        held.sort_unstable();
+        assert_eq!(held, [50, 51, 52, 53]);
+        assert!(members(&table, &[0, 1]).is_empty());
+    }
+
+    #[test]
+    fn lsof_cwd_fields_read_as_each_pids_folder() {
+        let read = parse_lsof_cwds("p401\nfcwd\nn/Users/zingzy/wsp/landing/app\np402\nfcwd\nn/private/tmp\n");
+        assert_eq!(read.get(&401), Some(&PathBuf::from("/Users/zingzy/wsp/landing/app")));
+        assert_eq!(read.get(&402), Some(&PathBuf::from("/private/tmp")));
+        assert_eq!(read.len(), 2);
+    }
+
+    #[test]
+    fn ps_lineage_columns_read_as_pid_parent_and_group() {
+        assert_eq!(
+            parse_lineage("  1     0     1\n 50     1    50\nnot a row\n 51    50\n"),
+            [Lineage { pid: 1, ppid: 0, pgid: 1 }, Lineage { pid: 50, ppid: 1, pgid: 50 }]
+        );
     }
 
     #[tokio::test]
@@ -722,8 +1233,8 @@ mod tests {
             named(4402, 805, 6, "chrome"),
             named(4403, 806, 7, "Electron Helper"),
         ]));
-        let mut w = PortWatcher::new(fixed(snapshot)).asking_only(only(&[800, 801, 802, 803, 804, 805, 806]));
-        w.ask = Arc::new(move |port| {
+        let mut w = rooted(fixed(snapshot), &[800, 801, 802, 803, 804, 805, 806]);
+        w.w.ask = Arc::new(move |port| {
             count.lock().unwrap().push(port);
             Box::pin(async { false })
         });
@@ -762,26 +1273,6 @@ mod tests {
         assert!(!browser_held(None));
     }
 
-    #[test]
-    fn the_tree_is_the_roots_and_everything_under_them_and_nothing_beside() {
-        let rows = parse_parents("  1     0\n 50     1\n 60    50\n 61    60\n 70     1\n 71    70\nnot a row\n");
-        assert_eq!(rows.len(), 6);
-        let mut tree: Vec<u32> = tree_under(&rows, &[50]).into_iter().collect();
-        tree.sort_unstable();
-        assert_eq!(tree, [50, 60, 61]);
-    }
-
-    #[tokio::test]
-    async fn wsps_own_processes_here_hold_this_daemon_and_what_it_started_and_never_init() {
-        let mut child = std::process::Command::new("sleep").arg("5").spawn().unwrap();
-        let tree = own_tree()().await;
-        let _ = child.kill();
-        let _ = child.wait();
-        assert!(tree.contains(&std::process::id()));
-        assert!(tree.contains(&child.id()), "a process this daemon started is its own");
-        assert!(!tree.contains(&1), "init is no process of wsp's");
-    }
-
     /// A listener that takes the connection and never says a word, as postgres, redis and ssh do to an HTTP ask.
     async fn silent() -> u16 {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -801,7 +1292,7 @@ mod tests {
         for n in 0..6u32 {
             rows.push(row(silent().await, Some(700 + n), u64::from(n) + 1, 0, true));
         }
-        let mut w = PortWatcher::new(fixed(Arc::new(Mutex::new(rows))));
+        let mut w = view(fixed(Arc::new(Mutex::new(rows))));
         let started = std::time::Instant::now();
         assert!(w.poll().await.is_empty());
         let took = started.elapsed();
@@ -812,7 +1303,7 @@ mod tests {
     #[tokio::test]
     async fn a_listener_that_never_answers_http_opens_on_the_poll_that_first_reads_it() {
         let snapshot = Arc::new(Mutex::new(Vec::new()));
-        let mut w = PortWatcher::new(fixed(Arc::clone(&snapshot)));
+        let mut w = view(fixed(Arc::clone(&snapshot)));
         assert!(w.poll().await.is_empty());
         let port = silent().await;
         snapshot.lock().unwrap().push(row(port, Some(800), 1, 0, true));
@@ -824,7 +1315,7 @@ mod tests {
     }
 
     /// Polls until a reading says something, as the watch's interval would.
-    async fn next_change(w: &mut PortWatcher) -> Vec<DaemonEvent> {
+    async fn next_change(w: &mut View) -> Vec<DaemonEvent> {
         for _ in 0..40 {
             let events = w.poll().await;
             if !events.is_empty() {
@@ -841,7 +1332,7 @@ mod tests {
         let server = answering("<!doctype html><title>dev</title>").await;
         let later = answering(r#"{"Browser":"Chrome/140.0","Protocol-Version":"1.3"}"#).await;
         let snapshot = Arc::new(Mutex::new(vec![named(devtools, 900, 1, "headless_shell"), row(server, Some(901), 2, 0, true)]));
-        let mut w = PortWatcher::new(fixed(Arc::clone(&snapshot)));
+        let mut w = view(fixed(Arc::clone(&snapshot)));
         assert!(w.poll().await.is_empty());
         let dropped = next_change(&mut w).await;
         assert!(matches!(dropped.as_slice(), [DaemonEvent::PortClose { port, .. }] if *port == devtools), "{dropped:?}");
@@ -907,9 +1398,9 @@ mod tests {
     async fn port_open_carries_process_when_the_row_has_one() {
         let root = fake_proc_root();
         let empty = Arc::new(Mutex::new(Vec::new()));
-        let mut w = PortWatcher::new(fixed(empty));
+        let mut w = view(fixed(empty));
         assert!(w.poll().await.is_empty());
-        w.source = proc_net_tcp_source(root.path().to_path_buf());
+        w.w.source = proc_net_tcp_source(root.path().to_path_buf());
         assert_eq!(
             w.poll().await,
             [
@@ -940,6 +1431,7 @@ mod tests {
                 process: Some("node".into()),
                 command: Some("node server.js --port 8080".into()),
                 exited: Some(true),
+                left: None,
                 at: Some(AT_ISO.into()),
             }]
         );
@@ -978,14 +1470,20 @@ mod tests {
         let asked = Arc::new(Mutex::new(Vec::new()));
         let seen = Arc::clone(&asked);
         let snapshot = Arc::new(Mutex::new(vec![held()]));
-        let mut w = PortWatcher::with(
-            fixed(Arc::clone(&snapshot)),
-            Box::new(move |pid| {
-                seen.lock().unwrap().push(pid);
-                false
-            }),
-            Box::new(|| AT),
-        );
+        let mut w = View {
+            w: PortWatcher::with(
+                fixed(Arc::clone(&snapshot)),
+                groups(&[]),
+                no_cwd(),
+                Box::new(move |pid| {
+                    seen.lock().unwrap().push(pid);
+                    false
+                }),
+                Box::new(|| AT),
+            ),
+            scope: Scope::Everything,
+            sent: None,
+        };
         assert!(w.poll().await.is_empty());
         snapshot.lock().unwrap().clear();
         let closed: Vec<serde_json::Value> = w.poll().await.iter().map(|e| serde_json::to_value(e).unwrap()).collect();
@@ -1008,7 +1506,17 @@ mod tests {
     async fn a_port_whose_owner_was_never_resolved_closes_plain_with_only_the_time() {
         let unowned = ListeningPort { port: 3000, pid: None, inode: Some(10), uid: 0, process: None, command: None, loopback: false };
         let snapshot = Arc::new(Mutex::new(vec![unowned]));
-        let mut w = PortWatcher::with(fixed(Arc::clone(&snapshot)), Box::new(|_| panic!("never asked without a pid")), Box::new(|| AT));
+        let mut w = View {
+            w: PortWatcher::with(
+                fixed(Arc::clone(&snapshot)),
+                groups(&[]),
+                no_cwd(),
+                Box::new(|_| panic!("never asked without a pid")),
+                Box::new(|| AT),
+            ),
+            scope: Scope::Everything,
+            sent: None,
+        };
         assert!(w.poll().await.is_empty());
         snapshot.lock().unwrap().clear();
         let closed: Vec<serde_json::Value> = w.poll().await.iter().map(|e| serde_json::to_value(e).unwrap()).collect();

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import { HERE_PLACE_ID, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { DaemonChannel } from "../src/daemon-channel.js";
@@ -21,6 +21,14 @@ import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, copyingFake, createOn, projectOn, testPlatform } from "./stub-backend.js";
 import { alive, grandchild, sweepStrays } from "./strays.js";
 import { until } from "./until.js";
+
+/** Pids a case says lead a group of a stranger's: the kernel hands an ended turn's number out again once its group is
+ * gone, and nothing here can make it do so on cue. */
+const strangers = vi.hoisted(() => new Set<number>());
+vi.mock("../src/local-exec.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../src/local-exec.js")>();
+  return { ...actual, groupExists: (pid: number) => strangers.has(pid) || actual.groupExists(pid) };
+});
 import { WsClient } from "./ws-client.js";
 
 /** A scripted adapter that runs one real command on the machine it was given through ctx.execStream and answers with
@@ -241,6 +249,141 @@ describe("local workspace", () => {
     expect(over.status).not.toBe("running");
     expect(over.pid).toBeUndefined();
   });
+
+  it("a workspace's ports.watch names its own turns and terminals as the roots, never another workspace's, and names them again as they move", async () => {
+    const { factory, end } = pidAdapter();
+    const sent: Record<string, unknown>[] = [];
+    // The one daemon every workspace here dials: what each channel's frames carried, and a pty answered with a pid.
+    const daemonChannel = async (): Promise<DaemonChannel> => ({
+      send: async frame => {
+        sent.push(frame as Record<string, unknown>);
+        if (frame.op === "pty.create") return { id: null, ok: true, ptyId: "pty_9", pid: 4242 } as never;
+        return (frame.op === "pty.list" ? { id: null, ok: true, ptys: [{ id: "pty_9", exited: true }] } : { id: null, ok: true, ports: [] }) as never;
+      },
+      close: () => {},
+      closed: new Promise(() => {}),
+    });
+    const token = "cafef00d".repeat(3);
+    const daemonRoad = async () => ({ url: "http://127.0.0.1:7070", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: token });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: factory }, local: { ...localWiring, daemonRoad }, daemonToken: token, daemonChannel });
+    const a = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "one"))).id, name: "a" });
+    const b = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "other"))).id, name: "b" });
+    const turnA = await rt.sessions.start(a.id, { prompt: "a" });
+    await rt.sessions.start(b.id, { prompt: "b" });
+    const pidA = (await rt.sessions.list(a.id))[0]!.pid!;
+    const pidB = (await rt.sessions.list(b.id))[0]!.pid!;
+    const watches = (): unknown[] => sent.filter(f => f["op"] === "ports.watch").map(f => f["roots"]);
+
+    const channel = await rt.workspaces.daemonChannel(a.id, () => {});
+    await channel.send({ id: null, op: "ports.watch" } as never);
+    expect(watches()).toEqual([[pidA]]);
+    // A terminal opened on this workspace's channel is its own from then on.
+    await channel.send({ id: null, op: "pty.create" } as never);
+    await until(() => watches().length === 2);
+    expect(watches()[1]).toEqual([pidA, 4242].sort((x, y) => x - y));
+    end(0);
+    await turnA.finished;
+    // The turn's group goes once the turn's road has ended its stragglers, and the next read of the roots drops it.
+    await until(() => JSON.stringify(watches().at(-1)) === JSON.stringify([4242]), 15_000);
+    // The terminal exited while no channel of this workspace listened: the list a pane asks for on connect says so.
+    await channel.send({ id: null, op: "pty.list" } as never);
+    await until(() => JSON.stringify(watches().at(-1)) === "[]");
+    expect(watches().flat()).not.toContain(pidB);
+    end(1);
+    channel.close();
+  }, 30_000);
+
+  it("an ended turn's pid leaves the roots once its group is gone, with no channel watching, so a stranger leading a group of that number is never the workspace's", async () => {
+    const { factory, end } = pidAdapter();
+    const sent: Record<string, unknown>[] = [];
+    const daemonChannel = async (): Promise<DaemonChannel> => ({
+      send: async frame => {
+        sent.push(frame as Record<string, unknown>);
+        return { id: null, ok: true, ports: [] } as never;
+      },
+      close: () => {},
+      closed: new Promise(() => {}),
+    });
+    const token = "cafef00d".repeat(3);
+    const daemonRoad = async () => ({ url: "http://127.0.0.1:7070", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: token });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: factory }, local: { ...localWiring, daemonRoad }, daemonToken: token, daemonChannel });
+    const ws = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "reused"))).id, name: "reused" });
+    const turn = await rt.sessions.start(ws.id, { prompt: "work" });
+    const pid = (await rt.sessions.list(ws.id))[0]!.pid!;
+    end(0);
+    await turn.finished;
+    // Nobody watches while the turn's road ends its group; then the kernel hands its number to a stranger's group.
+    await until(() => {
+      try {
+        process.kill(-pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    }, 10_000);
+    await new Promise(r => setTimeout(r, 6_000));
+    strangers.add(pid);
+    try {
+      const channel = await rt.workspaces.daemonChannel(ws.id, () => {});
+      await channel.send({ id: null, op: "ports.watch" } as never);
+      expect(sent.filter(f => f["op"] === "ports.watch").map(f => f["roots"])).toEqual([[]]);
+      channel.close();
+    } finally {
+      strangers.delete(pid);
+      await rt.close();
+    }
+  }, 30_000);
+
+  it("a settled turn whose group still has a member stays a root until the group is gone, and the watch names the workspace's folder", async () => {
+    // A turn whose leader exits and leaves a server in its group, as a harness's tool shell does with `cmd &`.
+    let leader: number | undefined;
+    const factory: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: ({ onEvent }) => {
+        const sessionId = randomUUID();
+        const child = spawn("bash", ["-c", "sleep 30 > /dev/null 2>&1 & exit 0"], { detached: true, stdio: "ignore" });
+        leader = child.pid!;
+        onEvent({ type: "session.start", sessionId });
+        const result: TurnResult = { status: "completed", text: "serving" };
+        const finished = new Promise<TurnResult>(resolve =>
+          child.once("exit", () => {
+            onEvent({ type: "turn.done", sessionId, result });
+            onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+            resolve(result);
+          }),
+        );
+        return { localId: sessionId, finished, interrupt: async () => {}, pid: child.pid! };
+      },
+    });
+    const sent: Record<string, unknown>[] = [];
+    const daemonChannel = async (): Promise<DaemonChannel> => ({
+      send: async frame => {
+        sent.push(frame as Record<string, unknown>);
+        return { id: null, ok: true, ports: [] } as never;
+      },
+      close: () => {},
+      closed: new Promise(() => {}),
+    });
+    const token = "cafef00d".repeat(3);
+    const daemonRoad = async () => ({ url: "http://127.0.0.1:7070", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: token });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: factory }, local: { ...localWiring, daemonRoad }, daemonToken: token, daemonChannel });
+    const ws = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "served"))).id, name: "served" });
+    const turn = await rt.sessions.start(ws.id, { prompt: "serve it" });
+    const channel = await rt.workspaces.daemonChannel(ws.id, () => {});
+    await channel.send({ id: null, op: "ports.watch" } as never);
+    const watches = (): Record<string, unknown>[] => sent.filter(f => f["op"] === "ports.watch");
+    expect(watches()).toEqual([expect.objectContaining({ roots: [leader], folder: ws.folder })]);
+    try {
+      await turn.finished;
+      await new Promise(r => setTimeout(r, 100));
+      expect(watches().at(-1)!["roots"], "the server the turn left in its group is still the workspace's").toEqual([leader]);
+    } finally {
+      process.kill(-leader!, "SIGKILL");
+    }
+    await until(() => (watches().at(-1)!["roots"] as number[]).length === 0, 15_000);
+    channel.close();
+    await rt.close();
+  }, 30_000);
 
   it("a host with no daemon binary still takes threads in the project folder, one record per project", async () => {
     const { copier: _none, ...bare } = localWiring;

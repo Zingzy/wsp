@@ -138,10 +138,13 @@ pub const PORT_CMDLINE_CAP_BYTES: usize = 512;
 pub const PROC_CAP: usize = 1000;
 /// Linux pid_max ceiling; both proc ops refuse anything above it.
 pub const PID_MAX: u32 = 4_194_304;
-/// How often a daemon samples the computer it runs on for sys.watch and proc.watch, and so how long after the reply
-/// to a watch its first sample lands. The protocol's DAEMON_SAMPLER_INTERVAL_MS is the same figure, held so by the
-/// contract fixture.
+/// How often a daemon samples the computer it runs on for sys.watch, and how long after the reply to a watch its
+/// first sample lands, proc.watch's first snapshot among them. The protocol's DAEMON_SAMPLER_INTERVAL_MS is the same
+/// figure, held so by the contract fixture.
 pub const SAMPLER_INTERVAL_MS: u64 = 2000;
+/// How often proc.watch reads the processes after its first snapshot. A whole list every two seconds measured 180 KB
+/// a frame on a Mac with a thousand processes; after the first, a frame carries only what changed.
+pub const PROC_INTERVAL_MS: u64 = 5000;
 /// The days of readings a daemon keeps, one file a day, and the most those files may hold between them on disk: the
 /// oldest day goes first past either. A minute's point is about 130 bytes, so a day is about 190 KB and the cap
 /// holds the fourteen days with room to spare.

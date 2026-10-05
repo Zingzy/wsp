@@ -236,7 +236,7 @@ pub(crate) struct Ctx {
     pub(crate) modes: Arc<mode::ModeWatcher>,
     pub(crate) manifest: Mutex<manifest::ProcessManifest>,
     pub(crate) spotter: Mutex<relay::CallbackSpotter>,
-    pub(crate) ports: ports::PortWatch,
+    pub(crate) ports: Arc<ports::PortWatch>,
     pub(crate) inbox: inbox::InboxWatch,
     /// The file lists fs.files keeps, one per folder asked about.
     pub(crate) files: files::FileLists,
@@ -294,9 +294,8 @@ impl Ctx {
         let manifest_path = options.manifest_path.clone().unwrap_or_else(|| PathBuf::from(numbers::DEFAULT_MANIFEST_PATH));
         let manifest = manifest::ProcessManifest::load(Some(manifest_path), options.run_dir.as_deref(), options.log_dir.as_deref())?;
         let interval = options.ports_interval_ms.map_or(ports::DEFAULT_INTERVAL, Duration::from_millis);
-        // A cloud machine is the workspace's whole; on the person's own computer only wsp's processes are its.
-        let own = (options.kind != "cloud").then(ports::own_tree);
-        let ports = ports::PortWatch::new(ports::source_for(options.proc_root.as_deref()), interval, own);
+        let given = options.proc_root.as_deref();
+        let ports = Arc::new(ports::PortWatch::new(ports::source_for(given), ports::lineage_for(given), ports::cwd_for(given), interval));
         let guest_unwatched = Duration::from_millis(options.guest_unwatched_ms.unwrap_or(numbers::GUEST_UNWATCHED_MS));
         #[cfg(target_os = "linux")]
         let (runtime, runtime_refusal) = open_runtime(&options, &log, daemon_port);
@@ -440,10 +439,12 @@ impl Ctx {
         let ctx = Arc::downgrade(self);
         let ptys: proc::PtyPids =
             Arc::new(move || ctx.upgrade().map_or_else(Vec::new, |ctx| ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).labels()));
+        let interval = Duration::from_millis(self.options.proc_interval_ms.unwrap_or(numbers::PROC_INTERVAL_MS));
         let opts = proc::ProcSamplerOptions {
             self_pid: std::process::id(),
             ptys,
-            interval: Duration::from_millis(self.options.proc_interval_ms.unwrap_or(numbers::SAMPLER_INTERVAL_MS)),
+            first: interval.min(Duration::from_millis(numbers::SAMPLER_INTERVAL_MS)),
+            interval,
             now: Arc::new(sys::now_ms),
             log: Arc::clone(&self.log),
         };
