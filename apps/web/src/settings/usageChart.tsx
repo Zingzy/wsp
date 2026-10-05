@@ -126,7 +126,7 @@ function useThemeTick(): number {
   return tick;
 }
 
-export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGHT = CHART_HEIGHT, figure = fmtTokens, axisFigure = figure, label = "Tokens over the range", axis, small = false }: {
+export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGHT = CHART_HEIGHT, figure = fmtTokens, axisFigure = figure, label = "Tokens over the range", axis, small = false, everyFigure = false }: {
   steps: readonly number[];
   lines: readonly ChartLine[];
   stepWord: (t: number) => string;
@@ -143,6 +143,9 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   /** The panel's size: the axis figures and ticks at 11 px, the gutter as wide as the widest figure and 8 px off the
    * plot, so the widest figure starts on the section's left edge and the plot ends on its right. */
   small?: boolean;
+  /** Every line's figure in the hover, a zero and a negative too: a slate's figures are the data it was given, where
+   * the Usage page's zero is a day nothing was spent and says nothing. */
+  everyFigure?: boolean;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -238,7 +241,7 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
                 <span className="flex flex-col gap-1">
                   <span className="font-mono text-xs text-muted-foreground tabular-nums">{stepWord(t)}</span>
                   {given
-                    .filter(line => (line.points[i] ?? 0) > 0)
+                    .filter(line => everyFigure ? line.points[i] !== undefined : (line.points[i] ?? 0) > 0)
                     .map(line => (
                       <span key={line.key} data-k="point-figure" className="flex items-center justify-between gap-4 text-xs">
                         <span className="flex items-center gap-2">

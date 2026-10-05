@@ -78,6 +78,23 @@ describe("the richer kit in the renderer", () => {
     const ticks = (c: HTMLElement): string[] => [...c.querySelectorAll<HTMLElement>("[data-k=y-axis] > span.absolute")].map(t => t.textContent ?? "");
     const at = (v: number, i: number) => ({ at: 1_759_000_000_000 + i * 60_000, v });
 
+    it("says a zero and a negative figure in the hover, as it says any other", async () => {
+      const { view } = draw(compiled(`<slate><value name="hist" start={[]} /><column><chart label="Change" items={$hist} x={item.at} value={item.v} format="integer" /></column></slate>`), { hist: [3, 0, -5].map(at) });
+      const points = [...view.container.querySelectorAll<HTMLElement>("[data-k=point]")];
+      const figureAt = async (i: number): Promise<string[]> => {
+        fireEvent.pointerEnter(points[i]!, { pointerType: "mouse" });
+        fireEvent.mouseEnter(points[i]!);
+        fireEvent.mouseMove(points[i]!);
+        await act(async () => new Promise(r => setTimeout(r, 0)));
+        const shown = [...document.querySelectorAll("[data-k=point-figure]")].map(e => e.textContent ?? "");
+        fireEvent.mouseLeave(points[i]!);
+        fireEvent.pointerLeave(points[i]!, { pointerType: "mouse" });
+        return shown;
+      };
+      expect((await figureAt(1)).join(" ")).toContain("0");
+      expect((await figureAt(2)).join(" ")).toContain("-5");
+    });
+
     // A series that holds one value draws no plot: the legend's line says the value, and the plot returns once it moves.
     for (const [name, hist] of [
       ["flat data", [4141.8, 4141.8, 4141.8].map(at)],

@@ -87,6 +87,7 @@ export const chart: PieceView = {
             label={label}
             axis={axisFor(values, props["format"])}
             small
+            everyFigure
           />
         )}
       </figure>
