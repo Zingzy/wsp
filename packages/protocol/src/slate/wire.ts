@@ -205,6 +205,8 @@ export const SLATE_OPS = {
   "slates.resolve": SlatesResolveParams,
 } as const;
 export type SlateOpName = keyof typeof SLATE_OPS;
+/** Each slate op's params as a client sends them. */
+export type SlateOpParams<O extends SlateOpName> = z.input<(typeof SLATE_OPS)[O]>;
 
 // --- answers ---
 

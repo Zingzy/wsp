@@ -3,7 +3,7 @@
 // again on every session.slate and after a gap, and folded in place on slate.state. Each thread's engine lives for
 // the window's life, so switching threads and back keeps a section's fold and a field's unsent text.
 import { create } from "zustand";
-import { slateDomainKey, slateLinkDomain, type SlateJson, type TurnResult } from "@wsp/protocol";
+import { slateDomainKey, slateLinkDomain, type SessionSlateEvent, type SlateJson, type SlateRunEvent, type SlateValuesEvent, type TurnResult } from "@wsp/protocol";
 import { ActionRunner, StateSender, type SlateLink } from "./actions.js";
 import { SlateEngine } from "./engine.js";
 import { isRunRecord, type SlateAsk, type SlateDoc } from "./model.js";
@@ -170,13 +170,7 @@ export function showOnce(threadId: string, entry: SlateEntry | undefined): void 
 }
 
 /** A slate event off the socket, from the protocol store's one subscription. */
-export function slateEvent(
-  e:
-    | { type: "session.slate"; threadId: string; by: string }
-    | { type: "slate.values"; threadId: string; version: number; revision: number; values: Record<string, unknown> }
-    | { type: "slate.run"; threadId: string; run: string; lines: readonly string[] }
-    | { type: "session.done"; threadId?: string | undefined; result: TurnResult },
-): void {
+export function slateEvent(e: SessionSlateEvent | SlateValuesEvent | SlateRunEvent | { type: "session.done"; threadId?: string | undefined; result: TurnResult }): void {
   switch (e.type) {
     case "session.slate": {
       // A write by the agent is the first-write moment; the person's and the host's own never open the tab.

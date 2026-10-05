@@ -4,7 +4,7 @@
 // and a press raises slates.event with the host's params.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { slateStartValues, type SlateDoc, type SlateEventAnswer, type SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender, type SlateLink } from "./actions";
 import { SlateEngine } from "./engine";
 import { fakeLink, manualScheduler, slate } from "./testing";
@@ -214,8 +214,8 @@ describe("the slate renderer", () => {
   });
 
   it("raises slates.event with the host's params on a press, held until the answer, then says the outcome", async () => {
-    let answer: (v: { outcome: string }) => void = () => {};
-    const eventFn = vi.fn(() => new Promise<{ outcome: string }>(resolve => (answer = resolve)));
+    let answer: (v: SlateEventAnswer) => void = () => {};
+    const eventFn = vi.fn(() => new Promise<SlateEventAnswer>(resolve => (answer = resolve)));
     const { link } = draw(EVERY_PIECE, VALUES, { link: { event: eventFn } });
     const button = screen.getByRole("button", { name: "Go on" }) as HTMLButtonElement;
     expect(button.title).toBe("Go on to the next step. (with $note)");
@@ -225,7 +225,7 @@ describe("the slate renderer", () => {
     expect(link.event).toHaveBeenCalledWith({ version: 3, piece: "go", event: "press", requestId: expect.stringMatching(/^t1:3:go:[0-9a-f-]{36}:1$/) });
     await act(async () => {});
     expect(button.disabled).toBe(true);
-    await act(async () => answer({ outcome: "steered" }));
+    await act(async () => answer({ outcome: "steered", said: "Sent into the running turn" }));
     expect(button.disabled).toBe(false);
     expect(screen.getByText("Sent into the running turn")).toBeTruthy();
   });

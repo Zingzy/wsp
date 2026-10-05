@@ -3,27 +3,13 @@
 // version through slates.event, and answers an outcome, with the consent sheet's content when it held a run; fill,
 // open, copy and pane run here (02-model, "Reactions"). The person's value writes go to the host through one sender
 // per slate, typing debounced and every other change at once; a secret's text goes once and is not kept.
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateEventAnswer, SlateJson, SlateOpParams } from "@wsp/protocol";
 import type { SlateEngine } from "./engine.js";
 import { isHostStep, stepsOf, type SlateApproval, type SlateAsk, type SlateEventName, type SlateStep } from "./model.js";
 import { getOwn } from "./paths.js";
 
-export interface SlateEventAsk {
-  version: number;
-  piece: string;
-  event: SlateEventName;
-  requestId: string;
-  /** The row of a repeating piece the press came from. */
-  scope?: { item: SlateJson; index: number };
-  /** Which of a table's row actions, where the press came from one. */
-  rowAction?: number;
-}
-
-export interface SlateEventAnswer {
-  outcome: string;
-  said?: string;
-  ask?: SlateAsk;
-}
+export type SlateEventAsk = Omit<SlateOpParams<"slates.event">, "threadId">;
+export type { SlateEventAnswer };
 
 /** The window's roads out for one slate, so a test draws a slate against a fake. */
 export interface SlateLink {
