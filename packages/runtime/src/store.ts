@@ -2,6 +2,7 @@ import { readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { STATE_SHAPE, StateShape, stateWriterWords } from "@wsp/protocol";
 import { writeOwn } from "@wsp/own-file";
+import type { TranscriptRows } from "./sqlite-transcripts.js";
 
 /** Persistence port. Hosted Postgres impl is Plan 2's problem. Blobs are
  * bytes too large for the JSON document (vault archives); one per id. */
@@ -18,6 +19,8 @@ export interface Store {
   /** Which write a blob is: its size and the moment it was written, nothing where there is no blob. A blob that is
    * there and cannot be read answers here where getBlob answers nothing, which is how a reader tells them apart. */
   statBlob(collection: string, id: string): Promise<BlobMark | undefined>;
+  /** The transcripts as rows, one per event, where the store keeps them so; elsewhere each is a blob by workspace. */
+  transcripts?: TranscriptRows;
 }
 
 export interface BlobMark {

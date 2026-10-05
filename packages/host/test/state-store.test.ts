@@ -8,7 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { STATE_SHAPE, STATE_STORE_ENV } from "@wsp/protocol";
-import { createRuntime, STATE_SHAPE_KEY } from "@wsp/runtime";
+import { sqliteBinding } from "@wsp/engine";
+import { createRuntime, sqliteStore, STATE_SHAPE_KEY } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { stateStore, up, type CliIO } from "../src/cli.js";
 import { lockPathFor, takeLock } from "../src/host-lock.js";
@@ -150,5 +151,96 @@ console.log(JSON.stringify(await store.keys("workspaces")));
     expect(one.out).toBe(two.out);
     expect((JSON.parse(one.out) as string[]).length).toBe(400);
     expect(stateFiles()).toEqual(["state.db", "state.json.imported"]);
+  });
+});
+
+describeWithDists("the move of the transcripts into rows, by a host of its own", ["runtime", "engine"], () => {
+  const { DatabaseSync } = sqliteBinding();
+  const WORKSPACES = 6;
+  const EVENTS = 400;
+  /** A host's runtime over the state, whose boot moves the transcripts. With `killAt` it kills itself as it writes that
+   * event of the move, which is inside the transaction of the workspace that event belongs to. */
+  const host = (killAt?: number): Promise<{ out: string; code: number | null; signal: NodeJS.Signals | null }> => {
+    const kill =
+      killAt === undefined
+        ? ""
+        : `const stringify = JSON.stringify;
+let written = 0;
+JSON.stringify = (v, ...rest) => {
+  if (v !== null && typeof v === "object" && typeof v.type === "string" && v.type.startsWith("session.") && ++written === ${killAt}) process.kill(process.pid, "SIGKILL");
+  return stringify(v, ...rest);
+};`;
+    const script = `
+import { createRuntime, sqliteStore } from ${JSON.stringify(distOf("runtime"))};
+import { NoProviderBackend } from ${JSON.stringify(distOf("engine"))};
+${kill}
+const rt = createRuntime({ backend: new NoProviderBackend(), store: sqliteStore(${JSON.stringify(statePath)}, { wsp: "test", daemon: 1, bin: "test" }), adapters: {} });
+await rt.sessions.list();
+await rt.close();
+`;
+    const child = spawn(process.execPath, ["--no-warnings", "--input-type=module", "-e", script], { env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: home }, stdio: ["ignore", "pipe", "pipe"] });
+    children.push(child);
+    return new Promise(done => {
+      let out = "";
+      child.stdout.on("data", (b: Buffer) => (out += b.toString()));
+      child.stderr.on("data", (b: Buffer) => (out += b.toString()));
+      child.once("exit", (code, signal) => done({ out, code, signal }));
+    });
+  };
+  const events = (w: number): object[] =>
+    Array.from({ length: EVENTS }, (_, i) => ({ type: "session.delta", workspaceId: `w${w}`, sessionId: "s", threadId: `t${i % 3}`, kind: "text", text: `w${w} line ${i}`, pos: i + 1 }));
+  /** Each workspace as the database holds it: its blob's events where the blob is still there, and its rows. */
+  const held = (): { blob?: object[]; rows: object[] }[] => {
+    const d = new DatabaseSync(join(home, "state.db"), { readOnly: true });
+    try {
+      return Array.from({ length: WORKSPACES }, (_, w) => {
+        const blob = d.prepare("select bytes from blobs where collection = 'transcripts' and id = ?").get(`w${w}`) as { bytes: Uint8Array } | undefined;
+        const rows = (d.prepare("select json from events where workspace = ? order by pos").all(`w${w}`) as { json: string }[]).map(r => JSON.parse(r.json) as object);
+        return { ...(blob !== undefined ? { blob: (JSON.parse(Buffer.from(blob.bytes).toString()) as { events: object[] }).events } : {}), rows };
+      });
+    } finally {
+      d.close();
+    }
+  };
+  /** Every workspace either still a blob with no row, or rows that are its blob's events exactly, and no blob. */
+  const whole = (): boolean[] =>
+    held().map((h, w) => {
+      if (h.blob !== undefined) {
+        expect(h.blob, `w${w}'s blob`).toEqual(events(w));
+        expect(h.rows, `w${w} is a blob and has rows`).toEqual([]);
+        return false;
+      }
+      expect(h.rows, `w${w}'s rows`).toEqual(events(w));
+      return true;
+    });
+
+  it("killed inside a workspace's move leaves each transcript a blob or rows, never both or half, and the next start finishes it", async () => {
+    const store = sqliteStore(statePath, stateWriterHere());
+    for (let w = 0; w < WORKSPACES; w++) await store.putBlob("transcripts", `w${w}`, Buffer.from(JSON.stringify({ workspaceId: `w${w}`, events: events(w) })));
+
+    // Half way through the third workspace's events.
+    const first = await host(2 * EVENTS + EVENTS / 2);
+    expect(first.signal, first.out).toBe("SIGKILL");
+    expect(whole()).toEqual([true, true, false, false, false, false]);
+
+    // Again on the next start, half way through the first workspace it has left.
+    const second = await host(EVENTS / 2);
+    expect(second.signal, second.out).toBe("SIGKILL");
+    expect(whole()).toEqual([true, true, false, false, false, false]);
+
+    const third = await host(EVENTS + 1);
+    expect(third.signal, third.out).toBe("SIGKILL");
+    expect(whole()).toEqual([true, true, true, false, false, false]);
+
+    const last = await host();
+    expect(last.code, last.out).toBe(0);
+    expect(whole()).toEqual(Array.from({ length: WORKSPACES }, () => true));
+    const d = new DatabaseSync(join(home, "state.db"), { readOnly: true });
+    try {
+      expect(Number((d.prepare("select count(*) as n from events").get() as { n: number }).n)).toBe(WORKSPACES * EVENTS);
+      expect(d.prepare("select count(*) as n from blobs where collection like 'transcript%'").get()).toEqual({ n: 0 });
+    } finally {
+      d.close();
+    }
   });
 });

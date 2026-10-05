@@ -23,7 +23,9 @@ const HOST_MEMORY_BUDGET_MB = 40;
  * top threads and the fifteen-minute draw added about 0.1 MB more; the pull request pane's reply, resolve and react
  * shapes took main from 35.9 to 36.1 MB on 2026-10-03. Main read 36.3 MB with the daemon's worktree ops; threads in
  * the project's folder and one turn in a worktree read 36.5, and the skill worked out at each ask rather than held
- * whole brought that to 36.4. */
+ * whole brought that to 36.4. Since the host has run under --stress-flush-code (2026-10-05) a reading leaves out the
+ * bytecode of code no turn ran: the build that kept transcripts as rows collected less and read 37.0 without it and
+ * 35.5 with it, as the build before it did both ways, so the cap stayed where it was. */
 const HOST_MEMORY_CAP_MB = 36.5;
 
 /** The one page that quotes the budget. */
@@ -167,7 +169,10 @@ const RUN_CAP_MS = 240_000;
 /** Runs a script under a node of its own with collection exposed, and answers with everything it said. */
 function ran(script: string, home: string): Promise<{ out: string; code: number | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--expose-gc", "--input-type=module", "-e", script], {
+    // V8 keeps a function's bytecode until six collections pass with no call, and a forced collection does not count:
+    // a host that made less garbage on the way reached the quiet minute holding 1.5 MB more of its start-up code than
+    // one that collected ten times, with the same records held. So code no turn runs is let go at every collection.
+    const child = spawn(process.execPath, ["--expose-gc", "--stress-flush-code", "--input-type=module", "-e", script], {
       cwd: home,
       env: { ...process.env, HOME: home, WSP_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],

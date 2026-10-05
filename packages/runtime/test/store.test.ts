@@ -393,12 +393,15 @@ describe("sqliteStore", () => {
     await store.putBlob("transcripts", "a", Buffer.from("events"));
     expect(existsSync(join(h, "state.json"))).toBe(false);
     expect(existsSync(join(h, "blobs"))).toBe(false);
-    expect(tables(join(h, "state.db"))).toEqual(["blobs", "collections", "migrations", "shape"]);
+    expect(tables(join(h, "state.db"))).toEqual(["blobs", "collections", "events", "migrations", "shape", "transcript_index"]);
     const d = new DatabaseSync(join(h, "state.db"), { readOnly: true });
     try {
       expect(d.prepare("pragma journal_mode").get()).toEqual({ journal_mode: "wal" });
       expect(d.prepare("select collection, id, json from collections").all().map(r => ({ ...r }))).toEqual([{ collection: "workspaces", id: "a", json: '{"id":"a"}' }]);
-      expect(d.prepare("select module, version from migrations").all().map(r => ({ ...r }))).toEqual([{ module: "store", version: 1 }]);
+      expect(d.prepare("select module, version from migrations order by module").all().map(r => ({ ...r }))).toEqual([
+        { module: "store", version: 1 },
+        { module: "transcripts", version: 1 },
+      ]);
     } finally {
       d.close();
     }
@@ -499,9 +502,12 @@ describe("sqliteStore", () => {
   });
 
   describe("the module list", () => {
-    it("holds the store's own tables and nothing else yet", async () => {
+    it("holds the store's own tables and the transcripts", async () => {
       const { STORE_MODULES } = await import("../src/sqlite-store.js");
-      expect(STORE_MODULES.map(m => [m.name, m.migrations.length])).toEqual([["store", 1]]);
+      expect(STORE_MODULES.map(m => [m.name, m.migrations.length])).toEqual([
+        ["store", 1],
+        ["transcripts", 1],
+      ]);
     });
 
     it("runs a module's migrations in order and each once, recorded per module, and a later migration only once the earlier ran", async () => {
@@ -517,6 +523,7 @@ describe("sqliteStore", () => {
       try {
         expect(d.prepare("select module, version from migrations order by module").all().map(r => ({ ...r }))).toEqual([
           { module: "store", version: 1 },
+          { module: "transcripts", version: 1 },
           { module: "usage", version: 2 },
         ]);
         expect(d.prepare("select name from sqlite_master where name like 'usage%' order by name").all().map(r => r["name"])).toEqual(["usage_at", "usage_rows"]);

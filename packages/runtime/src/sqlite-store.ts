@@ -9,6 +9,7 @@ import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { sqliteBinding } from "@wsp/engine";
 import { OWN_FILE_MODE, ownFolder } from "@wsp/own-file";
 import { StateShape, stateWriterWords } from "@wsp/protocol";
+import { TRANSCRIPTS_MODULE, transcriptRows } from "./sqlite-transcripts.js";
 import { readStateFile, refuseOtherShape, shapeNow, stateShapeUnreadableLine, stateUnreadableLine, type BlobMark, type StateWriter, type Store } from "./store.js";
 
 /** One module of the state database: the tables it owns, made and changed by its migrations, which run in order
@@ -18,8 +19,8 @@ export interface StoreModule {
   migrations: readonly string[];
 }
 
-/** Every module of the state database. A later one (transcripts, usage, a response cache, search) is one entry
- * here and the module that holds its tables. */
+/** Every module of the state database. A later one (usage, a response cache, search) is one entry here and the
+ * module that holds its tables. */
 export const STORE_MODULES: readonly StoreModule[] = [
   {
     name: "store",
@@ -29,6 +30,7 @@ export const STORE_MODULES: readonly StoreModule[] = [
        create table shape (one integer primary key check (one = 1), json text not null);`,
     ],
   },
+  TRANSCRIPTS_MODULE,
 ];
 
 /** The database a state file's records live in, beside it. */
@@ -256,6 +258,7 @@ export function sqliteStore(statePath: string, writer: StateWriter, modules: rea
   };
 
   return {
+    transcripts: transcriptRows(() => ready().d),
     async get(collection, id) {
       const row = ready().s.get.get(collection, id) as { json: string } | undefined;
       return row === undefined ? undefined : JSON.parse(row.json);
