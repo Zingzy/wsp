@@ -183,7 +183,7 @@ describe("the diagram", () => {
   });
 
   it("is in the catalog's index, which points a flow at it", () => {
-    expect(slateCatalog()).toContain("diagram: value label");
+    expect(slateCatalog()).toContain("diagram: value! label");
     expect(slateCatalog()).toContain("a flow is a diagram");
   });
 });

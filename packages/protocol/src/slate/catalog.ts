@@ -50,9 +50,19 @@ export const SLATE_INDEX_EXAMPLE = `<slate title="Issue">
 /** Said once for every group on the index's own line, not on each piece's. */
 const BOX = { pad: true, surface: true };
 
+/** Enums said once for every piece on the index's own lines, so a piece's line does not repeat them. */
+const SAID_ONCE = new Set(["tone", "emphasis", "pad", "align"]);
+
+/** A prop as the index names it: its allowed words where it takes a fixed set, as the checker holds them, and a !
+ * where a piece is refused without it. */
+function propWord(name: string, spec: SlatePropSpec): string {
+  const words = Array.isArray(spec.type) && !SAID_ONCE.has(name) ? `(${(spec.type as readonly string[]).join("|")})` : "";
+  return `${name}${spec.required === true ? "!" : ""}${words}`;
+}
+
 function pieceLine(p: SlatePieceModule): string {
-  const props = Object.keys(p.props).filter(k => !Object.values(p.items).some(i => i.prop === k) && !(k in BOX));
-  const items = Object.entries(p.items).map(([tag, s]) => `<${tag} ${[...Object.keys(s.fields), ...(s.events !== undefined ? ["onPress"] : [])].join(" ")}>`);
+  const props = Object.keys(p.props).filter(k => !Object.values(p.items).some(i => i.prop === k) && !(k in BOX)).map(k => propWord(k, p.props[k]!));
+  const items = Object.entries(p.items).map(([tag, s]) => `<${tag} ${[...Object.entries(s.fields).map(([k, f]) => propWord(k, f)), ...(s.events !== undefined ? ["onPress"] : [])].join(" ")}>`);
   const events = p.events.map(e => `on${e[0]!.toUpperCase()}${e.slice(1)}`);
   return `${p.type}: ${[...props, ...events].join(" ")}${items.length > 0 ? `; ${items.join(" ")}` : ""}${p.holdsChildren && p.childLimit === undefined ? "; children" : ""}`;
 }
@@ -78,7 +88,7 @@ function sourceLine(name: string): string {
 function index(): string {
   const core = Object.values(SLATE_PIECES).filter(p => p.level === "core");
   return [
-    "Slate kit wsp/2, JSX-like text. Pieces (attributes; <items>):",
+    "Slate kit wsp/2, JSX-like text. Pieces (attributes, ! required, (a|b) the only values; <items>):",
     ...core.map(pieceLine),
     "Every piece: id, when={cond}; items take when too. tone: default muted good warning bad info accent. emphasis: normal strong quiet.",
     "section, column, grid: pad none tight normal loose; surface=\"inset\" sets the card ground; align start center end, else children fill the width.",

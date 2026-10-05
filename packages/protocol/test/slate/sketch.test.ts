@@ -86,8 +86,9 @@ describe("the sketch", () => {
 describe("the catalog", () => {
   it("keeps the index near 1,000 tokens and its example valid", () => {
     // What ago and until print and what a chart's x takes, after agents guessed both, took it from 1,060 to 1,090;
-    // tool= runs on the first page and what a formula holds, after agents missed both, to 1,110.
-    expect(slateTokens(slateCatalog())).toBeLessThan(1110);
+    // tool= runs on the first page and what a formula holds, after agents missed both, to 1,110; every enum's
+    // values and every required mark, after 13 cells guessed them (ruling 8), to 1,310.
+    expect(slateTokens(slateCatalog())).toBeLessThan(1310);
     expect(slateCatalog()).toContain("then tool resource>");
     expect(slateCatalog()).toContain("with operators, a ? b : c, [lists], {records} and functions, never methods or =>.");
     expect(slateCatalog("pipes")).toBe(slateCatalog("steps"));
@@ -120,6 +121,18 @@ describe("the catalog", () => {
     expect(text).toContain("A failed run's out and json are its own, often empty");
     expect(text).toContain("stale: the command changed since this result.");
     expect(text).toContain("<value> state and each run's last result outlive an app or host restart.");
+  });
+
+  it("the index gives each core piece's enum props their values and its required props a !, read off the checker's spec", () => {
+    const index = slateCatalog();
+    for (const p of Object.values(SLATE_PIECES).filter(p => p.level === "core")) {
+      const line = index.split("\n").find(l => l.startsWith(`${p.type}: `))!;
+      for (const [k, spec] of Object.entries(p.props)) {
+        if (Object.values(p.items).some(i => i.prop === k) || k === "pad" || k === "surface") continue;
+        const values = Array.isArray(spec.type) && !["tone", "emphasis", "align"].includes(k) ? `(${(spec.type as readonly string[]).join("|")})` : "";
+        expect(line, `${p.type}.${k}`).toMatch(new RegExp(`(^|[ ;])${k}${spec.required === true ? "!" : ""}${values.replace(/[()|]/g, c => `\\${c}`)}( |;|$)`));
+      }
+    }
   });
 
   it("names the nearest entry for a wrong name", () => {
