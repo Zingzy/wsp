@@ -142,6 +142,9 @@ describe("the catalog", () => {
     for (const n of ["runs", "chart", "thread", "functions", "steps", "handlers", "patch", "icons", "examples"]) expect(slateCatalog(n).endsWith("\nThe pieces and rules: slate_catalog with no name."), n).toBe(true);
     expect(slateCatalog()).not.toContain("slate_catalog with no name");
     expect(slateCatalog("nope")).not.toContain("slate_catalog with no name");
+    // A guessed name answers the index too, which small models never asked for by name.
+    expect(slateCatalog("dashboards")).toMatch(/^dashboards is not in the catalog\. .* The whole index:\n\nSlate kit wsp\/2/s);
+    expect(slateCatalog("dashboards")).toContain(slateCatalog());
     expect(slateCatalog("runs")).toContain("once: a start while it still runs is skipped; without once it stops and starts again.");
     expect(slateCatalog("runs")).toContain("at the write for an every= run, at the first press or <when> for the rest. Until then it reads held; allowing it starts it at once.");
     expect(slateCatalog()).toContain("bigger: resend the whole slate with if_version.");

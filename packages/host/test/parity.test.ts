@@ -397,6 +397,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       const write = slate.find(t => t.name === "slate_write")!.inputSchema.properties as Record<string, { description?: string }>;
       expect(write["text"]!.description).toContain("JSX-like text");
       expect(write["document"]!.description).toContain("not for writing");
+      expect((slate.find(t => t.name === "slate_catalog")!.inputSchema.properties as Record<string, { description?: string }>)["name"]!.description).toBe("leave out first: the index of every piece; then an entry, like runs");
       expect(write["check"]!.description).toBe("validate, write nothing");
       expect(slate.find(t => t.name === "slate_read")!.description).toContain("the panel's words as the person sees them");
       expect(slate.find(t => t.name === "slate_catalog")!.description).toContain("Call it first whenever the person wants to see, watch, monitor or keep an eye on something, tick things off as they go, or see what's unread, even when another tool fetches the data.");

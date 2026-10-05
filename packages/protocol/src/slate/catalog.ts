@@ -206,12 +206,12 @@ export function slateCatalog(name?: string): string {
   if (name === undefined || name === "" || name === "index") return index();
   const text = entry(name);
   // A named entry adds detail only; agents that read one alone guessed pieces like <h1> and <p>.
-  return text.endsWith(NOT_IN) ? text : `${text}\n${BACK}`;
+  return text.startsWith(`${name.trim()} ${NOT_IN}`) ? text : `${text}\n${BACK}`;
 }
 
 /** Where the pieces and rules are, said under every named entry. */
 const BACK = "The pieces and rules: slate_catalog with no name.";
-const NOT_IN = "a server's tools are the host's to answer.";
+const NOT_IN = "is not in the catalog";
 
 function entry(name: string): string {
   const n = name.trim();
@@ -229,7 +229,8 @@ function entry(name: string): string {
     default: {
       const options = [...Object.keys(SLATE_PIECES), ...Object.keys(SLATE_SOURCES), "runs", "functions", "steps", "handlers", "patch", "icons", "examples"];
       const fix = nearest(n, options);
-      return `${n} is not in the catalog${fix !== undefined ? `; did you mean ${fix}?` : "."} Ask for a piece, a source, runs, patch, functions, steps, handlers, icons or examples; a server's tools are the host's to answer.`;
+      // A guessed name answers the index too: small models asked for "dashboards" or "rows" and never saw a piece.
+      return `${n} is not in the catalog${fix !== undefined ? `; did you mean ${fix}?` : "."} Ask for a piece, a source, runs, patch, functions, steps, handlers, icons or examples; a server's tools are the host's to answer. The whole index:\n\n${index()}`;
     }
   }
 }
