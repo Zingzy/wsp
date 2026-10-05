@@ -221,7 +221,7 @@ export const GENERAL_WORDS = {
   notifyNeeds: "When a thread needs you",
   notifyNeedsDescription: "A question, a permission prompt, a sign-in.",
   notifyDone: "When a thread finishes",
-  notifyDoneDescription: "Off keeps ten running threads from pinging you ten times.",
+  notifyDoneDescription: "A thread you or the command line started; one an agent started reports to that agent.",
   notifyChoices: { off: "Off", notify: "Notify", sound: "Sound", "notify-sound": "Notify and sound" } satisfies Record<NotifyChoice, string>,
   planAlerts: "When a plan window runs low",
   planAlertsDescription: "At 70% and 90% of a window, once each, and when an account is blocked.",

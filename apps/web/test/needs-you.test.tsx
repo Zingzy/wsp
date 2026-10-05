@@ -33,8 +33,10 @@ class FakeNotification {
   constructor(title: string, options?: { body?: string; silent?: boolean }) {
     FakeNotification.built.push({ title, body: options?.body ?? "", ...(options?.silent !== undefined ? { silent: options.silent } : {}) });
     FakeNotification.last = this;
+    FakeNotification.made.push(this);
   }
   static last: FakeNotification | undefined;
+  static made: FakeNotification[] = [];
   close(): void {
     this.closed += 1;
   }
@@ -65,6 +67,7 @@ beforeEach(() => {
   FakeNotification.permission = "granted";
   FakeNotification.asked = 0;
   FakeNotification.last = undefined;
+  FakeNotification.made = [];
   FakeNotification.requestPermission.mockClear();
   hidden = true;
   resetAskedToNotify();
@@ -276,17 +279,20 @@ describe("a machine that came up while the person looked away", () => {
     expect(FakeNotification.built).toEqual([]);
   });
 
-  it("follows When a thread finishes, not what needs the person: nothing by default, nothing with needs off, a sound where finishes sound", () => {
+  it("follows When a thread finishes, not what needs the person: silent by default, a sound where finishes sound, nothing where they are off", () => {
     const emit = bindEvents();
     render(<Harness />);
     act(() => useStore.setState({ workspaces: [WOKEN] }));
     act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1" }));
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifyNeeds: "off", notifyDone: "notify-sound" } }));
     act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1" }));
-    expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: workspaceAwakeLine("b1"), silent: false }]);
+    expect(FakeNotification.built).toEqual([
+      { title: NEEDS_YOU, body: workspaceAwakeLine("b1"), silent: true },
+      { title: NEEDS_YOU, body: workspaceAwakeLine("b1"), silent: false },
+    ]);
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifyNeeds: "notify-sound", notifyDone: "off" } }));
     act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1" }));
-    expect(FakeNotification.built).toHaveLength(1);
+    expect(FakeNotification.built).toHaveLength(2);
   });
   it("says nothing about a workspace this page never knew", () => {
     const emit = bindEvents();
@@ -299,7 +305,7 @@ describe("a machine that came up while the person looked away", () => {
 describe("the desktop shell's road out of the app", () => {
   it("hands the need to the shell rather than showing anything itself, since only the shell can read its window's focus", () => {
     const said: OutsideLine[] = [];
-    const handlers: (() => void)[] = [];
+    const handlers: ((id?: string) => void)[] = [];
     window.wsp = {
       sayOutside: line => said.push(line),
       onNeedsYouOpen: handler => {
@@ -310,20 +316,20 @@ describe("the desktop shell's road out of the app", () => {
     const emit = bindEvents();
     render(<Harness />);
     emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED });
-    expect(said).toEqual([{ title: NEEDS_YOU, body: NEED.what, show: true, sound: true }]);
+    expect(said).toEqual([{ title: NEEDS_YOU, body: NEED.what, show: true, sound: true, id: expect.stringMatching(/:1$/) }]);
     // The browser's own notifications are never used where a shell owns them.
     expect(FakeNotification.built).toEqual([]);
     // The shell's click comes back over the bridge and opens Computers here.
     expect(useStore.getState().settingsOpen).toBe(false);
-    handlers[0]!();
+    handlers[0]!(said[0]!.id);
     expect(useStore.getState().settingsOpen).toBe(true);
     expect(useSettingsStore.getState().at).toEqual({ kind: "group", group: "computers" });
   });
 
   it("a shell too old to take a need falls back to the browser's own road, so nothing is silently dropped", () => {
     window.wsp = { setTheme: () => {} };
-    const road = needsYouRoad(() => {});
-    road.say({ title: NEEDS_YOU, body: NEED.what, show: true, sound: false });
+    const road = needsYouRoad();
+    road.say({ title: NEEDS_YOU, body: NEED.what, show: true, sound: false }, () => {});
     expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: "sign in to GitHub CLI login", silent: true }]);
     road.close();
     expect(FakeNotification.last!.closed).toBe(1);
@@ -341,13 +347,16 @@ describe("a turn that finished while the person looked away", () => {
 
   const finishes = (notifyDone: NotifyChoice) => act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifyDone } }));
 
-  it("says nothing for a finished thread by default, since ten running threads would ping ten times", () => {
+  it("says a finished or failed thread with no sound by default, so ten threads finishing make no noise", () => {
     const emit = bindEvents();
     render(<Harness />);
     act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn()] } }));
     act(() => finish(emit));
     act(() => fail(emit));
-    expect(FakeNotification.built).toEqual([]);
+    expect(FakeNotification.built).toEqual([
+      { title: "Fix the redirect finished", body: "b1", silent: true },
+      { title: "Fix the redirect stopped", body: "exit 1", silent: true },
+    ]);
   });
 
   it("says which thread finished with a sound once the person picks notify and sound, silent on notify alone, and a click opens that thread", () => {
@@ -364,6 +373,65 @@ describe("a turn that finished while the person looked away", () => {
     act(() => finish(emit));
     expect(FakeNotification.built.at(-1)).toEqual({ title: "Fix the redirect finished", body: "b1", silent: true });
     focus.mockRestore();
+  });
+
+  it("a click on an older line opens the thread it named, not the one said after it, on either road", () => {
+    const two = { ws_1: [turn(), turn({ id: "s2", threadId: "thr_2", prompt: "Add the tests" })] };
+    const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
+    const emit = bindEvents();
+    const browser = render(<Harness />);
+    finishes("notify");
+    act(() => useStore.setState({ workspaces: [WS], sessions: two }));
+    act(() => finish(emit, "completed", "thr_1"));
+    act(() => finish(emit, "completed", "thr_2"));
+    expect(FakeNotification.made).toHaveLength(2);
+    FakeNotification.made[0]!.onclick!();
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_1", "thr_1"]);
+    browser.unmount();
+    const said: OutsideLine[] = [];
+    let click: ((id?: string) => void) | undefined;
+    window.wsp = {
+      sayOutside: line => said.push(line),
+      onNeedsYouOpen: handler => {
+        click = handler;
+        return () => {};
+      },
+    };
+    render(<Harness />);
+    act(() => finish(emit, "completed", "thr_1"));
+    act(() => finish(emit, "completed", "thr_2"));
+    expect(said.map(l => l.title)).toEqual(["Fix the redirect finished", "Add the tests finished"]);
+    act(() => useStore.setState({ selectedId: null, selectedThreadId: null }));
+    act(() => click!(said[0]!.id));
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_1", "thr_1"]);
+    focus.mockRestore();
+  });
+
+  it("a click on a line said before the page reloaded opens nothing on the new page, whatever the new page has said since", () => {
+    const two = { ws_1: [turn(), turn({ id: "s2", threadId: "thr_2", prompt: "Add the tests" })] };
+    const said: OutsideLine[] = [];
+    let click: ((id?: string) => void) | undefined;
+    window.wsp = {
+      sayOutside: line => said.push(line),
+      onNeedsYouOpen: handler => {
+        click = handler;
+        return () => {};
+      },
+    };
+    const emit = bindEvents();
+    finishes("notify");
+    act(() => useStore.setState({ workspaces: [WS], sessions: two }));
+    const before = render(<Harness />);
+    act(() => finish(emit, "completed", "thr_1"));
+    before.unmount();
+    render(<Harness />);
+    act(() => finish(emit, "completed", "thr_2"));
+    expect(said.map(l => l.title)).toEqual(["Fix the redirect finished", "Add the tests finished"]);
+    act(() => useStore.setState({ selectedId: null, selectedThreadId: null }));
+    act(() => click!(said[0]!.id));
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual([null, null]);
+    act(() => click!(said[1]!.id));
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_1", "thr_2"]);
   });
 
   it("says nothing for a turn somebody stopped, for a thread an agent opened, or while the app is in front", () => {
