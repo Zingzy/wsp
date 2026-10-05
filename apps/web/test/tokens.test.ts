@@ -81,9 +81,10 @@ describe("index.css", () => {
     expect(applied).toBe([...css.matchAll(/@apply glass-backdrop;/g)].length);
     const uses = execFileSync("git", ["grep", "-hoE", "[^ \"'`]*glass-backdrop", "--", "src", ":!*.css", ":!*.test.*"], { cwd: join(__dirname, ".."), encoding: "utf8" }).trim().split("\n");
     expect(uses.length).toBeGreaterThan(0);
-    // The composer and the rows attached to it frost on the Mac too: the owner wants the page under them to show.
+    // The composer and the rows attached to it frost on the Mac too, its tray among them: the owner wants the page
+    // under them to show.
     expect(uses.filter(use => !use.startsWith("off-mac:")).sort()).toEqual(
-      ["before:glass-backdrop", "before:glass-backdrop", "glass-backdrop", "glass-backdrop", "group-has-data-[composer-banner-surface=attached]/composer-surface:glass-backdrop"].sort(),
+      ["before:glass-backdrop", "before:glass-backdrop", "before:glass-backdrop", "glass-backdrop", "glass-backdrop", "group-has-data-[composer-banner-surface=attached]/composer-surface:glass-backdrop"].sort(),
     );
   });
 

@@ -66,6 +66,7 @@ import {
   rateLimitsReadLine,
   readMessage,
   refuseRequestLine,
+  threadCompactStartLine,
   threadForkLine,
   threadResumeLine,
   threadRevertLine,
@@ -157,6 +158,8 @@ export interface CodexAdapter {
   readonly sessions: ReadonlyMap<string, CodexSession>;
   /** The server takes turn/steer while a turn runs. */
   readonly steers: true;
+  /** A turn whose message is this alone runs the server's own compaction of the thread, as codex's own /compact does. */
+  readonly compacts: typeof COMPACT;
   /** The server takes images as local paths, so each one lands on the machine before the turn starts. */
   readonly attachments: "file";
   /** Servers ride the launch as `-c mcp_servers.<name>...` overrides over the config under CODEX_HOME. */
@@ -180,6 +183,8 @@ export interface CodexAdapter {
 }
 
 type Item = Record<string, unknown> & { id: string; type: string };
+
+const COMPACT = "/compact";
 
 /** The last lines the process printed that were not messages: codex's stderr shares the log with its stdout. */
 const STDERR_TAIL_LINES = 5;
@@ -283,7 +288,8 @@ function turnTokensOf(seen: UsageSeen): TurnTokens {
     return total !== undefined && before !== undefined ? total - before : count(seen.last[key]);
   };
   const fields = Object.fromEntries(BREAKDOWN.flatMap(([name, key]) => (field(key) === undefined ? [] : [[name, field(key)!]])));
-  const held = (count(seen.last.inputTokens) ?? 0) + (count(seen.last.outputTokens) ?? 0);
+  // A compaction's own usage line reports no input or output, only what the thread holds after it, as its total.
+  const held = count(seen.last.totalTokens) ?? (count(seen.last.inputTokens) ?? 0) + (count(seen.last.outputTokens) ?? 0);
   return { input: 0, output: 0, ...fields, context: held, ...(seen.window !== undefined ? { window: seen.window } : {}) };
 }
 
@@ -426,9 +432,18 @@ const APPROVALS: Readonly<Record<string, string>> = {
   "item/fileChange/requestApproval": "file_change",
 };
 
+/** The line that starts a turn's work: the server's own compaction for a message that is /compact alone, as codex's
+ * own /compact does, and turn/start for any other. */
+function turnLineFor(o: { threadId: string; prompt: string; images?: readonly string[]; effort?: string }): string {
+  if (o.prompt.trim() === COMPACT) return threadCompactStartLine({ threadId: o.threadId });
+  return turnStartLine({ threadId: o.threadId, text: o.prompt, ...(o.images !== undefined ? { images: o.images } : {}), ...(o.effort !== undefined ? { effort: o.effort } : {}) });
+}
+
+/** Whether a line on the run's channel already started its turn, a compaction's included. */
 const isTurnStart = (line: string): boolean => {
   try {
-    return (JSON.parse(line) as { method?: unknown }).method === "turn/start";
+    const method = (JSON.parse(line) as { method?: unknown }).method;
+    return method === "turn/start" || method === "thread/compact/start";
   } catch {
     return false;
   }
@@ -1052,7 +1067,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       startedAt: Date.now(),
       command,
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-      turnLine: threadId => turnStartLine({ threadId, text: options.prompt, ...(images !== undefined ? { images } : {}), ...(options.effort !== undefined ? { effort: options.effort } : {}) }),
+      turnLine: threadId => turnLineFor({ threadId, prompt: options.prompt, ...(images !== undefined ? { images } : {}), ...(options.effort !== undefined ? { effort: options.effort } : {}) }),
       ...(options.promptAfter !== undefined ? { promptAfter: options.promptAfter } : {}),
       onEvent: options.onEvent,
     });
@@ -1150,7 +1165,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
                   startedAt: options.startedAt,
                   ...(options.model !== undefined ? { model: options.model } : {}),
                   ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-                  ...(options.prompt !== undefined ? { owedTurn: (threadId: string) => turnStartLine({ threadId, text: options.prompt!, ...(options.effort !== undefined ? { effort: options.effort } : {}) }) } : {}),
+                  ...(options.prompt !== undefined ? { owedTurn: (threadId: string) => turnLineFor({ threadId, prompt: options.prompt!, ...(options.effort !== undefined ? { effort: options.effort } : {}) }) } : {}),
                   onEvent: options.onEvent,
                 });
           },
@@ -1158,6 +1173,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       : {}),
     sessions,
     steers: true,
+    compacts: COMPACT,
     mcpServers: true,
     waitsForPrompt: true,
     aside,

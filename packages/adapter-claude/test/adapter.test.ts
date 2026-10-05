@@ -1615,6 +1615,22 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
     expect(done.costUsd).toBeCloseTo(18.3538906, 6);
   });
 
+  it("a /compact turn says what the model holds after the compaction, though its result reports no call at all", async () => {
+    // 2.1.289's answer to a headless /compact on a resumed session (recorded 2026-10-05): the status lines, init, the
+    // boundary with what the model holds after it, and a result whose usage is all zeros.
+    const lines = [
+      `{"type":"system","subtype":"status","status":"compacting","session_id":"${FIXTURE_SESSION_ID}"}`,
+      `{"type":"system","subtype":"status","status":null,"compact_result":"success","session_id":"${FIXTURE_SESSION_ID}"}`,
+      init,
+      `{"type":"system","subtype":"compact_boundary","session_id":"${FIXTURE_SESSION_ID}","compact_metadata":{"trigger":"manual","pre_tokens":25442,"post_tokens":2691,"cumulative_dropped_tokens":22751,"duration_ms":10192}}`,
+      `{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"},"session_id":"${FIXTURE_SESSION_ID}","parent_tool_use_id":null,"isReplay":true}`,
+      JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 0, duration_ms: 10_400, result: "", session_id: FIXTURE_SESSION_ID, usage: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 } }),
+    ];
+    const { done } = await run(lines, FIXTURE_SESSION_ID);
+    expect(done.status).toBe("completed");
+    expect(done.tokens?.context).toBe(2_691);
+  });
+
   it("a total under the saved one started again from nothing, so the turn cost the whole of it", async () => {
     const { done } = await run([saved(352.3259844), init, result(2.5)], FIXTURE_SESSION_ID);
     expect(done.costUsd).toBe(2.5);

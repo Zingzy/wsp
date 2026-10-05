@@ -63,6 +63,9 @@
 // chip beside the ones held, the sentence why on its hover.
 // Where the agent takes a side question, /btw and a question goes to the host
 // instead, starts no turn and opens its own tab of the right panel on the answer.
+// A file let go anywhere on the chat takes the same road as a pasted one, a key
+// typed in the thread outside any field focuses the box, and the context ring's
+// Compact context starts the message the agent's adapter declares as a turn.
 // The checkout row under the composer picks the folder a fresh thread starts
 // in; a resumed one is started where its harness last said it was. The
 // model, effort, context window and access picks in the box's footer ride a
@@ -71,7 +74,7 @@
 // next turn, and never the agent or the access, which are that thread's own
 // off its rows.
 import { cn, isMacPlatform } from "../../lib/utils";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { PaperclipIcon } from "lucide-react";
 import { composerHeldLine, HOST_ASLEEP_SEND, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
@@ -87,7 +90,7 @@ import { addNotice } from "../../notices/store";
 import { collapseExpandedComposerCursor, detectComposerTrigger, enterSends, expandCollapsedComposerCursor, insertComposerBlock, isCollapsedCursorAdjacentToInlineToken, replaceTextRange } from "../../composer-logic";
 import { hostItemText, serializeComposerMention, splitPromptIntoComposerSegments } from "../../composer-editor-mentions";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
-import { asideQuestion, catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
+import { asideQuestion, catalogFromHarness, COMPOSER_PLACEHOLDER_SHORT, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
 import { useAsideStore } from "./asideStore";
 import { opensThread, ComposerCheckoutRow, HomeCheckoutRow, ROW_ITEM_CLASS } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
@@ -102,6 +105,8 @@ import { COMPOSER_WORDS } from "./composerWords";
 import { partitionStashFiles, usePromptStashStore, type PromptStashEntry } from "./promptStashStore";
 import { ComposerStashMenu, stashedWord } from "./ComposerStashMenu";
 import { usePublishContext } from "./ContextMeter";
+import { useChatDropZone } from "./ChatDropZone";
+import { useTypeToFocus } from "./composerTypeToFocus";
 import { useComposerModesStore } from "./composerModesStore";
 import { nextPastedTextName, pastesAsFile } from "./pastedText";
 import { buildComposerPromptHistoryEntries, stepComposerPromptHistory, type ComposerPromptHistoryPosition } from "./composerPromptHistory";
@@ -122,6 +127,9 @@ import { ComposerTasks } from "./ComposerTasks";
 import { asksThePerson, composerTasks } from "./composerTasks.logic";
 
 const noop = () => {};
+
+/** The row a start names to carry none of the box's files: no queued card holds it, so its file list is empty. */
+const NO_FILES_ROW = "no-files";
 
 /** A list read whose refusal is the computer's wsp not knowing the read yet reads as that, in the person's words. */
 const inPersonsWords = <T,>(read: Promise<T>, computer: string): Promise<T> =>
@@ -223,7 +231,8 @@ export function ChatComposer({
   sendLabel?: string;
   /** One more button beside the send, for a second act on the same text: Review #12. */
   beside?: ReactNode;
-  /** One line under the row, where what is typed is refused before any send: a link no project matches. */
+  /** One line under the tray, where what is typed is refused before any send: a link no project matches. It stands
+   * below the composer's glass, which ends at the tray. */
   under?: ReactNode;
 }) {
   const api = useStore(s => s.api);
@@ -475,16 +484,6 @@ export function ChatComposer({
       take([new File([text], nextPastedTextName(files.map(file => file.name)), { type: "text/plain" })]);
     },
     [files, take],
-  );
-
-  const onDrop = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      const dropped = [...(event.dataTransfer?.files ?? [])];
-      if (dropped.length === 0) return;
-      event.preventDefault();
-      take(dropped);
-    },
-    [take],
   );
 
   const highlight = useCallback(
@@ -856,12 +855,22 @@ export function ChatComposer({
   const access = <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} refused={accessPick.line} />;
   const accessInBar = <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} refused={accessPick.line} inBar />;
   const home = useStore(s => s.projects.find(p => projectHomeKey(p.id) === workspaceId));
-  usePublishContext(workspaceId, thread.view.turns, harnessCatalog?.label ?? harnessId);
+  // The agent's own compaction goes as the message its adapter declares, a turn like any other that carries none of
+  // the box's files and leaves the draft where it is.
+  const compacts = harnessCatalog?.compacts;
+  usePublishContext(
+    workspaceId,
+    thread.view.turns,
+    harnessCatalog?.label ?? harnessId,
+    compacts === undefined || onStart !== undefined || waits ? null : { run: () => start(compacts, noop, NO_FILES_ROW), held: unavailable ?? (thread.busy ? TURN_IN_FLIGHT : null) },
+  );
   const heightRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const mirrorRef = useRef<HTMLDivElement | null>(null);
   const tall = useTallDraft(mirrorRef, draft.prompt, compact);
   useAnimatedHeight(heightRef, surfaceRef);
+  const dropZone = useChatDropZone(heightRef, take, !shut && !waits);
+  useTypeToFocus(editorRef, !shut);
   useFlip(surfaceRef, compact ? (tall ? "tall" : "line") : "full");
   // The full box's bar holds the access beside the model and the effort while it fits; narrower, it waits underneath.
   const wide = useWiderThan(surfaceRef, ACCESS_IN_BAR_PX);
@@ -939,8 +948,9 @@ export function ChatComposer({
 
   return (
     <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
+      {dropZone}
       <ComposerQueue rows={queue} files={queuedFiles} next={next} waiting={waiting?.line ?? null} onEdit={editCard} onRemove={removeCard} />
-      <ComposerSurface.Shell contextStrip>
+      <ComposerSurface.Shell tray>
         {tasks !== null ? <ComposerTasks tasks={tasks} /> : null}
         <ComposerSurface.Host>
           <form
@@ -966,8 +976,6 @@ export function ChatComposer({
                     onPaste={onPaste}
                     onPasteCapture={onPasteCapture}
                     onKeyDown={onStashKey}
-                    onDrop={onDrop}
-                    onDragOver={event => event.preventDefault()}
                   >
                     {onStart !== undefined ? <ComposerModelChips workspaceId={workspaceId} /> : null}
                     {files.length > 0 || refusedFiles.length > 0 ? (
@@ -1011,6 +1019,7 @@ export function ChatComposer({
                           cursor={draft.cursor}
                           disabled={shut}
                           placeholder={composerPlaceholder(catalog)}
+                          shortPlaceholder={COMPOSER_PLACEHOLDER_SHORT}
                           onChange={onChange}
                           onCommandKeyDown={onCommandKeyDown}
                           {...(compact ? { className: "min-h-[1lh] max-h-[8lh]" } : {})}
@@ -1068,8 +1077,12 @@ export function ChatComposer({
           stash={stashWord}
           />
         )}
-        {under !== undefined ? <ComposerSurface.ContextStrip data-composer-under>{under}</ComposerSurface.ContextStrip> : null}
       </ComposerSurface.Shell>
+      {under !== undefined ? (
+        <div data-composer-under className="mx-auto mt-2 w-full max-w-3xl px-[1.625rem]">
+          {under}
+        </div>
+      ) : null}
     </div>
   );
 }
