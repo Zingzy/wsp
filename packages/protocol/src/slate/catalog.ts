@@ -86,7 +86,7 @@ function index(): string {
     "Sources, read only:",
     ...["thread", "usage", "cost", "time", "git", "pr"].map(sourceLine),
     "Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once confirm then tool resource> <file name> <when change={$path} or done={$run} do={steps}>",
-    `Steps: ${Object.keys(SLATE_STEPS).join(" ")}. Functions: ${Object.keys(SLATE_FUNCTIONS).join(" ")}. ago(t) gives "30s", until(t) "in 4m".`,
+    `Steps: ${Object.keys(SLATE_STEPS).join(" ")}. Functions: ${Object.keys(SLATE_FUNCTIONS).join(" ")}. ago(t) "30s ago", until(t) "in 4m".`,
     `After |: ${Object.keys(SLATE_PIPE_STEPS).join(" ")}. $run reads state exit out err json; a secret only .set .len.`,
     "Rules:",
     ...SLATE_RULES.map((r, i) => `${i + 1}. ${r}`),

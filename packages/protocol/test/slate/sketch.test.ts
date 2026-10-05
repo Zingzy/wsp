@@ -93,7 +93,7 @@ describe("the catalog", () => {
     expect(slateCatalog("pipes")).toBe(slateCatalog("steps"));
     expect(slateCatalog("tool")).toBe(slateCatalog("runs"));
     expect(slateCatalog("file")).toContain("The <file name=\"x.py\"> declaration, code a run calls as $SLATE_DIR/x.py, is in slate_catalog runs.");
-    expect(slateCatalog()).toContain(`ago(t) gives "30s", until(t) "in 4m".`);
+    expect(slateCatalog()).toContain(`ago(t) "30s ago", until(t) "in 4m".`);
     expect(slateCatalog()).toContain("time is a chart, x in ms or ISO;");
     expect(parseSlate(SLATE_INDEX_EXAMPLE).errors).toEqual([]);
     expect(slateCatalog()).toContain(SLATE_INDEX_EXAMPLE);

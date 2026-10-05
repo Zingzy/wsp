@@ -615,7 +615,7 @@ const F: Record<string, FnSpec> = {
   duration: { min: 1, max: 2, returns: ret(T.str), numberFirst: true, sig: "duration(ms, style?)", example: "duration(thread.lastTurn.durationMs)",
     fn: ([x, style]) => (isNum(x) ? fmtDuration(x, style === "clock" ? "clock" : "short") : null) },
   ago: { min: 1, max: 1, returns: ret(T.str), clock: true, sig: "ago(t)", example: "ago(pr.readAt)",
-    fn: ([t], env) => { const at = ms(t); const now = env.now(); return at === null || now === null ? null : span(now - at, false); } },
+    fn: ([t], env) => { const at = ms(t); const now = env.now(); return at === null || now === null ? null : `${span(now - at, false)} ago`; } },
   until: { min: 1, max: 1, returns: ret(T.str), clock: true, sig: "until(t)", example: "until(usage.week.resetsAt)",
     fn: ([t], env) => { const at = ms(t); const now = env.now(); return at === null || now === null ? null : at <= now ? "now" : `in ${span(at - now)}`; } },
   date: { min: 1, max: 2, returns: ret(T.str), sig: "date(t, style?)", example: "date(usage.week.resetsAt)",
