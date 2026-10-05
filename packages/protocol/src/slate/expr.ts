@@ -730,33 +730,88 @@ export const SLATE_FUNCTIONS: Readonly<Record<string, Readonly<{ min: number; ma
 
 // ---- pipeline steps ----
 
+/** What a step runs on: the list it was handed, cut to the list cap, the value itself, its arguments, and one
+ * argument evaluated on a row, which charges a visit. */
+interface PipeRun { list: SlateJson[]; cur: Val; args: SlatePipeStepNode["args"]; arg(n: number): SlateExpr; per(e: SlateExpr, item: SlateJson, index: number): Val; env: Env }
+
 interface PipeSpec {
   min: number; max: number; sig: string; example: string; purpose: string;
   /** Takes a list in; false for format, which takes a single value too. */
   needsList: boolean;
   out(input: SlateType, args: SlateType[]): SlateType;
+  apply(x: PipeRun): Val;
 }
+
+const numbersPer = (x: PipeRun): number[] => x.list.map((item, i) => x.per(x.arg(0), item, i)).filter(isNum);
 
 const same = (input: SlateType): SlateType => input;
 const PIPE: Record<string, PipeSpec> = slateTable<PipeSpec>({
-  where: { min: 1, max: 1, needsList: true, out: same, sig: "where(cond)", purpose: "keeps the elements where cond is true", example: "pr.checks | where(item.state == 'fail')" },
-  sortBy: { min: 1, max: 2, needsList: true, out: same, sig: "sortBy(expr, 'asc'|'desc')", purpose: "stable sort; nulls last", example: "processes.list | sortBy(item.cpu, 'desc')" },
-  groupBy: { min: 1, max: 1, needsList: true, out: i => ({ t: "list", of: { t: "record", fields: { key: T.any, items: i, count: T.num } } }), sig: "groupBy(expr)", purpose: "{ key, items, count } per group in first-seen order", example: "pr.checks | groupBy(item.state)" },
-  take: { min: 1, max: 1, needsList: true, out: same, sig: "take(n)", purpose: "the first n; n is a literal", example: "pr.checks | take(5)" },
-  skip: { min: 1, max: 1, needsList: true, out: same, sig: "skip(n)", purpose: "all but the first n", example: "pr.checks | skip(1)" },
-  count: { min: 0, max: 0, needsList: true, out: () => T.num, sig: "count", purpose: "the length", example: "$steps | where(item.done) | count" },
-  sum: { min: 1, max: 1, needsList: true, out: () => T.num, sig: "sum(expr)", purpose: "the total of expr; nulls skipped", example: "thread.changes.files | sum(item.additions)" },
-  min: { min: 1, max: 1, needsList: true, out: () => T.num, sig: "min(expr)", purpose: "the least expr", example: "pr.checks | min(num(item.startedAt))" },
-  max: { min: 1, max: 1, needsList: true, out: () => T.num, sig: "max(expr)", purpose: "the greatest expr", example: "processes.list | max(item.cpu)" },
-  avg: { min: 1, max: 1, needsList: true, out: () => T.num, sig: "avg(expr)", purpose: "the mean of expr", example: "processes.list | avg(item.mem)" },
-  first: { min: 0, max: 0, needsList: true, out: i => i.of ?? T.any, sig: "first", purpose: "the first element or null", example: "thread.plan.steps | where(item.state == 'working') | first" },
-  last: { min: 0, max: 0, needsList: true, out: i => i.of ?? T.any, sig: "last", purpose: "the last element or null", example: "thread.plan.steps | last" },
-  pick: { min: 1, max: 99, needsList: true, out: () => ({ t: "list", of: T.rec }), sig: "pick(field, ...)", purpose: "keeps the named fields", example: "processes.list | pick(name, cpu)" },
-  map: { min: 1, max: 99, needsList: true, out: () => ({ t: "list", of: T.rec }), sig: "map(name: expr, ...)", purpose: "adds or replaces fields", example: "pr.checks | map(took: num(item.completedAt) - num(item.startedAt))" },
-  distinct: { min: 0, max: 1, needsList: true, out: same, sig: "distinct(expr?)", purpose: "drops later repeats", example: "pr.checks | distinct(item.workflow)" },
-  flatten: { min: 0, max: 1, needsList: true, out: () => T.list, sig: "flatten(field?)", purpose: "joins inner lists", example: "tree.all | flatten(children)" },
-  join: { min: 2, max: 3, needsList: true, out: same, sig: "join(other, key, otherKey?)", purpose: "attaches the matching element of other", example: "thread.subagents | join(tree.children, id)" },
-  format: { min: 1, max: 1, needsList: false, out: i => (i.t === "list" ? { t: "list", of: T.str } : T.str), sig: "format(expr)", purpose: "expr as text per element", example: "pr.checks | format(`${item.name}: ${word(item.state)}`)" },
+  where: { apply: x => x.list.filter((item, i) => slateTruthy(x.per(x.arg(0), item, i))), min: 1, max: 1, needsList: true, out: same, sig: "where(cond)", purpose: "keeps the elements where cond is true", example: "pr.checks | where(item.state == 'fail')" },
+  sortBy: { apply: x => {
+      const desc = x.args[1] !== undefined && run(x.arg(1), x.env) === "desc";
+      const keyed = x.list.map((item, i) => ({ item, key: x.per(x.arg(0), item, i), i }));
+      keyed.sort((a, b) => compareKeys(a.key, b.key, desc) || a.i - b.i);
+      return keyed.map(k => k.item);
+    }, min: 1, max: 2, needsList: true, out: same, sig: "sortBy(expr, 'asc'|'desc')", purpose: "stable sort; nulls last", example: "processes.list | sortBy(item.cpu, 'desc')" },
+  groupBy: { apply: x => {
+      const groups = new Map<string, { key: SlateJson; items: SlateJson[] }>();
+      x.list.forEach((item, i) => {
+        const key = x.per(x.arg(0), item, i) ?? null;
+        const k = keyText(key);
+        const g = groups.get(k) ?? groups.set(k, { key, items: [] }).get(k)!;
+        g.items.push(item);
+      });
+      return [...groups.values()].map(g => ({ key: g.key, items: g.items, count: g.items.length }));
+    }, min: 1, max: 1, needsList: true, out: i => ({ t: "list", of: { t: "record", fields: { key: T.any, items: i, count: T.num } } }), sig: "groupBy(expr)", purpose: "{ key, items, count } per group in first-seen order", example: "pr.checks | groupBy(item.state)" },
+  take: { apply: x => { const n = run(x.arg(0), x.env); x.env.charge(x.list.length); return isNum(n) ? x.list.slice(0, Math.max(0, n)) : null; }, min: 1, max: 1, needsList: true, out: same, sig: "take(n)", purpose: "the first n; n is a literal", example: "pr.checks | take(5)" },
+  skip: { apply: x => { const n = run(x.arg(0), x.env); x.env.charge(x.list.length); return isNum(n) ? x.list.slice(Math.max(0, n)) : null; }, min: 1, max: 1, needsList: true, out: same, sig: "skip(n)", purpose: "all but the first n", example: "pr.checks | skip(1)" },
+  count: { apply: x => x.list.length, min: 0, max: 0, needsList: true, out: () => T.num, sig: "count", purpose: "the length", example: "$steps | where(item.done) | count" },
+  sum: { apply: x => numbersPer(x).reduce((a, b) => a + b, 0), min: 1, max: 1, needsList: true, out: () => T.num, sig: "sum(expr)", purpose: "the total of expr; nulls skipped", example: "thread.changes.files | sum(item.additions)" },
+  min: { apply: x => { const ns = numbersPer(x); return ns.length === 0 ? null : Math.min(...ns); }, min: 1, max: 1, needsList: true, out: () => T.num, sig: "min(expr)", purpose: "the least expr", example: "pr.checks | min(num(item.startedAt))" },
+  max: { apply: x => { const ns = numbersPer(x); return ns.length === 0 ? null : Math.max(...ns); }, min: 1, max: 1, needsList: true, out: () => T.num, sig: "max(expr)", purpose: "the greatest expr", example: "processes.list | max(item.cpu)" },
+  avg: { apply: x => { const ns = numbersPer(x); return ns.length === 0 ? null : ns.reduce((a, b) => a + b, 0) / ns.length; }, min: 1, max: 1, needsList: true, out: () => T.num, sig: "avg(expr)", purpose: "the mean of expr", example: "processes.list | avg(item.mem)" },
+  first: { apply: x => x.list[0] ?? null, min: 0, max: 0, needsList: true, out: i => i.of ?? T.any, sig: "first", purpose: "the first element or null", example: "thread.plan.steps | where(item.state == 'working') | first" },
+  last: { apply: x => x.list[x.list.length - 1] ?? null, min: 0, max: 0, needsList: true, out: i => i.of ?? T.any, sig: "last", purpose: "the last element or null", example: "thread.plan.steps | last" },
+  pick: { apply: x => {
+      const names = x.args.map(a => fieldName(a.expr)).filter((n): n is string => n !== undefined);
+      return x.list.map(item => { x.env.charge(1); return isRecord(item) ? Object.fromEntries(names.filter(n => Object.prototype.hasOwnProperty.call(item, n)).map(n => [n, item[n]!])) : null; });
+    }, min: 1, max: 99, needsList: true, out: () => ({ t: "list", of: T.rec }), sig: "pick(field, ...)", purpose: "keeps the named fields", example: "processes.list | pick(name, cpu)" },
+  map: { apply: x => x.list.map((item, i) => {
+      const base: Record<string, SlateJson> = isRecord(item) ? { ...item } : { value: item };
+      for (const a of x.args) base[a.name!] = x.per(a.expr, item, i) ?? null;
+      return base;
+    }), min: 1, max: 99, needsList: true, out: () => ({ t: "list", of: T.rec }), sig: "map(name: expr, ...)", purpose: "adds or replaces fields", example: "pr.checks | map(took: num(item.completedAt) - num(item.startedAt))" },
+  distinct: { apply: x => {
+      const seen = new Set<string>();
+      return x.list.filter((item, i) => { const k = keyText(x.args[0] !== undefined ? x.per(x.arg(0), item, i) : item); if (seen.has(k)) return false; seen.add(k); return true; });
+    }, min: 0, max: 1, needsList: true, out: same, sig: "distinct(expr?)", purpose: "drops later repeats", example: "pr.checks | distinct(item.workflow)" },
+  flatten: { apply: x => {
+      const name = x.args[0] !== undefined ? fieldName(x.arg(0)) : undefined;
+      const out: SlateJson[] = [];
+      for (const item of x.list) {
+        const inner = name !== undefined ? slateStep(item, name) : item;
+        if (isList(inner)) { x.env.charge(inner.length); out.push(...inner); }
+      }
+      return out.slice(0, SLATE_LIMITS.listItems);
+    }, min: 0, max: 1, needsList: true, out: () => T.list, sig: "flatten(field?)", purpose: "joins inner lists", example: "tree.all | flatten(children)" },
+  join: { apply: x => {
+      const otherExpr = x.arg(0);
+      const other = run(otherExpr, x.env);
+      const key = fieldName(x.arg(1));
+      const otherKey = x.args[2] !== undefined ? fieldName(x.arg(2)) : key;
+      const under = otherExpr.k === "path" ? String(otherExpr.segs.filter(s => typeof s === "string").at(-1) ?? otherExpr.head) : "other";
+      const pool = isList(other) ? other : [];
+      x.env.charge(pool.length);
+      const byKey = new Map<string, SlateJson>();
+      if (otherKey !== undefined) for (const o of pool) { const k = keyText(slateStep(o, otherKey) ?? null); if (!byKey.has(k)) byKey.set(k, o); }
+      return x.list.map(item => {
+        x.env.charge(1);
+        const mine = key !== undefined ? slateStep(item, key) : undefined;
+        const hit = byKey.get(keyText(mine ?? null)) ?? null;
+        return isRecord(item) ? { ...item, [under]: hit } : { value: item, [under]: hit };
+      });
+    }, min: 2, max: 3, needsList: true, out: same, sig: "join(other, key, otherKey?)", purpose: "attaches the matching element of other", example: "thread.subagents | join(tree.children, id)" },
+  format: { apply: x => (isList(x.cur) ? x.list.map((item, i) => slateText(x.per(x.arg(0), item, i))) : slateText(x.per(x.arg(0), x.cur ?? null, 0))), min: 1, max: 1, needsList: false, out: i => (i.t === "list" ? { t: "list", of: T.str } : T.str), sig: "format(expr)", purpose: "expr as text per element", example: "pr.checks | format(`${item.name}: ${word(item.state)}`)" },
 });
 
 /** Every pipeline step with its signature, purpose and an example. */
@@ -859,88 +914,7 @@ function runPipe(node: Extract<SlateExpr, { k: "pipe" }>, env: Env): Val {
     const list = isList(cur) ? cur.slice(0, SLATE_LIMITS.listItems) : [];
     const per = (e: SlateExpr, item: SlateJson, index: number): Val => { env.charge(1); return run(e, { ...env, ctx: { ...env.ctx, item, index }, step: () => env.charge(1) }); };
     const arg = (n: number): SlateExpr => step.args[n]!.expr;
-    switch (step.name) {
-      case "where": cur = list.filter((item, i) => slateTruthy(per(arg(0), item, i))); break;
-      case "sortBy": {
-        const desc = step.args[1] !== undefined && run(arg(1), env) === "desc";
-        const keyed = list.map((item, i) => ({ item, key: per(arg(0), item, i), i }));
-        keyed.sort((a, b) => compareKeys(a.key, b.key, desc) || a.i - b.i);
-        cur = keyed.map(k => k.item);
-        break;
-      }
-      case "groupBy": {
-        const groups = new Map<string, { key: SlateJson; items: SlateJson[] }>();
-        list.forEach((item, i) => {
-          const key = per(arg(0), item, i) ?? null;
-          const k = keyText(key);
-          const g = groups.get(k) ?? groups.set(k, { key, items: [] }).get(k)!;
-          g.items.push(item);
-        });
-        cur = [...groups.values()].map(g => ({ key: g.key, items: g.items, count: g.items.length }));
-        break;
-      }
-      case "take": { const n = run(arg(0), env); cur = isNum(n) ? list.slice(0, Math.max(0, n)) : null; env.charge(list.length); break; }
-      case "skip": { const n = run(arg(0), env); cur = isNum(n) ? list.slice(Math.max(0, n)) : null; env.charge(list.length); break; }
-      case "count": cur = list.length; break;
-      case "sum": case "min": case "max": case "avg": {
-        const ns = list.map((item, i) => per(arg(0), item, i)).filter(isNum);
-        cur = ns.length === 0 ? (step.name === "sum" ? 0 : null)
-          : step.name === "sum" ? ns.reduce((a, b) => a + b, 0)
-          : step.name === "min" ? Math.min(...ns)
-          : step.name === "max" ? Math.max(...ns)
-          : ns.reduce((a, b) => a + b, 0) / ns.length;
-        break;
-      }
-      case "first": cur = list[0] ?? null; break;
-      case "last": cur = list[list.length - 1] ?? null; break;
-      case "pick": {
-        const names = step.args.map(a => fieldName(a.expr)).filter((n): n is string => n !== undefined);
-        cur = list.map(item => { env.charge(1); return isRecord(item) ? Object.fromEntries(names.filter(n => Object.prototype.hasOwnProperty.call(item, n)).map(n => [n, item[n]!])) : null; });
-        break;
-      }
-      case "map": {
-        cur = list.map((item, i) => {
-          const base: Record<string, SlateJson> = isRecord(item) ? { ...item } : { value: item };
-          for (const a of step.args) base[a.name!] = per(a.expr, item, i) ?? null;
-          return base;
-        });
-        break;
-      }
-      case "distinct": {
-        const seen = new Set<string>();
-        cur = list.filter((item, i) => { const k = keyText(step.args[0] !== undefined ? per(arg(0), item, i) : item); if (seen.has(k)) return false; seen.add(k); return true; });
-        break;
-      }
-      case "flatten": {
-        const name = step.args[0] !== undefined ? fieldName(arg(0)) : undefined;
-        const out: SlateJson[] = [];
-        for (const item of list) {
-          const inner = name !== undefined ? slateStep(item, name) : item;
-          if (isList(inner)) { env.charge(inner.length); out.push(...inner); }
-        }
-        cur = out.slice(0, SLATE_LIMITS.listItems);
-        break;
-      }
-      case "join": {
-        const otherExpr = arg(0);
-        const other = run(otherExpr, env);
-        const key = fieldName(arg(1));
-        const otherKey = step.args[2] !== undefined ? fieldName(arg(2)) : key;
-        const under = otherExpr.k === "path" ? String(otherExpr.segs.filter(s => typeof s === "string").at(-1) ?? otherExpr.head) : "other";
-        const pool = isList(other) ? other : [];
-        env.charge(pool.length);
-        const byKey = new Map<string, SlateJson>();
-        if (otherKey !== undefined) for (const o of pool) { const k = keyText(slateStep(o, otherKey) ?? null); if (!byKey.has(k)) byKey.set(k, o); }
-        cur = list.map(item => {
-          env.charge(1);
-          const mine = key !== undefined ? slateStep(item, key) : undefined;
-          const hit = byKey.get(keyText(mine ?? null)) ?? null;
-          return isRecord(item) ? { ...item, [under]: hit } : { value: item, [under]: hit };
-        });
-        break;
-      }
-      case "format": cur = isList(cur) ? list.map((item, i) => slateText(per(arg(0), item, i))) : slateText(per(arg(0), cur ?? null, 0)); break;
-    }
+    cur = spec.apply({ list, cur, args: step.args, arg, per, env });
   }
   return cur;
 }
