@@ -82,6 +82,7 @@ export const chart: PieceView = {
             ticks={rows.length === 1 ? [{ at: 1, word: word(rows[0]!.x) }] : [{ at: 0, word: word(rows[0]!.x) }, { at: 1, word: word(rows.at(-1)!.x) }]}
             height={heightFor(width)}
             figure={shown}
+            axisFigure={v => figure(v, props["format"]) ?? ""}
             label={label}
             axis={axisFor(values, props["format"])}
             small

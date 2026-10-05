@@ -126,7 +126,7 @@ function useThemeTick(): number {
   return tick;
 }
 
-export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGHT = CHART_HEIGHT, figure = fmtTokens, label = "Tokens over the range", axis, small = false }: {
+export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGHT = CHART_HEIGHT, figure = fmtTokens, axisFigure = figure, label = "Tokens over the range", axis, small = false }: {
   steps: readonly number[];
   lines: readonly ChartLine[];
   stepWord: (t: number) => string;
@@ -134,6 +134,8 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   height?: number;
   /** The words for a figure on the axis and in the tooltip. */
   figure?: (v: number) => string;
+  /** The axis's own words where they differ: a unit the legend already names is not said again on every tick. */
+  axisFigure?: (v: number) => string;
   label?: string;
   /** A fixed axis from the caller, its figures drawn as plain text, split in four unless it names fewer parts; without
    * one it runs from 0 to a round top in four and the figures roll. */
@@ -188,12 +190,12 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
       <div data-k="y-axis" aria-hidden className={cn("relative font-mono leading-none whitespace-nowrap text-muted-foreground tabular-nums", small ? "text-[11px]" : "text-xs")} style={{ height: HEIGHT }}>
         {marks.map(g => (
           <span key={g} data-k="y-tick" className="invisible block h-0 text-right">
-            {figure(from + (top * g) / parts)}
+            {axisFigure(from + (top * g) / parts)}
           </span>
         ))}
         {marks.map(g => (
           <span key={g} className="absolute right-0 -translate-y-1/2" style={{ top: HEIGHT - PAD - (g / parts) * (HEIGHT - PAD * 2) }}>
-            {axis === undefined ? <DigitRoll rollIn value={figure(from + (top * g) / parts)} /> : figure(from + (top * g) / parts)}
+            {axis === undefined ? <DigitRoll rollIn value={axisFigure(from + (top * g) / parts)} /> : axisFigure(from + (top * g) / parts)}
           </span>
         ))}
       </div>

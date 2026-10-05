@@ -99,6 +99,15 @@ describe("the richer kit in the renderer", () => {
       expect(view.container.querySelector("[data-k=y-axis] [role=img], [data-k=y-axis] .digit-strip")).toBeNull();
     });
 
+    it("says its unit once, in the legend and the hover, never on every figure of the axis", () => {
+      const RATE = `<slate><value name="hist" start={[]} /><column><chart label="Requests" items={$hist} x={item.at} value={item.v} unit="req/min" format="integer" /></column></slate>`;
+      const { view } = draw(compiled(RATE), { hist: [120, 400, 250].map(at) });
+      const chart = view.container.querySelector<HTMLElement>("[data-slate-chart]")!;
+      expect(chart.querySelector("figcaption")!.textContent).toBe("Requestsreq/min");
+      expect(ticks(view.container)).toEqual(["0", "100", "200", "300", "400"]);
+      expect(chart.querySelector("[data-k=y-axis]")!.textContent).not.toContain("req/min");
+    });
+
     it("holds every value in four or five round steps", () => {
       for (const values of [[2400.5, 2401.25, 2399], [4141.8, 4141.8], [0, 0], [-5, -5], [3, 1000], [0.001, 0.0012], [-40, 25], [99.9, 100.1]]) {
         const { from, to, parts } = slateChartAxis(values);
