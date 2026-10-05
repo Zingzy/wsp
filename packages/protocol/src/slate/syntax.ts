@@ -6,7 +6,7 @@
 import { parseSlateExpression, slatePathText } from "./expr.js";
 import { SLATE_ITEM_KINDS, SLATE_PIECES, type SlateItemSpec } from "./kit.js";
 import { SLATE_LIMITS } from "./limits.js";
-import { nearest, slateProblem, type SlateCode } from "./problems.js";
+import { nearest, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
 import { SLATE_STEPS } from "./steps.js";
 import { validateDocument, type SlateLines } from "./validate.js";
 import {
@@ -604,7 +604,8 @@ class Compiler {
     }
     if (spec !== undefined && el.raw !== undefined && spec.textProp !== undefined) props[spec.textProp] = el.raw;
     if (el.text !== undefined) {
-      if (spec?.textProp === undefined) this.error("P100", `${el.tag} takes elements, not text; put the words in a <text>`, el.line, { piece: id });
+      if (spec === undefined) { const unknown = slateUnknownPiece(el.tag, Object.keys(SLATE_PIECES)); this.error("T300", unknown.message, el.line, { piece: id, ...(unknown.fix !== undefined ? { fix: unknown.fix } : {}) }); }
+      else if (spec.textProp === undefined) this.error("P100", `${el.tag} takes elements, not text; put the words in a <text>`, el.line, { piece: id });
       else if (props[spec.textProp] !== undefined) this.error("T303", `${el.tag} has both ${spec.textProp}= and a text child; use one`, el.line, { piece: id, prop: spec.textProp });
       else { props[spec.textProp] = this.textChild(el.text); this.lines.set(`${id}.${spec.textProp}`, el.line); }
     }

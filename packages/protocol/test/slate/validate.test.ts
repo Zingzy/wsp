@@ -264,3 +264,14 @@ describe("a per-row prop and a number given text", () => {
     expect(parseSlate(`<slate><meter label="x" value={1} max="5" /></slate>`).errors).toMatchObject([{ code: "T303", fix: "max={5}" }]);
   });
 });
+
+describe("an HTML habit gets the piece it meant", () => {
+  it("names the piece for <p>, <header> and <div>, points a piece's every at a <run>, and says what a form is for", () => {
+    const codes = (t: string) => parseSlate(t).errors.map(e => `${e.code} ${e.message}`);
+    expect(codes(`<slate><column><p>Waiting</p></column></slate>`)).toEqual([`T300 "p" is not a piece; words go in <text>...</text>`]);
+    expect(codes(`<slate><column><header><text>PR</text></header></column></slate>`)).toEqual([`T300 "header" is not a piece; a title is a <heading>, or a <section title="...">`]);
+    expect(codes(`<slate><column><div><text>x</text></div></column></slate>`)).toEqual([`T300 "div" is not a piece; a group is a <column>, a <row> or a <section>`]);
+    expect(codes(`<slate><column><text every={60}>x</text></column></slate>`)).toContain(`T302 every is a <run>'s, not a piece's: <run name="x" cmd='...' every={60} />, and the piece reads $x`);
+    expect(codes(`<slate><value name="r" start={null} /><form into="$r" /></slate>`)).toContain(`T304 form fills an MCP tool's arguments and needs tool="server.tool"; for fields of your own, use <input label="..." value={$x} /> and a <button>`);
+  });
+});

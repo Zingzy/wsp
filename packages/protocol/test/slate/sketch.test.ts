@@ -22,7 +22,7 @@ describe("the sketch", () => {
 
   it("draws bars to the panel's scale, the longest row full with no max, and says how many rows it left out", () => {
     const d = parseSlate(`<slate><column><bars id="hits" label="Hits" items={$rows} name={item.n} value={item.v} /></column><value name="rows" start={[]} /></slate>`).document!;
-    const many = [["CA", 284], ["CN", 102], ["US", 71], ["DE", 40], ["FR", 30], ["IN", 20], ["JP", 10], ["BR", 5], ["MX", 2]].map(([n, v]) => ({ n, v }));
+    const many = ([["CA", 284], ["CN", 102], ["US", 71], ["DE", 40], ["FR", 30], ["IN", 20], ["JP", 10], ["BR", 5], ["MX", 2]] as [string, number][]).map(([n, v]) => ({ n, v }));
     const s = sketchSlate(d, { rows: many }, { version: 1, now });
     expect(s).toContain("  CA  [##########] 284");
     expect(s).toContain("  CN  [####......] 102");

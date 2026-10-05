@@ -7,7 +7,7 @@ import { isSlateIcon, nearestSlateIcon } from "./icons.js";
 import { SLATE_PIECES, SLATE_RESERVED_PROPS, type SlateItemSpec, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
 import { SLATE_LIMITS } from "./limits.js";
 import { parseSlateOwnPath } from "./paths.js";
-import { SLATE_WARNINGS, nearest, orList, slateProblem, type SlateCode } from "./problems.js";
+import { SLATE_WARNINGS, nearest, orList, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
 import { SLATE_SOURCES, slateIsSeries, slateSourceType } from "./sources.js";
 import { SLATE_STEPS } from "./steps.js";
 import {
@@ -27,6 +27,8 @@ const RUN_FIELD_TYPES: Record<(typeof SLATE_RUN_FIELDS)[number], SlateType> = {
   lines: { t: "list", of: { t: "string" } }, startedAt: { t: "number" }, endedAt: { t: "number" }, ms: { t: "number" }, runs: { t: "number" }, cut: { t: "boolean" }, stale: { t: "boolean" },
   refreshing: { t: "boolean" }, text: { t: "boolean" },
 };
+/** Attributes of a <run> that a piece is given by habit: the refusal points at the run. */
+const RUN_ATTRS: ReadonlySet<string> = new Set(["every", "cmd", "timeout", "always", "once", "interval", "refresh"]);
 const SECRET_FIELD_TYPES: Record<string, SlateType> = { set: { t: "boolean" }, len: { t: "number" }, at: { t: "number" } };
 
 /** The type a literal start reads as: a list of records takes its first record's fields. */
@@ -450,8 +452,8 @@ class Validator {
     const spec = SLATE_PIECES[p.type];
     if (spec === undefined) {
       if (p.fallback === undefined) {
-        const fix = nearest(p.type, Object.keys(SLATE_PIECES));
-        this.add("T300", `"${p.type}" is not a piece${fix !== undefined ? `; did you mean ${fix}?` : ""}`, { piece: id }, fix);
+        const unknown = slateUnknownPiece(p.type, Object.keys(SLATE_PIECES));
+        this.add("T300", unknown.message, { piece: id }, unknown.fix);
       }
       return row;
     }
@@ -468,6 +470,7 @@ class Validator {
       const ps = spec.props[name];
       if (ps === undefined) {
         if (name in SLATE_RESERVED_PROPS) this.add("T312", `${name} is not a prop a slate can set; wsp draws the style. Use ${SLATE_RESERVED_PROPS[name]}.`, { piece: id, prop: name }, SLATE_RESERVED_PROPS[name]);
+        else if (RUN_ATTRS.has(name)) this.add("T302", `${name} is a <run>'s, not a piece's: <run name="x" cmd='...' ${name === "every" ? "every={60}" : `${name}=...`} />, and the piece reads $x`, { piece: id, prop: name });
         else { const fix = nearest(name, Object.keys(spec.props)); this.add("T302", `${p.type} has no ${name}${fix !== undefined ? `; did you mean ${fix}?` : `; it takes ${Object.keys(spec.props).join(", ")}`}`, { piece: id, prop: name }, fix); }
         continue;
       }
@@ -476,6 +479,7 @@ class Validator {
     for (const [name, ps] of Object.entries(spec.props)) {
       if (ps.required !== true || props[name] !== undefined) continue;
       if (spec.interactive === true && name === "label") this.add("T307", `a ${p.type} needs a label for people using a screen reader`, { piece: id, prop: name }, `label="..."`);
+      else if (p.type === "form" && name === "tool") this.add("T304", `form fills an MCP tool's arguments and needs tool="server.tool"; for fields of your own, use <input label="..." value={$x} /> and a <button>`, { piece: id, prop: name });
       else this.add("T304", `${p.type} "${id}" needs ${name}`, { piece: id, prop: name });
     }
     for (const [tag, is] of Object.entries(spec.items)) {
