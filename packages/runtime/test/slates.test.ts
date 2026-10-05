@@ -402,6 +402,14 @@ describe("the slate v2 host", () => {
     await expect(rt.sessions.start(workspaceId, { prompt: "two", cwd: join(root, "plain", "nowhere") })).rejects.toThrow(/^there is no folder at .*nowhere; name one that exists$/);
   });
 
+  it("a write's warnings are in its text, with their fixes, not only in the structured answer", async () => {
+    const { rt, asThread } = await threadOn("wsp-slates-warnings-text-");
+    const wrote = await rt.slates.write({ text: `<slate title="Live Gold Prices"><column><text>a · b</text></column></slate>` }, asThread);
+    expect(wrote.warnings.map(w => w.code)).toEqual(["W018", "W012"]);
+    expect(wrote.text).toMatch(/^slate v1 "Live Gold Prices", 2 pieces, 0 bound, 0 problems, 2 warnings\n/);
+    expect(wrote.text).toContain(`W018 slate: the slate's title "Live Gold Prices" is in Title Case; heads take sentence case. Fix: title="Live gold prices"`);
+  });
+
   it("a thread with no slate yet reads as an empty slate, not a refusal", async () => {
     const { rt, asThread } = await threadOn("wsp-slates-empty-read-");
     const read = await rt.slates.read({}, asThread);

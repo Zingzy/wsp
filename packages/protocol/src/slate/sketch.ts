@@ -20,6 +20,8 @@ export interface SlateSketchContext {
   problems?: SlateProblem[];
   /** A check with no thread: bound values show as their formula in braces. */
   check?: boolean;
+  /** A write's warnings: stored all the same, each worth fixing before the person reads the slate. */
+  warnings?: SlateProblem[];
   /** The runs held for the person's approval: a line of their own, never a problem. */
   waiting?: string[];
 }
@@ -166,7 +168,8 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
   const pieces = Object.keys(doc.pieces).length;
   const bound = Object.values(doc.pieces).reduce((n, p) => n + Object.values(p.props ?? {}).reduce<number>((m, v) => m + boundCount(v), 0), 0);
   const problems = [...(ctx.problems ?? []), ...(unbound ? [] : [...iconProblems(doc, read), ...plotProblems(doc, read)])];
-  const head = `slate${version}${doc.title !== undefined ? ` ${JSON.stringify(doc.title)}` : ""}, ${plural(pieces, "piece")}, ${bound} bound, ${plural(problems.length, "problem")}`;
+  const warned = ctx.warnings ?? [];
+  const head = `slate${version}${doc.title !== undefined ? ` ${JSON.stringify(doc.title)}` : ""}, ${plural(pieces, "piece")}, ${bound} bound, ${plural(problems.length, "problem")}${warned.length > 0 ? `, ${plural(warned.length, "warning")}` : ""}`;
 
   const lines: string[] = [];
   let pieceLines = 0;
@@ -274,6 +277,10 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
   if (problems.length > 0) {
     lines.push("problems:");
     for (const p of problems) lines.push(`  ${p.code} ${p.piece ?? "slate"}${p.prop !== undefined ? `.${p.prop}` : ""}${p.line !== undefined ? ` (line ${p.line})` : ""}: ${p.message}`);
+  }
+  if (warned.length > 0) {
+    lines.push("warnings, stored all the same; fix them before the person reads the slate:");
+    for (const p of warned) lines.push(`  ${p.code} ${p.piece ?? "slate"}${p.prop !== undefined ? `.${p.prop}` : ""}${p.line !== undefined ? ` (line ${p.line})` : ""}: ${p.message}${p.fix !== undefined ? `. Fix: ${p.fix}` : ""}`);
   }
   const text = [head, ...lines].join("\n");
   const capChars = SLATE_LIMITS.sketchTokens * 4;

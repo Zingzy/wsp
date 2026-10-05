@@ -592,8 +592,8 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   const scrub = (r: SlateRecord, text: string): string => runs.secrets.scrub(r.threadId, text);
 
-  const sketched = (r: SlateRecord, views: ReadonlyMap<string, SlateJson | undefined>, check = false, asked: SlateProblem[] = []): string => {
-    const text = sketchSlate(r.document, r.values, { ...contextOf(r, views), version: r.version, ...(check ? { check: true } : { problems: [...asked, ...problemsOf(r, views)], waiting: waitingOf(r) }) });
+  const sketched = (r: SlateRecord, views: ReadonlyMap<string, SlateJson | undefined>, check = false, asked: SlateProblem[] = [], warnings: SlateProblem[] = []): string => {
+    const text = sketchSlate(r.document, r.values, { ...contextOf(r, views), version: r.version, warnings, ...(check ? { check: true } : { problems: [...asked, ...problemsOf(r, views)], waiting: waitingOf(r) }) });
     return scrub(r, /^slate v\d/.test(text) ? text : text.replace(/^slate\b/, `slate v${r.version}`));
   };
   const sketchOf = async (r: SlateRecord): Promise<string> => sketched(r, await viewsFor(r));
@@ -981,7 +981,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       throw invalid([problem("D203", "piece-missing", `there is no piece ${press.piece} to press`, near !== undefined ? { fix: near } : {})], warnings);
     }
     const result = runSlateBatch(doc, values, writes, { ...contextOf(preview, views), by: "person", ...(press !== undefined ? { event: { piece: press.piece, kind: "press", ...(press.index !== undefined ? { index: press.index } : {}), ...(press.action !== undefined ? { rowAction: press.action } : {}) } } : {}) });
-    const after = sketched({ ...preview, values: result.values }, views);
+    const after = sketched({ ...preview, values: result.values }, views, false, [], warnings);
     const would = [
       ...result.starts.map(s => `would start $${s.run} (${s.why})`),
       ...result.cancels.map(run => `would cancel $${run}`),
@@ -1017,7 +1017,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     if (next !== null && /\bpr\.checks\b/.test(JSON.stringify(next))) deps.watchPr?.(r.workspaceId);
     push(r, Object.keys(values));
     const views = await viewsFor(r);
-    return { version: r.version, text: sketched(r, views), warnings, problems: problemsOf(r, views), waiting: waitingOf(r) };
+    return { version: r.version, text: sketched(r, views, false, [], warnings), warnings, problems: problemsOf(r, views), waiting: waitingOf(r) };
   };
 
   const undo = async (r: SlateRecord, by: "agent" | "person"): Promise<SlateWriteAnswer> => {
@@ -1076,7 +1076,7 @@ export function createSlates(deps: SlatesDeps): Slates {
           if (rehearsal) return rehearse(r, doc, valuesFor(r, doc), p, checked.warnings);
           if (p.check === true) {
             const preview: SlateRecord = { ...r, document: doc, values: valuesFor({ threadId, document: null, values: {} }, doc) };
-            return { version: r.version, text: sketched(preview, new Map(), true), warnings: checked.warnings, problems: [] };
+            return { version: r.version, text: sketched(preview, new Map(), true, [], checked.warnings), warnings: checked.warnings, problems: [] };
           }
           checkVersion(r, p.ifVersion);
           if (by === "agent") spendWrite(threadId);
@@ -1096,7 +1096,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         const next = applied.document;
         const values = next === null ? r.values : valuesFor({ threadId, document: r.document, values: applied.values ?? r.values }, next);
         if (rehearsal && next !== null) return rehearse(r, next, values, p, applied.warnings);
-        if (p.check === true) return { version: r.version, text: sketched({ ...r, document: next, values }, new Map(), true), warnings: applied.warnings, problems: [] };
+        if (p.check === true) return { version: r.version, text: sketched({ ...r, document: next, values }, new Map(), true, [], applied.warnings), warnings: applied.warnings, problems: [] };
         checkVersion(r, p.ifVersion);
         if (by === "agent") spendWrite(threadId);
         const touched = [...new Set(ops.flatMap(op => ("id" in op && typeof op.id === "string" ? [op.id] : [])))];
