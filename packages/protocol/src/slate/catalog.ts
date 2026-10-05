@@ -203,6 +203,16 @@ function handlersEntry(): string {
 /** The catalog: the index with no name, else the named piece, source or chapter, as text. */
 export function slateCatalog(name?: string): string {
   if (name === undefined || name === "" || name === "index") return index();
+  const text = entry(name);
+  // A named entry adds detail only; agents that read one alone guessed pieces like <h1> and <p>.
+  return text.endsWith(NOT_IN) ? text : `${text}\n${BACK}`;
+}
+
+/** Where the pieces and rules are, said under every named entry. */
+const BACK = "The pieces and rules: slate_catalog with no name.";
+const NOT_IN = "a server's tools are the host's to answer.";
+
+function entry(name: string): string {
   const n = name.trim();
   if (n === "file") return `${pieceEntry(SLATE_PIECES[n]!)}\nThe <file name="x.py"> declaration, code a run calls as $SLATE_DIR/x.py, is in slate_catalog runs.`;
   if (SLATE_PIECES[n] !== undefined) return pieceEntry(SLATE_PIECES[n]);

@@ -120,8 +120,12 @@ describe("the catalog", () => {
 
   it("answers runs, functions, steps, handlers and examples within their budgets", () => {
     // A line for each run attribute, after small models guessed what always and once did, took it from 590 to 660;
-    // once, stream and when the person is asked, as ruled (6, 7), to 720; a secret in a file, to 730.
-    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(730);
+    // once, stream and when the person is asked, as ruled (6, 7), to 720; a secret in a file, to 730; the line back to
+    // the pieces every named entry ends with, after agents that read runs alone guessed <h1> and <p>, to 740.
+    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(740);
+    for (const n of ["runs", "chart", "thread", "functions", "steps", "handlers", "patch", "icons", "examples"]) expect(slateCatalog(n).endsWith("\nThe pieces and rules: slate_catalog with no name."), n).toBe(true);
+    expect(slateCatalog()).not.toContain("slate_catalog with no name");
+    expect(slateCatalog("nope")).not.toContain("slate_catalog with no name");
     expect(slateCatalog("runs")).toContain("once: a start while it still runs is skipped; without once it stops and starts again.");
     expect(slateCatalog("runs")).toContain("at the write for an every= run, at the first press or <when> for the rest. Until then it reads held; allowing it starts it at once.");
     expect(slateCatalog()).toContain("bigger: resend the whole slate with if_version.");
