@@ -187,3 +187,14 @@ describe("the diagram", () => {
     expect(slateCatalog()).toContain("a flow is a diagram");
   });
 });
+
+describe("the inr format", () => {
+  it("draws rupees with lakh grouping in the sketch and the panel's formatter alike", async () => {
+    const { fmtInr } = await import("../../src/format.js");
+    expect(fmtInr(144740)).toBe("₹1,44,740");
+    expect(fmtInr(14918.5)).toBe("₹14,918.50");
+    const d = parseSlate(`<slate><column><number label="24K, per gram" value={14918} format="inr" /></column></slate>`);
+    expect(d.errors).toEqual([]);
+    expect(sketchSlate(d.document!, {}, { version: 1 })).toContain("24K, per gram  ₹14,918");
+  });
+});

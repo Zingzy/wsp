@@ -2,7 +2,7 @@
 // The pieces of kit wsp/2 (05-pieces), one self-contained entry each: props, items, events, its sketch line and its
 // catalog text. The compiler, the validator, the sketch and the catalog read these and switch on no type name of
 // their own, so adding a piece is one entry here and one view in the web app.
-import { fmtBytes, fmtCost, fmtTokens } from "../format.js";
+import { fmtBytes, fmtCost, fmtInr, fmtTokens } from "../format.js";
 import { slateAxisWord, slateChartAxis } from "./chart.js";
 import { slateResultShape, sketchSlateResult } from "./shape.js";
 import { isSlateSecretHandle, type SlateEventName, type SlateJson, type SlatePropValue, type SlateRunDecl, type SlateRunRecord } from "./types.js";
@@ -15,7 +15,7 @@ const VARIANT = ["default", "primary", "quiet", "danger"] as const;
 const PAD = ["none", "tight", "normal", "loose"] as const;
 const SURFACE = ["plain", "inset"] as const;
 const PLACE = ["start", "center", "end"] as const;
-const FIGURE = ["plain", "tokens", "bytes", "percent", "usd", "duration", "integer"] as const;
+const FIGURE = ["plain", "tokens", "bytes", "percent", "usd", "inr", "duration", "integer"] as const;
 
 /** A prop's type. text is a string or a number; path names a run or value as $name; icon is a name from
  * SLATE_ICONS; an array is an enum. */
@@ -148,6 +148,7 @@ function figure(format: string, value: SlateJson | undefined, max: SlateJson | u
     case "tokens": return fmtTokens(value);
     case "bytes": return fmtBytes(value);
     case "usd": return fmtCost(value);
+    case "inr": return fmtInr(value);
     case "integer": return String(Math.round(value));
     case "none": return "";
     default: return value.toLocaleString("en-US", { maximumFractionDigits: 2 });

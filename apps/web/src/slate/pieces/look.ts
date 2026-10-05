@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The meaning words a slate may say, drawn in the app's own tokens (05-styling). The agent picks a word; this file
 // is the whole of how each one looks, in every theme, since every class reads a theme token.
-import { fmtBytes, fmtCost, fmtDuration, fmtTokens, type SlateJson, type SlatePropValue } from "@wsp/protocol";
+import { fmtBytes, fmtCost, fmtDuration, fmtInr, fmtTokens, type SlateJson, type SlatePropValue } from "@wsp/protocol";
 import type { SlateEngine } from "../engine.js";
 import { truthy } from "../actions.js";
 import { whenOf } from "../paths.js";
@@ -67,6 +67,8 @@ export function figure(value: SlateJson | undefined, format: SlateJson | undefin
       return `${Math.round(value)}%`;
     case "usd":
       return fmtCost(value);
+    case "inr":
+      return fmtInr(value);
     case "duration":
       return fmtDuration(value);
     case "integer":

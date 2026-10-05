@@ -102,8 +102,8 @@ describe("the catalog", () => {
     // tool= runs on the first page and what a formula holds, after agents missed both, to 1,110; every enum's
     // values and every required mark, after 13 cells guessed them (ruling 8), to 1,310; what turns held off and where
     // a button goes in a project with no UI (ruling 12), to 1,345; never reading a secret's value, to 1,360; what the
-    // render judge found agents writing (Title Case, emoji, raw output and times), to 1,395.
-    expect(slateTokens(slateCatalog())).toBeLessThan(1395);
+    // render judge found agents writing (Title Case, emoji, raw output and times), to 1,395; the inr format, to 1,400.
+    expect(slateTokens(slateCatalog())).toBeLessThan(1400);
     for (const said of ["short labels, no emoji.", "in sentence case, never bold text.", "Show a run's json fields, never its raw out; times through date(), time() or ago()."]) expect(slateCatalog(), said).toContain(said);
     expect(slateCatalog()).toContain("One in a file stays there for the run to read, never you.");
     expect(slateCatalog("runs")).toContain("one in a file, the command reads itself, never through you.");
