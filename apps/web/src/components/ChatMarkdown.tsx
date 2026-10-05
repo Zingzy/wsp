@@ -112,6 +112,9 @@ interface ChatMarkdownProps {
   /** A file nobody here wrote, a skill's SKILL.md: no raw HTML, no image fetched, no link but to a web page, a mail
    * address or a heading, and nothing resolved against a folder. */
   restricted?: boolean;
+  /** With restricted, no image renders at all, a GitHub host's included: each is a link to its address. A slate's
+   * markdown, which the agent writes and the person only views, fetches nothing by being shown. */
+  noImages?: boolean;
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<ProviderSkill> = [];
@@ -313,7 +316,7 @@ type RestrictedNode = { type: string; value?: string; tagName?: string; properti
 /** Takes apart what a restricted file may not do before the sanitizer sees it: raw HTML becomes its own source text,
  * an image becomes its alt text and its address, and a link to anything but a web page, a mail address or a heading
  * becomes its text and its address with no anchor. */
-function rehypeRestrict() {
+function rehypeRestrict(options: { noImages?: boolean } = {}) {
   const text = (value: string): RestrictedNode => ({ type: "text", value });
   const fact = (value: string, k: string): RestrictedNode => ({ type: "element", tagName: "span", properties: { dataK: k, className: RESTRICTED_FACT_CLASS }, children: [text(value)] });
   const visit = (node: RestrictedNode): RestrictedNode => {
@@ -323,7 +326,7 @@ function rehypeRestrict() {
       const src = typeof node.properties?.src === "string" ? node.properties.src : "";
       // A GitHub image host's image renders; another web host's becomes a link to it; anything else (a non-web or
       // empty source) is its alt and address as text, the same fact a bad link reads as.
-      if (restrictedImageSrc(src)) return node;
+      if (options.noImages !== true && restrictedImageSrc(src)) return node;
       if (/^https?:\/\//i.test(src)) return { type: "element", tagName: "a", properties: { href: src }, children: [text(alt === "" ? src : alt)] };
       return fact([alt, src].filter((w) => w !== "").join(" "), "skill-image");
     }
@@ -340,6 +343,7 @@ function rehypeRestrict() {
 const SKILL_MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkGithubAlerts, remarkNormalizeListItemIndentation, remarkPreserveCodeMeta] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
 
 const SKILL_MARKDOWN_REHYPE_PLUGINS = [rehypeRestrict, [rehypeSanitize, SKILL_SANITIZE_SCHEMA]] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
+const IMAGELESS_MARKDOWN_REHYPE_PLUGINS = [[rehypeRestrict, { noImages: true }], [rehypeSanitize, SKILL_SANITIZE_SCHEMA]] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
 /** GitHub's own five alert kinds, in its colors: the glyph names the urgency, the title says it. */
 const GITHUB_ALERT_PRESENTATIONS: Record<
@@ -1503,6 +1507,7 @@ function ChatMarkdown({
   wordWrap = true,
   onOpenFile: givenOpenFile,
   restricted = false,
+  noImages = false,
 }: ChatMarkdownProps) {
   // A restricted file is resolved against no folder and opens nothing of this computer's.
   const cwd = restricted ? undefined : givenCwd;
@@ -1905,10 +1910,10 @@ function ChatMarkdown({
 
   const katex = useKatex(!restricted && hasMath(text));
   const rehypePlugins = useMemo(() => {
-    if (restricted) return SKILL_MARKDOWN_REHYPE_PLUGINS;
+    if (restricted) return noImages ? IMAGELESS_MARKDOWN_REHYPE_PLUGINS : SKILL_MARKDOWN_REHYPE_PLUGINS;
     const base = parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : [];
     return katex === null ? (parseRawHtml ? base : undefined) : [...base, katex];
-  }, [katex, parseRawHtml, restricted]);
+  }, [katex, noImages, parseRawHtml, restricted]);
 
   // react-markdown converts unparsed HTML nodes to text when skipHtml is false.
   // Keep that behavior explicit because literal mode depends on escaping the
