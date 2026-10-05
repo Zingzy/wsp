@@ -4,7 +4,8 @@
 // state is the panel's own Empty, quiet, with no spinner while the record is on its way.
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Button } from "../components/ui/button.js";
+import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
+import { Button, NEUTRAL_RING } from "../components/ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
 import { cn } from "../lib/utils.js";
@@ -43,6 +44,8 @@ export const SLATE_WORDS = {
   copy: "Copy as text",
   stop: "Stop runs",
   forget: "Forget secrets",
+  forgetTitle: "Forget this slate's secrets?",
+  forgetBody: "A secret it kept does not come back. The slate asks you to type it again.",
   menu: "Slate menu",
 } as const;
 
@@ -123,9 +126,8 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   const stop = () => {
     for (const run of runs) if (isRunRecord(engine.values[run]) && engine.values[run].state === "running") void api?.cancel(threadId, run);
   };
-  const forget = () => {
-    for (const path of secrets) void bundle.sender.secret(path, "");
-  };
+  const [forgetting, setForgetting] = useState(false);
+  const forget = () => Promise.all(secrets.map(path => bundle.sender.secret(path, "")));
   return (
     <div data-slate-version={engine.version} className={cn(COLUMN, "mt-3 mb-4 flex h-7 shrink-0 items-center gap-2")} title={engine.document?.title}>
       <h2 className="min-w-0 flex-1 truncate text-[13px] leading-5 font-normal text-muted-foreground">{title}</h2>
@@ -140,13 +142,48 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
           </MenuItem>
           <MenuItem onClick={() => void api?.clear(threadId).then(() => loadSlate(threadId))}>{SLATE_WORDS.clear}</MenuItem>
           {runs.length > 0 ? <MenuItem onClick={stop}>{SLATE_WORDS.stop}</MenuItem> : null}
-          {secrets.length > 0 ? <MenuItem onClick={forget}>{SLATE_WORDS.forget}</MenuItem> : null}
+          {secrets.length > 0 ? <MenuItem onClick={() => setForgetting(true)}>{SLATE_WORDS.forget}</MenuItem> : null}
           <MenuItem onClick={() => setStanding(true)}>{STANDING_WORDS.menu}</MenuItem>
           <MenuItem onClick={copy}>{SLATE_WORDS.copy}</MenuItem>
         </MenuPopup>
       </Menu>
+      {forgetting ? <ForgetSecrets forget={forget} onClose={() => setForgetting(false)} /> : null}
       {standing ? <StandingApprovals record={entry.record} revoke={key => slateLink(threadId).revoke(key).then(() => loadSlate(threadId))} onClose={() => setStanding(false)} /> : null}
     </div>
+  );
+}
+
+/** Forgetting the slate's secrets asks first: a kept secret does not come back, and the person types it again. */
+function ForgetSecrets({ forget, onClose }: { forget(): Promise<unknown>; onClose(): void }) {
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | undefined>(undefined);
+  return (
+    <AlertDialog open onOpenChange={open => (open ? undefined : onClose())}>
+      <AlertDialogPopup>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{SLATE_WORDS.forgetTitle}</AlertDialogTitle>
+          <AlertDialogDescription>{SLATE_WORDS.forgetBody}</AlertDialogDescription>
+        </AlertDialogHeader>
+        {refused === undefined ? null : <p className="px-5 text-[13px] leading-5 text-error-foreground">{refused}</p>}
+        <AlertDialogFooter>
+          <AlertDialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>Cancel</AlertDialogClose>
+          <Button
+            variant="destructive"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              setRefused(undefined);
+              void forget().then(onClose, (error: unknown) => {
+                setBusy(false);
+                setRefused(error instanceof Error ? error.message : String(error));
+              });
+            }}
+          >
+            {SLATE_WORDS.forget}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogPopup>
+    </AlertDialog>
   );
 }
 

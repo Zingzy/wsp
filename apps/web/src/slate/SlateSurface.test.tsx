@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Slate tab against a fake host: keyed by the selected thread, every empty state, a fetch on session.slate,
 // the tab opened once on the agent's first write, and state pushes folded in place.
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView } from "@wsp/protocol";
 import type { Api, ProtocolEvent } from "../protocol/client";
@@ -187,6 +187,19 @@ describe("a link a press opens", () => {
 });
 
 describe("the tab's Approvals", () => {
+  it("asks before forgetting the slate's secrets, and forgets nothing until the person says so", async () => {
+    const secretDoc = slate({ title: "Deploy", values: { token: { start: "", secret: true } }, root: "root", pieces: { root: { type: "column", children: ["said"] }, said: { type: "text", props: { value: "Deploy" } } } });
+    const api = host([record({ threadId: "t9", document: secretDoc, values: {} })]);
+    select(api, "t9");
+    render(<SlateSurface />);
+    fireEvent.click(await screen.findByRole("button", { name: "Slate menu" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Forget secrets" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Forget this slate's secrets?" });
+    expect(api.state).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Forget secrets" })));
+    await waitFor(() => expect(api.state).toHaveBeenCalledWith("t9", { $token: "" }));
+  });
+
   it("lists each standing approval as a row with Revoke, and revoking asks the host", async () => {
     const api = host([record({ approvals: { k1: { state: "allowed", at: 1, run: "deploy", cmd: "bash deploy.sh" }, "domain:example.com": { state: "allowed", at: 2, cmd: "links to example.com" }, k2: { state: "refused", at: 3, run: "x", cmd: "rm -rf x" } } })]);
     select(api, "t1");
