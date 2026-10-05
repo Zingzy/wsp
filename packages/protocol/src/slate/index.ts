@@ -7,8 +7,8 @@ export { SLATE_LIMITS, slateBytes } from "./limits.js";
 export { SLATE_CODES, SLATE_SECRET_IN_ARGS, SLATE_WARNINGS, slateProblem, nearest as slateNearest, type SlateCode } from "./problems.js";
 export { parseSlateOwnPath, getSlateValue, setSlateValue, slateStep, slateEqual } from "./paths.js";
 export {
-  parseSlateExpression, evaluateSlateExpression, evaluateSlateFormat, slateDependencies, slatePropDependencies, resolveSlateProp,
-  parseSlateFormat, checkSlateExpression, slateTruthy, slateText, slateWord, slatePathText, walkSlateExpr, SLATE_FUNCTIONS, SLATE_PIPE_STEPS,
+  parseSlateExpression, evaluateSlateExpression, slateDependencies, slatePropDependencies, resolveSlateProp,
+  parseSlateFormat, checkSlateExpression, slateTruthy, slateText, slatePathText, SLATE_FUNCTIONS, SLATE_PIPE_STEPS,
   type SlateExpr, type SlateEvalContext, type SlateFormatPart, type SlateCheckScope, type SlateType, type SlateTypeName,
 } from "./expr.js";
 export { slateFigure, SLATE_PIECES, SLATE_TONES, SLATE_ITEM_KINDS, SLATE_RESERVED_PROPS, type SlatePieceModule, type SlatePropSpec, type SlatePropType, type SlateItemSpec, type SlateSketchView } from "./kit.js";

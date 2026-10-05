@@ -501,7 +501,7 @@ class Validator {
     const props = p.props ?? {};
     const itemProps = new Map(Object.entries(spec.items).map(([tag, s]) => [s.prop, { tag, spec: s }]));
     const items = props.items;
-    const rowType = spec.repeating === true ? this.itemsRow(items, id, row) : undefined;
+    const rowType = spec.repeating === true ? this.itemsRow(items, row) : undefined;
     for (const [name, v] of Object.entries(props)) {
       const item = itemProps.get(name);
       const scalars = Array.isArray(v) && v.every(x => typeof x === "string" || typeof x === "number");
@@ -547,10 +547,9 @@ class Validator {
   }
 
   /** The row type of a repeating piece's items, where its shape is known. */
-  private itemsRow(items: SlatePropValue | undefined, id: string, row: SlateType | undefined): SlateType {
+  private itemsRow(items: SlatePropValue | undefined, row: SlateType | undefined): SlateType {
     if (!isSlateBinding(items)) return { t: "any" };
     const { type } = checkSlateExpression(items.bind, this.scope(row, false));
-    void id;
     return type.t === "list" ? (type.of ?? { t: "any" }) : { t: "any" };
   }
 

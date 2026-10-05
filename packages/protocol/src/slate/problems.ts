@@ -43,7 +43,7 @@ export function slateProblem(code: SlateCode, message: string, extra: Omit<Slate
 }
 
 /** Levenshtein distance, capped: past cap the answer is cap + 1. */
-export function editDistance(a: string, b: string, cap = 3): number {
+function editDistance(a: string, b: string, cap = 3): number {
   if (Math.abs(a.length - b.length) > cap) return cap + 1;
   let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) {

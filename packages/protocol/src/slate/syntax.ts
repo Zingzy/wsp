@@ -19,7 +19,7 @@ import {
 // ---- reading elements ----
 
 interface Attr { name: string; kind: "bare" | "string" | "braced"; value: string; line: number }
-interface Hole { expr: string; line: number }
+interface Hole { expr: string }
 interface El { tag: string; attrs: Attr[]; children: El[]; text?: (string | Hole)[]; raw?: string; line: number }
 
 class Fatal extends Error {
@@ -149,9 +149,8 @@ class Reader {
       if (this.starts("<!--") || this.starts("{/*")) { this.comments(); continue; }
       if (this.peek() === "<") { children.push(this.element(depth + 1)); continue; }
       if (this.peek() === "{") {
-        const hl = this.line();
         const end = this.balanced(this.i);
-        text.push({ expr: this.src.slice(this.i + 1, end), line: hl });
+        text.push({ expr: this.src.slice(this.i + 1, end) });
         this.i = end + 1;
         continue;
       }
@@ -183,10 +182,10 @@ function dedent(text: string): string {
 /** A text child's literal run as stored: runs of spaces and tabs read as one, indentation around a newline goes,
  * newlines stay. The whole child is trimmed afterwards. */
 const normalizeRun = (s: string): string => s.replace(/[ \t]+/g, " ").replace(/ ?\n ?/g, "\n").replace(/\n{3,}/g, "\n\n");
-export const slateTextChildForm = (s: string): string => normalizeRun(s).replace(/^\s+|\s+$/g, "");
+const slateTextChildForm = (s: string): string => normalizeRun(s).replace(/^\s+|\s+$/g, "");
 
 /** Splits text at top-level commas, honouring quotes, braces, brackets and parentheses. */
-export function splitTop(text: string): string[] {
+function splitTop(text: string): string[] {
   const out: string[] = [];
   let depth = 0;
   let quote: string | undefined;
@@ -205,7 +204,7 @@ export function splitTop(text: string): string[] {
 }
 
 /** A JSON-ish literal: strings in either quote, numbers, true, false, null, lists and records with bare keys. */
-export function parseSlateLiteral(text: string): SlateJson {
+function parseSlateLiteral(text: string): SlateJson {
   let i = 0;
   const ws = (): void => { while (/\s/.test(text[i] ?? "")) i++; };
   const value = (): SlateJson => {
@@ -277,7 +276,6 @@ function seconds(a: Attr): number {
 
 class Compiler {
   readonly errors: SlateProblem[] = [];
-  readonly warnings: SlateProblem[] = [];
   readonly lines: SlateLines = new Map();
   readonly doc: SlateDoc = { schema: 2, root: "", values: {}, derived: {}, runs: {}, reactions: [], pieces: {} };
   private readonly minted = new Map<string, number>();
@@ -576,7 +574,7 @@ class Compiler {
     return out;
   }
 
-  piece(el: El, depth = 1): string | undefined {
+  piece(el: El): string | undefined {
     if (DECLARATIONS.has(el.tag) || isFileDecl(el)) { this.error("P100", `<${el.tag}> is a declaration and goes directly under <slate>`, el.line); return undefined; }
     if ((SLATE_ITEM_KINDS as readonly string[]).includes(el.tag)) { this.error("T314", `<${el.tag}> is an item and goes inside the piece that takes it`, el.line); return undefined; }
     const spec = SLATE_PIECES[el.tag];
@@ -657,7 +655,7 @@ class Compiler {
         list.push(this.item(ch, itemSpec, id, `${itemSpec.prop}[${list.length}]`));
         continue;
       }
-      const child = this.piece(ch, depth + 1);
+      const child = this.piece(ch);
       if (child !== undefined) children.push(child);
     }
     if (Object.keys(props).length > 0) piece.props = props;
@@ -809,7 +807,7 @@ class Compiler {
         case "add": {
           if (attr("under") === undefined) { this.error("P105", "<add> takes under=\"<id>\"", el.line); continue; }
           const before = new Set(Object.keys(this.doc.pieces));
-          const order = el.children.map(ch => this.piece(ch, 2)).filter((x): x is string => x !== undefined);
+          const order = el.children.map(ch => this.piece(ch)).filter((x): x is string => x !== undefined);
           const pieces = Object.fromEntries(Object.entries(this.doc.pieces).filter(([k]) => !before.has(k)));
           const n = at();
           ops.push({ op: "add", under: under(), ...(n !== undefined ? { at: n } : {}), pieces, order });
@@ -878,7 +876,7 @@ class Compiler {
         if (current !== null && current.pieces[id] === undefined) { this.error("D203", `there is no piece ${id} to replace; add it with <add under="...">`, el.line, { fix: nearest(id, Object.keys(current.pieces)) }); continue; }
         this.taken.delete(id);
         const before = new Set(Object.keys(this.doc.pieces));
-        this.piece(el, 2);
+        this.piece(el);
         const children = Object.fromEntries(Object.entries(this.doc.pieces).filter(([k]) => !before.has(k) && k !== id));
         ops.push({ op: "replace", id, piece: this.doc.pieces[id]!, ...(Object.keys(children).length > 0 ? { children } : {}) });
         continue;

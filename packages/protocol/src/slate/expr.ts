@@ -549,7 +549,7 @@ const WORDS: Record<string, string> = slateTable<string>({
   idle: "Not run yet", held: "Held", running: "Running",
   open: "Open", merged: "Merged", closed: "Closed",
 });
-export function slateWord(x: Val): Val {
+function slateWord(x: Val): Val {
   if (typeof x !== "string") return missing(x) ? null : slateText(x);
   const known = WORDS[x];
   if (known !== undefined) return known;
@@ -999,7 +999,7 @@ export function evaluateSlateExpression(expr: string | SlateExpr, ctx: SlateEval
 }
 
 /** A format string's text: its words and each hole's value, or null when every hole reads nothing, as concat. */
-export function evaluateSlateFormat(src: string, ctx: SlateEvalContext): string | null {
+function evaluateSlateFormat(src: string, ctx: SlateEvalContext): string | null {
   return joined(parseSlateFormat(src).parts.map(p => (typeof p === "string" ? { read: false, v: p } : { read: true, v: evaluateSlateExpression(p.expr, ctx) })));
 }
 
@@ -1017,7 +1017,7 @@ export function resolveSlateProp(value: SlatePropValue, ctx: SlateEvalContext): 
 // ---- dependencies ----
 
 /** Every node, depth first. */
-export function walkSlateExpr(node: SlateExpr, visit: (n: SlateExpr) => void): void {
+function walkSlateExpr(node: SlateExpr, visit: (n: SlateExpr) => void): void {
   visit(node);
   switch (node.k) {
     case "neg": case "not": walkSlateExpr(node.arg, visit); break;
@@ -1090,7 +1090,7 @@ function merge(a: SlateType, b: SlateType): SlateType {
 
 /** A field of a known type: a record's declared field, or any. */
 function fieldType(of: SlateType, seg: string | number): SlateType | "unknown" {
-  if (typeof seg === "number") return of.t === "list" ? (of.of ?? T.any) : of.t === "any" ? T.any : T.any;
+  if (typeof seg === "number") return of.t === "list" ? (of.of ?? T.any) : T.any;
   if (of.t === "record" && of.fields !== undefined) return of.fields[seg] ?? "unknown";
   return T.any;
 }
