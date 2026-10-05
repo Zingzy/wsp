@@ -1210,19 +1210,19 @@ export function lastLine(text: string): string | undefined {
 }
 
 /** A limit as one unit: whole hours when it is hours, else whole minutes. */
-function fmtLimit(ms: number): string {
+export function fmtLimit(ms: number): string {
   return ms >= 3_600_000 && ms % 3_600_000 === 0 ? `${ms / 3_600_000}h` : `${Math.round(ms / 60_000)}m`;
 }
 
 /** Which rule ended a turn: idle is the turn doing nothing at all for the limit, TURN_IDLE_MS's own rule, and wall
- * is the cap on one turn's run. */
+ * is the turn limit set on the computer it ran on. */
 export type TurnCutRule = "idle" | "wall";
 
 /** The one line every client shows for a turn the runtime cut: which rule, how long the turn ran, the limit. */
 export function turnCutLine(rule: TurnCutRule, elapsedMs: number, limitMs: number): string {
   return rule === "idle"
     ? `stopped after ${fmtDuration(elapsedMs, "clock")} with no output for ${fmtLimit(limitMs)}`
-    : `stopped after ${fmtDuration(elapsedMs, "clock")} at the ${fmtLimit(limitMs)} cap on one turn`;
+    : `stopped after ${fmtDuration(elapsedMs, "clock")} at the ${fmtLimit(limitMs)} turn limit; send to continue where it stopped, or change the limit in Settings > Computers`;
 }
 
 /** An install step the guard ended at its road's limit: the seconds, and that it was the second time when it was. */

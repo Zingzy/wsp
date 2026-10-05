@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ANOTHER_AGENT_WORDS, BACKGROUND_WORK_WORDS, RUN_BLOCK_WORDS, backgroundWorkWords, TURN_END_WORDS, TURN_WALL_MS, fmtBytes } from "@wsp/protocol";
+import { ANOTHER_AGENT_WORDS, BACKGROUND_WORK_WORDS, RUN_BLOCK_WORDS, backgroundWorkWords, TURN_END_WORDS, fmtBytes } from "@wsp/protocol";
 import {
   ALIAS_PROBES,
   BROWSER_SHIM_PATH,
@@ -207,7 +207,7 @@ describe("the document", () => {
     expect(doc).toContain("- Disk: 19.5 GB root disk, 11.2 GB free when this file was written. wsp keeps 2 GB free");
     expect(doc).toContain("- Every agent session starts in the thread's folder; terminal panes open in the home folder.");
     expect(doc).toContain("- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.");
-    expect(doc).toContain(`- ${TURN_END_WORDS}; a command you run in the background holds the turn open until it finishes, up to the ${TURN_WALL_MS / 3_600_000} hour cap on one turn, and its result reaches you there. ${BACKGROUND_WORK_WORDS}. Nothing else wakes you, so a command whose output you want in the same breath runs in the foreground and you wait for it. Only a server you mean to keep serving is detached with setsid nohup, and that one holds nothing open.`);
+    expect(doc).toContain(`- ${TURN_END_WORDS}; a command you run in the background holds the turn open until it finishes, up to the turn limit set for this computer if it has one, and its result reaches you there. ${BACKGROUND_WORK_WORDS}. Nothing else wakes you, so a command whose output you want in the same breath runs in the foreground and you wait for it. Only a server you mean to keep serving is detached with setsid nohup, and that one holds nothing open.`);
     expect(doc).toContain(`- ${ANOTHER_AGENT_WORDS}.`);
     expect(doc).toContain(`- ${RUN_BLOCK_WORDS}.`);
     expect(doc).not.toContain("does not move the thread");
@@ -267,7 +267,7 @@ describe("the document", () => {
     expect(claude).toContain(backgroundWorkWords("run_in_background on the Bash tool"));
     expect(renderShortContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: ctx("codex") })).toContain(BACKGROUND_WORK_WORDS);
     expect(short).toContain("- Every agent session starts in the thread's folder; terminal panes open in the home folder.");
-    expect(short).toContain(`- ${TURN_END_WORDS}; a command you run in the background holds the turn open until it finishes, up to the ${TURN_WALL_MS / 3_600_000} hour cap on one turn, and its result reaches you there. ${BACKGROUND_WORK_WORDS}. Nothing else wakes you, so a command whose output you want in the same breath runs in the foreground and you wait for it. Only a server you mean to keep serving is detached with setsid nohup, and that one holds nothing open.`);
+    expect(short).toContain(`- ${TURN_END_WORDS}; a command you run in the background holds the turn open until it finishes, up to the turn limit set for this computer if it has one, and its result reaches you there. ${BACKGROUND_WORK_WORDS}. Nothing else wakes you, so a command whose output you want in the same breath runs in the foreground and you wait for it. Only a server you mean to keep serving is detached with setsid nohup, and that one holds nothing open.`);
     expect(short).toContain(`- ${ANOTHER_AGENT_WORDS}.`);
     expect(short).toContain(`- ${RUN_BLOCK_WORDS}.`);
     expect(short).not.toContain("lasts for that command only");

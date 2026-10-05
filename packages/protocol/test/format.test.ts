@@ -888,7 +888,7 @@ describe("lastLine", () => {
 describe("turnCutLine", () => {
   it("names the rule, how long the turn ran in the clock style and the limit, in the words the ticket row shows", () => {
     expect(turnCutLine("idle", 900_000, TURN_IDLE_MS)).toBe("stopped after 15m 00s with no output for 10m");
-    expect(turnCutLine("wall", TURN_WALL_MS, TURN_WALL_MS)).toBe("stopped after 6h 00m 00s at the 6h cap on one turn");
+    expect(turnCutLine("wall", TURN_WALL_MS, TURN_WALL_MS)).toBe("stopped after 6h 00m 00s at the 6h turn limit; send to continue where it stopped, or change the limit in Settings > Computers");
   });
 });
 

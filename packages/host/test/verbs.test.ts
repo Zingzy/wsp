@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NapRefusedError, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { homeShortened, localFolderRefusal, localWorktreeRefusal, threadDeletedLine, AGENTS_ON, type AgentRow, childStartedLine, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, napRefusedLine, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_MESSAGE_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, RuntimeRequest, threadStateWord, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, thisComputer, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine, shellLine, NOT_DELIVERED_LINE } from "@wsp/protocol";
+import { homeShortened, localFolderRefusal, localWorktreeRefusal, threadDeletedLine, AGENTS_ON, type AgentRow, childStartedLine, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, napRefusedLine, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_MESSAGE_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, RuntimeRequest, threadStateWord, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, thisComputer, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine, shellLine, NOT_DELIVERED_LINE, BUILT_IN_LIST_CLAUSE, BUILT_IN_TABLE_CLAUSE } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type AgentsReader, type DaemonChannel, type HarnessAdapterFactory, type HostSsh, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -19,7 +19,7 @@ import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, loca
 import { hostKeyHere, placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { awake, BUILT_IN_LIST_CLAUSE, BUILT_IN_TABLE_CLAUSE, CLI_VERBS, hasTool, VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, deleting, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noHostServingLine, noOpenAskLine, threadRows, threadTree, threadsOf, type HostClient } from "../src/verbs.js";
+import { awake, CLI_VERBS, hasTool, VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, deleting, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noHostServingLine, noOpenAskLine, threadRows, threadTree, threadsOf, type HostClient } from "../src/verbs.js";
 import { HOST_RESTARTING_LINE, HOST_SIDE_VAULT, SSH_PIPES_HERE_LINE, hostAgain, hostPlatform, hostRestartedLine, THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { restartRoads, type RestartRoad } from "../src/restart.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
@@ -2289,6 +2289,39 @@ describe("wsp verbs over the host", () => {
     expect(codex.starts).toEqual([]);
   });
 
+  it("a run on this computer checks a model against the agent's own list there, the one its start and the composer read, before a worktree is made", async () => {
+    const described: HarnessCatalogAnswer = {
+      version: "2.1.0",
+      models: [
+        { slug: "claude-sonnet-5-5", label: "Sonnet 5.5", contextWindows: [], isDefault: true },
+        { slug: "claude-sonnet-5", label: "Sonnet 5", contextWindows: [], isDefault: false },
+      ],
+      efforts: ["low", "high"],
+      permissionModes: ["default", "acceptEdits", "bypassPermissions"],
+    };
+    await restartHost({ claude: ctx => ({ ...claude.adapter(ctx), probeCatalog: async () => described }), codex: probing(codex.adapter) });
+    const { folder } = await macProject("mac");
+    execFileSync("git", ["-C", folder, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
+    const [mac] = await rt.workspaces.list();
+    expect((await rt.harnesses.list(mac!.id)).find(c => c.harness === "claude")!.models.map(m => m.value)).toEqual(["claude-sonnet-5-5", "claude-sonnet-5"]);
+
+    const only = await run("run", "mac", "--model", "claude-sonnet-5-5", "go");
+    expect(only.code, only.io.errors.join("\n")).toBe(0);
+    expect(claude.starts.at(-1)!.model).toBe("claude-sonnet-5-5");
+
+    const listed = 'wsp run: model "claude-opus-4-1" is not one claude takes; one of: Sonnet 5.5 (claude-sonnet-5-5), Sonnet 5 (claude-sonnet-5)';
+    const gone = await run("run", "mac", "--model", "claude-opus-4-1", "go");
+    expect(gone.code).toBe(3);
+    expect(gone.io.errors).toHaveLength(1);
+    expect(gone.io.errors[0]!.startsWith(listed)).toBe(true);
+    expect(gone.io.errors[0]).not.toContain("built-in");
+    const branched = await run("run", "mac", "--branch", "feat/x", "--model", "claude-opus-4-1", "go");
+    expect(branched.code).toBe(3);
+    expect(branched.io.errors[0]!.startsWith(listed)).toBe(true);
+    expect(copier.worktrees).toEqual([]);
+    expect(claude.starts).toHaveLength(1);
+  });
+
   it("a refusal off wsp's built-in list that quotes no list says whose word it is, as one sentence", async () => {
     await run("new", "alpha");
     const none = await run("run", "alpha", "--model", "claude-haiku-4-5-20251001", "--effort", "high", "review it");
@@ -3893,12 +3926,12 @@ describe("wsp verbs over the host", () => {
       const fallback = (here.capDefault as { threads: number }).threads;
       const set = await run("computers", "set", HERE_PLACE_ID, "--threads", "2");
       expect(set.code, set.io.errors.join("\n")).toBe(0);
-      expect(set.io.lines).toEqual([`${here.name}: 2 threads at once (${fallback} by default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)`]);
+      expect(set.io.lines).toEqual([`${here.name}: 2 threads at once (${fallback} by default), no turn limit (the default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)`]);
       expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)).toMatchObject({ cap: { threads: 2 }, settings: { threads: 2 } });
       const asJson = await run("computers", "set", here.name, "--threads", "1", "--json");
       expect(json(asJson.io).at(-1)).toMatchObject({ computer: { id: HERE_PLACE_ID, cap: { threads: 1 }, capDefault: { threads: fallback } } });
       const back = await run("computers", "set", HERE_PLACE_ID, "--reset", "threads");
-      expect(back.io.lines).toEqual([`${here.name}: ${fallback} ${fallback === 1 ? "thread" : "threads"} at once (the default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)`]);
+      expect(back.io.lines).toEqual([`${here.name}: ${fallback} ${fallback === 1 ? "thread" : "threads"} at once (the default), no turn limit (the default), agents may spawn: up to 3 workspaces (the default), 2 levels deep (the default)`]);
       expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)!.settings).toBeUndefined();
     });
 
@@ -3919,6 +3952,27 @@ describe("wsp verbs over the host", () => {
       const long = await run("computers", "set", forks.id, "--nap", "181");
       expect(long.code).toBe(EXIT_CODES.usage);
       expect(long.io.errors[0]).toBe(`wsp computers set: --nap for ${forks.id} takes whole minutes from 1 to 180, or off, and got "181". Write it as --nap 20 or --nap off.`);
+    });
+
+    it("sets the turn limit in whole hours or off, on this computer and on a cloud, and a reset takes it back", async () => {
+      await handle?.close();
+      rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: { ...placeWiring(statePath), provider: () => ({ id: "default", rateUsdPerHour: 0.1 }) }, daemonChannel: daemon.open });
+      handle = await serve(captured(), { port: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+      const set = await run("computers", "set", HERE_PLACE_ID, "--turn-limit", "8");
+      expect(set.code, set.io.errors.join("\n")).toBe(0);
+      expect(set.io.lines[0]).toContain("stops a turn at 8h (off by default)");
+      const cloud = (await rt.places!.rows()).find(p => p.kind === "provider")!;
+      expect(cloud).toMatchObject({ turnLimitMs: 6 * 3_600_000, turnLimitDefault: 6 * 3_600_000 });
+      const off = await run("computers", "set", cloud.id, "--turn-limit", "off", "--json");
+      expect(json(off.io).at(-1)).toMatchObject({ computer: { turnLimitMs: null, turnLimitDefault: 6 * 3_600_000, settings: { turnLimitMs: null } } });
+      const back = await run("computers", "set", cloud.id, "--reset", "turn-limit");
+      expect(back.io.lines[0]).toContain("stops a turn at 6h (the default)");
+      for (const word of ["0", "25", "1.5", "six"]) {
+        const wrong = await run("computers", "set", HERE_PLACE_ID, "--turn-limit", word);
+        expect(wrong.code).toBe(EXIT_CODES.usage);
+        expect(wrong.io.errors[0]).toBe(`wsp computers set: --turn-limit for ${HERE_PLACE_ID} takes whole hours from 1 to 24, or off, and got ${JSON.stringify(word)}. Write it as --turn-limit 6 or --turn-limit off.`);
+      }
+      expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)).toMatchObject({ turnLimitMs: 8 * 3_600_000 });
     });
 
     it("sets whether agents there may start agents for every workspace that says nothing of its own, and a workspace reads it", async () => {
