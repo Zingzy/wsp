@@ -8,7 +8,7 @@
 // opens the setup and spoken only while the tab is hidden. Nothing is said
 // while the app is in front of the person, and a line shows and sounds only
 // where it says so; a line that only sounds plays a short tone.
-import type { OutsideLine } from "@wsp/protocol";
+import { OUTSIDE_HELD, type OutsideLine } from "@wsp/protocol";
 import { desktopBridge } from "../lib/desktopShell.js";
 
 /** Whether the shell holding this page owns its own notifications: the one reading of which road speaks, so the
@@ -35,20 +35,30 @@ export function resetAskedToNotify(): void {
 export interface NeedsYouRoad {
   /** Asks for whatever the road needs before it can speak; nothing on a shell that needs no leave. */
   ready(): void;
-  /** Says the line outside the app, or nothing while the app already has the person's eyes. */
-  say(line: OutsideLine): void;
+  /** Says the line outside the app, or nothing while the app already has the person's eyes; a click on it runs opens. */
+  say(line: OutsideLine, opens: () => void): void;
   /** Drops the listener for a click on whatever this road showed, and anything it left standing. */
   close(): void;
 }
 
 /** The desktop shell's road: the line goes over the bridge and the shell decides on its own window's focus, since a
- * page cannot read it. A click there raises the window and the page opens what it was about. */
-function desktopRoad(onOpen: () => void): NeedsYouRoad {
+ * page cannot read it. A click there raises the window and hands back the line's id, and the page opens what that
+ * line was about. The shell holds a notification past a reload, so each road's ids carry a word of its own and a
+ * click on a line an earlier page said opens nothing here. */
+function desktopRoad(): NeedsYouRoad {
   const bridge = desktopBridge()!;
-  const off = bridge.onNeedsYouOpen?.(onOpen);
+  const opens = new Map<string, () => void>();
+  const page = crypto.randomUUID();
+  let said = 0;
+  const off = bridge.onNeedsYouOpen?.(id => (id === undefined ? undefined : opens.get(id))?.());
   return {
     ready: () => {},
-    say: line => bridge.sayOutside?.(line),
+    say: (line, open) => {
+      const id = `${page}:${(said += 1)}`;
+      opens.set(id, open);
+      if (opens.size > OUTSIDE_HELD) opens.delete(opens.keys().next().value!);
+      bridge.sayOutside?.({ ...line, id });
+    },
     close: () => off?.(),
   };
 }
@@ -73,12 +83,12 @@ function chime(): void {
 }
 
 /** A browser tab's road: the browser's own notifications, asked for once and spoken only while the tab is hidden. */
-function browserRoad(onOpen: () => void): NeedsYouRoad {
+function browserRoad(): NeedsYouRoad {
   const standing = new Set<Notification>();
   const has = (): boolean => typeof Notification !== "undefined";
   return {
     ready: askToNotify,
-    say: line => {
+    say: (line, open) => {
       if (!document.hidden) return;
       if (!line.show) {
         if (line.sound) chime();
@@ -87,11 +97,12 @@ function browserRoad(onOpen: () => void): NeedsYouRoad {
       if (!has() || Notification.permission !== "granted") return;
       const shown = new Notification(line.title, { body: line.body, silent: !line.sound });
       standing.add(shown);
+      shown.onclose = () => standing.delete(shown);
       shown.onclick = () => {
         window.focus();
         shown.close();
         standing.delete(shown);
-        onOpen();
+        open();
       };
     },
     close: () => {
@@ -103,9 +114,9 @@ function browserRoad(onOpen: () => void): NeedsYouRoad {
 
 /** One entry per shell: which one holds this page, and the road it gives. Adding a shell adds a row here and its
  * road above, and nothing else reads which shell is running. */
-const ROADS: readonly { holds(): boolean; road(onOpen: () => void): NeedsYouRoad }[] = [
+const ROADS: readonly { holds(): boolean; road(): NeedsYouRoad }[] = [
   { holds: shellOwnsNotices, road: desktopRoad },
   { holds: () => true, road: browserRoad },
 ];
 
-export const needsYouRoad = (onOpen: () => void): NeedsYouRoad => ROADS.find(r => r.holds())!.road(onOpen);
+export const needsYouRoad = (): NeedsYouRoad => ROADS.find(r => r.holds())!.road();

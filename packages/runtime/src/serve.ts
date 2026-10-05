@@ -1627,6 +1627,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "sessions.history":
               send({ id: msg.id, ok: true, events: await rt.sessions.history(msg.workspaceId, origin) });
               return;
+            case "sessions.attachment":
+              send({ id: msg.id, ok: true, attachment: await rt.sessions.attachment(msg.workspaceId, msg.threadId, msg.requestId, msg.index, origin) });
+              return;
             case "sessions.interrupt":
               send({ id: msg.id, ok: true, ...(await rt.sessions.interrupt(msg.sessionId, origin, msg.task)) });
               return;

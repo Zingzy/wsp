@@ -11,6 +11,12 @@ import type { AttachmentRecord, MachineState, PermissionOption, PermissionOutcom
 
 export type ChatMessageRole = "user" | "assistant" | "system";
 
+/** The thread a person's message was sent on, which the host keeps its images under. */
+export interface SentOn {
+  readonly workspaceId: string;
+  readonly threadId: string;
+}
+
 export interface ChatMessage {
   readonly id: string;
   readonly role: ChatMessageRole;
@@ -25,6 +31,8 @@ export interface ChatMessage {
   /** The id the client minted for the send this message opened, echoed by the runtime; the client that made the send
    * still holds those images and draws them from it. */
   readonly requestId?: string;
+  /** The thread the message was sent on, which the host keeps its images under for every other client. */
+  readonly sentOn?: SentOn;
   /** ISO time, or "" when the wire carried none (session events are unstamped). */
   readonly createdAt: string;
   readonly updatedAt: string;

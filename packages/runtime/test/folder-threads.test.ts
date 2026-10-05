@@ -72,6 +72,7 @@ function harness(starts: HarnessStartOptions[]): HarnessAdapterFactory {
   return () => ({
     steers: false,
     resumesAt: true,
+    attachments: "inline",
     start: o => {
       n += 1;
       starts.push(o);
@@ -345,6 +346,24 @@ describe("a thread whose worktree is gone", () => {
     ]);
     expect(moved[0]).not.toHaveProperty("fresh");
     expect((await rt.workspaces.get(at.workspace.id)).worktree).toMatchObject({ gone: true });
+  });
+});
+
+describe("the images a thread's messages carried", () => {
+  it("go with the thread when it is deleted, and another thread's on the same folder stay", async () => {
+    const { rt } = here();
+    const project = await rt.projects.add({ source: repo() });
+    const home = await rt.workspaces.folderFor({ project: project.id });
+    const png = { mediaType: "image/png", bytes: Buffer.alloc(32, 7).toString("base64"), name: "shot.png" };
+    const one = await rt.sessions.start(home.workspace.id, { prompt: "look", attachments: [png], requestId: "req_a" });
+    await one.finished;
+    const two = await rt.sessions.start(home.workspace.id, { prompt: "and this", attachments: [png], requestId: "req_b" });
+    await two.finished;
+    const [first, second] = [one.view().threadId!, two.view().threadId!];
+    expect(await rt.sessions.attachment(home.workspace.id, first, "req_a", 0)).toEqual({ mediaType: "image/png", bytes: png.bytes });
+    await rt.sessions.delete(first);
+    await expect(rt.sessions.attachment(home.workspace.id, first, "req_a", 0)).rejects.toMatchObject({ kind: "not-found" });
+    expect(await rt.sessions.attachment(home.workspace.id, second, "req_b", 0)).toEqual({ mediaType: "image/png", bytes: png.bytes });
   });
 });
 

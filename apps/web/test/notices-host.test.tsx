@@ -3,13 +3,13 @@
 // screen and left alone when the person is already looking at it, the waits
 // keyed until the event that closes them, and the noise said nowhere.
 import { act, render } from "@testing-library/react";
-import { askingLine, initNeedsYouLine, setupNeedsYouLine, setupReadyLine, waitLine, type InitJob, type PlaceView, type ReleaseView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { NEEDS_YOU, askingLine, initNeedsYouLine, setupNeedsYouLine, setupReadyLine, waitLine, type InitJob, type PlaceView, type ReleaseView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { HOST_NOTICE_WORDS, RELEASE_SAID_KEY, useHostNotices } from "../src/notices/hostNotices.js";
 import { useNotices, type Notice } from "../src/notices/store.js";
-import { closeAdd, useAddFlow } from "../src/settings/add/addFlow.js";
+import { closeAdd, openSetup, useAddFlow } from "../src/settings/add/addFlow.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { resetAskedToNotify } from "../src/shell/needsYou.js";
 
@@ -156,6 +156,22 @@ describe("a computer's install and its link", () => {
       expect(notices()).toEqual([]);
       emit({ type: "place.setup", addId: "a_2", placeId: "pl_box", wait: bare });
       expect(said).toHaveLength(2);
+    } finally {
+      delete (window as { wsp?: unknown }).wsp;
+    }
+  });
+
+  it("a setup's wait and its end are still handed to the shell with Add a computer open on it, since only the shell knows the window lost focus", () => {
+    const said: { title: string }[] = [];
+    window.wsp = { sayOutside: (line: { title: string }) => void said.push(line), onNeedsYouOpen: () => () => {} };
+    try {
+      remount();
+      act(() => openSetup("pl_box"));
+      emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait: { row: "signins/codex", label: "Codex", expiresAt: "2026-10-03T10:00:00Z", state: "waiting" } });
+      emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", end: "failed", said: "node did not install" });
+      expect(said.map(l => l.title)).toEqual([NEEDS_YOU, "spoo: setup failed"]);
+      // The dialog in front already says both, so neither is a toast.
+      expect(notices()).toEqual([]);
     } finally {
       delete (window as { wsp?: unknown }).wsp;
     }

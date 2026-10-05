@@ -4,9 +4,8 @@
 // comes to. Nothing here is a cloud: the backend is the in-process stub, whose
 // upload URLs point at a loopback server that records every body, so the file
 // road can be read byte for byte.
-import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { attachedFilesPrompt, dropFilesLine, filesNotLandedLine, imagePathIn, landFilesLine, noImagesLine, sendRefusal, threadImagesDir, turnImagesDir, type AdapterEvent, type AttachmentRoad, type TurnImage, type TurnResult } from "@wsp/protocol";
+import { attachedFilesPrompt, dropFilesLine, filesNotLandedLine, imagePathIn, landFilesLine, noImagesLine, sendRefusal, turnImagesDir, type AdapterEvent, type AttachmentRoad, type TurnImage, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
@@ -68,26 +67,15 @@ function failing(road: AttachmentRoad): { factory: HarnessAdapterFactory } {
   return { factory };
 }
 
-/** Every file in the tars the machine was sent, by path, so the file road can be read as the guest would read it. */
+/** Every file the machine was sent, by path, so the file road can be read as the guest would read it. */
 function landedFiles(puts: StubBackend["puts"]): Map<string, Buffer> {
-  const files = new Map<string, Buffer>();
-  for (const put of puts) {
-    const tar = gunzipSync(put.body);
-    for (let at = 0; at + 512 <= tar.length; ) {
-      const name = tar.toString("utf8", at, at + 100).replace(/\0.*$/, "");
-      if (name === "") break;
-      const size = Number.parseInt(tar.toString("utf8", at + 124, at + 135).replace(/\0.*$/, "").trim() || "0", 8);
-      files.set(`/${name}`, tar.subarray(at + 512, at + 512 + size));
-      at += 512 + Math.ceil(size / 512) * 512;
-    }
-  }
-  return files;
+  return new Map(puts.map(put => [put.path, put.body]));
 }
 
 /** A workspace on the stub, with what the machine was already sent and told at create marked off: a create lands the
  * daemon, so what an image costs is only ever what came after. */
-async function workspaceOn(adapters: Record<string, HarnessAdapterFactory>, backend = stubBackend()) {
-  const rt = createRuntime({ backend, store: memoryStore(), adapters });
+async function workspaceOn(adapters: Record<string, HarnessAdapterFactory>, backend = stubBackend(), store = memoryStore()) {
+  const rt = createRuntime({ backend, store, adapters });
   const ws = await createOn(rt, { golden: "snap_g", name: "shots" });
   const mark = { puts: backend.puts.length, execs: backend.machines[0]!.execLog.length };
   const since = () => ({ puts: backend.puts.slice(mark.puts), execs: backend.machines[0]!.execLog.slice(mark.execs) });
@@ -177,6 +165,98 @@ describe("a file that is not an image", () => {
   });
 });
 
+describe("the images the host keeps", () => {
+  it("answer a client after a host restart, whoever sent them, and only on their own workspace and thread", async () => {
+    const store = memoryStore();
+    const backend = stubBackend();
+    const { rt, ws } = await workspaceOn({ claude: recording("inline").factory }, backend, store);
+    // A send from the command line: no client holds these bytes, and the transcript keeps the records alone.
+    const handle = await rt.sessions.start(ws.id, { prompt: "what is this?", attachments: [png(7), pdf()], requestId: "req_a" });
+    await handle.finished;
+    const threadId = handle.view().threadId!;
+    await rt.close();
+    const again = createRuntime({ backend, store, adapters: {} });
+    expect(await again.sessions.attachment(ws.id, threadId, "req_a", 0)).toEqual({ mediaType: "image/png", bytes: bytesOf(7) });
+    // A file that is not an image draws from its record, so nothing of it is kept; nor is a send nobody named.
+    await expect(again.sessions.attachment(ws.id, threadId, "req_a", 1)).rejects.toMatchObject({ kind: "not-found" });
+    await expect(again.sessions.attachment(ws.id, threadId, "req_b", 0)).rejects.toMatchObject({ kind: "not-found" });
+    await expect(again.sessions.attachment(ws.id, "another-thread", "req_a", 0)).rejects.toMatchObject({ kind: "not-found" });
+    await again.close();
+  });
+
+  it("keep nothing for a send that carried no request id, since no client could ask for it", async () => {
+    const store = memoryStore();
+    const { rt, ws } = await workspaceOn({ claude: recording("inline").factory }, stubBackend(), store);
+    await (await rt.sessions.start(ws.id, { prompt: "unnamed", attachments: [png(3)] })).finished;
+    await rt.close();
+    expect(await store.list("attachment-keys")).toEqual([]);
+  });
+
+  it("name an image before its bytes land, so a write cut short leaves an entry that reads as not found and is swept", async () => {
+    const store = memoryStore();
+    const plain = store.putBlob.bind(store);
+    // The host dies between the two writes: the bytes never land.
+    store.putBlob = async (collection, id, bytes) => (collection === "attachments" ? Promise.reject(new Error("the host went down")) : plain(collection, id, bytes));
+    const { rt, ws } = await workspaceOn({ claude: recording("inline").factory }, stubBackend(), store);
+    const handle = await rt.sessions.start(ws.id, { prompt: "look", attachments: [png(5)], requestId: "req_a" });
+    await handle.finished;
+    const threadId = handle.view().threadId!;
+    await expect(rt.sessions.attachment(ws.id, threadId, "req_a", 0)).rejects.toMatchObject({ kind: "not-found" });
+    expect(await store.get("attachment-keys", ws.id)).toEqual({ threads: { [threadId]: [{ key: `${threadId}.req_a.0`, mediaType: "image/png" }] } });
+    await rt.workspaces.delete(ws.id);
+    expect(await store.get("attachment-keys", ws.id)).toBeUndefined();
+    await rt.close();
+  });
+
+  it("go when the start that names them leaves the transcript, since no row can ask for them after", async () => {
+    const store = memoryStore();
+    const big = "w".repeat(256 * 1024);
+    // A turn that writes a large file, as tool calls do: twenty of them push the thread past the transcript's cap.
+    const writer: HarnessAdapterFactory = () => ({
+      steers: false,
+      attachments: "inline",
+      start: (options: HarnessStartOptions) => {
+        const result: TurnResult = { status: "completed", text: "done" };
+        const finished = (async () => {
+          const feed: AdapterEvent[] = [
+            { type: "session.start", sessionId: SESSION_ID },
+            ...(options.prompt === "look" ? [] : [{ type: "turn.delta" as const, sessionId: SESSION_ID, kind: "tool_use" as const, text: big, toolName: "Write", toolUseId: "tu_1" }]),
+            { type: "turn.done", sessionId: SESSION_ID, result },
+            { type: "session.end", sessionId: SESSION_ID, exitCode: 0, sawResult: true },
+          ];
+          for (const e of feed) options.onEvent(e);
+          return result;
+        })();
+        return { localId: SESSION_ID, finished, interrupt: async () => {} };
+      },
+    });
+    const { rt, ws } = await workspaceOn({ claude: writer }, stubBackend(), store);
+    const first = await rt.sessions.start(ws.id, { prompt: "look", attachments: [png(5)], requestId: "req_a" });
+    await first.finished;
+    const threadId = first.view().threadId!;
+    expect(await rt.sessions.attachment(ws.id, threadId, "req_a", 0)).toEqual({ mediaType: "image/png", bytes: bytesOf(5) });
+    for (let i = 0; i < 20; i++) await (await rt.sessions.start(ws.id, { thread: threadId, prompt: `write ${i}` })).finished;
+    expect((await rt.sessions.history(ws.id)).some(e => e.type === "session.start" && e.requestId === "req_a")).toBe(false);
+    await expect(rt.sessions.attachment(ws.id, threadId, "req_a", 0)).rejects.toMatchObject({ kind: "not-found" });
+    expect(await store.getBlob("attachments", `${threadId}.req_a.0`)).toBeUndefined();
+    await rt.close();
+  });
+
+  it("go with the workspace when it is deleted", async () => {
+    const store = memoryStore();
+    const { rt, ws } = await workspaceOn({ claude: recording("inline").factory }, stubBackend(), store);
+    const handle = await rt.sessions.start(ws.id, { prompt: "look", attachments: [png(5)], requestId: "req_a" });
+    await handle.finished;
+    const key = `${handle.view().threadId!}.req_a.0`;
+    await rt.sessions.attachment(ws.id, handle.view().threadId!, "req_a", 0);
+    expect(await store.getBlob("attachments", key)).toBeDefined();
+    await rt.workspaces.delete(ws.id);
+    expect(await store.getBlob("attachments", key)).toBeUndefined();
+    expect(await store.get("attachment-keys", ws.id)).toBeUndefined();
+    await rt.close();
+  });
+});
+
 describe("an image on the inline road", () => {
   it("reaches the adapter as bytes with its type, and nothing lands on the machine", async () => {
     const claude = recording("inline");
@@ -186,7 +266,7 @@ describe("an image on the inline road", () => {
     expect(claude.starts[0]!.images).toEqual([{ mediaType: "image/png", bytes: bytesOf(7) }]);
     // Nothing was written to the guest for it: an inline harness reads no file.
     expect(since().puts).toHaveLength(0);
-    expect(since().execs.some(cmd => cmd.includes("/images"))).toBe(false);
+    expect(since().execs.some(cmd => cmd.includes(".images"))).toBe(false);
   });
 
   it("carries every image of the message, in the order the person added them", async () => {
@@ -206,16 +286,19 @@ describe("an image on the inline road", () => {
 });
 
 describe("an image on the file road", () => {
-  it("lands in this send's own folder under the thread's, and the adapter is handed the path", async () => {
+  it("lands in this send's own folder among the thread's files, in the folder the thread works in, and the adapter is handed the path", async () => {
     const codex = recording("file");
     const { rt, ws, since } = await workspaceOn({ codex: codex.factory });
     const handle = await rt.sessions.start(ws.id, { harness: "codex", prompt: "what is this?", attachments: [png(9)], requestId: "req_a" });
     await handle.finished;
     const threadId = handle.view().threadId!;
-    const path = imagePathIn(turnImagesDir(threadId, "req_a", "unused"), 0, "image/png");
-    expect(path).toBe(`/root/.wsp/threads/${threadId}/images/req_a/1.png`);
-    // The send's folder is under the thread's, so removing the thread removes every send's images with it.
-    expect(path.startsWith(`${threadImagesDir(threadId)}/`)).toBe(true);
+    const folder = handle.view().cwd!;
+    const dir = turnImagesDir(folder, threadId, "req_a", "unused");
+    const path = imagePathIn(dir, 0, "image/png");
+    // A computer the person owns has no /root to land under; the thread's folder is there on every kind of machine.
+    expect(path).toBe(`${folder}/.wsp-files/${threadId}/req_a.images/1.png`);
+    // Readied as the thread's files are, so git's status stays clean and removing the thread removes it too.
+    expect(since().execs).toContain(landFilesLine(folder, dir));
     // The adapter reads a path, and the path it reads holds the bytes the person sent.
     expect(codex.starts[0]!.images?.map((i: TurnImage) => i.path)).toEqual([path]);
     expect(landedFiles(since().puts).get(path)).toEqual(Buffer.alloc(64, 9));
@@ -230,7 +313,7 @@ describe("an image on the file road", () => {
     await (await rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: "second", attachments: [png(2)] })).finished;
     const dirs = codex.starts.map(start => start.images![0]!.path!.replace(/\/[^/]+$/, ""));
     expect(dirs[0]).not.toBe(dirs[1]);
-    for (const dir of dirs) expect(dir.startsWith(`${threadImagesDir(threadId)}/`)).toBe(true);
+    for (const dir of dirs) expect(dir.startsWith(`${one.view().cwd!}/.wsp-files/${threadId}/`) && dir.endsWith(".images")).toBe(true);
   });
 
   it("a request id shaped like a path of its own does not become one; the folder is named for this send instead", async () => {
@@ -239,7 +322,7 @@ describe("an image on the file road", () => {
     const handle = await rt.sessions.start(ws.id, { harness: "codex", prompt: "sneaky", attachments: [png(1)], requestId: "../../../../etc/cron.d" });
     await handle.finished;
     const path = codex.starts[0]!.images![0]!.path!;
-    expect(path.startsWith(`${threadImagesDir(handle.view().threadId!)}/`)).toBe(true);
+    expect(path.startsWith(`${handle.view().cwd!}/.wsp-files/${handle.view().threadId!}/`)).toBe(true);
     expect(path).not.toContain("..");
   });
 
@@ -253,13 +336,9 @@ describe("an image on the file road", () => {
       attachments: [png(1), { mediaType: "image/jpeg", bytes: bytesOf(2) }, { mediaType: "image/webp", bytes: bytesOf(3) }],
     });
     await handle.finished;
-    const threadId = handle.view().threadId!;
-    expect(codex.starts[0]!.images?.map((i: TurnImage) => i.path)).toEqual([
-      `/root/.wsp/threads/${threadId}/images/req_a/1.png`,
-      `/root/.wsp/threads/${threadId}/images/req_a/2.jpg`,
-      `/root/.wsp/threads/${threadId}/images/req_a/3.webp`,
-    ]);
-    expect([...landedFiles(since().puts).keys()].filter(p => p.includes("/images/"))).toHaveLength(3);
+    const dir = turnImagesDir(handle.view().cwd!, handle.view().threadId!, "req_a", "unused");
+    expect(codex.starts[0]!.images?.map((i: TurnImage) => i.path)).toEqual([`${dir}/1.png`, `${dir}/2.jpg`, `${dir}/3.webp`]);
+    expect([...landedFiles(since().puts).keys()].filter(p => p.includes(".images/"))).toHaveLength(3);
   });
 
   it("takes the send's folder off the machine when its turn ends, so a screenshot does not outlive the turn it was sent for", async () => {
@@ -268,11 +347,11 @@ describe("an image on the file road", () => {
     const handle = await rt.sessions.start(ws.id, { harness: "codex", prompt: "first", attachments: [png(1)], requestId: "req_a" });
     await handle.finished;
     const threadId = handle.view().threadId!;
-    const dir = turnImagesDir(threadId, "req_a", "unused");
+    const dir = turnImagesDir(handle.view().cwd!, threadId, "req_a", "unused");
     await until(() => backend.machines[0]!.execLog.includes(`rm -rf ${quoted(dir)}`));
     // Twenty text turns after it, nothing of that send is still there and no other folder was touched.
     for (let nth = 0; nth < 3; nth++) await (await rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: `text ${nth}` })).finished;
-    expect(since().execs.filter(cmd => cmd.startsWith("rm -rf ") && cmd.includes("/images/"))).toEqual([`rm -rf ${quoted(dir)}`]);
+    expect(since().execs.filter(cmd => cmd.startsWith("rm -rf ") && cmd.includes(".images"))).toEqual([`rm -rf ${quoted(dir)}`]);
   });
 
   it("takes the folder off however the turn ended, a failed one as well as a completed one", async () => {
@@ -280,7 +359,7 @@ describe("an image on the file road", () => {
     const { rt, ws, backend } = await workspaceOn({ codex: codex.factory });
     const handle = await rt.sessions.start(ws.id, { harness: "codex", prompt: "boom", attachments: [png(1)], requestId: "req_a" });
     await handle.finished.catch(() => {});
-    const dir = turnImagesDir(handle.view().threadId!, "req_a", "unused");
+    const dir = turnImagesDir(handle.view().cwd!, handle.view().threadId!, "req_a", "unused");
     await until(() => backend.machines[0]!.execLog.includes(`rm -rf ${quoted(dir)}`));
   });
 
@@ -357,7 +436,7 @@ describe("two sends with images on one thread", () => {
     const { rt, ws, backend } = await workspaceOn({ codex: codex.factory });
     const first = await rt.sessions.start(ws.id, { harness: "codex", prompt: "A", attachments: [png(1)], requestId: "req_a" });
     const threadId = first.view().threadId!;
-    const dirOf = (requestId: string): string => turnImagesDir(threadId, requestId, "unused");
+    const dirOf = (requestId: string): string => turnImagesDir(first.view().cwd!, threadId, requestId, "unused");
     const second = rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: "B", attachments: [png(2)], requestId: "req_b" });
     await new Promise(resolve => setTimeout(resolve, 20));
     codex.end(0);
@@ -403,7 +482,7 @@ describe("a send that landed its images and is then refused", () => {
     return { factory, starts, steered, reply: () => replied!(), exit: () => exited!() };
   }
 
-  /** A machine whose untar can be held, so a send's images are on it while the turn that refuses the send opens: the
+  /** A machine whose image landing can be held, so a send's images are on it while the turn that refuses the send opens: the
    * refusal has to come after the landing, which is the window this is about. Armed only after the workspace is
    * created, since a create lands the daemon the same way. */
   function heldLanding(): { backend: StubBackend; arm: () => void; release: () => void } {
@@ -413,7 +492,7 @@ describe("a send that landed its images and is then refused", () => {
     const held = new Promise<void>(resolve => (release = resolve));
     const plain = backend.execImpl;
     backend.execImpl = async (m, cmd) => {
-      if (armed && cmd.includes("tar xzf")) await held;
+      if (armed && cmd.includes(".images")) await held;
       return plain(m, cmd);
     };
     return { backend, arm: () => (armed = true), release: () => release!() };
@@ -426,13 +505,13 @@ describe("a send that landed its images and is then refused", () => {
     arm();
     const first = await rt.sessions.start(ws.id, { harness: "codex", prompt: "A" });
     const threadId = first.view().threadId!;
-    const dirOf = (requestId: string): string => turnImagesDir(threadId, requestId, "unused");
+    const dirOf = (requestId: string): string => turnImagesDir(first.view().cwd!, threadId, requestId, "unused");
     // B queues behind A, wakes when A's process exits, and is landing its images when the workspace naps.
     const second = rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: "B", attachments: [png(0xbb)], requestId: "req_b" });
     codex.reply();
     codex.exit();
     await first.finished;
-    await until(() => backend.machines[0]!.execLog.some(cmd => cmd.includes("tar xzf")));
+    await until(() => backend.machines[0]!.execLog.some(cmd => cmd.includes(".images")));
     // The nap leaves nothing on this machine for B to run as: B is refused once its own images have landed.
     await rt.workspaces.nap(ws.id);
     release();
@@ -465,7 +544,7 @@ describe("a send that landed its images and is then refused", () => {
     await first.finished;
     // B lands into a thread with nothing running; the thread is B's from that moment, so C finds it taken.
     const second = rt.sessions.start(ws.id, { thread: threadId, prompt: "B", attachments: [png(0xbb)], requestId: "req_b" });
-    await until(() => backend.machines[0]!.execLog.some(cmd => cmd.includes("tar xzf")));
+    await until(() => backend.machines[0]!.execLog.some(cmd => cmd.includes(".images")));
     let opened = false;
     const third = rt.sessions.start(ws.id, { thread: threadId, prompt: "C" }).then(t => ((opened = true), t));
     await new Promise(r => setTimeout(r, 50));

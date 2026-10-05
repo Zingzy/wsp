@@ -52,7 +52,7 @@ export const GENERAL_DEFAULTS = {
   sendWith: "enter",
   midTurn: "queue",
   notifyNeeds: "notify-sound",
-  notifyDone: "off",
+  notifyDone: "notify",
   planAlerts: true,
   settleAfter: "2h",
   askDelete: true,

@@ -118,12 +118,12 @@ describe("what the menu bar says over the system while no window is open", () =>
 
   const loud = { notifyNeeds: "notify-sound", notifyDone: "notify-sound", planAlerts: true } as const;
 
-  it("a finished turn says the thread finished and where, as the person chose for a finish, and nothing by default", () => {
+  it("a finished turn says the thread finished and where, as the person chose for a finish, and silently by default", () => {
     const done = { type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "completed" } } as const;
     expect(trayNotice(done, { sessions, workspaces, places }, loud)).toEqual({ title: "fix login finished", body: "zingzy's MacBook Pro", show: true, sound: true });
     expect(trayNotice(done, { sessions, workspaces, places }, { ...loud, notifyDone: "notify" })).toMatchObject({ show: true, sound: false });
     expect(trayNotice(done, { sessions, workspaces, places }, { ...loud, notifyDone: "sound" })).toMatchObject({ show: false, sound: true });
-    expect(trayNotice(done, { sessions, workspaces, places }, DEFAULT_PREFERENCES)).toBeUndefined();
+    expect(trayNotice(done, { sessions, workspaces, places }, DEFAULT_PREFERENCES)).toMatchObject({ show: true, sound: false });
   });
 
   it("an agent's own thread reports to it, and a turn that did not complete says nothing", () => {

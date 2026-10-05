@@ -1452,6 +1452,31 @@ describe("runtime session history", () => {
     await again.close();
   });
 
+  it("one thread's traffic never trims another thread's history off the workspace they share", async () => {
+    const { store } = countingStore();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: tooled("w".repeat(256 * 1024), "ok") } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    // Every thread of a project's folder is one workspace: a quiet thread, then busy ones beside it.
+    const quiet = await rt.sessions.start(ws.id, { prompt: "the quiet one" });
+    await quiet.finished;
+    // Three busy threads, each past the byte cap on its own.
+    const busy: string[] = [];
+    for (let b = 0; b < 3; b++) {
+      const first = await rt.sessions.start(ws.id, { prompt: `busy ${b}.0` });
+      await first.finished;
+      busy.push(first.view().threadId!);
+      for (let i = 1; i < 20; i++) await (await rt.sessions.start(ws.id, { thread: first.view().threadId!, prompt: `busy ${b}.${i}` })).finished;
+    }
+    const history = await rt.sessions.history(ws.id);
+    const ofQuiet = history.filter(e => e.threadId === quiet.view().threadId);
+    expect(ofQuiet.some(e => e.type === "session.start" && e.prompt === "the quiet one")).toBe(true);
+    expect(ofQuiet.at(-1)).toMatchObject({ type: "session.end" });
+    // Every busy thread keeps its newest turn whole, and the workspace stays inside the one cap.
+    for (const [b, threadId] of busy.entries()) expect(history.some(e => e.threadId === threadId && e.type === "session.start" && e.prompt === `busy ${b}.19`)).toBe(true);
+    expect(jsonBytes(history)).toBeLessThanOrEqual(TRANSCRIPT_BYTES);
+    await rt.close();
+  });
+
   it("keeps a tool result's opening characters in the transcript and hands the live stream all of it", async () => {
     const output = `first line\n${"r".repeat(TOOL_RESULT_KEPT * 4)}`;
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: tooled("{}", output) } });
