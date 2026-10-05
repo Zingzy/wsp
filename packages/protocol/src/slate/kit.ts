@@ -166,7 +166,7 @@ function rows(v: SlateSketchView, line: (item: SlateJson, index: number) => stri
   if (v.unbound) return [`rows of ${shown(items)}`];
   if (!Array.isArray(items) || items.length === 0) return [shown(v.prop("empty")) || empty];
   const cut = Math.min(items.length, 8);
-  return [...items.slice(0, cut).map((item, i) => line(item, i)), ...(items.length > cut ? [`and ${items.length - cut} more rows`] : [])];
+  return [...items.slice(0, cut).map((item, i) => line(item, i)), ...(items.length > cut ? [`and ${items.length - cut} more rows; slate_read values with the list's path reads them all`] : [])];
 }
 
 function actions(v: SlateSketchView, item: SlateJson, index: number): string {

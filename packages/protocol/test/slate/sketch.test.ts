@@ -37,7 +37,7 @@ describe("the sketch", () => {
     const s = sketchSlate(d, { rows: many }, { version: 1, now });
     expect(s).toContain("  CA  [##########] 284");
     expect(s).toContain("  CN  [####......] 102");
-    expect(s).toContain("and 1 more rows");
+    expect(s).toContain("and 1 more rows; slate_read values with the list's path reads them all");
   });
 
   it("marks a piece that reads a run's result before the run has one, and not one that reads its state", () => {
@@ -114,6 +114,9 @@ describe("the catalog", () => {
     expect(slateCatalog("patch")).toContain("check with press walks a press and its <when> chain on a copy: nothing runs and nothing is sent");
     expect(slateCatalog("patch")).toContain(`check with values {"$run.json": {...}, "$run.exit": 0} previews the panel for a result the run has not had yet.`);
     expect(slateCatalog("output")).toContain("how many of the newest lines show, out then err, 8 by default");
+    expect(slateCatalog("runs")).toContain("while the Slate tab is on screen; at once when it comes back.");
+    expect(slateCatalog("runs")).toContain("else its text parsed; out is its text;");
+    expect(slateCatalog("functions")).toContain(`Times read in this computer's zone: date(t) "Mon 5 Oct", time(t) "14:05", ago(t) "30s ago", until(t) "in 4m".`);
     expect(slateCatalog()).toContain("then tool resource>");
     expect(slateCatalog()).toContain("with operators, a ? b : c, [lists], {records} and functions, never methods or =>.");
     expect(slateCatalog("pipes")).toBe(slateCatalog("steps"));
@@ -133,8 +136,9 @@ describe("the catalog", () => {
   it("answers runs, functions, steps, handlers and examples within their budgets", () => {
     // A line for each run attribute, after small models guessed what always and once did, took it from 590 to 660;
     // once, stream and when the person is asked, as ruled (6, 7), to 720; a secret in a file, to 730; the line back to
-    // the pieces every named entry ends with, after agents that read runs alone guessed <h1> and <p>, to 740.
-    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(740);
+    // the pieces every named entry ends with, after agents that read runs alone guessed <h1> and <p>, to 740; a timed
+    // run on the tab's return and a tool's text in out, to 750.
+    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(750);
     for (const n of ["runs", "chart", "thread", "functions", "steps", "handlers", "patch", "icons", "examples"]) expect(slateCatalog(n).endsWith("\nThe pieces and rules: slate_catalog with no name."), n).toBe(true);
     expect(slateCatalog()).not.toContain("slate_catalog with no name");
     expect(slateCatalog("nope")).not.toContain("slate_catalog with no name");
@@ -151,7 +155,7 @@ describe("the catalog", () => {
     const lines = slateCatalog("runs").split("\n");
     for (const attr of ["name", "cmd", "env", "every", "always", "once", "timeout", "on", "confirm", "then", "tool"]) expect(lines.some(l => l.startsWith(`${attr}:`) || l.startsWith(`${attr}=`)), attr).toBe(true);
     const text = slateCatalog("runs");
-    expect(text).toContain("while the Slate tab is on screen in the app");
+    expect(text).toContain("while the Slate tab is on screen; at once when it comes back.");
     expect(text).toContain("Before a first result or after a failure, out and json are empty and len of them 0: show a figure with when={$run.exit == 0}.");
     expect(text).toContain("stale: the command changed since this result.");
     expect(text).toContain("<value> state and each run's last result outlive an app or host restart.");

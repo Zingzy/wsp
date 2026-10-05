@@ -158,7 +158,7 @@ Each attribute:
 name: the run is read as $name.
 cmd: the literal command, run by bash -c in the thread's folder. Single quotes outside double ones; the block form above takes any text.
 env={{ ID: $id }}: values it reads as $ID. args={[$a]}: as $1. stdin={$x}: on standard input. A secret goes only in env or stdin; one in a file, the command reads itself, never through you.
-every={60}: starts it again every 60 seconds, at least 10, while the Slate tab is on screen in the app.
+every={60}: starts it again every 60 seconds, at least 10, while the Slate tab is on screen; at once when it comes back.
 always: with every, ticks while the tab is not on screen too.
 once: a start while it still runs is skipped; without once it stops and starts again.
 stream: fills lines as it prints, the last 500, so an output piece shows them live.
@@ -173,7 +173,7 @@ json is out parsed as JSON. Before a first result or after a failure, out and js
 <value> state and each run's last result outlive an app or host restart.
 Chain: <when done={$check} do={set($ok, $check.exit == 0)} />; done fires on any outcome.
 Code only the slate uses goes in <file name="x.py"> and runs as $SLATE_DIR/x.py; project code runs where it is.
-A tool's json is its structured result, else its text parsed; one marked text only keeps json empty unless its text is JSON. The person allows a server once per thread, a destructive tool every start. A secret in args returns as [secret:name].`;
+A tool's json is its structured result, else its text parsed; out is its text; one marked text only keeps json empty unless its text is JSON. The person allows a server once per thread, a destructive tool every start. A secret in args returns as [secret:name].`;
 
 const PATCH = `patch: elements without <slate>, sent as text to slate_write; one write may hold several.
 <props id="price" tone="warning" />: merges these props into the piece.
@@ -190,7 +190,7 @@ check with values {"$run.json": {...}, "$run.exit": 0} previews the panel for a 
 
 function functionsEntry(): string {
   const shown = new Set(["percent", "pct", "tokens", "usd", "duration", "ago", "until", "date", "plural", "word", "short", "num", "json", "contains", "orElse", "len", "first", "pluck"]);
-  return ["Functions (pure; a null argument gives null unless the function takes one):", ...Object.entries(SLATE_FUNCTIONS).map(([n, f]) => (shown.has(n) ? `${f.sig}: ${f.example}` : f.sig))].join("\n");
+  return ["Functions (pure; a null argument gives null unless the function takes one). Times read in this computer's zone: date(t) \"Mon 5 Oct\", time(t) \"14:05\", ago(t) \"30s ago\", until(t) \"in 4m\".", ...Object.entries(SLATE_FUNCTIONS).map(([n, f]) => (shown.has(n) ? `${f.sig}: ${f.example}` : f.sig))].join("\n");
 }
 
 function stepsEntry(): string {
