@@ -120,7 +120,7 @@ export interface CodexSession {
    * turns the message down. */
   steer(prompt: string): Promise<"accepted" | "not-running">;
   /** Answers an approval the server asked for with accept or decline; gone when no such request is open. */
-  answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<"answered" | "gone">;
+  answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string; reason?: string }): Promise<"answered" | "gone">;
   /** turn/interrupt on one subagent's own thread, by that thread's id, the lead and its other subagents running on. */
   stopTask(task: string): Promise<TaskStop>;
 }
@@ -1020,6 +1020,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         const wrote = await stream.write(decisionLine(open.id, answer.optionId === PERMISSION_ALLOW ? "accept" : "decline")).catch(() => "gone" as const);
         if (wrote !== "written") return "gone";
         emit({ type: "permission.close", sessionId: threadId, askId, outcome: answer.outcome, optionId: answer.optionId });
+        // A decline carries no words on this server, so the person's reason goes to the turn as their own message.
+        if (answer.outcome === "denied" && answer.reason !== undefined) void session.steer(answer.reason);
         return "answered";
       },
       stopTask: async task => {

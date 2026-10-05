@@ -5118,6 +5118,7 @@ const DAEMON_CONTENTS = [
   "2d3c09680f6c9dca01d8915f8d7be7306ba0db7fc6e1734353a86bf5afaa4e4e",
   "1557c21f49fe3ec9248ca8c405e450b0f201e9bc4fd3f552bfd0f36132272b17",
   "1ee653af3b44dc450246290cc7bb7617da6ec8f062d9e859452472019e52e51e",
+  "bcf75f81f3ab2483afc7ef7efcd930c2fa3747cdfe31117a02d119a3c120c4c3",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5452,7 +5453,10 @@ const DAEMON_CONTENTS = [
  * Version 118: A leave run as root first takes what the setup wrote under /usr/local and /opt, read off the list in
  * /opt/wsp: each path still as wsp left it, hashed in one pass, a folder once empty, and nothing the computer had
  * before wsp; the list goes last, and while it still holds lines /opt/wsp stays and the leave says so.
- * Version 119: setup sign-ins, cut syncs and the size check survive their edges. */
+ * Version 119: setup sign-ins, cut syncs and the size check survive their edges.
+ * Version 120: A place report reads its free disk and its size off the volume a setup installs onto, wsp's install
+ * folder or the nearest folder above it that is there, where it read the work folder's or the home's, so the size check
+ * and the install loop read one volume. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -6093,6 +6097,7 @@ export const PlaceReport = z.object({
   arch: z.string().max(32),
   os: z.string().max(200),
   shape: WorkspaceSize,
+  /** What is free on the volume a setup installs onto: wsp's install folder's, or the nearest folder above it that is there. */
   diskFreeBytes: z.number().int().nonnegative().optional(),
   /** The size of that same disk, off the same read: what a setup keeps free there is a share of it. */
   diskSizeBytes: z.number().int().nonnegative().optional(),
@@ -6939,8 +6944,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.steer"), sessionId: z.string(), prompt: z.string(), requestId: z.string().optional() }),
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
-   * options; replies with a SessionAnswerResult. Takes the runtime's session id, as sessions.interrupt does. */
-  z.object({ id: reqId, op: z.literal("sessions.answer"), sessionId: z.string(), askId: z.string(), optionId: z.string() }),
+   * options; replies with a SessionAnswerResult. Takes the runtime's session id, as sessions.interrupt does. A deny
+   * may carry the person's reason, what the agent should do instead. */
+  z.object({ id: reqId, op: z.literal("sessions.answer"), sessionId: z.string(), askId: z.string(), optionId: z.string(), reason: z.string().optional() }),
   /** Puts the session's running turn into another access mode from its next tool call on; replies with a
    * SessionAccessResult. Takes the runtime's session id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.access"), sessionId: z.string(), permissionMode: z.string() }),
