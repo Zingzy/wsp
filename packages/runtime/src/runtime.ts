@@ -281,6 +281,8 @@ import {
 import { PLAN_RESETS, secretsOf } from "./adapters.js";
 import { accountOf, accountOnComputer, accountRows, createBurn, createPriceTable, createUsageLedger, resetDetailsDue, usageComputerName, type Vaulted } from "./usage.js";
 import { planAlerts } from "./plan-alerts.js";
+import { HEAD_BYTES, HISTORY_PAGE_BYTES, HISTORY_PAGE_EVENTS, type HistoryPage, type ThreadFacts, type ThreadHead } from "@wsp/protocol";
+import { headShape, readThread, type TranscriptReader } from "./transcript-reader.js";
 import { usageResets, type ResetPlace } from "./usage-reset.js";
 
 // --- adapter port -------------------------------------------------------------
@@ -1750,6 +1752,11 @@ export interface Runtime {
     list(workspaceId?: string, origin?: Caller): Promise<SessionView[]>;
     /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
     history(workspaceId: string, origin?: Caller): Promise<SessionEvent[]>;
+    /** One thread's newest events under `before`, as sessions.history answers a page; nothing for a thread the caller
+     * does not reach, as history leaves its events out. */
+    page(workspaceId: string, window: { threadId: string; before?: number; limit?: number }, origin?: Caller): Promise<HistoryPage>;
+    /** The thread's head, by its fold key; refused as not found where the caller reaches no row of it. */
+    head(threadId: string, origin?: Caller): Promise<ThreadHead>;
     /** One image a person's message carried on that workspace's thread, by the request id its start carries and its
      * place in the message; refused as not found where the host keeps none. */
     attachment(workspaceId: string, threadId: string, requestId: string, index: number, origin?: Caller): Promise<KeptAttachment>;
@@ -2087,6 +2094,9 @@ interface TranscriptIndex {
   taken: Map<string, Taken>;
   /** Each thread's subagents by the agent's id for them, in the order they started, with the turn each ran under. */
   children: Map<string, Map<string, Child>>;
+  /** The newest position the transcript has issued. It never moves back, so the position of an event a delete or a
+   * rewind took away is never issued again. */
+  pos: number;
 }
 
 /** A subagent as the index holds it: what a listing answers, the turn whose end stops it if it is still running, and
@@ -2107,7 +2117,7 @@ const transcriptUnreadLine = (workspaceId: string, why: string): string => `the 
 const SESSION_FACTS = ["cwd", "permissionMode", "model"] as const;
 type SessionFacts = Partial<Record<(typeof SESSION_FACTS)[number], string>>;
 
-const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map(), taken: new Map(), children: new Map() });
+const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map(), taken: new Map(), children: new Map(), pos: 0 });
 
 /** One session.subagent row into a thread's children: a start makes the child, or runs a resumed one again, and an end
  * moves one the index holds. An end whose start has left the ring finds none, so the child stays gone with it. */
@@ -2155,6 +2165,7 @@ function forgetChild(index: TranscriptIndex, e: SessionEvent): void {
  * into the one message they are, and the newest start and end of each thread and session. A subagent's lines are the
  * subagent's, and a row stamped no thread names none a hit could open. */
 function foldEvent(index: TranscriptIndex, e: SessionEvent): void {
+  if (e.pos !== undefined && e.pos > index.pos) index.pos = e.pos;
   if ((e.type === "session.start" || e.type === "session.steer") && e.requestId !== undefined && e.threadId !== undefined && e.turnId !== undefined) {
     index.taken.set(e.requestId, { sessionId: e.sessionId, threadId: e.threadId, turnId: e.turnId, outcome: e.type === "session.start" ? "started" : "steered" });
   }
@@ -2223,13 +2234,13 @@ const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritt
  * one that does not parse, and one written before it held the starts by request id, since the restart that brings
  * this host up is the one a send may be waiting across. */
 const indexBytes = (index: TranscriptIndex, of: BlobMark | undefined): Buffer =>
-  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts], taken: [...index.taken], children: [...index.children].map(([thread, held]) => [thread, [...held]]) }));
+  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts], taken: [...index.taken], children: [...index.children].map(([thread, held]) => [thread, [...held]]), pos: index.pos }));
 const indexRead = (bytes: Buffer): { index: TranscriptIndex; of?: BlobMark } | undefined => {
   try {
-    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][]; taken?: [string, Taken][]; children?: [string, [string, Child][]][] };
-    if (held.taken === undefined || held.children === undefined) return undefined;
+    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][]; taken?: [string, Taken][]; children?: [string, [string, Child][]][]; pos?: number };
+    if (held.taken === undefined || held.children === undefined || held.pos === undefined) return undefined;
     const children = new Map(held.children.map(([thread, kids]) => [thread, new Map(kids)]));
-    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts), taken: new Map(held.taken), children }, ...(held.of !== undefined ? { of: held.of } : {}) };
+    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts), taken: new Map(held.taken), children, pos: held.pos }, ...(held.of !== undefined ? { of: held.of } : {}) };
   } catch {
     return undefined;
   }
@@ -3682,6 +3693,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     try {
       const events = (JSON.parse(bytes.toString("utf8")) as Partial<TranscriptRecord>).events;
       if (!Array.isArray(events)) throw new Error("it holds no events");
+      // A file an older build wrote carries no positions: its events take them in order from one, the same at every
+      // read until a write carries them, and the index read off it issues the next one after them.
+      let pos = 0;
+      for (const e of events) pos = e.pos ??= pos + 1;
       return events;
     } catch (e) {
       const aside = `${workspaceId}.${Date.now()}`;
@@ -3704,13 +3719,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const id = moving.workspaceId;
     const seen = new Set<string>();
     const all: SessionEvent[] = [];
-    for (const e of [...((await readTranscript(id, TRANSCRIPT_HEADS)) ?? []), ...((await readTranscript(id)) ?? []), ...moving.events]) {
+    for (const read of [...((await readTranscript(id, TRANSCRIPT_HEADS)) ?? []), ...((await readTranscript(id)) ?? []), ...moving.events]) {
+      // Positions are given again below, so the same event read off two copies is still one.
+      const e = { ...read };
+      delete e.pos;
       const key = JSON.stringify(e);
       if (seen.has(key)) continue;
       seen.add(key);
       all.push(e);
     }
     all.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+    all.forEach((e, i) => (e.pos = i + 1));
     const held = [...all];
     dropOldest(held);
     const kept = new Set(held);
@@ -3776,6 +3795,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return events;
   };
+  /** One thread's events read off the transcript as openTranscript answers it. */
+  const transcriptReader: TranscriptReader = {
+    read: async (workspaceId, threadId, o) => ({ ...readThread(await openTranscript(workspaceId), threadId, o), pos: transcriptIndex.get(workspaceId)?.pos ?? 0 }),
+  };
   /** Inside the queue: `events` written as the transcript, the first `took` events written since the last flush
    * cleared the moment the file has them, and the index made again off what was written. */
   const writeTranscript = async (workspaceId: string, events: SessionEvent[], took: number): Promise<void> => {
@@ -3788,6 +3811,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       pendingBytes.delete(workspaceId);
     } else if (pending !== undefined) pendingBytes.set(workspaceId, pending.reduce((n, e) => n + eventBytes(e), 0));
     const index = indexOf(events);
+    index.pos = Math.max(index.pos, transcriptIndex.get(workspaceId)?.pos ?? 0);
     // An index that did not land keeps its old mark, and boot reads that transcript again.
     await writeIndex(workspaceId, index).catch((e: unknown) => console.warn(`the transcript index of ${workspaceId} was not written: ${e instanceof Error ? e.message : String(e)}`));
     // What arrived during the writes is folded on after them, as record folded it on the index this replaces.
@@ -3925,7 +3949,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // nothing else. A session's end is written at once, anything before it waits
   // for the debounce.
   const record = (unstamped: SessionEvent): void => {
-    const event: SessionEvent = { ...unstamped, at: Date.now() };
+    const event: SessionEvent = { ...unstamped, at: Date.now(), pos: indexFor(unstamped.workspaceId).pos + 1 };
     const id = event.workspaceId;
     // A subagent's text and thinking are clipped as a tool result is, so a subagent that thinks for pages cannot push its
     // lead's own lines out of the ring.
@@ -3950,6 +3974,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       transcriptTimers.set(event.workspaceId, clock.schedule(() => void flushTranscript(event.workspaceId), TRANSCRIPT_FLUSH_MS));
     }
     bus.emit(event);
+    if ((event.type === "session.start" || event.type === "session.end") && event.threadId !== undefined) pushHead(event.threadId);
   };
 
   /** The harness session a thread's newest start in the transcript announced: what a send resumes once the thread's
@@ -6452,6 +6477,62 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const entry = live.get(row.workspaceId);
     return entry === undefined || entry.creating || !reachesRow(row, origin) ? undefined : entry;
   };
+  /** Rows as a listing answers them: each with the stamps and marks its thread's record keeps, and with what only a
+   * live turn knows, which rides the answer and never the row. */
+  const listedRows = (held: readonly (typeof sessions extends Map<string, infer V> ? V : never)[]): SessionView[] => {
+    // A thread's subagents ride its latest row alone, the one foldThreads reads, so a thread of several rows lists
+    // each child once.
+    const latest = new Map(held.map(s => [threadKeyOf(s.view), s] as const));
+    // The turn's process and what its calls are stopped behind ride the answer and never the row itself: both are
+    // this host's to know while the turn runs, and a pid written down outlives the process it named while a wait
+    // written down outlives the question it was on.
+    return held.map(s => {
+      const behind = s.view.status === "running" ? stoppedBehind(s) : undefined;
+      const marks = threadRecords.get(threadKeyOf(s.view));
+      const children = latest.get(threadKeyOf(s.view)) === s && s.view.threadId !== undefined ? transcriptIndex.get(s.view.workspaceId)?.children.get(s.view.threadId) : undefined;
+      return {
+        ...s.view,
+        ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}),
+        ...(behind !== undefined ? { waitingOn: behind } : {}),
+        ...(children !== undefined && children.size > 0 ? { subagents: [...children.values()].map(({ turnId: _turn, startRow: _row, ...child }) => child) } : {}),
+        ...((): { setupRefusal?: string } => {
+          const entry = live.get(s.view.workspaceId);
+          const place = entry === undefined ? undefined : setupPlace(entry);
+          const refused = place === undefined ? undefined : setupRefusals.get(keyOf(place, s.view.harness));
+          return refused !== undefined ? { setupRefusal: refused } : {};
+        })(),
+        // A turn that ended before the stamps began reads as seen the moment it ended, not at the upgrade, so the quiet
+        // the sidebar folds a thread by still counts from its end.
+        readAt: marks?.readAt ?? (s.view.endedAt !== undefined && s.view.endedAt < readsSince ? s.view.endedAt : readsSince),
+        ...(marks?.settledAt !== undefined ? { settledAt: marks.settledAt } : {}),
+        ...(marks?.pinnedAt !== undefined ? { pinnedAt: marks.pinnedAt } : {}),
+        ...(marks?.snoozedUntil === undefined ? {} : marks.snoozedUntil > clock.now() ? { snoozedUntil: marks.snoozedUntil } : { wokeAt: marks.snoozedUntil }),
+        ...(marks?.section !== undefined ? { section: marks.section } : {}),
+        ...(marks?.rewound !== undefined ? { rewoundAt: marks.rewound.at } : {}),
+      };
+    });
+  };
+  /** A thread's facts off its rows here, as a listing folds them; undefined where the host holds no row of it. */
+  const threadFacts = (threadId: string): ThreadFacts | undefined => {
+    const held = [...sessions.values()].filter(s => threadKeyOf(s.view) === threadId);
+    const [listed] = foldThreads(listedRows(held));
+    if (listed === undefined) return undefined;
+    const { subagents: _subagents, ...thread } = listed;
+    const latest = held.at(-1)!.view;
+    const running = held.filter(s => s.view.status === "running").at(-1);
+    return {
+      ...thread,
+      ...(latest.model !== undefined ? { model: latest.model } : {}),
+      ...(latest.effort !== undefined ? { effort: latest.effort } : {}),
+      ...(latest.contextWindow !== undefined ? { contextWindow: latest.contextWindow } : {}),
+      ...(running !== undefined ? { turnId: running.turnId } : {}),
+    };
+  };
+  /** Tells every window a thread's facts moved, so none asks for its head again. */
+  const pushHead = (threadId: string): void => {
+    const facts = threadFacts(threadId);
+    if (facts !== undefined) bus.emit({ type: "thread.head", workspaceId: facts.workspaceId, threadId, facts, pos: transcriptIndex.get(facts.workspaceId)?.pos ?? 0 });
+  };
   /** Moves the read or settled stamp of each thread, by fold key, on the thread's record, which a thread from before
    * records existed takes here off its latest row; each workspace touched is written once and told once. Every
    * thread is checked before any moves, so a list naming one the caller cannot reach moves nothing. */
@@ -8509,6 +8590,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         async title => {
           pending.failed = false;
           if (title === null) return;
+          const moved = new Set<string>();
           // A title in the harness's own store is the person's rename inside it or the one the harness itself made
           // for them, and both outrank anything we would generate; only the opening words, which codex writes there
           // at a thread's start, are the seed again, and a seed is no news to a row that already carries a name.
@@ -8516,10 +8598,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             if (s.view.workspaceId !== entry.record.id || s.view.claudeSessionId !== sessionId) continue;
             const source = storedTitleSource(title, s.view.prompt);
             if (source === "seed" && sourceOf(s.view) !== "seed") continue;
+            if (s.view.harnessTitle !== title) moved.add(threadKeyOf(s.view));
             s.view.harnessTitle = title;
             s.view.titleSource = source;
           }
           await persistSessions(entry.record.id);
+          for (const threadId of moved) pushHead(threadId);
         },
         (e: unknown) => {
           if (!pending.failed) console.warn(noTitleLogLine(sessionId, entry.record.id, providerSaid(e)));
@@ -8613,6 +8697,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     }
     await persistSessions(entry.record.id);
+    pushHead(threadId);
     await nameInHarness(view, title);
   };
 
@@ -10272,37 +10357,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A row with none blocks, so a thread is titled on the first listing that sees it.
       const asked = titleRows(rows).map(view => ({ first: view.harnessTitle === undefined, done: refreshTitle(view, false) }));
       await Promise.all(asked.filter(a => a.first).map(a => a.done));
-      // A thread's subagents ride its latest row alone, the one foldThreads reads, so a thread of several rows lists
-      // each child once.
-      const latest = new Map(held.map(s => [threadKeyOf(s.view), s] as const));
-      // The turn's process and what its calls are stopped behind ride the answer and never the row itself: both are
-      // this host's to know while the turn runs, and a pid written down outlives the process it named while a wait
-      // written down outlives the question it was on.
-      return held.map(s => {
-        const behind = s.view.status === "running" ? stoppedBehind(s) : undefined;
-        const marks = threadRecords.get(threadKeyOf(s.view));
-        const children = latest.get(threadKeyOf(s.view)) === s && s.view.threadId !== undefined ? transcriptIndex.get(s.view.workspaceId)?.children.get(s.view.threadId) : undefined;
-        return {
-          ...s.view,
-          ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}),
-          ...(behind !== undefined ? { waitingOn: behind } : {}),
-          ...(children !== undefined && children.size > 0 ? { subagents: [...children.values()].map(({ turnId: _turn, startRow: _row, ...child }) => child) } : {}),
-          ...((): { setupRefusal?: string } => {
-            const entry = live.get(s.view.workspaceId);
-            const place = entry === undefined ? undefined : setupPlace(entry);
-            const refused = place === undefined ? undefined : setupRefusals.get(keyOf(place, s.view.harness));
-            return refused !== undefined ? { setupRefusal: refused } : {};
-          })(),
-          // A turn that ended before the stamps began reads as seen the moment it ended, not at the upgrade, so the quiet
-          // the sidebar folds a thread by still counts from its end.
-          readAt: marks?.readAt ?? (s.view.endedAt !== undefined && s.view.endedAt < readsSince ? s.view.endedAt : readsSince),
-          ...(marks?.settledAt !== undefined ? { settledAt: marks.settledAt } : {}),
-          ...(marks?.pinnedAt !== undefined ? { pinnedAt: marks.pinnedAt } : {}),
-          ...(marks?.snoozedUntil === undefined ? {} : marks.snoozedUntil > clock.now() ? { snoozedUntil: marks.snoozedUntil } : { wokeAt: marks.snoozedUntil }),
-          ...(marks?.section !== undefined ? { section: marks.section } : {}),
-          ...(marks?.rewound !== undefined ? { rewoundAt: marks.rewound.at } : {}),
-        };
-      });
+      return listedRows(held);
     },
 
     async history(workspaceId, origin) {
@@ -10311,6 +10366,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // workspaces; any other it names reads as every workspace verb reads it, so it learns nothing by asking.
       if (!treeStandsOn(workspaceId, origin)) await entryOf(workspaceId, origin);
       return (await openTranscript(workspaceId)).filter(e => drivesThread(e.threadId, origin)).map(e => ({ ...e }));
+    },
+
+    async page(workspaceId, window, origin) {
+      await ready();
+      if (!treeStandsOn(workspaceId, origin)) await entryOf(workspaceId, origin);
+      if (!drivesThread(window.threadId, origin)) return { events: [], pos: transcriptIndex.get(workspaceId)?.pos ?? 0, total: 0 };
+      return transcriptReader.read(workspaceId, window.threadId, {
+        ...(window.before !== undefined ? { before: window.before } : {}),
+        limit: window.limit ?? HISTORY_PAGE_EVENTS,
+        bytes: HISTORY_PAGE_BYTES,
+      });
+    },
+
+    async head(threadId, origin) {
+      await ready();
+      const facts = threadFacts(threadId);
+      if (facts === undefined || (await entryOfRow({ threadId: facts.threadId ?? threadId, workspaceId: facts.workspaceId }, origin)) === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
+      // The events take what the facts leave of the head's bytes, less the reply's own keys and numbers.
+      const room = HEAD_BYTES - Buffer.byteLength(JSON.stringify(facts)) - 100;
+      return { facts, ...(await transcriptReader.read(facts.workspaceId, facts.threadId ?? threadId, { limit: Infinity, bytes: room, strict: true, shape: headShape })) };
     },
 
     async attachment(workspaceId, threadId, requestId, index, origin) {
@@ -10405,6 +10480,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (threadId !== undefined) threadRecords.set(threadId, { ...(threadRecords.get(threadId) ?? { workspaceId: s.view.workspaceId, harness: s.view.harness }), permissionMode });
         if (latest.status !== "running") latest.permissionMode = permissionMode;
         void persistSessions(s.view.workspaceId);
+        pushHead(threadKeyOf(s.view));
       };
       if (latest.status !== "running") {
         landed();
@@ -10448,6 +10524,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
       }
       await persistSessions(entry.record.id);
+      pushHead(threadKeyOf(s.view));
       return { outcome: "renamed" };
     },
 
