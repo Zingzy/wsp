@@ -1627,6 +1627,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         holds.delete(threadId);
         skipped.delete(threadId);
         windows.delete(threadId);
+        for (const map of [writes, pressSentAt, reactionSentAt, eventBuckets, viewsNow]) map.delete(threadId);
+        for (const key of startedBy.keys()) if (key.startsWith(byKey(threadId, ""))) startedBy.delete(key);
         await deps.store.delete(SLATES, threadId);
       });
     },
