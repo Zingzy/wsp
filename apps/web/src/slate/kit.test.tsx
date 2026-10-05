@@ -73,6 +73,20 @@ describe("the richer kit in the renderer", () => {
     expect(view.container.querySelector("[data-slate-status=muted]")!.textContent).toBe("Waiting");
   });
 
+  it("draws a sparkline's line and last figure, says not read yet with no points, and an empty piece's title and body", () => {
+    const { view } = draw(compiled(`<slate><column>
+<sparkline id="s" label="Requests" values={[3, 9, 4, 1200]} />
+<sparkline id="none" label="Errors" values={[]} />
+<empty id="e" title="No pull request yet" body="Open one and it shows here." />
+</column></slate>`));
+    const line = piece(view.container, "s");
+    expect(line.querySelector("[data-slate-sparkline] polyline")!.getAttribute("points")!.split(" ")).toHaveLength(4);
+    expect(line.textContent).toBe("Requests1,200");
+    expect(piece(view.container, "none").textContent).toBe("ErrorsNot read yet");
+    expect(piece(view.container, "e").textContent).toContain("No pull request yet");
+    expect(piece(view.container, "e").textContent).toContain("Open one and it shows here.");
+  });
+
   it("draws a ring as the meter row", () => {
     const { view } = draw(compiled(`<slate><column>
 <ring id="r" label="Disk" value={40} max={80} />

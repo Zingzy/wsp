@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { isSlateBinding, parseSlateOwnPath, type SlatePropValue } from "@wsp/protocol";
 import type { RaiseResult } from "../actions.js";
 
-const COALESCE_MS = 500;
+export const COALESCE_MS = 500;
 const SAID_MS = 2_000;
 
 export function usePress(run: () => Promise<RaiseResult>): { busy: boolean; said: string | undefined; refused: string | undefined; press: () => void } {
