@@ -8,7 +8,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { McpTransport } from "@wsp/catalog";
-import { EXEC_OUTPUT_MAX, runOutputTail } from "@wsp/protocol";
+import { EXEC_OUTPUT_MAX, fmtBytes, runOutputTail } from "@wsp/protocol";
 import type { SlateAsk, SlateJson, SlateRunDecl } from "@wsp/protocol";
 import type { Reshape, RunApprovals, RunBy, RunRecord, RunStartAnswer } from "./slate-runs.js";
 
@@ -121,7 +121,7 @@ const DOTS = "••••";
 /** The most one message from a server may be, on either transport: a command's own cap, eight times what a slate's
  * values hold, so any answer worth keeping fits and a runaway one is cut off before it is parsed. */
 const MESSAGE_MAX_BYTES = EXEC_OUTPUT_MAX;
-const TOO_BIG = `the server sent a message over ${MESSAGE_MAX_BYTES / 1024 / 1024} MB`;
+const TOO_BIG = `the server sent a message over ${fmtBytes(MESSAGE_MAX_BYTES)}`;
 /** How deep and how wide a parsed answer may be before anything walks it. */
 const DEPTH_MAX = 64;
 const ITEMS_MAX = 100_000;
