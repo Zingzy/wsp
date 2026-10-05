@@ -56,8 +56,9 @@ import {
   shellQuote,
 } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative } from "node:path";
+import { createHash } from "node:crypto";
 import type { Store } from "./store.js";
 import { createSlateRuns, lastResult, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
 import { boxRoad, boxSlateDir } from "./slate-box.js";
@@ -79,6 +80,8 @@ interface Approval {
   at: number;
   run?: string;
   cmd?: string;
+  /** The named files' hashes the person allowed, so a run that asks again can say which one changed. */
+  scripts?: Record<string, string>;
 }
 
 /** One thread's slate as the store keeps it. Snapshots are kept by version and turns point at them, so a turn in
@@ -268,6 +271,34 @@ function filesRead(doc: SlateDoc | null, decl: SlateRunDecl): Record<string, str
 function withFiles(doc: SlateDoc | null, decl: SlateRunDecl): SlateRunDecl & { files?: Record<string, string> } {
   const files = filesRead(doc, decl);
   return files === undefined ? decl : { ...decl, files };
+}
+
+/** How many named files an approval binds, and how large one may be to be read for it. */
+const SCRIPTS_MAX = 32;
+const SCRIPT_BYTES = 4 * 1024 * 1024;
+
+/** Every file a run's cmd or then names that exists under the thread's folder, by its path there, with a hash of its
+ * content: an "Always" covers the script the person read, and an edit to it asks again. A file the command reaches
+ * some other way (an import, a glob, a path it builds) is out of reach, and the sheet says so. */
+function scriptsNamed(folder: string | undefined, decl: SlateRunDecl): Record<string, string> | undefined {
+  if (folder === undefined || decl.kind !== "cmd") return undefined;
+  let root: string;
+  try { root = realpathSync(folder); } catch { return undefined; }
+  const words = [decl.cmd, decl.then ?? ""].join("\n").split(/[\s'"`;|&()<>=,]+/).filter(w => w !== "" && !w.startsWith("-") && !w.includes("$") && /[./]/.test(w));
+  const found: Record<string, string> = {};
+  for (const word of words) {
+    if (Object.keys(found).length >= SCRIPTS_MAX) break;
+    let at: string;
+    try { at = realpathSync(isAbsolute(word) ? word : join(folder, word)); } catch { continue; }
+    const rel = relative(root, at);
+    if (rel === "" || rel.startsWith("..") || isAbsolute(rel) || found[rel] !== undefined) continue;
+    try {
+      const st = statSync(at);
+      if (!st.isFile() || st.size > SCRIPT_BYTES) continue;
+      found[rel] = createHash("sha256").update(readFileSync(at)).digest("hex").slice(0, 16);
+    } catch { continue; }
+  }
+  return Object.keys(found).length === 0 ? undefined : found;
 }
 
 /** What a run executes, without how often or how long: a change here makes its last result stale. */
@@ -460,11 +491,20 @@ export function createSlates(deps: SlatesDeps): Slates {
     now: deps.now,
   });
 
-  /** The run name and command an approval key stands for, so the menu can list it after the document changes. */
-  function approvalNames(r: SlateRecord, key: string): { run?: string; cmd?: string } {
+  /** A declaration as its approval takes it: the files it reads from the slate, and a hash of each file it names in
+   * the thread's folder, read again at every start. */
+  function approvalDecl(r: SlateRecord, declared: SlateRunDecl): SlateRunDecl & { files?: Record<string, string>; scripts?: Record<string, string> } {
+    const decl = withFiles(r.document, declared);
+    const scripts = scriptsNamed(deps.thread(r.threadId)?.folder, declared);
+    return scripts === undefined ? decl : { ...decl, scripts };
+  }
+
+  /** The run name and command an approval key stands for, so the menu can list it after the document changes, and
+   * the named files' hashes it covers, so a changed one can be named when it asks again. */
+  function approvalNames(r: SlateRecord, key: string): { run?: string; cmd?: string; scripts?: Record<string, string> } {
     for (const [name, declared] of Object.entries(r.document?.runs ?? {})) {
-      const decl = withFiles(r.document, declared);
-      if (decl.kind === "cmd" && runs.key(decl as CmdRunDecl) === key) return { run: name, cmd: decl.cmd };
+      const decl = approvalDecl(r, declared);
+      if (decl.kind === "cmd" && runs.key(decl as CmdRunDecl) === key) return { run: name, cmd: decl.cmd, ...(decl.scripts !== undefined ? { scripts: decl.scripts } : {}) };
       if (decl.kind !== "cmd" && key === consentKey(decl)) return { run: name, cmd: `the MCP server ${decl.server}${decl.then !== undefined ? `, then ${decl.then}` : ""}` };
       if (decl.kind !== "cmd" && key === `mcp:${decl.server}`) return { run: name, cmd: `the MCP server ${decl.server}` };
     }
@@ -679,6 +719,19 @@ export function createSlates(deps: SlatesDeps): Slates {
       return isRunRecord(rec) && rec.state === "held" && (rec.why === undefined || rec.why === HELD_APPROVAL || rec.why === HELD_CONFIRM);
     }).map(name => `$${name}`);
 
+  /** Which files a run names changed since the person said "Always" to it, when that is why it asks again. */
+  const changedSince = (r: SlateRecord, run: string, key: string): string | undefined => {
+    const declared = r.document?.runs[run];
+    if (declared === undefined) return undefined;
+    const now = approvalDecl(r, declared).scripts ?? {};
+    for (const [k, a] of Object.entries(r.approvals)) {
+      if (k === key || a.state !== "allowed" || a.run !== run || a.scripts === undefined) continue;
+      const changed = Object.keys({ ...a.scripts, ...now }).filter(path => a.scripts![path] !== now[path]);
+      if (changed.length > 0) return `${changed.join(", ")} changed since you allowed it, so it asks again`;
+    }
+    return undefined;
+  };
+
   const asksOf = (r: SlateRecord): SlateAsk[] => {
     const facts = deps.thread(r.threadId);
     const cmds = runs.held(r.threadId).map((a: RunAsk): SlateAsk => {
@@ -697,7 +750,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         ...(a.confirm !== undefined ? { confirm: a.confirm } : {}),
         ...(a.then !== undefined ? { then: a.then } : {}),
         ...(a.files !== undefined ? { files: a.files } : {}),
-        why: isRunRecord(rec) && rec.why !== undefined ? rec.why : HELD_APPROVAL,
+        why: changedSince(r, a.run, a.key) ?? (isRunRecord(rec) && rec.why !== undefined ? rec.why : HELD_APPROVAL),
       };
     });
     return [...cmds, ...mcp.held(r.threadId)];
@@ -728,7 +781,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   };
 
   const armTimers = (r: SlateRecord): void => {
-    const list = Object.entries(r.document?.runs ?? {}).flatMap(([run, decl]) => (decl.every !== undefined ? [{ run, every: decl.every, key: decl.kind === "cmd" ? runs.key(withFiles(r.document, decl) as CmdRunDecl) : JSON.stringify(decl), ...(decl.always === true ? { always: true } : {}) }] : []));
+    const list = Object.entries(r.document?.runs ?? {}).flatMap(([run, decl]) => (decl.every !== undefined ? [{ run, every: decl.every, key: decl.kind === "cmd" ? runs.key(approvalDecl(r, decl) as CmdRunDecl) : JSON.stringify(decl), ...(decl.always === true ? { always: true } : {}) }] : []));
     runs.timers(r.threadId, list);
     const servers = Object.values(r.document?.runs ?? {}).flatMap(decl => (decl.kind === "cmd" ? [] : [{ server: decl.server, kept: decl.every !== undefined && decl.always === true }]));
     mcp.servers(r.threadId, servers.map(s => s.server), servers.filter(s => s.kept).map(s => s.server));
@@ -850,7 +903,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     try {
       const said = decl.kind === "resource" ? undefined : decl.confirm;
       const confirm = said === undefined ? undefined : slateText(resolveSlateProp(said, contextOf(r, views)) ?? null) || `Run $${run}?`;
-      const asked = { ...withFiles(r.document, decl), ...(confirm !== undefined ? { confirm } : {}) };
+      const asked = { ...approvalDecl(r, decl), ...(confirm !== undefined ? { confirm } : {}) };
       const answer =
         asked.kind !== "cmd"
           ? mcp.start({ threadId: r.threadId, run, decl: asked as McpRunDecl, by, args: mcpArgsOf(r, asked as McpRunDecl), runs: count })
@@ -885,7 +938,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   /** Whether the person said "Always in this thread" to the run as declared now, and it asks nothing every start. */
   const approvedAlways = (r: SlateRecord, run: string): boolean => {
     const decl = r.document?.runs[run];
-    return decl?.kind === "cmd" && decl.confirm === undefined && r.approvals[runs.key(withFiles(r.document, decl) as CmdRunDecl)]?.state === "allowed";
+    return decl?.kind === "cmd" && decl.confirm === undefined && r.approvals[runs.key(approvalDecl(r, decl) as CmdRunDecl)]?.state === "allowed";
   };
 
   /** A record the runs module wrote outside a batch (an end, a cancel, a queued start, an approval): one batch, so
@@ -1366,7 +1419,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         });
         return;
       }
-      const named = Object.entries(r.document?.runs ?? {}).filter(([, decl]) => decl.kind === "cmd" && runs.key(withFiles(r.document, decl) as CmdRunDecl) === p.key).map(([name]) => name);
+      const named = Object.entries(r.document?.runs ?? {}).filter(([, decl]) => decl.kind === "cmd" && runs.key(approvalDecl(r, decl) as CmdRunDecl) === p.key).map(([name]) => name);
       if (named.length === 0) throw usageRefusal(`this slate declares no command with approval key ${p.key}:`, "read the slate again and approve what it asks now.");
       await serial(p.threadId, async () => {
         if (p.scope === "refuse") {
@@ -1390,7 +1443,7 @@ export function createSlates(deps: SlatesDeps): Slates {
             moved(p.threadId, run, { state: "failed", why: NO_FOLDER, exit: null, runs: rec.runs, endedAt: deps.now() });
             continue;
           }
-          const again = runs.start({ threadId: p.threadId, run, decl: withFiles(r.document, decl) as CmdRunDecl, by: "person", folder, inputs: inputsOf(r, decl), last: rec as unknown as RunRecord });
+          const again = runs.start({ threadId: p.threadId, run, decl: approvalDecl(r, decl) as CmdRunDecl, by: "person", folder, inputs: inputsOf(r, decl), last: rec as unknown as RunRecord });
           if (again.outcome === "held") runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once");
         }
         await save(r);

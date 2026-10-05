@@ -417,6 +417,27 @@ describe("the slate v2 host", () => {
     await expect(rt.sessions.start(workspaceId, { prompt: "two", cwd: join(root, "plain", "nowhere") })).rejects.toThrow(/^there is no folder at .*nowhere; name one that exists$/);
   });
 
+  it("an Always covers the scripts a command names in the thread's folder: an edit to one asks again and names it", async () => {
+    const { rt, root, threadId, asThread } = await threadOn("wsp-slates-script-hash-");
+    writeFileSync(join(root, "plain", "deploy.sh"), "echo safe\n");
+    await rt.slates.write({ text: `<slate><run name="deploy" cmd="bash deploy.sh" /><column><button id="go" label="Deploy" onPress={start($deploy)} /></column></slate>` }, asThread);
+    const press = async (n: number) => { await rt.slates.event({ threadId, version: (await rt.slates.get(threadId))!.version, piece: "go", event: "press", requestId: `p${n}` }); await rt.slates.settled(); };
+    const done = async (out: string) => vi.waitFor(async () => { await rt.slates.settled(); expect((await rt.slates.get(threadId))!.values["deploy"]).toMatchObject({ state: "done", out }); }, { timeout: 10_000 });
+    await press(1);
+    await rt.slates.approve({ threadId, key: (await rt.slates.get(threadId))!.asks[0]!.key, scope: "thread" });
+    await done("safe\n");
+    // Unchanged, the Always holds: the next press runs with no ask.
+    await press(2);
+    await done("safe\n");
+    expect((await rt.slates.get(threadId))!.asks).toEqual([]);
+    // Edited, it asks again and says which file changed.
+    writeFileSync(join(root, "plain", "deploy.sh"), "echo changed\n");
+    await press(3);
+    const view = (await rt.slates.get(threadId))!;
+    expect(view.values["deploy"]).toMatchObject({ state: "held" });
+    expect(view.asks).toMatchObject([{ run: "deploy", why: "deploy.sh changed since you allowed it, so it asks again" }]);
+  });
+
   it("a check previews what the panel shows for a run's result, setting $run.json on its copy, storing and starting nothing", async () => {
     const { rt, threadId, asThread } = await threadOn("wsp-slates-preview-run-");
     const text = `<slate><run name="market" cmd="echo '{}'" every={60} /><column><text when={$market.exit == 0}>{$market.json.open ? "Open" : "Closed"}</text></column></slate>`;

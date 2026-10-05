@@ -66,6 +66,8 @@ export interface CmdRunDecl {
   then?: string;
   /** The text of each of the slate's files the command or its then reads, by name: part of what the person approves. */
   files?: Record<string, string>;
+  /** A hash of each file in the thread's folder the command or its then names, by its path there: an edit asks again. */
+  scripts?: Record<string, string>;
 }
 
 /** One value as it reaches a command, evaluated by the host at the moment the run starts. A secret is named, never
@@ -619,7 +621,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     const env = Object.entries(decl.env ?? {})
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([name, expr]) => [name, stableJson(expr)]);
-    const what = [decl.kind, decl.cmd, env, (decl.args ?? []).map(stableJson), decl.stdin === undefined ? null : stableJson(decl.stdin), decl.on ?? "thread", decl.cwd ?? "", decl.stream === true, decl.every ?? null, decl.always === true, decl.timeout ?? DEFAULT_TIMEOUT_S, decl.once === true, ...(decl.then !== undefined ? [decl.then] : []), ...(decl.files !== undefined ? [stableJson(decl.files)] : [])];
+    const what = [decl.kind, decl.cmd, env, (decl.args ?? []).map(stableJson), decl.stdin === undefined ? null : stableJson(decl.stdin), decl.on ?? "thread", decl.cwd ?? "", decl.stream === true, decl.every ?? null, decl.always === true, decl.timeout ?? DEFAULT_TIMEOUT_S, decl.once === true, ...(decl.then !== undefined ? [decl.then] : []), ...(decl.files !== undefined ? [stableJson(decl.files)] : []), ...(decl.scripts !== undefined ? [stableJson(decl.scripts)] : [])];
     return createHash("sha256").update(JSON.stringify(what)).digest("hex").slice(0, 32);
   };
 

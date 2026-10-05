@@ -70,6 +70,8 @@ describe("several commands waiting", () => {
     expect(rows.map(r => r.dataset["slateApproval"])).toEqual(["k-link", "k-disk", "mcp:zoho-mail"]);
     const [link, disk, inbox] = rows as [HTMLElement, HTMLElement, HTMLElement];
     expect(link.querySelector("[data-slate-consent-cmd]")!.textContent).toBe('vercel link --yes --project "$PROJECT"');
+    // What an Always cannot cover is said on the sheet: a script it names is bound, anything else it reads is not.
+    expect(document.querySelector("[data-slate-consent-reach]")?.textContent).toBe("If a script it names changes, it asks again. The command can read anything you can.");
     expect(link.querySelector("[data-slate-consent-cadence]")!.textContent).toBe("Runs when you press it");
     expect(link.querySelector('[data-slate-consent-env="PROJECT"] dd')!.textContent).toBe("spoo-web");
     expect(link.querySelector('[data-slate-consent-env="VERCEL_TOKEN"] dd')!.textContent).toBe("•••••••••••• (24)");

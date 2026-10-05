@@ -104,7 +104,7 @@ export const SlateAsk = z.discriminatedUnion("kind", [SlateCmdAsk, SlateServerAs
 export type SlateAsk = z.infer<typeof SlateAsk>;
 
 /** An approval as a window or a read sees it: allowed or refused, never whether once or for the thread. */
-export const SlateApprovalView = z.object({ run: z.string().optional(), cmd: z.string().optional(), state: z.enum(["allowed", "refused"]), at: z.number() });
+export const SlateApprovalView = z.object({ run: z.string().optional(), cmd: z.string().optional(), scripts: z.record(z.string(), z.string()).optional(), state: z.enum(["allowed", "refused"]), at: z.number() });
 export type SlateApprovalView = z.infer<typeof SlateApprovalView>;
 
 /** The record as a window reads it: everything but the turn snapshots and the previous document. */
