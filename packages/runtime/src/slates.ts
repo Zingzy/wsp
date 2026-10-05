@@ -1249,7 +1249,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       const by = byOf(caller);
       // A computer the person paired types into the slate and starts nothing on this one, by name or by reaction.
       const paired = roadOf(caller) === "paired";
-      if (paired && (p.start ?? []).length > 0) throw usageRefusal("a paired computer writes a slate's values and starts no run:", "press it on the computer the slate runs on.");
+      if (paired && (p.start ?? []).length > 0) throw usageRefusal("a paired computer writes a slate's values and starts no run.", "Press it on the computer the slate runs on.");
       return serial(threadId, async () => {
         const r = await needRecord(threadId);
         const doc = r.document;
@@ -1433,7 +1433,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       if (p.key.startsWith(slateDomainKey(""))) {
         // A link's domain, allowed for the thread from the window's prompt; nothing runs, so once leaves nothing to keep.
         const domain = p.key.slice(slateDomainKey("").length);
-        if (!/^[a-z0-9.-]+$/.test(domain)) throw usageRefusal(`${p.key} names no domain:`, "approve a link as domain:example.com.");
+        if (!/^[a-z0-9.-]+$/.test(domain)) throw usageRefusal(`${p.key} names no domain.`, "Approve a link as domain:example.com.");
         await serial(p.threadId, async () => {
           if (p.scope === "thread") r.approvals[p.key] = { state: "allowed", at: deps.now(), cmd: `links to ${domain}` };
           else if (p.scope === "refuse") delete r.approvals[p.key];
@@ -1495,12 +1495,12 @@ export function createSlates(deps: SlatesDeps): Slates {
       const r = await needRecord(p.threadId);
       await serial(p.threadId, async () => {
         if (p.key === SLATE_SEND_KEY) {
-          if (r.sendsAllowed === undefined) throw usageRefusal("this thread's reactions were not allowed to message the agent:", "read its approvals again.");
+          if (r.sendsAllowed === undefined) throw usageRefusal("this thread's reactions were not allowed to message the agent.", "Read its approvals again.");
           delete r.sendsAllowed;
           await save(r);
           return;
         }
-        if (r.approvals[p.key] === undefined) throw usageRefusal(`this thread holds no approval ${p.key}:`, "read its approvals again.");
+        if (r.approvals[p.key] === undefined) throw usageRefusal(`this thread holds no approval ${p.key}.`, "Read its approvals again.");
         delete r.approvals[p.key];
         // What it covered stops now: each run started under it is cancelled, out of the queue, and off its timer.
         const covered = Object.entries(r.document?.runs ?? {}).flatMap(([name, declared]) => {
