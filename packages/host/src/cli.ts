@@ -2396,7 +2396,7 @@ export const MCP_OPTIONS: Options = {
 };
 
 const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (${MCP_AGENT_IDS})`;
-const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND} [--host <alias>] [${SCOPED_MCP_ARG}]\n       ${mcpInstallUsage()}`;
+const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND} [--host <alias>] [${SCOPED_MCP_ARG} [--no-slate]]\n       ${mcpInstallUsage()}`;
 
 /** The usage of the command a line stopped short of, whether it is a verb, `mcp` or the word the plumbing folds
  * under; none when no command owns the word. `mcp` needs its own answer here because it is not in the verb table
@@ -2424,6 +2424,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     io.log(mcpPage(words[0] === "install"));
     return 0;
   }
+  if (values["no-slate"] === true && values.scoped !== true) return failed(io, jsonAsked(argv), usageRefusal(`--no-slate goes with ${SCOPED_MCP_ARG}: it is for a thread another thread started`, usage));
   // Ahead of every reading of the state: a scoped server missing its pair would otherwise dial this computer's host
   // on the host's own token, which is acting as the person.
   if (values.scoped === true && words.length === 0 && hostFromEnv(env) === undefined) return failed(io, jsonAsked(argv), authRefusal(scopedNoPairLine));
