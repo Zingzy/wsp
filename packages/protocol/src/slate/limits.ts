@@ -37,7 +37,7 @@ export const SLATE_LIMITS = {
   sketchValueChars: 80,
   sketchTokens: 2_000,
   printColumns: 120,
-  catalogIndexTokens: 900,
+  catalogIndexTokens: 1_450,
   catalogEntryTokens: 200,
 } as const;
 

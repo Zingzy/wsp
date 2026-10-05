@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What slate_catalog answers (10, "The catalog call"): only the part asked for, as text, read off the registries.
-// The index stays under 900 tokens and an entry for a piece under 200; slateTokens is the estimate the tests hold.
+// The index and a piece's entry stay under their token budgets in limits.ts; slateTokens is the estimate the tests hold.
 import { SLATE_FUNCTIONS, SLATE_PIPE_STEPS } from "./expr.js";
 import { SLATE_EXAMPLES } from "./examples.js";
 import { SLATE_ICONS } from "./icons.js";
