@@ -77,12 +77,12 @@ export const QUIZ_TEXT = `<slate title="Networking quiz">
 </slate>`;
 
 export const INBOX_TEXT = `<slate title="Zoho mail">
-  <value name="box" start="aditya@singhi.me" />
+  <value name="box" start="me@example.com" />
   <value name="unread" start={false} />
   <run name="mail" cmd="python3 zoho_mail.py" env={{ BOX: $box }} every={60} />
   <column>
     <row>
-      <select label="Mailbox" value={$box} options={["aditya@singhi.me", "admin@spoo.me"]} />
+      <select label="Mailbox" value={$box} options={["me@example.com", "team@example.com"]} />
       <toggle label="Unread" value={$unread} />
     </row>
     <section title="Inbox" note="checked 4s">
@@ -101,12 +101,12 @@ export const INBOX_VALUES: Record<string, SlateJson> = {
   mail: done([
     ["2026-10-03 22:21", "PostHog", "Here's a 'dangerously-skip-permissions' macro pad", "unread"],
     ["2026-10-03 14:22", "google-noreply@google.com", "Reminder about Google's Terms of Service", "unread"],
-    ["2026-09-29 18:45", "noreply@sender.zohocalendar.in", "Reminder: Aditya<>Sujay @ Tue Sep 29, 2026 07:00 pm - 07:30 pm (Asia/Kolkata)", ""],
-    ["2026-09-29 13:35", "sujay@lab0.ai", "Invitation: Aditya<>Sujay @ Tue 29 Sept 2026 7pm - 7:30pm (IST) (aditya@singhi.me)", ""],
-    ["2026-09-29 12:00", "messages@binary.so", "RE: Update on your application - Join Supermemory founding team - Engineering and research", ""],
-    ["2026-09-29 11:55", "messages@binary.so", "RE: Update on your application - Join Supermemory founding team - Engineering and research", ""],
-    ["2026-09-29 09:45", "noreply@sender.zohocalendar.in", "Reminder: Chat with Aditya Singhi @ Tue Sep 29, 2026 10:00 am - 10:15 am (Asia/Kolkata)", ""],
-    ["2026-09-29 09:00", "hello@cal.com", "Reminder: Chat with Aditya Singhi - Tue, Sep 29, 2026 10:00am", ""],
+    ["2026-09-29 18:45", "noreply@calendar.example.com", "Reminder: design review @ Tue Sep 29, 2026 07:00 pm - 07:30 pm (Asia/Kolkata)", ""],
+    ["2026-09-29 13:35", "sam@example.org", "Invitation: design review @ Tue 29 Sept 2026 7pm - 7:30pm (IST) (me@example.com)", ""],
+    ["2026-09-29 12:00", "jobs@example.net", "RE: Update on your application - Engineering and research", ""],
+    ["2026-09-29 11:55", "jobs@example.net", "RE: Update on your application - Engineering and research", ""],
+    ["2026-09-29 09:45", "noreply@calendar.example.com", "Reminder: Weekly sync @ Tue Sep 29, 2026 10:00 am - 10:15 am (Asia/Kolkata)", ""],
+    ["2026-09-29 09:00", "hello@cal.com", "Reminder: Weekly sync - Tue, Sep 29, 2026 10:00am", ""],
   ].map(([when, from, subject, unread]) => ({ when, from, subject, unread }) as SlateJson)),
 };
 
