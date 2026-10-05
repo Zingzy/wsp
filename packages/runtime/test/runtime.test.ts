@@ -1664,6 +1664,20 @@ describe("runtime session index", () => {
     await rt2.close();
   });
 
+  it("the start of the turn that opened its thread says so, a later one does not, and each says who opened the thread", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: turns().adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const first = await rt.sessions.start(ws.id, { prompt: "first", harness: "claude", startedBy: "cli" });
+    await first.finished;
+    await (await rt.sessions.start(ws.id, { prompt: "second", thread: first.view().threadId!, startedBy: "agent" })).finished;
+    const starts = (await rt.sessions.history(ws.id)).filter(e => e.type === "session.start");
+    expect(starts.map(e => [e.prompt, e.opensThread, e.startedBy])).toEqual([
+      ["first", true, "cli"],
+      ["second", undefined, "cli"],
+    ]);
+    await rt.close();
+  });
+
   /** A harness whose turn the transport cut, as the idle deadline does: a failed done, then an end with no exit code and
    * no result. Every other prompt is one completed turn. */
   const CUT_ID = "77777777-7777-4777-8777-777777777777";

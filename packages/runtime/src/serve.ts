@@ -208,6 +208,8 @@ export interface ServeOptions {
   /** How an export of the image is sealed and written on this computer; without it image.export is refused. The
    * runtime hands over the record and the vault's bytes and never touches a file or a passphrase itself. */
   imageExport?: ImageExporter;
+  /** Told of every op that answered with an error, after the answer is sent; it must not throw. */
+  failed?: (op: string, e: unknown) => void;
   /** Takes one line per refused frame: the op, the kind and the sentence's first line, never the request itself. */
   log?: (line: string) => void;
 }
@@ -2130,6 +2132,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             ...(typeof kind === "string" ? { kind } : {}),
             ...(typeof fix === "string" ? { fix } : {}),
           });
+          opts.failed?.(msg.op, e);
         }
       })();
     };
