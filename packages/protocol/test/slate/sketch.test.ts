@@ -136,7 +136,7 @@ describe("the catalog", () => {
     for (const attr of ["name", "cmd", "env", "every", "always", "once", "timeout", "on", "confirm", "then", "tool"]) expect(lines.some(l => l.startsWith(`${attr}:`) || l.startsWith(`${attr}=`)), attr).toBe(true);
     const text = slateCatalog("runs");
     expect(text).toContain("while the Slate tab is on screen in the app");
-    expect(text).toContain("A failed run's out and json are its own, often empty");
+    expect(text).toContain("Before a first result or after a failure, out and json are empty and len of them 0: show a figure with when={$run.exit == 0}.");
     expect(text).toContain("stale: the command changed since this result.");
     expect(text).toContain("<value> state and each run's last result outlive an app or host restart.");
   });

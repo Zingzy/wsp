@@ -271,7 +271,7 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
     runLines.push(`  $${name}: ${r.state}${r.refreshing === true ? ", refreshing" : ""}${r.text === true ? ", text only" : ""}${facts.length > 0 ? ` (${facts.join(", ")})` : ""}${r.why !== undefined ? ` ${r.why}` : ""}${r.stale === true ? ", stale: the command changed since it ran" : ""}`);
   }
   if (runLines.length > 0) lines.push("runs:", ...runLines);
-  if ((ctx.waiting ?? []).length > 0) lines.push(`waiting for the person's approval: ${ctx.waiting!.join(", ")}; each starts once they allow it on the slate`);
+  if ((ctx.waiting ?? []).length > 0) lines.push(`waiting for the person's approval: ${ctx.waiting!.join(", ")}; each starts once they allow it on the slate. Until then nothing they feed has data: ask the person to allow them, and never call the panel live or ready`);
   const files = Object.entries(doc.files ?? {});
   if (files.length > 0) lines.push(`files in $SLATE_DIR: ${files.map(([name, text]) => `${name} (${size(new TextEncoder().encode(text).length)})`).join(", ")}`);
   if (problems.length > 0) {

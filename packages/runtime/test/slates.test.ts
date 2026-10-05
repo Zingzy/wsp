@@ -356,7 +356,7 @@ describe("the slate v2 host", () => {
     expect(wrote.problems).toEqual([]);
     expect(wrote.waiting).toEqual(["$tick"]);
     expect(wrote.text).toMatch(/^slate v1 "Ticker", \d+ pieces, \d+ bound, 0 problems/);
-    expect(wrote.text).toContain("waiting for the person's approval: $tick; each starts once they allow it on the slate");
+    expect(wrote.text).toContain("waiting for the person's approval: $tick; each starts once they allow it on the slate. Until then nothing they feed has data: ask the person to allow them, and never call the panel live or ready");
     expect(wrote.text).toContain("$tick: held needs your approval");
     const view = (await rt.slates.get(threadId))!;
     expect(view.values["tick"]).toMatchObject({ state: "held" });

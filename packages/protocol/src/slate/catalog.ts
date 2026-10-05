@@ -169,7 +169,7 @@ then='python3 x.py': pipes its raw result to that command; its stdout as JSON be
 tool="server.tool" args={{ id: $id }}, or resource="server:uri": calls an MCP tool instead; slate_catalog <server> lists its tools.
 start($run) in a handler or <when> starts one. The person allows each command once, on the slate, when it first wants to start: at the write for an every= run, at the first press or <when> for the rest. Until then it reads held; allowing it starts it at once. slate_state start runs only what they allowed "Always in this thread".
 $run reads ${SLATE_RUN_FIELDS.join(" ")}; state is idle (never started) held running done failed cancelled.
-json is out parsed as JSON. A failed run's out and json are its own, often empty: show a figure with when={$run.exit == 0}. stale: the command changed since this result. Output is scrubbed of secrets.
+json is out parsed as JSON. Before a first result or after a failure, out and json are empty and len of them 0: show a figure with when={$run.exit == 0}. stale: the command changed since this result. Output is scrubbed of secrets.
 <value> state and each run's last result outlive an app or host restart.
 Chain: <when done={$check} do={set($ok, $check.exit == 0)} />; done fires on any outcome.
 Code only the slate uses goes in <file name="x.py"> and runs as $SLATE_DIR/x.py; project code runs where it is.
