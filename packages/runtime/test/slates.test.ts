@@ -628,6 +628,32 @@ describe("the slate v2 host, round 4", () => {
     }
   }, 30_000);
 
+  it("a paired computer writes values and starts nothing: no reaction fires off its write, and a start it names is refused", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-paired-");
+    await rt.slates.write({ text: PROBE }, asThread);
+    await rt.slates.state({ threadId, values: { $n: 1 } }, "here");
+    const asked = (await rt.slates.get(threadId))!;
+    await rt.slates.approve({ threadId, key: asked.asks[0]!.key, scope: "thread" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect(await probeOf(rt, threadId)).toMatchObject({ state: "done", out: "run 1\n", runs: 1 });
+    }, { timeout: 10_000 });
+
+    await rt.slates.state({ threadId, values: { $n: 5 } }, "paired");
+    await rt.slates.settled();
+    expect((await rt.slates.get(threadId))!.values["n"]).toBe(5);
+    expect(await probeOf(rt, threadId)).toMatchObject({ state: "done", out: "run 1\n", runs: 1 });
+    await expect(rt.slates.state({ threadId, start: ["$probe"] }, "paired")).rejects.toThrow("a paired computer writes a slate's values and starts no run");
+    expect(await probeOf(rt, threadId)).toMatchObject({ state: "done", runs: 1 });
+
+    // The same write from the window on this computer fires the reaction, as it always did.
+    await rt.slates.state({ threadId, values: { $n: 1 } }, "here");
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect(await probeOf(rt, threadId)).toMatchObject({ state: "done", out: "run 1\n", runs: 2 });
+    }, { timeout: 10_000 });
+  }, 30_000);
+
   it("a run that starts again keeps its last result, marked refreshing, until the new one replaces it, across a restart too", async () => {
     const store = memoryStore();
     const { rt, root, threadId, asThread } = await threadOn("wsp-slates-refresh-", { store });

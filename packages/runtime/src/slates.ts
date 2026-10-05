@@ -17,6 +17,7 @@ import {
   printSlate,
   resolveSlateProp,
   runSlateBatch,
+  roadOf,
   scopeOf,
   sketchSlate,
   slateCatalog,
@@ -908,7 +909,7 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   /** One arrival through the batch (02, "The batch"): the module's pure core with a start that runs here, then the
    * cancels, the sends composed, the values saved and pushed. Called inside serial. */
-  async function batch(r: SlateRecord, input: { path: string; value: SlateJson }[], by: BatchBy, o: { event?: BatchEvent; starts?: { run: string; by: RunBy }[]; requestId?: string; sendAt?: number }): Promise<BatchOut> {
+  async function batch(r: SlateRecord, input: { path: string; value: SlateJson }[], by: BatchBy, o: { event?: BatchEvent; starts?: { run: string; by: RunBy }[]; requestId?: string; sendAt?: number; react?: false }): Promise<BatchOut> {
     const doc = r.document;
     if (doc === null) return { asks: [], started: [], sends: [] };
     const views = await viewsFor(r);
@@ -921,6 +922,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       by: by === "timer" ? "run" : by,
       ...(o.event !== undefined ? { event: o.event } : {}),
       reactionSends: r.sendsAllowed !== undefined,
+      ...(o.react === false ? { react: false } : {}),
       // A run's env reads the values as this batch leaves them, so the batch gets the record the start will give and
       // the command is spawned once they are stored.
       start: (run: string, startBy: "person" | "reaction"): SlateRunRecord => {
@@ -1176,6 +1178,9 @@ export function createSlates(deps: SlatesDeps): Slates {
     async state(p, caller) {
       const threadId = targetOf(p, caller, true);
       const by = byOf(caller);
+      // A computer the person paired types into the slate and starts nothing on this one, by name or by reaction.
+      const paired = roadOf(caller) === "paired";
+      if (paired && (p.start ?? []).length > 0) throw usageRefusal("a paired computer writes a slate's values and starts no run:", "press it on the computer the slate runs on.");
       return serial(threadId, async () => {
         const r = await needRecord(threadId);
         const doc = r.document;
@@ -1223,7 +1228,7 @@ export function createSlates(deps: SlatesDeps): Slates {
           spendWrite(threadId);
           runs.release(threadId);
         }
-        const out = input.length > 0 ? await batch(r, input, by, {}) : { asks: [], sends: [] };
+        const out = input.length > 0 ? await batch(r, input, by, paired ? { react: false } : {}) : { asks: [], sends: [] };
         if (by === "agent" && input.length > 0) announce(r, "state", by, []);
         if (starts.length > 0) await batch(r, [], "run", { starts });
         void deliverAll(r, out.sends).catch((e: unknown) => console.warn(`a slate send in thread ${threadWord(threadId)} was not delivered: ${e instanceof Error ? e.message : String(e)}`));
