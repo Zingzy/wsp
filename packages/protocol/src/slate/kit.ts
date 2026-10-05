@@ -7,6 +7,7 @@ import { slateAxisWord, slateChartAxis } from "./chart.js";
 import { slateResultShape, sketchSlateResult } from "./shape.js";
 import { isSlateSecretHandle, type SlateEventName, type SlateJson, type SlatePropValue, type SlateRunDecl, type SlateRunRecord } from "./types.js";
 import { slateTable } from "./paths.js";
+import { SLATE_LIMITS } from "./limits.js";
 
 export const SLATE_TONES = ["default", "muted", "good", "warning", "bad", "info", "accent"] as const;
 const EMPHASIS = ["normal", "strong", "quiet"] as const;
@@ -171,7 +172,7 @@ function rows(v: SlateSketchView, line: (item: SlateJson, index: number) => stri
   const items = v.prop("items");
   if (v.unbound) return [`rows of ${shown(items)}`];
   if (!Array.isArray(items) || items.length === 0) return [shown(v.prop("empty")) || empty];
-  const cut = Math.min(items.length, 8);
+  const cut = Math.min(items.length, SLATE_LIMITS.sketchRows);
   return [...items.slice(0, cut).map((item, i) => line(item, i)), ...(items.length > cut ? [`and ${items.length - cut} more rows; slate_read values with the list's path reads them all`] : [])];
 }
 
@@ -182,7 +183,7 @@ function actions(v: SlateSketchView, item: SlateJson, index: number): string {
   }).map(a => ` [${shown(v.row(a, item, index).label)}]`).join("");
 }
 
-const rowActionItem: SlateItemSpec = { prop: "rowActions", row: true, rowWhen: true, events: ["press"], max: 3, fields: { label: { type: "string", binds: "item", required: true } } };
+const rowActionItem: SlateItemSpec = { prop: "rowActions", row: true, rowWhen: true, events: ["press"], max: SLATE_LIMITS.rowActions, fields: { label: { type: "string", binds: "item", required: true } } };
 
 const PIECES: Record<string, SlatePieceModule> = {
   column: {
@@ -302,7 +303,7 @@ const PIECES: Record<string, SlatePieceModule> = {
     type: "table", level: "core", purpose: "Rows with columns from a bound list: <col> per column, <action> per row button.", holdsChildren: false, repeating: true,
     props: { items: { type: "list", binds: "yes", required: true }, key: rowKey(), empty: str(), rows: { type: "integer", binds: "no", min: 1, max: 5000 } },
     items: {
-      col: { prop: "columns", row: true, min: 1, max: 8, fields: { title: str({ ...req, binds: "no" }), value: { type: "text", binds: "item", required: true }, tone: { type: SLATE_TONES, binds: "item" }, emphasis: { type: EMPHASIS, binds: "item" }, mono: flag(), align: enm(["start", "end"], "start"), width: enm(["fit", "fill"]) } },
+      col: { prop: "columns", row: true, min: 1, max: SLATE_LIMITS.columns, fields: { title: str({ ...req, binds: "no" }), value: { type: "text", binds: "item", required: true }, tone: { type: SLATE_TONES, binds: "item" }, emphasis: { type: EMPHASIS, binds: "item" }, mono: flag(), align: enm(["start", "end"], "start"), width: enm(["fit", "fill"]) } },
       action: rowActionItem,
     },
     events: [],
@@ -324,7 +325,7 @@ const PIECES: Record<string, SlatePieceModule> = {
   facts: {
     type: "facts", level: "core", purpose: "Label and value pairs: <fact> per pair.", holdsChildren: false,
     props: { layout: enm(["line", "grid"], "line") },
-    items: { fact: { prop: "facts", min: 1, max: 12, fields: { label: str(req), value: { type: "text", binds: "yes", required: true }, tone: tone(), emphasis: { type: EMPHASIS, binds: "yes" }, mono: flag(), icon: icon() } } },
+    items: { fact: { prop: "facts", min: 1, max: SLATE_LIMITS.facts, fields: { label: str(req), value: { type: "text", binds: "yes", required: true }, tone: tone(), emphasis: { type: EMPHASIS, binds: "yes" }, mono: flag(), icon: icon() } } },
     events: [],
     sketch: v => {
       const all = present(v, asList(v.raw("facts"))).map((f, i) => v.row(f, null, i));

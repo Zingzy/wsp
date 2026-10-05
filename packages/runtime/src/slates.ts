@@ -195,13 +195,13 @@ const REQUESTS_KEPT = 500;
 /** The person's events a slate takes: five a second, a burst of five, before any is remembered or batched. */
 const EVENTS_PER_SECOND = 5;
 const PRESS_SEND_MS = 2_000;
-const REACTION_SEND_MS = 60_000;
+const REACTION_SEND_MS = 60_000 / SLATE_LIMITS.reactionSendsPerMinute;
 const WRITES_BURST = 20;
 const WRITES_PER_SECOND = 5;
 const WRITES_PER_HOUR = 600;
-const ERRORS_LISTED = 20;
+const ERRORS_LISTED = SLATE_LIMITS.errorsPerPass;
 const PROBLEMS_KEPT = 20;
-const PIECES_NAMED = 20;
+const PIECES_NAMED = SLATE_LIMITS.piecesNamed;
 const SOURCE_NAMES = [...HOST_SLATE_SOURCES.keys()];
 const HELD_APPROVAL = "needs your approval";
 /** Why a command did not start: it starts in its thread's folder, never the host's own, and none is known. */

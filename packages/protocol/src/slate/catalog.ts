@@ -12,6 +12,7 @@ import { SLATE_STEPS } from "./steps.js";
 import { compileSlateText } from "./syntax.js";
 import { SLATE_RUN_FIELDS } from "./types.js";
 import { slateTable } from "./paths.js";
+import { SLATE_LIMITS } from "./limits.js";
 
 /** A conservative token count: each word, each number and each other non-space character is one. Real tokenizers
  * join common words with their spaces and punctuation, so they count fewer. */
@@ -159,11 +160,11 @@ Each attribute:
 name: the run is read as $name.
 cmd: the literal command, run by bash -c in the thread's folder. Single quotes outside double ones; the block form above takes any text.
 env={{ ID: $id }}: values it reads as $ID. args={[$a]}: as $1. stdin={$x}: on standard input. A secret goes only in env or stdin; one in a file, the command reads itself, never through you.
-every={60}: starts it again every 60 seconds, at least 10, while the Slate tab is on screen; at once when it comes back.
+every={60}: starts it again every 60 seconds, at least ${SLATE_LIMITS.timerFloorS}, while the Slate tab is on screen; at once when it comes back.
 always: with every, ticks while the tab is not on screen too.
 once: a start while it still runs is skipped; without once it stops and starts again.
-stream: fills lines as it prints, the last 500, so an output piece shows them live.
-timeout={60}: seconds before it is stopped, at most 600.
+stream: fills lines as it prints, the last ${SLATE_LIMITS.streamLines}, so an output piece shows them live.
+timeout={60}: seconds before it is stopped, at most ${SLATE_LIMITS.timeoutMaxS}.
 on="host": runs on the host's computer, not the thread's.
 confirm="Stop it?": asks the person every start; a formula works too.
 then='python3 x.py': pipes its raw result to that command; its stdout as JSON becomes json, out stays raw.
@@ -199,7 +200,7 @@ function stepsEntry(): string {
 }
 
 function handlersEntry(): string {
-  return ["Handler steps, in onPress, onSubmit, onChange and <when do>; one step or [a, b], at most 6:", ...Object.values(SLATE_STEPS).map(s => `${s.sig}: ${s.purpose}. ${s.runs === "window" ? "Window only, on a press. " : ""}Consent: ${s.consent}. ${s.example}`)].join("\n");
+  return [`Handler steps, in onPress, onSubmit, onChange and <when do>; one step or [a, b], at most ${SLATE_LIMITS.stepsPerReaction}:`, ...Object.values(SLATE_STEPS).map(s => `${s.sig}: ${s.purpose}. ${s.runs === "window" ? "Window only, on a press. " : ""}Consent: ${s.consent}. ${s.example}`)].join("\n");
 }
 
 /** The catalog: the index with no name, else the named piece, source or chapter, as text. */

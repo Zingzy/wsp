@@ -10,7 +10,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, posix, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { writeOwn } from "@wsp/own-file";
-import { EXEC_DEADLINE_EXIT, EXEC_OUTPUT_MAX, EXEC_TIMEOUT_MAX_MS, runOutputTail, SLATE_SECRET_IN_ARGS } from "@wsp/protocol";
+import { EXEC_DEADLINE_EXIT, EXEC_OUTPUT_MAX, EXEC_TIMEOUT_MAX_MS, runOutputTail, SLATE_LIMITS, SLATE_SECRET_IN_ARGS } from "@wsp/protocol";
 import type { SlateJson } from "@wsp/protocol";
 
 export type RunState = "idle" | "held" | "running" | "done" | "failed" | "cancelled";
@@ -381,9 +381,9 @@ export function rewoundRecord(record: RunRecord, now: number = Date.now()): RunR
 }
 
 const DEFAULT_TIMEOUT_S = 60;
-const LINES_KEPT = 500;
-const RUNNING_MAX = 4;
-const STARTS_PER_MINUTE = 12;
+const LINES_KEPT = SLATE_LIMITS.streamLines;
+const RUNNING_MAX = SLATE_LIMITS.runningAtOnce;
+const STARTS_PER_MINUTE = SLATE_LIMITS.startsPerMinute;
 const TIMER_FLOOR_S = 10;
 /** Five failed starts in a row back an `always` timer off to one start every five minutes, until one succeeds (07). */
 const BACKOFF_AFTER = 5;

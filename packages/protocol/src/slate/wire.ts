@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AccountRow } from "../usage.js";
+import { SLATE_LIMITS } from "./limits.js";
 
 // The slate's wire, version 2: the ops a window, the slate verbs and the Rust tool server send the host, what each
 // answers, and the events (01-architecture, "Wire operations"). Shapes the slate module owns (the document, a
@@ -274,8 +275,8 @@ export const SessionSlateEvent = z.object({
   cause: SlateCause,
   version: z.number().int(),
   by: SlateBy,
-  /** The piece ids the write touched, at most 20. */
-  pieces: z.array(z.string()).max(20),
+  /** The piece ids the write touched, at most piecesNamed. */
+  pieces: z.array(z.string()).max(SLATE_LIMITS.piecesNamed),
   /** The run, for cause run. */
   run: z.string().optional(),
 });
