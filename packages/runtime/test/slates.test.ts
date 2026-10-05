@@ -1124,6 +1124,25 @@ describe("the slate v2 host, review fixes", () => {
   <column><button id="go" label="Deploy" onPress={start($deploy)} /></column>
 </slate>`;
 
+  it("a held run whose command the agent rewrote asks again for the new one, and Run once runs it", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-held-rewrite-");
+    const slate = (cmd: string) => `<slate title="Say"><run name="say" cmd="${cmd}" /><column><button id="go" label="Say" onPress={start($say)} /></column></slate>`;
+    await rt.slates.write({ text: slate("echo old") }, asThread);
+    const view = async () => {
+      await rt.slates.settled();
+      return (await rt.slates.get(threadId))!;
+    };
+    const pressed = await rt.slates.event({ threadId, version: (await view()).version, piece: "go", event: "press", requestId: "go" });
+    expect(pressed.ask).toMatchObject({ cmd: "echo old" });
+    await rt.slates.write({ text: slate("echo new") }, asThread);
+    const asks = (await view()).asks;
+    expect(asks).toHaveLength(1);
+    expect(asks[0]).toMatchObject({ run: "say", cmd: "echo new" });
+    expect(asks[0]!.key).not.toBe(pressed.ask!.key);
+    await rt.slates.approve({ threadId, key: asks[0]!.key, scope: "once" });
+    await vi.waitFor(async () => expect((await view()).values["say"]).toMatchObject({ state: "done", out: "new\n" }), { timeout: 10_000 });
+  }, 30_000);
+
   it("the agent's own starts meet the start budget, however many calls carry them", async () => {
     const { rt, threadId, asThread } = await threadOn("wsp-slates-agent-budget-");
     await rt.slates.write({ text: `<slate title="Hi"><run name="hi" cmd="echo hi" /><column><button id="go" label="Hi" onPress={start($hi)} /></column></slate>` }, asThread);

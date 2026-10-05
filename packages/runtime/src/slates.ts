@@ -1138,6 +1138,12 @@ export function createSlates(deps: SlatesDeps): Slates {
     if (next !== null) {
       // A timed run the person has not allowed asks now, shown or not, so this answer and their slate both say it waits.
       const asking = await viewsFor(r);
+      // A start held on the sheet whose command the write changed is held again as declared now, so the sheet shows
+      // the new command and Run once or Don't answers it.
+      for (const a of runs.held(r.threadId)) {
+        const decl = next.runs[a.run];
+        if (decl?.kind === "cmd" && runs.key(approvalDecl(r, decl) as CmdRunDecl) !== a.key) r.values[a.run] = asJson(startNow(r, a.run, "person", asking).record);
+      }
       for (const [run, decl] of Object.entries(next.runs)) {
         const rec = r.values[run];
         if (decl.every !== undefined && isRunRecord(rec) && rec.state === "idle" && provisional(r, run).state === "held") r.values[run] = asJson(startNow(r, run, "timer", asking).record);
