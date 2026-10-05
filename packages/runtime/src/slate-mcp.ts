@@ -603,9 +603,11 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
     return { key: toolKey(d), run, kind: "tool", server: d.server, tool: tool.tool, computer, why: HELD_CONFIRM, args: args ?? {}, ...(typeof tool.confirm === "string" ? { confirm: tool.confirm } : {}), ...(tool.then !== undefined ? { then: tool.then } : {}) };
   };
 
-  const hold = (req: McpRunStart, l: Live, ask: "server" | "tool" | "budget", runs: number): RunStartAnswer => {
+  const hold = (req: McpRunStart, l: Live, ask: "server" | "tool" | "budget", runs: number, beside = false): RunStartAnswer => {
     l.held = { req, ask };
-    const record = write(req.threadId, req.run, l, { state: "held", why: ask === "server" ? HELD_APPROVAL : ask === "tool" ? HELD_CONFIRM : HELD_BUDGET, runs });
+    // A start held beside a call still running leaves that call and its record be: it stops only once the new start
+    // launches.
+    const record = beside ? l.record : write(req.threadId, req.run, l, { state: "held", why: ask === "server" ? HELD_APPROVAL : ask === "tool" ? HELD_CONFIRM : HELD_BUDGET, runs });
     if (ask === "budget") return { outcome: "held", record };
     if (ask === "server" && !lists.has(listKey(req.threadId, req.decl.server))) void listFor(req.threadId, req.decl.server).then(() => deps.onAsks?.(req.threadId));
     return { outcome: "held", record };
@@ -652,6 +654,8 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
   /** The run goes running now and its call follows; a destructive tool found on the way holds it for the confirm. */
   const launch = (req: McpRunStart, l: Live, confirmed: boolean): RunStartAnswer => {
     const { threadId, run, decl } = req;
+    // Starting again stops the call still running, now that this one goes.
+    if (l.record.state === "running") stop(threadId, run, l, undefined);
     const gen = ++l.gen;
     const prior = l.record.runs;
     const runs = prior + 1;
@@ -769,18 +773,22 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
 
     start(req) {
       const l = live(req.threadId, req.run, req.runs ?? 0);
-      if (l.record.state === "running") {
-        if (req.decl.kind === "tool" && req.decl.once === true) return { outcome: "noop", record: l.record };
-        stop(req.threadId, req.run, l, undefined);
-      }
+      const beside = l.record.state === "running";
+      if (beside && req.decl.kind === "tool" && req.decl.once === true) return { outcome: "noop", record: l.record };
       delete l.held;
       if (req.by !== "person") {
         const at = now();
         l.starts = l.starts.filter(s => at - s < 60_000);
-        if (l.starts.length >= STARTS_PER_MINUTE) return hold(req, l, "budget", l.record.runs);
+        if (l.starts.length >= STARTS_PER_MINUTE) return hold(req, l, "budget", l.record.runs, beside);
         l.starts.push(at);
       }
-      if (!deps.approvals.has(req.threadId, consentKey(req.decl))) return hold(req, l, "server", l.record.runs);
+      if (!deps.approvals.has(req.threadId, consentKey(req.decl))) return hold(req, l, "server", l.record.runs, beside);
+      // The call still running read the server's tools, so a confirm this start needs is asked before that call stops.
+      if (beside && req.decl.kind === "tool" && (req.decl.confirm !== undefined || isDestructive(lists.get(listKey(req.threadId, req.decl.server))?.find(t => t.name === (req.decl as { tool: string }).tool)))) {
+        const asked = hold(req, l, "tool", l.record.runs, true);
+        deps.onAsks?.(req.threadId);
+        return asked;
+      }
       return launch(req, l, false);
     },
 
@@ -800,7 +808,11 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
     },
 
     deny(threadId, key) {
-      for (const [run, l] of heldOn(threadId, key)) stop(threadId, run, l, "you said not to run it");
+      // Turning down a new start leaves the call still running to finish.
+      for (const [run, l] of heldOn(threadId, key)) {
+        if (l.record.state === "running") delete l.held;
+        else stop(threadId, run, l, "you said not to run it");
+      }
     },
 
     owns(threadId, key) {

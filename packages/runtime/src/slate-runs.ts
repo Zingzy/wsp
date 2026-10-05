@@ -676,10 +676,13 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     return timer.always && timer.failures >= BACKOFF_AFTER ? `${why ?? "it failed"}; ${BACKED_OFF}` : why;
   };
 
-  const hold = (req: RunStart, l: Live, why: HeldFor): RunStartAnswer => {
+  const hold = (req: RunStart, l: Live, why: HeldFor, beside = false): RunStartAnswer => {
     l.held = { req, for: why };
     const t = thread(req.threadId);
     if (why === "busy" && !t.queue.includes(req.run)) t.queue.push(req.run);
+    // A start held beside an instance still running leaves that instance and its record be: it stops only once the new
+    // start launches.
+    if (beside) return why === "approval" ? { outcome: "held", record: l.record, ask: ask(req) } : { outcome: "held", record: l.record };
     const record = write(req.threadId, req.run, l, { state: "held", why: why === "approval" ? HELD_APPROVAL : why === "busy" ? HELD_BUSY : why === "pressed" ? HELD_PRESSED : HELD_BUDGET, runs: l.record.runs });
     return why === "approval" ? { outcome: "held", record, ask: ask(req) } : { outcome: "held", record };
   };
@@ -705,6 +708,8 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
   const launch = (req: RunStart, l: Live): RunStartAnswer => {
     const { threadId, run, decl } = req;
     const t = thread(threadId);
+    // Starting again stops the instance still running, now that this one goes.
+    if (l.record.state === "running") stop(threadId, run, l, undefined);
     if (running(t) >= RUNNING_MAX) return hold(req, l, "busy");
     const inputs = req.inputs();
     if ((inputs.args ?? []).some(input => "secret" in input)) return fail(req, l, SECRET_IN_ARGS);
@@ -848,23 +853,21 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
         delete l.held;
         return { outcome: "held", record: write(req.threadId, req.run, l, { ...(l.result ?? {}), state: "held", why: HELD_ASLEEP, runs: l.record.runs }) };
       }
-      if (l.record.state === "running") {
-        if (req.decl.once === true) return { outcome: "noop", record: l.record };
-        stop(req.threadId, req.run, l, undefined);
-      }
+      const beside = l.record.state === "running";
+      if (beside && req.decl.once === true) return { outcome: "noop", record: l.record };
       delete l.held;
       const at = now();
       if (req.by !== "person") {
         l.starts = l.starts.filter(s => at - s < 60_000);
-        if (l.starts.length >= STARTS_PER_MINUTE) return hold(req, l, "budget");
+        if (l.starts.length >= STARTS_PER_MINUTE) return hold(req, l, "budget", beside);
         l.starts.push(at);
       } else {
         // The person's starts have a budget of their own: a scripted window pressing fast restarts nothing past it.
         l.pressed = (l.pressed ?? []).filter(s => at - s < 60_000);
-        if (l.pressed.length >= STARTS_PER_MINUTE) return hold(req, l, "pressed");
+        if (l.pressed.length >= STARTS_PER_MINUTE) return hold(req, l, "pressed", beside);
         l.pressed.push(at);
       }
-      if (req.decl.confirm !== undefined || !approvals.has(req.threadId, key(req.decl))) return hold(req, l, "approval");
+      if (req.decl.confirm !== undefined || !approvals.has(req.threadId, key(req.decl))) return hold(req, l, "approval", beside);
       return launch(req, l);
     },
     approve(threadId, run, scope) {
@@ -878,6 +881,12 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     deny(threadId, run) {
       const l = threads.get(threadId)?.runs.get(run);
       if (l?.held === undefined) return;
+      // Turning down a new start leaves the instance still running to finish.
+      if (l.kill !== undefined || l.reshaping !== undefined) {
+        delete l.held;
+        thread(threadId).queue = thread(threadId).queue.filter(r => r !== run);
+        return;
+      }
       stop(threadId, run, l, "you said not to run it");
     },
     revoke: (threadId, k) => approvals.revoke(threadId, k),

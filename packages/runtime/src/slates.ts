@@ -1472,9 +1472,9 @@ export function createSlates(deps: SlatesDeps): Slates {
         viewsNow.set(p.threadId, views);
         for (const run of named) {
           const rec = r.values[run];
-          if (!isRunRecord(rec) || rec.state !== "held") continue;
+          if (!isRunRecord(rec) || (rec.state !== "held" && rec.state !== "running")) continue;
           startedBy.set(byKey(p.threadId, run), "person");
-          if (runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once") !== undefined) continue;
+          if (runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once") !== undefined || rec.state === "running") continue;
           // The hold was a host's before a restart, which this process never saw: hold it again, then answer it.
           const decl = r.document!.runs[run] as Extract<SlateRunDecl, { kind: "cmd" }>;
           const folder = folderFor(p.threadId, decl);

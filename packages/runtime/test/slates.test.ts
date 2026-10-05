@@ -313,15 +313,17 @@ describe("the slate v2 host", () => {
     const { rt, threadId, asThread } = await threadOn("wsp-slates-key-");
     await rt.slates.write({ text: TICKER }, asThread);
     const release = rt.slates.subscribe({ threadId, sources: [] });
+    // A start held while the last one still runs leaves that one to finish, so the ask is what is waited on.
+    let asked = "";
     const held = async (): Promise<string> => {
-      let key = "";
       await vi.waitFor(async () => {
         await rt.slates.settled();
         const v = (await rt.slates.get(threadId))!;
-        expect(v.values["tick"]).toMatchObject({ state: "held" });
-        key = v.asks[0]!.key;
+        expect(v.asks).toHaveLength(1);
+        expect(v.asks[0]!.key).not.toBe(asked);
+        asked = v.asks[0]!.key;
       }, { timeout: 5_000 });
-      return key;
+      return asked;
     };
     const ran = async (n: number): Promise<void> => {
       await vi.waitFor(async () => {
@@ -1113,4 +1115,28 @@ describe("the slate v2 host, round 5", () => {
   <file name="use.sh">{\`curl -H "Authorization: $token" example.com\`}</file>
 </slate>` }, asThread)).rejects.toMatchObject({ kind: "invalid", errors: [expect.objectContaining({ code: "S520" })] });
   });
+});
+
+describe("the slate v2 host, review fixes", () => {
+  const DEPLOY = `<slate title="Deploy">
+  <run name="deploy" cmd='sleep 2; echo deployed' confirm="Deploy now?" timeout={20} />
+  <column><button id="go" label="Deploy" onPress={start($deploy)} /></column>
+</slate>`;
+
+  it("a second press on a confirmed run still running leaves it running, and Don't drops only the new start", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-confirm-again-");
+    await rt.slates.write({ text: DEPLOY }, asThread);
+    const view = async () => (await rt.slates.get(threadId))!;
+    const press = async (requestId: string) => rt.slates.event({ threadId, version: (await view()).version, piece: "go", event: "press", requestId });
+    const first = await press("first");
+    await rt.slates.approve({ threadId, key: first.ask!.key, scope: "once" });
+    await vi.waitFor(async () => expect((await view()).values["deploy"]).toMatchObject({ state: "running" }), { timeout: 10_000 });
+
+    const again = await press("again");
+    expect(again.ask).toMatchObject({ key: first.ask!.key });
+    expect((await view()).values["deploy"]).toMatchObject({ state: "running", runs: 1 });
+    await rt.slates.approve({ threadId, key: first.ask!.key, scope: "refuse" });
+    expect((await view()).values["deploy"]).toMatchObject({ state: "running", runs: 1 });
+    await vi.waitFor(async () => expect((await view()).values["deploy"]).toMatchObject({ state: "done", out: "deployed\n", runs: 1 }), { timeout: 10_000 });
+  }, 30_000);
 });
