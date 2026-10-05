@@ -21,6 +21,7 @@ import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { captured, PAGE } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 runsFromItsOwnFolder();
 
@@ -248,7 +249,7 @@ describe("a guest session on the host", () => {
     it("puts the word on the line of this computer's binary for a thread another thread started, and only there", async () => {
       const seen = join(dir, "argv");
       const server = join(dir, "tool-server");
-      writeFileSync(server, `#!/bin/sh\necho "$@" >> ${seen}\n`, { mode: 0o755 });
+      writeStub(server, `#!/bin/sh\necho "$@" >> ${seen}\n`);
       const kind = guestTools(statePath, server);
       for (const noSlate of [false, true]) {
         kind.open({ argv: ["mcp"], cwd: "/root", env: {}, ...(noSlate ? { noSlate: true as const } : {}), reply: () => undefined, close: () => undefined });
