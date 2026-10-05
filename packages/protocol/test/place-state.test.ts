@@ -22,6 +22,10 @@ import {
   SPEND_LIMIT_LINE,
   spendCapRefusal,
   threadsAtOnce,
+  TURN_LIMIT_MAX_MS,
+  TURN_WALL_MS,
+  placeTurnLimit,
+  turnLimitMsOf,
   type PlaceSetup,
 } from "@wsp/protocol";
 
@@ -50,16 +54,16 @@ describe("threads at once", () => {
   });
 
   it("refuses a number the row's kind does not take, set or reset, a set with nothing in it, one key both set and reset, and counts below one", () => {
-    expect(placeSetRefusal({ kind: "computer", name: "spoo" }, { machines: 2 })).toBe("spoo takes threads at once, agents may start agents and levels deep, not machines at once");
-    expect(placeSetRefusal({ kind: "provider", name: "solari", takesForks: true }, { threads: 2 })).toBe("solari takes machines at once, spend per day, nap after, agents may start agents and levels deep, not threads at once");
-    expect(placeSetRefusal({ kind: "computer", name: "mac", takesForks: false }, { napMs: null })).toBe("mac takes threads at once, agents may start agents and levels deep, not nap after");
+    expect(placeSetRefusal({ kind: "computer", name: "spoo" }, { machines: 2 })).toBe("spoo takes threads at once, turn limit, agents may start agents and levels deep, not machines at once");
+    expect(placeSetRefusal({ kind: "provider", name: "solari", takesForks: true }, { threads: 2 })).toBe("solari takes machines at once, spend per day, nap after, turn limit, agents may start agents and levels deep, not threads at once");
+    expect(placeSetRefusal({ kind: "computer", name: "mac", takesForks: false }, { napMs: null })).toBe("mac takes threads at once, turn limit, agents may start agents and levels deep, not nap after");
     expect(placeSetRefusal({ kind: "computer", name: "spoo", takesForks: true }, { napMs: null })).toBeUndefined();
-    expect(placeSetRefusal({ kind: "computer", name: "spoo", takesForks: false }, {}, ["spend"])).toBe("spoo takes threads at once, agents may start agents and levels deep, not spend per day");
+    expect(placeSetRefusal({ kind: "computer", name: "spoo", takesForks: false }, {}, ["spend"])).toBe("spoo takes threads at once, turn limit, agents may start agents and levels deep, not spend per day");
     expect(placeSetRefusal({ kind: "computer", name: "spoo" }, { threads: 1 })).toBeUndefined();
     expect(placeSetRefusal({ kind: "provider", name: "solari", takesForks: true }, { spendPerDayUsd: 0 })).toBeUndefined();
     expect(placeSetRefusal({ kind: "computer", name: "spoo" }, {}, ["threads"])).toBeUndefined();
-    expect(placeSetRefusal({ kind: "computer", name: "spoo", takesForks: true }, {})).toBe("nothing to set on spoo: it takes threads at once, nap after, agents may start agents and levels deep");
-    expect(placeSetRefusal({ kind: "provider", name: "solari", takesForks: true }, { machines: undefined }, [])).toBe("nothing to set on solari: it takes machines at once, spend per day, nap after, agents may start agents and levels deep");
+    expect(placeSetRefusal({ kind: "computer", name: "spoo", takesForks: true }, {})).toBe("nothing to set on spoo: it takes threads at once, nap after, turn limit, agents may start agents and levels deep");
+    expect(placeSetRefusal({ kind: "provider", name: "solari", takesForks: true }, { machines: undefined }, [])).toBe("nothing to set on solari: it takes machines at once, spend per day, nap after, turn limit, agents may start agents and levels deep");
     expect(placeSetRefusal({ kind: "computer", name: "spoo" }, { threads: 2 }, ["threads"])).toBe("spoo: threads at once is both set and reset; name it once");
     expect(() => PlaceView.shape.cap.parse({ threads: 0 })).toThrow();
     expect(() => PlaceView.shape.cap.parse({ machines: 0, spendPerDayUsd: 10 })).toThrow();
@@ -103,6 +107,45 @@ describe("one rule for each setting", () => {
     expect(placeTakes({ kind: "computer", takesForks: true }, "nap")).toBe(true);
     expect(placeTakes({ kind: "computer", takesForks: false }, "spawn")).toBe(true);
     expect(placeTakes({ kind: "provider", takesForks: true }, "threads")).toBe(false);
+  });
+});
+
+describe("the turn limit", () => {
+  const HOUR = 3_600_000;
+
+  it("is off on a computer the person owns and six hours on a cloud until the person sets one", () => {
+    expect(placeTurnLimit("computer", {})).toBeNull();
+    expect(placeTurnLimit("provider", {})).toBe(6 * HOUR);
+    expect(TURN_WALL_MS).toBe(6 * HOUR);
+  });
+
+  it("runs at what the person set on either kind, off included", () => {
+    expect(placeTurnLimit("computer", { turnLimitMs: 2 * HOUR })).toBe(2 * HOUR);
+    expect(placeTurnLimit("provider", { turnLimitMs: 12 * HOUR })).toBe(12 * HOUR);
+    expect(placeTurnLimit("provider", { turnLimitMs: null })).toBeNull();
+  });
+
+  it("turns the hours a person names into the limit, none of them off, within a day", () => {
+    expect(turnLimitMsOf(0)).toBeNull();
+    expect(turnLimitMsOf(8)).toBe(8 * HOUR);
+    expect(TURN_LIMIT_MAX_MS).toBe(24 * HOUR);
+    expect(() => PlaceView.shape.settings.parse({ turnLimitMs: 25 * HOUR })).toThrow();
+    expect(() => PlaceView.shape.settings.parse({ turnLimitMs: 30 * 60_000 })).toThrow();
+  });
+
+  it("is taken by every computer, the one the app runs on included, and every cloud", () => {
+    expect(placeTakes({ kind: "computer", takesForks: false }, "turn-limit")).toBe(true);
+    expect(placeTakes({ kind: "computer", takesForks: true }, "turn-limit")).toBe(true);
+    expect(placeTakes({ kind: "provider", takesForks: true }, "turn-limit")).toBe(true);
+    expect(placeSetRefusal({ kind: "computer", name: "mac", takesForks: false }, { turnLimitMs: null })).toBeUndefined();
+    expect(placeSetRefusal({ kind: "computer", name: "mac", takesForks: false }, {})).toBe("nothing to set on mac: it takes threads at once, turn limit, agents may start agents and levels deep");
+  });
+
+  it("reads in the settings line at what it runs at, with the default beside one the person set", () => {
+    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, turnLimitMs: null, turnLimitDefault: null })).toBe("spoo: 2 threads at once (the default), no turn limit (the default)");
+    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, turnLimitMs: 8 * HOUR, turnLimitDefault: null, settings: { turnLimitMs: 8 * HOUR } })).toBe("spoo: 2 threads at once (the default), stops a turn at 8h (off by default)");
+    expect(placeSettingsLine({ ...solari, capDefault: CLOUD_CAP_DEFAULT, turnLimitMs: null, turnLimitDefault: 6 * HOUR, settings: { turnLimitMs: null } })).toBe("solari: 3 machines at once (the default), $10 a day (the default), no turn limit (6h by default)");
+    expect(placeSettingsLine({ ...solari, capDefault: CLOUD_CAP_DEFAULT, turnLimitMs: 6 * HOUR, turnLimitDefault: 6 * HOUR })).toBe("solari: 3 machines at once (the default), $10 a day (the default), stops a turn at 6h (the default)");
   });
 });
 

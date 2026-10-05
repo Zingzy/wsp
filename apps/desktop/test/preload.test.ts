@@ -15,7 +15,7 @@ const DROPPED = "/Users/me/Projects/spoo";
 vi.mock("electron", () => ({ contextBridge: { exposeInMainWorld }, ipcRenderer: { invoke, send, sendSync, on, off }, webUtils: { getPathForFile: () => DROPPED } }));
 
 // The preload reads the renderer's argv as its module body runs, which is the first import below.
-process.argv.push("--wsp-version=0.1.7", "--wsp-bundle-hover=Downloads the AppImage.");
+process.argv.push("--wsp-version=0.1.7", "--wsp-bundle-hover=Downloads the AppImage.", "--wsp-update-in-place=1");
 
 async function bridge(): Promise<DesktopBridge> {
   await import("../src/preload.js");
@@ -32,6 +32,11 @@ describe("the preload's bridge", () => {
 
   it("carries the words over Get that the shell's platform row gives", async () => {
     expect((await bridge()).bundleHover).toBe("Downloads the AppImage.");
+  });
+
+  it("carries whether the shell replaces itself, and no reason it cannot where it can", async () => {
+    expect((await bridge()).updatesInPlace).toBe(true);
+    expect((await bridge()).updateWhy).toBeUndefined();
   });
 
   it("carries the picture calls the switcher's cards need, each on its own channel", async () => {
@@ -56,6 +61,16 @@ describe("the preload's bridge", () => {
     expect(invoke).toHaveBeenLastCalledWith("onboarding:install", ["claude", "codex"]);
     await wsp.finish();
     expect(invoke).toHaveBeenLastCalledWith("onboarding:finish");
+  });
+
+  it("carries the release's download, the restart into it and Later's delete, each on its own channel", async () => {
+    const wsp = await bridge();
+    await wsp.getBundle({ version: "0.3.0" });
+    expect(invoke).toHaveBeenLastCalledWith("bundle:get", { version: "0.3.0" });
+    await wsp.quitAndOpen();
+    expect(invoke).toHaveBeenLastCalledWith("bundle:open");
+    await wsp.discardUpdate();
+    expect(invoke).toHaveBeenLastCalledWith("bundle:discard");
   });
 
   it("asks the shell before it hands over the path of a dropped file, and answers nothing when that is refused", async () => {
