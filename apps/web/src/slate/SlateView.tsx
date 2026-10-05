@@ -111,10 +111,13 @@ function PieceBody({ id }: { id: string }) {
   );
 }
 
-/** What a type this build does not know draws: its fallback piece, nothing, its sentence, or the one quiet line. */
+/** What a type this build does not know draws: its fallback piece, nothing, its sentence, or the one quiet line. A
+ * fallback this build cannot draw either, itself or a loop back to it included, is the quiet line. */
 function Fallback({ piece }: { piece: SlatePiece }) {
+  const { engine, views } = useScope();
   const fallback = piece.fallback;
   if (fallback === "drop") return null;
-  if (typeof fallback === "string") return <PieceHost id={fallback} />;
-  return <Quiet data-slate-unknown={piece.type}>{fallback?.text ?? "This part needs a newer wsp"}</Quiet>;
+  const target = typeof fallback === "string" ? engine.piece(fallback) : undefined;
+  if (typeof fallback === "string" && target !== undefined && views[target.type] !== undefined) return <PieceHost id={fallback} />;
+  return <Quiet data-slate-unknown={piece.type}>{typeof fallback === "object" ? fallback.text : "This part needs a newer wsp"}</Quiet>;
 }

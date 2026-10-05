@@ -176,6 +176,24 @@ describe("the slate renderer", () => {
     expect(screen.getByText("A chart goes here")).toBeTruthy();
   });
 
+  it("draws a fallback this build cannot draw either as the quiet line: one that names itself, a loop, an unknown target", () => {
+    const doc = slate({
+      root: "root",
+      pieces: {
+        root: { type: "column", children: ["self", "x", "far", "known"] },
+        self: { type: "future-thing", fallback: "self" },
+        x: { type: "future-thing", fallback: "y" },
+        y: { type: "other-thing", fallback: "x" },
+        far: { type: "future-thing", fallback: "nowhere" },
+        known: { type: "future-thing", fallback: "words" },
+        words: { type: "text", props: { value: "Drawn instead" } },
+      },
+    });
+    draw(doc, {});
+    expect(screen.getAllByText("This part needs a newer wsp")).toHaveLength(3);
+    expect(screen.getByText("Drawn instead")).toBeTruthy();
+  });
+
   it("draws quiet placeholders for values that have not arrived", () => {
     draw(EVERY_PIECE, {});
     // The chart and every number whose figure has not come.
