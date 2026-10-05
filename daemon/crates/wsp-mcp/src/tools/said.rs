@@ -83,6 +83,13 @@ pub struct Asks {
     pub write: String,
     pub write_in: String,
     pub write_size: String,
+    pub edit: String,
+    pub edit_in: String,
+    pub edit_places: String,
+    pub fetch: String,
+    pub change: String,
+    pub change_in: String,
+    pub changes: String,
 }
 
 #[derive(Deserialize)]
