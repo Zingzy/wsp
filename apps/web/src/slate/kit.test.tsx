@@ -223,6 +223,14 @@ describe("the richer kit in the renderer", () => {
     expect(faces("asked")).toEqual([true, false]);
   });
 
+  it("says a figure is not read yet rather than drawing a hole, and a zero reads 0", () => {
+    const doc = compiled(`<slate><value name="d" start={{}} /><column><row><number id="empty" label="Requests" value={$d.rpm} unit="req" /><number id="zero" label="Errors" value={0} /></row></column></slate>`);
+    const c = draw(doc).view.container;
+    expect(piece(c, "empty").textContent).toBe("RequestsNot read yet");
+    expect(piece(c, "empty").querySelector("[data-slate-unit]")).toBeNull();
+    expect(piece(c, "zero").textContent).toContain("0");
+  });
+
   it("draws bars, a status word with no dot, a chip as plain words, and no icon on a button, a text, a fact or a section head", () => {
     const doc = compiled(`<slate><value name="n" start={0} /><column>
       <bars label="Busiest" items={[{ n: 'web', v: 4 }, { n: 'host', v: 2 }]} name={item.n} value={item.v} />

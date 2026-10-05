@@ -8,7 +8,7 @@ import { cn } from "../../lib/utils.js";
 import { STAT } from "../../settings/usage.js";
 import type { SlateEngine } from "../engine.js";
 import type { PieceView } from "../SlateView.js";
-import { figure, str, TONE_INK, toneOf } from "./look.js";
+import { figure, NOTE, str, TONE_INK, toneOf } from "./look.js";
 import { isStatCell, ridersOf } from "./riders.js";
 import { placeOf } from "./runs.js";
 
@@ -48,7 +48,8 @@ export const number: PieceView = {
       <div className={cn(STAT.cell, own && "px-(--settings-inset,20px) pt-4 pb-3.5")}>
         <span className={cn(STAT.label, "leading-5")}>{label}</span>
         <span className={cn("flex min-h-8 min-w-0 flex-wrap items-baseline gap-x-1 tabular-nums", STAT.figure, TONE_INK[toneOf(props["tone"], slate, id)])}>
-          {shown === undefined ? null : (
+          {/* Nothing reads as empty: a figure whose data has not come says so, in the chart's words, at the figure's height. */}
+          {shown === undefined ? <span data-slate-unread className={cn(NOTE, "self-center font-sans font-normal")}>Not read yet</span> : (
             <>
               <DigitRoll value={shown} />
               {unit === undefined ? null : <span data-slate-unit className="font-sans text-xs leading-4 font-normal text-muted-foreground">{unit}</span>}

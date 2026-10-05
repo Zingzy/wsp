@@ -178,7 +178,8 @@ describe("the slate renderer", () => {
 
   it("draws quiet placeholders for values that have not arrived", () => {
     draw(EVERY_PIECE, {});
-    expect(screen.getByText("Not read yet")).toBeTruthy();
+    // The chart and every number whose figure has not come.
+    expect(screen.getAllByText("Not read yet").length).toBeGreaterThan(1);
     expect(screen.getByText("Nothing here")).toBeTruthy();
     expect(screen.queryByText("undefined")).toBeNull();
     expect(screen.queryByText("null")).toBeNull();
