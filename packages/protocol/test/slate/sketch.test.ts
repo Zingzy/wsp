@@ -106,6 +106,7 @@ describe("the catalog", () => {
     expect(slateTokens(slateCatalog())).toBeLessThan(1400);
     for (const said of ["short labels, no emoji.", "in sentence case, never bold text.", "Show a run's json fields, never its raw out; times through date(), time() or ago()."]) expect(slateCatalog(), said).toContain(said);
     expect(slateCatalog()).toContain("One in a file stays there for the run to read, never you.");
+    expect(slateCatalog()).not.toMatch(/Zingzy|repos\/[a-z]+\/wsp/i);
     expect(slateCatalog("runs")).toContain("one in a file, the command reads itself, never through you.");
     expect(slateCatalog()).toContain("A button asked for where the project has no UI goes here: the slate is its UI, and the reply says so.");
     expect(slateCatalog("chart")).toContain("in this computer's time zone");

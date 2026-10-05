@@ -40,7 +40,7 @@ export const SLATE_RULES: readonly string[] = [
 
 export const SLATE_INDEX_EXAMPLE = `<slate title="Issue">
   <value name="id" start="" />
-  <run name="check" cmd='gh api "repos/Zingzy/wsp/issues/$ID"' env={{ ID: $id }} />
+  <run name="check" cmd='gh api "repos/{owner}/{repo}/issues/$ID"' env={{ ID: $id }} />
   <when change={$id} do={start($check)} />
   <column>
     <input label="Issue" value={$id} />
