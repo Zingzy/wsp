@@ -4,7 +4,7 @@
 // opened, so this reads the source rather than a list somebody keeps: every
 // string a person can end up reading, in the app and in the tables the app
 // draws from, against the design spec's word table.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
@@ -115,9 +115,10 @@ const CUT = {
   thisMac: /(?<![\w-])[Tt]his Mac(?![\w-])/,
 } as const;
 
-/** The locked Computers screens name a cloud's machines in two places and nowhere else: the Computers page's blurb
- * and what a cloud's Remove takes. Each is exact, so any other machine word still fails. */
-const LOCKED_MACHINE_WORDS = ["The computers your threads run on, and the clouds that lend them machines.   is the first one.", "Deletes every machine wsp made there and forgets the key."];
+/** The locked Computers screens name a cloud's machines in three places and nowhere else: the Computers page's blurb,
+ * the cloud list's Machines column and what a cloud's Remove takes. Each is exact, so any other machine word still
+ * fails. */
+const LOCKED_MACHINE_WORDS = ["The computers your threads run on, and the clouds that lend them machines.   is the first one.", "Machines", "Deletes every machine wsp made there and forgets the key."];
 
 /** The protocol's words for the computer the host runs on in place of its name. The command line says them; the app
  * names that computer by the name its owner gave it, off the places list. */
@@ -171,6 +172,20 @@ describe("the words a person reads", () => {
     expect(desktop.length).toBeGreaterThan(5);
     expect([...app, ...desktop].flatMap(hereWordsIn)).toEqual([]);
     expect(spelling(desktop, ["thisMac"])).toEqual([]);
+  });
+
+  it("the desktop shell's own pages name the computer too: no page under its src says this Mac outside a comment", () => {
+    const pages = readdirSync(join(ROOT, "apps/desktop/src")).filter(file => file.endsWith(".html"));
+    expect(pages).toContain("onboarding.html");
+    const said = pages.flatMap(file =>
+      readFileSync(join(ROOT, "apps/desktop/src", file), "utf8")
+        // Comments are notes to the next reader, never read by a person on the page: HTML's, CSS's and the script's.
+        .replace(/<!--[\s\S]*?-->|\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, ""))
+        .replace(/(?<![:"'])\/\/.*$/gm, "")
+        .split("\n")
+        .flatMap((line, at) => (CUT.thisMac.test(line) ? [`apps/desktop/src/${file}:${at + 1} ${line.trim()}`] : [])),
+    );
+    expect(said).toEqual([]);
   });
 
   it("no record's id goes into a sentence the app shows", () => {

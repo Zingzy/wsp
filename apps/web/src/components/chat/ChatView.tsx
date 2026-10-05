@@ -11,6 +11,7 @@
 // with where it runs and its status, and the footer weighs the turn's own cost
 // against what those threads spent.
 import { HeroField, HeroMark } from "./EmptyHero.js";
+import { SetupCard, SetupRoom } from "./SetupCard.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
@@ -72,6 +73,14 @@ export function ChatView({
   const listRef = useRef<LegendListRef | null>(null);
   const { view } = thread;
   const empty = view.entries.length === 0 && !view.running;
+  // A create asked with no message that landed here keeps its setup as the thread's first content, the composer
+  // where it stood, until the first message: a page that moved as the create ended read as a fault.
+  const landed = useStore(s => (s.landed?.workspaceId === workspaceId ? s.landed : null));
+  const dropLanded = useStore(s => s.dropLanded);
+  const setupStands = landed !== null && (!thread.hydrated || empty);
+  useEffect(() => {
+    if (landed !== null && thread.hydrated && !empty) dropLanded(workspaceId);
+  }, [landed, thread.hydrated, empty, dropLanded, workspaceId]);
   const cwd = view.cwd ?? undefined;
   const onQuote = useCallback((quote: QuotedSelection) => insertIntoComposer(workspaceId, quoteText(quote)), [workspaceId]);
   // A file named in the transcript opens as its own tab in the Files pane at the line it names, read against the
@@ -230,7 +239,11 @@ export function ChatView({
   return (
     <div ref={rootRef} data-chat-view className="relative isolate h-full min-h-0 text-foreground [--empty-lift:calc((100%-var(--chat-composer-inset,0px)-5.5rem)/2)]">
       <div className="absolute inset-0">
-        {!thread.hydrated ? (
+        {setupStands ? (
+          <SetupRoom>
+            <SetupCard creation={landed.creation} landedAt={landed.at} />
+          </SetupRoom>
+        ) : !thread.hydrated ? (
           <div className="flex h-full items-center justify-center pb-(--chat-composer-inset) text-sm text-muted-foreground">{TRANSCRIPT_LOADING}</div>
         ) : empty ? (
           // A fresh thread centres the headline and the composer as one stack; the composer glides to its dock
@@ -273,7 +286,7 @@ export function ChatView({
         ref={composerRef}
         data-chat-composer-dock
         data-at-end={!showTranscript || atEnd || undefined}
-        data-centred={(thread.hydrated && empty) || undefined}
+        data-centred={(thread.hydrated && empty && !setupStands) || undefined}
         className="pointer-events-none absolute inset-x-0 bottom-0 z-10 *:pointer-events-auto transition-[bottom] duration-300 ease-out data-centred:bottom-(--empty-lift) motion-reduce:transition-none"
       >
         <ScrollToEnd hidden={!showTranscript || atEnd} onClick={() => void listRef.current?.scrollToEnd({ animated: true })} />

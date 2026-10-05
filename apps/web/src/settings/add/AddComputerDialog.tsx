@@ -39,7 +39,7 @@ import { everything, folderKey, githubPick, noPicks, tickUsedClis } from "./choi
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
 import { checkRows, opensLog, runningMs, setupCount, setupRows, setupStanding, stepLogs, type StepLine } from "./setup.js";
-import { RetryActs, SkipAct, StepRow } from "./StepRow.js";
+import { RetryActs, SkipAct, StepRow, useNow } from "./StepRow.js";
 
 const GLYPH = "size-4 text-foreground/80";
 
@@ -345,18 +345,6 @@ export function SetupList({ place, id = "setup", rows = setupRows(place, placeNa
       {refused === null ? null : <RefusalSlot k="retry-refused" said={refused.said} {...(refused.fix === undefined ? {} : { fix: refused.fix })} />}
     </>
   );
-}
-
-/** The time now, moved once a second while `on`: one interval for every row that ticks, never one per row. */
-function useNow(on: boolean): number {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (!on) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [on]);
-  return now;
 }
 
 function RunningView({ place }: { place: PlaceView }) {

@@ -66,6 +66,20 @@ describe.skipIf(renderSkipped !== undefined)("a computer's row at 390", () => {
     expect(got.cut).toEqual([]);
   }, 60_000);
 
+  it.each(["dark", "light"] as const)("in the %s theme at 390 each computer's version fact stands whole, broken between its parts at most and never inside one", async theme => {
+    await page!.emulateMedia({ colorScheme: theme });
+    await page!.goto(`${base}?screen=settings-computers&theme=${theme}`);
+    await page!.waitForSelector("[data-settings-page] [data-grid-fact]");
+    const lines = await page!.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-grid-fact] [data-version-part]")].map(el => el.getClientRects().length),
+    );
+    expect(lines.length).toBeGreaterThan(0);
+    expect(new Set(lines)).toEqual(new Set([1]));
+    // And nothing of it is cut off: its box holds all it says.
+    const cut = await page!.evaluate(() => [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-grid-fact]")].filter(el => el.scrollWidth > el.clientWidth + 1).map(el => el.textContent));
+    expect(cut).toEqual([]);
+  }, 60_000);
+
   it.each(["dark", "light"] as const)("in the %s theme a computer's Levels deep row stands whole in its card under the agents switch, its words at AA", async theme => {
     await page!.emulateMedia({ colorScheme: theme });
     await page!.goto(`${base}?screen=settings-computer&theme=${theme}`);
@@ -82,5 +96,39 @@ describe.skipIf(renderSkipped !== undefined)("a computer's row at 390", () => {
     }, row);
     expect(got).toEqual({ title: "Levels deep", value: "2", inCard: true, stepperInRow: true, under: true });
     for (const ratio of await textContrast(page!, `${row} [data-settings-title], ${row} [data-settings-description], ${row} [data-k='levels-deep-value']`)) expect(ratio).toBeGreaterThanOrEqual(4.5);
+  }, 60_000);
+
+  it.each(["dark", "light"] as const)("in the %s theme at 1440 every list's heads stand over their own values in one style, a cloud's Machines over its count, and no head is blank", async theme => {
+    await page!.setViewportSize({ width: 1440, height: 900 });
+    await page!.emulateMedia({ colorScheme: theme });
+    await page!.goto(`${base}?screen=settings-computers&theme=${theme}`);
+    await page!.waitForSelector("[data-grid=clouds] [data-place-row]");
+    const got = await page!.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-grid]")].map(grid => {
+        const head = [...grid.querySelectorAll<HTMLElement>("[data-grid-head] > *")];
+        const rows = [...grid.querySelectorAll<HTMLElement>("[data-grid-row]")];
+        const style = (el: HTMLElement) => { const cs = getComputedStyle(el); return `${cs.fontSize} ${cs.fontWeight} ${Math.round(el.getBoundingClientRect().bottom)}`; };
+        return {
+          id: grid.dataset["grid"],
+          blank: head.filter(cell => (cell.textContent ?? "").trim() === "").length,
+          styles: [...new Set(head.map(style))],
+          // Each right-aligned head's right edge, against the right edge of every value under it, by its data-k.
+          off: head
+            .filter(cell => getComputedStyle(cell).textAlign === "right")
+            .flatMap(cell => {
+              const right = cell.getBoundingClientRect().right;
+              const k = { Cores: "cores", Memory: "memory", Threads: "threads", Machines: "machines" }[cell.textContent ?? ""];
+              return rows.map(row => row.querySelector<HTMLElement>(`[data-k=${k}]`)).filter(v => v !== null).map(v => Math.abs(v!.getBoundingClientRect().right - right)).filter(gap => gap > 1);
+            }),
+        };
+      }),
+    );
+    expect(got.map(g => g.id)).toEqual(["computers", "clouds"]);
+    for (const grid of got) {
+      expect(grid.blank).toBe(0);
+      expect(grid.styles).toHaveLength(1);
+      expect(grid.off).toEqual([]);
+    }
+    await page!.setViewportSize({ width: 390, height: 844 });
   }, 60_000);
 });

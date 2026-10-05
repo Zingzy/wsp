@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { PLACE_CONNECTS, PLACE_INSTALL, PLACES_WORDS, REPORTED_WORD, ROW_LINE_MAX, START_DAEMON_WORD, absentComputer, absentRoad, awayMsOf, backUrl, linkedOver, daemonSilent, imageCopyStaysLine, lastKnown, ownDaemonDown, placeAddSheetWord, placeDialLine, placeDialRoad, placeNoDialLine, placeOwnedPaths, workspacePlace, workspaceState } from "../src/index.js";
+import { PLACE_INSTALL, PLACES_WORDS, REPORTED_WORD, ROW_LINE_MAX, START_DAEMON_WORD, absentComputer, absentRoad, awayMsOf, backUrl, linkedOver, daemonSilent, imageCopyStaysLine, lastKnown, ownDaemonDown, placeAddSheetWord, placeDialLine, placeDialRoad, placeNoDialLine, placeOwnedPaths, workspacePlace, workspaceState } from "../src/index.js";
 
 describe("the one state of a computer that is not answering", () => {
   const now = Date.parse("2026-09-12T13:30:00.000Z");
@@ -215,20 +215,3 @@ describe("what the two screens say wsp puts on a computer", () => {
   });
 });
 
-describe("what the sheet that adds a computer says about reaching it and about a closed lid", () => {
-  it("says how a computer that is not on this network reaches this Mac, in the clause both roads say it in", () => {
-    // The spec's own header sentence, carried on to the half a box in somebody else's rack needs: a sentence that
-    // stopped at the network told that person wsp was not for them. The sign-in is named in the words the Account
-    // row names it by, and no road between is given a noun.
-    expect(PLACE_CONNECTS).toBe("connects to this Mac over your network, or from outside it once you sign in");
-    expect(PLACES_WORDS.sheet.description).toBe(
-      "A computer you own runs workspaces for your wsp. It connects to this Mac over your network, or from outside it once you sign in. You open nothing on it.",
-    );
-    // Connects, never dials: a first-time person does not know what dialling a Mac is.
-    for (const said of [PLACES_WORDS.sheet.description, PLACES_WORDS.sheet.whileAsleep]) expect(said).not.toMatch(/dial/i);
-  });
-
-  it("answers what a closed lid does to work already running there, which is the whole reason for a second computer", () => {
-    expect(PLACES_WORDS.sheet.whileAsleep).toBe("Threads there keep running while this Mac sleeps; new ones start when it wakes.");
-  });
-});

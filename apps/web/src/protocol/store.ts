@@ -186,6 +186,10 @@ interface State {
    * own yet, and its address says so, so a reload opens it again rather than the thread it was opened from. */
   freshThread: boolean;
   creations: Creation[];
+  /** The create asked with no message that landed on the workspace the centre shows, and when: its setup stays as
+   * that thread's first content until the first message or until the person goes elsewhere, so nothing on the page
+   * moves as it lands. */
+  landed: { workspaceId: string; creation: Creation; at: number } | null;
   sessions: Record<string, SessionView[]>;
   /** The send that has opened no thread yet, per workspace. The runtime writes a session row only once the agent
    * announces itself, which on this computer is the seconds the agent takes to boot, so between the send and that
@@ -208,6 +212,8 @@ interface State {
   /** Also leaves the settings page: every road to a workspace lands on its thread. The pick goes into the page's
    * address, which is where the next load reads it back from. */
   select(id: string | null, threadId?: string | null): void;
+  /** Lets the landed setup go once the thread it stood over has a message. */
+  dropLanded(workspaceId: string): void;
   /** Opens a project's home in the centre, where a task typed and sent becomes a workspace of its own. */
   openProjectHome(projectId: string): void;
   /** Opens the screen the workspace's next thread is written on, with an address of its own, and asks the chat for
@@ -486,13 +492,19 @@ export const useStore = create<State>((set, get) => {
   };
   /** The row leaves with its workspace in place of it; the selection follows, onto the workspace's next thread,
    * and what was typed on the creation's page goes with it, the waiting messages to be sent from there. */
+  /** The landed setup a create leaves on the page it was open on: one asked with a message opens on that message
+   * instead, and one that lands while the person is elsewhere leaves none. */
+  const landedOn = (opened: boolean, creation: Creation | undefined, workspaceId: string): { landed?: State["landed"] } =>
+    opened && creation !== undefined && creation.asked === undefined ? { landed: { workspaceId, creation, at: Date.now() } } : {};
   const finishCreation = (key: string, workspaceId: string): void => {
     handOver(key, workspaceId);
     const opened = get().selectedId === key;
+    const creation = get().creations.find(c => c.key === key);
     set(s => ({
       creations: s.creations.filter(c => c.key !== key),
       selectedId: opened ? workspaceId : s.selectedId,
       freshThread: opened || s.freshThread,
+      ...landedOn(opened, creation, workspaceId),
     }));
     if (opened) writeAddress({ workspaceId });
   };
@@ -728,6 +740,7 @@ export const useStore = create<State>((set, get) => {
     selectedThreadId: null,
     freshThread: false,
     creations: keptAtLoad,
+    landed: null,
     sessions: {},
     launches: {},
     ready: false,
@@ -760,15 +773,18 @@ export const useStore = create<State>((set, get) => {
       if (conn === "live" && api) pull(api);
     },
     select(id, threadId = null) {
-      set({ selectedId: id, selectedThreadId: threadId, freshThread: false, settingsOpen: false, projectHome: null });
+      set(s => ({ selectedId: id, selectedThreadId: threadId, freshThread: false, settingsOpen: false, projectHome: null, landed: s.landed?.workspaceId === id ? s.landed : null }));
       writeAddress(id === null || get().creations.some(c => c.key === id) ? null : { workspaceId: id, ...(threadId === null ? {} : { threadId }) });
     },
+    dropLanded(workspaceId) {
+      set(s => (s.landed?.workspaceId === workspaceId ? { landed: null } : {}));
+    },
     openProjectHome(projectId) {
-      set({ selectedId: null, selectedThreadId: null, freshThread: false, settingsOpen: false, projectHome: projectId });
+      set({ selectedId: null, selectedThreadId: null, freshThread: false, settingsOpen: false, projectHome: projectId, landed: null });
       writeProjectHome(projectId);
     },
     newThread(workspaceId) {
-      set({ selectedId: workspaceId, selectedThreadId: null, freshThread: true, settingsOpen: false, projectHome: null });
+      set({ selectedId: workspaceId, selectedThreadId: null, freshThread: true, settingsOpen: false, projectHome: null, landed: null });
       writeAddress({ workspaceId, fresh: true });
       requestNewThread({ workspaceId });
     },
@@ -1294,6 +1310,7 @@ export const useStore = create<State>((set, get) => {
               creations: s.creations.filter(c => c !== creation),
               selectedId: opened ? e.workspace.id : s.selectedId,
               freshThread: opened || s.freshThread,
+              ...landedOn(opened, creation, e.workspace.id),
             };
           });
           return;

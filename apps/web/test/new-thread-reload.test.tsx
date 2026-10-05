@@ -234,7 +234,7 @@ describe("New thread's first message across a reload", () => {
     const row = store.getState().creations[0]!;
     expect(row).toMatchObject({ workspaceId: "ws_far", failed: { title: `Could not start ${TASK}`, detail: "Snapshot not found" } });
     render(<WorkspaceCreation creation={row} />);
-    const page = document.querySelector("[data-k=setting-up]")!.textContent!;
+    const page = document.querySelector("[data-settings-card=setting-up]")!.textContent!;
     expect(page).toContain(CREATE_STEP_WORDS["fork-requested"]);
     expect(page).toContain("Snapshot not found");
     expect(page).not.toContain(CREATE_ASKED);

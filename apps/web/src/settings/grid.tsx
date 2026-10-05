@@ -6,10 +6,10 @@
 // right-aligned mono, and a state as a word or the action itself. A row grows
 // with what it says.
 import { ChevronRightIcon } from "lucide-react";
-import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
+import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { RowAct } from "../components/agents/agentsRows.js";
 import { cn } from "../lib/utils.js";
-import { VALUE } from "./format.js";
+import { FACT, VALUE } from "./format.js";
 import { CARD_INSET, LINE_FLOOR, LIST_TITLE, NOTE, ROW_FLOOR } from "./layout.js";
 import { CARD_SURFACE } from "./rows.js";
 
@@ -39,6 +39,8 @@ export interface HeadCell {
   readonly word: string;
   readonly num?: boolean;
   readonly wideOnly?: boolean;
+  /** Stands over two columns, for a list whose one figure takes the room of another list's two. */
+  readonly span?: 2;
 }
 
 /** The header row, on the list's template, or on its own where the section's rows are not grid rows. The section's
@@ -47,7 +49,7 @@ export function GridHead({ columns, cells }: { columns?: string; cells: readonly
   return (
     <div data-grid-head className={cn("mb-4 min-h-7 items-end gap-x-4 border-x border-transparent", CARD_INSET, columns === undefined ? "flex" : cn("grid", columns))}>
       {cells.map((cell, at) => (
-        <span key={`${at}-${cell.word}`} className={cn("whitespace-nowrap text-sm leading-5 font-normal", at === 0 ? "-ml-[calc(var(--settings-inset,20px)+1px)] text-foreground/70" : "text-muted-foreground", cell.num === true && "text-right", cell.wideOnly === true && WIDE_ONLY)}>
+        <span key={`${at}-${cell.word}`} className={cn("whitespace-nowrap text-sm leading-5 font-normal", at === 0 ? "-ml-[calc(var(--settings-inset,20px)+1px)] text-foreground/70" : "text-muted-foreground", cell.num === true && "text-right", cell.wideOnly === true && WIDE_ONLY, cell.span === 2 && "col-span-2")}>
           {cell.word}
         </span>
       ))}
@@ -100,8 +102,9 @@ export function GlyphFrame({ children }: { children: ReactNode }) {
   return <span className={GLYPH_FRAME}>{children}</span>;
 }
 
-/** The first cell: the mark in its frame, the name, an optional tag beside it and an optional note under it. */
-export function GridName({ glyph, name, tag, note }: { glyph: ReactNode; name: string; tag?: string; note?: string }) {
+/** The first cell: the mark in its frame, the name, an optional tag beside it, and under it an optional note or a
+ * fact in the mono, a version say. */
+export function GridName({ glyph, name, tag, note, fact }: { glyph: ReactNode; name: string; tag?: string; note?: string; fact?: readonly string[] }) {
   return (
     <span className="flex min-w-0 items-center gap-3">
       {glyph}
@@ -121,15 +124,34 @@ export function GridName({ glyph, name, tag, note }: { glyph: ReactNode; name: s
             {note}
           </span>
         )}
+        {fact === undefined ? null : <VersionFact parts={fact} grid />}
       </span>
     </span>
   );
 }
 
-/** A number or a version, right-aligned in the mono. */
-export function Num({ children, k, wideOnly = false }: { children?: ReactNode; k?: string; wideOnly?: boolean }) {
+/** Which wsp and daemon a computer runs, in the mono at FACT's size, wherever it is drawn: under the name on the
+ * Computers list and after it on the computer's own page. A narrow row breaks it between its parts and never inside
+ * one, since nothing in a row is cut for want of room. */
+export function VersionFact({ parts, grid = false }: { parts: readonly string[]; grid?: boolean }) {
   return (
-    <span {...(k === undefined ? {} : { "data-k": k })} className={cn(VALUE, "min-w-0 truncate text-right", wideOnly && WIDE_ONLY)}>
+    <span data-version-fact {...(grid ? { "data-grid-fact": "" } : {})} className={cn(FACT, "min-w-0 font-mono leading-5")}>
+      {parts.map((part, at) => (
+        <Fragment key={part}>
+          {at === 0 ? null : ", "}
+          <span data-version-part className="whitespace-nowrap">
+            {part}
+          </span>
+        </Fragment>
+      ))}
+    </span>
+  );
+}
+
+/** A number or a version, right-aligned in the mono. */
+export function Num({ children, k, wideOnly = false, span }: { children?: ReactNode; k?: string; wideOnly?: boolean; span?: 2 }) {
+  return (
+    <span {...(k === undefined ? {} : { "data-k": k })} className={cn(VALUE, "min-w-0 truncate text-right", wideOnly && WIDE_ONLY, span === 2 && "col-span-2")}>
       {children}
     </span>
   );

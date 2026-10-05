@@ -7,7 +7,7 @@
 // that adds another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
@@ -179,20 +179,22 @@ describe("the Computers list", () => {
     expect(stateOf("p_2")).toBe(WHERE_WORDS.update);
   });
 
-  it("draws the clouds as their own list on the same template, and no machines column while the host reads none", async () => {
+  it("draws the clouds as their own list on the same template, its machines read off its workspaces and never off a forks figure no host writes for a cloud", async () => {
     const withRoom: PlaceView = { ...solari, forks: { running: 1, room: 1 } };
     useStore.setState({ places: [here, withRoom, ascii], workspaces: [] });
     await mountComputers(computersApi().api);
     const grids = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-grid]")];
     expect(grids.map(g => g.dataset["grid"])).toEqual(["computers", "clouds"]);
-    expect(grids.map(g => [...g.querySelectorAll("[data-grid-head] span")].map(c => c.textContent))).toEqual([["Computer", "Cores", "Memory", "Threads"], ["Cloud", "", "", "Threads"]]);
+    expect(grids.map(g => [...g.querySelectorAll("[data-grid-head] span")].map(c => c.textContent))).toEqual([["Computer", "Cores", "Memory", "Threads"], ["Cloud", "Machines", "Threads"]]);
     // The two lists share one column template, so the state column is one line down the page.
     expect(new Set(grids.map(g => g.querySelector("[data-grid-row]")?.className.match(/grid-cols-\[[^\s]+\]/)?.[0])).size).toBe(1);
     expect(nameOf("solari")).toBe("Solari");
     expect(markOf("solari")).toBeNull();
-    // Nothing on the host writes a cloud's running count or its room yet, so none is drawn, even off a row that says one.
+    // Nothing on the host writes a cloud's running count or its room, so a row that says one is not read: no workspace
+    // stands on it, so it runs none.
     expect(listRow("solari").textContent).not.toContain("1/2");
-    expect(document.querySelector("[data-settings-page]")?.textContent).not.toMatch(/this month|Machines/);
+    expect(cellOf("solari", "machines")).toBe("0");
+    expect(document.querySelector("[data-settings-page]")?.textContent).not.toMatch(/this month/);
   });
 
   it("draws a cloud row the host lists even with no key held and no workspace on it, as a stand-in serving that cloud is", async () => {
@@ -327,6 +329,38 @@ describe("the Computers list", () => {
     expect(asks).toBe(1);
     expect(listRow("box").textContent).not.toContain("$");
   });
+
+  it("says on each row which wsp and daemon it runs, in the mono under the name: this computer the host's release and its daemon, a joined one the daemon it reported, a cloud nothing", async () => {
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: true, version: "0.9.3", tokenHash: "a".repeat(64) };
+    try {
+      useStore.setState({ places: [{ ...here, daemonVersion: DAEMON_VERSION }, { ...box, daemonVersion: DAEMON_VERSION - 2, behind: { word: placeDaemonBehind({ daemonVersion: DAEMON_VERSION - 2 })!, fix: "wsp add hetzner --update", act: "update" } }, solari] });
+      await mountComputers(computersApi({ placesUpdate: async () => box } as Partial<Api>, setupOf({ keys: { solari: true } })).api);
+      const versions = (id: string) => listRow(id).querySelector<HTMLElement>("[data-grid-fact]");
+      expect(versions("here")?.textContent).toBe(`wsp 0.9.3, daemon ${DAEMON_VERSION}`);
+      expect(versions("p_2")?.textContent).toBe(`daemon ${DAEMON_VERSION - 2}`);
+      // One fact in one font on the ladder: the mono at FACT's 13 px, whole on its line at any width.
+      for (const word of ["font-mono", "tabular-nums", "text-[13px]"]) expect(versions("here")!.className.split(" ")).toContain(word);
+      expect(versions("here")!.className).not.toContain("text-xs");
+      // It breaks between its parts at most, never inside one.
+      expect([...versions("here")!.querySelectorAll("[data-version-part]")].map(part => [part.textContent, part.className])).toEqual([["wsp 0.9.3", "whitespace-nowrap"], [`daemon ${DAEMON_VERSION}`, "whitespace-nowrap"]]);
+      // Nothing the host does not carry is stood in for: a cloud's machines report no daemon to this list.
+      expect(versions("solari")).toBeNull();
+      // The joined computer that runs an older daemon says so on its row with the act that brings it level.
+      expect(listRow("p_2").querySelector("[data-k=update]")?.textContent).toBe(WHERE_WORDS.update);
+    } finally {
+      delete (window as unknown as { __WSP__?: unknown }).__WSP__;
+    }
+  });
+
+  it("gives a cloud's row how many machines it runs now under its own head and stands no empty cell where a computer's cores and memory go", async () => {
+    // Two forks running at Solari and one paused there, which runs no machine.
+    useStore.setState({ places: [here, solari], workspaces: [atSolari("ws_1"), atSolari("ws_2"), { ...atSolari("ws_3"), phase: "napping" }] });
+    await mountComputers(computersApi({}, setupOf({ keys: { solari: true } })).api);
+    const head = [...document.querySelectorAll("[data-grid=clouds] [data-grid-head] > *")].map(cell => cell.textContent);
+    expect(head).toEqual([WHERE_WORDS.heads.cloud, WHERE_WORDS.heads.machines, WHERE_WORDS.heads.threads]);
+    expect(cellOf("solari", "machines")).toBe("2");
+    expect([...listRow("solari").children].filter(cell => cell.textContent === "" && cell.tagName !== "svg" && cell.querySelector("svg, button, canvas") === null && !cell.hasAttribute("data-state-cell")).map(cell => cell.outerHTML)).toEqual([]);
+  });
 });
 
 describe("a computer's own page", () => {
@@ -457,8 +491,10 @@ describe("a computer's own page", () => {
     const head = document.querySelector("[data-settings-page] [data-k=computer-head]")!;
     expect(head.querySelector("[data-settings-title]")?.textContent).toBe("hetzner");
     expect(head.querySelector("[data-settings-description]")?.textContent).toBe(`Ubuntu 24.04, ${box.shape!.cpu} cores, ${fmtMemGb(box.shape!.memMb)}`);
-    // The app never says an internal word: the daemon's version is the doctor's to say, not the page's head.
-    expect(head.textContent).not.toMatch(/daemon/i);
+    // Which daemon it runs is the one fact after its name, as an agent's version is after the agent's.
+    expect(head.querySelector("[data-settings-mark]")?.textContent).toBe(`daemon ${DAEMON_VERSION}`);
+    // The same fact in the same font as the list draws it under the name.
+    for (const word of ["font-mono", "text-[13px]"]) expect(head.querySelector("[data-settings-mark] [data-version-fact]")?.className.split(" ")).toContain(word);
     // Ready draws no mark and has nothing to say.
     expect(document.querySelector("[data-k='place-state']")?.textContent).toBe("");
     expect(document.querySelector("[data-k='place-state'] [data-state-mark]")).toBeNull();

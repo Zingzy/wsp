@@ -36,11 +36,11 @@ import { readRecipes, useRecipes } from "./recipesStore.js";
 import { ComputerGlyph, useComputerIcon } from "./ComputerGlyph.js";
 import { BehindRow, LimitsCard, SpawnCard } from "./computerSettings.js";
 import { ADD_COMPUTER_WORDS, AGENTS_PAGE_WORDS, PLACE_STATE_WORDS, WHERE_WORDS, capitalised } from "./format.js";
-import { Chevron, GlyphFrame, Grid, GridHead, GridName, GridRow, LIST_COLUMNS, Num, PAGE_COLUMNS, StateCell, wordOnly, type HeadCell } from "./grid.js";
+import { Chevron, GlyphFrame, Grid, GridHead, GridName, GridRow, LIST_COLUMNS, Num, PAGE_COLUMNS, StateCell, VersionFact, wordOnly, type HeadCell } from "./grid.js";
 import { copyOn } from "./image.js";
 import { ImageCard, useImageStanding } from "./ImageCard.js";
 import { openImageRecipe } from "./openAt.js";
-import { NOTHING_HELD, absenceOf, absentOf, hereName, isProviderPlace, placeName, placeOf, placeStateCell, type PlaceHolding, type PlaceStateCell } from "./places.js";
+import { NOTHING_HELD, absenceOf, absentOf, hereName, isProviderPlace, placeName, placeOf, placeStateCell, versionFact, type PlaceHolding, type PlaceStateCell } from "./places.js";
 import { cloudsOffered, keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 import { CARD_SURFACE, Card, HeadRow, Row, type SettingsCardData, type SettingsRowData } from "./rows.js";
@@ -74,6 +74,18 @@ export function runningThreadsOn(ctx: Pick<SettingsContext, "places" | "workspac
     if (place === undefined) continue;
     const running = foldThreads(ctx.sessions[workspace.id] ?? []).filter(thread => thread.status === "running").length;
     counts[place.id] = (counts[place.id] ?? 0) + running;
+  }
+  return counts;
+}
+
+/** How many machines run on each row now, by the id of the row: a workspace on a cloud is one machine there, and a
+ * paused one runs none. The host writes no running count for a cloud, so the workspaces are what it is read off. */
+export function runningMachinesOn(ctx: Pick<SettingsContext, "places" | "workspaces" | "statuses">): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const workspace of ctx.workspaces) {
+    const place = placeOf(ctx.places, workspace);
+    if (place === undefined || (ctx.statuses[workspace.id]?.phase ?? workspace.phase) !== "running") continue;
+    counts[place.id] = (counts[place.id] ?? 0) + 1;
   }
   return counts;
 }
@@ -121,6 +133,7 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
   const computers = ctx.places.filter(place => !isProviderPlace(place) && !ctx.pending.some(p => p.placeId === place.id));
   const clouds = ctx.places.filter(isProviderPlace);
   const running = runningThreadsOn(ctx);
+  const machines = runningMachinesOn(ctx);
   const go = (place: PlaceView) => () => ctx.go({ kind: "computer", id: place.id });
   const refused =
     ctx.placesRefused === null ? null : <RefusalSlot k="places-refused" said={WHERE_WORDS.notRead(ctx.placesRefused.said)} {...(ctx.placesRefused.fix === undefined ? {} : { fix: ctx.placesRefused.fix })} />;
@@ -146,9 +159,9 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
   const cloudsBody = (
     <div className="flex flex-col gap-2">
       {clouds.length === 0 ? null : (
-        <Grid id="clouds" head={<GridHead columns={LIST_COLUMNS} cells={[{ word: H.cloud }, { word: "", wideOnly: true }, { word: "", wideOnly: true }, { word: H.threads, num: true }]} />}>
+        <Grid id="clouds" head={<GridHead columns={LIST_COLUMNS} cells={[{ word: H.cloud }, { word: H.machines, num: true, wideOnly: true, span: 2 }, { word: H.threads, num: true }]} />}>
           {clouds.map(place => (
-            <CloudListRow key={place.id} place={place} running={running[place.id] ?? 0} cell={stateCellAt(ctx, place)} open={go(place)} ctx={ctx} />
+            <CloudListRow key={place.id} place={place} machines={machines[place.id] ?? 0} running={running[place.id] ?? 0} cell={stateCellAt(ctx, place)} open={go(place)} ctx={ctx} />
           ))}
         </Grid>
       )}
@@ -212,11 +225,12 @@ const placeGlyph = (place: PlaceView) => (
 
 /** One computer on the list: its cores, its memory, the threads running there as a count until a cap gives the
  * count a track, and its state. */
-export function ComputerListRow({ place, running, cell, open, ctx }: { place: PlaceView; running: number; cell: PlaceStateCell; open?: () => void; ctx: Pick<SettingsContext, "setPreferences"> }) {
+export function ComputerListRow({ place, running, cell, open, ctx }: { place: PlaceView; running: number; cell: PlaceStateCell; open?: () => void; ctx: Pick<SettingsContext, "setPreferences" | "shell"> }) {
   const menu = useRowMenu(place, ctx);
+  const fact = versionFact(place, ctx.shell.host);
   return (
     <GridRow columns={LIST_COLUMNS} {...(open === undefined ? {} : { open })} onContextMenu={menu} {...(cell.why === undefined ? {} : { title: cell.why })} attrs={{ "data-place-row": place.id }}>
-      <GridName glyph={placeGlyph(place)} name={placeName(place)} {...(place.default ? { tag: WHERE_WORDS.default } : {})} />
+      <GridName glyph={placeGlyph(place)} name={placeName(place)} {...(place.default ? { tag: WHERE_WORDS.default } : {})} {...(fact === undefined ? {} : { fact })} />
       <Num k="cores" wideOnly>
         {place.shape?.cpu}
       </Num>
@@ -230,13 +244,15 @@ export function ComputerListRow({ place, running, cell, open, ctx }: { place: Pl
   );
 }
 
-/** One cloud on the list: its name, the threads running on its machines and its state. */
-function CloudListRow({ place, running, cell, open, ctx }: { place: PlaceView; running: number; cell: PlaceStateCell; open: () => void; ctx: SettingsContext }) {
+/** One cloud on the list: its name, how many machines it runs now, the threads running on them and its state. */
+function CloudListRow({ place, machines, running, cell, open, ctx }: { place: PlaceView; machines: number; running: number; cell: PlaceStateCell; open: () => void; ctx: SettingsContext }) {
   const menu = useRowMenu(place, ctx);
   return (
     <GridRow columns={LIST_COLUMNS} open={open} onContextMenu={menu} {...(cell.why === undefined ? {} : { title: cell.why })} attrs={{ "data-place-row": place.id }}>
       <GridName glyph={placeGlyph(place)} name={placeName(place)} />
-      <span className="col-span-2 max-md:hidden" />
+      <Num k="machines" wideOnly span={2}>
+        {machines}
+      </Num>
       <Num k="threads">{running}</Num>
       <PlaceState place={place} cell={cell} onSignIn={open} />
       <Chevron />
@@ -523,6 +539,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
   const here = place.id === HERE_PLACE_ID;
   const cloud = isProviderPlace(place);
   const name = placeName(place);
+  const fact = versionFact(place, ctx.shell.host);
   const held = !cloud || keyHeld(place.name, ctx.reads.setup);
   const standing = useImageStanding(place, ctx);
   const image = cloud && held ? (ctx.reads.image?.image ?? null) : null;
@@ -533,7 +550,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
     <>
       <section data-settings-card="computer" className="flex flex-col gap-3">
         <div className={CARD_SURFACE}>
-          <HeadRow glyph={<ComputerGlyph place={place} className="size-4 text-foreground/80" />} title={name} {...(shapeLine(place) === "" ? {} : { line: shapeLine(place) })} attrs={{ "data-k": "computer-head" }} />
+          <HeadRow glyph={<ComputerGlyph place={place} className="size-4 text-foreground/80" />} title={name} {...(fact === undefined ? {} : { mark: <VersionFact parts={fact} /> })} {...(shapeLine(place) === "" ? {} : { line: shapeLine(place) })} attrs={{ "data-k": "computer-head" }} />
           {cloud ? null : <BehindRow place={place} ctx={ctx} />}
         </div>
         <PlaceStateLine place={place} ctx={ctx} />

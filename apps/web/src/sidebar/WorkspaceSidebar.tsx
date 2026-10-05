@@ -21,7 +21,7 @@
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { HOST_ASLEEP_LINE, SETTLE_MS, modelOf, workspaceState, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, SETTLE_MS, copiesFolder, modelOf, workspaceKind, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
 import { CREATE_ASKED, CREATE_STEP_WORDS, currentStep, stepWords, stoppedStep } from "../shell/creationLog.js";
@@ -126,10 +126,14 @@ function AttemptGroup({ title, copies, children }: { title: string; copies: numb
   );
 }
 
+/** The workspace entries a project's row leaves off its folder's: renaming and removing a record no row shows. */
+const FOLDER_LEFT_OFF = new Set(["edit", "remove"]);
+
 export function WorkspaceSidebar() {
   const api = useStore(s => s.api);
   const conn = useStore(s => s.conn);
   const workspaces = useStore(s => s.workspaces);
+  const statuses = useStore(s => s.statuses);
   const forwards = useStore(s => s.forwards);
   const editorsAttached = useMemo(() => new Set(forwards.filter(f => f.kind === "editor").map(f => f.workspaceId)), [forwards]);
   const select = useStore(s => s.select);
@@ -273,9 +277,17 @@ export function WorkspaceSidebar() {
     openSettings: openProjectSettings,
     ...(api?.projectsRemove === undefined ? {} : { removeProject: (project: string) => void removeProject(project) }),
   };
-  /** One project's actions, as the switcher's rows offer them. */
-  const projectActionsOf = (group: ProjectGroup): ResolvedAction[] =>
-    resolveActions(projectActions, { id: group.project.id, name: group.project.name, workspaces: group.workspaces.map(w => w.displayName) }, projectVerbs);
+  /** One project's actions, as the switcher's rows offer them, then its folder's own, the entries a tile offers for the
+   * copy it runs on: a folder no thread runs in draws no tile, so this row is the one way to them. The edit and remove
+   * entries stay off, since they act on a record no row shows. An act that opens something puts the folder on screen
+   * first, since a pane opened on a workspace nobody looks at shows nothing. */
+  const projectActionsOf = (group: ProjectGroup): ResolvedAction[] => {
+    const own = resolveActions(projectActions, { id: group.project.id, name: group.project.name, workspaces: group.workspaces.map(w => w.displayName) }, projectVerbs);
+    const folder = workspaces.find(w => w.project.id === group.project.id && w.worktree === undefined && copiesFolder(workspaceKind(w)));
+    if (folder === undefined) return own;
+    const acts = resolveActions(workspaceActions, workspaceTarget(folder, statuses[folder.id] ?? null, places), verbs).filter(action => action.id !== "new-thread" && !FOLDER_LEFT_OFF.has(action.group));
+    return [...own, ...acts.map(action => (action.group !== "open" ? action : { ...action, run: async () => { select(folder.id); await action.run(); } }))];
+  };
 
   /** The name a person typed on a tile: the store takes it while the field stays as it is, and the field closes only
    * once the store has it. A refusal leaves the name in the field to try again, with the reason in the toast. */

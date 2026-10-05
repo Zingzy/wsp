@@ -15,6 +15,9 @@ const PAGE = readFileSync(new URL("../src/onboarding.html", import.meta.url), "u
 
 const TOOLS_FIX = "Take the tick off that agent, or fix its config and press again.";
 
+/** The name the shell reads for this computer. */
+const HERE = "zingzy's MacBook Pro";
+
 /** One computer's catalog rows as the recipe scan answers with them: two agents here, two the scan did not find. */
 const AGENTS = [
   { id: "claude", name: "Claude Code", found: true, configured: false },
@@ -55,7 +58,7 @@ function halves(slot: Element): { happened: string; fix: string } {
 
 /** The page with the shell's answers in place, opened and left until its scan has landed. `refusedScan` makes the
  * scan reject that many times before it answers, which is how a computer whose agents cannot be read is driven. */
-async function open(agents: unknown[] = AGENTS, opts: { refusedScan?: number; refusedTools?: string[] } = {}): Promise<Screen> {
+async function open(agents: unknown[] = AGENTS, opts: { refusedScan?: number; refusedTools?: string[]; unnamed?: true } = {}): Promise<Screen> {
   const asks: Asks = { install: [], finish: 0, scans: 0 };
   const dom = new JSDOM(PAGE, {
     runScripts: "dangerously",
@@ -64,6 +67,7 @@ async function open(agents: unknown[] = AGENTS, opts: { refusedScan?: number; re
       // jsdom has no matchMedia; the page reads it once to follow the computer's appearance, which Chromium answers.
       (window as unknown as { matchMedia: unknown }).matchMedia = () => ({ matches: false, addEventListener: () => {} });
       (window as unknown as { wsp: unknown }).wsp = {
+        here: () => (opts.unnamed === true ? Promise.reject(new Error("scutil: no ComputerName")) : Promise.resolve(HERE)),
         agents: () => {
           asks.scans += 1;
           return asks.scans <= (opts.refusedScan ?? 0) ? Promise.reject(new Error("the agent stores could not be read")) : Promise.resolve(agents);
@@ -132,8 +136,8 @@ describe("the first launch", () => {
   it("draws one row per catalog agent, the found ones first and ticked, the missing ones held, and Open wsp gives the ticked ones the tools and then asks the shell to open the app", async () => {
     const screen = await open();
     expect(rows(screen)).toEqual([
-      { id: "claude", checked: true, disabled: false, state: "on this Mac" },
-      { id: "codex", checked: true, disabled: false, state: "on this Mac" },
+      { id: "claude", checked: true, disabled: false, state: "installed" },
+      { id: "codex", checked: true, disabled: false, state: "installed" },
       { id: "gemini", checked: false, disabled: true, state: "not installed" },
       { id: "hermes", checked: false, disabled: true, state: "not installed" },
     ]);
@@ -158,10 +162,19 @@ describe("the first launch", () => {
     expect(screen.asks.install).toEqual([["codex"]]);
   });
 
+  it("names the computer by the name the shell reads in every sentence, and where the shell cannot read one names no place rather than a word for it", async () => {
+    const named = await open(AGENTS.map(a => ({ ...a, found: false })));
+    expect(named.text("#agents .sentence")).toBe(`Each ticked agent gets the wsp tools and skill, so it can open threads and tasks on ${HERE}.`);
+    const unnamed = await open(AGENTS.map(a => ({ ...a, found: false })), { unnamed: true });
+    expect(unnamed.text("#agents .sentence")).toBe("Each ticked agent gets the wsp tools and skill, so it can open threads and tasks.");
+    expect(unnamed.text("#line")).toBe("No agent found. Install Claude Code or Codex, then press Check again.");
+    expect(`${unnamed.text("#welcome")} ${unnamed.text("#agents")}`).not.toMatch(/this Mac|this computer/);
+  });
+
   it("on a computer with no agent holds every row and reads Check again, which reads the agents again and opens nothing", async () => {
     const screen = await open(AGENTS.map(a => ({ ...a, found: false })));
     expect(rows(screen).every(r => !r.checked && r.disabled)).toBe(true);
-    expect(screen.text("#line")).toBe("No agent found on this Mac. Install Claude Code or Codex, then press Check again.");
+    expect(screen.text("#line")).toBe(`No agent found on ${HERE}. Install Claude Code or Codex, then press Check again.`);
     expect(keycap(screen)).toBe("Check again");
     expect((screen.at("#open") as HTMLButtonElement).disabled).toBe(false);
     await screen.press("#open");
@@ -181,9 +194,9 @@ describe("the first launch", () => {
     expect((screen.at("#open") as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("leaves a refused scan's reason standing and never records this Mac off an empty list, reading again on Check again", async () => {
+  it("leaves a refused scan's reason standing and never records this computer off an empty list, reading again on Check again", async () => {
     const screen = await open(AGENTS, { refusedScan: 2 });
-    expect(halves(screen.at("#status"))).toEqual({ happened: "The agents on this Mac could not be read.", fix: "Press Check again to read them again." });
+    expect(halves(screen.at("#status"))).toEqual({ happened: `The agents on ${HERE} could not be read.`, fix: "Press Check again to read them again." });
     // A scan that learned nothing is not a computer with no agents: no row, and the line says nothing rather than that.
     expect(rows(screen)).toEqual([]);
     expect(screen.text("#line")).toBe("");
@@ -192,7 +205,7 @@ describe("the first launch", () => {
     await screen.press("#open");
     expect(screen.asks.finish).toBe(0);
     expect(screen.asks.install).toEqual([]);
-    expect(halves(screen.at("#status")).happened).toBe("The agents on this Mac could not be read.");
+    expect(halves(screen.at("#status")).happened).toBe(`The agents on ${HERE} could not be read.`);
     // The third read lands: the refusal clears and the rows arrive, and the next press opens wsp.
     await screen.press("#open");
     expect(screen.text("#status")).toBe("");

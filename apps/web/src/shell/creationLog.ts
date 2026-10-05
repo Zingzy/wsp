@@ -8,6 +8,7 @@
 // a stage is never named twice in two spellings.
 import { creationAwaits, GOLDEN_STAGE_WORDS, type ProjectView, type GoldenStageEvent, type WorkspaceCreateStage } from "@wsp/protocol";
 import type { Creation, CreationLine } from "../protocol/store.js";
+import type { StepLine } from "../settings/add/setup.js";
 
 export const CREATE_STEP_WORDS: Record<WorkspaceCreateStage, string> = {
   "fork-requested": "Making the copy",
@@ -28,13 +29,6 @@ export const CREATE_UNHEARD = "wsp is no longer making it, and it never came up:
  * protocol's stage words, capitalised. */
 export const stepWords = (line: Pick<CreationLine, "stage" | "message">): string =>
   line.stage === "image" ? line.message.charAt(0).toUpperCase() + line.message.slice(1) : CREATE_STEP_WORDS[line.stage];
-
-/** How long into the create a step came: seconds under a minute and minutes with seconds after, so rows a second
- * apart never read alike. */
-export function stepTime(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-}
 
 /** The folder a thread being started runs in: the project's own. */
 export function creationFolder(project: Pick<ProjectView, "computer" | "path">, _name: string): string {
@@ -59,4 +53,24 @@ export function imageBuildFrame(e: Pick<GoldenStageEvent, "stage" | "detail">, p
   const word = e.stage === "failed" ? undefined : GOLDEN_STAGE_WORDS[e.stage];
   if (word === undefined) return undefined;
   return { message: imageBuildLine(place, word.charAt(0).toLowerCase() + word.slice(1)), ...(e.detail === undefined ? {} : { notice: e.detail }) };
+}
+
+/** A create's lines as the step list draws them: each ended step with how long it took, off the gap to the line after
+ * it, and the last one under way with its time climbing, or the one a refusal stopped on, failed with the reason. The
+ * refusal is not a step of its own, and a create that has reported nothing yet is one step, the asking. Once the
+ * create has `ended`, `now` is the moment it landed and the last step is done at that time. */
+export function creationSteps(creation: Pick<Creation, "lines" | "failed" | "askedAt">, now: number, ended = false): StepLine[] {
+  const { failed } = creation;
+  const taken = creation.lines.filter(line => line.stage !== "failed");
+  const refusedAt = creation.lines.find(line => line.stage === "failed");
+  const stopped = (row: Pick<StepLine, "id" | "name">, ms?: number): StepLine => ({ ...row, state: "failed", ...(ms === undefined ? {} : { ms }), ...(failed === null ? {} : { said: failed.detail }) });
+  if (taken.length === 0) return [failed !== null ? stopped({ id: "asked", name: CREATE_ASKED }) : { id: "asked", name: CREATE_ASKED, state: ended ? "done" : "working" }];
+  return taken.map((line, i) => {
+    const row = { id: String(i), name: stepWords(line) };
+    const next = taken[i + 1];
+    if (next !== undefined) return { ...row, state: "done", ms: Math.max(0, next.elapsedMs - line.elapsedMs) };
+    if (failed !== null) return stopped(row, refusedAt === undefined ? undefined : Math.max(0, refusedAt.elapsedMs - line.elapsedMs));
+    const ms = Math.max(0, now - creation.askedAt - line.elapsedMs);
+    return ended ? { ...row, state: "done", ms } : { ...row, state: "working", ticking: true, ms };
+  });
 }
