@@ -349,6 +349,7 @@ import {
   usedPrice,
   windowCell,
   type LimitKind,
+  SLATE_TOOLS,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
@@ -3950,6 +3951,10 @@ const SLATE_VERBS: readonly Verb[] = [
     }),
   },
 ];
+
+/** The tools a client that defers tools behind a search loads up front all the same: the slate's, which a model that
+ * never searched never found. */
+export const LOADED_UP_FRONT: ReadonlySet<string> = new Set<string>(SLATE_TOOLS);
 
 /** The fields given, without the ones left out, so an absent input never rides the wire as undefined. */
 function pick<T extends Record<string, unknown>>(o: T): Partial<T> {
