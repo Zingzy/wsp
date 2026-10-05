@@ -129,7 +129,9 @@ export function boxRoad(machine: Machine, threadId: string, files: () => Readonl
                 `mkdir -p ${shellQuote(dir)}`,
                 `find ${shellQuote(dir)} -mindepth 1 -maxdepth 1 ! -name '.run-*' -exec rm -rf {} +`,
                 `find ${shellQuote(BOX_SLATES)} -mindepth 2 -maxdepth 2 -name '.run-*' ${spared} -exec rm -rf {} +`,
-                `mkdir -m 700 ${shellQuote(payload)}`,
+                // The upload made the folder already, under the shell's own umask, so it is shut to other accounts here,
+                // before the launcher decodes the values into it.
+                `mkdir -p ${shellQuote(payload)} && chmod 700 ${shellQuote(payload)}`,
               ],
             },
           );

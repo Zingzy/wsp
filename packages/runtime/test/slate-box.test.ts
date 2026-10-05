@@ -3,7 +3,7 @@
 // it, the road over a machine whose exec and run are this computer's bash (putFiles and all), and a box thread's run
 // reaching its machine through the runtime while one `on` the host stays here.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -132,6 +132,24 @@ describe("the road to a thread's machine", () => {
     expect(readFileSync(join(dir, "hi.sh"), "utf8")).toBe("echo from the file");
     expect(existsSync(join(dir, "stale.py"))).toBe(false);
     expect(execFileSync("bash", ["-c", `ls -a ${JSON.stringify(dir)}`], { encoding: "utf8" })).not.toContain(".run-");
+  });
+
+  it("the folder a run's values go up in is the account's alone before they are decoded into it", async () => {
+    const base = bashMachine();
+    const modes: number[] = [];
+    const machine: Machine = {
+      ...base,
+      run: (script, opts) => {
+        const payload = /^p='([^']+)'$/m.exec(script)?.[1];
+        if (payload !== undefined) modes.push(statSync(payload).mode & 0o777);
+        return base.run(script, opts);
+      },
+    };
+    const thread = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    made.push(boxSlateDir(thread));
+    const end = await ended(done => boxRoad(machine, thread, () => ({})).start({ cmd: "true", args: [], cwd: temp(), env: { TOKEN: "s" }, stdin: "", timeoutS: 20, stream: false }, { line: () => {}, end: done }));
+    expect(end).toMatchObject({ code: 0 });
+    expect(modes).toEqual([0o700]);
   });
 
   it("values a box left when it stopped answering go once it answers, and every contact sweeps stale values but a run's in flight", async () => {
