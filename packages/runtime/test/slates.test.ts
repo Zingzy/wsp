@@ -13,6 +13,7 @@ import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, ty
 import { localExecStream } from "../src/local-exec.js";
 import { SLATES } from "../src/slates.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { STARTS_PER_MINUTE } from "../src/slate-runs.js";
 import { stubBackend, testPlatform } from "./stub-backend.js";
 
 const TOKEN = "vcl_tok_9f8e7d6c5b4a3210";
@@ -1122,6 +1123,22 @@ describe("the slate v2 host, review fixes", () => {
   <run name="deploy" cmd='sleep 2; echo deployed' confirm="Deploy now?" timeout={20} />
   <column><button id="go" label="Deploy" onPress={start($deploy)} /></column>
 </slate>`;
+
+  it("the agent's own starts meet the start budget, however many calls carry them", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-agent-budget-");
+    await rt.slates.write({ text: `<slate title="Hi"><run name="hi" cmd="echo hi" /><column><button id="go" label="Hi" onPress={start($hi)} /></column></slate>` }, asThread);
+    const view = async () => (await rt.slates.get(threadId))!;
+    const pressed = await rt.slates.event({ threadId, version: (await view()).version, piece: "go", event: "press", requestId: "go" });
+    await rt.slates.approve({ threadId, key: pressed.ask!.key, scope: "thread" });
+    for (let n = 0; n <= STARTS_PER_MINUTE; n++) await rt.slates.state({ threadId, start: ["$hi"] }, asThread);
+    // The press ran once and the agent's first twelve starts ran; the thirteenth waits on the budget.
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await view()).values["hi"]).toMatchObject({ state: "done", runs: STARTS_PER_MINUTE + 1 });
+    }, { timeout: 10_000 });
+    await new Promise(r => setTimeout(r, 300));
+    expect((await view()).values["hi"]).toMatchObject({ runs: STARTS_PER_MINUTE + 1 });
+  }, 30_000);
 
   it("a second press on a confirmed run still running leaves it running, and Don't drops only the new start", async () => {
     const { rt, threadId, asThread } = await threadOn("wsp-slates-confirm-again-");

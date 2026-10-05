@@ -1287,7 +1287,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         }
         if (by === "agent") {
           spendWrite(threadId);
-          runs.release(threadId);
+          // The agent's write frees a run its start budget held (02), but a call that starts runs spends that budget.
+          if (input.length > 0 && starts.length === 0) runs.release(threadId);
         }
         const out = input.length > 0 ? await batch(r, input, by, paired ? { react: false } : {}) : { asks: [], sends: [] };
         if (by === "agent" && input.length > 0) announce(r, "state", by, []);
