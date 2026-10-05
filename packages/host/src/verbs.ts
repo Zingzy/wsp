@@ -131,6 +131,7 @@ import {
   TerminalConfig,
   TerminalScheme,
   ThreadMessage,
+  ThreadHead,
   ThreadView,
   TurnStatus,
   UpgradeResult,
@@ -2497,6 +2498,21 @@ async function readThread(client: HostClient, thread: ThreadView, last: boolean)
 /** What a read prints when the transcript holds nothing to print: which of the two silences it is. */
 const readLine = (read: { threadId: string; messages: readonly ThreadMessage[] }, last: boolean): string =>
   read.messages.length === 0 ? (last ? noReplyLine(read.threadId) : noMessagesLine(read.threadId)) : threadReadText(read.messages);
+
+/** A thread's head as the host answers it, by its fold key, its facts and events passed on as the host wrote them. */
+const threadHead = async (client: HostClient, thread: ThreadView): Promise<ThreadHead> => {
+  const { facts, events, pos, total } = await client.request<ThreadHead>("sessions.head", { threadId: thread.id });
+  return { facts, events, pos, total };
+};
+
+/** What a head prints: the title, what the thread runs on and where it stands, how much of it the head carries, and
+ * those newest events as a read lists them. */
+const headLine = (head: ThreadHead): string => {
+  const f = head.facts;
+  const runs = [f.model === undefined ? f.harness : `${f.harness} on ${f.model}`, ...(f.permissionMode !== undefined ? [f.permissionMode] : []), f.status].join(", ");
+  const rows = threadMessages(head.events, f.threadId ?? f.id);
+  return [f.title, runs, ...(f.cwd !== undefined ? [f.cwd] : []), `the newest ${head.events.length} of ${head.total} events`, ...(rows.length > 0 ? ["", threadReadText(rows)] : [])].join("\n");
+};
 
 /** The runtime's thread id of a row, the one its events carry; a row from before threads had ids is its own. */
 const threadIdOf = (t: ThreadView): string => t.threadId ?? t.id;
@@ -5679,6 +5695,33 @@ export const ALL_VERBS: readonly Verb[] = [
         const client = await deps.client();
         const read = await readThread(client, await threadOf(client, ref), last === true);
         return asText(readLine(read, last === true), read);
+      },
+    }),
+  },
+  {
+    name: "thread head",
+    usage: "wsp thread head <thread>",
+    about:
+      "the thread's facts and its newest events, what the app draws first on opening it: the title, the agent, model and access it runs on, where it stands and its folder, then as many of its newest events as fit in 64 KB, each tool result past 2 KB cut and marked with its whole length. Reading a head marks nothing",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp thread head takes one thread.", usageIs(ctx));
+      const client = await ctx.client();
+      const head = await threadHead(client, await threadOf(client, ref));
+      ctx.out.emit(head, headLine(head));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "The thread's head (by id, or a prefix of it): facts, the thread as threads lists it with the model, effort and context window its latest turn runs on and turnId while a turn runs; events, as many of the thread's newest transcript events as fit in 64 KB, oldest first, each tool result past 2 KB cut with cut set to its whole length; pos, the newest position the transcript has issued, which every event carries as its own pos; and total, how many events of the thread the transcript holds. It is the cheap look at a thread: read the whole conversation with thread_read. Nothing on a machine is touched and the thread is not marked read.",
+      input: { thread: z.string().describe("the thread's id, or a prefix of it that names one, as threads lists them") },
+      output: ThreadHead.shape,
+      call: async ({ thread: ref }, deps) => {
+        const client = await deps.client();
+        const head = await threadHead(client, await threadOf(client, ref));
+        return asText(headLine(head), head);
       },
     }),
   },
