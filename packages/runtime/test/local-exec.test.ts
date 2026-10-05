@@ -163,7 +163,7 @@ describe("local exec stream", () => {
   it("a child that keeps writing past the wall is cut at the cap", async () => {
     const factory = localExecStream({ root, runDir, idleMs: 60_000, deadlineMs: 150, pollMs: 10 });
     const stream = factory("while true; do echo tick; sleep 0.02; done", { env: {} });
-    await expect(collect(stream.lines)).rejects.toThrow(/at the 0m cap on one turn$/);
+    await expect(collect(stream.lines)).rejects.toThrow(/at the 0m turn limit; send to continue where it stopped, or change the limit in Settings > Computers$/);
     expect(await stream.exited).toBeNull();
   });
 
@@ -177,7 +177,7 @@ describe("local exec stream", () => {
     for (const drop of [...reading]) drop();
     const attachedAt = Date.now();
     const attached = (await localExecStream({ root, runDir, idleMs: 60_000, deadlineMs: WALL_MS, pollMs: 20 }).attach!(launched.run!, { input: false, startedAt })) as ExecStream;
-    await expect(collect(attached.lines)).rejects.toThrow(/cap on one turn$/);
+    await expect(collect(attached.lines)).rejects.toThrow(/turn limit; send to continue where it stopped, or change the limit in Settings > Computers$/);
     // Half the wall was left when it was re-opened, and that half is all it got.
     expect(Date.now() - attachedAt).toBeLessThan(WALL_MS * 0.9);
     expect(await attached.exited).toBeNull();
@@ -208,7 +208,7 @@ describe("local exec stream", () => {
       (async () => {
         for await (const line of attached.lines) seen.push(line);
       })(),
-    ).rejects.toThrow(/cap on one turn$/);
+    ).rejects.toThrow(/turn limit; send to continue where it stopped, or change the limit in Settings > Computers$/);
     expect(seen).toEqual(["while-away"]);
     expect(await attached.exited).toBeNull();
   }, 15_000);
