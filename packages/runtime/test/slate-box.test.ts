@@ -335,3 +335,46 @@ describe("a box thread's slate", () => {
     slates.close();
   }, 30_000);
 });
+
+describe("an Always for a box thread's command", () => {
+  it("covers the script an on=host command names in this computer's folder, and is refused for one that names a file on the box", async () => {
+    const machine = bashMachine();
+    const thread = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    made.push(boxSlateDir(thread));
+    const hereFolder = temp();
+    writeFileSync(join(hereFolder, "deploy.sh"), "echo one");
+    const slates = createSlates({
+      store: memoryStore(),
+      now: () => Date.now(),
+      record: () => {},
+      emit: () => {},
+      thread: () => ({ workspaceId: "w1", rootThreadId: thread, sessionId: "s1", folder: "/root/project", hostFolder: hereFolder, computer: "spoo" }),
+      machineOf: () => machine,
+      under: lead => [lead],
+      threadOfToken: () => thread,
+      sources: (threadId, workspaceId) => ({ threadId, workspaceId, now: Date.now(), rows: () => [] }) as never,
+      deliver: async () => ({ outcome: "started" }),
+      runEnv: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+    });
+    const asThread: Caller = { origin: "here", by: { kind: "thread", threadId: thread, workspaceId: "w1", rootThreadId: thread } };
+    await slates.write({ text: `<slate title="Deploy">
+  <run name="here" cmd="bash deploy.sh" on="host" timeout={20} />
+  <run name="there" cmd="bash deploy.sh" timeout={20} />
+  <column><button id="h" label="Here" onPress={start($here)} /><button id="t" label="There" onPress={start($there)} /></column>
+</slate>` }, asThread);
+    const press = async (piece: string) => slates.event({ threadId: thread, version: (await slates.get(thread))!.version, piece, event: "press", requestId: `${piece}-${Math.random()}` });
+    const value = async (run: string) => (await slates.get(thread))!.values[run] as { state: string; out?: string };
+
+    const here = await press("h");
+    await slates.approve({ threadId: thread, key: here.ask!.key, scope: "thread" });
+    for (let i = 0; i < 100 && (await value("here")).state !== "done"; i++) await new Promise(r => setTimeout(r, 100));
+    expect(await value("here")).toMatchObject({ state: "done", out: "one\n" });
+    writeFileSync(join(hereFolder, "deploy.sh"), "echo two");
+    expect((await press("h")).ask).toBeDefined();
+
+    const there = await press("t");
+    await expect(slates.approve({ threadId: thread, key: there.ask!.key, scope: "thread" })).rejects.toThrow(/deploy\.sh/);
+    await slates.approve({ threadId: thread, key: there.ask!.key, scope: "once" });
+    slates.close();
+  }, 30_000);
+});

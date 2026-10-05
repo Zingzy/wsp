@@ -281,6 +281,11 @@ function withFiles(doc: SlateDoc | null, decl: SlateRunDecl): SlateRunDecl & { f
 const SCRIPTS_MAX = 32;
 const SCRIPT_BYTES = 4 * 1024 * 1024;
 
+/** The words of a run's cmd or then that read as a path: what an Always has to cover the content of. */
+function pathsNamed(decl: Extract<SlateRunDecl, { kind: "cmd" }>): string[] {
+  return [decl.cmd, decl.then ?? ""].join("\n").split(/[\s'"`;|&()<>=,]+/).filter(w => w !== "" && !w.startsWith("-") && !w.includes("$") && /[./]/.test(w));
+}
+
 /** Every file a run's cmd or then names that exists under the thread's folder, by its path there, with a hash of its
  * content: an "Always" covers the script the person read, and an edit to it asks again. A file the command reaches
  * some other way (an import, a glob, a path it builds) is out of reach, and the sheet says so. */
@@ -288,7 +293,7 @@ function scriptsNamed(folder: string | undefined, decl: SlateRunDecl): Record<st
   if (folder === undefined || decl.kind !== "cmd") return undefined;
   let root: string;
   try { root = realpathSync(folder); } catch { return undefined; }
-  const words = [decl.cmd, decl.then ?? ""].join("\n").split(/[\s'"`;|&()<>=,]+/).filter(w => w !== "" && !w.startsWith("-") && !w.includes("$") && /[./]/.test(w));
+  const words = pathsNamed(decl);
   const found: Record<string, string> = {};
   for (const word of words) {
     if (Object.keys(found).length >= SCRIPTS_MAX) break;
@@ -502,7 +507,8 @@ export function createSlates(deps: SlatesDeps): Slates {
    * the thread's folder, read again at every start. */
   function approvalDecl(r: SlateRecord, declared: SlateRunDecl): SlateRunDecl & { files?: Record<string, string>; scripts?: Record<string, string> } {
     const decl = withFiles(r.document, declared);
-    const scripts = scriptsNamed(deps.thread(r.threadId)?.folder, declared);
+    // The files are hashed where the command runs; a folder on the thread's machine is not on this disk to read.
+    const scripts = onMachine(r.threadId, declared) ? undefined : scriptsNamed(folderFor(r.threadId, declared), declared);
     return scripts === undefined ? decl : { ...decl, scripts };
   }
 
@@ -893,6 +899,9 @@ export function createSlates(deps: SlatesDeps): Slates {
   const viewsNow = new Map<string, ReadonlyMap<string, SlateJson | undefined>>();
 
   /** Where a command starts: the thread's own folder on its own computer, or this computer's for one `on` the host. */
+  /** Whether a run's command runs on the thread's own machine rather than on this computer. */
+  const onMachine = (threadId: string, decl: SlateRunDecl): boolean => decl.kind === "cmd" && decl.on !== "host" && deps.machineOf?.(threadId) !== undefined;
+
   const folderFor = (threadId: string, decl: SlateRunDecl): string | undefined => {
     const facts = deps.thread(threadId);
     return decl.kind === "cmd" && decl.on === "host" ? (facts?.hostFolder ?? facts?.folder) : facts?.folder;
@@ -1459,6 +1468,14 @@ export function createSlates(deps: SlatesDeps): Slates {
       }
       const named = Object.entries(r.document?.runs ?? {}).filter(([, decl]) => decl.kind === "cmd" && runs.key(approvalDecl(r, decl) as CmdRunDecl) === p.key).map(([name]) => name);
       if (named.length === 0) throw usageRefusal(`this slate declares no command with approval key ${p.key}.`, "Read the slate again and approve what it asks now.");
+      // An Always covers the content of the files a command names, which this computer cannot read on the thread's machine.
+      if (p.scope === "thread") {
+        for (const run of named) {
+          const decl = r.document!.runs[run] as Extract<SlateRunDecl, { kind: "cmd" }>;
+          const paths = pathsNamed(decl).filter(w => !w.includes("://"));
+          if (onMachine(p.threadId, decl) && paths.length > 0) throw usageRefusal(`$${run} runs on the thread's machine and names ${paths.join(", ")} there, which this computer cannot read to hold an Always to.`, "Approve it with scope once.");
+        }
+      }
       await serial(p.threadId, async () => {
         if (p.scope === "refuse") {
           r.approvals[p.key] = { state: "refused", at: deps.now(), ...approvalNames(r, p.key) };
