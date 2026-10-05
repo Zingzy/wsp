@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The person's approval before a slate's command first runs (07, "Consent"; 11, "The consent sheet"): the row under
+// The person's approval before a slate's command first runs: the row under
 // the header while a run is held, and the 440 px sheet that shows the host's ask: the whole command text, each
 // environment name with the value it carries now (a secret as dots), the computer and the folder, the timeout and who
 // wrote it, with Don't, Run once and Always in this thread. A run that names `confirm` asks in the destructive tier.
@@ -13,7 +13,7 @@ import { isRunRecord, type SlateApproval, type SlateAsk, type SlateDoc } from ".
 import { AskFiles, AskWhy, ThenCommand } from "./mcp.js";
 import { usePieceVersion } from "./SlateView.js";
 
-/** The prompt before a press opens a link to a domain this thread was not allowed to open (12, links). */
+/** The prompt before a press opens a link to a domain this thread was not allowed to open. */
 export const LINK_WORDS = {
   title: (domain: string) => `Open ${domain} from this slate?`,
   always: "Always for this domain",

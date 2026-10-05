@@ -167,7 +167,7 @@ export function loadSlate(threadId: string): Promise<SlateEntry | undefined> {
 }
 
 /** Opens the Slate tab once, the first time a thread's slate is on screen, and tells the host so another window
- * and a later write do not open it again (decision 7). */
+ * and a later write do not open it again. */
 const shownHere = new Set<string>();
 
 export function showOnce(threadId: string, entry: SlateEntry | undefined): void {

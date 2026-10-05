@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One source as the window resolves it (06-sources): what in the window it reads, and how a path under it is read
+// One source as the window resolves it: what in the window it reads, and how a path under it is read
 // off that. A path this window does not hold answers ASK_HOST and is resolved through slates.resolve instead.
 import type { SlateJson, ThreadView, TurnResult } from "@wsp/protocol";
 import type { SlateRecord } from "../wire.js";

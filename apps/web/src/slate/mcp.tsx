@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The person's approval before a slate reaches an MCP server (07, "Consent"; 11, "The consent sheet"): once per
+// The person's approval before a slate reaches an MCP server: once per
 // server per thread, a sheet naming the server, the call that asked and every tool the server lists, with Once,
 // Always in this thread and Don't; and on every start of a tool that changes things, the destructive dialog with the
 // tool and its arguments as they will be sent.

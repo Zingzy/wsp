@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Bar lists written one after another or held in a grid or row of nothing else (the owner's pick C, 2026-10-05): one
+// Bar lists written one after another or held in a grid or row of nothing else: one
 // card holding every list, a segmented control over it naming them, one list shown at a time. Every list stays in the card's one grid cell, the others
 // invisible, so the card is the tallest list's height whatever is picked and nothing under it moves on a switch. The
 // pick is kept per slate for the window's life, so a value push or a redraw keeps it.

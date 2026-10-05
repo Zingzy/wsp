@@ -17,6 +17,6 @@ export function stepsOf(declared: SlateStep | SlateStep[] | undefined): SlateSte
   return declared === undefined ? [] : Array.isArray(declared) ? declared : [declared];
 }
 
-/** The steps the host runs; the rest run in the window that raised the event (02, "Reactions"). */
+/** The steps the host runs; the rest run in the window that raised the event. */
 const HOST_STEPS: ReadonlySet<SlateStep["do"]> = new Set(["set", "toggle", "start", "cancel", "send", "steer", "queue"]);
 export const isHostStep = (step: SlateStep): boolean => HOST_STEPS.has(step.do);

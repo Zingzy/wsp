@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A run's output as it streams (05, "The output of a run"): a row of the card with its label and its state as one word,
+// A run's output as it streams: a row of the card with its label and its state as one word,
 // a quiet Cancel in the slot while it runs, then the tail of its lines as the next row in 12 px mono, `lines` rows
 // tall, following the end while it runs, no box of its own; why under them when held or failed.
 // A finished run keeps its last lines until it next starts; after the agent changed its command they read as stale.

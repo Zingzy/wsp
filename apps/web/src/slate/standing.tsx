@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The thread's standing approvals, from the slate tab's menu (07, "Revoke"): one settings row per command, MCP server,
+// The thread's standing approvals, from the slate tab's menu: one settings row per command, MCP server,
 // domain and reaction send the person allowed, each with Revoke. Revoking stops what it covered; the next start asks.
 import { useState } from "react";
 import { Button } from "../components/ui/button.js";

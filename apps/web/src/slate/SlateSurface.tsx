@@ -27,7 +27,7 @@ import { askConsent, closeLink, loadSlate, markSeen, slateBundle, slateLink, use
 import { threadWorkspace } from "./SlateHost.js";
 import { STANDING_WORDS, StandingApprovals } from "./standing.js";
 
-/** The hold a drawn slate keeps on the host while the tab shows it (07, "A timer"). */
+/** The hold a drawn slate keeps on the host while the tab shows it. */
 export const SHOWN_HOLD = "slate";
 
 export const SLATE_WORDS = {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Rows of a list as rows of the card, each a 16 px checkbox, the title and its note; a done title muted, not struck. When editable,
-// a tick writes the row's done field into the value the list binds: $items[index].<field> (05, "checklist").
+// a tick writes the row's done field into the value the list binds: $items[index].<field>.
 import type { SlateJson, SlatePropValue } from "@wsp/protocol";
 import { isSlateBinding } from "@wsp/protocol";
 import { Checkbox } from "../../components/ui/checkbox.js";

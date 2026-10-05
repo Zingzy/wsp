@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What a press, a submit or a change does. The host runs set, toggle, start, cancel and the sends off its own stored
 // version through slates.event, and answers an outcome, with the consent sheet's content when it held a run; fill,
-// open, copy and pane run here (02-model, "Reactions"). The person's value writes go to the host through one sender
+// open, copy and pane run here. The person's value writes go to the host through one sender
 // per slate, typing debounced and every other change at once; a secret's text goes once and is not kept.
 import type { SlateEventAnswer, SlateJson, SlateOpParams } from "@wsp/protocol";
 import type { SlateEngine } from "./engine.js";
@@ -77,7 +77,7 @@ export class StateSender {
   }
 
   /** A secret's text, sent once and never written into the window's values: once the host has it, the window
-   * holds the handle alone (08, "Where the plaintext lives"). An empty text clears it. */
+   * holds the handle alone. An empty text clears it. */
   async secret(path: string, text: string): Promise<void> {
     await this.#link().writeState({ [path]: text });
     this.#engine.settle(path, { secret: true, set: text !== "", len: text.length, at: Date.now() });

@@ -38,13 +38,13 @@ export const browserScheduler: Scheduler = {
   now: () => Date.now(),
 };
 
-/** At most ten redraws a second per slate (12-rendering, budgets). */
+/** At most ten redraws a second per slate. */
 const MIN_FLUSH_GAP_MS = 100;
 /** The document's own listeners: the root, the title, the version. */
 export const DOC = "";
 /** Listeners on any run's record: the held-run rows under the header. */
 export const RUNS = "#runs";
-/** The lines a streaming run keeps (07, "Timeouts, output, streaming, cancel"). */
+/** The lines a streaming run keeps. */
 const LINES_KEPT = 500;
 
 type Loud = "primary" | "large" | "accent";
@@ -194,7 +194,7 @@ export class SlateEngine {
     return moved;
   }
 
-  /** A run that starts again begins its streamed lines afresh; a finished one keeps its last until then (11). */
+  /** A run that starts again begins its streamed lines afresh; a finished one keeps its last until then. */
   #restarted(path: string, value: SlateJson | undefined): void {
     const name = ownPath(path)?.name;
     if (name === undefined || path !== `$${name}` || own(this.#doc?.runs, name) === undefined) return;
@@ -266,7 +266,7 @@ export class SlateEngine {
     return runs.filter(run => found.has(run));
   }
 
-  /** A secret's path: the person types it, the host keeps it, the window holds only its handle (08). */
+  /** A secret's path: the person types it, the host keeps it, the window holds only its handle. */
   isSecret(path: string): boolean {
     const name = ownPath(path)?.name;
     return name !== undefined && own(this.#doc?.values, name)?.secret === true;
@@ -568,7 +568,7 @@ export class SlateEngine {
   }
 
   /** Whether this piece is the slate's one primary button, one large figure or one accent: the first in display
-   * order keeps it and the rest draw quiet (05-styling). */
+   * order keeps it and the rest draw quiet. */
   isLoud(kind: Loud, id: string): boolean {
     return this.#loud.get(kind) === id;
   }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Round 4 in the renderer: a refreshing run keeps what it drew and says so quietly, and the layout defaults that
+// The renderer: a refreshing run keeps what it drew and says so quietly, and the layout defaults that
 // make a good slate without the agent asking.
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -321,7 +321,7 @@ describe("what the kit adds", () => {
   });
 });
 
-describe("kit4's syntax, parsed and drawn", () => {
+describe("the kit's syntax, parsed and drawn", () => {
   it("draws when on facts, columns and options, a shut section, icon formulas and the larger icon set", () => {
     const doc = compiled(`<slate>
 <value name="pro" start={false} />

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The window's slate ops (01-architecture, "Wire operations"), each answer parsed against the wire type.
+// The window's slate ops, each answer parsed against the wire type.
 import { SlateEventAnswer, SlateReadAnswer, SlatesGetAnswer, SlatesResolveAnswer, SlateStateAnswer, SlateWriteAnswer, type SlateDoc, type SlateJson, type SlateOpName, type SlateOpParams, type SlateView } from "@wsp/protocol";
 import type { SlateEventAsk } from "./actions.js";
 import type { SlateApproval } from "./model.js";
@@ -8,7 +8,7 @@ interface Requester {
   request<T = Record<string, unknown>>(op: string, params?: Record<string, unknown>): Promise<T>;
 }
 
-/** The schema this renderer draws; a newer document is held untouched and the tab says so (13, "Versioning"). */
+/** The schema this renderer draws; a newer document is held untouched and the tab says so. */
 export const SLATE_SCHEMA = 2;
 
 /** One thread's slate as the window draws it: the host's record with its document checked for a slate's frame. */
@@ -38,7 +38,7 @@ export interface SlateApi {
   /** The person withdraws one of the thread's standing approvals. */
   revoke(threadId: string, key: string): Promise<void>;
   shown(threadId: string): Promise<void>;
-  /** The slate as text, the sketch the agent reads (10). */
+  /** The slate as text, the sketch the agent reads. */
   sketch(threadId: string): Promise<string>;
   undo(threadId: string): Promise<{ version: number }>;
   clear(threadId: string): Promise<{ version: number }>;

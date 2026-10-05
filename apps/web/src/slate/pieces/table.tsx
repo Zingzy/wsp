@@ -77,7 +77,7 @@ function sharedWidths(slate: SlateEngine, id: string, own: (number | undefined)[
   return own.map((width, at) => (width === undefined ? undefined : Math.max(width, ...fellows.map(widths => widths[at] ?? 0))));
 }
 
-/** Past this many rows a table says how many more there are rather than draw them all on every push (11). */
+/** Past this many rows a table says how many more there are rather than draw them all on every push. */
 export const ROWS_DRAWN = 200;
 
 /** How many of a table's rows draw: what its rows prop asks for, never past ROWS_DRAWN. */

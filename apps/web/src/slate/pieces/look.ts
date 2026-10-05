@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The meaning words a slate may say, drawn in the app's own tokens (05-styling). The agent picks a word; this file
+// The meaning words a slate may say, drawn in the app's own tokens. The agent picks a word; this file
 // is the whole of how each one looks, in every theme, since every class reads a theme token.
 import { fmtBytes, fmtCost, fmtDuration, fmtInr, fmtTokens, type SlateJson, type SlatePropValue } from "@wsp/protocol";
 import type { SlateEngine } from "../engine.js";
@@ -50,7 +50,7 @@ export function toneOf(value: SlateJson | undefined, slate: SlateEngine, id: str
   return value as Tone;
 }
 
-/** The steps a layout's children stand apart: 4, 12 (pieces, the owner's spacing of 2026-10-05) and 16. */
+/** The steps a layout's children stand apart: 4, 12 (pieces) and 16. */
 export const GAP: Record<string, string> = { tight: "gap-1", normal: "gap-3", loose: "gap-4" };
 export const gapOf = (value: SlateJson | undefined): string => GAP[typeof value === "string" ? value : "normal"] ?? GAP["normal"]!;
 

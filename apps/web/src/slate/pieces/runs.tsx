@@ -73,7 +73,7 @@ export function isBarHolder(slate: SlateEngine, id: string): boolean {
   return (piece?.type === "grid" || piece?.type === "row") && children.length > 0 && children.every(child => slate.piece(child)?.type === "bars");
 }
 
-/** Bar lists switched in one card under a segmented control (the owner's pick C, 2026-10-05): two or more written one
+/** Bar lists switched in one card under a segmented control: two or more written one
  * after another, or any held in a grid or row of nothing else. */
 export function inBarSwitch(slate: SlateEngine, id: string): boolean {
   if (slate.piece(id)?.type !== "bars") return false;

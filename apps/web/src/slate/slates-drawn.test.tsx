@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The owner's three slates of 2026-10-03 drawn from fixture documents in the locked settings grammar: heads with their
+// Three slates drawn from fixture documents in the settings grammar: heads with their
 // meta and refresh glyph, soft cards with hairlined rows, the stat cell, the chart under its head, lists with their
 // header over the card, and state as a word.
 import { readFileSync } from "node:fs";
@@ -266,14 +266,14 @@ describe("a series that holds one value", () => {
   });
 });
 
-describe("the old design's spacing and tables, and the bar lists' switch (the owner's word of 2026-10-05)", () => {
+describe("the spacing and tables, and the bar lists' switch", () => {
   it("stands sections 32 px apart and pieces 12, with no stylesheet rule adding its own margin over a section", () => {
     const c = draw(GOLD_TEXT, GOLD_VALUES);
     const group = c.querySelector<HTMLElement>("[data-slate-group]")!;
     expect(group.className).toContain("gap-3");
     expect(group.className).toContain("[&>[data-slate-type=section]:not(:first-child)]:mt-5");
     expect(c.querySelector<HTMLElement>("[data-slate-section] > div:last-child")!.className).toContain("gap-3");
-    // The first proof of concept's rule gave every section 12 px over its head and outranked the column's own margin.
+    // A section adds no room of its own over its head, so the column's gap is the only one.
     expect(readFileSync(join(__dirname, "../index.css"), "utf8")).not.toMatch(/slate-piece\[data-slate-type="section"\]/);
     // A row or column of pieces stands them 12 px apart at its normal gap.
     const row = draw(`<slate><column><row><button label="One" onPress={send("1")} /><button label="Two" onPress={send("2")} /></row></column></slate>`);

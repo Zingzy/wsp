@@ -31,7 +31,7 @@ const LINE_FIELD = cn(ROW_FIELD, "w-full basis-full");
 const fieldFor = (placeholder: string | undefined, mono: boolean): string => ((placeholder?.length ?? 0) > (mono ? 17 : 20) ? LINE_FIELD : SLOT_FIELD);
 
 /** A secret's field: a password field whatever `kind` says. The text lives in the field until the host takes it,
- * then the field is empty again and draws the handle's dots (08). Emptying a filled field clears the secret. */
+ * then the field is empty again and draws the handle's dots. Emptying a filled field clears the secret. */
 function SecretInput({ path, label, props, slate, sender }: { path: string; label: string } & Pick<PieceViewProps, "props" | "slate" | "sender">) {
   const fieldId = useId();
   const [draft, setDraft] = useState("");
