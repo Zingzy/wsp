@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The old design's spacing and tables, and the bar lists' switch, measured in Chromium since jsdom lays nothing out
-// (the owner's word of 2026-10-05): reach check's spoo live traffic as its agent wrote it, at the panel's 400 px and
-// widened to 640 and 960. A section stands 32 px from what is beside it and pieces 12; a table's header words sit on
+// The spacing and tables, and the bar lists' switch, measured in Chromium since jsdom lays nothing out: a live
+// traffic slate at the panel's 400 px and widened to 640 and 960. A section stands 32 px from what is beside it and pieces 12; a table's header words sit on
 // their columns, 11 px over the card; the log's last column ends on the card's right inset however wide the panel;
 // and the bar lists' switch never moves the page. Like the other render tests it runs only when asked for
 // (WSP_RENDER=1).
