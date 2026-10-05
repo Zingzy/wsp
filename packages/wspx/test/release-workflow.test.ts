@@ -201,6 +201,17 @@ describe("the release workflow", () => {
     expect(desktopScripts["build"]).toBe("pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --publish never");
   });
 
+  it("starts the AppImage it uploads once, after the rename and before the upload, on a virtual display", () => {
+    const rename = linuxJob.indexOf("- name: Name the AppImage after the release");
+    const launch = linuxJob.indexOf("- name: Start the AppImage once and wait for its window's page\n");
+    const upload = linuxJob.indexOf("- name: Attach them to the draft\n");
+    expect(rename).toBeGreaterThan(-1);
+    expect(linuxJob.indexOf("- name:", rename + 1)).toBe(launch);
+    expect(linuxJob.indexOf("- name:", launch + 1)).toBe(upload);
+    expect(linuxJob.slice(launch, upload)).toContain('run: xvfb-run --auto-servernum node apps/desktop/scripts/appimage-launch.mjs "$APPIMAGE"\n');
+    expect(existsSync(join(repo, "apps", "desktop", "scripts", "appimage-launch.mjs"))).toBe(true);
+  });
+
   it("builds every package the app's staging copies from in build:deps, the only build the release runs first", () => {
     expect(desktopScripts["build:deps"]).toBe('pnpm --filter "@wsp/desktop^..." build');
     for (const kind of ASSET_KINDS) {

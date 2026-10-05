@@ -258,6 +258,11 @@ jobs:
           fi
           mv "$1" "$APPIMAGE"
           cp "$APPIMAGE" "$APPIMAGE_STABLE"
+      # The file this job ships, started once on a virtual display as its desktop entry starts it, until its window
+      # has loaded its page; a library missing from the bundle or a launch that dies on boot fails the release here.
+      - name: Start the AppImage once and wait for its window's page
+        timeout-minutes: 5
+        run: xvfb-run --auto-servernum node apps/desktop/scripts/appimage-launch.mjs "$APPIMAGE"
       - name: Attach them to the draft
         env:
           GH_TOKEN: ${{ github.token }}
