@@ -10,7 +10,7 @@ import { SLATE_PIECES, SLATE_RESERVED_PROPS, type SlateItemSpec, type SlatePiece
 import { SLATE_LIMITS, slateBytes } from "./limits.js";
 import { slateTable, parseSlateOwnPath, slateOwnName } from "./paths.js";
 import { SLATE_SECRET_IN_ARGS, SLATE_WARNINGS, nearest, orList, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
-import { SLATE_SOURCES, slateIsSeries, slateSourceType } from "./sources.js";
+import { SLATE_SOURCES, slateSourceType } from "./sources.js";
 import { SLATE_STEPS } from "./steps.js";
 import {
   SLATE_FILE_NAME, SLATE_ID, SLATE_NAME, SLATE_PANE_KINDS, SLATE_RUN_FIELDS, SLATE_SECRET_FIELDS, SlateSchema, isSlateBinding, isSlateFormat,
@@ -536,13 +536,8 @@ class Validator {
       if (children.length > spec.childLimit.max) this.add("T309", `${p.type} takes at most ${spec.childLimit.max} child${spec.childLimit.max === 1 ? "" : "ren"}`, { piece: id });
       if (spec.childLimit.types.length > 0) for (const c of children) { const t = this.doc.pieces[c]?.type; if (t !== undefined && !spec.childLimit.types.includes(t)) this.add("T309", `${p.type} takes ${orList(spec.childLimit.types)} children, not ${t}`, { piece: id }); }
     }
-    if (p.type === "checklist" && props.editable === true && !(isSlateBinding(props.items) && this.kinds.get(slateOwnName(props.items.bind) ?? "") === "value")) {
-      this.add("S502", "an editable checklist writes its ticks back, so items binds a value: items={$steps}", { piece: id, prop: "items" });
-    }
     if (props.mono === true && spec.textProp !== undefined && sentence(props[spec.textProp])) this.add("W014", MONO_WARNING, { piece: id, prop: "mono" }, "drop mono");
-    if (p.type === "chart" && (props.x === undefined || (isSlateBinding(props.x) && props.x.bind.trim() === "index"))) this.add("W013", "the chart's x is each row's index, so its axis reads 0 to the count; give each row its time, for example x={item.at}", { piece: id, prop: "x" }, "x={item.at}");
-    if (p.type === "bars" && isSlateBinding(items) && slateIsSeries(items.bind.trim())) this.add("W003", `${items.bind} is a series over time; draw it as a line`, { piece: id, prop: "items" }, "<chart>");
-    else if (p.type === "bars" && isSlateBinding(props.name) && readsTime(props.name.bind)) this.add("W003", `bars name each row by ${props.name.bind}, a time: a series over time is a line`, { piece: id, prop: "name" }, "<chart>");
+    spec.check?.({ props, kind: n => this.kinds.get(n), add: (code, message, prop, fix) => this.add(code, message, { piece: id, ...(prop !== undefined ? { prop } : {}) }, fix) });
     return row;
   }
 
@@ -591,7 +586,7 @@ class Validator {
     const name = w.prop!.split(".").at(-1)!;
     const enumWords = Array.isArray(ps.type) ? (ps.type as readonly string[]) : undefined;
     if (v === null) return;
-    const mark = type === "markdown" || ps.binds === "state" ? undefined : joiningMark(v);
+    const mark = ps.marks === true || ps.binds === "state" ? undefined : joiningMark(v);
     if (mark !== undefined) this.add("W012", `${name} joins words with "${mark}"; the kit separates things by layout, never a mark: give each its own piece, or join with a comma`, w, "separate pieces (facts, chips, a row) or a comma");
     if (isBound(v)) {
       if (ps.binds === "no") { this.add("T305", `${name} takes a literal, not a formula`, w); return; }
@@ -623,7 +618,7 @@ class Validator {
       const m = typeof v === "string" ? slateOwnName(v) : undefined;
       if (m === undefined) { this.add("T303", `${name} names a run or a value as $name`, w); return; }
       const kind = this.kinds.get(m);
-      if (type === "output" && kind !== "run") this.add("K702", `run names a run: $${m} is ${kind ?? "not declared"}`, w, nearest(m, [...this.kinds].filter(([, k]) => k === "run").map(([n]) => `$${n}`)));
+      if (ps.names === "run" && kind !== "run") this.add("K702", `run names a run: $${m} is ${kind ?? "not declared"}`, w, nearest(m, [...this.kinds].filter(([, k]) => k === "run").map(([n]) => `$${n}`)));
       return;
     }
     if (enumWords !== undefined) {
@@ -666,7 +661,7 @@ class Validator {
           else if (parseSlateOwnPath(v) !== undefined || /\{\$[^}]*\}/.test(v)) this.add("W001", `${name} is the literal text "${v}", which reads like a formula; quotes show it as written`, w, `${name}={${v.replace(/^\{(.*)\}$/, "$1")}}`);
           if (v.includes("\u2014")) this.add("W004", "an em dash in the slate's words; use a comma, a colon or a full stop", w);
           if (/\p{Extended_Pictographic}/u.test(v)) this.add("W017", `${name} has an emoji; the slate's words carry none, so say it in words or give the piece an icon`, w);
-          if ((name === "title" || (type === "heading" && name === "value")) && titleCased(v)) this.add("W018", `${name} "${v}" is in Title Case; heads take sentence case`, w, `${name}="${sentenceCase(v)}"`);
+          if ((name === "title" || ps.head === true) && titleCased(v)) this.add("W018", `${name} "${v}" is in Title Case; heads take sentence case`, w, `${name}="${sentenceCase(v)}"`);
           return;
         }
         if (typeof v === "number" && ps.type === "text") return;
@@ -680,20 +675,13 @@ class Validator {
     const tally = (pred: (p: SlatePiece) => boolean): string[] => Object.entries(this.doc.pieces).filter(([, p]) => pred(p)).map(([id]) => id);
     const check = (ids: string[], what: string): void => { if (ids.length > 1) this.add("T311", `${what} on ${ids.join(", ")}; one per slate reads loud, the rest draw as default`, { piece: ids[1]! }); };
     check(tally(p => p.props?.tone === "accent"), "accent");
-    check(tally(p => p.type === "button" && p.props?.variant === "primary"), "primary");
+    check(tally(p => p.props?.variant === "primary"), "primary");
     check(tally(p => p.props?.size === "large"), "large");
   }
 }
 
-const TIME_FIELDS = new Set(["at", "time", "date", "ts", "timestamp", "when", "day", "hour", "minute"]);
-const TIME_FNS = /\b(?:date|time|ago|weekday)\s*\(/;
 
 /** A row's name that reads a time: item.at, item.date, or date(...) and its kin. */
-function readsTime(expr: string): boolean {
-  if (TIME_FNS.test(expr) || slateDependencies(expr).includes("time.now")) return true;
-  const field = /\bitem\.([A-Za-z_]+)\b/.exec(expr)?.[1];
-  return field !== undefined && TIME_FIELDS.has(field);
-}
 
 /** The names a list of own paths starts from. */
 /** Whether a write to one path can change what the other reads: the same path, or one above the other. */

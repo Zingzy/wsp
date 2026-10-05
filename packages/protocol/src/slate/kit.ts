@@ -5,8 +5,11 @@
 import { fmtBytes, fmtCost, fmtDuration, fmtInr, fmtTokens } from "../format.js";
 import { slateAxisWord, slateChartAxis } from "./chart.js";
 import { slateResultShape, sketchSlateResult } from "./shape.js";
-import { isSlateSecretHandle, type SlateEventName, type SlateJson, type SlatePropValue, type SlateRunDecl, type SlateRunRecord } from "./types.js";
-import { slateTable } from "./paths.js";
+import { isSlateBinding, isSlateSecretHandle, type SlateEventName, type SlateJson, type SlatePropValue, type SlateRunDecl, type SlateRunRecord } from "./types.js";
+import { slateDependencies } from "./expr.js";
+import { slateOwnName, slateTable } from "./paths.js";
+import type { SlateCode } from "./problems.js";
+import { slateIsSeries } from "./sources.js";
 import { SLATE_LIMITS } from "./limits.js";
 
 export const SLATE_TONES = ["default", "muted", "good", "warning", "bad", "info", "accent"] as const;
@@ -39,6 +42,19 @@ export interface SlatePropSpec {
   literal?: true;
   /** A list the piece plots, whose every entry is a number. */
   of?: "number";
+  /** A path prop that names a run, never a value. */
+  names?: "run";
+  /** Free text, whose words may sit beside a mark like "·", as markdown's do. */
+  marks?: true;
+  /** A head, in sentence case, never Title Case. */
+  head?: true;
+}
+
+/** What a piece's own check reads and says through: its props, the kind of a name the slate declares, and a problem. */
+export interface SlatePieceCheck {
+  props: Readonly<Record<string, SlatePropValue>>;
+  kind(name: string): string | undefined;
+  add(code: SlateCode, message: string, prop?: string, fix?: string): void;
 }
 
 export interface SlateItemSpec {
@@ -94,6 +110,10 @@ export interface SlatePieceModule {
   items: Record<string, SlateItemSpec>;
   events: readonly SlateEventName[];
   sketch(view: SlateSketchView): string | string[];
+  /** Whether the person sees its children now; a collapsed piece's children are not sketched. */
+  collapsed?(view: SlateSketchView): boolean;
+  /** The rules only this piece is held to, beyond its props' types. */
+  check?(piece: SlatePieceCheck): void;
   fallback: string;
   example: string;
 }
@@ -108,6 +128,16 @@ const rowKey = (): SlatePropSpec => ({ type: "any", binds: "item", unseen: "name
 const icon = (): SlatePropSpec => ({ type: "icon", binds: "yes" });
 /** How a group sits: inner space, the app's inset ground, and where its children line up across. */
 const box = { pad: enm(PAD, "none"), surface: enm(SURFACE, "plain") };
+
+/** Whether a row name reads a time, which makes the rows a series over time. */
+function readsTime(expr: string): boolean {
+  if (TIME_FNS.test(expr) || slateDependencies(expr).includes("time.now")) return true;
+  const field = /\bitem\.([A-Za-z_]+)\b/.exec(expr)?.[1];
+  return field !== undefined && TIME_FIELDS.has(field);
+}
+
+const TIME_FIELDS = new Set(["at", "time", "date", "ts", "timestamp", "when", "day", "hour", "minute"]);
+const TIME_FNS = /\b(?:date|time|ago|weekday)\s*\(/;
 
 /** A value as a sketch shows it: nothing for missing. */
 const shown = (v: SlateJson | undefined): string => (v === null || v === undefined ? "" : typeof v === "string" ? v : typeof v === "object" ? JSON.stringify(v) : String(v));
@@ -205,6 +235,7 @@ const PIECES: Record<string, SlatePieceModule> = {
     type: "section", level: "core", purpose: "A titled group, optionally collapsible.", holdsChildren: true,
     props: { title: str(req), note: str(), icon: icon(), collapsible: flag(), open: { type: "boolean", binds: "state", literal: true, about: "open={false} starts it shut; open={$open} also keeps it" }, align: enm(PLACE), ...box }, items: {}, events: ["change"],
     sketch: v => (v.prop("open") === false ? `${shown(v.prop("title"))} (collapsed)` : shown(v.prop("title"))),
+    collapsed: v => v.prop("open") === false,
     fallback: "children under a text with the title", example: `<section title="Files changed" collapsible><text>None yet</text></section>`,
   },
   text: {
@@ -216,13 +247,13 @@ const PIECES: Record<string, SlatePieceModule> = {
   },
   heading: {
     type: "heading", level: "core", purpose: "A heading on the app's type ladder: title, section, or label in small caps.", holdsChildren: false, textProp: "value",
-    props: { value: { type: "text", binds: "yes", required: true }, level: enm(["title", "section", "label"]), icon: icon() }, items: {}, events: [],
+    props: { value: { type: "text", binds: "yes", required: true, head: true }, level: enm(["title", "section", "label"]), icon: icon() }, items: {}, events: [],
     sketch: v => { const s = shown(v.prop("value")); return v.prop("level") === "title" ? `# ${s}` : v.prop("level") === "label" ? s.toUpperCase() : `## ${s}`; },
     fallback: "text", example: `<heading level="title" icon="gauge">Gold price</heading>`,
   },
   markdown: {
     type: "markdown", level: "core", purpose: "Rich text, sanitised; images are not fetched.", holdsChildren: false, textProp: "value",
-    props: { value: { type: "string", binds: "yes", required: true } }, items: {}, events: [],
+    props: { value: { type: "string", binds: "yes", required: true, marks: true } }, items: {}, events: [],
     sketch: v => { const lines = shown(v.prop("value")).split("\n"); return lines.length > 1 ? `${lines[0]} (+${lines.length - 1} lines)` : lines[0]!; },
     fallback: "text", example: `<markdown>**Why.** The host keeps the last 5,000 events.</markdown>`,
   },
@@ -262,6 +293,11 @@ const PIECES: Record<string, SlatePieceModule> = {
       const max = v.prop("max") ?? Math.max(0, ...values);
       return [shown(v.prop("label")), ...rows(v, (item, i) => { const r = v.row({ name: v.raw("name") ?? null, value: v.raw("value") ?? null }, item, i); const t = v.row({ tone: v.raw("tone") ?? null }, item, i); return `  ${shown(r.name)}  ${bar(r.value ?? null, max)} ${figure(String(v.prop("format") ?? "value"), r.value, max)}${marks(t)}`; })];
     },
+    check: c => {
+      const { items, name } = c.props;
+      if (isSlateBinding(items) && slateIsSeries(items.bind.trim())) c.add("W003", `${items.bind} is a series over time; draw it as a line`, "items", "<chart>");
+      else if (isSlateBinding(name) && readsTime(name.bind)) c.add("W003", `bars name each row by ${name.bind}, a time: a series over time is a line`, "name", "<chart>");
+    },
     fallback: "table", example: `<bars label="Busiest" items={processes.list | take(5)} name={item.name} value={item.cpu} />`,
   },
   chart: {
@@ -284,6 +320,10 @@ const PIECES: Record<string, SlatePieceModule> = {
         `${label}  last ${fig(vals.at(-1)!)}, min ${fig(Math.min(...vals))}, max ${fig(Math.max(...vals))} over ${vals.length} point${vals.length === 1 ? "" : "s"}`.trimStart(),
         `  x ${slateAxisWord(rowsRead[0]!.x)} to ${slateAxisWord(rowsRead.at(-1)!.x)}, y ${fig(axis.from)} to ${fig(axis.to)}`,
       ];
+    },
+    check: c => {
+      const x = c.props.x;
+      if (x === undefined || (isSlateBinding(x) && x.bind.trim() === "index")) c.add("W013", "the chart's x is each row's index, so its axis reads 0 to the count; give each row its time, for example x={item.at}", "x", "x={item.at}");
     },
     fallback: "text", example: `<chart label="Gold" items={$hist} x={item.at} value={item.v} format="usd" />`,
   },
@@ -320,6 +360,9 @@ const PIECES: Record<string, SlatePieceModule> = {
     props: { items: { type: "list", binds: "yes", required: true }, key: rowKey(), title: { type: "string", binds: "item", required: true }, done: { type: "boolean", binds: "item", required: true }, state: { type: ["pending", "working", "done"], binds: "item", unseen: "this build's checklist draws done alone" }, note: { type: "string", binds: "item" }, editable: flag(), empty: str() },
     items: {}, events: ["change"],
     sketch: v => rows(v, (item, i) => { const r = v.row({ title: v.raw("title") ?? null, done: v.raw("done") ?? null }, item, i); const note = shown(v.row({ note: v.raw("note") ?? null }, item, i).note); return `[${r.done === true ? "x" : " "}] ${shown(r.title)}${note === "" ? "" : `  ${note}`}`; }),
+    check: c => {
+      if (c.props.editable === true && !(isSlateBinding(c.props.items) && c.kind(slateOwnName(c.props.items.bind) ?? "") === "value")) c.add("S502", "an editable checklist writes its ticks back, so items binds a value: items={$steps}", "items");
+    },
     fallback: "text rows", example: `<checklist items={$steps} title={item.title} done={item.done} editable />`,
   },
   facts: {
@@ -359,7 +402,7 @@ const PIECES: Record<string, SlatePieceModule> = {
   },
   output: {
     type: "output", level: "core", purpose: "A run's output as it streams, with its state and a Cancel.", holdsChildren: false,
-    props: { run: { type: "path", binds: "no", required: true }, label: str(), lines: { type: "integer", binds: "no", min: 3, max: 40, about: "how many of the newest lines show, out then err, 8 by default" }, wrap: flag() },
+    props: { run: { type: "path", binds: "no", required: true, names: "run" }, label: str(), lines: { type: "integer", binds: "no", min: 3, max: 40, about: "how many of the newest lines show, out then err, 8 by default" }, wrap: flag() },
     items: {}, events: [],
     sketch: v => {
       const name = shown(v.raw("run") as SlateJson);
