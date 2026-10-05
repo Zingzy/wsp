@@ -35,10 +35,10 @@ export const section: PieceView = {
     const folds = props["collapsible"] === true || piece.props?.["open"] !== undefined;
     const head = (
       <>
-        <span className="min-w-0 truncate" role="heading" aria-level={3}>{title}</span>
-        {folds && note !== undefined ? <span className={cn(NOTE, "min-w-0 truncate")}>{note}</span> : null}
-        <span className="flex-1" />
-        {!folds && note !== undefined ? <span className={cn(NOTE, "shrink-0 whitespace-nowrap")}>{note}</span> : null}
+        {/* Neither is cut for want of room: the title keeps its words, wrapping past two thirds of the row, and the note
+            wraps in the rest, at the row's end unless a chevron folds the section. */}
+        <span className={cn("min-w-0 break-words", note !== undefined && "max-w-[65%] shrink-0")} role="heading" aria-level={3}>{title}</span>
+        {note === undefined ? <span className="flex-1" /> : <span data-slate-section-note className={cn(NOTE, "min-w-0 flex-1 break-words", !folds && "text-right")}>{note}</span>}
         {timed.length > 0 || refreshing ? (
           <span data-slate-refresh {...(refreshing ? { "data-slate-refreshing": "" } : {})} title={timed.map(run => cadenceOf(slate.document, run)).join("\n") || undefined} className="-my-0.5 grid size-6 shrink-0 place-items-center rounded-lg text-muted-foreground">
             <RefreshCw aria-hidden className={cn("size-3.5", refreshing && "animate-spin motion-reduce:animate-none")} />
