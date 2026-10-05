@@ -275,3 +275,17 @@ describe("an HTML habit gets the piece it meant", () => {
     expect(codes(`<slate><value name="r" start={null} /><form into="$r" /></slate>`)).toContain(`T304 form fills an MCP tool's arguments and needs tool="server.tool"; for fields of your own, use <input label="..." value={$x} /> and a <button>`);
   });
 });
+
+describe("what the render judge found agents writing", () => {
+  it("warns of Title Case heads, emoji and a formula written as quoted text, and the write goes through", () => {
+    const r = parseSlate(`<slate title="Live Gold Prices"><value name="x" start={1} /><column><section title="Bengaluru Retail Prices"><text>📈 Up</text></section><text value="$x.out" /><text value="{$x}" /><heading>Open PRs</heading></column></slate>`);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings.map(w => [w.code, w.fix])).toEqual([
+      ["W018", `title="Live gold prices"`],
+      ["W018", `title="Bengaluru retail prices"`],
+      ["W017", undefined],
+      ["W001", "value={$x.out}"],
+      ["W001", "value={$x}"],
+    ]);
+  });
+});

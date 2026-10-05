@@ -90,8 +90,10 @@ describe("the catalog", () => {
     // What ago and until print and what a chart's x takes, after agents guessed both, took it from 1,060 to 1,090;
     // tool= runs on the first page and what a formula holds, after agents missed both, to 1,110; every enum's
     // values and every required mark, after 13 cells guessed them (ruling 8), to 1,310; what turns held off and where
-    // a button goes in a project with no UI (ruling 12), to 1,345; never reading a secret's value, to 1,360.
-    expect(slateTokens(slateCatalog())).toBeLessThan(1360);
+    // a button goes in a project with no UI (ruling 12), to 1,345; never reading a secret's value, to 1,360; what the
+    // render judge found agents writing (Title Case, emoji, raw output and times), to 1,395.
+    expect(slateTokens(slateCatalog())).toBeLessThan(1395);
+    for (const said of ["short labels, no emoji.", "in sentence case, never bold text.", "Show a run's json fields, never its raw out; times through date(), time() or ago()."]) expect(slateCatalog(), said).toContain(said);
     expect(slateCatalog()).toContain("One in a file stays there for the run to read, never you.");
     expect(slateCatalog("runs")).toContain("one in a file, the command reads itself, never through you.");
     expect(slateCatalog()).toContain("A button asked for where the project has no UI goes here: the slate is its UI, and the reply says so.");

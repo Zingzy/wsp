@@ -27,6 +27,18 @@ const RUN_FIELD_TYPES: Record<(typeof SLATE_RUN_FIELDS)[number], SlateType> = {
   lines: { t: "list", of: { t: "string" } }, startedAt: { t: "number" }, endedAt: { t: "number" }, ms: { t: "number" }, runs: { t: "number" }, cut: { t: "boolean" }, stale: { t: "boolean" },
   refreshing: { t: "boolean" }, text: { t: "boolean" },
 };
+/** A plain own path written as text, "$x" or "$x.out": the agent meant the formula. */
+const OWN_PATH = /^\$[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])*$/;
+/** Words a head capitalises in Title Case and sentence case leaves alone: an acronym, or a word with a capital inside. */
+const KEPT_CAPS = /^[A-Z0-9]{2,}s?$|^.+[A-Z].*$/;
+/** Whether a head reads as Title Case: two or more words of four letters or more past the first, every one capitalised. */
+function titleCased(v: string): boolean {
+  const later = v.trim().split(/\s+/).slice(1).filter(w => /^[A-Za-z]{4,}/.test(w) && !KEPT_CAPS.test(w.slice(1)) && !/^[A-Z0-9]{2,}s?$/.test(w));
+  return later.length >= 2 && later.every(w => /^[A-Z]/.test(w));
+}
+/** The head with every word past the first lowercased, acronyms and inner capitals kept. */
+const sentenceCase = (v: string): string => v.trim().split(/(\s+)/).map((w, i) => (i === 0 || /^\s+$/.test(w) || /^[A-Z0-9]{2,}s?$/.test(w) || KEPT_CAPS.test(w.slice(1)) ? w : w.toLowerCase())).join("");
+
 /** Attributes of a <run> that a piece is given by habit: the refusal points at the run. */
 const RUN_ATTRS: ReadonlySet<string> = new Set(["every", "cmd", "timeout", "always", "once", "interval", "refresh"]);
 const SECRET_FIELD_TYPES: Record<string, SlateType> = { set: { t: "boolean" }, len: { t: "number" }, at: { t: "number" } };
@@ -121,6 +133,7 @@ class Validator {
     const d = this.doc;
     if ((d.schema as number) !== 2) this.add("D200", `schema ${String(d.schema)} is not a version this host knows; this host reads schema 2`, {}, "update wsp");
     if (d.kit !== undefined && d.kit !== "wsp/2") this.add("D201", `kit ${d.kit} is not one this host has; it has wsp/2`);
+    if (d.title !== undefined && titleCased(d.title)) this.add("W018", `the slate's title "${d.title}" is in Title Case; heads take sentence case`, {}, `title="${sentenceCase(d.title)}"`);
     if (JSON.stringify({ ...d, files: undefined }).length > SLATE_LIMITS.documentBytes) this.add("D208", `the document is over ${SLATE_LIMITS.documentBytes / 1024} KB`);
     this.names();
     this.limits();
@@ -629,7 +642,10 @@ class Validator {
       case "string": case "text":
         if (typeof v === "string") {
           if (looksLikePath(v)) this.add("W001", `${name} is the literal text "${v}", which reads like a path`, w, `${name}={${v}}`);
+          else if (OWN_PATH.test(v) || /\{\$[^}]*\}/.test(v)) this.add("W001", `${name} is the literal text "${v}", which reads like a formula; quotes show it as written`, w, `${name}={${v.replace(/^\{(.*)\}$/, "$1")}}`);
           if (v.includes("\u2014")) this.add("W004", "an em dash in the slate's words; use a comma, a colon or a full stop", w);
+          if (/\p{Extended_Pictographic}/u.test(v)) this.add("W017", `${name} has an emoji; the slate's words carry none, so say it in words or give the piece an icon`, w);
+          if ((name === "title" || (type === "heading" && name === "value")) && titleCased(v)) this.add("W018", `${name} "${v}" is in Title Case; heads take sentence case`, w, `${name}="${sentenceCase(v)}"`);
           return;
         }
         if (typeof v === "number" && ps.type === "text") return;
