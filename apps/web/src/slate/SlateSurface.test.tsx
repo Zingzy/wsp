@@ -53,6 +53,7 @@ function host(answers: (SlateRecord | null | { newer: number })[]): SlateApi & {
     undo: vi.fn(async () => ({ version: 2 })),
     clear: vi.fn(async () => ({ version: 2 })),
     subscribe: vi.fn(async () => {}),
+    revoke: vi.fn(async () => {}),
     unsubscribe: vi.fn(async () => {}),
     resolve: vi.fn(async () => ({})),
   };
@@ -182,5 +183,21 @@ describe("a link a press opens", () => {
     await waitFor(() => expect(opened).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("Open example.com from this slate?")).toBeNull();
     opened.mockRestore();
+  });
+});
+
+describe("the tab's Approvals", () => {
+  it("lists each standing approval as a row with Revoke, and revoking asks the host", async () => {
+    const api = host([record({ approvals: { k1: { state: "allowed", at: 1, run: "deploy", cmd: "bash deploy.sh" }, "domain:example.com": { state: "allowed", at: 2, cmd: "links to example.com" }, k2: { state: "refused", at: 3, run: "x", cmd: "rm -rf x" } } })]);
+    select(api, "t1");
+    render(<SlateSurface />);
+    fireEvent.click(await screen.findByRole("button", { name: "Slate menu" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Approvals" }));
+    expect(await screen.findByText("Approvals in this thread")).toBeTruthy();
+    expect(screen.getByText("bash deploy.sh")).toBeTruthy();
+    expect(screen.getByText("links to example.com")).toBeTruthy();
+    expect(screen.queryByText("rm -rf x")).toBeNull();
+    fireEvent.click(document.querySelector<HTMLElement>('[data-slate-revoke="k1"]')!);
+    await waitFor(() => expect(api.revoke).toHaveBeenCalledWith("t1", "k1"));
   });
 });

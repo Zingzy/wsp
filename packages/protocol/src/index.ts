@@ -6439,6 +6439,7 @@ function slateOps() {
     op("slates.event"),
     op("slates.approve"),
     op("slates.cancel"),
+    op("slates.revoke"),
     op("slates.shown"),
     op("slates.subscribe"),
     op("slates.unsubscribe"),

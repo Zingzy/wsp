@@ -3,7 +3,7 @@
 // the panel is per workspace like every tab's; what it shows follows the thread the centre has open. Every empty
 // state is the panel's own Empty, quiet, with no spinner while the record is on its way.
 import { MoreHorizontal } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "../components/ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
@@ -24,6 +24,7 @@ import { bindSources } from "./sources/binder.js";
 import { SlateView, usePieceVersion } from "./SlateView.js";
 import { askConsent, closeLink, loadSlate, markSeen, slateBundle, slateLink, useSlateStore, type SlateEntry } from "./store.js";
 import { threadWorkspace } from "./SlateHost.js";
+import { STANDING_WORDS, StandingApprovals } from "./standing.js";
 
 /** The hold a drawn slate keeps on the host while the tab shows it (07, "A timer"). */
 export const SHOWN_HOLD = "slate";
@@ -114,6 +115,7 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   const refreshing = root !== undefined && engine.piece(root)?.type !== "section" && engine.refreshingUnder(root);
   const title = engine.document?.title ?? "Slate";
   const copy = () => void api?.sketch(threadId).then(text => navigator.clipboard?.writeText(text));
+  const [standing, setStanding] = useState(false);
   const runs = Object.keys(engine.document?.runs ?? {});
   const secrets = Object.entries(engine.document?.values ?? {}).flatMap(([name, decl]) => (decl.secret === true ? [`$${name}`] : []));
   const stop = () => {
@@ -137,9 +139,11 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
           <MenuItem onClick={() => void api?.clear(threadId).then(() => loadSlate(threadId))}>{SLATE_WORDS.clear}</MenuItem>
           {runs.length > 0 ? <MenuItem onClick={stop}>{SLATE_WORDS.stop}</MenuItem> : null}
           {secrets.length > 0 ? <MenuItem onClick={forget}>{SLATE_WORDS.forget}</MenuItem> : null}
+          <MenuItem onClick={() => setStanding(true)}>{STANDING_WORDS.menu}</MenuItem>
           <MenuItem onClick={copy}>{SLATE_WORDS.copy}</MenuItem>
         </MenuPopup>
       </Menu>
+      {standing ? <StandingApprovals record={entry.record} revoke={key => slateLink(threadId).revoke(key).then(() => loadSlate(threadId))} onClose={() => setStanding(false)} /> : null}
     </div>
   );
 }

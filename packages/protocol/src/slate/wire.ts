@@ -181,6 +181,9 @@ export const SlatesEventParams = z.object({
 });
 export const SlatesApproveParams = z.object({ threadId: z.string(), key: z.string(), scope: z.enum(["once", "thread", "refuse"]) });
 export const SlatesCancelParams = z.object({ threadId: z.string(), run: z.string() });
+/** The person withdrawing one standing approval of a thread's slate: a command's, an MCP server's, a domain's, or
+ * the one that lets reactions message the agent. */
+export const SlatesRevokeParams = z.object({ threadId: z.string(), key: z.string() });
 export const SlatesShownParams = z.object({ threadId: z.string() });
 export const SlatesSubscribeParams = z.object({ threadId: z.string(), sources: z.array(z.string()) });
 export const SlatesResolveParams = z.object({ threadId: z.string(), paths: z.array(z.string()).max(200) });
@@ -195,6 +198,7 @@ export const SLATE_OPS = {
   "slates.event": SlatesEventParams,
   "slates.approve": SlatesApproveParams,
   "slates.cancel": SlatesCancelParams,
+  "slates.revoke": SlatesRevokeParams,
   "slates.shown": SlatesShownParams,
   "slates.subscribe": SlatesSubscribeParams,
   "slates.unsubscribe": SlatesSubscribeParams,

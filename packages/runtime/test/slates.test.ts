@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { REWIND_NO_UNDO_LINE, type AdapterEvent, type Caller, type EventUnion, type SlateView, type TurnResult } from "@wsp/protocol";
+import { DEVICE_OPS, REWIND_NO_UNDO_LINE, THREAD_OPS, type AdapterEvent, type Caller, type EventUnion, type SlateView, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { SLATES } from "../src/slates.js";
@@ -436,6 +436,35 @@ describe("the slate v2 host", () => {
     const view = (await rt.slates.get(threadId))!;
     expect(view.values["deploy"]).toMatchObject({ state: "held" });
     expect(view.asks).toMatchObject([{ run: "deploy", why: "deploy.sh changed since you allowed it, so it asks again" }]);
+  });
+
+  it("the person revokes an approval: its run stops and leaves its timer, and the next start asks again", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-revoke-");
+    await rt.slates.write({ text: TICKER.replace('cmd="sleep 1; echo tick"', 'cmd="sleep 5; echo tick"') }, asThread);
+    const release = rt.slates.subscribe({ threadId, sources: [] });
+    const key = (await rt.slates.get(threadId))!.asks[0]!.key;
+    await rt.slates.approve({ threadId, key, scope: "thread" });
+    await vi.waitFor(async () => { await rt.slates.settled(); expect((await rt.slates.get(threadId))!.values["tick"]).toMatchObject({ state: "running" }); }, { timeout: 5_000 });
+    await rt.slates.revoke({ threadId, key });
+    await vi.waitFor(async () => { await rt.slates.settled(); expect((await rt.slates.get(threadId))!.values["tick"]).toMatchObject({ state: "cancelled" }); }, { timeout: 5_000 });
+    const view = (await rt.slates.get(threadId))!;
+    expect(view.approvals[key]).toBeUndefined();
+    // Its timer is gone until something starts it again, and then it asks: the Always is gone.
+    await rt.slates.write({ text: TICKER.replace('cmd="sleep 1; echo tick"', 'cmd="sleep 5; echo tick"') }, asThread);
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      const again = (await rt.slates.get(threadId))!;
+      expect(again.values["tick"]).toMatchObject({ state: "held" });
+      expect(again.asks.map(a => a.key)).toEqual([key]);
+    }, { timeout: 5_000 });
+    await rt.slates.approve({ threadId, key: "domain:example.com", scope: "thread" });
+    await rt.slates.revoke({ threadId, key: "domain:example.com" });
+    expect((await rt.slates.get(threadId))!.approvals["domain:example.com"]).toBeUndefined();
+    await expect(rt.slates.revoke({ threadId, key: "nope" })).rejects.toThrow(/holds no approval nope/);
+    // The person's alone: no thread token and no paired device may send it.
+    expect(THREAD_OPS).not.toContain("slates.revoke");
+    expect(DEVICE_OPS).not.toContain("slates.revoke");
+    release();
   });
 
   it("keeps a link's domain the person allowed for the thread, and refuses a key that names no domain", async () => {

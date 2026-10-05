@@ -72,6 +72,7 @@ function fakeHost(values: Record<string, SlateJson>): SlateApi {
     undo: vi.fn(),
     clear: vi.fn(),
     subscribe: vi.fn(async () => {}),
+    revoke: vi.fn(async () => {}),
     unsubscribe: vi.fn(async () => {}),
     resolve: vi.fn(async (_t: string, paths: readonly string[]) => Object.fromEntries(paths.map(p => [p, values[p] ?? null]))),
   } as unknown as SlateApi;

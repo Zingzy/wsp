@@ -220,7 +220,7 @@ describe("in the Slate tab", () => {
   function open(first: SlateRecord, over: Partial<SlateApi> = {}) {
     const slates: SlateApi = {
       get: vi.fn(async () => ({ record: first })), state: vi.fn(async () => ({ version: 2 })), event: vi.fn(async () => ({ outcome: "done" as const, said: "" })),
-      approve: vi.fn(async () => {}), cancel: vi.fn(async () => {}), shown: vi.fn(async () => {}), sketch: vi.fn(async () => ""),
+      approve: vi.fn(async () => {}), cancel: vi.fn(async () => {}), revoke: vi.fn(async () => {}), shown: vi.fn(async () => {}), sketch: vi.fn(async () => ""),
       undo: vi.fn(async () => ({ version: 2 })), clear: vi.fn(async () => ({ version: 2 })), subscribe: vi.fn(async () => {}), unsubscribe: vi.fn(async () => {}),
       resolve: vi.fn(async () => ({})), ...over,
     };

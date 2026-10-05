@@ -368,6 +368,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "slates.event": "a press is the person's act in the window; an agent hears it as the message the press sends",
       "slates.approve": "the person's answer to the consent sheet; an agent never approves a command it declared",
       "slates.cancel": "the person stopping a run from the window; an agent never starts or stops a run",
+      "slates.revoke": "the person withdrawing an approval from the window; an agent never revokes for the person",
       "slates.subscribe": "a window's hold on the sources its drawn pieces read; an agent's read resolves what it names at once",
       "slates.unsubscribe": "a window letting go of a hold it took",
       "slates.resolve": "the window's read of a path it cannot resolve itself; an agent names paths in slate read",

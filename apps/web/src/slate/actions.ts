@@ -32,6 +32,8 @@ export interface SlateLink {
   /** Answers a held run's sheet by its approval key. */
   approve(key: string, scope: SlateApproval): Promise<unknown>;
   cancel(run: string): Promise<unknown>;
+  /** The person withdraws one of the thread's standing approvals. */
+  revoke(key: string): Promise<unknown>;
   /** Opens the consent sheet on a run a press held. */
   consent(ask: SlateAsk): void;
   fill(text: string): void;

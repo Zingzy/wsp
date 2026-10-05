@@ -365,6 +365,9 @@ export interface Slates {
   /** With a thread, a name that is one of its agent's MCP servers answers that server's tools. */
   catalog(p: SlateTarget & { name?: string }, caller?: Caller): Promise<{ text: string }>;
   shown(threadId: string): Promise<void>;
+  /** The person withdraws one standing approval: the runs it covered stop, leave the queue and their timers, and the
+   * next start asks again. */
+  revoke(p: { threadId: string; key: string }): Promise<void>;
   event(p: { threadId: string; version: number; piece: string; event: "press" | "submit" | "change"; requestId: string; scope?: { item?: unknown; index: number }; rowAction?: number }): Promise<SlateEventAnswer>;
   approve(p: { threadId: string; key: string; scope: "once" | "thread" | "refuse" }): Promise<void>;
   cancel(p: { threadId: string; run: string }): Promise<void>;
@@ -786,8 +789,8 @@ export function createSlates(deps: SlatesDeps): Slates {
     for (const [name, decl] of Object.entries(r.document?.values ?? {})) if (decl.secret === true) r.values[name] = asJson(runs.secrets.handle(r.threadId, name));
   };
 
-  const armTimers = (r: SlateRecord): void => {
-    const list = Object.entries(r.document?.runs ?? {}).flatMap(([run, decl]) => (decl.every !== undefined ? [{ run, every: decl.every, key: decl.kind === "cmd" ? runs.key(approvalDecl(r, decl) as CmdRunDecl) : JSON.stringify(decl), ...(decl.always === true ? { always: true } : {}) }] : []));
+  const armTimers = (r: SlateRecord, stopped: ReadonlySet<string> = new Set()): void => {
+    const list = Object.entries(r.document?.runs ?? {}).flatMap(([run, decl]) => (decl.every !== undefined && !stopped.has(run) ? [{ run, every: decl.every, key: decl.kind === "cmd" ? runs.key(approvalDecl(r, decl) as CmdRunDecl) : JSON.stringify(decl), ...(decl.always === true ? { always: true } : {}) }] : []));
     runs.timers(r.threadId, list);
     const servers = Object.values(r.document?.runs ?? {}).flatMap(decl => (decl.kind === "cmd" ? [] : [{ server: decl.server, kept: decl.every !== undefined && decl.always === true }]));
     mcp.servers(r.threadId, servers.map(s => s.server), servers.filter(s => s.kept).map(s => s.server));
@@ -1470,6 +1473,34 @@ export function createSlates(deps: SlatesDeps): Slates {
           const again = runs.start({ threadId: p.threadId, run, decl: approvalDecl(r, decl) as CmdRunDecl, by: "person", folder, inputs: inputsOf(r, decl), last: rec as unknown as RunRecord });
           if (again.outcome === "held") runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once");
         }
+        // A timer a revoke took away comes back with the person's word.
+        if (p.scope === "thread") armTimers(r);
+        await save(r);
+      });
+    },
+
+    async revoke(p) {
+      const r = await needRecord(p.threadId);
+      await serial(p.threadId, async () => {
+        if (p.key === SLATE_SEND_KEY) {
+          if (r.sendsAllowed === undefined) throw usageRefusal("this thread's reactions were not allowed to message the agent:", "read its approvals again.");
+          delete r.sendsAllowed;
+          await save(r);
+          return;
+        }
+        if (r.approvals[p.key] === undefined) throw usageRefusal(`this thread holds no approval ${p.key}:`, "read its approvals again.");
+        delete r.approvals[p.key];
+        // What it covered stops now: each run started under it is cancelled, out of the queue, and off its timer.
+        const covered = Object.entries(r.document?.runs ?? {}).flatMap(([name, declared]) => {
+          const decl = approvalDecl(r, declared);
+          const covers = decl.kind === "cmd" ? runs.key(decl as CmdRunDecl) === p.key : p.key === consentKey(decl as McpRunDecl) || p.key === `mcp:${decl.server}`;
+          return covers ? [name] : [];
+        });
+        for (const run of covered) {
+          runs.cancel(p.threadId, run);
+          mcp.cancel(p.threadId, run);
+        }
+        armTimers(r, new Set(covered));
         await save(r);
       });
     },

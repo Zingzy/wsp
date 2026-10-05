@@ -93,6 +93,7 @@ function linkFor(threadId: string): SlateLink {
     event: ask => (api === null ? gone() : api.event(threadId, ask)),
     approve: (key, scope) => (api === null ? gone() : api.approve(threadId, key, scope)),
     cancel: run => (api === null ? gone() : api.cancel(threadId, run)),
+    revoke: key => (api === null ? gone() : api.revoke(threadId, key)),
     consent: ask => askConsent(threadId, { run: ask.run, ask }),
     writeState: values => (api === null ? gone() : api.state(threadId, values)),
     fill: text => host?.fill(threadId, text),
