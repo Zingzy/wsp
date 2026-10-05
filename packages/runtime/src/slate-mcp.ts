@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import type { McpTransport } from "@wsp/catalog";
 import { EXEC_OUTPUT_MAX, fmtBytes, runOutputTail } from "@wsp/protocol";
 import type { SlateAsk, SlateJson, SlateRunDecl } from "@wsp/protocol";
-import { HELD_APPROVAL, HELD_BUDGET, HELD_PRESSED, mapStrings, SECRET_DOTS, spent, stableJson, type Reshape, type RunApprovals, type RunBy, type RunRecord, type RunStartAnswer } from "./slate-runs.js";
+import { HELD_APPROVAL, HELD_BUDGET, HELD_PRESSED, lastResult, mapStrings, runningRecord, SECRET_DOTS, spent, stableJson, type Reshape, type RunResult, type RunApprovals, type RunBy, type RunRecord, type RunStartAnswer } from "./slate-runs.js";
 
 /** `files` is the text of each slate file its then reads, as on a command. */
 export type McpRunDecl = Extract<SlateRunDecl, { kind: "tool" | "resource" }> & { files?: Record<string, string> };
@@ -47,7 +47,8 @@ export interface McpRunStart {
   by: RunBy;
   /** The tool's arguments evaluated now, a secret as slateSecretMark(name) wherever it stands. */
   args: () => Record<string, SlateJson>;
-  runs?: number;
+  /** The run's record before this start, whose result stays in view while this one runs. */
+  last?: RunRecord;
 }
 
 export interface SlateMcpDeps {
@@ -71,7 +72,7 @@ export interface SlateMcpDeps {
 export interface SlateMcp {
   /** What a start inside a batch will give, before it is started: running where the server is allowed and nothing
    * known asks on this start, else held. */
-  provisional(threadId: string, decl: McpRunDecl, runs: number): RunRecord;
+  provisional(threadId: string, decl: McpRunDecl, last: RunRecord | undefined): RunRecord;
   start(req: McpRunStart): RunStartAnswer;
   /** The person's answer to a held run, by the key its ask carried. Every run held on that key moves. */
   approve(threadId: string, key: string, scope: "once" | "thread"): void;
@@ -446,6 +447,8 @@ interface Live {
   /** The call in flight, for a cancel to tell the server. */
   inflight?: { conn: Conn; id: number };
   reshaping?: Reshape;
+  /** The last call's result, kept in view while the next one runs and through a hold. */
+  result?: RunResult;
   held?: { req: McpRunStart; ask: HeldAsk };
   starts: number[];
   /** The person's own starts, on a budget of their own. */
@@ -482,11 +485,12 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
     }
     return t;
   };
-  const live = (threadId: string, run: string, runs = 0): Live => {
+  const live = (threadId: string, run: string, last: RunRecord | undefined): Live => {
     const t = thread(threadId);
     let l = t.runs.get(run);
     if (l === undefined) {
-      l = { record: { state: "idle", runs }, gen: 0, starts: [] };
+      const result = last === undefined ? undefined : lastResult(last);
+      l = { record: { state: "idle", runs: last?.runs ?? 0 }, gen: 0, starts: [], ...(result !== undefined ? { result } : {}) };
       t.runs.set(run, l);
     }
     return l;
@@ -559,6 +563,8 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
 
   const write = (threadId: string, run: string, l: Live, record: RunRecord): RunRecord => {
     l.record = record;
+    const result = record.state === "running" ? undefined : lastResult(record);
+    if (result !== undefined) l.result = result;
     deps.onRecord(threadId, run, record);
     return record;
   };
@@ -593,7 +599,7 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
     l.held = { req, ask };
     // A start held beside a call still running leaves that call and its record be: it stops only once the new start
     // launches.
-    const record = beside ? l.record : write(req.threadId, req.run, l, { state: "held", why: ask === "server" ? HELD_APPROVAL : ask === "tool" ? HELD_CONFIRM : ask === "pressed" ? HELD_PRESSED : HELD_BUDGET, runs });
+    const record = beside ? l.record : write(req.threadId, req.run, l, { ...(l.result ?? {}), state: "held", why: ask === "server" ? HELD_APPROVAL : ask === "tool" ? HELD_CONFIRM : ask === "pressed" ? HELD_PRESSED : HELD_BUDGET, runs });
     if (ask === "budget" || ask === "pressed") return { outcome: "held", record };
     if (ask === "server" && !lists.has(listKey(req.threadId, req.decl.server))) void listFor(req.threadId, req.decl.server).then(() => deps.onAsks?.(req.threadId));
     return { outcome: "held", record };
@@ -646,7 +652,7 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
     const prior = l.record.runs;
     const runs = prior + 1;
     const startedAt = now();
-    const record = write(threadId, run, l, { state: "running", runs, startedAt });
+    const record = write(threadId, run, l, runningRecord(l.result, runs, startedAt));
     const work = (async (): Promise<void> => {
       let spec: McpServerSpec | undefined;
       try {
@@ -748,17 +754,18 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
     [...(threads.get(threadId)?.runs ?? [])].filter(([, l]) => l.held !== undefined && l.held.ask !== "budget" && l.held.ask !== "pressed" && (l.held.ask === "server" ? consentKey(l.held.req.decl) : toolKey(l.held.req.decl)) === key);
 
   return {
-    provisional(threadId, decl, runs) {
+    provisional(threadId, decl, last) {
+      const runs = last?.runs ?? 0;
       if (!deps.approvals.has(threadId, consentKey(decl))) return { state: "held", why: HELD_APPROVAL, runs };
       if (decl.kind === "tool") {
         const info = lists.get(listKey(threadId, decl.server))?.find(x => x.name === decl.tool);
         if (decl.confirm !== undefined || isDestructive(info)) return { state: "held", why: HELD_CONFIRM, runs };
       }
-      return { state: "running", runs: runs + 1, startedAt: now() };
+      return runningRecord(last === undefined ? undefined : lastResult(last), runs + 1, now());
     },
 
     start(req) {
-      const l = live(req.threadId, req.run, req.runs ?? 0);
+      const l = live(req.threadId, req.run, req.last);
       const beside = l.record.state === "running";
       if (beside && req.decl.kind === "tool" && req.decl.once === true) return { outcome: "noop", record: l.record };
       delete l.held;

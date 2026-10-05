@@ -914,7 +914,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       const asked = { ...approvalDecl(r, decl), ...(confirm !== undefined ? { confirm } : {}) };
       const answer =
         asked.kind !== "cmd"
-          ? mcp.start({ threadId: r.threadId, run, decl: asked as McpRunDecl, by, args: mcpArgsOf(r, asked as McpRunDecl), runs: count })
+          ? mcp.start({ threadId: r.threadId, run, decl: asked as McpRunDecl, by, args: mcpArgsOf(r, asked as McpRunDecl), ...(isRunRecord(prior) ? { last: prior as unknown as RunRecord } : {}) })
           : runs.start({
               threadId: r.threadId,
               run,
@@ -939,7 +939,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     const decl = r.document?.runs[run];
     const prior = r.values[run];
     const count = isRunRecord(prior) ? prior.runs : 0;
-    if (decl !== undefined && decl.kind !== "cmd") return mcp.provisional(r.threadId, withFiles(r.document, decl) as McpRunDecl, count) as SlateRunRecord;
+    if (decl !== undefined && decl.kind !== "cmd") return mcp.provisional(r.threadId, withFiles(r.document, decl) as McpRunDecl, isRunRecord(prior) ? (prior as unknown as RunRecord) : undefined) as SlateRunRecord;
     return approvedAlways(r, run) ? (runningRecord(isRunRecord(prior) ? lastResult(prior as unknown as RunRecord) : undefined, count + 1, deps.now()) as SlateRunRecord) : { state: "held", why: HELD_APPROVAL, runs: count };
   };
 
