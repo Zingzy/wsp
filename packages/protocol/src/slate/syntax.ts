@@ -3,9 +3,10 @@
 // stored document and to patch ops; and the printer back. The compiler only builds the shape; every rule about
 // meaning is the validator's, which runs on the compiled document so the JSON form and a patched result are held
 // to the same checks. Lines ride beside the document so each problem names the line of the attribute it is on.
-import { parseSlateExpression, parseSlateFormat, slatePathText } from "./expr.js";
+import { closingBrace, parseSlateExpression, parseSlateFormat, slatePathText } from "./expr.js";
 import { SLATE_ITEM_KINDS, SLATE_PIECES, type SlateItemSpec } from "./kit.js";
 import { SLATE_LIMITS, slateBytes } from "./limits.js";
+import { parseSlateOwnPath, slateOwnName } from "./paths.js";
 import { nearest, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
 import { SLATE_STEPS } from "./steps.js";
 import { validateDocument, type SlateLines } from "./validate.js";
@@ -164,17 +165,11 @@ class Reader {
   }
   /** The index of the } that closes the { at i, with strings, templates and nested braces skipped. */
   private balanced(i: number): number {
-    let depth = 0;
-    let quote: string | undefined;
-    for (let j = i; j < this.src.length; j++) {
-      const c = this.src[j]!;
-      if (quote !== undefined) { if (c === "\\") j++; else if (c === quote) quote = undefined; }
-      else if (c === "'" || c === '"' || c === "`") quote = c;
-      else if (c === "{") depth++;
-      else if (c === "}" && --depth === 0) return j;
-    }
-    throw new Fatal("P100", `a { at line ${this.line(i)} never closes`, this.line(i));
+    const end = closingBrace(this.src, i + 1);
+    if (end < 0) throw new Fatal("P100", `a { at line ${this.line(i)} never closes`, this.line(i));
+    return end;
   }
+
 }
 
 function dedent(text: string): string {
@@ -499,9 +494,9 @@ class Compiler {
       }
       on = { change: paths };
     } else {
-      const p = done!.kind === "braced" ? /^\s*\$([a-zA-Z_][a-zA-Z0-9_]*)\s*$/.exec(done!.value) : null;
-      if (p === null) { this.error("K702", "done names a run: done={$check}", done!.line, { piece: key }); return; }
-      on = { done: p[1]! };
+      const run = done!.kind === "braced" ? slateOwnName(done!.value) : undefined;
+      if (run === undefined) { this.error("K702", "done names a run: done={$check}", done!.line, { piece: key }); return; }
+      on = { done: run };
     }
     this.lines.set(`${key}.do`, doAttr.line);
     const steps = this.steps(doAttr, key);
@@ -532,7 +527,7 @@ class Compiler {
       }
       const args = splitTop(m[2]!).map(s => s.trim());
       const bad = (message: string, fix?: string): void => this.error("A601", `${kind}: ${message}`, a.line, { ...at, fix });
-      const own = (s: string | undefined): string | undefined => (s !== undefined && /^\$[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*|\[-?\d+\])*$/.test(s) ? s : undefined);
+      const own = (s: string | undefined): string | undefined => (s !== undefined && parseSlateOwnPath(s) !== undefined ? s : undefined);
       switch (kind) {
         case "set": {
           const path = own(args[0]);
@@ -547,9 +542,9 @@ class Compiler {
           break;
         }
         case "start": case "cancel": {
-          const r = /^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(args[0] ?? "");
-          if (r === null || args.length !== 1) { bad(`${kind} names a run: ${kind}($check)`); break; }
-          out.push({ do: kind, run: r[1]! });
+          const run = slateOwnName(args[0] ?? "");
+          if (run === undefined || args.length !== 1) { bad(`${kind} names a run: ${kind}($check)`); break; }
+          out.push({ do: kind, run });
           break;
         }
         case "send": case "steer": case "queue": case "fill": {
@@ -637,7 +632,7 @@ class Compiler {
           props[a.name] = true;
           return;
         }
-        if (spec?.props[a.name]?.type === "path" && a.kind === "braced" && /^\s*\$[A-Za-z_][A-Za-z0-9_]*\s*$/.test(a.value)) { props[a.name] = a.value.trim(); return; }
+        if (spec?.props[a.name]?.type === "path" && a.kind === "braced" && slateOwnName(a.value) !== undefined) { props[a.name] = a.value.trim(); return; }
         props[a.name] = this.value(a);
       });
     }

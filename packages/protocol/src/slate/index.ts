@@ -5,7 +5,7 @@
 export * from "./types.js";
 export { SLATE_LIMITS, slateBytes } from "./limits.js";
 export { SLATE_CODES, SLATE_SECRET_IN_ARGS, SLATE_WARNINGS, slateProblem, nearest as slateNearest, type SlateCode } from "./problems.js";
-export { parseSlateOwnPath, slateOwnPathText, getSlateValue, setSlateValue, slateStep, slateEqual } from "./paths.js";
+export { parseSlateOwnPath, getSlateValue, setSlateValue, slateStep, slateEqual } from "./paths.js";
 export {
   parseSlateExpression, evaluateSlateExpression, evaluateSlateFormat, slateDependencies, slatePropDependencies, resolveSlateProp,
   parseSlateFormat, checkSlateExpression, slateTruthy, slateText, slateWord, slatePathText, walkSlateExpr, SLATE_FUNCTIONS, SLATE_PIPE_STEPS,

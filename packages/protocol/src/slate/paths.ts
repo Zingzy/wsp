@@ -25,8 +25,11 @@ export function parseSlateOwnPath(path: SlateOwnPath): { name: string; segs: (st
   return { name: m[1]!, segs };
 }
 
-export const slateOwnPathText = (name: string, segs: readonly (string | number)[]): string =>
-  `$${name}${segs.map(s => (typeof s === "number" ? `[${s}]` : `.${s}`)).join("")}`;
+/** The name of a bare own path, "$name" with no fields, or undefined. */
+export function slateOwnName(text: string): string | undefined {
+  const p = parseSlateOwnPath(text.trim());
+  return p !== undefined && p.segs.length === 0 ? p.name : undefined;
+}
 
 /** One step into a value: a record's own field, or a list's item counting back from the end for a negative index. */
 export function slateStep(value: SlateJson | undefined, seg: string | number): SlateJson | undefined {

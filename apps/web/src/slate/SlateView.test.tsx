@@ -4,7 +4,8 @@
 // and a press raises slates.event with the host's params.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { slateStartValues, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { slateStartValues, SLATE_PANE_KINDS, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { PANES } from "../panes";
 import { ActionRunner, StateSender, type SlateLink } from "./actions";
 import { SlateEngine } from "./engine";
 import { fakeLink, manualScheduler, slate } from "./testing";
@@ -91,6 +92,10 @@ const VALUES: Record<string, SlateJson> = {
 describe("the slate renderer", () => {
   it("has a view for every piece the kit offers, so no piece the agent may write draws as needing a newer wsp", () => {
     expect(Object.keys(SLATE_VIEWS).sort()).toEqual(Object.keys(SLATE_PIECES).sort());
+  });
+
+  it("opens only panes the window has, for every pane a slate's pane() step may name", () => {
+    for (const kind of SLATE_PANE_KINDS) expect(Object.keys(PANES)).toContain(kind);
   });
 
   it("draws every core piece from a fixture document", () => {

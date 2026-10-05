@@ -8,7 +8,7 @@ import { checkSlateExpression, parseSlateExpression, parseSlateFormat, slateDepe
 import { isSlateIcon, nearestSlateIcon } from "./icons.js";
 import { SLATE_PIECES, SLATE_RESERVED_PROPS, type SlateItemSpec, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
 import { SLATE_LIMITS, slateBytes } from "./limits.js";
-import { slateTable, parseSlateOwnPath } from "./paths.js";
+import { slateTable, parseSlateOwnPath, slateOwnName } from "./paths.js";
 import { SLATE_SECRET_IN_ARGS, SLATE_WARNINGS, nearest, orList, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
 import { SLATE_SOURCES, slateIsSeries, slateSourceType } from "./sources.js";
 import { SLATE_STEPS } from "./steps.js";
@@ -30,7 +30,6 @@ const RUN_FIELD_TYPES: Record<(typeof SLATE_RUN_FIELDS)[number], SlateType> = sl
   refreshing: { t: "boolean" }, text: { t: "boolean" },
 });
 /** A plain own path written as text, "$x" or "$x.out": the agent meant the formula. */
-const OWN_PATH = /^\$[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])*$/;
 /** Words a head capitalises in Title Case and sentence case leaves alone: an acronym, or a word with a capital inside. */
 const KEPT_CAPS = /^[A-Z0-9]{2,}s?$|^.+[A-Z].*$/;
 /** Whether a head reads as Title Case: two or more words of four letters or more past the first, every one capitalised. */
@@ -319,7 +318,7 @@ class Validator {
         for (const s of this.secretsIn(v)) secretEnv.push([k, s]);
       }
       (r.args ?? []).forEach((v, i) => {
-        const secret = isSlateBinding(v) ? /^\s*\$([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(v.bind)?.[1] : undefined;
+        const secret = isSlateBinding(v) ? slateOwnName(v.bind) : undefined;
         if (secret !== undefined && this.kinds.get(secret) === "secret") this.add("S520", `args[${i}] is the secret $${secret}; ${SLATE_SECRET_IN_ARGS}`, w(`args[${i}]`), `env={{ ${secret.toUpperCase()}: $${secret} }}, or stdin={$${secret}}`);
         else this.propValue(v, w(`args[${i}]`));
       });
@@ -537,7 +536,7 @@ class Validator {
       if (children.length > spec.childLimit.max) this.add("T309", `${p.type} takes at most ${spec.childLimit.max} child${spec.childLimit.max === 1 ? "" : "ren"}`, { piece: id });
       if (spec.childLimit.types.length > 0) for (const c of children) { const t = this.doc.pieces[c]?.type; if (t !== undefined && !spec.childLimit.types.includes(t)) this.add("T309", `${p.type} takes ${orList(spec.childLimit.types)} children, not ${t}`, { piece: id }); }
     }
-    if (p.type === "checklist" && props.editable === true && !(isSlateBinding(props.items) && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(props.items.bind.trim()) && this.kinds.get(props.items.bind.trim().slice(1)) === "value")) {
+    if (p.type === "checklist" && props.editable === true && !(isSlateBinding(props.items) && this.kinds.get(slateOwnName(props.items.bind) ?? "") === "value")) {
       this.add("S502", "an editable checklist writes its ticks back, so items binds a value: items={$steps}", { piece: id, prop: "items" });
     }
     if (props.mono === true && spec.textProp !== undefined && sentence(props[spec.textProp])) this.add("W014", MONO_WARNING, { piece: id, prop: "mono" }, "drop mono");
@@ -599,16 +598,16 @@ class Validator {
       if (ps.binds === "no") { this.add("T305", `${name} takes a literal, not a formula`, w); return; }
       if (ps.binds === "state") {
         const bind = isSlateBinding(v) ? v.bind.trim() : "";
-        const m = /^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(bind);
-        const kind = m !== null ? this.kinds.get(m[1]!) : undefined;
-        if (m === null) {
+        const m = slateOwnName(bind);
+        const kind = m !== undefined ? this.kinds.get(m) : undefined;
+        if (m === undefined) {
           const into = name === "value" ? "picked" : name;
           this.add("X410", `${name} on ${type} writes back, so it binds one plain value, not ${bind}; bind a value of its own and keep a list with append in a <when> if you need one per item`, w, `<value name="${into}" start={null} /> and ${name}={$${into}}`);
           return;
         }
-        if (kind === undefined) { this.add("S501", `$${m[1]} is not declared; add <value name="${m[1]}" start=... />`, w, nearest(m[1]!, [...this.kinds.keys()])); return; }
+        if (kind === undefined) { this.add("S501", `$${m} is not declared; add <value name="${m}" start=... />`, w, nearest(m, [...this.kinds.keys()])); return; }
         if (kind === "secret" && type !== "input") { this.add("S520", "a secret is typed into an input and nowhere else", w); return; }
-        if (kind !== "value" && kind !== "secret") { this.add("X410", `${name} on ${type} writes a value; $${m[1]} is ${kind === "derived" ? "derived" : "a run"}`, w); return; }
+        if (kind !== "value" && kind !== "secret") { this.add("X410", `${name} on ${type} writes a value; $${m} is ${kind === "derived" ? "derived" : "a run"}`, w); return; }
         return;
       }
       const t = this.propValue(v, w, { ...(row !== undefined ? { row } : {}), ...(enumWords !== undefined ? { enumWords } : {}) });
@@ -622,10 +621,10 @@ class Validator {
     if (ps.binds === "state" && ps.literal === true && ps.type === "boolean" && typeof v === "boolean") return;
     if (ps.binds === "state") { this.add("X410", `${name} on ${type} is two-way and binds a value: ${name}={$name}`, w, `${name}={$${typeof v === "string" && /^[a-z_]\w*$/.test(v) ? v : "name"}}`); return; }
     if (ps.type === "path") {
-      const m = typeof v === "string" ? /^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(v) : null;
-      if (m === null) { this.add("T303", `${name} names a run or a value as $name`, w); return; }
-      const kind = this.kinds.get(m[1]!);
-      if (type === "output" && kind !== "run") this.add("K702", `run names a run: $${m[1]} is ${kind ?? "not declared"}`, w, nearest(m[1]!, [...this.kinds].filter(([, k]) => k === "run").map(([n]) => `$${n}`)));
+      const m = typeof v === "string" ? slateOwnName(v) : undefined;
+      if (m === undefined) { this.add("T303", `${name} names a run or a value as $name`, w); return; }
+      const kind = this.kinds.get(m);
+      if (type === "output" && kind !== "run") this.add("K702", `run names a run: $${m} is ${kind ?? "not declared"}`, w, nearest(m, [...this.kinds].filter(([, k]) => k === "run").map(([n]) => `$${n}`)));
       return;
     }
     if (enumWords !== undefined) {
@@ -665,7 +664,7 @@ class Validator {
       case "string": case "text":
         if (typeof v === "string") {
           if (looksLikePath(v)) this.add("W001", `${name} is the literal text "${v}", which reads like a path`, w, `${name}={${v}}`);
-          else if (OWN_PATH.test(v) || /\{\$[^}]*\}/.test(v)) this.add("W001", `${name} is the literal text "${v}", which reads like a formula; quotes show it as written`, w, `${name}={${v.replace(/^\{(.*)\}$/, "$1")}}`);
+          else if (parseSlateOwnPath(v) !== undefined || /\{\$[^}]*\}/.test(v)) this.add("W001", `${name} is the literal text "${v}", which reads like a formula; quotes show it as written`, w, `${name}={${v.replace(/^\{(.*)\}$/, "$1")}}`);
           if (v.includes("\u2014")) this.add("W004", "an em dash in the slate's words; use a comma, a colon or a full stop", w);
           if (/\p{Extended_Pictographic}/u.test(v)) this.add("W017", `${name} has an emoji; the slate's words carry none, so say it in words or give the piece an icon`, w);
           if ((name === "title" || (type === "heading" && name === "value")) && titleCased(v)) this.add("W018", `${name} "${v}" is in Title Case; heads take sentence case`, w, `${name}="${sentenceCase(v)}"`);

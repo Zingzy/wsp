@@ -2,7 +2,7 @@
 // The slate as text with its values filled in (10, "The sketch"), returned after every write and read so an agent
 // with no eyes knows what the person sees. Each piece type writes its own line; this file walks the tree, hides
 // what is hidden, tags each line with its id and type, lists the values, runs and problems, and caps the whole.
-import { fmtBytes } from "../format.js";
+import { fmtBytes, plural } from "../format.js";
 import { evaluateSlateExpression, parseSlateFormat, resolveSlateProp, slateDependencies, slatePropDependencies, slateTruthy, type SlateEvalContext } from "./expr.js";
 import { isSlateIcon } from "./icons.js";
 import { SLATE_PIECES, slateHeldText, type SlatePieceModule, type SlatePropSpec, type SlateSketchView } from "./kit.js";
@@ -27,7 +27,6 @@ export interface SlateSketchContext {
   waiting?: string[];
 }
 
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** How many props hold a binding or a format string, nested ones counted one by one. */
 function boundCount(value: SlatePropValue | undefined): number {
