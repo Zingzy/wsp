@@ -62,6 +62,9 @@ const METHOD_FIX: Record<string, string> = slateTable<string>({
   test: "contains, startsWith or endsWith; there are no regular expressions", forEach: "a piece that takes items",
 });
 
+/** The escapes a string literal reads: JSON's, so a printed JSON string reads back as written. */
+const ESCAPES: Readonly<Record<string, string>> = slateTable({ n: "\n", t: "\t", r: "\r", b: "\b", f: "\f" });
+
 function tokenize(src: string): Token[] {
   const out: Token[] = [];
   let i = 0;
@@ -79,7 +82,14 @@ function tokenize(src: string): Token[] {
       let s = "";
       i++;
       while (i < src.length && src[i] !== c) {
-        if (src[i] === "\\" && i + 1 < src.length) { const n = src[i + 1]!; s += n === "n" ? "\n" : n === "t" ? "\t" : n; i += 2; continue; }
+        if (src[i] === "\\" && i + 1 < src.length) {
+          const n = src[i + 1]!;
+          const hex = n === "u" ? /^[0-9A-Fa-f]{4}/.exec(src.slice(i + 2, i + 6))?.[0] : undefined;
+          if (hex !== undefined) { s += String.fromCharCode(parseInt(hex, 16)); i += 6; continue; }
+          s += ESCAPES[n] ?? n;
+          i += 2;
+          continue;
+        }
         s += src[i];
         i++;
       }
@@ -94,6 +104,7 @@ function tokenize(src: string): Token[] {
       i++;
       while (i < src.length && src[i] !== "`") {
         if (src.startsWith("$${", i)) { lit += "${"; i += 3; continue; }
+        if (src.startsWith("\\`", i)) { lit += "`"; i += 2; continue; }
         if (src.startsWith("${", i)) {
           const start = i + 2;
           const end = closingBrace(src, start);

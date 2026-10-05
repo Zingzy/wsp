@@ -235,3 +235,23 @@ describe("text with holes", () => {
     expect(parseSlate(printSlate(written)).document).toEqual(written);
   });
 });
+
+describe("printing, then parsing again", () => {
+  const doc = (pieces: Record<string, unknown>, extra: object = {}): SlateDoc => validateSlate({ schema: 2, root: "top", values: { v: { start: 1 } }, derived: {}, runs: {}, reactions: [], pieces: { top: { type: "column", children: Object.keys(pieces) }, ...pieces }, ...extra }).document!;
+
+  it("gives back the same document for quotes, control characters, entities and backticks", () => {
+    const docs = [
+      doc({ t: { type: "text", props: { value: "x" } } }, { title: `He said "hi" and 'bye'` }),
+      doc({ b: { type: "button", props: { label: "Go" }, on: { press: [{ do: "send", text: "a\rb\u0001c" }] } } }),
+      doc({ s: { type: "section", props: { title: "Q&amp;A" } } }, { values: { v: { start: "a &amp; b" } } }),
+      doc({ s: { type: "section", props: { title: "x", note: { format: "a `b` ${$v} $${c}" } } } }),
+      doc({ o: { type: "output", props: { run: "$r" } } }, { runs: { r: { kind: "cmd", cmd: "echo '&amp;' \"x\"" } } }),
+    ];
+    for (const d of docs) {
+      expect(d).toBeDefined();
+      const back = parseSlate(printSlate(d));
+      expect(back.errors, printSlate(d)).toEqual([]);
+      expect(back.document).toEqual(d);
+    }
+  });
+});

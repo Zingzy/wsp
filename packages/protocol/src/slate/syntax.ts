@@ -3,7 +3,7 @@
 // stored document and to patch ops; and the printer back. The compiler only builds the shape; every rule about
 // meaning is the validator's, which runs on the compiled document so the JSON form and a patched result are held
 // to the same checks. Lines ride beside the document so each problem names the line of the attribute it is on.
-import { parseSlateExpression, slatePathText } from "./expr.js";
+import { parseSlateExpression, parseSlateFormat, slatePathText } from "./expr.js";
 import { SLATE_ITEM_KINDS, SLATE_PIECES, type SlateItemSpec } from "./kit.js";
 import { SLATE_LIMITS, slateBytes } from "./limits.js";
 import { nearest, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
@@ -24,6 +24,9 @@ interface El { tag: string; attrs: Attr[]; children: El[]; text?: (string | Hole
 class Fatal extends Error {
   constructor(readonly code: SlateCode, message: string, readonly line: number, readonly fix?: string) { super(message); }
 }
+
+/** An HTML entity, which nothing in a slate decodes. */
+const HTML_ENTITY = /&(?:[A-Za-z]+|#\d+|#x[0-9A-Fa-f]+);/;
 
 const DECLARATIONS = new Set(["value", "secret", "derived", "run", "when"]);
 const PATCH_TAGS = new Set(["props", "add", "remove", "move", "clear", "undo"]);
@@ -104,7 +107,7 @@ class Reader {
         if (end < 0) this.fail(`the string for ${an[0]} at line ${aline} never closes`);
         const raw = this.src.slice(this.i + 1, end);
         if (raw.endsWith("\\")) this.fail(`attribute strings take no escapes (${an[0]} at line ${aline}): a backslash does not hide a ${q} inside ${q}...${q}`, q === '"' ? `${an[0]}='echo "hi"', single quotes outside the double ones; with both quotes inside, the block form <run name="x">{\`...\`}</run>` : `${an[0]}="echo 'hi'", double quotes outside the single ones; with both quotes inside, the block form <run name="x">{\`...\`}</run>`);
-        const entity = /&(?:[A-Za-z]+|#\d+|#x[0-9A-Fa-f]+);/.exec(raw);
+        const entity = HTML_ENTITY.exec(raw);
         if (entity !== null) {
           // Nothing decodes an entity here: &quot; reaches a command as the five letters, and bash runs "quot".
           const quote = /^&(?:quot|apos|#34|#39|#x22|#x27);$/.test(entity[0]);
@@ -310,6 +313,7 @@ class Compiler {
   document(el: El): void {
     for (const a of el.attrs) {
       if (a.name === "title" && a.kind === "string") this.doc.title = a.value;
+      else if (a.name === "title" && a.kind === "braced" && stringLiteral(a.value) !== undefined) this.doc.title = stringLiteral(a.value);
       else if (a.name === "title") this.error("T303", "title is a literal string: <slate title=\"...\">", a.line);
       else this.error("T302", `<slate> takes title alone, not ${a.name}`, a.line, { fix: "title" });
     }
@@ -712,7 +716,7 @@ class Compiler {
     const { ast } = parseSlateExpression(t);
     if (ast?.k === "lit") return ast.v;
     if (ast?.k === "neg" && ast.arg.k === "lit" && typeof ast.arg.v === "number") return -ast.arg.v;
-    if (ast?.k === "tpl") return { format: t.slice(1, -1) };
+    if (ast?.k === "tpl") return { format: t.slice(1, -1).replace(/\\`/g, "`") };
     return { bind: t };
   }
 
@@ -720,12 +724,12 @@ class Compiler {
     let format = "";
     let holes = 0;
     for (const p of parts) {
-      if (typeof p === "string") format += normalizeRun(p).replace(/\$\{/g, "$${");
+      if (typeof p === "string") format += normalizeRun(p).replace(/\$\{/g, () => "$${");
       else {
         const e = p.expr.trim();
         if (e.startsWith("/*") && e.endsWith("*/")) continue;
         const lit = stringLiteral(e);
-        if (lit !== undefined) { format += lit.replace(/\$\{/g, "$${"); continue; }
+        if (lit !== undefined) { format += lit.replace(/\$\{/g, () => "$${"); continue; }
         // A $ just before ${ would read as the $${ escape and print the hole as text.
         if (format.endsWith("$")) format = `${format.slice(0, -1)}\${'$'}`;
         format += `\${${e}}`;
@@ -989,13 +993,14 @@ function commandAttr(name: string, cmd: string): string {
 }
 
 function quoteAttr(s: string): string {
-  if (!s.includes('"') && !s.endsWith("\\")) return `"${s}"`;
-  if (!s.includes("'") && !s.endsWith("\\")) return `'${s}'`;
+  const quotable = !s.endsWith("\\") && !HTML_ENTITY.test(s);
+  if (quotable && !s.includes('"')) return `"${s}"`;
+  if (quotable && !s.includes("'")) return `'${s}'`;
   return `{${exprString(s)}}`;
 }
 
 /** A string as a formula's string literal. */
-const exprString = (s: string): string => `'${s.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/\t/g, "\\t")}'`;
+const exprString = (s: string): string => `'${s.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t")}'`;
 
 function literalText(v: SlateJson): string {
   if (v === null || typeof v !== "object") return typeof v === "string" ? exprString(v) : String(v);
@@ -1006,7 +1011,7 @@ function literalText(v: SlateJson): string {
 /** A prop value as an expression inside braces or a step's argument. */
 function valueExpr(v: SlatePropValue): string {
   if (isSlateBinding(v)) return v.bind;
-  if (isSlateFormat(v)) return `\`${v.format}\``;
+  if (isSlateFormat(v)) return `\`${parseSlateFormat(v.format).parts.map(p => (typeof p === "string" ? p.replace(/\$\{/g, () => "$${").replace(/`/g, "\\`") : `\${${p.expr}}`)).join("")}\``;
   if (v === null || typeof v !== "object") return literalText(v);
   if (Array.isArray(v)) return `[${v.map(valueExpr).join(", ")}]`;
   return `{ ${Object.entries(v).map(([k, x]) => `${/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : JSON.stringify(k)}: ${valueExpr(x)}`).join(", ")} }`;
