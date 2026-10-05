@@ -10,7 +10,7 @@
 // same four everywhere, so they sit here once and the adapters read them.
 import { z } from "zod";
 import type { AttachmentRoad } from "./adapter-port.js";
-import { fmtBytes } from "./format.js";
+import { ATTACHED_FILES_HEAD, fmtBytes } from "./format.js";
 import { shellQuote } from "./shell-quote.js";
 
 /** The image types a message carries, each with the word a transcript prints and the extension its copy on a machine
@@ -252,5 +252,5 @@ export function filesNotLandedLine(folder: string): string {
 
 /** The prompt the agent is handed for a message with files: the person's words, then every landed path. */
 export function attachedFilesPrompt(prompt: string, paths: readonly string[]): string {
-  return paths.length === 0 ? prompt : `${prompt}\n\nAttached files:\n${paths.map(p => `- ${p}`).join("\n")}`;
+  return paths.length === 0 ? prompt : `${prompt}\n\n${ATTACHED_FILES_HEAD}\n${paths.map(p => `- ${p}`).join("\n")}`;
 }

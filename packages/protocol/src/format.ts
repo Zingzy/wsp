@@ -1145,13 +1145,19 @@ export function wordsWithin(line: string, room: number): string | undefined {
   return boundary > 0 ? head.slice(0, boundary).replace(SEPARATOR_TAIL, "") : undefined;
 }
 
-/** Where a title read out of the harness's own store came from: one that is the thread's opening words, or their head,
- * is the seed under the harness's roof (codex names a thread from them the moment it starts) and the thread is still
- * asked for a name; any other is the person's rename or the harness's own made name, and stands. */
+/** The line that opens the block of landed paths after a message's words in the prompt an agent is handed. */
+export const ATTACHED_FILES_HEAD = "Attached files:";
+
+/** Where a title read out of the harness's own store came from: one that is the prompt the thread opened with, or its
+ * head, is the seed under the harness's roof (codex names a thread from it the moment it starts, every line of the
+ * prompt in its title column, the block of attached paths included) and the thread is still asked for a name; any
+ * other is the person's rename or the harness's own made name, and stands. The paths are the machine's and the row
+ * keeps none, so a prompt with files is matched as the opening words and that block's head. */
 export function storedTitleSource(stored: string, opening: string | undefined): TitleSource {
   if (opening === undefined) return "person";
   const title = stored.replace(/\s+/g, " ").trim();
-  return title !== "" && titleLine(opening).startsWith(title) ? "seed" : "person";
+  const handed = `${opening.replace(/\s+/g, " ").trim()} ${ATTACHED_FILES_HEAD}`;
+  return title !== "" && (handed.startsWith(title) || title.startsWith(handed)) ? "seed" : "person";
 }
 
 /** The most characters a generated title takes; a longer answer is cut to the words that fit. */

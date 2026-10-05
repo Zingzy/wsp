@@ -210,7 +210,7 @@ where
     done
 }
 
-async fn git_path<R: Runs>(runner: &R, top: &Path, name: &str) -> Result<PathBuf, OpError> {
+pub(super) async fn git_path<R: Runs>(runner: &R, top: &Path, name: &str) -> Result<PathBuf, OpError> {
     let at = run_git(runner, top, &["rev-parse", "--git-path", name], None, None).await?;
     ran(&at, "rev-parse --git-path")?;
     Ok(top.join(stdout_text(&at).trim()))
