@@ -10,7 +10,7 @@ import { delimiter, dirname, join, sep } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, configSum, skillsDirOf, type AgentEntry, type McpAgent, type Placed } from "@wsp/catalog";
 import { writeConfigHere } from "@wsp/engine";
 import { tilde } from "@wsp/collect";
-import { MCP_SERVER_NAME, mcpServerCommandLine, nextInsideAgentLine, WSP_TOOL_TIMEOUT_SEC, type McpServerSpec } from "@wsp/protocol";
+import { MCP_SERVER_NAME, NO_SLATE_MCP_ARG, mcpServerCommandLine, nextInsideAgentLine, WSP_TOOL_TIMEOUT_SEC, type McpServerSpec } from "@wsp/protocol";
 import { placeSections, removeSections } from "./agents-md.js";
 import { daemonBinaryHere } from "./assets.js";
 import { SKILL_NAME, wspSkill } from "./skill.js";
@@ -149,10 +149,10 @@ export function mcpServerCommand(run: RunningWsp): McpServerSpec {
 
 /** What `wsp mcp` runs where this computer's binary has the tool server: the binary, on the state the command line
  * resolved and the flags it was given, handed this same wsp. None where the binary carries no tool server. */
-export function toolServerLine(statePath: string, given: { host?: string; scoped?: boolean; json?: boolean }, run: RunningWsp): McpServerSpec | undefined {
+export function toolServerLine(statePath: string, given: { host?: string; scoped?: boolean; "no-slate"?: boolean; json?: boolean }, run: RunningWsp): McpServerSpec | undefined {
   const binary = toolServerOf(run);
   if (binary === false) return undefined;
-  const flags = [...(given.host !== undefined ? ["--host", given.host] : []), ...(given.scoped === true ? ["--scoped"] : []), ...(given.json === true ? ["--json"] : [])];
+  const flags = [...(given.host !== undefined ? ["--host", given.host] : []), ...(given.scoped === true ? ["--scoped"] : []), ...(given["no-slate"] === true ? [NO_SLATE_MCP_ARG] : []), ...(given.json === true ? ["--json"] : [])];
   return { command: binary, args: ["mcp", "--state", statePath, ...flags, ...handedWsp(run)] };
 }
 

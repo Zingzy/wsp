@@ -4,7 +4,7 @@
 // line streams back. The link is a fake standing for one machine's daemon, so
 // what is driven here is the door and its two kinds and nothing of the wire
 // under them, which the daemon's own suite drives.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EXIT_CODES, GUEST_SESSIONS_PER_WORKSPACE_CAP, GUEST_WORKSPACE_FULL, guestNoTokenRefusal, guestTurnNoTokenRefusal, guestHostFlagLine, guestNamesWorkspaceLine, guestNoFileLine, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, guestPersonsComputerLine, LOOPBACK, UNAUTHORIZED, type DaemonEvent } from "@wsp/protocol";
@@ -12,7 +12,7 @@ import { copyKey, createRuntime, memoryStore, type GuestKindModule, type Runtime
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
 import { guestRefusal } from "../src/guest-cli.js";
-import { guestKinds } from "../src/guest-tools.js";
+import { guestKinds, guestTools } from "../src/guest-tools.js";
 import { guestDoor, type GuestDoor, type GuestLink } from "../src/guest.js";
 import { placeWiring } from "../src/places.js";
 import type { HostHandle } from "../src/server.js";
@@ -43,8 +43,8 @@ describe("a guest session on the host", () => {
   let workspaceId: string;
 
   /** A thread's own token on the named workspace, minted by the same door every other road reads. */
-  const tokenOn = async (on: string): Promise<string> =>
-    (await rt.devices.mint("thread t1", { kind: "thread", threadId: "t1", workspaceId: on, rootThreadId: "t1" }, Date.now())).deviceToken;
+  const tokenOn = async (on: string, rootThreadId = "t1"): Promise<string> =>
+    (await rt.devices.mint("thread t1", { kind: "thread", threadId: "t1", workspaceId: on, rootThreadId }, Date.now())).deviceToken;
 
   const replies = (): unknown[] => sent.filter(s => s.op === "guest.reply").map(s => s.params["message"]);
   const closes = (): Sent[] => sent.filter(s => s.op === "guest.close");
@@ -231,6 +231,30 @@ describe("a guest session on the host", () => {
       const served = VERBS.filter(hasTool).filter(v => readsHere(v) === undefined);
       expect(names).toEqual(served.map(v => toolName(v.name)).sort());
       expect(VERBS.filter(hasTool).filter(v => readsHere(v) !== undefined).map(v => v.name)).toEqual(["recipe scan", "recipe", "terminal config"]);
+    });
+
+    it("tells the server of a thread another thread started that it has no slate, and a lead's that it has one", async () => {
+      const hello = async (token: string): Promise<string> => {
+        sent = [];
+        door.event(link, opened({ token, kind: "mcp", argv: ["mcp"], session: "g0" }));
+        const answer = await call(token, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } });
+        door.event(link, { type: "guest.closed", session: "g0" });
+        return (answer["result"] as { instructions?: string }).instructions ?? "";
+      };
+      expect(await hello(await tokenOn(workspaceId))).toContain("slate");
+      expect(await hello(await tokenOn(workspaceId, "t0"))).not.toContain("slate");
+    });
+
+    it("puts the word on the line of this computer's binary for a thread another thread started, and only there", async () => {
+      const seen = join(dir, "argv");
+      const server = join(dir, "tool-server");
+      writeFileSync(server, `#!/bin/sh\necho "$@" >> ${seen}\n`, { mode: 0o755 });
+      const kind = guestTools(statePath, server);
+      for (const noSlate of [false, true]) {
+        kind.open({ argv: ["mcp"], cwd: "/root", env: {}, ...(noSlate ? { noSlate: true as const } : {}), reply: () => undefined, close: () => undefined });
+      }
+      await settled(() => existsSync(seen) && readFileSync(seen, "utf8").split("\n").length > 2);
+      expect(readFileSync(seen, "utf8").trim().split("\n").sort()).toEqual([`mcp --state ${statePath} --scoped --guest`, `mcp --state ${statePath} --scoped --guest --no-slate`]);
     });
 
     it("drives this host with the thread's own token: a tool call answers off the host the session named", async () => {

@@ -19,6 +19,8 @@ export const INLINE_EXEC_MS = 20_000;
 /** What a run past its deadline exits with, the same code the guest-side guard uses for its own timeout, and the
  * one the exec op on a place answers with, read off the protocol so the two roads cannot say different numbers. */
 export const DEADLINE_EXIT = EXEC_DEADLINE_EXIT;
+/** What a run answers when its caller cancelled it: the shell's own code for a session ended by an interrupt. */
+export const CANCELLED_EXIT = 130;
 
 /** The folder a machine wsp made keeps wsp's own working files in. The whole disk there is wsp's, so the shared
  * temporary folder is wsp's too; a machine somebody else owns names its own, since a folder every account on it
@@ -107,6 +109,20 @@ export function markersOf(stdout: string, marker: string): Map<string, string> {
       return words[0] === marker && words[1] !== undefined ? [[words[1], words.slice(2).join(" ")] as const] : [];
     }),
   );
+}
+
+/** A pause that a cancel cuts short, so a run cancelled between polls is killed at once rather than a poll later. */
+function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (signal === undefined) return sleep(ms);
+  return new Promise(resolve => {
+    const done = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
 }
 
 function sleep(ms: number): Promise<void> {
@@ -300,6 +316,9 @@ export async function execDetached(machine: Machine, script: string, opts: RunOp
   const exec = (cmd: string): Promise<ExecResult> => machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
 
   const quiet = (p: Promise<unknown>): Promise<void> => p.then(() => undefined, () => undefined);
+  // Read through a call each time: the flag moves while the run is awaited, which a narrowed property would hide.
+  const cancelled = (): boolean => opts.signal?.aborted === true;
+  if (cancelled()) return { exitCode: CANCELLED_EXIT, stdout: "", stderr: "cancelled\n" };
 
   // A launch that failed may have left the script, or the pieces of one, on the guest: nothing else will come back
   // for them, and they hold whatever the caller put in the script.
@@ -329,6 +348,12 @@ export async function execDetached(machine: Machine, script: string, opts: RunOp
   let wait = Math.min(FIRST_POLL_MS, pollMs);
   let downs = 0;
   while (true) {
+    // A cancel ends the run as the deadline does, its group killed and its files gone.
+    if (cancelled()) {
+      await quiet(exec(killCommand(base)));
+      await quiet(exec(cleanCommand(base)));
+      return result(CANCELLED_EXIT, "cancelled");
+    }
     if (Date.now() - startedAt > opts.deadlineMs) {
       await quiet(exec(killCommand(base)));
       const last = await exec(pollCommand(base, out.offset, err.offset)).then(r => parsePoll(r.stdout), () => undefined);
@@ -345,7 +370,7 @@ export async function execDetached(machine: Machine, script: string, opts: RunOp
       poll = undefined;
     }
     if (poll === undefined) {
-      await sleep(pollMs);
+      await pause(pollMs, opts.signal);
       continue;
     }
     if (read(poll)) continue;
@@ -360,7 +385,7 @@ export async function execDetached(machine: Machine, script: string, opts: RunOp
       return result(-1, NO_EXIT_NOTE);
     }
     if (!poll.up) continue;
-    await sleep(wait);
+    await pause(wait, opts.signal);
     wait = Math.min(pollMs, wait * 2);
   }
 }

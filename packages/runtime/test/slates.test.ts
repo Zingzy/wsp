@@ -11,6 +11,7 @@ import { LocalBackend } from "@wsp/engine";
 import { REWIND_NO_UNDO_LINE, type AdapterEvent, type Caller, type EventUnion, type SlateView, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
+import { SLATES } from "../src/slates.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, testPlatform } from "./stub-backend.js";
 
@@ -764,6 +765,50 @@ describe("the slate v2 host, round 4", () => {
     expect(realpathSync(String(((await again.slates.get(threadId))!.values["where"] as { out: string }).out).split("\n")[0]!)).toBe(realpathSync(inner));
   }, 30_000);
 
+  it("a settled thread stops its timed runs, always ones too, and opening its slate starts them again at once", async () => {
+    const store = memoryStore();
+    const { rt, root, threadId, asThread } = await threadOn("wsp-slates-settled-", { store });
+    await rt.slates.write({ text: `<slate title="Feed"><run name="feed" cmd="echo hi" every={3600} always timeout={20} /><column><output run={$feed} /></column></slate>` }, asThread);
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.asks).toHaveLength(1);
+    }, { timeout: 5_000 });
+    await rt.slates.approve({ threadId, key: (await rt.slates.get(threadId))!.asks[0]!.key, scope: "thread" });
+    const feed = async (on: Runtime) => (await on.slates.get(threadId))!.values["feed"] as { state: string; runs: number };
+    await vi.waitFor(async () => expect(await feed(rt)).toMatchObject({ state: "done", runs: 1 }), { timeout: 10_000 });
+    await rt.sessions.settle([threadId]);
+    await rt.close();
+    runtimes.splice(runtimes.indexOf(rt), 1);
+
+    // The new host arms the always timer as it boots, which ticks at once; the thread is settled, so nothing starts.
+    const again = host(root, store, [], []);
+    await again.slates.ready();
+    await new Promise(resolve => setTimeout(resolve, 1_500));
+    await again.slates.settled();
+    expect(await feed(again)).toMatchObject({ state: "done", runs: 1 });
+    // A window opens the slate: the run it held starts now, not an hour from now.
+    again.slates.subscribe({ threadId, sources: [] });
+    await vi.waitFor(async () => {
+      await again.slates.settled();
+      expect(await feed(again)).toMatchObject({ state: "done", runs: 2 });
+    }, { timeout: 10_000 });
+  }, 30_000);
+
+  it("a thread another thread started has no slate: every slate tool refuses it in one plain line, and its lead's slate works on", async () => {
+    const { rt, threadId, workspaceId, asThread } = await threadOn("wsp-slates-sub-");
+    const child = await rt.sessions.start(workspaceId, { prompt: "builder" }, asThread);
+    await child.finished;
+    const childThread = child.view().threadId!;
+    expect(child.view().parentThreadId).toBe(threadId);
+    const asChild: Caller = { origin: "here", by: { kind: "thread", threadId: childThread, workspaceId, rootThreadId: threadId } };
+    const said = "Z803 sub-thread: a thread another thread started has no slate; tell the thread that started you what to show, and it puts it on its own";
+    await expect(rt.slates.write({ text: `<slate><column><text>x</text></column></slate>` }, asChild)).rejects.toThrow(said);
+    await expect(rt.slates.read({}, asChild)).rejects.toThrow(said);
+    await expect(rt.slates.state({ values: { $x: 1 } }, asChild)).rejects.toThrow(said);
+    await expect(rt.slates.catalog({}, asChild)).rejects.toThrow(said);
+    expect((await rt.slates.write({ text: `<slate><column><text>x</text></column></slate>` }, asThread)).version).toBe(1);
+  }, 30_000);
+
   it("a timer that ticks as the host boots starts its run in the thread's folder, never the host process's", async () => {
     let inner = "";
     const store = memoryStore();
@@ -924,6 +969,28 @@ describe("the slate v2 host, round 5", () => {
     await rt.sessions.delete(threadId);
     expect(existsSync(dir)).toBe(false);
   }, 60_000);
+
+  it("deleting a thread deletes its slate, its folder and its runs, a running one killed before it finishes", async () => {
+    const store = memoryStore();
+    const { rt, root, threadId, asThread } = await threadOn("wsp-slates-delete-", { store });
+    const marker = join(root, "finished");
+    await rt.slates.write({ text: `<slate title="Long"><value name="go" start={0} /><run name="long" cmd='sleep 2; touch "${marker}"' timeout={20} /><when change={$go} do={start($long)} /><column><output run={$long} /></column><file name="note.txt">{\`kept\`}</file></slate>` }, asThread);
+    await rt.slates.state({ threadId, values: { $go: 1 } });
+    await rt.slates.approve({ threadId, key: (await rt.slates.get(threadId))!.asks[0]!.key, scope: "thread" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["long"]).toMatchObject({ state: "running" });
+    }, { timeout: 10_000 });
+    const dir = join(root, "state", "slates", threadId);
+    expect(await store.get(SLATES, threadId)).toBeDefined();
+
+    await rt.sessions.delete(threadId);
+    expect(await rt.slates.get(threadId)).toBeNull();
+    expect(await store.get(SLATES, threadId)).toBeUndefined();
+    expect(existsSync(dir)).toBe(false);
+    await new Promise(resolve => setTimeout(resolve, 3_000));
+    expect(existsSync(marker)).toBe(false);
+  }, 30_000);
 
   it("refuses a file that names a secret", async () => {
     const { rt, asThread } = await threadOn("wsp-slates-filesecret-");

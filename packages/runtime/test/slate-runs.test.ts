@@ -402,6 +402,21 @@ describe("then", () => {
   });
 });
 
+describe("a box that naps", () => {
+  it("a tick while it naps is held, saying so, its last result kept and nothing launched; a press runs", async () => {
+    const h = harness();
+    const first = await runAllowed(h, "feed", cmd("echo one"));
+    expect(first).toMatchObject({ state: "done", out: "one\n" });
+    const held = h.runs.start({ threadId: THREAD, run: "feed", decl: cmd("echo one"), by: "timer", folder: dir, inputs: () => ({}), asleep: true });
+    expect(held.outcome).toBe("held");
+    expect(held.record).toMatchObject({ state: "held", why: "the box was asleep, so this tick did not wake it; press to run it now", out: "one\n", exit: 0 });
+    expect(h.runs.held(THREAD)).toEqual([]);
+    const ended = h.until("feed", ["done"]);
+    expect(h.runs.start({ threadId: THREAD, run: "feed", decl: cmd("echo one"), by: "person", folder: dir, inputs: () => ({}), asleep: true }).outcome).toBe("running");
+    expect(await ended).toMatchObject({ state: "done", runs: 2 });
+  });
+});
+
 describe("timers", () => {
   it("tick only while shown by default, always with always, never under 10 s", () => {
     vi.useFakeTimers();

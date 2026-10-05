@@ -72,12 +72,17 @@ function serverFlags(servers: Readonly<Record<string, McpServerSpec>>): string[]
     if (!SERVER_NAME_RE.test(name)) throw new Error(`an MCP server name must be one plain word of a config key, got "${name}"`);
     if (name !== MCP_SERVER_NAME) return entry(name, spec);
     const slate = JSON.stringify(SLATE_TOOLS);
+    // A thread another thread started has no slate: the tools stay off its wsp server and no slate server stands.
+    if (spec.noSlate === true) return [...entry(name, spec), configRaw(`mcp_servers.${name}.disabled_tools`, slate)];
     return [
       ...entry(name, spec),
       configRaw(`mcp_servers.${name}.disabled_tools`, slate),
       ...entry(SLATE_SERVER_NAME, spec),
       configRaw(`mcp_servers.${SLATE_SERVER_NAME}.enabled_tools`, slate),
       configRaw(`mcp_servers.${SLATE_SERVER_NAME}.omit_tools_from`, JSON.stringify(["deferred"])),
+      // The slate's own four run without an ask in any sandbox or approval policy, each by name, so nothing else on
+      // the wsp server ever does (approval_mode, codex-rs/codex-mcp/src/mcp/mod.rs at rust-v0.155.1).
+      ...SLATE_TOOLS.map(tool => config(`mcp_servers.${SLATE_SERVER_NAME}.tools.${tool}.approval_mode`, "approve")),
     ];
   });
 }

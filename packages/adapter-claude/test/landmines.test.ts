@@ -202,6 +202,8 @@ describe("buildCommand", () => {
     expect(SLATE_BRIEF).toContain("your first tool call is mcp__wsp__slate_catalog");
     expect(SLATE_BRIEF).toContain("Never read that file or put its value in a tool call.");
     expect(buildCommand({ sessionId, mcpServers: { wsp: { command: "/opt/wsp", args: ["mcp"] } } })).not.toContain("--append-system-prompt");
+    // A thread another thread started has no slate, so nothing tells it of one.
+    expect(buildCommand({ sessionId, mcpServers: { wsp: { command: "/opt/wsp", args: ["mcp", "--scoped", "--no-slate"], noSlate: true } } })).not.toContain("--append-system-prompt");
     expect(buildCommand({ sessionId })).not.toContain("--append-system-prompt");
   });
 

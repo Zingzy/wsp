@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
-import { CLOUD_ENV, type GuestKind } from "@wsp/protocol";
+import { CLOUD_ENV, NO_SLATE_MCP_ARG, type GuestKind } from "@wsp/protocol";
 import type { GuestKindModule } from "@wsp/runtime";
 import { guestCli } from "./guest-cli.js";
 import { guestMcp } from "./guest-mcp.js";
@@ -30,7 +30,7 @@ export function guestTools(statePath: string, toolServer: string | false): Guest
       const own = Object.fromEntries([CLOUD_ENV, "TZ"].flatMap(name => (process.env[name] !== undefined ? [[name, process.env[name]!]] : [])));
       const env = { ...o.env, ...own };
       // Not the guest's folder, which is on its machine and which the guest's rules never read.
-      const child = spawn(toolServer, ["mcp", "--state", statePath, "--scoped", "--guest"], { cwd: dirname(statePath), env, stdio: ["pipe", "pipe", "pipe"] });
+      const child = spawn(toolServer, ["mcp", "--state", statePath, "--scoped", "--guest", ...(o.noSlate === true ? [NO_SLATE_MCP_ARG] : [])], { cwd: dirname(statePath), env, stdio: ["pipe", "pipe", "pipe"] });
       let live = true;
       let said = "";
       // Its last line is what the guest reads when it ends first; the rest is not kept.

@@ -221,6 +221,8 @@ export interface GuestOpening {
   cwd: string;
   /** The pair a verb reads its host and its token off, as a turn's own launch leaves them, plus the turn's token. */
   env: Record<string, string>;
+  /** The token is a thread another thread started, which has no slate: its tool server says nothing of one. */
+  noSlate?: true;
   reply(message: unknown): void;
   close(error?: string): void;
 }

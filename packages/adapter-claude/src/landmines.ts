@@ -162,10 +162,11 @@ function permissionFlags(mode: string | undefined): string[] {
   return [...slugFlag("--permission-mode", "permissionMode", mode), prompts];
 }
 
-/** The slate's brief at the end of the system prompt, for a turn whose wsp server is a thread's own, scoped one. */
+/** The slate's brief at the end of the system prompt, for a turn whose wsp server is a thread's own, scoped one, and
+ * not one another thread started, which has no slate. */
 function briefFlag(servers: Readonly<Record<string, McpServerSpec>> | undefined): string[] {
   const wsp = servers?.[MCP_SERVER_NAME];
-  return wsp !== undefined && wsp.args.includes(SCOPED_MCP_ARG) ? [`--append-system-prompt ${shellQuote(SLATE_BRIEF)}`] : [];
+  return wsp !== undefined && wsp.args.includes(SCOPED_MCP_ARG) && wsp.noSlate !== true ? [`--append-system-prompt ${shellQuote(SLATE_BRIEF)}`] : [];
 }
 
 /**

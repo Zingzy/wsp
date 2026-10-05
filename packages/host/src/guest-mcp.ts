@@ -22,7 +22,7 @@ export function guestMcp(statePath: string): GuestKindModule {
     open(o) {
       return served(o, ({ dialer, mcpServer }) => {
         const dial = dialer(statePath, { env: o.env });
-        return { dial, server: mcpServer(statePath, { dial, cwd: o.cwd, env: o.env, ...GUEST_SERVED }) };
+        return { dial, server: mcpServer(statePath, { dial, cwd: o.cwd, env: o.env, ...GUEST_SERVED, ...(o.noSlate === true ? { noSlate: true } : {}) }) };
       });
     },
   };

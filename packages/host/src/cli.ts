@@ -2372,6 +2372,7 @@ export const MCP_OPTIONS: Options = {
   remove: { type: "boolean" },
   state: { type: "string" },
   scoped: { type: "boolean" },
+  "no-slate": { type: "boolean" },
   help: { type: "boolean", short: "h" },
 };
 
@@ -2393,7 +2394,7 @@ function commandUsage(word: string): string | undefined {
  * `--json` instead of taking it and printing prose. */
 async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string, run: RunningWsp, env: Readonly<Record<string, string | undefined>>, starts: { start?: HostStarter }): Promise<number> {
   const usage = mcpUsage();
-  let values: { agent?: string[]; host?: string; json?: boolean; remove?: boolean; state?: string; scoped?: boolean; help?: boolean };
+  let values: { agent?: string[]; host?: string; json?: boolean; remove?: boolean; state?: string; scoped?: boolean; "no-slate"?: boolean; help?: boolean };
   let words: string[];
   try {
     ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
@@ -2415,7 +2416,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     // TypeScript server answers there. The agent starts it in its own folder, which is the folder a thread opened with
     // no workspace is placed by.
     const { serveMcp } = await import("./mcp.js");
-    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...starts, ...(values.host !== undefined ? { host: values.host } : {}), ...(values.scoped === true ? { scoped: true } : {}) });
+    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...starts, ...(values.host !== undefined ? { host: values.host } : {}), ...(values.scoped === true ? { scoped: true } : {}), ...(values["no-slate"] === true ? { noSlate: true } : {}) });
     return 0;
   }
   const json = values.json === true;
@@ -2695,13 +2696,14 @@ const MCP_FLAG_WORDS: Readonly<Record<string, string>> = {
   state: COMMON_FLAG_WORDS.state,
   host: "write the server against a host on your account, by the name wsp hosts lists it under, so the tools drive that host",
   scoped: "what the host puts on a thread's own tools: without the launch pair in the environment the server refuses rather than dial this computer's host on its own token",
+  "no-slate": "what the host puts beside it for a thread another thread started, which has no slate: the server's instructions say nothing of one",
 };
 
 /** The tool server's own two pages, each with the flags it reads. `wsp mcp` alone serves; `wsp mcp install` writes
  * an agent's config. Both were two usage lines and no words until a person asked what --agent took. */
 function mcpPage(install: boolean): string {
   const line = COMMAND_LINES.find(l => l.words === (install ? `${MCP_COMMAND} install` : MCP_COMMAND))!;
-  const flags = install ? ["agent", "remove", "json", "state", "host"] : ["state", "host", "scoped"];
+  const flags = install ? ["agent", "remove", "json", "state", "host"] : ["state", "host", "scoped", "no-slate"];
   return helpPage(line.usage, wrap(`  ${line.about}`, HELP_WIDTH, "  "), flags.map(name => [`--${name}`, MCP_FLAG_WORDS[name]!] as const));
 }
 

@@ -40,6 +40,9 @@ pub struct Instructions {
     pub cloud_on: String,
     pub scoped_cloud_off: String,
     pub scoped_cloud_on: String,
+    /// A thread's own server where another thread started the thread, which has no slate: nothing of one is said.
+    pub scoped_no_slate_cloud_off: String,
+    pub scoped_no_slate_cloud_on: String,
 }
 
 pub fn server() -> Server {
