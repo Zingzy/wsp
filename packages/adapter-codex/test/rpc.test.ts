@@ -58,7 +58,7 @@ describe("the lines wsp writes to codex app-server", () => {
     expect(parsed(line)).toEqual({
       id: REQUEST.thread,
       method: "thread/fork",
-      params: { threadId: THREAD, ephemeral: true, sandbox: "read-only", approvalPolicy: "never", cwd: "/root/w", developerInstructions: "answer only" },
+      params: { threadId: THREAD, ephemeral: true, excludeTurns: true, sandbox: "read-only", approvalPolicy: "never", cwd: "/root/w", developerInstructions: "answer only" },
     });
   });
 

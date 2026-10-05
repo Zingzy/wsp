@@ -20,6 +20,7 @@ const SURFACES: RightPanelSurface[] = [
   { id: "machine", kind: "machine" },
   { id: "processes", kind: "processes" },
   { id: "agents", kind: "agents" },
+  { id: "aside", kind: "aside" },
 ];
 
 function tabs(surfaces: RightPanelSurface[], onAdd = vi.fn()) {
@@ -51,10 +52,10 @@ describe("the pane registry", () => {
   it("names every open kind on the tab strip by its label, or by what its tab holds", () => {
     tabs(SURFACES);
     const strip = [...document.querySelectorAll("[data-right-panel-tab-list] [data-active-tab]")].map(t => t.textContent);
-    expect(strip).toEqual(["Browser", "Terminal", "Changes", "Pull request", "Files", "Computer", "Processes", "Agents"]);
+    expect(strip).toEqual(["Browser", "Terminal", "Changes", "Pull request", "Files", "Computer", "Processes", "Agents", "Side question"]);
   });
 
-  it("keeps every kind it holds across a reload of the store", () => {
+  it("keeps every kind it holds across a reload of the store, but the side question's, which lived in memory alone", () => {
     act(() => {
       for (const surface of SURFACES) {
         if (surface.kind === "terminal") useRightPanelStore.getState().openTerminal("ws", surface.resourceId);
@@ -65,7 +66,7 @@ describe("the pane registry", () => {
     act(() => useRightPanelStore.setState({ byWorkspaceId: {} }));
     window.localStorage.setItem("wsp:right-panel-state:v1", saved);
     act(() => void useRightPanelStore.persist.rehydrate());
-    expect(useRightPanelStore.getState().byWorkspaceId["ws"]?.surfaces.map(s => s.kind)).toEqual(PANE_KINDS);
+    expect(useRightPanelStore.getState().byWorkspaceId["ws"]?.surfaces.map(s => s.kind)).toEqual(PANE_KINDS.filter(k => k !== "aside"));
   });
 
   it("says per kind when it opens and why it is held", () => {
@@ -85,13 +86,14 @@ describe("the pane registry", () => {
     const opens = Object.fromEntries(Object.entries(contexts).map(([name, at]) => [name, PANE_KINDS.filter(k => PANES[k].available(at))]));
     expect(opens).toEqual({
       here: ["preview", "terminal", "machine", "processes"],
-      running: PANE_KINDS.filter(k => k !== "pr"),
+      // The side question opens from /btw alone, never from the launcher.
+      running: PANE_KINDS.filter(k => k !== "pr" && k !== "aside"),
       napping: ["machine", "agents"],
       away: ["preview", "diff", "files", "machine", "agents"],
       startable: ["preview", "diff", "files", "machine", "processes", "agents"],
       none: [],
       pr: ["pr", "machine", "agents"],
-      unread: PANE_KINDS.filter(k => k !== "pr"),
+      unread: PANE_KINDS.filter(k => k !== "pr" && k !== "aside"),
     });
     const reasons = (at: PaneContext) => Object.fromEntries(PANE_KINDS.flatMap(k => (PANES[k].reason?.(at) === undefined ? [] : [[k, PANES[k].reason!(at)]])));
     expect(reasons(contexts["here"]!)).toEqual({ diff: "Pick a project to review its changes.", files: "Pick a thread to read its files." });
