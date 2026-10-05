@@ -312,8 +312,11 @@ describe("the wsp skill", () => {
   it("the MCP instructions are what another agent is, the slate, what wsp is and where the skill is, the agents, and the roads to a child's end, whole inside what Claude Code keeps", () => {
     expect(instructions()).toBe(instructionsOf(THREAD_AGENTS));
     expect(instructions().startsWith(`${ANOTHER_AGENT_WORDS}. ${SLATE_WORDS}. Agents work on a project, a folder on one computer`)).toBe(true);
-    // The slate's sentence is second and under 220 characters with its full stop (10).
+    // The slate's sentence is second and under 220 characters with its full stop.
     expect(`${SLATE_WORDS}.`.length).toBeLessThan(220);
+    // This server is the person's own, not a thread's, so a slate call from it names the thread.
+    expect(SLATE_WORDS).not.toContain("This thread");
+    expect(SLATE_WORDS).toContain("naming the thread");
     expect(instructions().indexOf(`${SLATE_WORDS}.`)).toBe(ANOTHER_AGENT_WORDS.length + 2);
     // The skill's slate section stays under 600 tokens, counted at four characters a token.
     const text = wspSkill();

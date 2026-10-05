@@ -81,7 +81,7 @@ export const INSTRUCTIONS_KEPT = 2048;
 
 /** What a slate is, carried second so it lands inside what Claude Code keeps, under 220 characters with its full stop;
  * the skill's slate section sits past the cut. */
-export const SLATE_WORDS = "This thread can own a slate, a live panel the person reads, presses and fills in: when they ask for a panel, dashboard, form, checklist, tracker or walkthrough, or name the slate, call slate_catalog, then slate_write";
+export const SLATE_WORDS = "Each thread can own a slate, a live panel the person reads, presses and fills in: when they ask for a panel, dashboard, form, checklist, tracker or walkthrough, call slate_catalog, then slate_write naming the thread";
 
 /** What a thread's own tool server opens with, ahead of everything else: that the session is a thread with a slate
  * beside it, keyed on what the person wants to do rather than on the names of pieces, since they say "I wanna see
