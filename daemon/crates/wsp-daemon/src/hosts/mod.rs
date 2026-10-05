@@ -8,9 +8,9 @@ use std::path::Path;
 
 use wsp_frames::{
     numbers, words, DaemonErrorCode, GitBranchCompareReply, GitIssueReadReply, GitPrCheckoutReply, GitPrDiffReply, GitPrListReply,
-    GitPrMergeReply, GitPrReactReply, GitPrReply, GitPrReplyReply, GitPrResolveReply, GitPrReviewReply, GitPrViewReply, GitRepoReadReply,
-    GitRunLogReply, HostItem, HostItemKind, IssueRead, MergeMethod, PullRequest, PullRequestCheck, PullRequestReaction, PullRequestState,
-    ReactionContent, ReviewComment, ReviewEvent, ReviewSide,
+    GitPrMergeReply, GitPrReactReply, GitPrReadReply, GitPrReply, GitPrReplyReply, GitPrResolveReply, GitPrReviewReply, GitPrViewReply,
+    GitRepoReadReply, GitRunLogReply, HostItem, HostItemKind, IssueRead, MergeMethod, PullRequest, PullRequestCheck, PullRequestReaction,
+    PullRequestState, ReactionContent, ReviewComment, ReviewEvent, ReviewSide,
 };
 
 use crate::git::Runs;
@@ -48,6 +48,13 @@ pub(crate) trait PullRequests: Sync {
     /// The pull request one of those lines answered with, off its JSON and never its prose, its checks and its count
     /// behind the base still to read; nothing where the JSON is not one this module reads.
     fn read(&self, stdout: &str) -> Option<PullRequest>;
+    /// One cheap read of a pull request by number that says whether it moved: its last update, head commit and state,
+    /// in the form `seen` returns them off the full read's JSON, so the two compare as words.
+    fn probe_argv(&self, repo: &str, number: u64) -> Vec<String>;
+    fn read_probe(&self, stdout: &str) -> Option<String>;
+    fn seen(&self, view: &str) -> Option<String>;
+    /// Whether what the line said is the host refusing for the account's rate limit.
+    fn rate_limited(&self, said: &str) -> bool;
     /// The line that answers with every check on a pull request's head.
     fn checks_argv(&self, repo: &str, number: u64) -> Vec<String>;
     fn read_checks(&self, stdout: &str) -> Option<Vec<PullRequestCheck>>;
@@ -59,13 +66,10 @@ pub(crate) trait PullRequests: Sync {
     fn read_compare(&self, stdout: &str) -> Option<(u64, u64, String)>;
     /// Whether a line refused because the host lacks what it named, off what the program said.
     fn not_found(&self, stderr: &str) -> bool;
-    /// The four lines a pull request's page is read from: its own JSON, the comments left on its lines, the comments
-    /// in its conversation, and what only the host's API answers of its commits, reviews and threads.
+    /// The one line a pull request's page is read from, and the page off its JSON: the pull request, its commits,
+    /// reviews, conversation, comments on lines with their threads, and files.
     fn page_argv(&self, repo: &str, number: u64) -> Vec<String>;
-    fn line_comments_argv(&self, repo: &str, number: u64) -> Vec<String>;
-    fn comments_argv(&self, repo: &str, number: u64) -> Vec<String>;
-    fn graph_argv(&self, repo: &str, number: u64) -> Vec<String>;
-    fn read_page(&self, page: &str, line_comments: &str, comments: &str, graph: &str) -> Option<GitPrViewReply>;
+    fn read_page(&self, stdout: &str) -> Option<GitPrViewReply>;
     /// The line that prints the failed steps of one job of one run.
     fn log_argv(&self, repo: &str, run_id: u64, job_id: u64) -> Vec<String>;
     /// The line that merges, or arms a merge for when the checks pass, only while the head is the commit named.
@@ -250,32 +254,43 @@ fn last_said(stdout: &str, stderr: &str) -> String {
 }
 
 fn refused_by(host: &'static dyn PullRequests, stdout: &str, stderr: &str) -> OpError {
-    OpError::plain(format!("{} said: {}", host.program(), last_said(stdout, stderr)))
+    let said = last_said(stdout, stderr);
+    let line = format!("{} said: {said}", host.program());
+    if host.rate_limited(&said) {
+        return OpError::coded(DaemonErrorCode::RateLimited, line);
+    }
+    OpError::plain(line)
 }
 
 /// The pull request as its host has it, with every check on its head and, while it is open, how far its base has
 /// moved on; nothing where a branch has none, which is what a line that refused a view by branch means on every host
 /// here. A number always names one, so a view of it refused is the line failing, and says so rather than none.
-/// A checks line that answered no JSON, which is what gh does on a head with no checks, is no checks.
+/// A checks line that answered no JSON, which is what gh does on a head with no checks, is no checks. A line the host
+/// refused for its rate limit refuses the read on any road, so a lost read never reads as no pull request or no checks.
+/// What it saw comes with it.
 async fn read_with<R: Runs>(
     runner: &R,
     host: &'static dyn PullRequests,
     repo: &str,
     ask: &Ask<'_>,
     pick: &Pick<'_>,
-) -> Result<Option<PullRequest>, OpError> {
+) -> Result<(Option<PullRequest>, Option<String>), OpError> {
     let (code, stdout, said) = run_cli(runner, host, ask, &host.view_argv(repo, pick)).await?;
-    if code != Some(0) && matches!(pick, Pick::Number(_)) {
+    if code != Some(0) && (matches!(pick, Pick::Number(_)) || host.rate_limited(&last_said(&stdout, &said))) {
         return Err(refused_by(host, &stdout, &said));
     }
-    let Some(mut pr) = (if code == Some(0) { host.read(&stdout) } else { None }) else { return Ok(None) };
-    let (_, checks, _) = run_cli(runner, host, ask, &host.checks_argv(repo, pr.number)).await?;
+    let Some(mut pr) = (if code == Some(0) { host.read(&stdout) } else { None }) else { return Ok((None, None)) };
+    let seen = host.seen(&stdout);
+    let (code, checks, said) = run_cli(runner, host, ask, &host.checks_argv(repo, pr.number)).await?;
+    if code != Some(0) && host.rate_limited(&last_said(&checks, &said)) {
+        return Err(refused_by(host, &checks, &said));
+    }
     pr.checks = host.read_checks(&checks).unwrap_or_default();
     if pr.state == PullRequestState::Open && !pr.base.is_empty() && !pr.head_oid.is_empty() {
         let (code, behind, _) = run_cli(runner, host, ask, &host.behind_argv(repo, &pr.base, &pr.head_oid)).await?;
         pr.behind_base = if code == Some(0) { behind.trim().parse().ok() } else { None };
     }
-    Ok(Some(pr))
+    Ok((Some(pr), seen))
 }
 
 /// How far a head branch is from a base branch as the host holds them; not pushed where the host lacks one of them,
@@ -293,10 +308,20 @@ pub(crate) async fn compare<R: Runs>(runner: &R, ask: &Ask<'_>, base: &str, head
     Ok(GitBranchCompareReply { pushed: true, ahead_by: Some(ahead), behind_by: Some(behind), status: Some(status) })
 }
 
-/// The pull request a branch or a number names, read in full.
-pub(crate) async fn read<R: Runs>(runner: &R, ask: &Ask<'_>, pick: &Pick<'_>) -> Result<Option<PullRequest>, OpError> {
+/// The pull request a branch or a number names, read in full. One named by number with what the last read saw is
+/// first read once over REST, which spends nothing of the GraphQL budget: where its last update, head and state are
+/// what was seen, it answers unchanged and nothing else runs. The rest of its body is no signal, since it carries the
+/// repository's last push and issue count, which move with every push to any branch.
+pub(crate) async fn read<R: Runs>(runner: &R, ask: &Ask<'_>, pick: &Pick<'_>, seen: Option<&str>) -> Result<GitPrReadReply, OpError> {
     let (host, repo) = cli_for(runner, ask).await?;
-    read_with(runner, host, &repo, ask, pick).await
+    if let (Pick::Number(number), Some(seen)) = (pick, seen) {
+        let (code, said, _) = run_cli(runner, host, ask, &host.probe_argv(&repo, *number)).await?;
+        if code == Some(0) && host.read_probe(&said).as_deref() == Some(seen) {
+            return Ok(GitPrReadReply { pr: None, seen: Some(seen.to_owned()), unchanged: true });
+        }
+    }
+    let (pr, seen) = read_with(runner, host, &repo, ask, pick).await?;
+    Ok(GitPrReadReply { pr, seen, unchanged: false })
 }
 
 /// The branch's pull request, opened where the host has none. Read back through the same line that looks one up, so
@@ -320,31 +345,21 @@ pub(crate) async fn open<R: Runs>(
             return Err(OpError::plain(format!("{} said: {}", host.program(), if said.is_empty() { stdout.trim() } else { said })));
         }
     }
-    match read_with(runner, host, &repo, ask, &pick).await? {
+    match read_with(runner, host, &repo, ask, &pick).await?.0 {
         Some(pr) => Ok(GitPrReply { pr, created }),
         None => Err(OpError::plain(format!("{} opened the pull request and then answered with none for {branch}", host.program()))),
     }
 }
 
 /// A pull request's page: title, body, commits, reviews, the conversation, the comments on its lines and its files,
-/// read off four lines run at once, any of which refused refuses the page.
+/// read off one line; a refusal is the host's own last line.
 pub(crate) async fn page<R: Runs>(runner: &R, ask: &Ask<'_>, number: u64) -> Result<GitPrViewReply, OpError> {
     let (host, repo) = cli_for(runner, ask).await?;
-    let lines = [
-        host.page_argv(&repo, number),
-        host.line_comments_argv(&repo, number),
-        host.comments_argv(&repo, number),
-        host.graph_argv(&repo, number),
-    ];
-    let said = futures_util::future::try_join_all(lines.iter().map(|argv| run_cli(runner, host, ask, argv))).await?;
-    let mut answers = Vec::with_capacity(lines.len());
-    for (code, stdout, stderr) in said {
-        if code != Some(0) {
-            return Err(refused_by(host, &stdout, &stderr));
-        }
-        answers.push(stdout);
+    let (code, stdout, stderr) = run_cli(runner, host, ask, &host.page_argv(&repo, number)).await?;
+    if code != Some(0) {
+        return Err(refused_by(host, &stdout, &stderr));
     }
-    host.read_page(&answers[0], &answers[1], &answers[2], &answers[3])
+    host.read_page(&stdout)
         .ok_or_else(|| OpError::plain(format!("{} answered with a pull request page this does not read", host.program())))
 }
 
@@ -707,7 +722,7 @@ mod tests {
     use wsp_frames::{CheckState, Mergeable, ReviewSide as Side};
 
     const FIELDS: &str =
-        "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,additions,deletions,changedFiles,commits,author,isCrossRepository,maintainerCanModify,headRepositoryOwner,autoMergeRequest";
+        "number,url,state,updatedAt,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,additions,deletions,changedFiles,commits,author,isCrossRepository,maintainerCanModify,headRepositoryOwner,autoMergeRequest";
 
     #[test]
     fn the_host_name_is_read_off_a_url_and_off_the_scp_form_alike() {
@@ -798,13 +813,13 @@ mod tests {
         let gh = fake_gh();
         let runner = with_gh(&gh);
         let ask = Ask { cwd: gh.path(), remote_url: "git@github.com:o/r.git" };
-        assert_eq!(read(&runner, &ask, &Pick::Branch("work")).await.unwrap(), None);
+        assert_eq!(read(&runner, &ask, &Pick::Branch("work"), None).await.unwrap().pr, None);
         let opened = open(&runner, &ask, "main", "work", None, None).await.unwrap();
         assert_eq!((opened.created, opened.pr.number, opened.pr.state), (true, 7, PullRequestState::Open));
         assert_eq!((opened.pr.url.as_str(), opened.pr.behind_base, opened.pr.checks.len()), ("https://github.com/o/r/pull/7", Some(2), 0));
         let again = open(&runner, &ask, "main", "work", None, None).await.unwrap();
         assert_eq!((again.created, again.pr.number), (false, 7));
-        assert_eq!(read(&runner, &ask, &Pick::Branch("work")).await.unwrap().unwrap().number, 7);
+        assert_eq!(read(&runner, &ask, &Pick::Branch("work"), None).await.unwrap().pr.unwrap().number, 7);
         let calls = argv_of(&gh);
         assert_eq!(calls.iter().filter(|c| c.get(1).is_some_and(|w| w == "create")).count(), 1, "{calls:?}");
         assert_eq!(calls[0], ["pr", "view", "work", "-R", "o/r", "--json", FIELDS]);
@@ -818,7 +833,7 @@ mod tests {
         let gh = fake_gh();
         let runner = with_gh(&gh);
         let ask = Ask { cwd: gh.path(), remote_url: "git@github.com:o/r.git" };
-        let said = read(&runner, &ask, &Pick::Number(7)).await.unwrap_err().message;
+        let said = read(&runner, &ask, &Pick::Number(7), None).await.unwrap_err().message;
         assert!(said.contains("no pull requests found for branch"), "{said}");
     }
 
@@ -867,7 +882,7 @@ mod tests {
     async fn a_read_is_three_gh_lines_naming_the_repository_and_never_git() {
         let runner = Recorded::new(&["gh"]).answering(vec![(0, VIEW_JSON), (8, CHECKS_JSON), (0, "3\n")]);
         let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:Zingzy/wsp.git" };
-        let pr = read(&runner, &ask, &Pick::Branch("ticket/batch9-git")).await.unwrap().unwrap();
+        let pr = read(&runner, &ask, &Pick::Branch("ticket/batch9-git"), None).await.unwrap().pr.unwrap();
         let calls = runner.asked();
         assert!(calls.iter().all(|c| c.program == "gh" && c.cwd == "/Users/p"), "a call ran git or ran somewhere else");
         assert_eq!(calls[0].args, ["pr", "view", "ticket/batch9-git", "-R", "Zingzy/wsp", "--json", FIELDS]);
@@ -886,10 +901,78 @@ mod tests {
         // By number the same, and a merged one never asks how far behind it is.
         let merged = VIEW_JSON.replace("\"OPEN\"", "\"MERGED\"");
         let runner = Recorded::new(&["gh"]).answering(vec![(0, &merged), (1, "")]);
-        let pr = read(&runner, &ask, &Pick::Number(870)).await.unwrap().unwrap();
+        let pr = read(&runner, &ask, &Pick::Number(870), None).await.unwrap().pr.unwrap();
         assert_eq!((pr.state, pr.behind_base, pr.checks.len()), (PullRequestState::Merged, None, 0));
         assert_eq!(runner.asked().len(), 2);
         assert_eq!(runner.asked()[0].args[2], "870");
+    }
+
+    /// What VIEW_JSON's read saw, and what the probe prints for the same pull request: REST spells the state open.
+    const SEEN: &str = "2026-09-28T10:00:00Z ec5c10de663bd1860925ad42e9580bab4eb1d377 open";
+    const PROBE: &str = "2026-09-28T10:00:00Z ec5c10de663bd1860925ad42e9580bab4eb1d377 open\n";
+
+    #[tokio::test]
+    async fn a_pull_request_whose_update_head_and_state_stood_answers_unchanged_and_makes_no_checks_call() {
+        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:Zingzy/wsp.git" };
+        let runner = Recorded::new(&["gh"]).answering(vec![(0, PROBE)]);
+        let got = read(&runner, &ask, &Pick::Number(870), Some(SEEN)).await.unwrap();
+        assert_eq!(got, GitPrReadReply { pr: None, seen: Some(SEEN.to_owned()), unchanged: true });
+        let calls = runner.asked();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].args, ["api", "repos/Zingzy/wsp/pulls/870", "--jq", r#""\(.updated_at) \(.head.sha) \(.state)""#]);
+    }
+
+    #[tokio::test]
+    async fn a_pull_request_that_moved_is_read_in_full_and_says_what_it_saw() {
+        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:Zingzy/wsp.git" };
+        let moved = "2026-09-29T08:00:00Z ec5c10de663bd1860925ad42e9580bab4eb1d377 open\n";
+        let runner = Recorded::new(&["gh"]).answering(vec![(0, moved), (0, VIEW_JSON), (8, CHECKS_JSON), (0, "3\n")]);
+        let got = read(&runner, &ask, &Pick::Number(870), Some(SEEN)).await.unwrap();
+        assert_eq!((got.seen.as_deref(), got.unchanged), (Some(SEEN), false));
+        assert_eq!(got.pr.map(|pr| (pr.number, pr.checks.len(), pr.behind_base)), Some((870, 5, Some(3))));
+        let lines: Vec<String> = runner.asked().iter().map(|c| c.args[..2].join(" ")).collect();
+        assert_eq!(
+            lines,
+            [
+                "api repos/Zingzy/wsp/pulls/870",
+                "pr view",
+                "pr checks",
+                "api repos/Zingzy/wsp/compare/main...ec5c10de663bd1860925ad42e9580bab4eb1d377"
+            ]
+        );
+        // A probe gh could not make at all leaves the full read to say what the host has.
+        let runner = Recorded::new(&["gh"]).answering_said(vec![
+            (1, "", "error connecting to api.github.com"),
+            (0, VIEW_JSON, ""),
+            (8, CHECKS_JSON, ""),
+            (0, "3\n", ""),
+        ]);
+        let got = read(&runner, &ask, &Pick::Number(870), Some(SEEN)).await.unwrap();
+        assert_eq!((got.unchanged, got.pr.map(|pr| pr.number)), (false, Some(870)));
+        // With nothing seen to compare, as while a check runs, no probe is made at all.
+        let runner = Recorded::new(&["gh"]).answering(vec![(0, VIEW_JSON), (8, CHECKS_JSON), (0, "3\n")]);
+        read(&runner, &ask, &Pick::Number(870), None).await.unwrap();
+        assert_eq!(runner.asked()[0].args[..2], ["pr", "view"]);
+        assert_eq!(runner.asked().len(), 3);
+    }
+
+    /// What gh 2.97 printed on 2026-10-05 with the account's GraphQL budget spent.
+    const RATE_LIMITED: &str = "GraphQL: API rate limit already exceeded for user ID 90309290.";
+
+    #[tokio::test]
+    async fn a_read_the_host_refused_for_its_rate_limit_is_coded_so_and_never_reads_as_none() {
+        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:Zingzy/wsp.git" };
+        for pick in [Pick::Number(870), Pick::Branch("work")] {
+            let runner = Recorded::new(&["gh"]).answering_said(vec![(1, "", RATE_LIMITED)]);
+            let err = read(&runner, &ask, &pick, None).await.unwrap_err();
+            assert_eq!((err.code, err.message), (Some(DaemonErrorCode::RateLimited), format!("gh said: {RATE_LIMITED}")));
+        }
+        // Nor does its checks line read as no checks.
+        let runner = Recorded::new(&["gh"]).answering_said(vec![(0, VIEW_JSON, ""), (1, "", RATE_LIMITED)]);
+        assert_eq!(read(&runner, &ask, &Pick::Number(870), None).await.unwrap_err().code, Some(DaemonErrorCode::RateLimited));
+        // And the page says the same.
+        let runner = Recorded::new(&["gh"]).answering_said(vec![(1, "", RATE_LIMITED)]);
+        assert_eq!(page(&runner, &ask, 870).await.unwrap_err().code, Some(DaemonErrorCode::RateLimited));
     }
 
     #[tokio::test]
@@ -899,7 +982,7 @@ mod tests {
         {
             let runner = Recorded::new(&["gh"]);
             let ask = Ask { cwd: Path::new("/Users/p"), remote_url: remote };
-            let err = read(&runner, &ask, &Pick::Number(1)).await.unwrap_err();
+            let err = read(&runner, &ask, &Pick::Number(1), None).await.unwrap_err();
             assert_eq!((err.code, err.message), (Some(DaemonErrorCode::NoHostCli), words::no_host_cli(named)), "{remote}");
             assert!(runner.asked().is_empty(), "{remote}");
         }
@@ -938,7 +1021,7 @@ mod tests {
         let ask = Ask { cwd: Path::new("/private/tmp/proof/repo"), remote_url: "git@github.com:o/r.git" };
         // Looking one up and opening one answer alike, and the open never reaches its create.
         let looked = Recorded::new(&["gh"]).answering_said(vec![(4, "", SIGN_IN_SAID)]);
-        let found = read(&looked, &ask, &Pick::Branch("work")).await.unwrap_err();
+        let found = read(&looked, &ask, &Pick::Branch("work"), None).await.unwrap_err();
         assert_eq!((found.code, found.message.as_str()), (Some(DaemonErrorCode::NoHostCli), words::no_host_cli("github.com").as_str()));
         let runner = Recorded::new(&["gh"]).answering_said(vec![(4, "", SIGN_IN_SAID), (4, "", SIGN_IN_SAID)]);
         let opened = open(&runner, &ask, "main", "work", None, None).await.unwrap_err();
@@ -958,7 +1041,7 @@ mod tests {
         assert_eq!(refused.message, "gh said: could not create pull request");
         // And a branch with no pull request is still a branch with no pull request rather than a refusal.
         let quiet = Recorded::new(&["gh"]).answering_said(vec![(1, "", "no pull requests found for branch")]);
-        assert_eq!(read(&quiet, &ask, &Pick::Branch("work")).await.unwrap(), None);
+        assert_eq!(read(&quiet, &ask, &Pick::Branch("work"), None).await.unwrap().pr, None);
     }
 
     #[tokio::test]
@@ -994,33 +1077,18 @@ mod tests {
         assert_eq!(refused.asked().len(), 1);
     }
 
-    const NO_GRAPH: &str =
-        r#"{"data":{"repository":{"pullRequest":{"commits":{"nodes":[]},"reviews":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}"#;
-
     #[tokio::test]
-    async fn a_page_reads_four_lines_and_the_repository_two_more() {
+    async fn a_page_reads_one_line_and_the_repository_two_more() {
         let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "https://github.com/o/r" };
-        let runner = Recorded::new(&["gh"]).answering(vec![
-            (0, r#"{"title":"t","body":"b","commits":[],"reviews":[],"files":[]}"#),
-            (0, "[[]]"),
-            (0, "[[]]"),
-            (0, NO_GRAPH),
-        ]);
+        let runner = Recorded::new(&["gh"])
+            .answering(vec![(0, r#"{"data":{"repository":{"pullRequest":{"title":"t","body":"b","reviewThreads":{"nodes":[]}}}}}"#)]);
         let read = page(&runner, &ask, 12).await.unwrap();
         assert_eq!((read.title.as_str(), read.review_comments.len()), ("t", 0));
         let calls = runner.asked();
-        assert_eq!(calls.len(), 4);
-        assert_eq!(calls[1].args, ["api", "--paginate", "--slurp", "repos/o/r/pulls/12/comments?per_page=100"]);
-        assert_eq!(calls[2].args, ["api", "--paginate", "--slurp", "repos/o/r/issues/12/comments?per_page=100"]);
-        assert_eq!(calls[3].args[..2], ["api", "graphql"]);
-        assert_eq!(calls[3].args[4..], ["-f", "owner=o", "-f", "name=r", "-F", "number=12"]);
-        // Any of the four refused is the page refused, in gh's own last line.
-        let refused = Recorded::new(&["gh"]).answering_said(vec![
-            (0, r#"{"title":"t","body":"b","commits":[],"reviews":[],"files":[]}"#, ""),
-            (0, "[[]]", ""),
-            (0, "[[]]", ""),
-            (1, "", "gh: Resource not accessible by integration"),
-        ]);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].args[..2], ["api", "graphql"]);
+        assert_eq!(calls[0].args[4..], ["-f", "owner=o", "-f", "name=r", "-F", "number=12"]);
+        let refused = Recorded::new(&["gh"]).answering_said(vec![(1, "", "gh: Resource not accessible by integration")]);
         assert_eq!(page(&refused, &ask, 12).await.unwrap_err().message, "gh said: gh: Resource not accessible by integration");
         let runner = Recorded::new(&["gh"]).answering(vec![
             (0, r#"{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":false,"viewerDefaultMergeMethod":"SQUASH"}"#),
@@ -1108,7 +1176,7 @@ mod tests {
         let bare = Here::on("");
         let nowhere = Ask { cwd: gh.path(), remote_url: "git@github.com:o/r.git" };
         for err in [
-            read(&bare, &nowhere, &Pick::Branch("work")).await.unwrap_err(),
+            read(&bare, &nowhere, &Pick::Branch("work"), None).await.unwrap_err(),
             open(&bare, &nowhere, "main", "work", None, None).await.unwrap_err(),
         ] {
             assert_eq!(err.code, Some(DaemonErrorCode::NoHostCli));
@@ -1274,7 +1342,7 @@ mod tests {
                 "  'pr diff') for f in 01 02 03 04 05 06 07 08 09 10; do\n",
                 "      printf 'diff --git a/f%s b/f%s\\n--- a/f%s\\n+++ b/f%s\\n@@ -0,0 +1 @@\\n+' $f $f $f $f\n",
                 "      head -c 1572864 /dev/zero | tr '\\0' x; printf '\\n'; done;;\n",
-                "  'pr view') printf '{\"title\":\"'; head -c 17825792 /dev/zero | tr '\\0' x;;\n",
+                "  'api graphql') printf '{\"title\":\"'; head -c 17825792 /dev/zero | tr '\\0' x;;\n",
                 "esac\n",
             ),
         )

@@ -12,6 +12,7 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
   ACCOUNT_TICKET_REFUSAL,
+  usageRefusal,
   absentComputer,
   ACCOUNT_UNSERVED,
   AUTH_DEADLINE_MS,
@@ -1363,7 +1364,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               });
               return;
             case "workspaces.pullRequestView":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestView({ workspaceId: msg.workspaceId }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestView({ workspaceId: msg.workspaceId, ...(msg.fresh === true ? { fresh: true } : {}) }, origin)) });
               return;
             case "workspaces.pullRequestDiff":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestDiff({ workspaceId: msg.workspaceId }, origin)) });
@@ -1640,7 +1641,16 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, sessions: await rt.sessions.list(msg.workspaceId, origin) });
               return;
             case "sessions.history":
+              if (msg.threadId !== undefined) {
+                const window = { threadId: msg.threadId, ...(msg.before !== undefined ? { before: msg.before } : {}), ...(msg.limit !== undefined ? { limit: msg.limit } : {}) };
+                send({ id: msg.id, ok: true, ...(await rt.sessions.page(msg.workspaceId, window, origin)) });
+                return;
+              }
+              if (msg.before !== undefined || msg.limit !== undefined) throw usageRefusal("before and limit page one thread's events.", "Name the thread with threadId.");
               send({ id: msg.id, ok: true, events: await rt.sessions.history(msg.workspaceId, origin) });
+              return;
+            case "sessions.head":
+              send({ id: msg.id, ok: true, ...(await rt.sessions.head(msg.threadId, origin)) });
               return;
             case "sessions.attachment":
               send({ id: msg.id, ok: true, attachment: await rt.sessions.attachment(msg.workspaceId, msg.threadId, msg.requestId, msg.index, origin) });

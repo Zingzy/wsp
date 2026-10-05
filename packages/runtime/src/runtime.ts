@@ -233,7 +233,7 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
-import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
+import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, PR_POLL_IDLE_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
 import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, attachmentKey, type KeptAttachment, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
@@ -254,6 +254,7 @@ import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone
 import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
 import { makePlaceDoor, NO_PLACE_DOOR, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
 import type { BlobMark, Store } from "./store.js";
+import { memoryGitHubCache, type GitHubCache } from "./github-cache.js";
 import { RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, resetNoLoginsLine, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type AgentSignInState, type ResetAnswer, type UsageRange, type UsageSplit, type UsedAnswer } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, modelLabel, smallestModel } from "./harness-catalog.js";
 import {
@@ -272,7 +273,7 @@ import {
   takenNameAfter,
   withCloses,
   type IssueRead,
-  type PullRequest,
+  PullRequest,
   type ReviewDraft,
   type ReviewPostResult,
   type ReviewVerdict,
@@ -282,6 +283,8 @@ import {
 import { PLAN_RESETS, secretsOf } from "./adapters.js";
 import { accountOf, accountOnComputer, accountRows, createBurn, createPriceTable, createUsageLedger, resetDetailsDue, usageComputerName, type Vaulted } from "./usage.js";
 import { planAlerts } from "./plan-alerts.js";
+import { HEAD_BYTES, HISTORY_PAGE_BYTES, HISTORY_PAGE_EVENTS, type HistoryPage, type ThreadFacts, type ThreadHead } from "@wsp/protocol";
+import { headShape, readThread, type TranscriptReader } from "./transcript-reader.js";
 import { usageResets, type ResetPlace } from "./usage-reset.js";
 
 // --- adapter port -------------------------------------------------------------
@@ -512,6 +515,12 @@ export const SESSION_TITLE_TTL_MS = 10_000;
 /** How long a copy's checkout, once read, answers a tile or a pane asking again without asking git: every tile reads
  * it as it mounts, and a sidebar of twenty is one read, not twenty. */
 export const CHECKOUT_TTL_MS = 10_000;
+
+/** How long a pull request's page read stands for another open of it. */
+export const PR_PAGE_HOLD_MS = 60_000;
+
+/** How long a git host's rate limit refusal answers every read on the road that met it. */
+export const RATE_LIMIT_HOLD_MS = 60_000;
 /** A grep of one session file or a row out of one sqlite; a guest slower than this keeps the title it last gave. */
 const SESSION_TITLE_TIMEOUT_MS = 15_000;
 /** How many of a workspace's harness sessions one refresh asks about, newest first: a store read is an exec on the
@@ -879,6 +888,10 @@ interface LiveWorkspace {
   prReading?: Promise<PullRequestSeen | undefined>;
   /** Cancels the next timed read of an open pull request with a check still running. */
   prPoll?: () => void;
+  /** The interval that timed read was armed at. */
+  prPollMs?: number;
+  /** The head commit a read by branch last found no pull request at: the branch is not read again until it moves. */
+  prNoneAt?: string;
 }
 
 /** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. A notice is a second
@@ -1110,6 +1123,8 @@ export interface RuntimeOptions {
   idle?: { defaultWindowMs?: number };
   /** Drives the idle window and the transcript debounce; tests inject one they advance by hand. */
   clock?: Clock;
+  /** Where the reads off a git host keep their bodies and ETags; held in memory where none is given. */
+  githubCache?: GitHubCache;
   /** How long a seal waits for a killed machine to read gone (tests shrink it). */
   killConfirm?: KillConfirm;
   /** How long a seal waits between snapshot attempts the provider refused (tests shrink it). */
@@ -1592,8 +1607,8 @@ export interface Runtime {
     /** The workspace's viewed marks; with a path, the mark on that file set against the blob or taken off at null. */
     viewed(o: { workspaceId: string; path?: string; blob?: string | null }, origin?: Caller): Promise<ViewedMarks>;
     /** The workspace's pull request page, read through the git host's command line on this computer, or the running
-     * copy's where this computer has none; never kept. */
-    pullRequestView(o: { workspaceId: string }, origin?: Caller): Promise<PullRequestPage>;
+     * copy's where this computer has none; held PR_PAGE_HOLD_MS unless asked fresh. */
+    pullRequestView(o: { workspaceId: string; fresh?: boolean }, origin?: Caller): Promise<PullRequestPage>;
     /** The workspace's pull request's diff against its base, read as the page is and cut at GIT_DIFF_CAP_BYTES. */
     pullRequestDiff(o: { workspaceId: string }, origin?: Caller): Promise<GitPrDiffReply>;
     /** Sends items of the page to the workspace's agent as one message, read off the page anew, into the thread a fix
@@ -1757,6 +1772,11 @@ export interface Runtime {
     list(workspaceId?: string, origin?: Caller): Promise<SessionView[]>;
     /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
     history(workspaceId: string, origin?: Caller): Promise<SessionEvent[]>;
+    /** One thread's newest events under `before`, as sessions.history answers a page; nothing for a thread the caller
+     * does not reach, as history leaves its events out. */
+    page(workspaceId: string, window: { threadId: string; before?: number; limit?: number }, origin?: Caller): Promise<HistoryPage>;
+    /** The thread's head, by its fold key; refused as not found where the caller reaches no row of it. */
+    head(threadId: string, origin?: Caller): Promise<ThreadHead>;
     /** One image a person's message carried on that workspace's thread, by the request id its start carries and its
      * place in the message; refused as not found where the host keeps none. */
     attachment(workspaceId: string, threadId: string, requestId: string, index: number, origin?: Caller): Promise<KeptAttachment>;
@@ -2094,6 +2114,9 @@ interface TranscriptIndex {
   taken: Map<string, Taken>;
   /** Each thread's subagents by the agent's id for them, in the order they started, with the turn each ran under. */
   children: Map<string, Map<string, Child>>;
+  /** The newest position the transcript has issued. It never moves back, so the position of an event a delete or a
+   * rewind took away is never issued again. */
+  pos: number;
 }
 
 /** A subagent as the index holds it: what a listing answers, the turn whose end stops it if it is still running, and
@@ -2114,7 +2137,7 @@ const transcriptUnreadLine = (workspaceId: string, why: string): string => `the 
 const SESSION_FACTS = ["cwd", "permissionMode", "model"] as const;
 type SessionFacts = Partial<Record<(typeof SESSION_FACTS)[number], string>>;
 
-const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map(), taken: new Map(), children: new Map() });
+const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map(), taken: new Map(), children: new Map(), pos: 0 });
 
 /** One session.subagent row into a thread's children: a start makes the child, or runs a resumed one again, and an end
  * moves one the index holds. An end whose start has left the ring finds none, so the child stays gone with it. */
@@ -2162,6 +2185,7 @@ function forgetChild(index: TranscriptIndex, e: SessionEvent): void {
  * into the one message they are, and the newest start and end of each thread and session. A subagent's lines are the
  * subagent's, and a row stamped no thread names none a hit could open. */
 function foldEvent(index: TranscriptIndex, e: SessionEvent): void {
+  if (e.pos !== undefined && e.pos > index.pos) index.pos = e.pos;
   if ((e.type === "session.start" || e.type === "session.steer") && e.requestId !== undefined && e.threadId !== undefined && e.turnId !== undefined) {
     index.taken.set(e.requestId, { sessionId: e.sessionId, threadId: e.threadId, turnId: e.turnId, outcome: e.type === "session.start" ? "started" : "steered" });
   }
@@ -2230,13 +2254,13 @@ const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritt
  * one that does not parse, and one written before it held the starts by request id, since the restart that brings
  * this host up is the one a send may be waiting across. */
 const indexBytes = (index: TranscriptIndex, of: BlobMark | undefined): Buffer =>
-  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts], taken: [...index.taken], children: [...index.children].map(([thread, held]) => [thread, [...held]]) }));
+  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts], taken: [...index.taken], children: [...index.children].map(([thread, held]) => [thread, [...held]]), pos: index.pos }));
 const indexRead = (bytes: Buffer): { index: TranscriptIndex; of?: BlobMark } | undefined => {
   try {
-    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][]; taken?: [string, Taken][]; children?: [string, [string, Child][]][] };
-    if (held.taken === undefined || held.children === undefined) return undefined;
+    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][]; taken?: [string, Taken][]; children?: [string, [string, Child][]][]; pos?: number };
+    if (held.taken === undefined || held.children === undefined || held.pos === undefined) return undefined;
     const children = new Map(held.children.map(([thread, kids]) => [thread, new Map(kids)]));
-    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts), taken: new Map(held.taken), children }, ...(held.of !== undefined ? { of: held.of } : {}) };
+    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts), taken: new Map(held.taken), children, pos: held.pos }, ...(held.of !== undefined ? { of: held.of } : {}) };
   } catch {
     return undefined;
   }
@@ -3293,6 +3317,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const goneConfirmMs = opts.goneConfirmMs ?? GONE_CONFIRM_MS;
   const lateReadMs = opts.wake?.lateReadMs ?? WAKE_LATE_READ_MS;
   const clock = opts.clock ?? realClock;
+  const githubCache = opts.githubCache ?? memoryGitHubCache();
   /** What the provider says the machine is, bounded by its own read; undefined where the read could not be had. */
   const readsState = (machine: Machine): Promise<MachineState | undefined> =>
     until(machine.state(), clock.now() + providerReadMs, `state of ${machine.id}`, clock).catch(() => undefined);
@@ -3778,6 +3803,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     try {
       const events = (JSON.parse(bytes.toString("utf8")) as Partial<TranscriptRecord>).events;
       if (!Array.isArray(events)) throw new Error("it holds no events");
+      // A file an older build wrote carries no positions: its events take them in order from one, the same at every
+      // read until a write carries them, and the index read off it issues the next one after them.
+      let pos = 0;
+      for (const e of events) pos = e.pos ??= pos + 1;
       return events;
     } catch (e) {
       const aside = `${workspaceId}.${Date.now()}`;
@@ -3800,13 +3829,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const id = moving.workspaceId;
     const seen = new Set<string>();
     const all: SessionEvent[] = [];
-    for (const e of [...((await readTranscript(id, TRANSCRIPT_HEADS)) ?? []), ...((await readTranscript(id)) ?? []), ...moving.events]) {
+    for (const read of [...((await readTranscript(id, TRANSCRIPT_HEADS)) ?? []), ...((await readTranscript(id)) ?? []), ...moving.events]) {
+      // Positions are given again below, so the same event read off two copies is still one.
+      const e = { ...read };
+      delete e.pos;
       const key = JSON.stringify(e);
       if (seen.has(key)) continue;
       seen.add(key);
       all.push(e);
     }
     all.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+    all.forEach((e, i) => (e.pos = i + 1));
     const held = [...all];
     dropOldest(held);
     const kept = new Set(held);
@@ -3872,6 +3905,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return events;
   };
+  /** One thread's events read off the transcript as openTranscript answers it. */
+  const transcriptReader: TranscriptReader = {
+    read: async (workspaceId, threadId, o) => ({ ...readThread(await openTranscript(workspaceId), threadId, o), pos: transcriptIndex.get(workspaceId)?.pos ?? 0 }),
+  };
   /** Inside the queue: `events` written as the transcript, the first `took` events written since the last flush
    * cleared the moment the file has them, and the index made again off what was written. */
   const writeTranscript = async (workspaceId: string, events: SessionEvent[], took: number): Promise<void> => {
@@ -3884,6 +3921,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       pendingBytes.delete(workspaceId);
     } else if (pending !== undefined) pendingBytes.set(workspaceId, pending.reduce((n, e) => n + eventBytes(e), 0));
     const index = indexOf(events);
+    index.pos = Math.max(index.pos, transcriptIndex.get(workspaceId)?.pos ?? 0);
     // An index that did not land keeps its old mark, and boot reads that transcript again.
     await writeIndex(workspaceId, index).catch((e: unknown) => console.warn(`the transcript index of ${workspaceId} was not written: ${e instanceof Error ? e.message : String(e)}`));
     // What arrived during the writes is folded on after them, as record folded it on the index this replaces.
@@ -4022,7 +4060,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // nothing else. A session's end is written at once, anything before it waits
   // for the debounce.
   const record = (unstamped: SessionEvent): void => {
-    const event: SessionEvent = { ...unstamped, at: Date.now() };
+    const event: SessionEvent = { ...unstamped, at: Date.now(), pos: indexFor(unstamped.workspaceId).pos + 1 };
     const id = event.workspaceId;
     // A subagent's text and thinking are clipped as a tool result is, so a subagent that thinks for pages cannot push its
     // lead's own lines out of the ring.
@@ -4047,6 +4085,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       transcriptTimers.set(event.workspaceId, clock.schedule(() => void flushTranscript(event.workspaceId), TRANSCRIPT_FLUSH_MS));
     }
     bus.emit(event);
+    if ((event.type === "session.start" || event.type === "session.end") && event.threadId !== undefined) pushHead(event.threadId);
   };
 
   /** The harness session a thread's newest start in the transcript announced: what a send resumes once the thread's
@@ -4982,14 +5021,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const readHost = async <T>(entry: LiveWorkspace, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<T> =>
     (await readHostOn(entry, frame, parse)).read;
 
-  /** The same read, saying whether it was this computer's own command line that answered. */
+  /** The same read, saying whether it was this computer's own command line that answered. What it answers is held
+   * by remote and number alone, since this computer's command line answers it wherever one is signed in here. */
   const readHostOn = async <T>(entry: LiveWorkspace, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<{ read: T; here: boolean }> => {
     try {
-      return { read: await onThisComputer(async (ask, home) => parse(await ask(frame(home)))), here: true };
+      return { read: await heldOff("here", () => onThisComputer(async (ask, home) => parse(await ask(frame(home))))), here: true };
     } catch (e) {
       if (!isNoHostCli(e) || !copyReadsHost(entry)) throw e;
     }
-    return { read: await withDaemon(entry, async ask => parse(await ask(frame(checkoutOf(entry.record))))), here: false };
+    return { read: await heldOff(entry.record.id, () => withDaemon(entry, async ask => parse(await ask(frame(checkoutOf(entry.record)))))), here: false };
+  };
+
+  /** The git host's rate limit refusal, by the road whose command line met it: this computer's, or a copy's. A road
+   * that met one answers every read with it for RATE_LIMIT_HOLD_MS rather than running its command line against an
+   * empty budget once per pane open. gh's refusal names no reset, so the hold does not end at one. */
+  const rateLimited = new Map<string, { until: number; refusal: unknown }>();
+  const heldOff = async <T>(road: string, read: () => Promise<T>): Promise<T> => {
+    const held = rateLimited.get(road);
+    if (held !== undefined && clock.now() < held.until) throw held.refusal;
+    try {
+      return await read();
+    } catch (e) {
+      if (e instanceof DaemonRefusal && e.code === "rate-limited") rateLimited.set(road, { until: clock.now() + RATE_LIMIT_HOLD_MS, refusal: e });
+      throw e;
+    }
   };
 
   /** The workspace with the pull request it has, by number, and its project's remote; refused where it has none. */
@@ -5000,9 +5055,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return { entry, remote: projectHeld(entry.record.project).remote, number };
   };
 
+  const pageKey = (remote: string, number: number): string => `page:${remote}#${number}`;
+
+  /** A pull request's page, held PR_PAGE_HOLD_MS per remote and number so a pane reopened or remounted within it reads
+   * nothing; a refresh asks fresh, and every write as the person drops what is held. */
+  const readPage = async (entry: LiveWorkspace, remote: string, number: number, fresh: boolean): Promise<{ page: GitPrViewReply; here: boolean }> => {
+    const key = pageKey(remote, number);
+    const held = fresh ? undefined : githubCache.get(key);
+    if (held !== undefined && clock.now() - held.fetchedAt < PR_PAGE_HOLD_MS) return held.body as { page: GitPrViewReply; here: boolean };
+    const fetchedAt = clock.now();
+    const { read: page, here } = await readHostOn(entry, cwd => ({ op: "git.prView", cwd, remote, number }), r => GitPrViewReply.parse(r));
+    githubCache.set(key, { body: { page, here }, fetchedAt });
+    clock.schedule(() => githubCache.get(key)?.fetchedAt === fetchedAt && githubCache.delete(key), PR_PAGE_HOLD_MS, { unref: true });
+    return { page, here };
+  };
+
   /** A write on the git host as the person, through this computer's own signed-in command line alone, as a merge and
    * a review post are: a copy's gh sits on a PATH its agent can write, so nothing posts as the person through it. */
-  const postAsPerson = async <T>(remote: string, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<T> => {
+  const postAsPerson = async <T>(remote: string, number: number, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<T> => {
+    githubCache.delete(pageKey(remote, number));
     try {
       return await onThisComputer(async (ask, home) => parse(await ask(frame(home))));
     } catch (e) {
@@ -5014,27 +5085,57 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The host a project's remote lives on, as a sentence about its command line names it. */
   const hostOfRemote = (remote: string): string => gitHostOf(remote)?.sshHosts[0] ?? remoteHost(remote) ?? remote;
 
+  /** How often an open pull request is read again: PR_POLL_MS while a window is open, PR_POLL_IDLE_MS while none is. */
+  const prPollMs = (): number => (status.watched() ? PR_POLL_MS : PR_POLL_IDLE_MS);
+
+  const prKey = (remote: string, number: number): string => `pr:${remote}#${number}`;
+
   /** The workspace's pull request read through the git host's command line, kept on the entry and pushed on its status:
    * on view, at a turn's end, after a bring back, a merge, a fix and an update, and on a timer while it is open. An
-   * open one known by number is read by number, otherwise by the copy's branch; a merged or closed
-   * one is never read again. Within CHECKOUT_TTL_MS the fact held answers unless the caller forces a read. A read the
-   * host refused for any reason but a missing command line keeps the last fact, whose time says how old it is. */
-  const readPullRequest = (entry: LiveWorkspace, force: boolean): Promise<PullRequestSeen | undefined> => {
+   * open one known by number is read by number with what its last read saw, so an unchanged one costs one REST read
+   * and runs nothing else, unless the caller asks for the whole; otherwise it is read by the copy's branch, and a
+   * branch that had none is not read again on view until its head moves. A merged or closed one is never read again. On view an open one read
+   * within the poll interval answers as held, since its timer keeps it, and anything else within CHECKOUT_TTL_MS. A
+   * read the host refused for any reason but a missing command line keeps the last fact, whose time says how old it is. */
+  const readPullRequest = (entry: LiveWorkspace, force: boolean, whole = false): Promise<PullRequestSeen | undefined> => {
     const kept = entry.record.pr;
     if (kept !== undefined && kept.state !== "open") return Promise.resolve(entry.pr);
     const held = entry.pr;
-    if (!force && held !== undefined && clock.now() - held.readAt < CHECKOUT_TTL_MS) return Promise.resolve(held);
-    if (entry.prReading !== undefined) return entry.prReading;
+    const hold = isPullRequestFact(held) ? prPollMs() : CHECKOUT_TTL_MS;
+    if (!force && held !== undefined && clock.now() - held.readAt < hold) {
+      // A window opened or closed since the timer was armed: it reads at the interval now in force, from the last read.
+      if (isPullRequestFact(held) && entry.prPoll !== undefined && entry.prPollMs !== hold) pollPullRequest(entry, held.readAt);
+      return Promise.resolve(held);
+    }
+    if (!force && kept === undefined && entry.prNoneAt !== undefined && entry.prNoneAt === entry.checkout?.head) return Promise.resolve(held);
+    if (entry.prReading !== undefined && !whole) return entry.prReading;
     const reading = (async (): Promise<PullRequestSeen | undefined> => {
       const project = projectHeld(entry.record.project);
       if (project.remote === "") return entry.pr;
-      const branch = kept === undefined ? (entry.checkout ?? (await readCheckout(entry, false)))?.branch : undefined;
+      const checkout = kept === undefined ? (entry.checkout ?? (await readCheckout(entry, false))) : undefined;
+      const branch = checkout?.branch;
       const base = entry.record.base ?? project.base;
       if (kept === undefined && (branch === undefined || branch === base || branch.startsWith("("))) return entry.pr;
+      const cached = kept !== undefined ? githubCache.get(prKey(project.remote, kept.number)) : undefined;
+      const body = PullRequest.safeParse(cached?.body);
+      // A check finishing moves nothing of what is seen, so one still running, or an ask for the whole, reads in full.
+      const seen = !whole && body.success && cached?.tag !== undefined && !body.data.checks.some(c => c.state === "pending") ? cached.tag : undefined;
       const at = clock.now();
       try {
-        const read = await readHost(entry, cwd => ({ op: "git.prRead", cwd, remote: project.remote, ...(kept !== undefined ? { number: kept.number } : { branch }) }), r => GitPrReadReply.parse(r).pr);
-        await takePullRequest(entry, read === undefined ? undefined : { ...read, readAt: at });
+        const read = await readHost(
+          entry,
+          cwd => ({ op: "git.prRead", cwd, remote: project.remote, ...(kept !== undefined ? { number: kept.number } : { branch }), ...(seen !== undefined ? { seen } : {}) }),
+          r => GitPrReadReply.parse(r),
+        );
+        if (read.unchanged === true && body.success) {
+          await takePullRequest(entry, { ...body.data, readAt: at });
+          return entry.pr;
+        }
+        const pr = read.pr;
+        if (pr !== undefined && read.seen !== undefined) githubCache.set(prKey(project.remote, pr.number), { body: pr, tag: read.seen, fetchedAt: at });
+        if (pr === undefined && kept === undefined) entry.prNoneAt = checkout?.head;
+        else delete entry.prNoneAt;
+        await takePullRequest(entry, pr === undefined ? undefined : { ...pr, readAt: at });
       } catch (e) {
         if (isNoHostCli(e)) {
           const host = hostOfRemote(project.remote);
@@ -5073,17 +5174,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The one timed read an open pull request waits on; nothing is armed for a merged or closed one, which is never
    * read again. */
-  const pollPullRequest = (entry: LiveWorkspace): void => {
+  const pollPullRequest = (entry: LiveWorkspace, from = clock.now()): void => {
     entry.prPoll?.();
     delete entry.prPoll;
     const fact = entry.pr;
     if (!isPullRequestFact(fact) || fact.state !== "open" || live.get(entry.record.id) !== entry) return;
+    const ms = prPollMs();
+    entry.prPollMs = ms;
     entry.prPoll = clock.schedule(
       () => {
         delete entry.prPoll;
         void readPullRequest(entry, true);
       },
-      PR_POLL_MS,
+      Math.max(0, from + ms - clock.now()),
       { unref: true },
     );
   };
@@ -5123,7 +5226,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const mergeSettings = async (remote: string): Promise<GitRepoReadReply> => {
     const cached = repoSettings.get(remote);
     if (cached !== undefined && clock.now() - cached.at < REPO_SETTINGS_MS) return cached.read;
-    const read = GitRepoReadReply.parse(await onThisComputer((ask, home) => ask({ op: "git.repoRead", cwd: home, remote })));
+    const read = GitRepoReadReply.parse(await heldOff("here", () => onThisComputer((ask, home) => ask({ op: "git.repoRead", cwd: home, remote }))));
     repoSettings.set(remote, { at: clock.now(), read });
     return read;
   };
@@ -6557,6 +6660,62 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await ready();
     const entry = live.get(row.workspaceId);
     return entry === undefined || entry.creating || !reachesRow(row, origin) ? undefined : entry;
+  };
+  /** Rows as a listing answers them: each with the stamps and marks its thread's record keeps, and with what only a
+   * live turn knows, which rides the answer and never the row. */
+  const listedRows = (held: readonly (typeof sessions extends Map<string, infer V> ? V : never)[]): SessionView[] => {
+    // A thread's subagents ride its latest row alone, the one foldThreads reads, so a thread of several rows lists
+    // each child once.
+    const latest = new Map(held.map(s => [threadKeyOf(s.view), s] as const));
+    // The turn's process and what its calls are stopped behind ride the answer and never the row itself: both are
+    // this host's to know while the turn runs, and a pid written down outlives the process it named while a wait
+    // written down outlives the question it was on.
+    return held.map(s => {
+      const behind = s.view.status === "running" ? stoppedBehind(s) : undefined;
+      const marks = threadRecords.get(threadKeyOf(s.view));
+      const children = latest.get(threadKeyOf(s.view)) === s && s.view.threadId !== undefined ? transcriptIndex.get(s.view.workspaceId)?.children.get(s.view.threadId) : undefined;
+      return {
+        ...s.view,
+        ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}),
+        ...(behind !== undefined ? { waitingOn: behind } : {}),
+        ...(children !== undefined && children.size > 0 ? { subagents: [...children.values()].map(({ turnId: _turn, startRow: _row, ...child }) => child) } : {}),
+        ...((): { setupRefusal?: string } => {
+          const entry = live.get(s.view.workspaceId);
+          const place = entry === undefined ? undefined : setupPlace(entry);
+          const refused = place === undefined ? undefined : setupRefusals.get(keyOf(place, s.view.harness));
+          return refused !== undefined ? { setupRefusal: refused } : {};
+        })(),
+        // A turn that ended before the stamps began reads as seen the moment it ended, not at the upgrade, so the quiet
+        // the sidebar folds a thread by still counts from its end.
+        readAt: marks?.readAt ?? (s.view.endedAt !== undefined && s.view.endedAt < readsSince ? s.view.endedAt : readsSince),
+        ...(marks?.settledAt !== undefined ? { settledAt: marks.settledAt } : {}),
+        ...(marks?.pinnedAt !== undefined ? { pinnedAt: marks.pinnedAt } : {}),
+        ...(marks?.snoozedUntil === undefined ? {} : marks.snoozedUntil > clock.now() ? { snoozedUntil: marks.snoozedUntil } : { wokeAt: marks.snoozedUntil }),
+        ...(marks?.section !== undefined ? { section: marks.section } : {}),
+        ...(marks?.rewound !== undefined ? { rewoundAt: marks.rewound.at } : {}),
+      };
+    });
+  };
+  /** A thread's facts off its rows here, as a listing folds them; undefined where the host holds no row of it. */
+  const threadFacts = (threadId: string): ThreadFacts | undefined => {
+    const held = [...sessions.values()].filter(s => threadKeyOf(s.view) === threadId);
+    const [listed] = foldThreads(listedRows(held));
+    if (listed === undefined) return undefined;
+    const { subagents: _subagents, ...thread } = listed;
+    const latest = held.at(-1)!.view;
+    const running = held.filter(s => s.view.status === "running").at(-1);
+    return {
+      ...thread,
+      ...(latest.model !== undefined ? { model: latest.model } : {}),
+      ...(latest.effort !== undefined ? { effort: latest.effort } : {}),
+      ...(latest.contextWindow !== undefined ? { contextWindow: latest.contextWindow } : {}),
+      ...(running !== undefined ? { turnId: running.turnId } : {}),
+    };
+  };
+  /** Tells every window a thread's facts moved, so none asks for its head again. */
+  const pushHead = (threadId: string): void => {
+    const facts = threadFacts(threadId);
+    if (facts !== undefined) bus.emit({ type: "thread.head", workspaceId: facts.workspaceId, threadId, facts, pos: transcriptIndex.get(facts.workspaceId)?.pos ?? 0 });
   };
   /** Moves the read or settled stamp of each thread, by fold key, on the thread's record, which a thread from before
    * records existed takes here off its latest row; each workspace touched is written once and told once. Every
@@ -8219,9 +8378,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return { viewed: marks };
     },
 
-    async pullRequestView({ workspaceId }, origin) {
+    async pullRequestView({ workspaceId, fresh }, origin) {
       const { entry, remote, number } = await pullRequestOn(workspaceId, origin);
-      const { read: page, here } = await readHostOn(entry, cwd => ({ op: "git.prView", cwd, remote, number }), r => GitPrViewReply.parse(r));
+      const { page, here } = await readPage(entry, remote, number, fresh === true);
       const merge = await mergeSettings(remote).catch(() => undefined);
       return { ...page, ...(merge !== undefined ? { merge } : {}), sent: entry.record.prSent ?? [], postsAsYou: here };
     },
@@ -8235,23 +8394,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (body.trim() === "") throw Object.assign(new Error(REPLY_EMPTY_LINE), { kind: "invalid" });
       const { remote, number } = await pullRequestOn(workspaceId, origin);
       const where = { ...(replyTo !== undefined ? { replyTo } : {}), ...(threadId !== undefined ? { threadId } : {}) };
-      return postAsPerson(remote, cwd => ({ op: "git.prReply", cwd, remote, number, ...where, body }), r => GitPrReplyReply.parse(r));
+      return postAsPerson(remote, number, cwd => ({ op: "git.prReply", cwd, remote, number, ...where, body }), r => GitPrReplyReply.parse(r));
     },
 
     async pullRequestResolve({ workspaceId, threadId, resolved }, origin) {
       const { remote, number } = await pullRequestOn(workspaceId, origin);
-      return postAsPerson(remote, cwd => ({ op: "git.prResolve", cwd, remote, number, threadId, resolved }), r => GitPrResolveReply.parse(r));
+      return postAsPerson(remote, number, cwd => ({ op: "git.prResolve", cwd, remote, number, threadId, resolved }), r => GitPrResolveReply.parse(r));
     },
 
     async pullRequestReact({ workspaceId, subject, content, on }, origin) {
       const { remote, number } = await pullRequestOn(workspaceId, origin);
-      return postAsPerson(remote, cwd => ({ op: "git.prReact", cwd, remote, number, subject, content, on }), r => GitPrReactReply.parse(r));
+      return postAsPerson(remote, number, cwd => ({ op: "git.prReact", cwd, remote, number, subject, content, on }), r => GitPrReactReply.parse(r));
     },
 
     async pullRequestSend({ workspaceId, items }, origin) {
       const { entry, remote, number } = await pullRequestOn(workspaceId, origin);
       await copyBlocked(entry);
-      const page = await readHost(entry, cwd => ({ op: "git.prView", cwd, remote, number }), r => GitPrViewReply.parse(r));
+      const { page } = await readPage(entry, remote, number, false);
       const same = (a: PullRequestItem, b: PullRequestItem): boolean => a.kind === b.kind && a.id === b.id;
       const asked = items.filter((item, n) => items.findIndex(other => same(item, other)) === n);
       const said = await toFirstThread(workspaceId, pullRequestSendPrompt(page, asked, number), origin);
@@ -8285,7 +8444,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const branch = entry.checkout?.branch ?? (isPullRequestFact(entry.pr) ? entry.pr.branch : base);
         prompt = conflictsPrompt({ base, branch, files: updated.conflicts });
       } else {
-        const fact = await readPullRequest(entry, false);
+        // Read whole: a check that failed since the last read moves nothing a lighter read compares.
+        const fact = await readPullRequest(entry, true, true);
         if (!isPullRequestFact(fact)) throw new Error(noPullRequestRefusal(entry.record.name));
         const failed = fact.checks.find(c => c.name === check);
         if (failed === undefined) throw new Error(noSuchCheckRefusal(check, fact.checks.map(c => c.name)));
@@ -8325,6 +8485,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const done = GitPrMergeReply.parse(
         await onThisComputer((ask, home) => ask({ op: "git.prMerge", cwd: home, remote, number: fact.number, method: by, auto: whenChecksPass === true, headOid: head ?? fact.headOid })),
       );
+      githubCache.delete(pageKey(remote, fact.number));
       await readPullRequest(entry, true);
       return { number: fact.number, method: by, merged: done.merged, autoArmed: done.autoArmed };
     },
@@ -8452,6 +8613,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       entry.record.review = { ...draft, posted: { url: done.url, at: clock.now(), folded: done.folded } };
       await persist(entry.record);
       bus.emit({ type: "workspace.review", workspaceId });
+      githubCache.delete(pageKey(remote, from.number));
       void readPullRequest(entry, true);
       return { url: done.url, number: from.number, comments: ticked.length - done.folded.length, folded: done.folded.length };
     },
@@ -8609,6 +8771,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         async title => {
           pending.failed = false;
           if (title === null) return;
+          const moved = new Set<string>();
           // A title in the harness's own store is the person's rename inside it or the one the harness itself made
           // for them, and both outrank anything we would generate; only the opening words, which codex writes there
           // at a thread's start, are the seed again, and a seed is no news to a row that already carries a name.
@@ -8616,10 +8779,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             if (s.view.workspaceId !== entry.record.id || s.view.claudeSessionId !== sessionId) continue;
             const source = storedTitleSource(title, s.view.prompt);
             if (source === "seed" && sourceOf(s.view) !== "seed") continue;
+            if (s.view.harnessTitle !== title) moved.add(threadKeyOf(s.view));
             s.view.harnessTitle = title;
             s.view.titleSource = source;
           }
           await persistSessions(entry.record.id);
+          for (const threadId of moved) pushHead(threadId);
         },
         (e: unknown) => {
           if (!pending.failed) console.warn(noTitleLogLine(sessionId, entry.record.id, providerSaid(e)));
@@ -8714,6 +8879,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     }
     await persistSessions(entry.record.id);
+    pushHead(threadId);
     await nameInHarness(view, title);
   };
 
@@ -10490,37 +10656,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A row with none blocks, so a thread is titled on the first listing that sees it.
       const asked = titleRows(rows).map(view => ({ first: view.harnessTitle === undefined, done: refreshTitle(view, false) }));
       await Promise.all(asked.filter(a => a.first).map(a => a.done));
-      // A thread's subagents ride its latest row alone, the one foldThreads reads, so a thread of several rows lists
-      // each child once.
-      const latest = new Map(held.map(s => [threadKeyOf(s.view), s] as const));
-      // The turn's process and what its calls are stopped behind ride the answer and never the row itself: both are
-      // this host's to know while the turn runs, and a pid written down outlives the process it named while a wait
-      // written down outlives the question it was on.
-      return held.map(s => {
-        const behind = s.view.status === "running" ? stoppedBehind(s) : undefined;
-        const marks = threadRecords.get(threadKeyOf(s.view));
-        const children = latest.get(threadKeyOf(s.view)) === s && s.view.threadId !== undefined ? transcriptIndex.get(s.view.workspaceId)?.children.get(s.view.threadId) : undefined;
-        return {
-          ...s.view,
-          ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}),
-          ...(behind !== undefined ? { waitingOn: behind } : {}),
-          ...(children !== undefined && children.size > 0 ? { subagents: [...children.values()].map(({ turnId: _turn, startRow: _row, ...child }) => child) } : {}),
-          ...((): { setupRefusal?: string } => {
-            const entry = live.get(s.view.workspaceId);
-            const place = entry === undefined ? undefined : setupPlace(entry);
-            const refused = place === undefined ? undefined : setupRefusals.get(keyOf(place, s.view.harness));
-            return refused !== undefined ? { setupRefusal: refused } : {};
-          })(),
-          // A turn that ended before the stamps began reads as seen the moment it ended, not at the upgrade, so the quiet
-          // the sidebar folds a thread by still counts from its end.
-          readAt: marks?.readAt ?? (s.view.endedAt !== undefined && s.view.endedAt < readsSince ? s.view.endedAt : readsSince),
-          ...(marks?.settledAt !== undefined ? { settledAt: marks.settledAt } : {}),
-          ...(marks?.pinnedAt !== undefined ? { pinnedAt: marks.pinnedAt } : {}),
-          ...(marks?.snoozedUntil === undefined ? {} : marks.snoozedUntil > clock.now() ? { snoozedUntil: marks.snoozedUntil } : { wokeAt: marks.snoozedUntil }),
-          ...(marks?.section !== undefined ? { section: marks.section } : {}),
-          ...(marks?.rewound !== undefined ? { rewoundAt: marks.rewound.at } : {}),
-        };
-      });
+      return listedRows(held);
     },
 
     async history(workspaceId, origin) {
@@ -10529,6 +10665,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // workspaces; any other it names reads as every workspace verb reads it, so it learns nothing by asking.
       if (!treeStandsOn(workspaceId, origin)) await entryOf(workspaceId, origin);
       return (await openTranscript(workspaceId)).filter(e => drivesThread(e.threadId, origin)).map(e => ({ ...e }));
+    },
+
+    async page(workspaceId, window, origin) {
+      await ready();
+      if (!treeStandsOn(workspaceId, origin)) await entryOf(workspaceId, origin);
+      if (!drivesThread(window.threadId, origin)) return { events: [], pos: transcriptIndex.get(workspaceId)?.pos ?? 0, total: 0 };
+      return transcriptReader.read(workspaceId, window.threadId, {
+        ...(window.before !== undefined ? { before: window.before } : {}),
+        limit: window.limit ?? HISTORY_PAGE_EVENTS,
+        bytes: HISTORY_PAGE_BYTES,
+      });
+    },
+
+    async head(threadId, origin) {
+      await ready();
+      const facts = threadFacts(threadId);
+      if (facts === undefined || (await entryOfRow({ threadId: facts.threadId ?? threadId, workspaceId: facts.workspaceId }, origin)) === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
+      // The events take what the facts leave of the head's bytes, less the reply's own keys and numbers.
+      const room = HEAD_BYTES - Buffer.byteLength(JSON.stringify(facts)) - 100;
+      return { facts, ...(await transcriptReader.read(facts.workspaceId, facts.threadId ?? threadId, { limit: Infinity, bytes: room, strict: true, shape: headShape })) };
     },
 
     async attachment(workspaceId, threadId, requestId, index, origin) {
@@ -10623,6 +10779,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (threadId !== undefined) threadRecords.set(threadId, { ...(threadRecords.get(threadId) ?? { workspaceId: s.view.workspaceId, harness: s.view.harness }), permissionMode });
         if (latest.status !== "running") latest.permissionMode = permissionMode;
         void persistSessions(s.view.workspaceId);
+        pushHead(threadKeyOf(s.view));
       };
       if (latest.status !== "running") {
         landed();
@@ -10667,6 +10824,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
       }
       await persistSessions(entry.record.id);
+      pushHead(threadKeyOf(s.view));
       return { outcome: "renamed" };
     },
 
