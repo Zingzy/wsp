@@ -3,8 +3,8 @@
 // T3 Code's BranchToolbar: the computer's icon and name, the access picker,
 // the stashed prompts and the git branch, each the same 12 px sans in the one
 // muted ink with a 12 px icon, the same height and padding, a faint chevron
-// only on what opens a menu, one even gap, left to right. Quiet text on the
-// page, no tray. The folder is not on the row: the tile's card says it. Before
+// only on what opens a menu, one even gap, left to right, seated in the tray
+// joined to the box's foot. The folder is not on the row: the tile's card says it. Before
 // the first message it is the one the runtime's rule will open, the project's;
 // once a turn exists it is the harness folder, which a cd in the agent's shell
 // cannot move; the shell's own folder, as the agent's tool calls move it, is
@@ -102,12 +102,12 @@ export function ComposerCheckoutRow({
   }, [shell, shellCwd, workspaceId]);
 
   return (
-    <ComposerSurface.ContextStrip data-composer-checkout data-opening={opening || undefined} data-composer-folder={folder ?? undefined}>
+    <ComposerSurface.Tray data-composer-checkout data-opening={opening || undefined} data-composer-folder={folder ?? undefined}>
       <RowComputer name={computer} place={place} />
       {access}
       {stash}
       <RowBranch head={head !== null && head !== DETACHED_HEAD ? head : null} why={onCheckout || branch.kind === "repo" ? "detached" : branch.kind} />
-    </ComposerSurface.ContextStrip>
+    </ComposerSurface.Tray>
   );
 }
 
@@ -116,10 +116,10 @@ export function ComposerCheckoutRow({
  * project's own record. */
 export function HomeCheckoutRow({ path, branch, where = null, access = null }: { path: string; branch: string; where?: ReactNode; access?: ReactNode }) {
   return (
-    <ComposerSurface.ContextStrip data-composer-checkout data-composer-home data-composer-folder={path}>
+    <ComposerSurface.Tray data-composer-checkout data-composer-home data-composer-folder={path}>
       {where}
       {access}
       <RowBranch head={branch === "" ? null : branch} />
-    </ComposerSurface.ContextStrip>
+    </ComposerSurface.Tray>
   );
 }

@@ -1,8 +1,8 @@
 // Adapted from pingdotgg/t3code apps/web/src/lib/contextWindow.ts at c9a0e8a1 (MIT).
 // Differs from upstream: the reading comes off the thread's turns, the latest
 // whose tokens say what the model held, rather than off activity rows; the
-// words go through the protocol's fmtTokens; nothing of compaction is offered,
-// since wsp has no road to compact a thread.
+// words go through the protocol's fmtTokens; compaction is the agent's own,
+// sent as the message its adapter declares, and not a call of the host's.
 import { fmtTokens } from "@wsp/protocol";
 import type { TurnSummary } from "../../adapt";
 
@@ -42,3 +42,11 @@ export function contextTitle(snapshot: ContextSnapshot, agentLabel: string): str
     ? `Context: ${fmtTokens(snapshot.used)} tokens; ${agentLabel} does not report its limit`
     : `Context: ${contextPercent(snapshot)} used, ${fmtTokens(snapshot.used)} of ${fmtTokens(snapshot.max)} tokens`;
 }
+
+/** What the ring's card says beside the numbers. */
+export const CONTEXT_WORDS = {
+  head: "Context window",
+  compact: "Compact context",
+  /** The card's line where the agent reports no limit to measure the count against. */
+  noLimit: (agentLabel: string): string => `${agentLabel} does not report its limit`,
+} as const;

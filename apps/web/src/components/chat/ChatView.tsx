@@ -237,7 +237,7 @@ export function ChatView({
   ) : null;
 
   return (
-    <div ref={rootRef} className="relative isolate h-full min-h-0 text-foreground [--empty-lift:calc((100%-var(--chat-composer-inset,0px)-5.5rem)/2)]">
+    <div ref={rootRef} data-chat-view className="relative isolate h-full min-h-0 text-foreground [--empty-lift:calc((100%-var(--chat-composer-inset,0px)-5.5rem)/2)]">
       <div className="absolute inset-0">
         {setupStands ? (
           <SetupRoom>

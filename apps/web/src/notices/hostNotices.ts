@@ -26,7 +26,7 @@ import { useSettingsStore } from "../settings/settingsStore.js";
 import { needsYouRoad, type NeedsYouRoad } from "../shell/needsYou.js";
 import { releaseAhead, shellVersions } from "../shell/shellVersion.js";
 import { copyName } from "../sidebar/workspaceRows.js";
-import { addNotice, useNotices, type NoticeAction } from "./store.js";
+import { addNotice, useNotices, type NoticeAction, type NoticeInput } from "./store.js";
 
 /** Where this page's storage keeps the last release version the update notice has said, so a reload says it no more. */
 export const RELEASE_SAID_KEY = "wsp:release-said";
@@ -120,8 +120,6 @@ const openComputer = (placeId: string | undefined): NoticeAction => ({
 /** What the rules keep between events, for one mounted effect. */
 interface Held {
   road: NeedsYouRoad | null;
-  /** What a click on the last thing the shell's road said opens: the road hands a click back for whatever it showed last. */
-  opens: () => void;
   /** The need the keyed notice stands for. */
   need: string | undefined;
   /** Whether the build's rows were in front of the person at the last change, so leaving them with a need standing
@@ -159,9 +157,7 @@ function endWait(h: Held, key: string): void {
 }
 
 function sayOutside(held: Held, opens: () => void, line: OutsideLine | undefined): void {
-  if (line === undefined) return;
-  held.opens = opens;
-  held.road?.say(line);
+  if (line !== undefined) held.road?.say(line, opens);
 }
 
 function sayNeed(held: Held, what: string, placeId: string | undefined): void {
@@ -234,30 +230,35 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
     // A wait that ran out, or a run that ended, is said by the run's own words: the wait's toast goes.
     if (e.wait?.state === "expired") endWait(held, waitKey(e.placeId, e.wait.row));
     if (e.end !== undefined) for (const [key, at] of held.waits) if (at.placeId === e.placeId) endWait(held, key);
-    if ((e.end === undefined && e.wait?.state !== "waiting") || computerOnScreen(e.placeId)) return;
+    if (e.end === undefined && e.wait?.state !== "waiting") return;
     const place = useStore.getState().places.find(p => p.id === e.placeId);
     if (place === undefined) return;
     const name = placeName(place);
     const open = openSetupOf(e.placeId);
+    // The shell is told even with the dialog on screen, since only it knows whether the window still has the
+    // person's eyes; the toast is for a computer whose own rows are not showing.
+    const toast = (notice: NoticeInput): void => {
+      if (!computerOnScreen(e.placeId)) addNotice(notice);
+    };
     if (e.end === undefined && e.wait !== undefined) {
       // The runtime says a wait again as the relay reads its page and then its code: the toast takes the newest, and
       // the person is told outside the app once.
       const key = waitKey(e.placeId, e.wait.row);
       const what = waitLine(e.wait);
-      addNotice({ kind: "waiting", key: waitNoticeKey(key), text: setupNeedsYouLine(name, what), where: name, action: open });
+      toast({ kind: "waiting", key: waitNoticeKey(key), text: setupNeedsYouLine(name, what), where: name, action: open });
       if (held.waits.has(key)) return;
       held.waits.set(key, { placeId: e.placeId, addId: e.addId });
       sayOutside(held, open.run, lineFor({ kind: "signIn", what: `${name}: ${what}` }));
       return;
     }
     if (e.end === "failed") {
-      addNotice({ kind: "error", text: HOST_NOTICE_WORDS.notSetUp(name, e.said ?? ""), where: name, action: open });
+      toast({ kind: "error", text: HOST_NOTICE_WORDS.notSetUp(name, e.said ?? ""), where: name, action: open });
       sayOutside(held, open.run, lineFor({ kind: "setupFailed", computer: name, said: e.said ?? "" }));
     } else if (e.end === "needs-you") {
-      addNotice({ kind: "note", text: setupNeedsYouLine(name, e.said ?? ""), where: name, action: open });
+      toast({ kind: "note", text: setupNeedsYouLine(name, e.said ?? ""), where: name, action: open });
       sayOutside(held, open.run, lineFor({ kind: "setupNeedsYou", computer: name, what: e.said ?? "" }));
     } else {
-      addNotice({ kind: "done", text: setupReadyLine(name, e.said), where: name, action: open });
+      toast({ kind: "done", text: setupReadyLine(name, e.said), where: name, action: open });
       sayOutside(held, open.run, lineFor({ kind: "setupReady", computer: name, ...(e.said !== undefined ? { missed: e.said } : {}) }));
     }
   },
@@ -345,10 +346,10 @@ export function useHostNotices(): void {
   const needed = useStore(s => s.initJob?.needsYou !== undefined || Object.values(s.sessions).some(rows => rows.some(row => row.asking !== undefined)));
   // Counted where the rows land, so a window showing a thread, which moves its read stamp, takes it off the dock.
   const waiting = useStore(s => needsYouCount(Object.values(s.sessions).flat()));
-  const held = useRef<Held>({ road: null, opens: () => openComputer(undefined).run(), need: undefined, shown: false, jobsEnded: new Set(), released: undefined, results: new Map(), waits: new Map() });
+  const held = useRef<Held>({ road: null, need: undefined, shown: false, jobsEnded: new Set(), released: undefined, results: new Map(), waits: new Map() });
   useEffect(() => {
     const h = held.current;
-    const built = needsYouRoad(() => h.opens());
+    const built = needsYouRoad();
     h.road = built;
     return () => {
       built.close();

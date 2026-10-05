@@ -4,6 +4,7 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 
 import { cn } from "../../lib/utils";
+import { TOOLTIP_SKIN } from "./hover-skin";
 
 const PopoverCreateHandle = PopoverPrimitive.createHandle;
 
@@ -50,11 +51,12 @@ function PopoverPopup({
       >
         <PopoverPrimitive.Popup
           className={cn(
-            "dropdown-glass relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) rounded-[12px] text-popover-foreground outline-none transition-[width,height,scale,opacity] before:pointer-events-none before:absolute before:inset-0 before:rounded-[11px] before:shadow-[0_1px_--theme(--color-black/4%)] has-data-[slot=calendar]:rounded-xl has-data-[slot=calendar]:before:rounded-[calc(var(--radius-xl)-1px)] data-starting-style:scale-98 data-starting-style:opacity-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+            "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) rounded-[12px] text-popover-foreground outline-none transition-[width,height,scale,translate,opacity] before:pointer-events-none before:absolute before:inset-0 before:rounded-[11px] before:shadow-[0_1px_--theme(--color-black/4%)] has-data-[slot=calendar]:rounded-xl has-data-[slot=calendar]:before:rounded-[calc(var(--radius-xl)-1px)] data-starting-style:opacity-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+            // The tooltip's own skin, so a card that holds a button reads as the hover cards that hold none.
             tooltipStyle &&
-              "w-fit text-balance rounded-md text-xs shadow-md/5 before:rounded-[calc(var(--radius-md)-1px)]",
+              cn(TOOLTIP_SKIN, "w-fit text-balance rounded-md text-xs before:rounded-[calc(var(--radius-md)-1px)] data-[side=top]:data-starting-style:translate-y-0.5 data-[side=bottom]:data-starting-style:-translate-y-0.5"),
             !tooltipStyle &&
-              "popover-shadow",
+              "dropdown-glass popover-shadow data-starting-style:scale-98",
             className,
           )}
           data-slot="popover-popup"

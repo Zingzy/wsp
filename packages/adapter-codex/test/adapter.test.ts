@@ -1470,3 +1470,50 @@ describe("creditsOf", () => {
     ]);
   });
 });
+
+describe("a Codex thread's own compaction", () => {
+  // codex-cli 0.155.1's answer to thread/compact/start on a thread holding 20,964 tokens (recorded 2026-10-05, ids
+  // swapped for the test's): a turn of its own whose one item is the compaction, and a usage line whose last call
+  // reports no input or output but the context the thread now holds as its total.
+  const COMPACTION = [
+    '{"id":"wsp-turn","result":{}}',
+    turnStarted,
+    `{"method":"item/started","params":{"item":{"type":"contextCompaction","id":"cc1"},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`,
+    `{"method":"item/completed","params":{"item":{"type":"contextCompaction","id":"cc1"},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`,
+    `{"method":"thread/tokenUsage/updated","params":{"threadId":"${THREAD_ID}","turnId":"${TURN_ID}","tokenUsage":{"total":{"totalTokens":20964,"inputTokens":20959,"cachedInputTokens":11136,"cacheWriteInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0},"last":{"totalTokens":4607,"inputTokens":0,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0},"modelContextWindow":258400}},"emittedAtMs":1791150174233}`,
+    `{"method":"turn/completed","params":{"threadId":"${THREAD_ID}","turn":{"id":"${TURN_ID}","items":[],"status":"completed","durationMs":3086}}}`,
+  ];
+  const compactingServer = (seed: readonly string[]): Wire => {
+    const w = wire({
+      onWrite: (message, self) => {
+        if (message.method === "thread/resume") self.push(...opened());
+        if (message.method === "thread/compact/start") self.push(...COMPACTION);
+      },
+    });
+    for (const line of seed) void w.stream.write(line);
+    return w;
+  };
+
+  it("runs /compact as the server's own compaction of the thread, not as a message to the model", async () => {
+    const launch = launcher(compactingServer);
+    const adapter = adapterOver(launch);
+    expect(adapter.compacts).toBe("/compact");
+    const result = await adapter.start({ prompt: "/compact", resume: THREAD_ID, onEvent: () => {} }).finished;
+    expect(result.status).toBe("completed");
+    const methods = launch.wires[0]!.written.map(m => m.method);
+    expect(methods).toContain("thread/compact/start");
+    expect(methods).not.toContain("turn/start");
+    expect(launch.wires[0]!.written.find(m => m.method === "thread/compact/start")).toEqual({ id: "wsp-turn", method: "thread/compact/start", params: { threadId: THREAD_ID } });
+  });
+
+  it("reads what the thread holds after the compaction off the usage line's total, where it reports no input or output", async () => {
+    const result = await adapterOver(launcher(compactingServer)).start({ prompt: "/compact", resume: THREAD_ID, onEvent: () => {} }).finished;
+    expect(result.tokens).toMatchObject({ context: 4_607, window: 258_400 });
+  });
+
+  it("sends any other message as a turn, /compact with words after it included", async () => {
+    const launch = launcher(scripted([agentMessage("m1", "done"), completed("completed")]));
+    await adapterOver(launch).start({ prompt: "/compact the notes please", resume: THREAD_ID, onEvent: () => {} }).finished;
+    expect(launch.wires[0]!.written.map(m => m.method)).toContain("turn/start");
+  });
+});

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { render } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { TurnSummary } from "../src/adapt";
 import { ContextRing, usePublishContext } from "../src/components/chat/ContextMeter.js";
@@ -35,6 +35,35 @@ describe("the context ring in the thread's top bar", () => {
     );
     expect(ring()!.getAttribute("aria-label")).toBe("Context: 24.8k tokens; Codex does not report its limit");
     expect(Number(used().getAttribute("stroke-dashoffset"))).toBeCloseTo(2 * Math.PI * 9.75);
+  });
+
+  it("opens a card with the share, the count over the window and a meter, or the count alone and why where there is no limit", async () => {
+    const { unmount } = render(
+      <>
+        <Thread turns={[{ tokens: { input: 1, output: 1, context: 50_000, window: 200_000 } }]} agentLabel="Claude Code" />
+        <ContextRing workspaceId={WS} />
+      </>,
+    );
+    fireEvent.click(ring()!);
+    const card = await waitFor(() => document.querySelector<HTMLElement>("[data-context-card]")!);
+    expect(card.textContent).toContain("Context window");
+    expect(card.querySelector("[data-context-figures]")!.textContent).toBe("25%50k / 200k");
+    expect(card.querySelector("[role=progressbar]")!.getAttribute("aria-valuenow")).toBe("25");
+    // No compaction was published for this thread, so the card offers none.
+    expect(card.querySelector("[data-context-compact]")).toBeNull();
+    unmount();
+
+    render(
+      <>
+        <Thread turns={[{ tokens: { input: 1, output: 1, context: 24_763 } }]} agentLabel="Codex" />
+        <ContextRing workspaceId={WS} />
+      </>,
+    );
+    fireEvent.click(ring()!);
+    const bare = await waitFor(() => document.querySelector<HTMLElement>("[data-context-card]")!);
+    expect(bare.querySelector("[data-context-figures]")!.textContent).toBe("24.8k");
+    expect(bare.querySelector("[role=progressbar]")).toBeNull();
+    expect(bare.textContent).toContain("Codex does not report its limit");
   });
 
   it("draws nothing on a thread no turn of which said, and goes as the thread leaves", () => {

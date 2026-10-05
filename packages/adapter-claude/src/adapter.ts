@@ -138,6 +138,9 @@ export interface ClaudeAdapter {
   readonly waitsForPrompt: true;
   /** An access picked while a turn runs reaches that turn: over the control channel, and on the prompt it is stopped on. */
   readonly movesAccess: true;
+  /** The CLI's own /compact runs headless as a turn's message: it compacts the session and writes its compact_boundary
+   * with what the model holds after (measured on 2.1.289, 2026-10-05). */
+  readonly compacts: "/compact";
   /** The commands the CLI runs only in its own terminal; the composer keeps them out of its menu and sends none. */
   readonly screenCommands: ReadonlyArray<ScreenCommand>;
   /** Makes the binary describe itself under the same config dir as a session; null when it did not answer. The
@@ -709,6 +712,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     /** What the model held after its last call, the agent's own and never a subagent's: the last reply's usage, or a
      * compaction's figure where one came after it. The result's usage sums the turn, so it cannot say this. */
     let heldContext: number | undefined;
+    /** Set once the CLI wrote a compaction's boundary this turn: /compact answers with no words and no call, and the
+     * compaction is the whole of what it did, so its result is no empty answer. */
+    let compacted = false;
     let initModel: string | undefined;
     /** The session's running totals as its file saved them before this turn, which every result's totals start from. */
     let saved: SavedUse | undefined;
@@ -782,7 +788,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       settleAsked();
       void endAfterResult(stream, exitMs, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
       // Held until the process exits, since the CLI writes its reason to stderr after the result.
-      if (answeredNothing(result)) {
+      if (answeredNothing(result) && !compacted) {
         emptyResult = result;
         return;
       }
@@ -910,8 +916,11 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (ended !== undefined) continue;
           // A report's answer with no reply held is not this turn's: the person's message is answered after it.
           if (heldReply === undefined && !sawResult && drainedNotice(event)) continue;
-          const compacted = compactedTo(event);
-          if (compacted !== undefined) heldContext = compacted;
+          const after = compactedTo(event);
+          if (after !== undefined) {
+            heldContext = after;
+            compacted = true;
+          }
           const call = str(event.type) === "assistant" && event.is_api_error_message !== true ? rec(event.message) : undefined;
           const callUsage = rec(call?.usage);
           const callId = str(call?.id);
@@ -1250,6 +1259,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     steers: true,
     resumesAt: true,
     movesAccess: true,
+    compacts: "/compact",
     attachments: "inline",
     mcpServers: true,
     waitsForPrompt: true,
