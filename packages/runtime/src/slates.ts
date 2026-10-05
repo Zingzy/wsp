@@ -53,11 +53,14 @@ import {
   type SlateValuesEvent,
   type SlateView,
   type SlateWriteAnswer,
+  shellQuote,
 } from "@wsp/protocol";
+import type { Machine } from "@wsp/engine";
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Store } from "./store.js";
 import { createSlateRuns, lastResult, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
+import { boxRoad, boxSlateDir } from "./slate-box.js";
 import { HELD_CONFIRM, consentKey, createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
 import { HOST_SLATE_SOURCES, resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
 
@@ -111,8 +114,11 @@ export interface SlateThreadFacts {
   sessionId: string;
   /** The running turn, when one runs. */
   turnId?: string;
-  /** The folder a run starts in, on this computer. */
+  /** The folder a run `on` the thread starts in, on the thread's own computer. */
   folder?: string;
+  /** The folder a run `on` the host starts in, on this computer: the thread's own here, else the project's folder
+   * here where the project is also here, else the host's own. */
+  hostFolder?: string;
   /** The computer's own name, for the consent sheet. */
   computer?: string;
 }
@@ -127,6 +133,8 @@ export interface SlatesDeps {
   thread(threadId: string): SlateThreadFacts | undefined;
   /** The host's workspaces loaded, which a thread's facts are read off; the slates recover only after. */
   loaded?(): Promise<void>;
+  /** The machine a thread runs on where that is not this computer, which its slate's commands then run on too. */
+  machineOf?(threadId: string): Machine | undefined;
   /** Whether the thread is settled, by the sidebar's own rule: its slate's timers, always ones too, wait until a window
    * shows the slate again. */
   settled?(threadId: string): Promise<boolean>;
@@ -398,6 +406,11 @@ export function createSlates(deps: SlatesDeps): Slates {
     now: deps.now,
     ...(deps.secretsFile !== undefined ? { secretsFile: deps.secretsFile } : {}),
     ...(deps.slatesDir !== undefined ? { dir: writeFiles } : {}),
+    road: (threadId, on) => {
+      if (on === "host") return undefined;
+      const machine = deps.machineOf?.(threadId);
+      return machine === undefined ? undefined : boxRoad(machine, threadId, () => records.get(threadId)?.document?.files ?? {});
+    },
     approvals,
     onRecord: moved,
     onLine: (threadId, run, line) => {
@@ -811,13 +824,19 @@ export function createSlates(deps: SlatesDeps): Slates {
   /** The sources a run's inputs read, kept from the last batch of its slate. */
   const viewsNow = new Map<string, ReadonlyMap<string, SlateJson | undefined>>();
 
+  /** Where a command starts: the thread's own folder on its own computer, or this computer's for one `on` the host. */
+  const folderFor = (threadId: string, decl: SlateRunDecl): string | undefined => {
+    const facts = deps.thread(threadId);
+    return decl.kind === "cmd" && decl.on === "host" ? (facts?.hostFolder ?? facts?.folder) : facts?.folder;
+  };
+
   /** A declared run started through the runs module; its first record is the caller's to write. `prior` is the record
    * from before the batch, whose own record of the start is not the runs module's to count. */
   const startNow = (r: SlateRecord, run: string, by: RunBy, views: ReadonlyMap<string, SlateJson | undefined>, prior: SlateJson | undefined = r.values[run]): { record: SlateRunRecord; ask?: RunAsk } => {
     const decl = r.document?.runs[run];
     const count = isRunRecord(prior) ? prior.runs : 0;
     if (decl === undefined) return { record: { state: "failed", why: `$${run} is not declared`, runs: count } };
-    const folder = deps.thread(r.threadId)?.folder;
+    const folder = folderFor(r.threadId, decl);
     if (decl.kind === "cmd" && folder === undefined) return { record: { state: "failed", why: NO_FOLDER, runs: count } };
     viewsNow.set(r.threadId, views);
     capturing = { threadId: r.threadId, run };
@@ -1350,7 +1369,7 @@ export function createSlates(deps: SlatesDeps): Slates {
           if (runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once") !== undefined) continue;
           // The hold was a host's before a restart, which this process never saw: hold it again, then answer it.
           const decl = r.document!.runs[run] as Extract<SlateRunDecl, { kind: "cmd" }>;
-          const folder = deps.thread(p.threadId)?.folder;
+          const folder = folderFor(p.threadId, decl);
           if (folder === undefined) {
             moved(p.threadId, run, { state: "failed", why: NO_FOLDER, exit: null, runs: rec.runs, endedAt: deps.now() });
             continue;
@@ -1448,6 +1467,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         records.delete(threadId);
         const dir = folderOf(threadId);
         if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
+        // Its folder on the thread's own machine goes too, where that machine still answers.
+        void deps.machineOf?.(threadId)?.exec(`rm -rf ${shellQuote(boxSlateDir(threadId))}`).catch(() => undefined);
         holds.delete(threadId);
         skipped.delete(threadId);
         windows.delete(threadId);

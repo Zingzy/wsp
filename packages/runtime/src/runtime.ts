@@ -3773,15 +3773,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (workspaceId === undefined) return undefined;
       const running = [...sessions.values()].find(s => s.view.threadId === threadId && s.view.status === "running");
       const entry = live.get(workspaceId);
-      // A run starts where the thread's next turn would: the folder its session ran in, a --cwd or a worktree.
+      // A run starts where the thread's next turn would: the folder its session ran in, a --cwd or a worktree, else
+      // the folder the workspace's kind holds its project in, on that kind's computer.
       const ranIn = latest?.cwd ?? (latest?.claudeSessionId === undefined ? undefined : folderOf(workspaceId, latest.claudeSessionId));
+      if (entry === undefined) return { workspaceId, rootThreadId: rootOf(threadId), sessionId: latest?.claudeSessionId ?? latest?.id ?? threadId, ...(running !== undefined ? { turnId: running.turnId } : {}) };
+      const folder = runsIn(entry, ranIn, moduleOf(entry.record.kind).folder(entry.record) ?? checkoutOf(entry.record));
+      // A run on the host from a thread on a box starts in the project's folder here, where the project is also here.
+      const here = isLocalWorkspace(entry.record) ? folder : existsSync(checkoutOf(entry.record)) ? checkoutOf(entry.record) : homedir();
       return {
         workspaceId,
         rootThreadId: rootOf(threadId),
         sessionId: latest?.claudeSessionId ?? latest?.id ?? threadId,
         ...(running !== undefined ? { turnId: running.turnId } : {}),
-        ...(entry !== undefined ? { folder: runsIn(entry, ranIn, checkoutOf(entry.record)), computer: computerOf(entry) } : {}),
+        folder,
+        hostFolder: here,
+        computer: computerOf(entry),
       };
+    },
+    machineOf: threadId => {
+      const workspaceId = latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
+      const entry = workspaceId === undefined ? undefined : live.get(workspaceId);
+      return entry === undefined || isLocalWorkspace(entry.record) ? undefined : entry.machine;
     },
     loaded: () => ready(),
     settled: async threadId => {

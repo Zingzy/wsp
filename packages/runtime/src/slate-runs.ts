@@ -7,7 +7,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, posix, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { writeOwn } from "@wsp/own-file";
 import { EXEC_DEADLINE_EXIT, EXEC_OUTPUT_MAX, EXEC_TIMEOUT_MAX_MS, runOutputTail } from "@wsp/protocol";
@@ -146,7 +146,41 @@ export interface SlateRunsDeps {
   secretsFile?: string;
   /** The slate's own folder with its files written, which every command and then reads as SLATE_DIR. */
   dir?: (threadId: string) => string;
+  /** Where a run of this thread runs when that is not this computer: the thread's own machine, for a run `on` the
+   * thread whose thread is on a box. Unset, or answering nothing, runs it here. */
+  road?: (threadId: string, on: "thread" | "host") => RunRoad | undefined;
   now?: () => number;
+}
+
+/** What a road starts: the agent's text as bash -c's one argument, the values beside it, never in it. */
+export interface RoadStart {
+  cmd: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string>;
+  stdin?: string;
+  timeoutS: number;
+  stream: boolean;
+}
+
+/** How a command ended, its streams whole and not yet scrubbed. */
+export interface RoadEnd {
+  code: number | null;
+  signal?: string | null;
+  error?: Error;
+  out: string;
+  err: string;
+  cut: boolean;
+  timedOut: boolean;
+}
+
+/** The computer a run's command runs on: this one's child, or the thread's own machine. */
+export interface RunRoad {
+  /** SLATE_DIR on that computer, whose files the road writes before each command. */
+  slateDir: string;
+  /** Each line as it is printed where the run streams, then the end, once; kill ends the whole group. */
+  start(o: RoadStart, on: { line(stream: "out" | "err", text: string): void; end(o: RoadEnd): void }): { kill(): void };
+  reshape(o: { cmd: string; input: string; cwd: string; env: Record<string, string>; timeoutS: number; scrub: (text: string) => string }): Reshape;
 }
 
 export interface SlateSecrets {
@@ -225,22 +259,94 @@ export function reshapeResult(o: { cmd: string; input: string; cwd: string; env:
       ended = true;
       clearTimeout(deadline);
       kill();
-      const err = runOutputTail(o.scrub(Buffer.concat(chunks.err).toString("utf8")));
-      if (error !== undefined) return settle({ why: `then could not start: ${o.scrub(error.message)}`, exit: null, err });
-      if (timedOut) return settle({ why: `then timed out after ${o.timeoutS} s`, exit: EXEC_DEADLINE_EXIT, err });
-      if (code !== 0) return settle({ why: `then exited with ${code ?? "a signal"}`, exit: code, err });
-      const out = o.scrub(Buffer.concat(chunks.out).toString("utf8"));
-      try {
-        settle({ json: JSON.parse(out) as SlateJson });
-      } catch {
-        settle({ why: `then printed no JSON${out.trim() === "" ? "" : `: ${out.trim().split("\n")[0]!.slice(0, 120)}`}`, exit: 0, err });
-      }
+      settle(reshapeAnswer({ code, ...(error !== undefined ? { error } : {}), out: Buffer.concat(chunks.out).toString("utf8"), err: Buffer.concat(chunks.err).toString("utf8"), cut: false, timedOut }, o.timeoutS, o.scrub));
     };
     child.on("error", e => end(null, e));
     child.on("close", code => end(code));
   });
   return { done, kill };
 }
+
+/** What a `then` that ended says: the JSON it printed, or why not, on whichever computer it ran. */
+export function reshapeAnswer(end: RoadEnd, timeoutS: number, scrub: (text: string) => string): ReshapeAnswer {
+  const err = runOutputTail(scrub(end.err));
+  if (end.error !== undefined) return { why: `then could not start: ${scrub(end.error.message)}`, exit: null, err };
+  if (end.timedOut) return { why: `then timed out after ${timeoutS} s`, exit: EXEC_DEADLINE_EXIT, err };
+  if (end.code !== 0) return { why: `then exited with ${end.code ?? "a signal"}`, exit: end.code, err };
+  const out = scrub(end.out);
+  try {
+    return { json: JSON.parse(out) as SlateJson };
+  } catch {
+    return { why: `then printed no JSON${out.trim() === "" ? "" : `: ${out.trim().split("\n")[0]!.slice(0, 120)}`}`, exit: 0, err };
+  }
+}
+
+/** This computer: the command a child of the host's, in its own process group, which a kill or the deadline takes
+ * whole, its streams capped as the daemon caps an exec's. */
+const localRoad: RunRoad = {
+  slateDir: "",
+  start(o, on) {
+    const child = spawn("bash", ["-c", o.cmd, "bash", ...o.args], { cwd: o.cwd, env: o.env, detached: true, stdio: [o.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
+    const chunks = { out: [] as Buffer[], err: [] as Buffer[] };
+    let total = 0;
+    let cut = false;
+    const partial = { out: "", err: "" };
+    const decoders = { out: new StringDecoder("utf8"), err: new StringDecoder("utf8") };
+    const take = (stream: "out" | "err") => (chunk: Buffer): void => {
+      if (total + chunk.length > EXEC_OUTPUT_MAX) {
+        cut = true;
+        chunk = chunk.subarray(0, Math.max(0, EXEC_OUTPUT_MAX - total));
+      }
+      total += chunk.length;
+      if (chunk.length === 0) return;
+      chunks[stream].push(chunk);
+      if (!o.stream) return;
+      const parts = (partial[stream] + decoders[stream].write(chunk)).split("\n");
+      partial[stream] = parts.pop() ?? "";
+      for (const p of parts) on.line(stream, p);
+    };
+    child.stdout?.on("data", take("out"));
+    child.stderr?.on("data", take("err"));
+    if (child.stdin !== null) {
+      child.stdin.on("error", () => {});
+      child.stdin.end(o.stdin);
+    }
+    let timedOut = false;
+    let ended = false;
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      if (child.pid !== undefined) killGroup(child.pid);
+    }, o.timeoutS * 1_000);
+    const end = (code: number | null, signal: NodeJS.Signals | null, error?: Error): void => {
+      if (ended) return;
+      ended = true;
+      clearTimeout(deadline);
+      if (grace !== undefined) clearTimeout(grace);
+      if (child.pid !== undefined) killGroup(child.pid);
+      if (o.stream) {
+        for (const stream of ["out", "err"] as const) {
+          const rest = partial[stream] + decoders[stream].end();
+          if (rest !== "") on.line(stream, rest);
+        }
+      }
+      on.end({ code, signal, ...(error !== undefined ? { error } : {}), out: Buffer.concat(chunks.out).toString("utf8"), err: Buffer.concat(chunks.err).toString("utf8"), cut, timedOut });
+    };
+    child.on("error", e => end(null, null, e));
+    child.on("exit", (code, signal) => {
+      // What the leader left running in its group goes with it, and the pipes close once it has.
+      if (child.pid !== undefined) killGroup(child.pid);
+      grace = setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        end(code, signal);
+      }, CLOSE_GRACE_MS);
+    });
+    child.on("close", (code, signal) => end(code, signal));
+    return { kill: () => (child.pid !== undefined ? killGroup(child.pid) : undefined) };
+  },
+  reshape: o => reshapeResult(o),
+};
 
 const RESULT_FIELDS = ["exit", "out", "err", "json", "lines", "endedAt", "ms", "cut"] as const;
 
@@ -294,7 +400,8 @@ interface Live {
   gen: number;
   /** The last result, kept through holds so the next start carries it. */
   result?: RunResult;
-  pid?: number;
+  /** Ends the running command, its whole group, on whichever computer it runs. */
+  kill?: () => void;
   /** The run's `then`, while it reshapes the result. */
   reshaping?: Reshape;
   held?: { req: RunStart; for: HeldFor };
@@ -567,9 +674,11 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     if (running(t) >= RUNNING_MAX) return hold(req, l, "busy");
     const inputs = req.inputs();
     if ((inputs.args ?? []).some(input => "secret" in input)) return fail(req, l, SECRET_IN_ARGS);
+    // On the thread's own machine the command takes that machine's environment, and SLATE_DIR there.
+    const road = deps.road?.(threadId, decl.on ?? "thread");
     let env: Record<string, string>;
     try {
-      env = loginEnv(threadId);
+      env = road === undefined ? loginEnv(threadId) : { SLATE_DIR: road.slateDir };
     } catch (e) {
       return fail(req, l, filesUnwritten(e));
     }
@@ -581,8 +690,9 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     }
     const args = (inputs.args ?? []).map(input => ("secret" in input ? "" : asText(input.value)));
     const stdin = inputs.stdin === undefined ? undefined : "secret" in inputs.stdin ? (secrets.plaintext(threadId, inputs.stdin.secret) ?? "") : asText(inputs.stdin.value);
-    const cwd = decl.cwd === undefined ? req.folder : resolve(req.folder, decl.cwd);
-    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) return fail(req, l, `the folder ${cwd} does not exist`);
+    const cwd = decl.cwd === undefined ? req.folder : road === undefined ? resolve(req.folder, decl.cwd) : posix.resolve(req.folder, decl.cwd);
+    // A folder on the thread's machine is that machine's to find; its launcher says so when it is not there.
+    if (road === undefined && (!existsSync(cwd) || !statSync(cwd).isDirectory())) return fail(req, l, `the folder ${cwd} does not exist`);
     const timeout = timeoutOf(decl);
 
     const gen = ++l.gen;
@@ -590,65 +700,19 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     const runs = l.record.runs + 1;
     const record = write(threadId, run, l, runningRecord(l.result, runs, startedAt));
 
-    const child = spawn("bash", ["-c", decl.cmd, "bash", ...args], { cwd, env, detached: true, stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
-    l.pid = child.pid;
-    const chunks = { out: [] as Buffer[], err: [] as Buffer[] };
-    let total = 0;
-    let cut = false;
     const lines: string[] = [];
-    const partial = { out: "", err: "" };
-    const decoders = { out: new StringDecoder("utf8"), err: new StringDecoder("utf8") };
     const line = (stream: "out" | "err", text: string): void => {
       const clean = secrets.scrub(threadId, text);
       lines.push(clean);
       if (lines.length > LINES_KEPT) lines.shift();
       if (l.gen === gen) deps.onLine?.(threadId, run, clean, stream);
     };
-    const take = (stream: "out" | "err") => (chunk: Buffer): void => {
-      if (total + chunk.length > EXEC_OUTPUT_MAX) {
-        cut = true;
-        chunk = chunk.subarray(0, Math.max(0, EXEC_OUTPUT_MAX - total));
-      }
-      total += chunk.length;
-      if (chunk.length === 0) return;
-      chunks[stream].push(chunk);
-      if (decl.stream !== true) return;
-      const parts = (partial[stream] + decoders[stream].write(chunk)).split("\n");
-      partial[stream] = parts.pop() ?? "";
-      for (const p of parts) line(stream, p);
-    };
-    child.stdout?.on("data", take("out"));
-    child.stderr?.on("data", take("err"));
-    if (child.stdin !== null) {
-      child.stdin.on("error", () => {});
-      child.stdin.end(stdin);
-    }
-
-    let timedOut = false;
-    let ended = false;
-    let grace: ReturnType<typeof setTimeout> | undefined;
-    const deadline = setTimeout(() => {
-      timedOut = true;
-      if (child.pid !== undefined) killGroup(child.pid);
-    }, timeout * 1_000);
-
-    const end = (code: number | null, signal: NodeJS.Signals | null, error?: Error): void => {
-      if (ended) return;
-      ended = true;
-      clearTimeout(deadline);
-      if (grace !== undefined) clearTimeout(grace);
-      if (child.pid !== undefined) killGroup(child.pid);
+    const end = (o: RoadEnd): void => {
       if (l.gen !== gen) return;
-      delete l.pid;
-      if (decl.stream === true) {
-        for (const stream of ["out", "err"] as const) {
-          const rest = partial[stream] + decoders[stream].end();
-          if (rest !== "") line(stream, rest);
-        }
-      }
-      const raw = secrets.scrub(threadId, Buffer.concat(chunks.out).toString("utf8"));
+      delete l.kill;
+      const raw = secrets.scrub(threadId, o.out);
       const out = runOutputTail(raw);
-      const err = runOutputTail(secrets.scrub(threadId, Buffer.concat(chunks.err).toString("utf8")));
+      const err = runOutputTail(secrets.scrub(threadId, o.err));
       let json: SlateJson | undefined;
       if (out.trim() !== "") {
         try {
@@ -657,8 +721,8 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
           json = undefined;
         }
       }
-      const exit = timedOut ? EXEC_DEADLINE_EXIT : code;
-      const why = error !== undefined ? secrets.scrub(threadId, error.message) : timedOut ? `timed out after ${timeout} s` : exit === 0 ? undefined : exit === null ? `ended by ${signal ?? "a signal"}` : `exited with ${exit}`;
+      const exit = o.timedOut ? EXEC_DEADLINE_EXIT : o.code;
+      const why = o.error !== undefined ? secrets.scrub(threadId, o.error.message) : o.timedOut ? `timed out after ${timeout} s` : exit === 0 ? undefined : exit === null ? `ended by ${o.signal ?? "a signal"}` : `exited with ${exit}`;
       const finish = (fields: Pick<RunRecord, "state" | "why" | "exit" | "err" | "json">): void => {
         const endedAt = now();
         write(threadId, run, l, {
@@ -669,16 +733,16 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
           endedAt,
           ms: endedAt - startedAt,
           runs,
-          ...(cut ? { cut: true as const } : {}),
+          ...(o.cut ? { cut: true as const } : {}),
         });
         next(threadId);
       };
-      const ok = exit === 0 && error === undefined;
+      const ok = exit === 0 && o.error === undefined;
       if (!ok || decl.then === undefined) {
         finish({ state: ok ? "done" : "failed", ...(why !== undefined ? { why } : {}), exit, err, ...(json !== undefined ? { json } : {}) });
         return;
       }
-      const shaping = reshape(threadId, decl.then, raw, cwd, timeout);
+      const shaping = road === undefined ? reshape(threadId, decl.then, raw, cwd, timeout) : road.reshape({ cmd: decl.then, input: raw, cwd, env, timeoutS: timeout, scrub: text => secrets.scrub(threadId, text) });
       l.reshaping = shaping;
       void shaping.done.then(answer => {
         if (l.gen !== gen) return;
@@ -686,25 +750,17 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
         finish("json" in answer ? { state: "done", exit, err, json: answer.json } : { state: "failed", why: answer.why, exit: answer.exit, err: answer.err });
       });
     };
-    child.on("error", e => end(null, null, e));
-    child.on("exit", (code, signal) => {
-      // What the leader left running in its group goes with it, and the pipes close once it has.
-      if (child.pid !== undefined) killGroup(child.pid);
-      grace = setTimeout(() => {
-        child.stdout?.destroy();
-        child.stderr?.destroy();
-        end(code, signal);
-      }, CLOSE_GRACE_MS);
-    });
-    child.on("close", (code, signal) => end(code, signal));
+    const started = (road ?? localRoad).start({ cmd: decl.cmd, args, cwd, env, ...(stdin !== undefined ? { stdin } : {}), timeoutS: timeout, stream: decl.stream === true }, { line, end });
+    // A road may end before it answers, as a launch refused at once does; nothing is left to kill then.
+    if (l.gen === gen && l.record.state === "running") l.kill = started.kill;
     return { outcome: "running", record };
   };
 
   const stop = (threadId: string, run: string, l: Live, why: string | undefined): void => {
     const was = l.record.state;
     l.gen += 1;
-    if (l.pid !== undefined) killGroup(l.pid);
-    delete l.pid;
+    l.kill?.();
+    delete l.kill;
     l.reshaping?.kill();
     delete l.reshaping;
     delete l.held;
