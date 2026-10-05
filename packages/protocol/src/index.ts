@@ -14,12 +14,12 @@ import { CLOUD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_T
 import { Attachment, AttachmentRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
-import { UsageRange, UsageSplit, UsageTokens } from "./usage.js";
+import { UsageAccountEvent, UsageRange, UsageSplit, UsageTokens } from "./usage.js";
 import { effortsFor, everyModel, markedDefault, modelOf } from "./harness-picks.js";
 import { AccessChoice, AgentDefaults, AgentDefaultsPatch, ProjectOverrides, ProjectOverridesPatch, AgentSetupSet, patchedFields } from "./thread-defaults.js";
 import { GENERAL_DEFAULTS, GENERAL_FIELDS, patchedGeneral } from "./general-prefs.js";
 import { UsageAlertEvent } from "./plan-alerts.js";
-import { SessionSlateEvent, SLATE_OPS, SlateRunEvent, SlateValuesEvent, UsageAccountEvent } from "./slate/wire.js";
+import { SessionSlateEvent, SLATE_OPS, SlateRunEvent, SlateValuesEvent } from "./slate/wire.js";
 import { RecipeFile } from "./recipe-file.js";
 import { ProjectHue, ProjectIcon } from "./project-look.js";
 import type { OutsideLine } from "./outside-line.js";

@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { AccountRow } from "../usage.js";
 import { SLATE_LIMITS } from "./limits.js";
 
 // The slate's wire, version 2: the ops a window, the slate verbs and the Rust tool server send the host, what each
@@ -290,7 +289,3 @@ export type SlateValuesEvent = z.infer<typeof SlateValuesEvent>;
 /** New lines of a streaming run, scrubbed, pushed and never recorded. */
 export const SlateRunEvent = z.object({ type: z.literal("slate.run"), workspaceId: z.string(), threadId: z.string(), run: z.string(), lines: z.array(z.string()) });
 export type SlateRunEvent = z.infer<typeof SlateRunEvent>;
-
-/** An account's row after a turn's limit reading folded into it, so a bound meter moves at once. */
-export const UsageAccountEvent = z.object({ type: z.literal("usage.account"), key: z.string(), row: AccountRow });
-export type UsageAccountEvent = z.infer<typeof UsageAccountEvent>;
