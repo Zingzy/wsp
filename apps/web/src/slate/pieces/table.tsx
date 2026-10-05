@@ -157,7 +157,6 @@ export const table: PieceView = {
       return (
         <div role="table" aria-label={header(title)} data-slate-folded className="flex min-w-0 flex-col gap-2.5">
           {header(title) === undefined || slate.parent(id)?.type === "section" ? null : <span className={SECTION_HEAD}>{header(title)}</span>}
-          {shown.length === 0 ? null : (
             <div className={cn("grid min-w-0 grid-cols-[minmax(0,1fr)_auto] [&>*+*]:border-t [&>*+*]:border-border/50", card)}>
               {shown.map((item, index) => {
                 const row = { item, index };
@@ -197,7 +196,6 @@ export const table: PieceView = {
                 );
               })}
             </div>
-          )}
           {below}
         </div>
       );

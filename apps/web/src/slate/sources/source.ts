@@ -36,4 +36,3 @@ export interface SourceModule {
   wants?(ctx: SourceContext): void;
 }
 
-export type { CostTick };

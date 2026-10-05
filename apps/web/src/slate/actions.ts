@@ -41,15 +41,6 @@ export interface RaiseResult {
   refused?: string;
 }
 
-/** The send outcomes, in the copy voice (09-events, "Delivery"); any other outcome says nothing. */
-const OUTCOME_WORDS: Record<string, string> = {
-  started: "Sent",
-  sent: "Sent",
-  steered: "Sent into the running turn",
-  queued: "Waiting for the turn to end",
-};
-export const outcomeWord = (outcome: string): string | undefined => OUTCOME_WORDS[outcome];
-
 const DEBOUNCE_MS = 300;
 
 /** The person's value writes to one slate: typing waits 300 ms for the next keystroke, the rest go at once. */
@@ -103,11 +94,6 @@ export class StateSender {
       // The value stays drawn as typed; the next keystroke or a reconnect's fetch sends or replaces it.
     }
   }
-
-  dispose(): void {
-    for (const timer of this.#timers.values()) clearTimeout(timer);
-    this.#timers.clear();
-  }
 }
 
 /** Runs one event's steps: the host's part as one slates.event, then the window's own in order. */
@@ -141,7 +127,7 @@ export class ActionRunner {
       try {
         const answer = await this.#link().event(ask);
         if (answer.ask !== undefined) this.#link().consent(answer.ask);
-        said = answer.said ?? outcomeWord(answer.outcome);
+        said = answer.said;
       } catch (error) {
         return { refused: error instanceof Error ? error.message : String(error) };
       }

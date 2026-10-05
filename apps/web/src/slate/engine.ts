@@ -573,10 +573,6 @@ export class SlateEngine {
     return this.#loud.get(kind) === id;
   }
 
-  dispose(): void {
-    this.#cancel?.();
-    this.#cancel = null;
-  }
 }
 
 function same(a: SlateJson | undefined, b: SlateJson | undefined): boolean {

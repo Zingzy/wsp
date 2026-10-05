@@ -7,11 +7,11 @@ import { str, TONE_INK, toneOf, type Tone } from "./look.js";
 const W = 64;
 const H = 16;
 
-export const numbersOf = (value: SlateJson | undefined): number[] =>
+const numbersOf = (value: SlateJson | undefined): number[] =>
   Array.isArray(value) ? value.filter((v): v is number => typeof v === "number" && Number.isFinite(v)) : [];
 
 /** A 64 by 16 line over its own range; under two points there is no line to draw. */
-export function Sparkline({ values, tone = "accent", ink, label }: { values: readonly number[]; tone?: Tone; ink?: string; label?: string }) {
+function Sparkline({ values, tone = "accent", ink, label }: { values: readonly number[]; tone?: Tone; ink?: string; label?: string }) {
   if (values.length < 2) return null;
   const lo = Math.min(...values);
   const span = Math.max(...values) - lo || 1;
