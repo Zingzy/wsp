@@ -3779,23 +3779,23 @@ function emitSlate(ctx: VerbContext, answer: { text: string }): void {
 
 /** A slate file as a write sends it: the JSX-like form for .slate, the stored document for .json. */
 function slateFile(ctx: VerbContext, path: string): { text: string } | { document: Record<string, unknown> } {
-  if (ctx.elsewhere === true) throw usageRefusal(`${path} is a file on your machine, which this host cannot read:`, "pass the slate to slate_write as text instead.");
+  if (ctx.elsewhere === true) throw usageRefusal(`${path} is a file on your machine, which this host cannot read.`, "Pass the slate to slate_write as text instead.");
   const at = resolve(ctx.cwd ?? process.cwd(), path);
-  if (!path.endsWith(".slate") && !path.endsWith(".json")) throw usageRefusal(`${path} is neither a .slate nor a .json file:`, "write the JSX-like form to a .slate file or the stored form to a .json file.");
+  if (!path.endsWith(".slate") && !path.endsWith(".json")) throw usageRefusal(`${path} is neither a .slate nor a .json file.`, "Write the JSX-like form to a .slate file or the stored form to a .json file.");
   let text: string;
   try {
     text = readFileSync(at, "utf8");
   } catch {
-    throw usageRefusal(`there is no file at ${at}:`, "name a .slate or .json file that is there.");
+    throw usageRefusal(`there is no file at ${at}.`, "Name a .slate or .json file that is there.");
   }
   if (path.endsWith(".slate")) return { text };
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch (e) {
-    throw usageRefusal(`${path} does not parse as JSON (${e instanceof Error ? e.message : String(e)}):`, "fix the JSON or write the JSX-like form to a .slate file.");
+    throw usageRefusal(`${path} does not parse as JSON (${e instanceof Error ? e.message : String(e)}).`, "Fix the JSON or write the JSX-like form to a .slate file.");
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw usageRefusal(`${path} holds no JSON object:`, "write the stored document, an object with schema, root and pieces.");
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw usageRefusal(`${path} holds no JSON object.`, "Write the stored document, an object with schema, root and pieces.");
   return { document: parsed as Record<string, unknown> };
 }
 
@@ -3854,7 +3854,7 @@ const SLATE_VERBS: readonly Verb[] = [
       const values: Record<string, unknown> = {};
       for (const word of flagList(ctx.flags, "set")) {
         const pair = stateValue(word);
-        if (pair === undefined) throw usageRefusal(`--set ${word} is not <path>=<json>:`, "write it like --set '$i=2'.");
+        if (pair === undefined) throw usageRefusal(`--set ${word} is not <path>=<json>.`, "Write it like --set '$i=2'.");
         values[pair[0]] = pair[1];
       }
       const piece = typeof ctx.flags["press"] === "string" ? ctx.flags["press"] : undefined;

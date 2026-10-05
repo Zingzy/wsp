@@ -549,7 +549,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       return p.threadId;
     }
     if (p.turnToken !== undefined) return deps.threadOfToken(p.turnToken);
-    throw usageRefusal("a slate belongs to a thread, and this line names none and runs inside no turn:", "name the thread by id, as wsp threads lists it.");
+    throw usageRefusal("a slate belongs to a thread, and this line names none and runs inside no turn.", "Name the thread by id, as wsp threads lists it.");
   };
 
   const byOf = (caller: Caller | undefined): "agent" | "person" => (scopeOf(caller) !== undefined ? "agent" : "person");
@@ -1128,8 +1128,8 @@ export function createSlates(deps: SlatesDeps): Slates {
       const threadId = targetOf(p, caller, true);
       const given = [p.text, p.document].filter(v => v !== undefined).length;
       const rehearsal = p.values !== undefined || p.press !== undefined;
-      if (rehearsal && p.check !== true) throw usageRefusal("values and press rehearse a slate, which only a check does:", "add check, or set the live values with slate_state.");
-      if (given > 1 || (given === 0 && !rehearsal)) throw Object.assign(usageRefusal(`A601 step-arg: a slate write takes exactly one of text or document, and this one has ${given === 0 ? "none" : "both"}:`, "send text alone."), { code: "A601" });
+      if (rehearsal && p.check !== true) throw usageRefusal("values and press rehearse a slate, which only a check does.", "Add check, or set the live values with slate_state.");
+      if (given > 1 || (given === 0 && !rehearsal)) throw Object.assign(usageRefusal(`A601 step-arg: a slate write takes exactly one of text or document, and this one has ${given === 0 ? "none" : "both"}.`, "Send text alone."), { code: "A601" });
       const by = byOf(caller);
       const whole = p.document !== undefined || (p.text !== undefined && p.text.trimStart().startsWith("<slate"));
       return serial(threadId, async () => {
@@ -1181,7 +1181,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         const doc = r.document;
         if (doc === null) throw usage(problem("Z802", "no-slate", "this slate is empty; write one with slate_write"));
         checkVersion(r, p.ifVersion);
-        if (Object.keys(p.values ?? {}).length === 0 && (p.start ?? []).length === 0) throw usageRefusal("slate state sets values or starts runs, and this one names neither:", "give values, start, or both.");
+        if (Object.keys(p.values ?? {}).length === 0 && (p.start ?? []).length === 0) throw usageRefusal("slate state sets values or starts runs, and this one names neither.", "Give values, start, or both.");
         // The agent starts only what the person already let run every time; anything else waits for their press.
         const starts: { run: string; by: RunBy }[] = [];
         const notStarted: string[] = [];
@@ -1351,7 +1351,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       }
       if (mcp.owns(p.threadId, p.key)) {
         const server = p.key.startsWith("mcp:");
-        if (!server && p.scope === "thread") throw usageRefusal("a destructive tool asks on every start, so it takes Run once or Don't:", "approve it with scope once.");
+        if (!server && p.scope === "thread") throw usageRefusal("a destructive tool asks on every start, so it takes Run once or Don't.", "Approve it with scope once.");
         await serial(p.threadId, async () => {
           if (p.scope === "refuse") {
             if (server) r.approvals[p.key] = { state: "refused", at: deps.now(), ...approvalNames(r, p.key) };
@@ -1367,7 +1367,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         return;
       }
       const named = Object.entries(r.document?.runs ?? {}).filter(([, decl]) => decl.kind === "cmd" && runs.key(withFiles(r.document, decl) as CmdRunDecl) === p.key).map(([name]) => name);
-      if (named.length === 0) throw usageRefusal(`this slate declares no command with approval key ${p.key}:`, "read the slate again and approve what it asks now.");
+      if (named.length === 0) throw usageRefusal(`this slate declares no command with approval key ${p.key}.`, "Read the slate again and approve what it asks now.");
       await serial(p.threadId, async () => {
         if (p.scope === "refuse") {
           r.approvals[p.key] = { state: "refused", at: deps.now(), ...approvalNames(r, p.key) };
