@@ -1445,7 +1445,7 @@ function listed(subject: string, word: string, options: ReadonlyArray<HarnessOpt
   if (value === undefined || options.some(o => o.value === value) || legacy.some(o => o.value === value) || hidden.some(o => o.value === value)) return;
   const older = legacy.length === 0 ? "" : `; legacy: ${optionWords(legacy)}`;
   const said = options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}${older}`;
-  throw Object.assign(new Error(said), { offered: options.length, kind: "invalid" });
+  throw Object.assign(new Error(said), { kind: "usage", offered: options.length });
 }
 
 function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined, runsOn: string | undefined): void {
@@ -1563,6 +1563,10 @@ export const SessionStartEvent = z.object({
   /** Set when the thread's previous turn ended with no exit code and no result (a deadline, a host restart, a nap
    * that ended it), so clients say the harness resumes a transcript that may be missing context; absent otherwise. */
   afterCut: z.literal(true).optional(),
+  /** Set on the turn that opened its thread; absent on every later one and on a turn from before it was recorded. */
+  opensThread: z.literal(true).optional(),
+  /** Who opened this turn's thread, as its row says it. Absent on a turn from before it was recorded. */
+  startedBy: SessionOrigin.optional(),
   model: z.string().optional(),
   cwd: z.string().optional(),
   /** The access this turn ran at, as the harness's own slug; the runtime's pick, not the CLI's echo. It rides the
@@ -2314,6 +2318,10 @@ export const Preferences = z.object({
   /** Whether the host reads this computer's agent logs for the work done outside wsp, which the Usage page counts on
    * rows of their own. Read here and kept here; defaulted as serverIcons is. */
   usageLogs: z.boolean().default(true),
+  /** Whether the host sends PostHog anonymous counts of what wsp did: threads, turns, computers, setups and failures,
+   * never a path, a prompt, a name or a key. On unless the person turns it off, and ANALYTICS_ENV=0 in the host's
+   * environment stops it whatever this says; defaulted as serverIcons is. */
+  productUsage: z.boolean().default(true),
   /** The editor Open in editor opens a file in; absent opens the first one installed on the computer running the host. */
   editor: EditorId.optional(),
   /** Whether the desktop app keeps this computer from sleeping on its own while a thread works on it. On unless the
@@ -2378,7 +2386,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, ...GENERAL_DEFAULTS, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, productUsage: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, ...GENERAL_DEFAULTS, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -2426,6 +2434,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     serverIcons: patch.serverIcons ?? current.serverIcons,
     agentVersions: patch.agentVersions ?? current.agentVersions,
     usageLogs: patch.usageLogs ?? current.usageLogs,
+    productUsage: patch.productUsage ?? current.productUsage,
     keepAwake: patch.keepAwake ?? current.keepAwake,
     transparency: patch.transparency ?? current.transparency,
     projectOrder: patch.projectOrder ?? current.projectOrder,
@@ -2514,7 +2523,13 @@ export interface BootPayload {
   /** The state file this host serves; the page keeps what it remembers (the workspace open last) under it. A page
    * served beyond loopback carries none, so every stranger's page remembers under one empty slot. */
   statePath?: string;
+  /** Why this host sends no usage counts whatever the switch says, so the Privacy switch shows off with the reason and
+   * the first run says nothing about them. Absent where the switch decides. */
+  productUsageOff?: ProductUsageOff;
 }
+
+/** Why a host sends no usage counts: a build that carries no PostHog key, or ANALYTICS_ENV=0 where the host runs. */
+export type ProductUsageOff = "build" | "env";
 
 /** One row of a context menu as the page hands it to the desktop shell, which builds the native menu from it. An item
  * that cannot run right now is shown dimmed with its refusal as the hover text; rows of different groups are parted by
@@ -7796,7 +7811,7 @@ export * from "./app-ports.js";
 export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, launchWords, PERMISSION_ALLOW, PERMISSION_DENY, programWord } from "./adapter-port.js";
-export { CLOUD_ENV, LAUNCH_ENV, NO_SLATE_MCP_ARG, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
+export { ANALYTICS_ENV, CLOUD_ENV, LAUNCH_ENV, NO_SLATE_MCP_ARG, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TaskStop, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";
 export * from "./slate/index.js";
 export * from "./slate/wire.js";

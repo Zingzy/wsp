@@ -54,6 +54,24 @@ describe("preferences over the wire", () => {
     expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true, preferences: { theme: "light", sidebarMode: "spaces", terminalZoom: { ws_a: 2 } } });
   });
 
+  it("usage counts read on until the person turns them off, and the record keeps the switch for the next runtime", async () => {
+    const store = memoryStore();
+    srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {}, env: NO_LABS }), { port: 0, authToken: "t" });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true, preferences: { productUsage: true } });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { productUsage: false } })).toMatchObject({ ok: true, preferences: { productUsage: false } });
+    await srv.close();
+    srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {}, env: NO_LABS }), { port: 0, authToken: "t" });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true, preferences: { productUsage: false } });
+  });
+
+  it("an op that answers with an error is told to the server's failed hook, by op and with the error as thrown", async () => {
+    const failed: Array<[string, unknown]> = [];
+    srv = await serveRuntime(createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, env: NO_LABS }), { port: 0, authToken: "t", failed: (op, e) => failed.push([op, e]) });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { defaultAgent: "nope" } })).toMatchObject({ ok: false, kind: "usage" });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true });
+    expect(failed.map(([op, e]) => [op, (e as { kind?: string }).kind])).toEqual([["preferences.set", "usage"]]);
+  });
+
   it("the access picked in a workspace lands on the record and the next thread there reads it", async () => {
     const store = memoryStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, env: NO_LABS });

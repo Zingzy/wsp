@@ -257,6 +257,18 @@ describe("what a page carries about this computer", () => {
     }
   });
 
+  it("says why the usage counts are off only where the host was told why", async () => {
+    const { handle: h } = await withState();
+    expect((await bootOf(h.port)).productUsageOff).toBeUndefined();
+    await h.close();
+    for (const why of ["build", "env"] as const) {
+      handle = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, productUsageOff: why });
+      expect((await bootOf(handle.port)).productUsageOff).toBe(why);
+      await handle.close();
+      handle = undefined;
+    }
+  });
+
   it("gives every page a host bound beyond this computer serves the same, its own included", async () => {
     const { handle: h } = await withState("0.0.0.0");
     const boot = await bootOf(h.port);

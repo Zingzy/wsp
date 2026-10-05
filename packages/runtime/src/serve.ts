@@ -209,6 +209,8 @@ export interface ServeOptions {
   /** How an export of the image is sealed and written on this computer; without it image.export is refused. The
    * runtime hands over the record and the vault's bytes and never touches a file or a passphrase itself. */
   imageExport?: ImageExporter;
+  /** Told of every op that answered with an error, after the answer is sent; it must not throw. */
+  failed?: (op: string, e: unknown) => void;
   /** Takes one line per refused frame: the op, the kind and the sentence's first line, never the request itself. */
   log?: (line: string) => void;
 }
@@ -1595,11 +1597,27 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // A start on this computer names a project, a branch or a folder rather than a record: the folder's record
               // is found or made first, and the start runs on it.
               if (msg.workspaceId !== undefined && msg.branch !== undefined) throw Object.assign(new Error(BRANCH_ON_A_THREAD_LINE), { kind: "usage" });
+              const picks = {
+                ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
+                ...(msg.model !== undefined ? { model: msg.model } : {}),
+                ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
+                ...(msg.access !== undefined ? { access: msg.access } : {}),
+                ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
+                ...(msg.fast === true ? { fast: true } : {}),
+              };
               const at =
                 msg.workspaceId !== undefined
                   ? { workspaceId: msg.workspaceId, cwd: msg.cwd }
                   : await rt.workspaces
-                      .folderFor({ ...(msg.project !== undefined ? { project: msg.project } : {}), ...(msg.branch !== undefined ? { branch: msg.branch } : {}), ...(msg.cwd !== undefined ? { cwd: msg.cwd } : {}) }, origin)
+                      .folderFor(
+                        {
+                          ...(msg.project !== undefined ? { project: msg.project } : {}),
+                          ...(msg.branch !== undefined ? { branch: msg.branch } : {}),
+                          ...(msg.cwd !== undefined ? { cwd: msg.cwd } : {}),
+                          ...(Object.keys(picks).length > 0 ? { picks } : {}),
+                        },
+                        origin,
+                      )
                       .then(found => ({ workspaceId: found.workspace.id, cwd: found.cwd }));
               const handle = await rt.sessions.start(at.workspaceId, {
                 prompt: msg.prompt,
@@ -2200,6 +2218,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             ...(typeof fix === "string" ? { fix } : {}),
             ...problemListsOf(e),
           });
+          opts.failed?.(msg.op, e);
         }
       })();
     };

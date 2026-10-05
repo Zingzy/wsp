@@ -112,6 +112,8 @@ import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, refre
 import { CLI_VERBS, cloudLineOf, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { installedVersion, stateWriterHere, VERSION } from "./version.js";
 import { latestWords, releaseReading, releaseWatch } from "./release.js";
+import { analyticsOff, hostAnalytics } from "./analytics.js";
+import { followUsage } from "./analytics-events.js";
 
 /** The one claim about the host a person reads twice, on the front page and on wsp up's own page: which is why up
  * is for a host somebody wants to watch and not the switch that turns wsp on. Said once here, so the page and the
@@ -1483,6 +1485,16 @@ async function hostFor(
           ...(road.refusal !== undefined ? { refusal: road.refusal } : {}),
           restart: () => (serving === undefined ? Promise.reject(new Error("the host is still starting")) : road.restart(serving)),
         };
+  // Built and followed before the host binds, so nothing the host does once it serves goes uncounted; a build with no
+  // key, or a host the environment holds off, gets the client that does nothing.
+  const usageOff = analyticsOff(opts.statePath, process.env);
+  const analytics = hostAnalytics({
+    off: usageOff,
+    common: { wspVersion: VERSION, os: ["darwin", "linux", "win32"].includes(process.platform) ? process.platform : "other", arch: ["arm64", "x64"].includes(process.arch) ? process.arch : "other", host: started ?? "app" },
+    log: line => io.log(line),
+  });
+  const init = hostInitDoor(rt, opts.statePath, run, opts.openUrl ?? systemOpener(), line => io.log(line), opts.providerEnv);
+  const usage = followUsage(analytics, rt, init);
   try {
     // Written before startHost binds: a client can read the page while the host is still listing at the provider.
     const authToken = randomBytes(24).toString("base64url");
@@ -1507,7 +1519,7 @@ async function hostFor(
       log: line => io.log(line),
       recipePath: recipePath(opts.statePath),
       statePath: opts.statePath,
-      init: hostInitDoor(rt, opts.statePath, run, opts.openUrl ?? systemOpener(), line => io.log(line), opts.providerEnv),
+      init,
       doctor: hostDoctorReaders(links, opts.statePath),
       // The row this host forks on, so a host wired to none asks its account nothing at all.
       provider: wiredProviderId(opts.providerEnv),
@@ -1522,8 +1534,11 @@ async function hostFor(
         log: line => io.log(line),
       }),
       ...(restart !== undefined ? { restart } : {}),
+      failed: usage.failed,
+      ...(usageOff !== undefined ? { productUsageOff: usageOff } : {}),
     });
     rewriteLock(lockPath, { ...lock, port: handle.port, address });
+    usage.begin();
     // A skill copy an install wrote once falls behind the binary at the next release, and the agent reading it
     // calls verbs that are gone. Only the agents whose wsp entry names this state file are brought up to date: a
     // host for a proof, on a state no entry names, writes nothing under the person's home.
@@ -1558,14 +1573,18 @@ async function hostFor(
       ...handle,
       close: async () => {
         watcher?.close();
+        usage.close();
         await relay?.close();
         await handle.close();
+        await analytics.close();
         rmSync(lockPath, { force: true });
       },
     };
     serving = host;
     return host;
   } catch (e) {
+    usage.close();
+    await analytics.close();
     rmSync(lockPath, { force: true });
     throw e;
   }

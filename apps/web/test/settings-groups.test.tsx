@@ -7,7 +7,7 @@ import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { DEFAULT_KEYBINDINGS, parseKeybindingShortcut } from "../src/keybindingDefaults.js";
 import { KEYBINDING_COMMANDS, type KeybindingCommand } from "../src/keybindingTypes.js";
-import type { BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, ReleaseView, WorkspaceView } from "@wsp/protocol";
+import type { BootPayload, BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, ReleaseView, WorkspaceView } from "@wsp/protocol";
 import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RESTART_LINE, UP_RESTART_LINE, fmtBytes } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -523,7 +523,7 @@ describe("Privacy", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, at: { kind: "group", group: "privacy" } });
     await settle();
-    expect(rowTitles()).toEqual([PRIVACY_WORDS.serverIcons, PRIVACY_WORDS.agentVersions, PRIVACY_WORDS.usageLogs]);
+    expect(rowTitles()).toEqual([PRIVACY_WORDS.serverIcons, PRIVACY_WORDS.agentVersions, PRIVACY_WORDS.usageLogs, PRIVACY_WORDS.productUsage]);
     expect(descriptionOf("server-icons")).toBe(PRIVACY_WORDS.serverIconsDescription);
     expect(PRIVACY_WORDS.serverIconsDescription).toBe("wsp asks Google for each public server's icon by host name; turning this off deletes the saved icons.");
     const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=server-icons]")!;
@@ -535,7 +535,7 @@ describe("Privacy", () => {
     expect(toggle().getAttribute("aria-checked")).toBe("false");
     fireEvent.click(document.querySelector<HTMLElement>("[data-k=restore-defaults]")!);
     await settle();
-    expect(sets.at(-1)).toEqual({ serverIcons: true, agentVersions: true, usageLogs: true });
+    expect(sets.at(-1)).toEqual({ serverIcons: true, agentVersions: true, usageLogs: true, productUsage: true });
     expect(toggle().getAttribute("aria-checked")).toBe("true");
   });
 
@@ -555,6 +555,40 @@ describe("Privacy", () => {
     expect(toggle().getAttribute("aria-checked")).toBe("false");
     expect(toggle().hasAttribute("data-disabled")).toBe(true);
     expect(toggle().closest("[title]")?.getAttribute("title")).toBe(PRIVACY_WORDS.agentVersionsHeld);
+  });
+
+  it("offers anonymous usage counts as a switch, on by default, that writes productUsage and restores to on", async () => {
+    const { api, sets } = settingsApi();
+    mountSettings({ api, at: { kind: "group", group: "privacy" } });
+    await settle();
+    expect(descriptionOf("product-usage")).toBe("wsp sends PostHog counts of threads, turns, setups and failures; never a path, a prompt, a name or a key.");
+    const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=product-usage]")!;
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle());
+    await settle();
+    expect(sets).toEqual([{ productUsage: false }]);
+    expect(useStore.getState().preferences.productUsage).toBe(false);
+    fireEvent.click(document.querySelector<HTMLElement>("[data-k=restore-defaults]")!);
+    await settle();
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("holds the usage counts switch off, saying why, on a build with no key and where the host says WSP_ANALYTICS=0", async () => {
+    const said = { build: "Off in this build: it carries no PostHog key, so nothing is sent.", env: "Off on the host: WSP_ANALYTICS is 0." } as const;
+    for (const why of ["build", "env"] as const) {
+      (window as unknown as { __WSP__?: BootPayload }).__WSP__ = { wsPath: "/ws", paired: true, version: "0.2.0", productUsageOff: why };
+      try {
+        mountSettings({ api: settingsApi().api, at: { kind: "group", group: "privacy" } });
+        await settle();
+        const toggle = document.querySelector<HTMLElement>("[data-k=product-usage]")!;
+        expect(toggle.getAttribute("aria-checked")).toBe("false");
+        expect(toggle.hasAttribute("data-disabled")).toBe(true);
+        expect(toggle.closest("[title]")?.getAttribute("title")).toBe(said[why]);
+      } finally {
+        delete (window as unknown as { __WSP__?: BootPayload }).__WSP__;
+        cleanup();
+      }
+    }
   });
 });
 

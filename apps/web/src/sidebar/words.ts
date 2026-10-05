@@ -19,6 +19,8 @@ export const FIRST_RUN_WORDS = {
   title: "Add a project to get started",
   sentence: (here: string) => onceNamed(here, h => `A project is a git repo on ${h}. Every piece of work on it gets its own copy.`),
   add: "Add a project",
+  productUsage: "wsp sends anonymous usage counts to PostHog.",
+  privacy: "Privacy settings",
 } as const;
 
 /** The project's own rows in the sidebar: its menu, the leaf under a project nobody has started work on, the

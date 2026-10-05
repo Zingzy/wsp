@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { parseArgs } from "node:util";
 import { dirname, join } from "node:path";
-import { CLOUD_ENV, EXIT_CODES, LABS_ENV, LOOPBACK, UPDATE_CHECK_ENV } from "@wsp/protocol";
+import { ANALYTICS_ENV, CLOUD_ENV, EXIT_CODES, LABS_ENV, LOOPBACK, UPDATE_CHECK_ENV } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SERVE_FLAGS, SHARED_OPTIONS, claudeKeyOnlyInThisShell, cli, downCommand, keyOnlyInThisShell, optsFor, statusCommand, upServiceCommand, hostStoppedLine, type CliIO, type ServeAsked, type ServiceDeps } from "../src/cli.js";
 import {
@@ -247,6 +247,10 @@ describe("one module per service manager", () => {
 
   it("a service installed from a shell that turned the release check off keeps it off", () => {
     expect(serviceEnv({ PATH: "/usr/bin", [UPDATE_CHECK_ENV]: "0" })).toEqual({ PATH: "/usr/bin", [UPDATE_CHECK_ENV]: "0" });
+  });
+
+  it("a service installed from a shell that turned the usage counts off keeps them off", () => {
+    expect(serviceEnv({ PATH: "/usr/bin", [ANALYTICS_ENV]: "0" })).toEqual({ PATH: "/usr/bin", [ANALYTICS_ENV]: "0" });
   });
 
   it("a manager writes every variable of the plan into the unit it hands over", () => {

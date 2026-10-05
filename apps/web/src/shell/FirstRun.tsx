@@ -3,9 +3,13 @@
 // what it means, and the one key that does it. The form is the Add a project
 // dialog's, so a project is made in one place whether this is the first or the
 // tenth; a workspace is its own step after it.
+import { bootPayload } from "../boot.js";
 import { Mark } from "../brand/Brand.js";
 import { AddButton } from "../components/ui/add-button.js";
+import { cn } from "../lib/utils.js";
 import { usePlaces } from "../protocol/store.js";
+import { NOTE } from "../settings/layout.js";
+import { openSettingsGroup } from "../settings/openAt.js";
 import { hereName } from "../settings/places.js";
 import { FIRST_RUN_WORDS } from "../sidebar/words.js";
 import { requestAddProject } from "./shellRequests.js";
@@ -24,6 +28,14 @@ export function FirstRun() {
       <AddButton primary data-k="add-project" className="mt-6" onClick={requestAddProject}>
         {FIRST_RUN_WORDS.add}
       </AddButton>
+      {bootPayload()?.productUsageOff !== undefined ? null : (
+        <p data-k="product-usage" className={cn(NOTE, "mt-8 max-w-xs")}>
+          {FIRST_RUN_WORDS.productUsage}{" "}
+          <button type="button" data-k="privacy" className="text-foreground/80 transition-colors duration-150 hover:text-foreground" onClick={() => openSettingsGroup("privacy")}>
+            {FIRST_RUN_WORDS.privacy}
+          </button>
+        </p>
+      )}
     </div>
   );
 }

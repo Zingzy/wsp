@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { fmtPx, listWords, offlineFor, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type SendKey, type ServerSignIn, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { fmtPx, listWords, offlineFor, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type ProductUsageOff, type SendKey, type ServerSignIn, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
  * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
@@ -257,6 +257,9 @@ export const PRIVACY_WORDS = {
   agentVersionsHeld: "Off on the host: WSP_UPDATE_CHECK is 0.",
   usageLogs: "Agent logs",
   usageLogsDescription: (here: string): string => onceNamed(here, h => `Usage counts what Claude Code, Codex and OpenCode logged on ${h}, wsp's own threads there included. wsp reads the logs there and shows what they count on the Usage page alone, never to an agent.`),
+  productUsage: "Anonymous usage counts",
+  productUsageDescription: "wsp sends PostHog counts of threads, turns, setups and failures; never a path, a prompt, a name or a key.",
+  productUsageOff: { env: "Off on the host: WSP_ANALYTICS is 0.", build: "Off in this build: it carries no PostHog key, so nothing is sent." } satisfies Record<ProductUsageOff, string>,
 } as const;
 
 /** Settings > Appearance's switch over the app's glass. */

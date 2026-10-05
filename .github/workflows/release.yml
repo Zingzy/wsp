@@ -166,9 +166,12 @@ jobs:
       # The certificate and the Apple account that sign and notarize the bundles reach this step alone. Unset, each
       # arrives empty and the build signs ad hoc; electron-builder takes an empty CSC_LINK for a certificate and fails
       # importing it, so that one is unset, while the other four read empty as unset.
+      # The PostHog project key is baked into the host by these builds and no other, so a dev build or a source run
+      # sends no usage counts. It ships inside every bundle, so it is a repository variable and not a secret.
       - name: Build the bundles
         env:
           WSP_REQUIRE_DAEMON: "1"
+          POSTHOG_KEY: ${{ vars.POSTHOG_KEY }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -232,6 +235,7 @@ jobs:
       - name: Build the bundle
         env:
           WSP_REQUIRE_DAEMON: "1"
+          POSTHOG_KEY: ${{ vars.POSTHOG_KEY }}
         run: pnpm --filter @wsp/desktop run build:linux
       - name: Name the AppImage after the release, and copy it to the name that never moves
         run: |
@@ -284,6 +288,7 @@ jobs:
       - name: Build, with every daemon binary required
         env:
           WSP_REQUIRE_DAEMON: "1"
+          POSTHOG_KEY: ${{ vars.POSTHOG_KEY }}
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
       - name: Every target the host names is in the package
         run: node packages/wspx/scripts/daemon-binary.mjs --check

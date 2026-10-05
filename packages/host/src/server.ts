@@ -6,7 +6,7 @@ import { isIP, type Socket } from "node:net";
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, type ProvisionPlan } from "@wsp/engine";
-import { BOOT_SCRIPT, DEFAULT_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type PlaceView, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
+import { BOOT_SCRIPT, DEFAULT_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type ProductUsageOff, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type PlaceView, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
 import { sshHostsIn } from "./ssh-hosts.js";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type HostSsh, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ProjectLander, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
@@ -96,6 +96,10 @@ export interface HostOptions {
   release?: ReleaseWatch;
   /** How this host restarts itself for host.restart; absent, the op is refused. */
   restart?: RestartDoor;
+  /** Told of every op that answered with an error, for the usage counts. */
+  failed?: (op: string, e: unknown) => void;
+  /** Why the usage counts are off whatever the switch says, which the page says on the Privacy switch. */
+  productUsageOff?: ProductUsageOff;
   /** The wsp home this host reads and writes as its own: the ssh door's files and the account; wspHome() when absent. */
   home?: string;
 }
@@ -449,6 +453,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       version: VERSION,
       ...(terminalFont !== undefined ? { terminalFont } : {}),
       ...(here && opts.statePath !== undefined ? { statePath: opts.statePath } : {}),
+      ...(opts.productUsageOff !== undefined ? { productUsageOff: opts.productUsageOff } : {}),
     });
   };
 
@@ -614,6 +619,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       log,
       ...(opts.release !== undefined ? { release: opts.release } : {}),
       ...(opts.restart !== undefined ? { restart: opts.restart } : {}),
+      ...(opts.failed !== undefined ? { failed: opts.failed } : {}),
     });
   } catch (e) {
     bound();
