@@ -81,7 +81,8 @@ function iconProblems(doc: SlateDoc, read: SlateEvalContext): SlateProblem[] {
 /** The fields a run's result fills; reading one before the run has ended reads null. */
 const RESULT_FIELDS: ReadonlySet<string> = new Set(["out", "err", "json", "exit", "lines", "ms", "endedAt", "cut", "text"]);
 
-/** The runs a piece reads a result of that have none yet, so a formula over them shows null as if it were real. */
+/** The runs a piece reads a result of that have none yet, or whose last run failed, so a formula over them shows
+ * null or a failure's output as if it were real; each named with why. */
 function unrunReads(doc: SlateDoc, values: SlateValues, piece: SlatePiece): string[] {
   const paths = [...Object.values(piece.props ?? {}).flatMap(v => slatePropDependencies(v)), ...(piece.when !== undefined ? slateDependencies(piece.when) : [])];
   const runs = new Set<string>();
@@ -90,7 +91,9 @@ function unrunReads(doc: SlateDoc, values: SlateValues, piece: SlatePiece): stri
     if (own === undefined || doc.runs[own.name] === undefined) continue;
     const first = own.segs[0];
     if (first !== undefined && !(typeof first === "string" && RESULT_FIELDS.has(first))) continue;
-    if ((values[own.name] as Partial<SlateRunRecord> | undefined)?.endedAt === undefined) runs.add(`$${own.name}`);
+    const rec = values[own.name] as Partial<SlateRunRecord> | undefined;
+    if (rec?.endedAt === undefined) runs.add(`$${own.name}, not run yet`);
+    else if (rec.state === "failed") runs.add(`$${own.name}, which failed`);
   }
   return [...runs];
 }
@@ -190,7 +193,7 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
     const drawn = module.sketch(v);
     const out = Array.isArray(drawn) ? [...drawn] : [drawn];
     const unrun = unbound ? [] : unrunReads(doc, values, piece);
-    if (unrun.length > 0 && out[0] !== undefined && !/not (read|run) yet/.test(out[0])) out[0] = `${out[0]} (reads ${unrun.join(", ")}, not run yet)`.trimStart();
+    if (unrun.length > 0 && out[0] !== undefined && !/not (read|run) yet/.test(out[0])) out[0] = `${out[0]} (reads ${unrun.join("; ")})`.trimStart();
     const look = lookWords(piece, module.props, reads);
     const transparent = module.holdsChildren && out.every(l => l === "") && look.length === 0;
     if (!transparent) {

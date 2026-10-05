@@ -44,6 +44,8 @@ describe("the sketch", () => {
     expect(before).toContain("Waiting  [waiting text]");
     const ran = { ...slateStartValues(d), market: { state: "done", exit: 0, out: '{"open":false}', json: { open: false }, runs: 1, startedAt: now - 1000, endedAt: now } };
     expect(sketchSlate(d, ran, { version: 2, now })).toContain("Market closed  [closed text]");
+    const failed = { ...slateStartValues(d), market: { state: "failed", why: "exited with 1", exit: 1, out: "", runs: 1, startedAt: now - 1000, endedAt: now } };
+    expect(sketchSlate(d, failed, { version: 3, now })).toContain("Market closed (reads $market, which failed)  [closed text]");
   });
 
   it("draws the setup slate as the person sees it, the secret as dots, and the runs that moved", () => {
