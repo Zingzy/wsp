@@ -623,15 +623,15 @@ pub(crate) mod tests {
         }
     }
 
-    /// A stand-in sshd: it records its argv and listens where ListenAddress says until it is killed; a stand-in
-    /// ssh-keygen writes the two halves of a host key.
+    /// A stand-in sshd: it records its argv and its pid and listens where ListenAddress says until it is killed; a
+    /// stand-in ssh-keygen writes the two halves of a host key.
     pub(crate) fn stand_ins(dir: &Path) -> Programs {
         use std::os::unix::fs::PermissionsExt;
         let sshd = dir.join("sshd");
         std::fs::write(
             &sshd,
             format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}/argv'\nfor a in \"$@\"; do case \"$a\" in ListenAddress=*) port=${{a##*:}};; esac; done\nexec python3 -c 'import socket,sys,time\ns=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind((\"127.0.0.1\", int(sys.argv[1]))); s.listen(8)\nwhile True: c,_=s.accept(); c.sendall(b\"SSH-2.0-stand-in\\r\\n\")' \"$port\"\n",
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{0}/argv'\necho $$ > '{0}/pid'\nfor a in \"$@\"; do case \"$a\" in ListenAddress=*) port=${{a##*:}};; esac; done\nexec python3 -c 'import socket,sys,time\ns=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind((\"127.0.0.1\", int(sys.argv[1]))); s.listen(8)\nwhile True: c,_=s.accept(); c.sendall(b\"SSH-2.0-stand-in\\r\\n\")' \"$port\"\n",
                 dir.display()
             ),
         )
@@ -646,6 +646,12 @@ pub(crate) mod tests {
             std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         Programs { sshd, keygen, privsep: dir.join("privsep"), dir: Some(dir.join("files")), cgroup_root: dir.join("cgroup") }
+    }
+
+    /// Whether the stand-in started last still runs. Its port is no witness: once the server lets it go, another
+    /// test's listener may be handed it.
+    pub(crate) fn stand_in_runs(dir: &Path) -> bool {
+        alive_on(&Machine::Here, std::fs::read_to_string(dir.join("pid")).unwrap().trim().parse().unwrap())
     }
 
     fn servers(dir: &Path, idle: Duration) -> Arc<Servers> {
@@ -704,7 +710,7 @@ pub(crate) mod tests {
         assert!(TcpStream::connect(("127.0.0.1", started.port)).await.is_ok(), "ended while a session stood");
         drop(two);
         tokio::time::sleep(Duration::from_millis(900)).await;
-        assert!(TcpStream::connect(("127.0.0.1", started.port)).await.is_err(), "still up past the idle window");
+        assert!(!stand_in_runs(dir.path()), "still up past the idle window");
         assert!(s.lock().is_empty());
         // The next ask starts it again.
         let again = s.start(Machine::Here, KEY).await.unwrap();
@@ -748,20 +754,20 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn ending_them_all_leaves_no_server_listening_and_none_held() {
+    async fn ending_them_all_leaves_no_server_running_and_none_held() {
         let dir = tempfile::tempdir().unwrap();
         let s = servers(dir.path(), Duration::from_secs(60));
-        let started = s.start(Machine::Here, KEY).await.unwrap();
+        s.start(Machine::Here, KEY).await.unwrap();
         s.end_all().await;
         assert!(s.lock().is_empty());
-        let mut refused = false;
+        let mut ended = false;
         for _ in 0..40 {
-            if TcpStream::connect(("127.0.0.1", started.port)).await.is_err() {
-                refused = true;
+            if !stand_in_runs(dir.path()) {
+                ended = true;
                 break;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        assert!(refused, "still listening after every server was ended");
+        assert!(ended, "still running after every server was ended");
     }
 }

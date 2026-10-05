@@ -1353,7 +1353,7 @@ mod tests {
         assert!(tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.is_ok(), "the server went while a session stood");
         reply(&b, &c, json!({"id": 3, "op": "tunnel.close", "tunnelId": "s1"})).await;
         tokio::time::sleep(Duration::from_millis(1200)).await;
-        assert!(tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.is_err(), "the server outlived its idle window");
+        assert!(!crate::ssh::tests::stand_in_runs(dir.path()), "the server outlived its idle window");
     }
 
     /// The dial is the op's to choose (this machine's loopback, or inside a fork); what the tunnel says back names
