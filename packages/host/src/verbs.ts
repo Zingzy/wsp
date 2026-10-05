@@ -3947,9 +3947,9 @@ const SLATE_VERBS: readonly Verb[] = [
   },
 ];
 
-/** The tools a client that defers tools behind a search loads up front all the same: the slate's, which a model that
- * never searched never found. */
-export const LOADED_UP_FRONT: ReadonlySet<string> = new Set<string>(SLATE_TOOLS);
+/** The slate's tools: loaded up front by a client that defers tools behind a search, since a model that never searched
+ * never found them, and left off a server for a thread that has no slate. */
+export const SLATE_TOOL_NAMES: ReadonlySet<string> = new Set<string>(SLATE_TOOLS);
 
 /** The fields given, without the ones left out, so an absent input never rides the wire as undefined. */
 function pick<T extends Record<string, unknown>>(o: T): Partial<T> {
