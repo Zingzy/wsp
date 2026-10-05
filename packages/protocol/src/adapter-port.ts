@@ -13,7 +13,7 @@
 // these into the SessionEvent shapes in index.ts that clients read, which is
 // why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
 // declared once there and imported back here.
-import type { DeltaKind, PermissionOption, PermissionOutcome, PlanStep, SessionHarness, SubagentState, TurnResult } from "./index.js";
+import type { DeltaKind, McpServerSpec, PermissionOption, PermissionOutcome, PlanStep, SessionHarness, SubagentState, TurnResult } from "./index.js";
 import { shellQuote } from "./shell-quote.js";
 import type { HarnessLimit } from "./usage.js";
 
@@ -383,12 +383,14 @@ export interface DraftAsk {
 export type CommitDrafter = (ask: DraftAsk, exec: (command: string) => Promise<string>) => Promise<string | null>;
 
 /** A question asked beside a thread: the harness's own session it is asked of, as that harness keys it, the words,
- * and the folder and model the thread's latest turn ran at, where the row knows them. */
+ * the folder and model the thread's latest turn ran at, where the row knows them, and the MCP servers a turn of the
+ * thread is handed, which the copy loads so its harness is not told they went away. */
 export interface AsideQuestion {
   session: string;
   question: string;
   cwd?: string;
   model?: string;
+  mcpServers?: Readonly<Record<string, McpServerSpec>>;
 }
 
 /** The harness's answer to a side question, and what it reported spending on it where it reports usage. */

@@ -76,7 +76,7 @@
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { PaperclipIcon } from "lucide-react";
-import { composerHeldLine, HOST_ASLEEP_SEND, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, composerHeldLine, HOST_ASLEEP_SEND, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
@@ -307,6 +307,22 @@ export function ChatComposer({
   const { harness } = thread.view;
   // A side question copies the thread's own session, so it is offered only on a thread that has a row to name it by.
   const asides = harnessCatalog?.asides === true && latestRow !== null && api?.askAside !== undefined;
+  // A /btw draft is the host's to answer and never a turn: held while the agent's lists or the thread's row are on
+  // their way, and refused with the reason where there is no side question to ask.
+  const ran = !thread.fresh && (thread.view.entries.length > 0 || thread.view.running);
+  const asideHold = ((): string | null => {
+    if (asideQuestion(draft.prompt) === null || asides) return null;
+    if (harnessCatalogs.length === 0) return COMPOSER_WORDS.asideUnknown;
+    if (harnessCatalog === null) return COMPOSER_WORDS.asideUnsupported(harnessId);
+    const takes = harnessCatalog.asides === true && api?.askAside !== undefined;
+    if (ran && latestRow === null) {
+      // Unread rows are on their way; read ones without this thread fell off the runtime's index, which the
+      // transcript outlives. The catalog is the thread's own only where its transcript names its agent.
+      if (sessions === undefined) return COMPOSER_WORDS.asideUnknown;
+      return !takes && thread.view.agent !== null ? COMPOSER_WORDS.asideUnsupported(harnessCatalog.label) : COMPOSER_WORDS.asideRowsGone;
+    }
+    return takes ? ASIDE_NO_SESSION_LINE : COMPOSER_WORDS.asideUnsupported(harnessCatalog.label);
+  })();
   // A side question is about the thread it was asked from, so it goes when the composer leaves that thread.
   const fresh = thread.fresh;
   useEffect(() => () => useAsideStore.getState().close(workspaceId), [fresh, threadKey, workspaceId]);
@@ -338,7 +354,7 @@ export function ChatComposer({
   // Everything that holds this send, in one reading: what blocks every send in this workspace, then what this draft
   // alone cannot be sent as. The slot, the send button and the Enter path all take it from here, so a person is told
   // once and told the same thing wherever they look.
-  const sendHeld = unavailable ?? slashHoldLine({ prompt: draft.prompt, catalog, screen: screenCommandsOf(harnessCatalog) });
+  const sendHeld = unavailable ?? asideHold ?? slashHoldLine({ prompt: draft.prompt, catalog, screen: screenCommandsOf(harnessCatalog) });
   const sendDisabledReason = sendHeld ?? (thread.busy ? TURN_IN_FLIGHT : null);
   const hasText = draft.prompt.trim().length > 0;
   // The catalog answers before the click; a row the runtime's table stood in for is no answer, so an image is taken
@@ -637,8 +653,9 @@ export function ChatComposer({
       const prompt = (editorRef.current?.readSnapshot().value ?? draft.prompt).trim();
       if (prompt === "") return;
       // A side question is the host's to answer and never a turn, so it goes whether or not the thread is working.
-      const question = asides ? asideQuestion(prompt) : null;
+      const question = asideQuestion(prompt);
       if (question !== null) {
+        if (!asides) return;
         setDraft(workspaceId, EMPTY_DRAFT);
         askAside(question);
         return;

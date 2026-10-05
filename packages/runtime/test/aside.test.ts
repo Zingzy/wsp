@@ -10,8 +10,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, HERE_PLACE_ID, asideUnsupportedLine, deviceHeldRefusal, threadOpRefusal, type AsideQuestion, type TurnResult } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, HERE_PLACE_ID, HOST_TOKEN_ENV, HOST_URL_ENV, MCP_SERVER_NAME, SCOPED_MCP_ARG, asideUnsupportedLine, deviceHeldRefusal, threadOpRefusal, type AsideQuestion, type ExecStream, type ExecStreamFactory, type TurnResult } from "@wsp/protocol";
 import { createRuntime, serveRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime, type RuntimeServer } from "../src/index.js";
+import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend, copyingFake, createOn, testPlatform } from "./stub-backend.js";
@@ -103,13 +104,65 @@ describe("a side question beside a thread", () => {
     expect(await rt.sessions.list(workspaceId)).toEqual(rows);
   });
 
+  it("hands the side question the wsp server and the host pair a turn of the thread gets, and takes the token back once it is answered", async () => {
+    const wspMcp = { command: "node", args: ["/opt/wsp/dist/bin.js", "mcp"] };
+    const seen: { question: AsideQuestion; env: Readonly<Record<string, string>>; devices: number }[] = [];
+    const factory: HarnessAdapterFactory = ctx => ({
+      ...answering(asked)(ctx),
+      mcpServers: true,
+      asideServers: true,
+      aside: async (q: AsideQuestion) => {
+        seen.push({ question: q, env: { ...ctx.env }, devices: (await rt.devices.list()).length });
+        return { text: ANSWER };
+      },
+    });
+    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, local: localWiring, agents: { here: { url: "http://127.0.0.1:4801" }, wspMcp } });
+    const { first } = await twoTurns();
+    // The turns' own tokens are taken back as their processes end, so what stands now is the side question's alone.
+    await expect.poll(async () => (await rt.devices.list()).length).toBe(0);
+
+    expect(await rt.sessions.aside(first, "what did I last ask?")).toEqual({ text: ANSWER });
+    // The copy resumes a session that announced the wsp server's instructions; a fork without that server is told
+    // it disconnected, and the answer opens on it.
+    expect(seen[0]!.question.mcpServers).toEqual({ [MCP_SERVER_NAME]: { ...wspMcp, args: [...wspMcp.args, SCOPED_MCP_ARG] } });
+    // The scoped server refuses to start without the pair, which would read as the same disconnection.
+    expect(seen[0]!.env[HOST_URL_ENV]).toBe("http://127.0.0.1:4801");
+    expect(seen[0]!.env[HOST_TOKEN_ENV]).toMatch(/\S/);
+    expect(seen[0]!.devices).toBe(1);
+    expect(await rt.devices.list()).toEqual([]);
+  });
+
+  it("hands a Codex side question no token: its fork loads no server to dial with one, and it can run read-only commands", async () => {
+    const wspMcp = { command: "node", args: ["/opt/wsp/dist/bin.js", "mcp"] };
+    const launched: { env: Record<string, string>; devices: Promise<number> }[] = [];
+    // The real Codex adapter, its declarations and its side question as they ship; only the turn is a fake, and the
+    // side question's app server answers nothing, so the ask rejects once its environment is read.
+    const silent: ExecStreamFactory = (_command, { env }) => {
+      launched.push({ env: { ...env }, devices: rt.devices.list().then(d => d.length) });
+      const stream: ExecStream = { lines: (async function* () {})(), teardown: () => {}, kill: () => {}, write: async () => "written" as const, closeInput: () => {}, exited: Promise.resolve(1) };
+      return stream;
+    };
+    const codex: HarnessAdapterFactory = ctx => ({ ...HARNESS_ADAPTERS.codex({ ...ctx, execStream: silent }), start: answering(asked)(ctx).start });
+    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { codex }, local: localWiring, agents: { here: { url: "http://127.0.0.1:4801" }, wspMcp } });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const turn = await rt.sessions.start(ws.id, { prompt: "the first thing", harness: "codex" });
+    await turn.finished;
+    await expect.poll(async () => (await rt.devices.list()).length).toBe(0);
+
+    await expect(rt.sessions.aside(turn.id, "what did I last ask?")).rejects.toThrow();
+    expect(launched).toHaveLength(1);
+    expect(launched[0]!.env[HOST_TOKEN_ENV]).toBeUndefined();
+    expect(launched[0]!.env[HOST_URL_ENV]).toBeUndefined();
+    expect(await launched[0]!.devices).toBe(0);
+  });
+
   it("tells the composer the harness takes one, and not for a harness without it", async () => {
     rt = runtime(answering(asked));
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     expect((await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")?.asides).toBe(true);
     const bare = runtime(answering(asked, { aside: false }));
     const other = await createOn(bare, { on: HERE_PLACE_ID, name: "mac-2" });
-    expect((await bare.harnesses.list(other.id)).find(c => c.harness === "claude")?.asides).toBeUndefined();
+    expect((await bare.harnesses.list(other.id)).find(c => c.harness === "claude")?.asides).toBe(false);
   });
 
   it("tells the composer the message that compacts the harness's thread, the adapter's own, and nothing where it has none", async () => {

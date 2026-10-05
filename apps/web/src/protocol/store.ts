@@ -190,6 +190,7 @@ interface State {
    * that thread's first content until the first message or until the person goes elsewhere, so nothing on the page
    * moves as it lands. */
   landed: { workspaceId: string; creation: Creation; at: number } | null;
+  /** Each workspace's rows once a list answered for it, an empty list where it answered none; absent while unread. */
   sessions: Record<string, SessionView[]>;
   /** The send that has opened no thread yet, per workspace. The runtime writes a session row only once the agent
    * announces itself, which on this computer is the seconds the agent takes to boot, so between the send and that
@@ -323,8 +324,9 @@ interface State {
 const COMPUTERS_PAGE: SettingsAt = { kind: "group", group: "computers" };
 const NO_SESSIONS: SessionView[] = [];
 
-function groupSessions(rows: SessionView[]): Record<string, SessionView[]> {
-  const out: Record<string, SessionView[]> = {};
+/** Every listed workspace keyed, one with no rows at an empty list: a key that is absent means its rows are unread. */
+function groupSessions(rows: SessionView[], listed: readonly string[]): Record<string, SessionView[]> {
+  const out: Record<string, SessionView[]> = Object.fromEntries(listed.map(id => [id, []]));
   for (const r of rows) (out[r.workspaceId] ??= []).push(r);
   return out;
 }
@@ -915,7 +917,7 @@ export const useStore = create<State>((set, get) => {
       const [workspaces, answered] = await Promise.all([api.listWorkspaces(), api.listSessions().then(rows => rows, () => null)]);
       const s = get();
       const rows = answered ?? NO_SESSIONS;
-      const sessions = newerKept(answered === null ? null : groupSessions(rows), asked, workspaces.map(w => w.id), s.sessions);
+      const sessions = newerKept(answered === null ? null : groupSessions(rows, workspaces.map(w => w.id)), asked, workspaces.map(w => w.id), s.sessions);
       // The address is read on every refresh, not only the first: a reconnect after the host restarted rebuilds this
       // store from nothing, and what the person is reading is recorded there rather than here.
       const address = readAddress();
