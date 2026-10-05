@@ -9,10 +9,11 @@
 import { readingRoad, workspaceKind } from "@wsp/protocol";
 import type { Api } from "../protocol/client.js";
 import type { useStore } from "../protocol/store.js";
-import { getLive } from "./live.js";
+import { getLive, liveWatched, onLiveWatched } from "./live.js";
 
-/** Keeps the host's readings flowing for every workspace whose kind reads them here, for as long as the page is
- * mounted. A subscription dies with the socket that made it, so a socket that comes back is asked again. */
+/** Keeps the host's readings flowing for every workspace whose kind reads them here while a pane draws them, and
+ * stops them when the last one goes. A subscription dies with the socket that made it, so a socket that comes back
+ * is asked again. */
 export function wireHostLive(store: typeof useStore): () => void {
   /** The workspaces this page has asked the socket it holds now about. */
   const asked = new Set<string>();
@@ -29,30 +30,38 @@ export function wireHostLive(store: typeof useStore): () => void {
       asked.clear();
       offSamples = api.onSysSample(e => getLive(e.workspaceId).feedSample(e.sample));
     }
-    const here = workspaces.filter(w => readingRoad(workspaceKind(w), "metrics") === "host");
+    const here = new Set(workspaces.filter(w => readingRoad(workspaceKind(w), "metrics") === "host" && liveWatched(w.id)).map(w => w.id));
     if (conn !== "live") {
       // The readings ride this socket: one that is not live is a row whose newest figure is the last one before it went.
       for (const id of asked) getLive(id).feedReach("unreachable");
       asked.clear();
       return;
     }
-    for (const w of here) {
-      if (asked.has(w.id)) continue;
-      asked.add(w.id);
-      void api.watchSys(w.id).then(
-        () => getLive(w.id).feedReach("live"),
+    for (const id of asked) {
+      if (here.has(id)) continue;
+      asked.delete(id);
+      getLive(id).feedReach("unreachable");
+      void api.unwatchSys?.(id).catch(() => undefined);
+    }
+    for (const id of here) {
+      if (asked.has(id)) continue;
+      asked.add(id);
+      void api.watchSys(id).then(
+        () => getLive(id).feedReach("live"),
         () => {
-          asked.delete(w.id);
-          getLive(w.id).feedReach("unreachable");
+          asked.delete(id);
+          getLive(id).feedReach("unreachable");
         },
       );
     }
   };
 
   const unsubscribe = store.subscribe(sync);
+  const unwatched = onLiveWatched(sync);
   sync();
   return () => {
     unsubscribe();
+    unwatched();
     offSamples?.();
     offSamples = null;
     for (const id of asked) getLive(id).feedReach("unreachable");
