@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { localExecStream } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExecStream } from "@wsp/protocol";
-import { stayOnUncaught, stopOnSignals, type CliIO, type StopProcess, type UncaughtProcess } from "../src/cli.js";
+import { OWN_FILES_POLL_MS, stayOnUncaught, stopOnSignals, type CliIO, type StopProcess, type UncaughtProcess } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { alive, grandchild, sweepStrays } from "../../runtime/test/strays.js";
 
@@ -14,11 +14,11 @@ const quietIO = (errors: string[] = []): CliIO => ({ log: () => {}, error: l => 
 
 /** Where the signals arrive and how the process ends, handed to the stop in place of this one: the test runner
  * cannot be sent a real signal, and the stop registers before any turn starts, the way the host does at its start. */
-function standInHost(): { self: StopProcess; exits: number[]; signal: (sig: "SIGINT" | "SIGTERM" | "SIGHUP") => void; taken: () => string[] } {
+function standInHost(execPath = process.execPath, platform: string = process.platform): { self: StopProcess; exits: number[]; signal: (sig: "SIGINT" | "SIGTERM" | "SIGHUP") => void; taken: () => string[] } {
   const listeners = new Map<string, () => void>();
   const exits: number[] = [];
   return {
-    self: { on: (sig, listener) => listeners.set(sig, listener), exit: code => void exits.push(code) },
+    self: { execPath, platform, on: (sig, listener) => listeners.set(sig, listener), exit: code => void exits.push(code) },
     exits,
     signal: sig => {
       const listener = listeners.get(sig);
@@ -62,6 +62,48 @@ describe("a serving host stopping on a signal", () => {
     running.stream.kill();
     await running.stream.exited;
   }, 20_000);
+
+  it("a host whose own executable is gone closes and exits 0 as on a signal, so its manager starts it again from what the command names now", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      // An AppImage's mount that went with its launch, or a copy of the app since removed, as the host sees it.
+      const exe = join(root, "wsp");
+      writeFileSync(exe, "");
+      const host = standInHost(exe, "linux");
+      const errors: string[] = [];
+      let closes = 0;
+      stopOnSignals({ close: async () => void closes++ } as unknown as HostHandle, quietIO(errors), host.self);
+      vi.advanceTimersByTime(OWN_FILES_POLL_MS * 3);
+      expect(host.exits).toEqual([]);
+      rmSync(exe);
+      vi.advanceTimersByTime(OWN_FILES_POLL_MS);
+      await vi.waitFor(() => expect(host.exits).toEqual([0]));
+      expect(closes).toBe(1);
+      expect(errors).toEqual([`${exe}, which this host runs, is gone; it stops so the next start runs what the wsp command names now`]);
+      vi.advanceTimersByTime(OWN_FILES_POLL_MS * 3);
+      expect(closes).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("on a Mac a host whose executable is gone keeps serving, since the app never removes what a host runs and a node upgrade under a hand-started host is all the stop would catch", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const exe = join(root, "node");
+      writeFileSync(exe, "");
+      const host = standInHost(exe, "darwin");
+      const errors: string[] = [];
+      stopOnSignals({ close: async () => {} } as unknown as HostHandle, quietIO(errors), host.self);
+      rmSync(exe);
+      vi.advanceTimersByTime(OWN_FILES_POLL_MS * 3);
+      await Promise.resolve();
+      expect(host.exits).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("the first signal closes and exits 0, and the turn running here is left running for the host that comes next", async () => {
     const host = standInHost();

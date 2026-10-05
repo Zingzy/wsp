@@ -7,9 +7,9 @@
 // workspace switch is ours, and so is the new thread's mod+t, listed after
 // mod+n so a label reads it; a browser tab keeps mod+t for its own new tab,
 // so mod+n stays for the app in a tab. A Control chord is the terminal's while it has
-// focus, and Tab and the digits with mod are the browser's inside a tab, where
-// keybindings.ts drops them. The Tab pair is bound twice: inside a right
-// panel of several tabs, a terminal there included, it steps the panel's
+// focus, short of the few commands keybindings.ts passes, and Tab and the digits with
+// mod are the browser's inside a tab, where keybindings.ts drops them. The Tab pair is
+// bound twice: inside a right panel of several tabs, a terminal there included, it steps the panel's
 // tabs and the switcher stands down, and everywhere else it opens the
 // switcher, which the mod arrows open there too. They hold mod on purpose: an Option arrow alone is the word move in
 // every text field on macOS, and a switch that lands the caret in a composer
@@ -48,6 +48,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+-", command: "terminal.zoomOut", when: "terminalFocus" },
   { key: "mod+0", command: "terminal.zoomReset", when: "terminalFocus" },
   { key: "mod+shift+j", command: "preview.toggle" },
+  { key: "mod+shift+p", command: "commandPalette.toggle" },
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalOwnsMod" },
   { key: "mod+p", command: "files.quickOpen", when: "!terminalOwnsMod" },
   { key: "mod+shift+f", command: "files.search", when: "!terminalOwnsMod" },

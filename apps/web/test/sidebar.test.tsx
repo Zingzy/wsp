@@ -478,19 +478,18 @@ describe("a probe that never left this computer", () => {
 });
 
 describe("a workspace's link that is down, on its tiles", () => {
-  it("a resting tile says the link is down in its slot with the pane's sentence on its hover, and its age once the link is up", async () => {
-    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "fix the port list", status: "completed", startedAt: iso(-60 * 60_000), endedAt: iso(-50 * 60_000), readAt: iso(-50 * 60_000) }), session("s2", "ws_b", { prompt: "upgrade node", status: "completed", startedAt: iso(-60 * 60_000), endedAt: iso(-50 * 60_000), readAt: iso(-50 * 60_000) })]), "fix the port list");
+  it("a thread whose turns answer keeps its own status on its tile while the page's own link to its machine is down, in every way it goes down", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "fix the port list", status: "completed", startedAt: iso(-60 * 60_000), endedAt: iso(-50 * 60_000), readAt: iso(-50 * 60_000) })]), "fix the port list");
+    const age = statusSlot(rowOf("fix the port list"))?.textContent;
+    expect(age).toBe("50m");
     const wt = new WorkspaceTerminals({ request: async () => ({ ok: true }) });
-    act(() => {
-      wt.feedStatus("connecting");
-      provideTerminals(API.id, wt);
-    });
-    await waitFor(() => expect(statusSlot(rowOf("fix the port list"))?.textContent).toBe(LINK_DOWN_WORDS.reconnecting));
-    expect(statusSlot(rowOf("fix the port list"))!.getAttribute("title")).toBe("Reconnecting to the task");
-    // A workspace with no link open is not down.
-    expect(statusSlot(rowOf("upgrade node"))?.textContent).not.toBe(LINK_DOWN_WORDS.reconnecting);
-    act(() => wt.feedStatus("live"));
-    await waitFor(() => expect(statusSlot(rowOf("fix the port list"))?.textContent).not.toBe(LINK_DOWN_WORDS.reconnecting));
+    act(() => provideTerminals(API.id, wt));
+    for (const down of ["unanswered", "connecting", "refused", "reauth-needed"] as const) {
+      act(() => wt.feedStatus(down, down === "refused" ? "the connection was refused with 403" : undefined));
+      expect(statusSlot(rowOf("fix the port list"))?.textContent).toBe(age);
+      expect(statusSlot(rowOf("fix the port list"))?.dataset["threadStatus"]).not.toBe("link-down");
+    }
+    expect(rowOf("fix the port list").textContent).not.toContain(LINK_DOWN_WORDS.unanswered);
     act(() => provideTerminals(API.id, null));
   });
 });
