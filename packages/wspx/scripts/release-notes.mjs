@@ -71,10 +71,13 @@ export function cliArgs(argv) {
   return { tag: argv.find(arg => arg !== "--signed") ?? "", signed: argv.includes("--signed") };
 }
 
+/** What an ad hoc signed release says about the app replacing itself: each update is a new identity to macOS. */
+export const PERMISSIONS_AGAIN = "macOS may ask again for permissions you gave wsp, since each update is signed on its own.";
+
 /**
- * @param {{ version: string, previous?: string, changes: string[], bundles: string, renames?: string }} notes
+ * @param {{ version: string, previous?: string, changes: string[], bundles: string, renames?: string, signed?: boolean }} notes
  */
-export function releaseNotes({ version, previous, changes, bundles, renames }) {
+export function releaseNotes({ version, previous, changes, bundles, renames, signed = false }) {
   const names = bundleNames(version);
   return [
     previous === undefined ? "## What changed" : `## What changed since ${previous}`,
@@ -88,6 +91,7 @@ export function releaseNotes({ version, previous, changes, bundles, renames }) {
     `- \`${names.appImage}\`: Linux on x64.`,
     `- The command line: \`npm i -g ${PACKAGE}@${version}\`.`,
     "",
+    ...(signed ? [] : [PERMISSIONS_AGAIN, ""]),
     bundles,
     "",
   ].join("\n");
@@ -104,6 +108,7 @@ function notesFor(repo, tag, signed) {
     previous,
     changes: changeLines(subjects),
     bundles: bundleNote(readme, signed),
+    signed,
     ...(renames === undefined ? {} : { renames }),
   });
 }

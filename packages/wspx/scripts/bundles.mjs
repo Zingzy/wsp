@@ -14,9 +14,10 @@ export const RELEASE_TAG = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
  * sends a person: the site's footer, and the app's line about a shell older than the host serving it. */
 export const RELEASES = `${REPO}/releases`;
 
-/** What each download on the release page is called for one version, which is the name the notes print. */
+/** What each download on the release page is called for one version, which is the name the notes print. The zip
+ * is what an installed mac app replaces itself from, so the notes leave it out. */
 export function bundleNames(version) {
-  return { mac: `wsp-${version}-mac.dmg`, appImage: `wsp-${version}.AppImage` };
+  return { mac: `wsp-${version}-mac.dmg`, macZip: `wsp-${version}-mac.zip`, appImage: `wsp-${version}.AppImage` };
 }
 
 /** The copies the release job uploads beside the versioned ones, under names no version moves. GitHub serves the
@@ -28,12 +29,13 @@ export function downloadUrl(asset) {
   return `${REPO}/releases/latest/download/${asset}`;
 }
 
-/** The four names one release's job works with, as the assignments it writes into its own environment. */
+/** The five names one release's job works with, as the assignments it writes into its own environment. */
 export function bundleEnv(version) {
   const versioned = bundleNames(version);
   const lines = [
     ["MAC_DMG", versioned.mac],
     ["MAC_STABLE", STABLE_NAMES.mac],
+    ["MAC_ZIP", versioned.macZip],
     ["APPIMAGE", versioned.appImage],
     ["APPIMAGE_STABLE", STABLE_NAMES.appImage],
   ];

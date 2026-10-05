@@ -10,9 +10,9 @@ import { bundleEnv, bundleNames, downloadUrl, RELEASES, REPO, STABLE_NAMES } fro
 const script = fileURLToPath(new URL("../scripts/bundle-env.mjs", import.meta.url));
 
 describe("what a release's downloads are called", () => {
-  it("is one disk image for both mac chips and one AppImage for linux, each carrying the version", () => {
-    expect(bundleNames("0.1.5")).toEqual({ mac: "wsp-0.1.5-mac.dmg", appImage: "wsp-0.1.5.AppImage" });
-    expect(bundleNames("1.0.0-rc.1")).toEqual({ mac: "wsp-1.0.0-rc.1-mac.dmg", appImage: "wsp-1.0.0-rc.1.AppImage" });
+  it("is one disk image for both mac chips, the zip the app updates itself from, and one AppImage for linux, each carrying the version", () => {
+    expect(bundleNames("0.1.5")).toEqual({ mac: "wsp-0.1.5-mac.dmg", macZip: "wsp-0.1.5-mac.zip", appImage: "wsp-0.1.5.AppImage" });
+    expect(bundleNames("1.0.0-rc.1")).toEqual({ mac: "wsp-1.0.0-rc.1-mac.dmg", macZip: "wsp-1.0.0-rc.1-mac.zip", appImage: "wsp-1.0.0-rc.1.AppImage" });
   });
 
   it("has a copy of each under a name no version moves, of the same kind of file", () => {
@@ -39,8 +39,8 @@ describe("where a download is reached", () => {
 });
 
 describe("the names the release job reads", () => {
-  it("are the four assets it uploads, as the assignments a step appends to its environment", () => {
-    expect(bundleEnv("0.1.5")).toBe("MAC_DMG=wsp-0.1.5-mac.dmg\nMAC_STABLE=wsp-mac.dmg\nAPPIMAGE=wsp-0.1.5.AppImage\nAPPIMAGE_STABLE=wsp-linux.AppImage\n");
+  it("are the five assets it uploads, as the assignments a step appends to its environment", () => {
+    expect(bundleEnv("0.1.5")).toBe("MAC_DMG=wsp-0.1.5-mac.dmg\nMAC_STABLE=wsp-mac.dmg\nMAC_ZIP=wsp-0.1.5-mac.zip\nAPPIMAGE=wsp-0.1.5.AppImage\nAPPIMAGE_STABLE=wsp-linux.AppImage\n");
   });
 
   it("come out of the script the workflow runs, for the version it is handed", () => {

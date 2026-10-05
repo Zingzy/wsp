@@ -8,12 +8,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RELEASE_API_ENV } from "@wsp/protocol";
-import { BUNDLE_WORDS, askedVersion, bundleHover, bundleShell, getBundle, openBundle, type BundleDeps } from "../src/get-bundle.js";
+import { BUNDLE_WORDS, IN_PLACE_HOVER, askedVersion, bundleHover, bundleShell, getBundle, openBundle, type BundleDeps, type InPlaceRoad } from "../src/get-bundle.js";
 
 const BYTES = Buffer.from("a disk image, as far as this test is concerned");
 const SUM = createHash("sha256").update(BYTES).digest("hex");
 const TAG_URL = "https://api.github.com/repos/Zingzy/wsp/releases/tags/v0.3.0";
 const DMG_URL = "https://github.com/Zingzy/wsp/releases/download/v0.3.0/wsp-0.3.0-mac.dmg";
+const ZIP_URL = "https://github.com/Zingzy/wsp/releases/download/v0.3.0/wsp-0.3.0-mac.zip";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -29,7 +30,7 @@ const answer = (assets: unknown[]): Response => new Response(JSON.stringify({ ta
 const asset = (name: string, digest: string | null = `sha256:${SUM}`, size: number | string | null = BYTES.length): Record<string, unknown> => ({ name, ...(size === null ? {} : { size }), ...(digest === null ? {} : { digest }) });
 
 /** A GitHub that answers the tag with these assets and serves these bytes for any download, logging every URL. */
-function github(assets: unknown[] = [asset("wsp-0.3.0-mac.dmg"), asset("wsp-0.3.0.AppImage")], bytes: Buffer = BYTES, status = 200) {
+function github(assets: unknown[] = [asset("wsp-0.3.0-mac.dmg"), asset("wsp-0.3.0-mac.zip"), asset("wsp-0.3.0.AppImage")], bytes: Buffer = BYTES, status = 200) {
   const asked: string[] = [];
   const fetcher = vi.fn(async (url: string | URL | Request): Promise<Response> => {
     const at = String(url);
@@ -183,6 +184,10 @@ describe("the words over Get", () => {
     expect(bundleHover("linux")).toBe("Downloads the AppImage into Downloads and checks its sha256. The app you run is not replaced.");
     expect(bundleHover("win32")).toBeUndefined();
   });
+
+  it("say the update installs on restart where the app replaces itself", () => {
+    expect(bundleHover("darwin", true)).toBe(IN_PLACE_HOVER);
+  });
 });
 
 describe("opening what was kept", () => {
@@ -267,5 +272,99 @@ describe("the shell's two channels", () => {
     expect((await bad.shell.get({ version: "0.3.0" })).ok).toBe(false);
     expect(await bad.shell.open()).toEqual({ ok: false, error: BUNDLE_WORDS.nothingKept });
     expect(existsSync(join(bad.d.dir, "wsp-0.3.0-mac.dmg"))).toBe(false);
+  });
+});
+
+describe("an app that replaces itself", () => {
+  /** A checked copy as stageUpdate answers one, in a folder that exists unless `gone`. */
+  const checked = (gone = false) => {
+    const stage = downloads();
+    return { ok: true as const, app: gone ? join(stage, "new", "gone.app") : stage, stage, exe: "wsp" };
+  };
+  const inPlaceShell = (over: Partial<BundleDeps> = {}, stage: InPlaceRoad["stage"] = async () => checked()) => {
+    const quit = vi.fn();
+    const open = vi.fn(async () => "");
+    const d = deps(over);
+    const dir = join(downloads(), ".wsp-update");
+    const road = { dir, stage: vi.fn(stage), swap: vi.fn(), discard: vi.fn(async () => undefined) };
+    return { d, quit, open, road, shell: bundleShell({ ...d, open, reveal: vi.fn(), quit, running: "0.2.0", packaged: false, inPlace: road }) };
+  };
+
+  it("downloads the release's zip beside the app, checked against its own sha256, and hands it to the stage", async () => {
+    const hub = github();
+    const { shell, road, d } = inPlaceShell({ fetch: hub.fetch });
+    expect(await shell.get({ version: "0.3.0" })).toEqual({ ok: true });
+    expect(hub.asked).toEqual([TAG_URL, ZIP_URL]);
+    expect(road.stage).toHaveBeenCalledWith(join(road.dir, "wsp-0.3.0-mac.zip"), "0.3.0");
+    expect(readFileSync(join(road.dir, "wsp-0.3.0-mac.zip"))).toEqual(BYTES);
+    expect(readdirSync(d.dir)).toEqual([]);
+  });
+
+  it("stages nothing from a zip whose sha256 is not the published one", async () => {
+    const { shell, road, quit } = inPlaceShell({ fetch: github(undefined, Buffer.from("tampered")).fetch });
+    expect(await shell.get({ version: "0.3.0" })).toEqual({ ok: false, error: BUNDLE_WORDS.mismatch("wsp-0.3.0-mac.zip") });
+    expect(road.stage).not.toHaveBeenCalled();
+    expect(readdirSync(road.dir)).toEqual([]);
+    expect(await shell.open()).toEqual({ ok: false, error: BUNDLE_WORDS.nothingKept });
+    expect(quit).not.toHaveBeenCalled();
+  });
+
+  it("restarts into the checked copy on open: the swap gets the copy and the version, then the app quits", async () => {
+    const { shell, road, quit, open } = inPlaceShell();
+    expect(await shell.get({ version: "0.3.0" })).toEqual({ ok: true });
+    const { ok: _ok, ...staged } = (await road.stage.mock.results[0]!.value) as ReturnType<typeof checked>;
+    expect(await shell.open()).toEqual({ ok: true });
+    expect(road.swap).toHaveBeenCalledWith(staged, "0.3.0");
+    expect(quit).toHaveBeenCalledTimes(1);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("fetches a version already staged no second time", async () => {
+    const hub = github();
+    const { shell, road } = inPlaceShell({ fetch: hub.fetch });
+    expect(await shell.get({ version: "0.3.0" })).toEqual({ ok: true });
+    expect(await shell.get({ version: "0.3.0" })).toEqual({ ok: true });
+    expect(hub.asked).toEqual([TAG_URL, ZIP_URL]);
+    expect(road.stage).toHaveBeenCalledTimes(1);
+  });
+
+  it("says the stage's refusal, and a refused or vanished copy starts no swap and does not quit", async () => {
+    const refused = inPlaceShell({}, async () => ({ ok: false, error: "wsp-0.3.0-mac.zip failed its signature check and was deleted" }));
+    expect(await refused.shell.get({ version: "0.3.0" })).toEqual({ ok: false, error: "wsp-0.3.0-mac.zip failed its signature check and was deleted" });
+    expect(await refused.shell.open()).toEqual({ ok: false, error: BUNDLE_WORDS.nothingKept });
+    const vanished = inPlaceShell({}, async () => checked(true));
+    expect(await vanished.shell.get({ version: "0.3.0" })).toEqual({ ok: true });
+    expect(await vanished.shell.open()).toEqual({ ok: false, error: BUNDLE_WORDS.gone });
+    for (const { road, quit } of [refused, vanished]) {
+      expect(road.swap).not.toHaveBeenCalled();
+      expect(quit).not.toHaveBeenCalled();
+    }
+  });
+
+  it("deletes the checked copy on Later, after which there is nothing to restart into", async () => {
+    const { shell, road, quit } = inPlaceShell();
+    expect(await shell.get({ version: "0.3.0" })).toEqual({ ok: true });
+    expect(await shell.discard()).toEqual({ ok: true });
+    expect(road.discard).toHaveBeenCalledTimes(1);
+    expect(await shell.open()).toEqual({ ok: false, error: BUNDLE_WORDS.nothingKept });
+    expect(road.swap).not.toHaveBeenCalled();
+    expect(quit).not.toHaveBeenCalled();
+  });
+
+  it("deletes an older checked copy before it stages a newer release", async () => {
+    const { shell, road } = inPlaceShell({ fetch: github([asset("wsp-0.3.0-mac.zip"), asset("wsp-0.3.1-mac.zip")]).fetch });
+    expect(await shell.get({ version: "0.3.0" })).toEqual({ ok: true });
+    expect(road.discard).not.toHaveBeenCalled();
+    expect(await shell.get({ version: "0.3.1" })).toEqual({ ok: true });
+    expect(road.discard).toHaveBeenCalledTimes(1);
+    expect(road.discard.mock.invocationCallOrder[0]).toBeLessThan(road.stage.mock.invocationCallOrder[1]!);
+  });
+
+  it("refuses a version that is not above its own before anything is fetched", async () => {
+    const hub = github();
+    const { shell, road } = inPlaceShell({ fetch: hub.fetch });
+    expect(await shell.get({ version: "0.2.0" })).toEqual({ ok: false, error: BUNDLE_WORDS.notNewer("0.2.0") });
+    expect(hub.asked).toEqual([]);
+    expect(road.stage).not.toHaveBeenCalled();
   });
 });

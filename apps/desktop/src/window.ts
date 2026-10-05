@@ -39,9 +39,15 @@ const MAC: WindowFrame = {
 
 const FRAMES: Partial<Record<NodeJS.Platform, WindowFrame>> = { darwin: MAC };
 
-export function windowOptions(platform: NodeJS.Platform, version: string, preload?: string): BrowserWindowConstructorOptions {
+/** How this app takes a release: replaced where it runs, or the disk image road with the reason it cannot be. */
+export interface UpdateRoad {
+  inPlace: boolean;
+  why?: string;
+}
+
+export function windowOptions(platform: NodeJS.Platform, version: string, preload?: string, update: UpdateRoad = { inPlace: false }): BrowserWindowConstructorOptions {
   const frame = FRAMES[platform] ?? STOCK;
-  const hover = bundleHover(platform);
+  const hover = bundleHover(platform, update.inPlace);
   return {
     width: 1280,
     height: 800,
@@ -52,7 +58,13 @@ export function windowOptions(platform: NodeJS.Platform, version: string, preloa
       contextIsolation: true,
       sandbox: true,
       ...(preload !== undefined ? { preload } : {}),
-      additionalArguments: [shellArg("version", version), ...(frame.htmlClass !== undefined ? [shellArg("html-class", frame.htmlClass)] : []), ...(hover !== undefined ? [shellArg("bundle-hover", hover)] : [])],
+      additionalArguments: [
+        shellArg("version", version),
+        ...(frame.htmlClass !== undefined ? [shellArg("html-class", frame.htmlClass)] : []),
+        ...(hover !== undefined ? [shellArg("bundle-hover", hover)] : []),
+        ...(update.inPlace ? [shellArg("update-in-place", "1")] : []),
+        ...(update.why !== undefined ? [shellArg("update-why", update.why)] : []),
+      ],
     },
   };
 }

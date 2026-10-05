@@ -157,6 +157,23 @@ describe("the toast", () => {
     expect(useNotices.getState().notices).toHaveLength(1);
   });
 
+  it("with a second action, draws it and the first as two keycaps under the sentence and its detail, and Later runs its own and goes", async () => {
+    mountShell();
+    const run = vi.fn();
+    const discard = vi.fn();
+    act(() => void addNotice({ kind: "note", key: "update-ready", text: "wsp 0.3.0 is ready to install", detail: "Your 2 running threads carry on. Open terminals close.", action: { word: "Restart", run }, later: { word: "Later", run: discard } }));
+    await waitFor(() => expect(showing()).toHaveLength(1));
+    const toast = showing()[0]!;
+    expect(toast.querySelector("[data-notice-detail]")?.textContent).toBe("Your 2 running threads carry on. Open terminals close.");
+    expect([...toast.querySelectorAll<HTMLElement>("[data-slot=button]")].map(b => b.textContent)).toEqual(["Later", "Restart"]);
+    expect(toast.querySelector(`[aria-label="${CLOSE_NOTICE_LABEL}"]`)).toBeNull();
+    fireEvent.click(toast.querySelector<HTMLElement>("[data-notice-later]")!);
+    await waitFor(() => expect(showing()).toHaveLength(0));
+    expect(discard).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
+    expect(useNotices.getState().notices).toHaveLength(1);
+  });
+
   it("goes after its time, and not while the pointer is over the stack", () => {
     vi.useFakeTimers();
     mountShell();

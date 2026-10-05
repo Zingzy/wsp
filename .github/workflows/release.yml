@@ -201,10 +201,21 @@ jobs:
           fi
           mv "$1" "$MAC_DMG"
           cp "$MAC_DMG" "$MAC_STABLE"
+      # The zip an installed app updates itself from; GitHub publishes its sha256 and size beside it, which the app
+      # checks before it unpacks anything.
+      - name: Name the zip after the release
+        run: |
+          shopt -s nullglob
+          set -- apps/desktop/dist/*.zip
+          if [ "$#" -ne 1 ]; then
+            echo "expected one zip in apps/desktop/dist, found $#"
+            exit 1
+          fi
+          mv "$1" "$MAC_ZIP"
       - name: Attach them to the draft
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" "$MAC_DMG" "$MAC_STABLE" --clobber
+        run: gh release upload "$GITHUB_REF_NAME" "$MAC_DMG" "$MAC_STABLE" "$MAC_ZIP" --clobber
 
   linux:
     name: Linux AppImage

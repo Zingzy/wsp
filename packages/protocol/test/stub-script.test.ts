@@ -147,18 +147,26 @@ const NEVER_RUN: Record<string, Record<string, string>> = {
     'join(home, ".codex", "computer-use", "SkyComputerUseClient")': "a binary the import copies, its mode what is read",
     'join(home, ".codex", "notify.py")': "a hook the import copies, its mode what is read",
   },
+  "apps/desktop/test/self-update.test.ts": { 'join(s.staged.stage, "new")': "the folder a checked copy was unpacked into, made read only so the rename out of it fails" },
+};
+
+/** Executables a test signs into an app bundle as its main executable, where a link to the runner cannot stand:
+ * codesign refuses the runner's script beside it and writes to the runner it would link. The app's own update runs
+ * a copy unpacked a moment before, so the cases that run one give the first exec's check room in their waits. */
+const SIGNED_INTO_A_BUNDLE: Record<string, Record<string, string>> = {
+  "apps/desktop/test/self-update.test.ts": { 'join(app, "Contents", "MacOS", "wsp")': "a test bundle's own executable, which plays the app the swap launches and opens" },
 };
 
 describe("every script a test runs is a stub", () => {
   it("no test writes an executable mode onto a file outside writeStub, unless it is listed as never run", () => {
     const offenders = testFiles()
       .filter(rel => !HOME.includes(rel))
-      .flatMap(rel => executablesWritten(rel).filter(w => NEVER_RUN[rel]?.[w.path] === undefined).map(w => `${w.at} ${w.path}`));
+      .flatMap(rel => executablesWritten(rel).filter(w => NEVER_RUN[rel]?.[w.path] === undefined && SIGNED_INTO_A_BUNDLE[rel]?.[w.path] === undefined).map(w => `${w.at} ${w.path}`));
     expect(offenders).toEqual([]);
   });
 
-  it("every never-run entry still names an executable its file writes, so a moved or deleted one leaves the list", () => {
-    const stale = Object.entries(NEVER_RUN).flatMap(([rel, paths]) => {
+  it("every listed entry, never run or signed into a bundle, still names an executable its file writes, so a moved or deleted one leaves the list", () => {
+    const stale = [...Object.entries(NEVER_RUN), ...Object.entries(SIGNED_INTO_A_BUNDLE)].flatMap(([rel, paths]) => {
       const written = new Set(executablesWritten(rel).map(w => w.path));
       return Object.keys(paths).filter(p => !written.has(p)).map(p => `${rel} ${p}`);
     });

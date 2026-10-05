@@ -260,8 +260,10 @@ describe("the release workflow", () => {
   });
 
   it("uploads each bundle under the release's own name and under the name a link can hold", () => {
-    expect(macJob).toContain('gh release upload "$GITHUB_REF_NAME" "$MAC_DMG" "$MAC_STABLE" --clobber');
+    expect(macJob).toContain('gh release upload "$GITHUB_REF_NAME" "$MAC_DMG" "$MAC_STABLE" "$MAC_ZIP" --clobber');
     expect(macJob).toContain('cp "$MAC_DMG" "$MAC_STABLE"');
+    expect(macJob).toContain('set -- apps/desktop/dist/*.zip');
+    expect(macJob).toContain('mv "$1" "$MAC_ZIP"');
     expect(linuxJob).toContain('gh release upload "$GITHUB_REF_NAME" "$APPIMAGE" "$APPIMAGE_STABLE" --clobber');
     expect(linuxJob).toContain('cp "$APPIMAGE" "$APPIMAGE_STABLE"');
   });

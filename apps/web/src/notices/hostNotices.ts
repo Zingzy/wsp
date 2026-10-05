@@ -14,8 +14,10 @@
 // a failure and a machine that came up as things that finished. An account's
 // plan running low, blocked or back is a notice and a notification with no
 // sound while the person keeps that switch on. The
-// dock's badge counts the threads waiting on the person.
-import { GET_THE_APP_WORD, NOTIFY_ME, waitLine, setupNeedsYouLine, setupReadyLine, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, type OutsideLine, type OutsideMoment, type PlaceView, type ReleaseView, type TurnResult } from "@wsp/protocol";
+// dock's badge counts the threads waiting on the person. A newer release on an
+// app that replaces itself is downloaded and checked in the background, then
+// said once it is ready, with Restart and Later.
+import { GET_THE_APP_WORD, NOTIFY_ME, releaseAbove, waitLine, setupNeedsYouLine, setupReadyLine, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, type OutsideLine, type BundleOutcome, type DesktopBridge, type OutsideMoment, type PlaceView, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { threadRows, useProtocolEvents, useStore } from "../protocol/store.js";
@@ -47,7 +49,16 @@ export const HOST_NOTICE_WORDS = {
   imageNotBuilt: (said: string | undefined): string => (said === undefined ? "The image was not built" : `The image was not built: ${said}`),
   imageSealed: (version: number | undefined): string => (version === undefined ? "Image sealed" : `Image v${version} sealed`),
   released: (version: string): string => `wsp ${version} is out`,
+  ready: (version: string): string => `wsp ${version} is ready to install`,
+  keepRunning: (running: number): string => `${running === 1 ? "Your running thread carries" : `Your ${running} running threads carry`} on. Open terminals close.`,
+  restart: "Restart",
+  later: "Later",
+  notReady: (version: string, said: string): string => `wsp ${version} was not downloaded: ${said}`,
+  notRestarted: (said: string): string => `wsp did not restart: ${said}`,
 };
+
+/** The key the ready notice stands under, so a second download of the same release replaces it. */
+export const UPDATE_READY_KEY = "update-ready";
 
 const NEED_KEY = "needs-you";
 const askKey = (workspaceId: string, threadId: string | undefined, askId: string): string => `${askPrefix(workspaceId, threadId)}${askId}`;
@@ -194,17 +205,56 @@ function releaseSaid(): string | undefined {
   }
 }
 
+/** The release downloaded and checked beside the app, then the ready notice; the shell answers only the app's own
+ * host's page, so a page on a host somewhere else asks nothing. */
+async function updateInBackground(bridge: Partial<DesktopBridge>, version: string): Promise<void> {
+  const { getBundle, quitAndOpen, discardUpdate, hosts } = bridge;
+  if (getBundle === undefined || quitAndOpen === undefined) return;
+  if (hosts !== undefined && (await hosts().catch(() => undefined))?.current !== null) return;
+  const got = await getBundle({ version }).catch((e: unknown): BundleOutcome => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  if (!got.ok) {
+    addNotice({ kind: "error", text: HOST_NOTICE_WORDS.notReady(version, got.error) });
+    return;
+  }
+  const running = Object.values(useStore.getState().sessions)
+    .flat()
+    .filter(row => row.status === "running").length;
+  const restart = (): void =>
+    void quitAndOpen().then(
+      done => {
+        if (!done.ok) addNotice({ kind: "error", text: HOST_NOTICE_WORDS.notRestarted(done.error) });
+      },
+      (e: unknown) => addNotice({ kind: "error", text: HOST_NOTICE_WORDS.notRestarted(e instanceof Error ? e.message : String(e)) }),
+    );
+  addNotice({
+    kind: "note",
+    key: UPDATE_READY_KEY,
+    text: HOST_NOTICE_WORDS.ready(version),
+    ...(running === 0 ? {} : { detail: HOST_NOTICE_WORDS.keepRunning(running) }),
+    action: { word: HOST_NOTICE_WORDS.restart, run: restart },
+    later: { word: HOST_NOTICE_WORDS.later, run: () => void discardUpdate?.().catch(() => undefined) },
+  });
+}
+
 function sayRelease(held: Held, release: ReleaseView | null): void {
-  const ahead = releaseAhead(release, shellVersions());
-  if (ahead === undefined || held.released === ahead.version) return;
+  const versions = shellVersions();
+  const ahead = releaseAhead(release, versions);
+  if (release === null || ahead === undefined || held.released === ahead.version) return;
   held.released = ahead.version;
   try {
     window.localStorage.setItem(RELEASE_SAID_KEY, ahead.version);
   } catch {
     // A storage that refuses only means the next page says it again.
   }
+  const bridge = desktopBridge();
+  const appBehind = versions.app !== undefined && releaseAbove(release, versions.app);
+  if (appBehind && bridge?.updatesInPlace === true) {
+    void updateInBackground(bridge, ahead.version);
+    return;
+  }
   if (versionOnScreen()) return;
-  addNotice({ kind: "note", text: HOST_NOTICE_WORDS.released(ahead.version), action: { word: GET_THE_APP_WORD, run: () => void window.open(ahead.url, "_blank", "noopener,noreferrer") } });
+  const why = appBehind ? bridge?.updateWhy : undefined;
+  addNotice({ kind: "note", text: HOST_NOTICE_WORDS.released(ahead.version), ...(why === undefined ? {} : { detail: why }), action: { word: GET_THE_APP_WORD, run: () => void window.open(ahead.url, "_blank", "noopener,noreferrer") } });
 }
 
 type Rule<T extends ProtocolEvent["type"]> = (e: Extract<ProtocolEvent, { type: T }>, held: Held) => void;

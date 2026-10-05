@@ -53,7 +53,8 @@ checkout of `main` on a computer with the Solari key in `.env`.
    `wsp-<version>.AppImage`. Each also goes up as an unversioned copy,
    `wsp-mac.dmg` and `wsp-linux.AppImage`, which is what GitHub serves at
    `releases/latest/download/<name>` and what the site's two download buttons
-   link. Every one of those names comes from
+   link. The mac job also uploads `wsp-<version>-mac.zip`, which an installed
+   app downloads and replaces itself from. Every one of those names comes from
    `packages/wspx/scripts/bundles.mjs`; the workflow spells none of them. They
    land on a draft release on the tag, whose notes are the commits since the
    previous tag plus the README's lines on opening a downloaded bundle. Nothing
@@ -90,7 +91,10 @@ right-click Open, which the README's paragraph between the `unsigned` markers
 says, and the notes carry that paragraph. With the five secrets below the same
 workflow signs with the Developer ID, has Apple notarize each bundle, staples
 the ticket into it, and leaves the paragraph out of the notes. Nothing else
-changes: the next pushed tag ships notarized bundles. Set all five or none: a
+changes: the next pushed tag ships notarized bundles. While the bundles are
+signed ad hoc, the installed app still updates itself from the release's zip,
+and the notes say: macOS may ask again for permissions you gave wsp, since
+each update is signed on its own. Set all five or none: a
 certificate without the Apple account fails the release, because the check
 step insists on a notarized, stapled bundle once a certificate is present.
 The owner does this once:

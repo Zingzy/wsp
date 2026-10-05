@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { bundleHover } from "../src/get-bundle.js";
+import { IN_PLACE_HOVER, bundleHover } from "../src/get-bundle.js";
 import { shellArgFrom } from "../src/shell-args.js";
 import { vibrancyFor, windowOptions } from "../src/window.js";
 
@@ -49,6 +49,18 @@ describe("windowOptions", () => {
     expect(hoverOn("darwin")).toMatch(/disk image/);
     expect(hoverOn("linux")).toMatch(/AppImage/);
     expect(hoverOn("win32")).toBeUndefined();
+  });
+
+  it("tells the renderer the app replaces itself, with the words over Get saying so, or why it cannot", () => {
+    const argsOf = (update: Parameters<typeof windowOptions>[3]): string[] => ["/app/electron", ...windowOptions("darwin", "0.1.5", "/app/preload.cjs", update).webPreferences!.additionalArguments!];
+    const inPlace = argsOf({ inPlace: true });
+    expect(shellArgFrom(inPlace, "update-in-place")).toBe("1");
+    expect(shellArgFrom(inPlace, "bundle-hover")).toBe(IN_PLACE_HOVER);
+    expect(shellArgFrom(inPlace, "update-why")).toBeUndefined();
+    const refused = argsOf({ inPlace: false, why: "The app runs from its disk image, so it cannot replace itself." });
+    expect(shellArgFrom(refused, "update-in-place")).toBeUndefined();
+    expect(shellArgFrom(refused, "bundle-hover")).toBe(bundleHover("darwin"));
+    expect(shellArgFrom(refused, "update-why")).toBe("The app runs from its disk image, so it cannot replace itself.");
   });
 
   it("frosts a Mac window with the system's own glass while the page draws glass, and takes it off while every surface is solid", () => {

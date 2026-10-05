@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings > General's Version card: the version this wsp runs, whether a
 // newer release waits, and the road to it: in the app on its own host the shell
-// downloads and opens it, anywhere else Get is a link. Once newer files are
+// downloads and opens it, or stages it and restarts into it where the app
+// replaces itself, anywhere else Get is a link. Once newer files are
 // installed under a running host, Restart host stands in Get's place. The app's
 // half and the host's get a line each only once they run apart.
 import { releaseAbove, type BundleOutcome, type DesktopBridge, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
@@ -42,7 +43,7 @@ function hostHover(release: ReleaseView | null): string {
 
 const openPage = (url: string): void => void window.open(url, "_blank", "noopener,noreferrer");
 
-type Bundle = Pick<DesktopBridge, "getBundle" | "quitAndOpen" | "bundleHover">;
+type Bundle = Pick<DesktopBridge, "getBundle" | "quitAndOpen" | "bundleHover" | "updatesInPlace">;
 
 /** The shell's bundle road where this page is the app's own host's, else nothing: a page a host somewhere else
  * serves, a browser tab and a shell from before the road all take the link form. */
@@ -59,8 +60,8 @@ function useBundleRoad(): Bundle | undefined {
       live = false;
     };
   }, [bridge]);
-  const { getBundle, quitAndOpen, bundleHover } = bridge ?? {};
-  return here === true && getBundle !== undefined && quitAndOpen !== undefined ? { getBundle, quitAndOpen, bundleHover } : undefined;
+  const { getBundle, quitAndOpen, bundleHover, updatesInPlace } = bridge ?? {};
+  return here === true && getBundle !== undefined && quitAndOpen !== undefined ? { getBundle, quitAndOpen, bundleHover, updatesInPlace } : undefined;
 }
 
 /** Get while this page is behind: the shell's download only where the app itself is behind, since a host that lags
@@ -91,7 +92,7 @@ function GetRelease({ latest, appBehind, failed }: { latest: ReleaseLatest; appB
   if (phase === "kept")
     return (
       <Button size="xs" variant="outline" data-k="get-release" onClick={() => answered(road.quitAndOpen())}>
-        {ABOUT_WORDS.quitAndOpen}
+        {road.updatesInPlace === true ? ABOUT_WORDS.restartToUpdate : ABOUT_WORDS.quitAndOpen}
       </Button>
     );
   const get = (): void => {
