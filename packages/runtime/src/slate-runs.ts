@@ -202,7 +202,8 @@ export interface SlateSecrets {
 
 export interface SlateRuns {
   /** The approval key: kind, text, env names and the expressions filling them, args and stdin expressions, on,
-   * cwd, stream, every and always. A changed value is the same key; a changed declaration is a new one. */
+   * cwd, stream, every, always, timeout, once, then, the slate files it reads and the hashes of the scripts it names.
+   * A changed value is the same key; a changed declaration is a new one. */
   key(decl: CmdRunDecl): string;
   start(req: RunStart): RunStartAnswer;
   /** The person's answer to a held run: "Run once" or "Always in this thread" starts it now. */
