@@ -66,4 +66,19 @@ describe.skipIf(renderSkipped !== undefined)("the slate's layout in Chromium", (
     }
     await page.close();
   });
+
+  it("spreads an empty table's header across its card, every column named, rather than bunching it at the left", async () => {
+    const page = await open("empty-table", 600);
+    const head = await page.evaluate(() => {
+      const table = document.querySelector('[data-slate-piece="errors"]')!;
+      const cells = [...table.querySelectorAll("[role=columnheader]")].map(c => c.getBoundingClientRect());
+      const card = table.querySelector("p")!.getBoundingClientRect();
+      return { names: [...table.querySelectorAll("[role=columnheader]")].map(c => c.textContent), lefts: cells.map(c => c.left - card.left), width: card.width };
+    });
+    expect(head.names).toEqual(["Time", "Status", "Method", "Path", "Duration (ms)", "Request"]);
+    // Six even columns: each starts about a sixth of the card further right than the last.
+    const steps = head.lefts.slice(1).map((left, i) => left - head.lefts[i]!);
+    for (const step of steps) expect(step).toBeGreaterThan(head.width / 6 - 20);
+    await page.close();
+  });
 });
