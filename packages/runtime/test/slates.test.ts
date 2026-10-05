@@ -347,6 +347,20 @@ describe("the slate v2 host", () => {
     await rt.slates.write({ text: TICKER.replace("every={60}", "every={120} always") }, asThread);
     const hidden = await held();
     expect([first, slower]).not.toContain(hidden);
+
+    // How long it may run and whether a start restarts it are on the sheet the person allowed, so either asks again.
+    await rt.slates.approve({ threadId, key: hidden, scope: "thread" });
+    await rt.slates.write({ text: TICKER.replace("every={60}", "every={120} always").replace("timeout={20}", "timeout={600}") }, asThread);
+    const longer = await held();
+    expect([first, slower, hidden]).not.toContain(longer);
+    await rt.slates.approve({ threadId, key: longer, scope: "thread" });
+    // A once run started while it runs is skipped, so the next write waits for this one to end.
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["tick"]).toMatchObject({ state: "done" });
+    }, { timeout: 10_000 });
+    await rt.slates.write({ text: TICKER.replace("every={60}", "every={120} always").replace("timeout={20}", "timeout={600} once") }, asThread);
+    expect([first, slower, hidden, longer]).not.toContain(await held());
     release();
   }, 30_000);
 
