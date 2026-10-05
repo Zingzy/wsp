@@ -2,7 +2,7 @@
 // The slate as text with its values filled in (10, "The sketch"), returned after every write and read so an agent
 // with no eyes knows what the person sees. Each piece type writes its own line; this file walks the tree, hides
 // what is hidden, tags each line with its id and type, lists the values, runs and problems, and caps the whole.
-import { evaluateSlateExpression, parseSlateFormat, resolveSlateProp, slateTruthy, type SlateEvalContext } from "./expr.js";
+import { evaluateSlateExpression, parseSlateFormat, resolveSlateProp, slateDependencies, slatePropDependencies, slateTruthy, type SlateEvalContext } from "./expr.js";
 import { isSlateIcon } from "./icons.js";
 import { SLATE_PIECES, slateHeldText, type SlatePieceModule, type SlatePropSpec, type SlateSketchView } from "./kit.js";
 import { SLATE_LIMITS } from "./limits.js";
@@ -121,6 +121,23 @@ function plotProblems(doc: SlateDoc, read: SlateEvalContext): SlateProblem[] {
   return out;
 }
 
+/** The fields a run's result fills; reading one before the run has ended reads null. */
+const RESULT_FIELDS: ReadonlySet<string> = new Set(["out", "err", "json", "exit", "lines", "ms", "endedAt", "cut", "text"]);
+
+/** The runs a piece reads a result of that have none yet, so a formula over them shows null as if it were real. */
+function unrunReads(doc: SlateDoc, values: SlateValues, piece: SlatePiece): string[] {
+  const paths = [...Object.values(piece.props ?? {}).flatMap(v => slatePropDependencies(v)), ...(piece.when !== undefined ? slateDependencies(piece.when) : [])];
+  const runs = new Set<string>();
+  for (const path of paths) {
+    const own = parseSlateOwnPath(path);
+    if (own === undefined || doc.runs[own.name] === undefined) continue;
+    const first = own.segs[0];
+    if (first !== undefined && !(typeof first === "string" && RESULT_FIELDS.has(first))) continue;
+    if ((values[own.name] as Partial<SlateRunRecord> | undefined)?.endedAt === undefined) runs.add(`$${own.name}`);
+  }
+  return [...runs];
+}
+
 /** The sketch: a header, one line per visible piece, then the values, runs and problems that matter. */
 export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: SlateSketchContext = {}): string {
   const version = ctx.version !== undefined ? ` v${ctx.version}` : "";
@@ -214,7 +231,9 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
       return;
     }
     const drawn = module.sketch(v);
-    const out = Array.isArray(drawn) ? drawn : [drawn];
+    const out = Array.isArray(drawn) ? [...drawn] : [drawn];
+    const unrun = unbound ? [] : unrunReads(doc, values, piece);
+    if (unrun.length > 0 && out[0] !== undefined && !/not (read|run) yet/.test(out[0])) out[0] = `${out[0]} (reads ${unrun.join(", ")}, not run yet)`.trimStart();
     const look = lookWords(piece, module.props, reads);
     const transparent = module.holdsChildren && out.every(l => l === "") && look.length === 0;
     if (!transparent) {

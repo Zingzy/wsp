@@ -5,7 +5,7 @@
 /// <reference path="./markdown.d.ts" />
 import text from "../../../skills/wsp/SKILL.md";
 import { THREAD_AGENTS, WSP_SKILL_NAME } from "@wsp/catalog";
-import { ANOTHER_AGENT_WORDS } from "@wsp/protocol";
+import { ANOTHER_AGENT_WORDS, BACKGROUND_WORK_WORDS, COORDINATOR_HANDOFF, NOTIFY_CALLER } from "@wsp/protocol";
 import { CLOUD_ON } from "./cloud.js";
 
 export const SKILL_NAME = WSP_SKILL_NAME;
@@ -53,12 +53,10 @@ export function skillFor(skill: string, cloud: boolean): string {
  * askers, and holding it would keep a second copy of the file for the host's whole life. */
 export const wspSkill = (): string => skillFor(text, CLOUD_ON);
 
-/** The section whose opening paragraph is the condensed walkthrough the instructions carry; the numbered steps and
- * the exact lines to watch for stay in the skill, which is too long to be a server's instructions. */
+/** The section that walks a person's setup, the numbered steps and the exact lines to watch for. */
 export const SETUP_HEADING = "## Setting a person up from nothing";
 
-/** The section the instructions carry whole, its opening paragraph and every rule line: what a machine can do at
- * once and what wastes it, which a caller holding only the tools has nowhere else to read. */
+/** The section of rules for running work: what a machine can do at once and what wastes it. */
 export const RULES_HEADING = "## Running work well";
 
 /** The verbs table an agent reads, and the section holding the one verb that blocks, which is a shell script's. A
@@ -66,36 +64,11 @@ export const RULES_HEADING = "## Running work well";
 export const VERBS_HEADING = "## Verbs and tools";
 export const SHELL_HEADING = "### For a shell script";
 
-/** What a caller holding only the tools cannot read off them: where the whole procedure lives, and that the setup
- * verbs are on the command line alone, so a caller with a shell should reach for that instead. */
-const BEYOND_THE_TOOLS =
-  "The steps, with the exact line to run and what to watch for after each, are in the wsp skill, which `wsp mcp install --agent <id>` writes into this agent's skills folder; when you have a shell prefer the `wsp` command line, since `wsp init` and `wsp up` are the command line's alone.";
-
-/** The lines from `from` up to the next blank line or heading, trimmed and joined as one paragraph. */
-function paragraph(lines: readonly string[], from: number): string {
-  const body: string[] = [];
-  for (let i = from; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (line.startsWith("#")) break;
-    if (line.trim() === "") {
-      if (body.length > 0) break;
-      continue;
-    }
-    body.push(line.trim());
-  }
-  return body.join(" ");
-}
-
-/** The `- ` lines of the section beginning at `from`, up to the next section. */
-function bullets(lines: readonly string[], from: number): string[] {
-  const body: string[] = [];
-  for (let i = from; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (line.startsWith("## ")) break;
-    if (line.startsWith("- ")) body.push(line);
-  }
-  return body;
-}
+/** What wsp is and where the rest of it lives, between the agent line and the rules: the setup walkthrough and the
+ * rules past these three are the skill's, since the whole of them was cut off by Claude Code and copied into every
+ * deferred tool's entry by Codex. */
+const ESSENTIALS =
+  "A project is a folder on one computer, and agents work on it as threads, each shown in the person's sidebar. Setting a person up, every verb and the rules for running work well are in the wsp skill, which `wsp mcp install --agent <id>` writes; read it before setting anyone up.";
 
 /** The agents a thread runs on, from the adapter registry, so the instructions promise no agent the host refuses. */
 export function agentsLine(agents: readonly string[]): string {
@@ -116,34 +89,14 @@ export const SLATE_WORDS = "This thread can own a slate, a live panel the person
 export const THREAD_SLATE_WORDS =
   "This session is a wsp thread, and it has a slate: a live panel shown here, beside this conversation, that the person sees while you work. Use it whenever they want to see, watch, monitor or keep an eye on something that changes (live data, traffic, metrics, a price, logs, a PR, progress, status), want a dashboard, or want something to press, fill in or tick off (a form, a checklist, a walkthrough), or want a flow, an architecture or a sequence laid out to look at (a diagram): call slate_catalog, then slate_write, and show it there. Build and read it with the slate tools, never wsp from a shell, which may be another install. Once the slate is written, a request to see something lands there. A run with every={60} refreshes the slate on a timer with no turns, so updates the person watches never stream into the chat, never poll in a loop and never point them to another window.";
 
-/** The MCP server's instructions: what another agent is, since it is the one fact an agent acts on before it has read
- * anything else and it has to land inside what the agent keeps, then the skill's opening paragraph, the setup
- * walkthrough's, the agents the host has adapters for, the line that points back at the skill and the command line,
- * and the rules for running work on a machine, one line each as the skill writes them. The frontmatter and the title
- * line are not part of it. */
-export function instructionsOf(skill: string, agents: readonly string[], scoped = false): string {
-  const lines = skill.split("\n");
-  let start = 0;
-  if (lines[0] === "---") {
-    start = lines.indexOf("---", 1) + 1;
-    if (start === 0) throw new Error("the skill's frontmatter never closes");
-  }
-  const title = lines.findIndex((line, at) => at >= start && line.startsWith("# "));
-  const opening = paragraph(lines, title === -1 ? start : title + 1);
-  if (opening === "") throw new Error("the skill has no opening paragraph before its first section");
-  const heading = lines.indexOf(SETUP_HEADING);
-  if (heading === -1) throw new Error(`the skill has no ${SETUP_HEADING} section`);
-  const walkthrough = paragraph(lines, heading + 1);
-  if (walkthrough === "") throw new Error(`${SETUP_HEADING} has no opening paragraph`);
-  const rules = lines.indexOf(RULES_HEADING);
-  if (rules === -1) throw new Error(`the skill has no ${RULES_HEADING} section`);
-  const lead = paragraph(lines, rules + 1);
-  const written = bullets(lines, rules + 1);
-  if (lead === "" || written.length === 0) throw new Error(`${RULES_HEADING} has no rules`);
-  const body = [[`${ANOTHER_AGENT_WORDS}.`, ...(scoped ? [] : [`${SLATE_WORDS}.`]), opening, walkthrough, agentsLine(agents), BEYOND_THE_TOOLS, lead].join(" "), ...written].join("\n");
+/** The MCP server's instructions, whole inside what Claude Code keeps: a thread's slate first, then what another agent
+ * is, since it is the one fact an agent acts on before it has read anything else, what wsp is and where the skill is,
+ * the agents the host has adapters for, and the two roads to a child's end with the background road. */
+export function instructionsOf(agents: readonly string[], scoped = false): string {
+  const body = [[`${ANOTHER_AGENT_WORDS}.`, ...(scoped ? [] : [`${SLATE_WORDS}.`]), ESSENTIALS, agentsLine(agents)].join(" "), ...[`${NOTIFY_CALLER}, so nothing is polled.`, `${COORDINATOR_HANDOFF}.`, `${BACKGROUND_WORK_WORDS}.`].map(rule => `- ${rule}`)].join("\n");
   return scoped ? `${THREAD_SLATE_WORDS}\n\n${body}` : body;
 }
 
 /** The MCP server's instructions, worked out when a server opens, for the same reason; a thread's own server opens
  * with its slate. */
-export const instructions = (scoped = false): string => instructionsOf(wspSkill(), THREAD_AGENTS, scoped);
+export const instructions = (scoped = false): string => instructionsOf(THREAD_AGENTS, scoped);

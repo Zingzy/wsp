@@ -42,6 +42,9 @@
     },
     "execution": {
       "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": false
     }
   },
   "cloudOn": {
@@ -87,6 +90,9 @@
     },
     "execution": {
       "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": false
     }
   }
 }
