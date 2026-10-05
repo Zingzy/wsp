@@ -92,6 +92,9 @@ describe("the wsp skill", () => {
   it("says once a slate is written a request to see lands there, the person's result stays there, and the slate's own code lives in its files", () => {
     expect(THREAD_SLATE_WORDS).toContain("Once the slate is written, a request to see something lands there.");
     expect(THREAD_SLATE_WORDS).toContain("Build and read it with the slate tools, never wsp from a shell, which may be another install.");
+    // Rulings 11 and 13: a one-off answer stays in chat, and the reply after a write is short and checked first.
+    expect(THREAD_SLATE_WORDS).toContain("A one-off answer, a comparison or an explanation, stays in chat unless they ask to see it.");
+    expect(THREAD_SLATE_WORDS).toContain("Read the sketch a write answers before saying it works, then reply briefly: what you built and what waits on the person.");
     const text = wspSkill();
     const section = text.slice(text.indexOf("### slate\n"), text.indexOf("\n## ", text.indexOf("### slate\n")));
     for (const words of [
