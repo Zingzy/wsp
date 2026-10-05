@@ -6,7 +6,8 @@ import { CLOUD_SETUP_WORDS, DEFAULT_THEME, HOSTNAME_KEPT, type GoldenManifest, t
 import { readProjectHome } from "../src/protocol/address.js";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
-import { GOLDEN_FRAMES_KEPT, useStore } from "../src/protocol/store.js";
+import { FRAME_MS, GOLDEN_FRAMES_KEPT, useStore } from "../src/protocol/store.js";
+import { deriveSidebarProjects } from "../src/adapt/workspaces.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
@@ -1284,5 +1285,58 @@ describe("the newest release in the store", () => {
     useStore.getState().bind({ ...api, releaseGet: async () => Promise.reject(new Error("unknown op release.get")) });
     await flush();
     expect(useStore.getState().release).toBeNull();
+  });
+});
+
+describe("a frame about one workspace", () => {
+  it("lands a burst as one store change and leaves every other workspace's row and threads the same objects", async () => {
+    const sessions: SessionView[] = [
+      { id: "s_a", workspaceId: "ws_a", harness: "claude", status: "completed", threadId: "thr_a", endedAt: 2_000 },
+      { id: "s_b", workspaceId: "ws_b", harness: "claude", status: "completed", threadId: "thr_b", endedAt: 2_000 },
+    ];
+    const { api, emit } = fakeApi([view("ws_a"), view("ws_b")], sessions);
+    useStore.getState().bind(api);
+    await flush();
+    await new Promise(r => setTimeout(r, FRAME_MS * 3));
+    const derive = () => deriveSidebarProjects(useStore.getState());
+    const before = derive();
+    expect(before.map(p => p.threads.length)).toEqual([1, 1]);
+
+    // Every value the store takes for ws_a, in order: a status row and a cost tick are each the whole entry, so the
+    // newest in a frame is the one that lands and an older one never lands after it.
+    const landed: [number | undefined, number | undefined][] = [];
+    const off = useStore.subscribe(s => landed.push([s.statuses["ws_a"]?.checkout?.changed, s.costs["ws_a"]?.accruedUsd]));
+    const base = { ...view("ws_a"), machineState: "running" as const, reach: { state: "reachable" as const }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0 };
+    // A poll's rows and the cost timer's ticks for one workspace, as the socket hands them over one frame at a time.
+    for (let i = 1; i <= 5; i++) {
+      emit({ type: "workspace.status", status: { ...base, checkout: { branch: "main", ahead: 0, behind: 0, changed: i, readAt: i } } });
+      emit({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0, awakeMs: i, accruedUsd: i, at: new Date(i).toISOString() });
+    }
+    await new Promise(r => setTimeout(r, FRAME_MS * 3));
+    off();
+    expect(landed).toEqual([[5, 5]]);
+
+    const after = derive();
+    const pick = (snapshots: typeof before, id: string) => snapshots.find(p => p.id === id)!;
+    expect(pick(after, "ws_b")).toBe(pick(before, "ws_b"));
+    expect(pick(after, "ws_b").threads[0]).toBe(pick(before, "ws_b").threads[0]);
+    // The row that changed is built again, and its threads, whose rows did not move, are the ones it had.
+    expect(pick(after, "ws_a")).not.toBe(pick(before, "ws_a"));
+    expect(pick(after, "ws_a").threads).toBe(pick(before, "ws_a").threads);
+  });
+});
+
+describe("a status written outside the event stream while a frame is held", () => {
+  it("lands after the rows the socket handed over before it, never under them", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    await new Promise(r => setTimeout(r, FRAME_MS * 3));
+    const base = { ...view("ws_a"), machineState: "running" as const, reach: { state: "reachable" as const }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0 };
+    emit({ type: "workspace.status", status: { ...base, name: "before the rename" } });
+    // A rename's reply, read after that row arrived and before its frame is over.
+    useStore.getState().applyWorkspace({ ...view("ws_a"), name: "renamed" });
+    await new Promise(r => setTimeout(r, FRAME_MS * 3));
+    expect(useStore.getState().statuses["ws_a"]!.name).toBe("renamed");
   });
 });
