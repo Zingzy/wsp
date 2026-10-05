@@ -379,7 +379,7 @@ describe("makeApi wrappers", () => {
       f["op"] === "places.setupLog"
         ? { id: f["id"], ok: true, lines: ["2026-10-04T10:00:00Z [clis] brew install gh"] }
         : f["op"] === "places.estimate"
-          ? { id: f["id"], ok: true, estimate: { neededBytes: 2048, freeBytes: 4096, unmeasured: 1 } }
+          ? { id: f["id"], ok: true, estimate: { neededBytes: 2048, keptBytes: 1024, freeBytes: 4096, unmeasured: 1 } }
           : { id: f["id"], ok: true, place: box };
     expect((await api.placesFollow!("p_jump", "builders")).recipe).toBe("builders");
     expect(lastSent()).toMatchObject({ op: "places.follow", placeId: "p_jump", recipe: "builders" });
@@ -387,7 +387,7 @@ describe("makeApi wrappers", () => {
     expect(lastSent()).toMatchObject({ op: "places.skip", placeId: "p_jump", row: "signins/codex" });
     expect(await api.placesSetupLog!("p_jump", "clis")).toEqual(["2026-10-04T10:00:00Z [clis] brew install gh"]);
     expect(lastSent()).toMatchObject({ op: "places.setupLog", placeId: "p_jump", step: "clis" });
-    expect(await api.placesEstimate!("p_jump", picks)).toEqual({ neededBytes: 2048, freeBytes: 4096, unmeasured: 1 });
+    expect(await api.placesEstimate!("p_jump", picks)).toEqual({ neededBytes: 2048, keptBytes: 1024, freeBytes: 4096, unmeasured: 1 });
     expect(lastSent()).toMatchObject({ op: "places.estimate", ref: "p_jump", choices: picks });
   });
 });

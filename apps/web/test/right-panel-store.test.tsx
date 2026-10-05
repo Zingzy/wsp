@@ -128,6 +128,13 @@ describe("rightPanelStore hydrate", () => {
     expect(state.activeSurfaceId).toBe("browser:new");
   });
 
+  it("drops the side question's tab, whose question lived in memory alone, and opens on the tab beside it", async () => {
+    await hydrate([{ id: "machine", kind: "machine" }, { id: "aside", kind: "aside" }], "aside");
+    const state = selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS);
+    expect(state.surfaces).toEqual([{ id: "machine", kind: "machine" }]);
+    expect(state.activeSurfaceId).toBe("machine");
+  });
+
   it("the tab strip renders after hydrating a surface of a kind this build no longer has", async () => {
     useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, selectedId: WS, sessions: {}, ready: true });
     clearNotices();

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { COMPILER_ROW, catalogEntry, sizeBytes } from "@wsp/catalog";
 import { RecipeFile } from "@wsp/protocol";
-import { cliBytes, estimatePicks, folderBytes, PICKS_SPARE_BYTES } from "../src/pick-sizes.js";
+import { cliBytes, estimatePicks, folderBytes } from "../src/pick-sizes.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -47,7 +47,7 @@ describe("what the picks weigh on a box", () => {
       plugins: { "lint@acme": {} },
     });
     const sized = estimatePicks(picks, home);
-    expect(sized.bytes).toBe(PICKS_SPARE_BYTES + size("claude") + size("gh") + size(COMPILER_ROW) + 100);
+    expect(sized.bytes).toBe(size("claude") + size("gh") + size(COMPILER_ROW) + 100);
     // The two CLIs no build measured and the plugin, whose size is its marketplace's.
     expect(sized.unmeasured).toBe(3);
   });

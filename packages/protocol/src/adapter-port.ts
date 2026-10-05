@@ -160,6 +160,10 @@ export interface AdapterAttachOptions {
   startedAt: number;
   model?: string;
   cwd?: string;
+  /** The message the turn opened with and the effort it ran at, off the row: a harness that hands the message over
+   * after its process starts gives it to a run re-opened before it went. */
+  prompt?: string;
+  effort?: string;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -201,6 +205,13 @@ export interface ExecStream {
   write(line: string): Promise<"written" | "gone">;
   /** Ends the stdin channel: the process reads EOF. Nothing after the stream ended. */
   closeInput(): void;
+  /** Holds one line beside the run and appends it to the channel once `after` settles, as a held seed is: a host that
+   * goes in between leaves it for the next one, whose attach hands it over. A rejection drops the line. Absent where
+   * runs die with their host, and a caller there writes the line itself once it is due. */
+  writeAfter?(line: string, after: Promise<void>): void;
+  /** On a run re-opened by attach, every line its channel had taken by then, a held line handed over included; absent
+   * on a launched run and on a road that cannot read the channel back. */
+  readonly taken?: readonly string[];
   readonly exited: Promise<number | null>;
   /** The signal that ended the run, by the name the computer running it spells, once `exited` has settled; absent
    * where it ended on its own and on a road that cannot tell, which is every run read off a machine's exit file.

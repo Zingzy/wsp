@@ -157,7 +157,7 @@ import {
   githubAddress,
   shellQuote,
 } from "@wsp/protocol";
-import { GITHUB_TOKEN_ENV, LinkBackend, unlandFiles, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, envInput, keyFingerprint, machineServerPort, newSetupRun, pathLine, plainPath, putFiles, serversOutLines, unmergeServers, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage, type SetupRun } from "@wsp/engine";
+import { GITHUB_TOKEN_ENV, LinkBackend, ownedFloorBytes, unlandFiles, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, envInput, keyFingerprint, machineServerPort, newSetupRun, pathLine, plainPath, putFiles, serversOutLines, unmergeServers, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage, type SetupRun } from "@wsp/engine";
 import { CATALOG_AGENTS, keyEnvOf, loginSignIn, mintsToken, sharedFileIn, sharedOn } from "@wsp/catalog";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
@@ -320,8 +320,7 @@ export interface PlaceProvisioner {
   /** What taking rows out of a computer's picks runs there, planned off the picks as they were. Absent, a row taken
    * out of a recipe stays where it is. */
   undo?(before: RecipeFile, removed: readonly { kind: RecipeKind; name: string }[], on: { home: string }): Promise<PlaceUndo[]>;
-  /** What some picks weigh on a box with the room it needs past them, read on this computer, and how many rows
-   * nobody measured. */
+  /** What some picks weigh on a box, read on this computer, and how many rows nobody measured. */
   estimate?(picks: RecipeFile): Promise<{ bytes: number; unmeasured: number }>;
 }
 
@@ -1441,21 +1440,27 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     let held = started;
     let ended = false;
     let writing: Promise<void> = Promise.resolve();
-    const applied = (): PlaceApplied => ({
-      hash,
-      at: new Date(clockNow()).toISOString(),
-      rows: [...new Map(rows.map(r => [r.id, r])).values()].map(r => {
-        const fix = r.outcome === "failed" && r.fix === undefined ? setupRowFix(r, record.name) : undefined;
-        return fix === undefined ? r : { ...r, fix };
-      }),
-      ...(resolved !== undefined ? { items: resolved.items } : {}),
-    });
+    const applied = (): PlaceApplied => {
+      // A sync holds the recipe it started from until its last step ended, so one cut partway still reads changes.
+      const from = sync !== undefined && !ended ? { hash: record.applied?.hash ?? "", items: record.applied?.items } : { hash, items: resolved?.items };
+      return {
+        hash: from.hash,
+        at: new Date(clockNow()).toISOString(),
+        rows: [...new Map(rows.map(r => [r.id, r])).values()].map(r => {
+          const fix = r.outcome === "failed" && r.fix === undefined ? setupRowFix(r, record.name) : undefined;
+          return fix === undefined ? r : { ...r, fix };
+        }),
+        ...(from.items !== undefined ? { items: from.items } : {}),
+      };
+    };
     const push = (next: PlaceSetup): void => {
       held = next;
       writing = writing.then(() => writeSetup(placeId, { setup: next, applied: applied() })).catch(() => undefined);
     };
     /** The steps running this moment, which every line's frame names. */
     const running = new Set<PlaceSetupStep>();
+    /** Whether any step started, so a sync that failed before one did put nothing on and still reads behind. */
+    let stepped = false;
     const line = (l: PlaceSetupLine): void => {
       if (l.state === "running") running.add(l.step);
       else running.delete(l.step);
@@ -1478,6 +1483,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
      * took. A step that throws is one failed row, unless the computer stopped answering, which the job waits out. */
     const step = async (name: PlaceSetupStep, work: () => Promise<PlaceProvisionRow[]>): Promise<{ rows: PlaceProvisionRow[]; failed: boolean } | undefined> => {
       if (done.has(name) || (sync !== undefined && !sync.steps.has(name))) return undefined;
+      stepped = true;
       const began = clockNow();
       line({ step: name, state: "running", startedAt: new Date(began).toISOString() });
       let got: PlaceProvisionRow[];
@@ -1818,9 +1824,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       await end();
     } catch (e) {
       // A computer that stopped answering leaves the setup running on its record, and a sync behind: its next link
-      // takes either up again.
-      if (e instanceof PlaceAbsentError) {
+      // takes either up again. A sync that failed before any step started put nothing on, so it is behind too.
+      if (e instanceof PlaceAbsentError || (sync !== undefined && !stepped)) {
         await writing;
+        if (!(e instanceof PlaceAbsentError)) log.write(firstLineOf(e));
         if (sync !== undefined) {
           await writeSetup(placeId, { sync: { ...sync.state, state: "behind" } });
           syncFrame({ placeId, sync: { ...sync.state, state: "behind" } });
@@ -2529,6 +2536,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         kept.set(record.id, record);
         if (record.backendFacts !== undefined && !backends.has(record.id)) backendFrom(record.id, record.backendFacts);
         holdBack(record);
+        // A sign-in a setup that ended left waiting had its login in the host that stopped, so nothing follows it
+        // now: it reads expired, and Retry asks for a fresh one. A running setup's waits run again as it resumes.
+        if (record.setup !== undefined && record.setup.state !== "running" && record.setup.waiting.some(w => w.state === "waiting"))
+          await change(record.id, now => (now.setup === undefined ? undefined : { ...now, setup: { ...now.setup, waiting: now.setup.waiting.map(w => ({ ...w, state: "expired" as const })) } }));
+        // A sync the stopped host was running puts nothing on now: it is behind until the computer dials back.
+        if (record.sync?.state === "running") await change(record.id, now => (now.sync?.state !== "running" ? undefined : { ...now, sync: { ...now.sync, state: "behind" } }));
       }
       // A setup left running resumes at its computer's next link (attach); an add the host stopped in the middle of
       // installing wsp either joined meanwhile, which is the join it was waiting on, or is taken back off that computer.
@@ -3186,9 +3199,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (weigh === undefined) throw new Error(NO_ESTIMATE_LINE);
       const pend = (await pendingRecords()).find(p => p.id === ref || p.address === ref || p.name === ref || p.placeId === ref);
       const placeId = pend?.placeId ?? (await records()).find(r => r.id === ref || r.name === ref)?.id;
-      const free = placeId === undefined ? undefined : (await recordOf(placeId))?.report.diskFreeBytes;
+      const disk = placeId === undefined ? undefined : (await recordOf(placeId))?.report;
       const sized = await weigh(choices);
-      return { neededBytes: sized.bytes, unmeasured: sized.unmeasured, ...(free !== undefined ? { freeBytes: free } : {}) };
+      // The install loop stops at the room it keeps free there, so the picks fit only above it.
+      return { neededBytes: sized.bytes, keptBytes: ownedFloorBytes(disk?.diskSizeBytes), unmeasured: sized.unmeasured, ...(disk?.diskFreeBytes !== undefined ? { freeBytes: disk.diskFreeBytes } : {}) };
     },
 
     async setupLog(placeId, step) {

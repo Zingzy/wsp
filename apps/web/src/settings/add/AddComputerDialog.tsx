@@ -196,13 +196,13 @@ function SummaryStep({ picks, box, place, here, recipeIcon }: { picks: RecipeFil
                 {...(estimate === null || estimate.unmeasured === 0 ? {} : { title: ADD_COMPUTER_WORDS.unmeasured(estimate.unmeasured) })}
                 className={cn("text-[13px] tabular-nums sm:text-right", short ? "text-destructive-foreground" : "text-muted-foreground")}
               >
-                {estimate === null ? `${fmtBytes(free!)} free` : free === undefined ? `${fmtBytes(estimate.neededBytes)} needed` : ADD_COMPUTER_WORDS.diskLine(fmtBytes(estimate.neededBytes), fmtBytes(free))}
+                {estimate === null ? `${fmtBytes(free!)} free` : ADD_COMPUTER_WORDS.diskLine(fmtBytes(estimate.neededBytes), fmtBytes(estimate.keptBytes), free === undefined ? undefined : fmtBytes(free))}
               </span>
             }
           />
         )}
       </Card>
-      {short ? <RefusalSlot k="disk-short" {...ADD_COMPUTER_WORDS.diskShort(box, fmtBytes(free!), fmtBytes(estimate!.neededBytes))} /> : null}
+      {short ? <RefusalSlot k="disk-short" {...ADD_COMPUTER_WORDS.diskShort(box, fmtBytes(free!), fmtBytes(estimate!.neededBytes), fmtBytes(estimate!.keptBytes))} /> : null}
       <Card id="save-recipe">
         <PickRow id="save" checked={saveAs.on} onCheckedChange={on => setSaveAs({ on })} glyph={<Glyph aria-hidden className={GLYPH} />} name="Save as a recipe" note="The next box starts from these picks.">
           {saveAs.on ? (

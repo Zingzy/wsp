@@ -8,6 +8,10 @@ import type { WorkspaceSize } from "./WorkspaceSize.js";
  */
 export type PlaceReport = { name: string, platform: Platform, arch: string, os: string, shape: WorkspaceSize, diskFreeBytes?: number, 
 /**
+ * The size of that same disk, off the same read: what a setup keeps free there is a share of it.
+ */
+diskSizeBytes?: number, 
+/**
  * Which Mac this is, as its registry names the product, else its model identifier; absent off a Mac.
  */
 model?: string, login: { [key in string]: string }, 

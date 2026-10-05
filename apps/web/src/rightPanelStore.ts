@@ -16,7 +16,7 @@ import { useBrowserTabs } from "./browser/tabs.js";
 import { HERE_KEY } from "./terminal/computer.js";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { PANE_KINDS, type RightPanelKind } from "./panes.js";
+import { PANE_KINDS, paneOf, type RightPanelKind } from "./panes.js";
 
 export type { RightPanelKind } from "./panes.js";
 
@@ -186,7 +186,7 @@ function usableSurface(raw: unknown): RightPanelSurface | null {
   if (!raw || typeof raw !== "object") return null;
   const surface = raw as Record<string, unknown>;
   const kind = surface["kind"];
-  if (!isKnownKind(kind)) return null;
+  if (!isKnownKind(kind) || paneOf(kind).unkept === true) return null;
   if (isSingleton(kind)) return singletonSurface(kind);
   switch (kind) {
     case "files": {

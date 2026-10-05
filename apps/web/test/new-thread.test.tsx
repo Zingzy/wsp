@@ -146,7 +146,7 @@ describe("New thread from Cmd+T", () => {
     await waitFor(() => expect(document.querySelector("[data-k=project-home]")).not.toBeNull());
     expect(useStore.getState()).toMatchObject({ selectedId: null, freshThread: false, projectHome: WSP.id });
     expect(heading().textContent).toBe("What should we build in wsp?");
-    expect(crumb()).toBe("New thread");
+    expect(crumb()).toBe("wsp/New thread");
     expect(document.body.textContent).not.toContain("What should we build in Plan batch 10");
     expect(palette()).toBeNull();
   });
@@ -236,7 +236,7 @@ describe("New thread from a workspace's own menu", () => {
     await mount();
     act(() => useStore.getState().newThread(PLANNER.id));
     await waitFor(() => expect(useStore.getState()).toMatchObject({ selectedId: PLANNER.id, freshThread: true, projectHome: null }));
-    await waitFor(() => expect(crumb()).toBe("New thread"));
+    await waitFor(() => expect(crumb()).toBe("wsp/New thread"));
     expect(heading().textContent).toBe("What should we build in wsp?");
     expect(document.querySelector('[data-composer-picker="project"]')).toBeNull();
   });

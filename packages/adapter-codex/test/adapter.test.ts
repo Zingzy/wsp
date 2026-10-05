@@ -231,6 +231,22 @@ describe("CodexAdapter over codex app-server", () => {
     expect(launch.wires[0]!.closed).toBe(true);
   });
 
+  it("takes its prompt late: the server starts and opens the thread at once, and the turn goes once the prompt is due", async () => {
+    // The launch's snapshot of the folder is what the prompt waits on, and it took 0.46 to 1.6 s on a one-file repo
+    // (measured 2026-10-05); before the server boots in that window, every send paid it in full first.
+    const launch = launcher(server(fixtureLines("app-server-turn")));
+    const adapter = adapterOver(launch);
+    expect(adapter.waitsForPrompt).toBe(true);
+    let due!: () => void;
+    const session = adapter.start({ prompt: "list the repo", promptAfter: new Promise<void>(r => (due = r)), onEvent: () => {} });
+    await until(() => launch.wires[0]!.written.some(m => m.method === "thread/start"));
+    await new Promise(r => setTimeout(r, 5));
+    expect(launch.wires[0]!.written.some(m => m.method === "turn/start")).toBe(false);
+    due();
+    expect((await session.finished).status).toBe("completed");
+    expect(launch.wires[0]!.written.find(m => m.method === "turn/start")!.params).toMatchObject({ threadId: RECORDED_THREAD, input: [{ type: "text", text: "list the repo" }] });
+  });
+
   it("reads a recorded turn: session.start, the CLI's warning as a note, each item as deltas, the approval, turn.done and session.end", async () => {
     const launch = launcher(server(fixtureLines("app-server-turn")));
     const { events, onEvent } = collect();
@@ -647,6 +663,19 @@ describe("interrupt", () => {
     expect(await session.finished).toEqual({ status: "interrupted" });
     expect(launch.wires[0]!.written.some(m => m.method === "turn/interrupt")).toBe(false);
     expect(launch.wires[0]!.order).toEqual(["teardown", "kill"]);
+  });
+
+  it("a stop before the prompt was handed over sends no turn, then or once the prompt is due", async () => {
+    const launch = launcher(server(fixtureLines("app-server-turn")));
+    const { events, onEvent } = collect();
+    let due!: () => void;
+    const session = adapterOver(launch, { graceMs: 15 }).start({ prompt: "x", promptAfter: new Promise<void>(r => (due = r)), onEvent });
+    await until(() => events.some(e => e.type === "session.start"));
+    await session.interrupt();
+    due();
+    expect(await session.finished).toEqual({ status: "interrupted" });
+    await new Promise(r => setTimeout(r, 5));
+    expect(launch.wires[0]!.written.some(m => m.method === "turn/start")).toBe(false);
   });
 
   it("an interrupt after the process is gone sends nothing and ends nothing", async () => {
@@ -1077,7 +1106,10 @@ describe("a side question on a Codex thread", () => {
       const w = wire({
         ...opts,
         onWrite: (message, self) => {
-          if (message.method === "thread/fork")
+          // 0.155.1 refuses an ephemeral fork that would hand back the thread's whole history, in these words.
+          if (message.method === "thread/fork" && (message.params as Json).excludeTurns !== true)
+            self.push('{"id":"wsp-initialize","result":{}}', '{"error":{"code":-32600,"message":"ephemeral paginated thread/fork requires `excludeTurns: true`"},"id":"wsp-thread"}');
+          else if (message.method === "thread/fork")
             self.push('{"id":"wsp-initialize","result":{}}', `{"id":"wsp-thread","result":{"thread":{"id":"${FORK}","ephemeral":true,"forkedFromId":"${THREAD_ID}"},"model":"gpt-5.6-sol"}}`);
           if (message.method === "turn/start") onTurn(self);
         },
