@@ -262,7 +262,13 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
     type: "bars", level: "core", purpose: "Categories compared as rows of name, track and figure; never a series over time.", holdsChildren: false, repeating: true,
     props: { label: str(req), items: { type: "list", binds: "yes", required: true }, key: rowKey(), name: { type: "string", binds: "item", required: true }, value: { type: "number", binds: "item", required: true }, tone: { type: SLATE_TONES, binds: "item" }, max: num(), format: enm(["percent", "value", "none"], "value") },
     items: {}, events: [],
-    sketch: v => [shown(v.prop("label")), ...rows(v, (item, i) => { const r = v.row({ name: v.raw("name") ?? null, value: v.raw("value") ?? null }, item, i); const t = v.row({ tone: v.raw("tone") ?? null }, item, i); return `  ${shown(r.name)}  ${bar(r.value ?? null, v.prop("max") ?? 100)} ${figure(String(v.prop("format") ?? "value"), r.value, v.prop("max"))}${marks(t)}`; }).slice(0, 5)],
+    sketch: v => {
+      const items = v.prop("items");
+      // As the panel draws it: with no max, the longest row fills its track.
+      const values = Array.isArray(items) ? items.map((item, i) => v.row({ value: v.raw("value") ?? null }, item, i).value).filter(isNum) : [];
+      const max = v.prop("max") ?? Math.max(0, ...values);
+      return [shown(v.prop("label")), ...rows(v, (item, i) => { const r = v.row({ name: v.raw("name") ?? null, value: v.raw("value") ?? null }, item, i); const t = v.row({ tone: v.raw("tone") ?? null }, item, i); return `  ${shown(r.name)}  ${bar(r.value ?? null, max)} ${figure(String(v.prop("format") ?? "value"), r.value, max)}${marks(t)}`; })];
+    },
     fallback: "table", example: `<bars label="Busiest" items={processes.list | take(5)} name={item.name} value={item.cpu} />`,
   },
   chart: {
@@ -335,7 +341,13 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
     props: { layout: enm(["line", "grid"], "line") },
     items: { fact: { prop: "facts", min: 1, max: 12, fields: { label: str(req), value: { type: "text", binds: "yes", required: true }, tone: tone(), emphasis: { type: EMPHASIS, binds: "yes" }, mono: flag(), icon: icon() } } },
     events: [],
-    sketch: v => present(v, asList(v.raw("facts"))).map((f, i) => v.row(f, null, i)).filter(f => f.value !== null && f.value !== undefined && f.value !== "").map(f => `${shown(f.label)}: ${shown(f.value)}${marks(f)}`).join("  "),
+    sketch: v => {
+      const all = present(v, asList(v.raw("facts"))).map((f, i) => v.row(f, null, i));
+      const empty = (f: Record<string, SlateJson | undefined>): boolean => f.value === null || f.value === undefined || f.value === "";
+      // The panel leaves out a fact with no value; the sketch says which, so a missing line reads as empty, not lost.
+      const left = all.filter(empty).map(f => shown(f.label));
+      return [...all.filter(f => !empty(f)).map(f => `${shown(f.label)}: ${shown(f.value)}${marks(f)}`), ...(left.length > 0 && !v.unbound ? [`(no value yet, not shown: ${left.join(", ")})`] : [])].join("  ");
+    },
     fallback: "text lines", example: `<facts><fact label="State" value={pr.word} /><fact label="Review" value={word(pr.review)} /></facts>`,
   },
   data: {

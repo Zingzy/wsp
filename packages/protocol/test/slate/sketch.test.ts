@@ -15,6 +15,20 @@ describe("the sketch", () => {
     expect(s.split("\n").every(l => l.length <= 100)).toBe(true);
   });
 
+  it("says which facts the panel leaves out for having no value", () => {
+    const d = parseSlate(`<slate><value name="v" start={null} /><facts id="f"><fact label="Health" value="ok" /><fact label="Version" value={$v} /></facts></slate>`).document!;
+    expect(sketchSlate(d, { v: null }, { version: 1, now })).toContain("Health: ok  (no value yet, not shown: Version)  [f facts]");
+  });
+
+  it("draws bars to the panel's scale, the longest row full with no max, and says how many rows it left out", () => {
+    const d = parseSlate(`<slate><column><bars id="hits" label="Hits" items={$rows} name={item.n} value={item.v} /></column><value name="rows" start={[]} /></slate>`).document!;
+    const many = [["CA", 284], ["CN", 102], ["US", 71], ["DE", 40], ["FR", 30], ["IN", 20], ["JP", 10], ["BR", 5], ["MX", 2]].map(([n, v]) => ({ n, v }));
+    const s = sketchSlate(d, { rows: many }, { version: 1, now });
+    expect(s).toContain("  CA  [##########] 284");
+    expect(s).toContain("  CN  [####......] 102");
+    expect(s).toContain("and 1 more rows");
+  });
+
   it("marks a piece that reads a run's result before the run has one, and not one that reads its state", () => {
     const d = parseSlate(`<slate>
   <run name="market" cmd="echo '{}'" />
