@@ -19,6 +19,7 @@ export const SLATE_LIMITS = {
   timerFloorS: 10,
   timeoutDefaultS: 60,
   timeoutMaxS: 600,
+  streamLines: 500,
   reactionSendsPerMinute: 1,
   exprChars: 500,
   exprDepth: 16,
@@ -31,12 +32,16 @@ export const SLATE_LIMITS = {
   facts: 12,
   rowActions: 3,
   errorsPerPass: 20,
+  piecesNamed: 20,
   sketchColumns: 100,
   sketchPieceLines: 40,
   sketchRows: 8,
   sketchValueChars: 80,
   sketchTokens: 2_000,
   printColumns: 120,
-  catalogIndexTokens: 900,
+  catalogIndexTokens: 1_450,
   catalogEntryTokens: 200,
 } as const;
+
+/** A text's size as the limits count it: UTF-8 bytes, as the host stores and sends it. */
+export const slateBytes = (text: string): number => new TextEncoder().encode(text).length;

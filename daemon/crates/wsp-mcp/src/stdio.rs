@@ -93,7 +93,7 @@ fn take(line: &[u8], host: &Arc<Host>, answer: &mpsc::UnboundedSender<String>, c
             let _ = answer.send(result(&id, "{}"));
         }
         "tools/list" => {
-            let listed: Vec<String> = tools::listed(host.cloud(), host.args().guest).map(compact).collect();
+            let listed: Vec<String> = tools::listed(host.cloud(), host.args().guest, host.args().no_slate).map(compact).collect();
             let _ = answer.send(result(&id, &format!(r#"{{"tools":[{}]}}"#, listed.join(","))));
         }
         "tools/call" => {
@@ -136,7 +136,7 @@ fn greeting(params: Option<&Value>, cloud: bool, scoped: bool, no_slate: bool) -
 }
 
 async fn called(host: Arc<Host>, asked: CallParams) -> String {
-    let Some((tool, entry)) = tools::named(&asked.name, host.cloud(), host.args().guest) else {
+    let Some((tool, entry)) = tools::named(&asked.name, host.cloud(), host.args().guest, host.args().no_slate) else {
         return refused_text(&format!("MCP error -32602: Tool {} not found", asked.name));
     };
     let arguments = match refused_before_call(tool.name, entry, asked.arguments) {
@@ -249,7 +249,6 @@ mod tests {
         let server = record::server();
         for cloud in [false, true] {
             assert!(!said(cloud).to_lowercase().contains("slate"));
-            assert!(server.instructions.cloud_off.contains("slate"));
         }
         assert_eq!(said(false), server.instructions.scoped_no_slate_cloud_off);
         assert_eq!(said(true), server.instructions.scoped_no_slate_cloud_on);

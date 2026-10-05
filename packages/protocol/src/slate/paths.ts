@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The slate's own values read and written by one path form, "$name[.field|[index]]*", the same in a binding, a
 // step, a patch, the tools and the batch.
+import { SLATE_LIMITS } from "./limits.js";
 import type { SlateJson, SlateOwnPath, SlateValues } from "./types.js";
 
 const SEGMENT = /^(?:\.([a-zA-Z_][a-zA-Z0-9_]*)|\[(-?\d+)\])/;
 const UNSAFE = new Set(["__proto__", "constructor", "prototype"]);
+
+/** A table looked up by the agent's words, with no prototype, so constructor or toString names nothing in it. */
+export const slateTable = <T>(entries: Record<string, T>): Record<string, T> => Object.assign(Object.create(null) as Record<string, T>, entries);
 
 /** The name and the segments after it, or undefined when the text is not an own path. */
 export function parseSlateOwnPath(path: SlateOwnPath): { name: string; segs: (string | number)[] } | undefined {
@@ -21,8 +25,11 @@ export function parseSlateOwnPath(path: SlateOwnPath): { name: string; segs: (st
   return { name: m[1]!, segs };
 }
 
-export const slateOwnPathText = (name: string, segs: readonly (string | number)[]): string =>
-  `$${name}${segs.map(s => (typeof s === "number" ? `[${s}]` : `.${s}`)).join("")}`;
+/** The name of a bare own path, "$name" with no fields, or undefined. */
+export function slateOwnName(text: string): string | undefined {
+  const p = parseSlateOwnPath(text.trim());
+  return p !== undefined && p.segs.length === 0 ? p.name : undefined;
+}
 
 /** One step into a value: a record's own field, or a list's item counting back from the end for a negative index. */
 export function slateStep(value: SlateJson | undefined, seg: string | number): SlateJson | undefined {
@@ -44,7 +51,7 @@ export function getSlateValue(values: SlateValues, path: SlateOwnPath): SlateJso
 }
 
 /** A copy of values with value at path, or undefined when the path is not an own path or steps through a scalar.
- * Missing records on the way are made; a list index past the end pads with null. */
+ * Missing records on the way are made; a list index past the end pads with null, up to the list cap. */
 export function setSlateValue(values: SlateValues, path: SlateOwnPath, value: SlateJson): SlateValues | undefined {
   const p = parseSlateOwnPath(path);
   if (p === undefined || UNSAFE.has(p.name) || p.segs.some(s => typeof s === "string" && UNSAFE.has(s))) return undefined;
@@ -55,7 +62,7 @@ export function setSlateValue(values: SlateValues, path: SlateOwnPath, value: Sl
       const list = Array.isArray(at) ? [...at] : at === undefined || at === null ? [] : undefined;
       if (list === undefined) return undefined;
       const index = seg < 0 ? list.length + seg : seg;
-      if (index < 0) return undefined;
+      if (index < 0 || index >= SLATE_LIMITS.listItems) return undefined;
       const next = write(list[index], i + 1);
       if (next === undefined) return undefined;
       while (list.length < index) list.push(null);

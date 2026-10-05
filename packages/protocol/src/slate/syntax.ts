@@ -3,9 +3,10 @@
 // stored document and to patch ops; and the printer back. The compiler only builds the shape; every rule about
 // meaning is the validator's, which runs on the compiled document so the JSON form and a patched result are held
 // to the same checks. Lines ride beside the document so each problem names the line of the attribute it is on.
-import { parseSlateExpression, slatePathText } from "./expr.js";
+import { closingBrace, parseSlateExpression, parseSlateFormat, slatePathText } from "./expr.js";
 import { SLATE_ITEM_KINDS, SLATE_PIECES, type SlateItemSpec } from "./kit.js";
-import { SLATE_LIMITS } from "./limits.js";
+import { SLATE_LIMITS, slateBytes } from "./limits.js";
+import { parseSlateOwnPath, slateOwnName } from "./paths.js";
 import { nearest, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
 import { SLATE_STEPS } from "./steps.js";
 import { validateDocument, type SlateLines } from "./validate.js";
@@ -18,20 +19,39 @@ import {
 // ---- reading elements ----
 
 interface Attr { name: string; kind: "bare" | "string" | "braced"; value: string; line: number }
-interface Hole { expr: string; line: number }
+interface Hole { expr: string }
 interface El { tag: string; attrs: Attr[]; children: El[]; text?: (string | Hole)[]; raw?: string; line: number }
 
 class Fatal extends Error {
   constructor(readonly code: SlateCode, message: string, readonly line: number, readonly fix?: string) { super(message); }
 }
 
+/** An HTML entity, which nothing in a slate decodes. */
+const HTML_ENTITY = /&(?:[A-Za-z]+|#\d+|#x[0-9A-Fa-f]+);/;
+
 const DECLARATIONS = new Set(["value", "secret", "derived", "run", "when"]);
 const PATCH_TAGS = new Set(["props", "add", "remove", "move", "clear", "undo"]);
 
+const TAG_NAME = /[a-zA-Z][a-zA-Z0-9-]*/y;
+const ATTR_NAME = /[A-Za-z][A-Za-z0-9_-]*/y;
+const CLOSING_TAG = /<\/([a-zA-Z][a-zA-Z0-9-]*)\s*>/y;
+
+/** Nesting the reader follows before it stops; the checker refuses anything past SLATE_LIMITS.depth with its own words. */
+const READ_DEPTH = SLATE_LIMITS.depth + 10;
+
 class Reader {
   private i = 0;
-  constructor(private readonly src: string) {}
-  line(at = this.i): number { let n = 1; for (let j = 0; j < at && j < this.src.length; j++) if (this.src[j] === "\n") n++; return n; }
+  private readonly newlines: number[] = [];
+  constructor(private readonly src: string) {
+    for (let j = src.indexOf("\n"); j >= 0; j = src.indexOf("\n", j + 1)) this.newlines.push(j);
+  }
+  line(at = this.i): number {
+    let lo = 0;
+    let hi = this.newlines.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (this.newlines[mid]! < at) lo = mid + 1; else hi = mid; }
+    return lo + 1;
+  }
+  private match(re: RegExp): RegExpExecArray | null { re.lastIndex = this.i; return re.exec(this.src); }
   private peek(n = 0): string | undefined { return this.src[this.i + n]; }
   private starts(s: string): boolean { return this.src.startsWith(s, this.i); }
   private ws(): void { while (this.i < this.src.length && /\s/.test(this.src[this.i]!)) this.i++; }
@@ -39,6 +59,8 @@ class Reader {
 
   /** Every top-level element: one <slate> for a document, any number for a patch. */
   elements(): El[] {
+    const most = SLATE_LIMITS.documentBytes + SLATE_LIMITS.filesBytes;
+    if (this.src.length > most || slateBytes(this.src) > most) throw new Fatal("D208", `the text is over ${most / 1024} KB, the most a slate and its files hold; write less, or patch it in parts`, 1);
     const out: El[] = [];
     for (;;) {
       this.ws();
@@ -47,7 +69,7 @@ class Reader {
       if (this.i >= this.src.length) break;
       if (this.peek() !== "<" && out.length === 0 && (this.peek() === "{" || this.peek() === "[")) this.fail("this is JSON, and a slate is JSX-like text that starts with <slate>; slate_catalog shows it", `<slate title="Gold"><number label="Spot" value={$spot.json.usd} unit="USD" /></slate>`);
       if (this.peek() !== "<") this.fail(`expected an element at line ${this.line()}, found text`);
-      out.push(this.element());
+      out.push(this.element(1));
     }
     return out;
   }
@@ -58,10 +80,11 @@ class Reader {
       break;
     }
   }
-  private element(): El {
+  private element(depth: number): El {
     const line = this.line();
+    if (depth > READ_DEPTH) throw new Fatal("D206", `elements nest more than ${SLATE_LIMITS.depth} deep at line ${line}; flatten the layout`, line);
     this.i++;
-    const tag = /^[a-zA-Z][a-zA-Z0-9-]*/.exec(this.src.slice(this.i));
+    const tag = this.match(TAG_NAME);
     if (tag === null) this.fail(`cannot read a tag name at line ${line}`);
     const name = tag[0];
     this.i += name.length;
@@ -71,7 +94,7 @@ class Reader {
       if (this.starts("/>")) { this.i += 2; return { tag: name, attrs, children: [], line }; }
       if (this.peek() === ">") { this.i++; break; }
       if (this.i >= this.src.length) this.fail(`<${name}> at line ${line} is not closed; write <${name} ... /> or </${name}>`);
-      const an = /^[A-Za-z][A-Za-z0-9_-]*/.exec(this.src.slice(this.i));
+      const an = this.match(ATTR_NAME);
       if (an === null) this.fail(`cannot read an attribute of <${name}> at line ${this.line()}; write <${name} prop="literal" prop={formula} />`);
       const aline = this.line();
       this.i += an[0].length;
@@ -85,7 +108,7 @@ class Reader {
         if (end < 0) this.fail(`the string for ${an[0]} at line ${aline} never closes`);
         const raw = this.src.slice(this.i + 1, end);
         if (raw.endsWith("\\")) this.fail(`attribute strings take no escapes (${an[0]} at line ${aline}): a backslash does not hide a ${q} inside ${q}...${q}`, q === '"' ? `${an[0]}='echo "hi"', single quotes outside the double ones; with both quotes inside, the block form <run name="x">{\`...\`}</run>` : `${an[0]}="echo 'hi'", double quotes outside the single ones; with both quotes inside, the block form <run name="x">{\`...\`}</run>`);
-        const entity = /&(?:[A-Za-z]+|#\d+|#x[0-9A-Fa-f]+);/.exec(raw);
+        const entity = HTML_ENTITY.exec(raw);
         if (entity !== null) {
           // Nothing decodes an entity here: &quot; reaches a command as the five letters, and bash runs "quot".
           const quote = /^&(?:quot|apos|#34|#39|#x22|#x27);$/.test(entity[0]);
@@ -117,18 +140,17 @@ class Reader {
     for (;;) {
       if (this.i >= this.src.length) this.fail(`<${name}> at line ${line} is not closed; write <${name} ... /> or </${name}>`);
       if (this.starts("</")) {
-        const m = /^<\/([a-zA-Z][a-zA-Z0-9-]*)\s*>/.exec(this.src.slice(this.i));
+        const m = this.match(CLOSING_TAG);
         if (m === null) this.fail(`cannot read the closing tag at line ${this.line()}`);
         if (m[1] !== name) this.fail(`</${m[1]}> at line ${this.line()} closes <${name}> opened at line ${line}; expected </${name}>`, `</${name}>`);
         this.i += m[0].length;
         break;
       }
       if (this.starts("<!--") || this.starts("{/*")) { this.comments(); continue; }
-      if (this.peek() === "<") { children.push(this.element()); continue; }
+      if (this.peek() === "<") { children.push(this.element(depth + 1)); continue; }
       if (this.peek() === "{") {
-        const hl = this.line();
         const end = this.balanced(this.i);
-        text.push({ expr: this.src.slice(this.i + 1, end), line: hl });
+        text.push({ expr: this.src.slice(this.i + 1, end) });
         this.i = end + 1;
         continue;
       }
@@ -142,17 +164,11 @@ class Reader {
   }
   /** The index of the } that closes the { at i, with strings, templates and nested braces skipped. */
   private balanced(i: number): number {
-    let depth = 0;
-    let quote: string | undefined;
-    for (let j = i; j < this.src.length; j++) {
-      const c = this.src[j]!;
-      if (quote !== undefined) { if (c === "\\") j++; else if (c === quote) quote = undefined; }
-      else if (c === "'" || c === '"' || c === "`") quote = c;
-      else if (c === "{") depth++;
-      else if (c === "}" && --depth === 0) return j;
-    }
-    throw new Fatal("P100", `a { at line ${this.line(i)} never closes`, this.line(i));
+    const end = closingBrace(this.src, i + 1);
+    if (end < 0) throw new Fatal("P100", `a { at line ${this.line(i)} never closes`, this.line(i));
+    return end;
   }
+
 }
 
 function dedent(text: string): string {
@@ -166,10 +182,10 @@ function dedent(text: string): string {
 /** A text child's literal run as stored: runs of spaces and tabs read as one, indentation around a newline goes,
  * newlines stay. The whole child is trimmed afterwards. */
 const normalizeRun = (s: string): string => s.replace(/[ \t]+/g, " ").replace(/ ?\n ?/g, "\n").replace(/\n{3,}/g, "\n\n");
-export const slateTextChildForm = (s: string): string => normalizeRun(s).replace(/^\s+|\s+$/g, "");
+const slateTextChildForm = (s: string): string => normalizeRun(s).replace(/^\s+|\s+$/g, "");
 
 /** Splits text at top-level commas, honouring quotes, braces, brackets and parentheses. */
-export function splitTop(text: string): string[] {
+function splitTop(text: string): string[] {
   const out: string[] = [];
   let depth = 0;
   let quote: string | undefined;
@@ -188,7 +204,7 @@ export function splitTop(text: string): string[] {
 }
 
 /** A JSON-ish literal: strings in either quote, numbers, true, false, null, lists and records with bare keys. */
-export function parseSlateLiteral(text: string): SlateJson {
+function parseSlateLiteral(text: string): SlateJson {
   let i = 0;
   const ws = (): void => { while (/\s/.test(text[i] ?? "")) i++; };
   const value = (): SlateJson => {
@@ -260,7 +276,6 @@ function seconds(a: Attr): number {
 
 class Compiler {
   readonly errors: SlateProblem[] = [];
-  readonly warnings: SlateProblem[] = [];
   readonly lines: SlateLines = new Map();
   readonly doc: SlateDoc = { schema: 2, root: "", values: {}, derived: {}, runs: {}, reactions: [], pieces: {} };
   private readonly minted = new Map<string, number>();
@@ -291,6 +306,7 @@ class Compiler {
   document(el: El): void {
     for (const a of el.attrs) {
       if (a.name === "title" && a.kind === "string") this.doc.title = a.value;
+      else if (a.name === "title" && a.kind === "braced" && stringLiteral(a.value) !== undefined) this.doc.title = stringLiteral(a.value);
       else if (a.name === "title") this.error("T303", "title is a literal string: <slate title=\"...\">", a.line);
       else this.error("T302", `<slate> takes title alone, not ${a.name}`, a.line, { fix: "title" });
     }
@@ -476,9 +492,9 @@ class Compiler {
       }
       on = { change: paths };
     } else {
-      const p = done!.kind === "braced" ? /^\s*\$([a-zA-Z_][a-zA-Z0-9_]*)\s*$/.exec(done!.value) : null;
-      if (p === null) { this.error("K702", "done names a run: done={$check}", done!.line, { piece: key }); return; }
-      on = { done: p[1]! };
+      const run = done!.kind === "braced" ? slateOwnName(done!.value) : undefined;
+      if (run === undefined) { this.error("K702", "done names a run: done={$check}", done!.line, { piece: key }); return; }
+      on = { done: run };
     }
     this.lines.set(`${key}.do`, doAttr.line);
     const steps = this.steps(doAttr, key);
@@ -509,7 +525,7 @@ class Compiler {
       }
       const args = splitTop(m[2]!).map(s => s.trim());
       const bad = (message: string, fix?: string): void => this.error("A601", `${kind}: ${message}`, a.line, { ...at, fix });
-      const own = (s: string | undefined): string | undefined => (s !== undefined && /^\$[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*|\[-?\d+\])*$/.test(s) ? s : undefined);
+      const own = (s: string | undefined): string | undefined => (s !== undefined && parseSlateOwnPath(s) !== undefined ? s : undefined);
       switch (kind) {
         case "set": {
           const path = own(args[0]);
@@ -524,9 +540,9 @@ class Compiler {
           break;
         }
         case "start": case "cancel": {
-          const r = /^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(args[0] ?? "");
-          if (r === null || args.length !== 1) { bad(`${kind} names a run: ${kind}($check)`); break; }
-          out.push({ do: kind, run: r[1]! });
+          const run = slateOwnName(args[0] ?? "");
+          if (run === undefined || args.length !== 1) { bad(`${kind} names a run: ${kind}($check)`); break; }
+          out.push({ do: kind, run });
           break;
         }
         case "send": case "steer": case "queue": case "fill": {
@@ -558,7 +574,7 @@ class Compiler {
     return out;
   }
 
-  piece(el: El, depth = 1): string | undefined {
+  piece(el: El): string | undefined {
     if (DECLARATIONS.has(el.tag) || isFileDecl(el)) { this.error("P100", `<${el.tag}> is a declaration and goes directly under <slate>`, el.line); return undefined; }
     if ((SLATE_ITEM_KINDS as readonly string[]).includes(el.tag)) { this.error("T314", `<${el.tag}> is an item and goes inside the piece that takes it`, el.line); return undefined; }
     const spec = SLATE_PIECES[el.tag];
@@ -614,7 +630,7 @@ class Compiler {
           props[a.name] = true;
           return;
         }
-        if (spec?.props[a.name]?.type === "path" && a.kind === "braced" && /^\s*\$[A-Za-z_][A-Za-z0-9_]*\s*$/.test(a.value)) { props[a.name] = a.value.trim(); return; }
+        if (spec?.props[a.name]?.type === "path" && a.kind === "braced" && slateOwnName(a.value) !== undefined) { props[a.name] = a.value.trim(); return; }
         props[a.name] = this.value(a);
       });
     }
@@ -639,7 +655,7 @@ class Compiler {
         list.push(this.item(ch, itemSpec, id, `${itemSpec.prop}[${list.length}]`));
         continue;
       }
-      const child = this.piece(ch, depth + 1);
+      const child = this.piece(ch);
       if (child !== undefined) children.push(child);
     }
     if (Object.keys(props).length > 0) piece.props = props;
@@ -693,7 +709,7 @@ class Compiler {
     const { ast } = parseSlateExpression(t);
     if (ast?.k === "lit") return ast.v;
     if (ast?.k === "neg" && ast.arg.k === "lit" && typeof ast.arg.v === "number") return -ast.arg.v;
-    if (ast?.k === "tpl") return { format: t.slice(1, -1) };
+    if (ast?.k === "tpl") return { format: t.slice(1, -1).replace(/\\`/g, "`") };
     return { bind: t };
   }
 
@@ -701,12 +717,14 @@ class Compiler {
     let format = "";
     let holes = 0;
     for (const p of parts) {
-      if (typeof p === "string") format += normalizeRun(p).replace(/\$\{/g, "$${");
+      if (typeof p === "string") format += normalizeRun(p).replace(/\$\{/g, () => "$${");
       else {
         const e = p.expr.trim();
         if (e.startsWith("/*") && e.endsWith("*/")) continue;
         const lit = stringLiteral(e);
-        if (lit !== undefined) { format += lit.replace(/\$\{/g, "$${"); continue; }
+        if (lit !== undefined) { format += lit.replace(/\$\{/g, () => "$${"); continue; }
+        // A $ just before ${ would read as the $${ escape and print the hole as text.
+        if (format.endsWith("$")) format = `${format.slice(0, -1)}\${'$'}`;
         format += `\${${e}}`;
         holes++;
       }
@@ -789,7 +807,7 @@ class Compiler {
         case "add": {
           if (attr("under") === undefined) { this.error("P105", "<add> takes under=\"<id>\"", el.line); continue; }
           const before = new Set(Object.keys(this.doc.pieces));
-          const order = el.children.map(ch => this.piece(ch, 2)).filter((x): x is string => x !== undefined);
+          const order = el.children.map(ch => this.piece(ch)).filter((x): x is string => x !== undefined);
           const pieces = Object.fromEntries(Object.entries(this.doc.pieces).filter(([k]) => !before.has(k)));
           const n = at();
           ops.push({ op: "add", under: under(), ...(n !== undefined ? { at: n } : {}), pieces, order });
@@ -858,7 +876,7 @@ class Compiler {
         if (current !== null && current.pieces[id] === undefined) { this.error("D203", `there is no piece ${id} to replace; add it with <add under="...">`, el.line, { fix: nearest(id, Object.keys(current.pieces)) }); continue; }
         this.taken.delete(id);
         const before = new Set(Object.keys(this.doc.pieces));
-        this.piece(el, 2);
+        this.piece(el);
         const children = Object.fromEntries(Object.entries(this.doc.pieces).filter(([k]) => !before.has(k) && k !== id));
         ops.push({ op: "replace", id, piece: this.doc.pieces[id]!, ...(Object.keys(children).length > 0 ? { children } : {}) });
         continue;
@@ -869,7 +887,7 @@ class Compiler {
   }
 }
 
-/** <file name="..."> declares code for the slate; <file path="..."> is the piece that shows a file of the folder. */
+/** <file name="..."> declares code for the slate. */
 const isFileDecl = (el: Pick<El, "tag" | "attrs">): boolean => el.tag === "file" && el.attrs.some(a => a.name === "name");
 const isDeclarationEl = (el: El): boolean => DECLARATIONS.has(el.tag) || isFileDecl(el);
 /** The declarations inside a piece, however deep, taken out of it; the piece keeps its other children. */
@@ -968,13 +986,14 @@ function commandAttr(name: string, cmd: string): string {
 }
 
 function quoteAttr(s: string): string {
-  if (!s.includes('"') && !s.endsWith("\\")) return `"${s}"`;
-  if (!s.includes("'") && !s.endsWith("\\")) return `'${s}'`;
+  const quotable = !s.endsWith("\\") && !HTML_ENTITY.test(s);
+  if (quotable && !s.includes('"')) return `"${s}"`;
+  if (quotable && !s.includes("'")) return `'${s}'`;
   return `{${exprString(s)}}`;
 }
 
 /** A string as a formula's string literal. */
-const exprString = (s: string): string => `'${s.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/\t/g, "\\t")}'`;
+const exprString = (s: string): string => `'${s.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t")}'`;
 
 function literalText(v: SlateJson): string {
   if (v === null || typeof v !== "object") return typeof v === "string" ? exprString(v) : String(v);
@@ -985,7 +1004,7 @@ function literalText(v: SlateJson): string {
 /** A prop value as an expression inside braces or a step's argument. */
 function valueExpr(v: SlatePropValue): string {
   if (isSlateBinding(v)) return v.bind;
-  if (isSlateFormat(v)) return `\`${v.format}\``;
+  if (isSlateFormat(v)) return `\`${parseSlateFormat(v.format).parts.map(p => (typeof p === "string" ? p.replace(/\$\{/g, () => "$${").replace(/`/g, "\\`") : `\${${p.expr}}`)).join("")}\``;
   if (v === null || typeof v !== "object") return literalText(v);
   if (Array.isArray(v)) return `[${v.map(valueExpr).join(", ")}]`;
   return `{ ${Object.entries(v).map(([k, x]) => `${/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : JSON.stringify(k)}: ${valueExpr(x)}`).join(", ")} }`;

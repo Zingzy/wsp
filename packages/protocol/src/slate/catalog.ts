@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What slate_catalog answers (10, "The catalog call"): only the part asked for, as text, read off the registries.
-// The index stays under 900 tokens and an entry for a piece under 200; slateTokens is the estimate the tests hold.
+// The index and a piece's entry stay under their token budgets in limits.ts; slateTokens is the estimate the tests hold.
 import { SLATE_FUNCTIONS, SLATE_PIPE_STEPS } from "./expr.js";
 import { SLATE_EXAMPLES } from "./examples.js";
 import { SLATE_ICONS } from "./icons.js";
@@ -11,6 +11,8 @@ import { SLATE_SOURCES, slateShapeText, type SlateShape } from "./sources.js";
 import { SLATE_STEPS } from "./steps.js";
 import { compileSlateText } from "./syntax.js";
 import { SLATE_RUN_FIELDS } from "./types.js";
+import { slateTable } from "./paths.js";
+import { SLATE_LIMITS } from "./limits.js";
 
 /** A conservative token count: each word, each number and each other non-space character is one. Real tokenizers
  * join common words with their spaces and punctuation, so they count fewer. */
@@ -39,7 +41,7 @@ export const SLATE_RULES: readonly string[] = [
 
 export const SLATE_INDEX_EXAMPLE = `<slate title="Issue">
   <value name="id" start="" />
-  <run name="check" cmd='gh api "repos/Zingzy/wsp/issues/$ID"' env={{ ID: $id }} />
+  <run name="check" cmd='gh api "repos/{owner}/{repo}/issues/$ID"' env={{ ID: $id }} />
   <when change={$id} do={start($check)} />
   <column>
     <input label="Issue" value={$id} />
@@ -68,20 +70,10 @@ function pieceLine(p: SlatePieceModule): string {
   return `${p.type}: ${[...props, ...events].join(" ")}${items.length > 0 ? `; ${items.join(" ")}` : ""}${p.holdsChildren && p.childLimit === undefined ? "; children" : ""}`;
 }
 
-/** The fields the index names for each source; the entry for the source has the rest. */
-const INDEX_FIELDS: Record<string, readonly string[]> = {
-  thread: ["id", "title", "status", "agent", "model", "turns", "lastTurn", "cost", "tokens", "context", "changes", "plan", "waitingOn", "subagents"],
-  usage: ["account", "windows", "session", "week", "status", "note"],
-  cost: ["rateUsdPerHour", "accruedUsd"],
-  time: ["now", "today", "zone"],
-  git: ["branch", "head", "ahead", "behind", "changed"],
-  pr: ["number", "url", "state", "draft", "branch", "headSubject", "mergeable", "review", "checks", "word"],
-};
-
 function sourceLine(name: string): string {
   const shape = SLATE_SOURCES[name]!.shape;
   if ("keyed" in shape) return `${name}.<server>: state tools[] resources[]`;
-  const fields = Object.entries(shape.fields).filter(([k]) => INDEX_FIELDS[name]?.includes(k) ?? true);
+  const fields = Object.entries(shape.fields).filter(([k]) => SLATE_SOURCES[name]!.indexed?.includes(k) ?? true);
   const more = fields.length < Object.keys(shape.fields).length ? " ..." : "";
   return `${name}: ${fields.map(([k, v]) => (typeof v === "object" && "list" in v ? `${k}[]` : k)).join(" ")}${more}`;
 }
@@ -95,7 +87,7 @@ function index(): string {
     "section, column, grid: pad none tight normal loose; surface=\"inset\" sets the card ground; align start center end, else children fill the width.",
     "bars compare categories; time is a chart, x in ms or ISO; a flow is a diagram.",
     "Sources, read only:",
-    ...["thread", "usage", "cost", "time", "git", "pr"].map(sourceLine),
+    ...Object.values(SLATE_SOURCES).filter(s => s.level === "core").map(s => sourceLine(s.name)),
     "Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once confirm then tool resource> <file name> <when change={$path} or done={$run} do={steps}>",
     `Steps: ${Object.keys(SLATE_STEPS).join(" ")}. Functions: ${Object.keys(SLATE_FUNCTIONS).join(" ")}. ago(t) "30s ago", until(t) "in 4m".`,
     `After |: ${Object.keys(SLATE_PIPE_STEPS).join(" ")}. $run reads state exit out err json; a secret only .set .len.`,
@@ -158,11 +150,11 @@ Each attribute:
 name: the run is read as $name.
 cmd: the literal command, run by bash -c in the thread's folder. Single quotes outside double ones; the block form above takes any text.
 env={{ ID: $id }}: values it reads as $ID. args={[$a]}: as $1. stdin={$x}: on standard input. A secret goes only in env or stdin; one in a file, the command reads itself, never through you.
-every={60}: starts it again every 60 seconds, at least 10, while the Slate tab is on screen; at once when it comes back.
+every={60}: starts it again every 60 seconds, at least ${SLATE_LIMITS.timerFloorS}, while the Slate tab is on screen; at once when it comes back.
 always: with every, ticks while the tab is not on screen too.
 once: a start while it still runs is skipped; without once it stops and starts again.
-stream: fills lines as it prints, the last 500, so an output piece shows them live.
-timeout={60}: seconds before it is stopped, at most 600.
+stream: fills lines as it prints, the last ${SLATE_LIMITS.streamLines}, so an output piece shows them live.
+timeout={60}: seconds before it is stopped, at most ${SLATE_LIMITS.timeoutMaxS}.
 on="host": runs on the host's computer, not the thread's.
 confirm="Stop it?": asks the person every start; a formula works too.
 then='python3 x.py': pipes its raw result to that command; its stdout as JSON becomes json, out stays raw.
@@ -198,7 +190,7 @@ function stepsEntry(): string {
 }
 
 function handlersEntry(): string {
-  return ["Handler steps, in onPress, onSubmit, onChange and <when do>; one step or [a, b], at most 6:", ...Object.values(SLATE_STEPS).map(s => `${s.sig}: ${s.purpose}. ${s.runs === "window" ? "Window only, on a press. " : ""}Consent: ${s.consent}. ${s.example}`)].join("\n");
+  return [`Handler steps, in onPress, onSubmit, onChange and <when do>; one step or [a, b], at most ${SLATE_LIMITS.stepsPerReaction}:`, ...Object.values(SLATE_STEPS).map(s => `${s.sig}: ${s.purpose}. ${s.runs === "window" ? "Window only, on a press. " : ""}Consent: ${s.consent}. ${s.example}`)].join("\n");
 }
 
 /** The catalog: the index with no name, else the named piece, source or chapter, as text. */
@@ -215,7 +207,7 @@ const NOT_IN = "is not in the catalog";
 
 function entry(name: string): string {
   const n = name.trim();
-  if (n === "file") return `${pieceEntry(SLATE_PIECES[n]!)}\nThe <file name="x.py"> declaration, code a run calls as $SLATE_DIR/x.py, is in slate_catalog runs.`;
+  if (n === "file") return `The <file name="x.py"> declaration, code a run calls as $SLATE_DIR/x.py, is in slate_catalog runs.`;
   if (SLATE_PIECES[n] !== undefined) return pieceEntry(SLATE_PIECES[n]);
   if (SLATE_SOURCES[n] !== undefined) return sourceEntry(n);
   switch (n) {

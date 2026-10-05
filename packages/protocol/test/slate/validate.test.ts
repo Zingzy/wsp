@@ -42,7 +42,7 @@ const FIXTURES: [string, string][] = [
   ["Q424", wrap(`<text>{pr.number | count}</text>`)],
   ["Q425", wrap(`<text>{pr.checks | take(pr.number) | count}</text>`)],
   ["Q426", wrap(`<text>{pr.checks${" | skip(0)".repeat(13)} | count}</text>`)],
-  ["S500", wrap(`<text>x</text>`, `  <value name="big" start="${"x".repeat(262_200)}" />`)],
+  ["D208", wrap(`<text>x</text>`, `  <value name="big" start="${"x".repeat(262_200)}" />`)],
   ["S501", wrap(`<text>{$nope}</text>`)],
   ["S502", wrap(`<checklist items={pr.checks} title={item.name} done={item.state == 'pass'} editable />`)],
   ["S503", wrap(`<text>x</text>`, `  <value name="v" start={pr.word} />`)],
@@ -81,7 +81,8 @@ describe("the validator", () => {
   });
 
   it("holds every code it raises to the closed table", () => {
-    for (const [code] of FIXTURES) expect(code in SLATE_CODES).toBe(true);
+    const raised = new Set([...FIXTURES.map(([, text]) => text), ...SPEC_EXAMPLES.map(e => e.text)].flatMap(all));
+    for (const code of raised) expect(SLATE_CODES, code).toHaveProperty(code);
   });
 
   it("gives no error and no warning beyond T311 for every spec example", () => {
@@ -281,13 +282,15 @@ describe("a per-row prop and a number given text", () => {
 });
 
 describe("an HTML habit gets the piece it meant", () => {
-  it("names the piece for <p>, <header> and <div>, points a piece's every at a <run>, and says what a form is for", () => {
+  it("names the piece for <p>, <header>, <div>, <img>, <a> and <list>, and points a piece's every at a <run>", () => {
     const codes = (t: string) => parseSlate(t).errors.map(e => `${e.code} ${e.message}`);
     expect(codes(`<slate><column><p>Waiting</p></column></slate>`)).toEqual([`T300 "p" is not a piece; words go in <text>...</text>`]);
     expect(codes(`<slate><column><header><text>PR</text></header></column></slate>`)).toEqual([`T300 "header" is not a piece; a title is a <heading>, or a <section title="...">`]);
     expect(codes(`<slate><column><div><text>x</text></div></column></slate>`)).toEqual([`T300 "div" is not a piece; a group is a <column>, a <row> or a <section>`]);
     expect(codes(`<slate><column><text every={60}>x</text></column></slate>`)).toContain(`T302 every is a <run>'s, not a piece's: <run name="x" cmd='...' every={60} />, and the piece reads $x`);
-    expect(codes(`<slate><value name="r" start={null} /><form into="$r" /></slate>`)).toContain(`T304 form fills an MCP tool's arguments and needs tool="server.tool"; for fields of your own, use <input label="..." value={$x} /> and a <button>`);
+    expect(codes(`<slate><column><img src="a.png" /></column></slate>`)).toEqual([`T300 "img" is not a piece; a slate draws no images`]);
+    expect(codes(`<slate><column><a href="x">x</a></column></slate>`)).toEqual([`T300 "a" is not a piece; a link is a <button> whose onPress opens it`]);
+    expect(codes(`<slate><column><list items={[]} /></column></slate>`)).toEqual([`T300 "list" is not a piece; a list is a <checklist> or a <table items={...}>`]);
   });
 });
 
@@ -326,5 +329,38 @@ describe("what round three's Haiku wrote", () => {
     expect(parseSlate(`<slate><run name="a" cmd='curl -H "Authorization: Bearer $T" https://x' env={{ T: "xapt-dd233a3a-85a9-45d2-9a1c-a4608f2b9eeb" }} /><column><text>x</text></column></slate>`).errors).toMatchObject([{ code: "S520", message: expect.stringMatching(/^the slate holds a token written out \(xapt-d\.\.\.\)/) }]);
     expect(parseSlate(`<slate><column><piece id="rates"><text>x</text></piece></column></slate>`).errors[0]!.message).toBe(`"piece" is not a piece; the tag is the piece's own type, like <number ...> or <text>`);
     expect(parseSlate(`<slate><run name="a" cmd="echo \\"hi\\"" /><column><text>x</text></column></slate>`).errors[0]!.fix).toContain(`with both quotes inside, the block form <run name="x">{\`...\`}</run>`);
+  });
+});
+
+describe("a piece's fallback", () => {
+  const withPieces = (pieces: Record<string, unknown>): string[] =>
+    validateSlate({ schema: 2, root: "top", values: {}, derived: {}, runs: {}, reactions: [], pieces: { top: { type: "column", children: ["a"] }, ...pieces } }).errors.map(e => e.code);
+
+  it("is walked as a placed piece: it must exist, and may not lead back to itself", () => {
+    expect(withPieces({ a: { type: "sparkle", fallback: "a" } })).toContain("D205");
+    expect(withPieces({ a: { type: "sparkle", fallback: "gone" } })).toContain("D203");
+    expect(withPieces({ a: { type: "sparkle", fallback: "b" }, b: { type: "sparkle", fallback: "a" } })).toContain("D205");
+    expect(withPieces({ a: { type: "sparkle", fallback: "b" }, b: { type: "text", props: {} } })).toContain("T304");
+    expect(withPieces({ a: { type: "sparkle", fallback: "b" }, b: { type: "text", props: { value: "Hi" } } })).toEqual([]);
+  });
+});
+
+describe("a secret on a run", () => {
+  it("is refused as an argument at write time, and taken in env, on stdin, or as its .len", () => {
+    const run = (attrs: string): string[] => all(wrap(`<text>x</text>`, `  <secret name="tok" />\n  <run name="r" cmd='echo' ${attrs} />`)).filter(c => c === "S520");
+    expect(run(`args={[$tok]}`)).toEqual(["S520"]);
+    expect(run(`env={{ TOK: $tok }}`)).toEqual([]);
+    expect(run(`stdin={$tok}`)).toEqual([]);
+    expect(run(`args={[$tok.len]}`)).toEqual([]);
+  });
+});
+
+describe("a reaction cycle", () => {
+  it("is a path writing what triggers it, not two fields under one name", () => {
+    const decl = (when: string) => all(wrap(`<text>x</text>`, `  <value name="x" start={{ a: 1, b: 0 }} />\n  ${when}`)).filter(c => c === "A610");
+    expect(decl(`<when change={$x.a} do={set($x.b, 1)} />`)).toEqual([]);
+    expect(decl(`<when change={$x.a} do={set($x.a, 1)} />`)).toEqual(["A610"]);
+    expect(decl(`<when change={$x} do={set($x.b, 1)} />`)).toEqual(["A610"]);
+    expect(decl(`<when change={$x.b} do={set($x, { a: 1, b: 2 })} />`)).toEqual(["A610"]);
   });
 });

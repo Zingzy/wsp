@@ -6,7 +6,7 @@
 import { fmtBytes, fmtClock, fmtCost, fmtDuration, fmtTokens } from "../format.js";
 import { CHECK_STATE_WORDS } from "../pull-request.js";
 import { SLATE_LIMITS } from "./limits.js";
-import { slateEqual, slateStep } from "./paths.js";
+import { slateTable, slateEqual, slateStep } from "./paths.js";
 import { nearest, slateProblem, type SlateCode } from "./problems.js";
 import { isSlateBinding, isSlateFormat, type SlateJson, type SlateProblem, type SlatePropValue } from "./types.js";
 
@@ -50,17 +50,22 @@ const HANDLER_STEPS = new Set(["set", "toggle", "start", "cancel", "send", "stee
 interface Token { t: "num" | "str" | "tpl" | "own" | "name" | "op" | "end"; v: string; parts?: (string | { src: string; at: number })[]; at: number }
 
 class Fault extends Error {
+  /** Set once at and the message's columns count from the whole expression rather than a hole inside it. */
+  absolute = false;
   constructor(readonly code: SlateCode, message: string, readonly at: number, readonly fix?: string) { super(message); }
 }
 
 /** JavaScript method names a model writes by reflex, with this language's spelling. */
-const METHOD_FIX: Record<string, string> = {
+const METHOD_FIX: Record<string, string> = slateTable<string>({
   length: "len(x)", map: "x | map(name: item.field) or pluck(x, 'field')", filter: "x | where(item.cond)", toUpperCase: "upper(x)",
   toLowerCase: "lower(x)", includes: "contains(x, v)", join: "join(x, sep)", slice: "x | take(n)", find: "x | where(...) | first",
   some: "len(x | where(...)) > 0", trim: "trim(x)", split: "split(x, sep)", replace: "replace(x, a, b)", startsWith: "startsWith(x, p)",
   endsWith: "endsWith(x, p)", reduce: "x | sum(item.field)", sort: "x | sortBy(item.field)", toString: "str(x)", toFixed: "number(x, places)",
   test: "contains, startsWith or endsWith; there are no regular expressions", forEach: "a piece that takes items",
-};
+});
+
+/** The escapes a string literal reads: JSON's, so a printed JSON string reads back as written. */
+const ESCAPES: Readonly<Record<string, string>> = slateTable({ n: "\n", t: "\t", r: "\r", b: "\b", f: "\f" });
 
 function tokenize(src: string): Token[] {
   const out: Token[] = [];
@@ -79,7 +84,14 @@ function tokenize(src: string): Token[] {
       let s = "";
       i++;
       while (i < src.length && src[i] !== c) {
-        if (src[i] === "\\" && i + 1 < src.length) { const n = src[i + 1]!; s += n === "n" ? "\n" : n === "t" ? "\t" : n; i += 2; continue; }
+        if (src[i] === "\\" && i + 1 < src.length) {
+          const n = src[i + 1]!;
+          const hex = n === "u" ? /^[0-9A-Fa-f]{4}/.exec(src.slice(i + 2, i + 6))?.[0] : undefined;
+          if (hex !== undefined) { s += String.fromCharCode(parseInt(hex, 16)); i += 6; continue; }
+          s += ESCAPES[n] ?? n;
+          i += 2;
+          continue;
+        }
         s += src[i];
         i++;
       }
@@ -94,6 +106,7 @@ function tokenize(src: string): Token[] {
       i++;
       while (i < src.length && src[i] !== "`") {
         if (src.startsWith("$${", i)) { lit += "${"; i += 3; continue; }
+        if (src.startsWith("\\`", i)) { lit += "`"; i += 2; continue; }
         if (src.startsWith("${", i)) {
           const start = i + 2;
           const end = closingBrace(src, start);
@@ -322,9 +335,7 @@ class Parser {
           node = node.k === "path" ? { ...node, segs: [...node.segs, index] } : { k: "field", of: node, name: index, at: n.at + this.base };
           continue;
         }
-        this.enter(open.at);
         const index = this.pipeline();
-        this.depth--;
         this.expect("]");
         node = { k: "index", of: node, index, at: open.at + this.base };
         continue;
@@ -336,7 +347,11 @@ class Parser {
   private primary(): SlateExpr {
     const t = this.next();
     const at = t.at + this.base;
-    if (t.t === "num") return { k: "lit", v: Number(t.v), at };
+    if (t.t === "num") {
+      const v = Number(t.v);
+      if (!Number.isFinite(v)) throw new Fault("X400", `${t.v} is past the largest number, at column ${t.at + 1}`, t.at);
+      return { k: "lit", v, at };
+    }
     if (t.t === "str") return { k: "lit", v: t.v, at };
     if (t.t === "tpl") {
       const parts: SlateTemplatePart[] = [];
@@ -351,14 +366,11 @@ class Parser {
     }
     if (t.t === "own") return { k: "path", head: t.v, own: true, segs: [], at };
     if (t.t === "op" && t.v === "(") {
-      this.enter(t.at);
       const e = this.pipeline();
-      this.depth--;
       this.expect(")");
       return e;
     }
     if (t.t === "op" && t.v === "[") {
-      this.enter(t.at);
       const items: SlateExpr[] = [];
       while (!this.isOp("]")) {
         items.push(this.pipeline());
@@ -366,11 +378,9 @@ class Parser {
         this.next();
       }
       this.expect("]");
-      this.depth--;
       return { k: "list", items, at };
     }
     if (t.t === "op" && t.v === "{") {
-      this.enter(t.at);
       const fields: { name: string; expr: SlateExpr }[] = [];
       while (!this.isOp("}")) {
         const key = this.next();
@@ -381,7 +391,6 @@ class Parser {
         this.next();
       }
       this.expect("}");
-      this.depth--;
       return { k: "rec", fields, at };
     }
     if (t.t === "op" && t.v === "/") throw new Fault("X420", "no regular expressions; use contains, startsWith or endsWith", t.at);
@@ -409,8 +418,15 @@ class Parser {
 }
 
 function parseAt(src: string, base: number): SlateExpr {
-  if (src.trim() === "") throw new Fault("X400", "a hole is empty", 0);
-  return new Parser(tokenize(src), base).parseAll();
+  try {
+    if (src.trim() === "") throw new Fault("X400", "a hole is empty", 0);
+    return new Parser(tokenize(src), base).parseAll();
+  } catch (e) {
+    if (!(e instanceof Fault) || e.absolute) throw e;
+    const shifted = new Fault(e.code, e.message.replace(/column (\d+)/g, (_, n: string) => `column ${Number(n) + base}`), e.at + base, e.fix);
+    shifted.absolute = true;
+    throw shifted;
+  }
 }
 
 const parsed = new Map<string, { ast?: SlateExpr; errors: SlateProblem[] }>();
@@ -525,15 +541,15 @@ const plainNumber = (n: number, p?: number): string =>
 
 /** The app's own word for a known state (04, word()): check states, thread statuses, review and mergeable enums,
  * run states; any other string capitalised once. */
-const WORDS: Record<string, string> = {
+const WORDS: Record<string, string> = slateTable<string>({
   ...CHECK_STATE_WORDS,
   starting: "Starting", working: "Working", "needs-you": "Needs you", resting: "Resting", done: "Done", failed: "Failed",
   none: "None", approved: "Approved", changes_asked: "Changes asked", required: "Review required",
   mergeable: "Mergeable", conflicting: "Conflicting", unknown: "Unknown",
   idle: "Not run yet", held: "Held", running: "Running",
   open: "Open", merged: "Merged", closed: "Closed",
-};
-export function slateWord(x: Val): Val {
+});
+function slateWord(x: Val): Val {
   if (typeof x !== "string") return missing(x) ? null : slateText(x);
   const known = WORDS[x];
   if (known !== undefined) return known;
@@ -554,6 +570,10 @@ const T = {
 interface Env {
   ctx: SlateEvalContext;
   steps: number;
+  visits: number;
+  /** One node evaluated; a row's own nodes count as visits instead, so a pipeline is held by the visits budget. */
+  step(): void;
+  /** Rows or items visited. */
   charge(n: number): void;
   now(): number | null;
 }
@@ -601,9 +621,9 @@ function pick(of: Val, at: Val): Val {
 const ret = (t: SlateType) => (): SlateType => t;
 const elemOf = (args: SlateType[]): SlateType => args[0]?.of ?? T.any;
 
-const F: Record<string, FnSpec> = {
+const F: Record<string, FnSpec> = slateTable<FnSpec>({
   percent: { min: 1, max: 2, returns: ret(T.str), numberFirst: true, sig: "percent(fraction, places?)", example: "percent(thread.context.used / thread.context.window)",
-    fn: ([x, p]) => { if (!isNum(x)) return null; const v = x * 100; return `${v.toFixed(places(p, Math.abs(v) < 10 && v !== 0 ? 1 : 0))}%`; } },
+    fn: ([x, p]) => { const v = isNum(x) ? finite(x * 100) : null; if (v === null) return null; return `${v.toFixed(places(p, Math.abs(v) < 10 && v !== 0 ? 1 : 0))}%`; } },
   pct: { min: 1, max: 2, returns: ret(T.str), numberFirst: true, sig: "pct(points, places?)", example: "pct(usage.week.percent)",
     fn: ([x, p]) => (isNum(x) ? `${x.toFixed(places(p, 0))}%` : null) },
   tokens: { min: 1, max: 1, returns: ret(T.str), numberFirst: true, sig: "tokens(n)", example: "tokens(thread.context.free)", fn: ([x]) => (isNum(x) ? fmtTokens(x) : null) },
@@ -692,7 +712,8 @@ const F: Record<string, FnSpec> = {
     fn: ([l, f], env) => (isList(l) ? numbersOf(env, l, f).reduce((a, b) => a + b, 0) : null) },
   avg: { min: 1, max: 2, returns: ret(T.num), listFirst: true, sig: "avg(list, field?)", example: "avg(thread.changes.files, 'additions')",
     fn: ([l, f], env) => { const ns = numbersOf(env, l, f); return ns.length === 0 ? null : ns.reduce((a, b) => a + b, 0) / ns.length; } },
-  first: { min: 1, max: 1, returns: elemOf, listFirst: true, sig: "first(list)", example: "first(pr.checks).name", fn: ([l]) => (isList(l) ? (l[0] ?? null) : null) },
+  first: { min: 1, max: 2, returns: a => (a.length > 1 ? (a[0] ?? T.list) : elemOf(a)), listFirst: true, sig: "first(list, n?)", example: "first(pr.checks).name",
+    fn: ([l, n]) => (!isList(l) ? null : n === undefined ? (l[0] ?? null) : isNum(n) ? l.slice(0, Math.max(0, Math.floor(n))) : null) },
   last: { min: 1, max: 2, returns: a => (a.length > 1 ? (a[0] ?? T.list) : elemOf(a)), listFirst: true, sig: "last(list, n?)", example: "last(append($hist, $spot.json.v), 60)",
     fn: ([l, n]) => (!isList(l) ? null : n === undefined ? (l[l.length - 1] ?? null) : isNum(n) ? (n >= 1 ? l.slice(-Math.floor(n)) : []) : null) },
   at: { min: 2, max: 2, returns: elemOf, listFirst: true, sig: "at(list, i)", example: "at($questions, $i).text", fn: ([l, i]) => pick(l, i) },
@@ -702,41 +723,96 @@ const F: Record<string, FnSpec> = {
     fn: ([l, f], env) => (isList(l) && typeof f === "string" ? l.map(item => { env.charge(1); return field(item, f) ?? null; }) : null) },
   join: { min: 2, max: 2, returns: ret(T.str), listFirst: true, sig: "join(list, sep)", example: "join(pluck(pr.checks, 'name'), ', ')",
     fn: ([l, sep], env) => (isList(l) ? l.map(item => { env.charge(1); return slateText(item); }).join(typeof sep === "string" ? sep : ", ") : null) },
-};
+});
 
 /** Every function with its signature and an example, for the catalog and the checker. */
 export const SLATE_FUNCTIONS: Readonly<Record<string, Readonly<{ min: number; max: number; sig: string; example: string }>>> = F;
 
 // ---- pipeline steps ----
 
+/** What a step runs on: the list it was handed, cut to the list cap, the value itself, its arguments, and one
+ * argument evaluated on a row, which charges a visit. */
+interface PipeRun { list: SlateJson[]; cur: Val; args: SlatePipeStepNode["args"]; arg(n: number): SlateExpr; per(e: SlateExpr, item: SlateJson, index: number): Val; env: Env }
+
 interface PipeSpec {
   min: number; max: number; sig: string; example: string; purpose: string;
   /** Takes a list in; false for format, which takes a single value too. */
   needsList: boolean;
   out(input: SlateType, args: SlateType[]): SlateType;
+  apply(x: PipeRun): Val;
 }
 
+const numbersPer = (x: PipeRun): number[] => x.list.map((item, i) => x.per(x.arg(0), item, i)).filter(isNum);
+
 const same = (input: SlateType): SlateType => input;
-const PIPE: Record<string, PipeSpec> = {
-  where: { min: 1, max: 1, needsList: true, out: same, sig: "where(cond)", purpose: "keeps the elements where cond is true", example: "pr.checks | where(item.state == 'fail')" },
-  sortBy: { min: 1, max: 2, needsList: true, out: same, sig: "sortBy(expr, 'asc'|'desc')", purpose: "stable sort; nulls last", example: "processes.list | sortBy(item.cpu, 'desc')" },
-  groupBy: { min: 1, max: 1, needsList: true, out: i => ({ t: "list", of: { t: "record", fields: { key: T.any, items: i, count: T.num } } }), sig: "groupBy(expr)", purpose: "{ key, items, count } per group in first-seen order", example: "pr.checks | groupBy(item.state)" },
-  take: { min: 1, max: 1, needsList: true, out: same, sig: "take(n)", purpose: "the first n; n is a literal", example: "pr.checks | take(5)" },
-  skip: { min: 1, max: 1, needsList: true, out: same, sig: "skip(n)", purpose: "all but the first n", example: "pr.checks | skip(1)" },
-  count: { min: 0, max: 0, needsList: true, out: () => T.num, sig: "count", purpose: "the length", example: "$steps | where(item.done) | count" },
-  sum: { min: 1, max: 1, needsList: true, out: () => T.num, sig: "sum(expr)", purpose: "the total of expr; nulls skipped", example: "thread.changes.files | sum(item.additions)" },
-  min: { min: 1, max: 1, needsList: true, out: () => T.num, sig: "min(expr)", purpose: "the least expr", example: "pr.checks | min(num(item.startedAt))" },
-  max: { min: 1, max: 1, needsList: true, out: () => T.num, sig: "max(expr)", purpose: "the greatest expr", example: "processes.list | max(item.cpu)" },
-  avg: { min: 1, max: 1, needsList: true, out: () => T.num, sig: "avg(expr)", purpose: "the mean of expr", example: "processes.list | avg(item.mem)" },
-  first: { min: 0, max: 0, needsList: true, out: i => i.of ?? T.any, sig: "first", purpose: "the first element or null", example: "thread.plan.steps | where(item.state == 'working') | first" },
-  last: { min: 0, max: 0, needsList: true, out: i => i.of ?? T.any, sig: "last", purpose: "the last element or null", example: "thread.plan.steps | last" },
-  pick: { min: 1, max: 99, needsList: true, out: () => ({ t: "list", of: T.rec }), sig: "pick(field, ...)", purpose: "keeps the named fields", example: "processes.list | pick(name, cpu)" },
-  map: { min: 1, max: 99, needsList: true, out: () => ({ t: "list", of: T.rec }), sig: "map(name: expr, ...)", purpose: "adds or replaces fields", example: "pr.checks | map(took: num(item.completedAt) - num(item.startedAt))" },
-  distinct: { min: 0, max: 1, needsList: true, out: same, sig: "distinct(expr?)", purpose: "drops later repeats", example: "pr.checks | distinct(item.workflow)" },
-  flatten: { min: 0, max: 1, needsList: true, out: () => T.list, sig: "flatten(field?)", purpose: "joins inner lists", example: "tree.all | flatten(children)" },
-  join: { min: 2, max: 3, needsList: true, out: same, sig: "join(other, key, otherKey?)", purpose: "attaches the matching element of other", example: "thread.subagents | join(tree.children, id)" },
-  format: { min: 1, max: 1, needsList: false, out: i => (i.t === "list" ? { t: "list", of: T.str } : T.str), sig: "format(expr)", purpose: "expr as text per element", example: "pr.checks | format(`${item.name}: ${word(item.state)}`)" },
-};
+const PIPE: Record<string, PipeSpec> = slateTable<PipeSpec>({
+  where: { apply: x => x.list.filter((item, i) => slateTruthy(x.per(x.arg(0), item, i))), min: 1, max: 1, needsList: true, out: same, sig: "where(cond)", purpose: "keeps the elements where cond is true", example: "pr.checks | where(item.state == 'fail')" },
+  sortBy: { apply: x => {
+      const desc = x.args[1] !== undefined && run(x.arg(1), x.env) === "desc";
+      const keyed = x.list.map((item, i) => ({ item, key: x.per(x.arg(0), item, i), i }));
+      keyed.sort((a, b) => compareKeys(a.key, b.key, desc) || a.i - b.i);
+      return keyed.map(k => k.item);
+    }, min: 1, max: 2, needsList: true, out: same, sig: "sortBy(expr, 'asc'|'desc')", purpose: "stable sort; nulls last", example: "processes.list | sortBy(item.cpu, 'desc')" },
+  groupBy: { apply: x => {
+      const groups = new Map<string, { key: SlateJson; items: SlateJson[] }>();
+      x.list.forEach((item, i) => {
+        const key = x.per(x.arg(0), item, i) ?? null;
+        const k = keyText(key);
+        const g = groups.get(k) ?? groups.set(k, { key, items: [] }).get(k)!;
+        g.items.push(item);
+      });
+      return [...groups.values()].map(g => ({ key: g.key, items: g.items, count: g.items.length }));
+    }, min: 1, max: 1, needsList: true, out: i => ({ t: "list", of: { t: "record", fields: { key: T.any, items: i, count: T.num } } }), sig: "groupBy(expr)", purpose: "{ key, items, count } per group in first-seen order", example: "pr.checks | groupBy(item.state)" },
+  take: { apply: x => { const n = run(x.arg(0), x.env); x.env.charge(x.list.length); return isNum(n) ? x.list.slice(0, Math.max(0, n)) : null; }, min: 1, max: 1, needsList: true, out: same, sig: "take(n)", purpose: "the first n; n is a literal", example: "pr.checks | take(5)" },
+  skip: { apply: x => { const n = run(x.arg(0), x.env); x.env.charge(x.list.length); return isNum(n) ? x.list.slice(Math.max(0, n)) : null; }, min: 1, max: 1, needsList: true, out: same, sig: "skip(n)", purpose: "all but the first n", example: "pr.checks | skip(1)" },
+  count: { apply: x => x.list.length, min: 0, max: 0, needsList: true, out: () => T.num, sig: "count", purpose: "the length", example: "$steps | where(item.done) | count" },
+  sum: { apply: x => numbersPer(x).reduce((a, b) => a + b, 0), min: 1, max: 1, needsList: true, out: () => T.num, sig: "sum(expr)", purpose: "the total of expr; nulls skipped", example: "thread.changes.files | sum(item.additions)" },
+  min: { apply: x => { const ns = numbersPer(x); return ns.length === 0 ? null : Math.min(...ns); }, min: 1, max: 1, needsList: true, out: () => T.num, sig: "min(expr)", purpose: "the least expr", example: "pr.checks | min(num(item.startedAt))" },
+  max: { apply: x => { const ns = numbersPer(x); return ns.length === 0 ? null : Math.max(...ns); }, min: 1, max: 1, needsList: true, out: () => T.num, sig: "max(expr)", purpose: "the greatest expr", example: "processes.list | max(item.cpu)" },
+  avg: { apply: x => { const ns = numbersPer(x); return ns.length === 0 ? null : ns.reduce((a, b) => a + b, 0) / ns.length; }, min: 1, max: 1, needsList: true, out: () => T.num, sig: "avg(expr)", purpose: "the mean of expr", example: "processes.list | avg(item.mem)" },
+  first: { apply: x => x.list[0] ?? null, min: 0, max: 0, needsList: true, out: i => i.of ?? T.any, sig: "first", purpose: "the first element or null", example: "thread.plan.steps | where(item.state == 'working') | first" },
+  last: { apply: x => x.list[x.list.length - 1] ?? null, min: 0, max: 0, needsList: true, out: i => i.of ?? T.any, sig: "last", purpose: "the last element or null", example: "thread.plan.steps | last" },
+  pick: { apply: x => {
+      const names = x.args.map(a => fieldName(a.expr)).filter((n): n is string => n !== undefined);
+      return x.list.map(item => { x.env.charge(1); return isRecord(item) ? Object.fromEntries(names.filter(n => Object.prototype.hasOwnProperty.call(item, n)).map(n => [n, item[n]!])) : null; });
+    }, min: 1, max: 99, needsList: true, out: () => ({ t: "list", of: T.rec }), sig: "pick(field, ...)", purpose: "keeps the named fields", example: "processes.list | pick(name, cpu)" },
+  map: { apply: x => x.list.map((item, i) => {
+      const base: Record<string, SlateJson> = isRecord(item) ? { ...item } : { value: item };
+      for (const a of x.args) base[a.name!] = x.per(a.expr, item, i) ?? null;
+      return base;
+    }), min: 1, max: 99, needsList: true, out: () => ({ t: "list", of: T.rec }), sig: "map(name: expr, ...)", purpose: "adds or replaces fields", example: "pr.checks | map(took: num(item.completedAt) - num(item.startedAt))" },
+  distinct: { apply: x => {
+      const seen = new Set<string>();
+      return x.list.filter((item, i) => { const k = keyText(x.args[0] !== undefined ? x.per(x.arg(0), item, i) : item); if (seen.has(k)) return false; seen.add(k); return true; });
+    }, min: 0, max: 1, needsList: true, out: same, sig: "distinct(expr?)", purpose: "drops later repeats", example: "pr.checks | distinct(item.workflow)" },
+  flatten: { apply: x => {
+      const name = x.args[0] !== undefined ? fieldName(x.arg(0)) : undefined;
+      const out: SlateJson[] = [];
+      for (const item of x.list) {
+        const inner = name !== undefined ? slateStep(item, name) : item;
+        if (isList(inner)) { x.env.charge(inner.length); out.push(...inner); }
+      }
+      return out.slice(0, SLATE_LIMITS.listItems);
+    }, min: 0, max: 1, needsList: true, out: () => T.list, sig: "flatten(field?)", purpose: "joins inner lists", example: "tree.all | flatten(children)" },
+  join: { apply: x => {
+      const otherExpr = x.arg(0);
+      const other = run(otherExpr, x.env);
+      const key = fieldName(x.arg(1));
+      const otherKey = x.args[2] !== undefined ? fieldName(x.arg(2)) : key;
+      const under = otherExpr.k === "path" ? String(otherExpr.segs.filter(s => typeof s === "string").at(-1) ?? otherExpr.head) : "other";
+      const pool = isList(other) ? other : [];
+      x.env.charge(pool.length);
+      const byKey = new Map<string, SlateJson>();
+      if (otherKey !== undefined) for (const o of pool) { const k = keyText(slateStep(o, otherKey) ?? null); if (!byKey.has(k)) byKey.set(k, o); }
+      return x.list.map(item => {
+        x.env.charge(1);
+        const mine = key !== undefined ? slateStep(item, key) : undefined;
+        const hit = byKey.get(keyText(mine ?? null)) ?? null;
+        return isRecord(item) ? { ...item, [under]: hit } : { value: item, [under]: hit };
+      });
+    }, min: 2, max: 3, needsList: true, out: same, sig: "join(other, key, otherKey?)", purpose: "attaches the matching element of other", example: "thread.subagents | join(tree.children, id)" },
+  format: { apply: x => (isList(x.cur) ? x.list.map((item, i) => slateText(x.per(x.arg(0), item, i))) : slateText(x.per(x.arg(0), x.cur ?? null, 0))), min: 1, max: 1, needsList: false, out: i => (i.t === "list" ? { t: "list", of: T.str } : T.str), sig: "format(expr)", purpose: "expr as text per element", example: "pr.checks | format(`${item.name}: ${word(item.state)}`)" },
+});
 
 /** Every pipeline step with its signature, purpose and an example. */
 export const SLATE_PIPE_STEPS: Readonly<Record<string, Readonly<{ min: number; max: number; sig: string; purpose: string; example: string }>>> = PIPE;
@@ -749,9 +825,13 @@ function makeEnv(ctx: SlateEvalContext): Env {
   const env: Env = {
     ctx,
     steps: 0,
+    visits: 0,
+    step() {
+      if (++env.steps > SLATE_LIMITS.evalSteps) throw new OverBudget();
+    },
     charge(n) {
-      env.steps += n;
-      if (env.steps > SLATE_LIMITS.pipelineVisits) throw new OverBudget();
+      env.visits += n;
+      if (env.visits > SLATE_LIMITS.pipelineVisits) throw new OverBudget();
     },
     now() {
       const v = ctx.resolve("time.now");
@@ -821,6 +901,7 @@ function keyText(v: Val): string { return JSON.stringify(v ?? null); }
 
 function fieldName(e: SlateExpr): string | undefined {
   if (e.k === "path" && !e.own && e.segs.length === 0) return e.head;
+  if (e.k === "path" && !e.own && e.head === "item" && e.segs.length === 1 && typeof e.segs[0] === "string") return e.segs[0];
   if (e.k === "lit" && typeof e.v === "string") return e.v;
   return undefined;
 }
@@ -831,94 +912,21 @@ function runPipe(node: Extract<SlateExpr, { k: "pipe" }>, env: Env): Val {
     const spec = PIPE[step.name]!;
     if (spec.needsList && !isList(cur)) return null;
     const list = isList(cur) ? cur.slice(0, SLATE_LIMITS.listItems) : [];
-    const per = (e: SlateExpr, item: SlateJson, index: number): Val => { env.charge(1); return run(e, { ...env, ctx: { ...env.ctx, item, index } } as Env); };
+    const per = (e: SlateExpr, item: SlateJson, index: number): Val => { env.charge(1); return run(e, { ...env, ctx: { ...env.ctx, item, index }, step: () => env.charge(1) }); };
     const arg = (n: number): SlateExpr => step.args[n]!.expr;
-    switch (step.name) {
-      case "where": cur = list.filter((item, i) => slateTruthy(per(arg(0), item, i))); break;
-      case "sortBy": {
-        const desc = step.args[1] !== undefined && run(arg(1), env) === "desc";
-        const keyed = list.map((item, i) => ({ item, key: per(arg(0), item, i), i }));
-        keyed.sort((a, b) => compareKeys(a.key, b.key, desc) || a.i - b.i);
-        cur = keyed.map(k => k.item);
-        break;
-      }
-      case "groupBy": {
-        const groups = new Map<string, { key: SlateJson; items: SlateJson[] }>();
-        list.forEach((item, i) => {
-          const key = per(arg(0), item, i) ?? null;
-          const k = keyText(key);
-          const g = groups.get(k) ?? groups.set(k, { key, items: [] }).get(k)!;
-          g.items.push(item);
-        });
-        cur = [...groups.values()].map(g => ({ key: g.key, items: g.items, count: g.items.length }));
-        break;
-      }
-      case "take": { const n = run(arg(0), env); cur = isNum(n) ? list.slice(0, Math.max(0, n)) : null; env.charge(list.length); break; }
-      case "skip": { const n = run(arg(0), env); cur = isNum(n) ? list.slice(Math.max(0, n)) : null; env.charge(list.length); break; }
-      case "count": cur = list.length; break;
-      case "sum": case "min": case "max": case "avg": {
-        const ns = list.map((item, i) => per(arg(0), item, i)).filter(isNum);
-        cur = ns.length === 0 ? (step.name === "sum" ? 0 : null)
-          : step.name === "sum" ? ns.reduce((a, b) => a + b, 0)
-          : step.name === "min" ? Math.min(...ns)
-          : step.name === "max" ? Math.max(...ns)
-          : ns.reduce((a, b) => a + b, 0) / ns.length;
-        break;
-      }
-      case "first": cur = list[0] ?? null; break;
-      case "last": cur = list[list.length - 1] ?? null; break;
-      case "pick": {
-        const names = step.args.map(a => fieldName(a.expr)).filter((n): n is string => n !== undefined);
-        cur = list.map(item => { env.charge(1); return isRecord(item) ? Object.fromEntries(names.filter(n => Object.prototype.hasOwnProperty.call(item, n)).map(n => [n, item[n]!])) : null; });
-        break;
-      }
-      case "map": {
-        cur = list.map((item, i) => {
-          const base: Record<string, SlateJson> = isRecord(item) ? { ...item } : { value: item };
-          for (const a of step.args) base[a.name!] = per(a.expr, item, i) ?? null;
-          return base;
-        });
-        break;
-      }
-      case "distinct": {
-        const seen = new Set<string>();
-        cur = list.filter((item, i) => { const k = keyText(step.args[0] !== undefined ? per(arg(0), item, i) : item); if (seen.has(k)) return false; seen.add(k); return true; });
-        break;
-      }
-      case "flatten": {
-        const name = step.args[0] !== undefined ? fieldName(arg(0)) : undefined;
-        const out: SlateJson[] = [];
-        for (const item of list) {
-          const inner = name !== undefined ? slateStep(item, name) : item;
-          if (isList(inner)) { env.charge(inner.length); out.push(...inner); }
-        }
-        cur = out.slice(0, SLATE_LIMITS.listItems);
-        break;
-      }
-      case "join": {
-        const otherExpr = arg(0);
-        const other = run(otherExpr, env);
-        const key = fieldName(arg(1));
-        const otherKey = step.args[2] !== undefined ? fieldName(arg(2)) : key;
-        const under = otherExpr.k === "path" ? String(otherExpr.segs.filter(s => typeof s === "string").at(-1) ?? otherExpr.head) : "other";
-        const pool = isList(other) ? other : [];
-        env.charge(pool.length);
-        cur = list.map(item => {
-          env.charge(1);
-          const mine = key !== undefined ? slateStep(item, key) : undefined;
-          const hit = pool.find(o => otherKey !== undefined && slateEqual(slateStep(o, otherKey), mine ?? null)) ?? null;
-          return isRecord(item) ? { ...item, [under]: hit } : { value: item, [under]: hit };
-        });
-        break;
-      }
-      case "format": cur = isList(cur) ? list.map((item, i) => slateText(per(arg(0), item, i))) : slateText(per(arg(0), cur ?? null, 0)); break;
-    }
+    cur = spec.apply({ list, cur, args: step.args, arg, per, env });
   }
   return cur;
 }
 
+/** What a call or a template may hand on: no text past the most the slate's values hold, and no infinity. */
+function heldText(v: Val): Val {
+  if (typeof v === "string" && v.length > SLATE_LIMITS.valuesBytes) throw new OverBudget();
+  return typeof v === "number" ? finite(v) : v;
+}
+
 function run(node: SlateExpr, env: Env): Val {
-  env.charge(1);
+  env.step();
   switch (node.k) {
     case "lit": return node.v;
     case "path": return readPath(node, env);
@@ -926,7 +934,7 @@ function run(node: SlateExpr, env: Env): Val {
     case "neg": { const v = run(node.arg, env); return isNum(v) ? -v : null; }
     case "not": return !slateTruthy(run(node.arg, env));
     case "cond": return slateTruthy(run(node.test, env)) ? run(node.then, env) : run(node.else, env);
-    case "tpl": return joined(node.parts.map(p => (typeof p === "string" ? { read: false, v: p } : { read: p.expr.k !== "lit", v: run(p.expr, env) })));
+    case "tpl": return heldText(joined(node.parts.map(p => (typeof p === "string" ? { read: false, v: p } : { read: p.expr.k !== "lit", v: run(p.expr, env) }))));
     case "pipe": return runPipe(node, env);
     case "list": return node.items.map(e => run(e, env) ?? null);
     case "index": return pick(run(node.of, env), run(node.index, env));
@@ -946,7 +954,7 @@ function run(node: SlateExpr, env: Env): Val {
       if (spec === undefined || node.args.length < spec.min || node.args.length > spec.max) return null;
       const args = node.args.map(a => run(a, env));
       if (spec.nullSafe !== true && missing(args[0])) return null;
-      return spec.fn(args, env, node.args);
+      return heldText(spec.fn(args, env, node.args));
     }
   }
 }
@@ -965,7 +973,7 @@ export function evaluateSlateExpression(expr: string | SlateExpr, ctx: SlateEval
 }
 
 /** A format string's text: its words and each hole's value, or null when every hole reads nothing, as concat. */
-export function evaluateSlateFormat(src: string, ctx: SlateEvalContext): string | null {
+function evaluateSlateFormat(src: string, ctx: SlateEvalContext): string | null {
   return joined(parseSlateFormat(src).parts.map(p => (typeof p === "string" ? { read: false, v: p } : { read: true, v: evaluateSlateExpression(p.expr, ctx) })));
 }
 
@@ -983,7 +991,7 @@ export function resolveSlateProp(value: SlatePropValue, ctx: SlateEvalContext): 
 // ---- dependencies ----
 
 /** Every node, depth first. */
-export function walkSlateExpr(node: SlateExpr, visit: (n: SlateExpr) => void): void {
+function walkSlateExpr(node: SlateExpr, visit: (n: SlateExpr) => void): void {
   visit(node);
   switch (node.k) {
     case "neg": case "not": walkSlateExpr(node.arg, visit); break;
@@ -1056,7 +1064,7 @@ function merge(a: SlateType, b: SlateType): SlateType {
 
 /** A field of a known type: a record's declared field, or any. */
 function fieldType(of: SlateType, seg: string | number): SlateType | "unknown" {
-  if (typeof seg === "number") return of.t === "list" ? (of.of ?? T.any) : of.t === "any" ? T.any : T.any;
+  if (typeof seg === "number") return of.t === "list" ? (of.of ?? T.any) : T.any;
   if (of.t === "record" && of.fields !== undefined) return of.fields[seg] ?? "unknown";
   return T.any;
 }
@@ -1159,12 +1167,13 @@ export function checkSlateExpression(src: string, scope: SlateCheckScope, base =
         for (const step of node.steps) {
           const spec = PIPE[step.name]!;
           if (spec.needsList && ["number", "string", "boolean", "record"].includes(cur.t)) {
-            add("Q424", `${step.name} takes a list; this is ${cur.t === "string" ? "text" : `a ${cur.t}`}`, step.at - base);
+            add("Q424", `${step.name} takes a list; this is ${cur.t === "string" ? "text" : `a ${cur.t}`}`, step.at);
           }
           const elem = cur.t === "list" ? (cur.of ?? T.any) : T.any;
           const argTypes: SlateType[] = [];
           for (const [i, a] of step.args.entries()) {
             if ((step.name === "pick" || (step.name === "join" && i > 0) || step.name === "flatten") && fieldName(a.expr) !== undefined) { argTypes.push(T.str); continue; }
+            if (step.name === "join" && i > 0) add("Q425", "join's keys are field names: join($other, id) or join($other, id, ownerId)", a.expr.at);
             argTypes.push(type(a.expr, step.name === "join" && i === 0 ? row : elem));
           }
           cur = spec.out(cur, argTypes);

@@ -4,6 +4,7 @@ import {
   applySlatePatch, parseSlatePatch, evaluateSlateExpression, parseSlate, printSlate, runSlateBatch, sketchSlate, slateCatalog, slateStartValues, validateSlate,
   SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES, type SlateDoc, type SlateJson, type SlateValues,
 } from "../../src/slate/index.js";
+import { fmtDuration } from "../../src/format.js";
 
 const example = (title: string): string => SLATE_EXAMPLES.find(e => e.title === title)!.text;
 const GOLD = example("a live figure with an hour of history");
@@ -196,5 +197,13 @@ describe("the inr format", () => {
     const d = parseSlate(`<slate><column><number label="24K, per gram" value={14918} format="inr" /></column></slate>`);
     expect(d.errors).toEqual([]);
     expect(sketchSlate(d.document!, {}, { version: 1 })).toContain("24K, per gram  ₹14,918");
+  });
+});
+
+describe("figures", () => {
+  it("sketches a figure as the panel draws it, through the one formatter", () => {
+    const sketch = sketchSlate(compiled(`<slate><column><number label="Up" value={3600000} format="duration" /><number label="Rows" value={1234567} format="integer" /></column></slate>`), {});
+    expect(sketch).toContain(`Up  ${fmtDuration(3_600_000)}`);
+    expect(sketch).toContain("1,234,567");
   });
 });

@@ -8,7 +8,7 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { instructions } from "./skill.js";
-import { LOADED_UP_FRONT, VERBS, c1Escaped, dialHost, hasTool, toolFailure, toolName, type DialOpts, type HostClient, type Verb, type VerbDeps } from "./verbs.js";
+import { SLATE_TOOL_NAMES, VERBS, c1Escaped, dialHost, hasTool, toolFailure, toolName, type DialOpts, type HostClient, type Verb, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 export interface Dialer {
@@ -59,8 +59,9 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: V
   for (const verb of VERBS) {
     if (!hasTool(verb) || opts.skip?.(verb) === true) continue;
     const name = toolName(verb.name);
+    if (opts.noSlate === true && SLATE_TOOL_NAMES.has(name)) continue;
     // A Claude Code launch loads this server's tools up front (alwaysLoad); every tool but the slate's stays behind its tool search.
-    const listed = { _meta: { "anthropic/alwaysLoad": LOADED_UP_FRONT.has(name) } };
+    const listed = { _meta: { "anthropic/alwaysLoad": SLATE_TOOL_NAMES.has(name) } };
     server.registerTool(name, { description: verb.tool.description, inputSchema: verb.tool.input, outputSchema: verb.tool.output, ...listed }, args => verb.tool.call(args, deps).catch((e: unknown) => toolFailure(e, "usage" in verb ? verb.usage : undefined)));
   }
   return server;

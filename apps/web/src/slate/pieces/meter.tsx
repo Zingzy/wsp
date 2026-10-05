@@ -1,23 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { slateFigure } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
-import { figure, num, str, TONE_FILL, toneOf } from "./look.js";
+import { num, str, TONE_FILL, toneOf } from "./look.js";
 
 /** The figure right of the label, in the word the meter's format names. */
 function meterFigure(value: number, max: number, format: string): string | undefined {
-  switch (format) {
-    case "none":
-      return undefined;
-    case "value":
-      return figure(value, "plain");
-    case "fraction":
-      return `${figure(value, "plain")}/${figure(max, "plain")}`;
-    case "tokens":
-    case "bytes":
-      return figure(value, format);
-    default:
-      return `${Math.round((value / max) * 100)}%`;
-  }
+  return format === "none" ? undefined : slateFigure(value, format === "value" ? "plain" : format, max);
 }
 
 export const meter: PieceView = {

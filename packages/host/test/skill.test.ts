@@ -2,9 +2,9 @@
 // The wsp skill for agents on this computer: one file in the repo, read as
 // text at build time, that names every verb and tool and gives the MCP server
 // its instructions.
-import { RUN_BLOCK_WORDS, thisComputerLine } from "@wsp/protocol";
+import { CLOUD_ENV, RUN_BLOCK_WORDS, thisComputerLine } from "@wsp/protocol";
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { ANOTHER_AGENT_WORDS, BACKGROUND_WORK_WORDS, COORDINATOR_HANDOFF, LOGIN_CHOICES, NOTIFY_CALLER, SessionStartOutcome, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
 import { instructions, INSTRUCTIONS_KEPT, SLATE_WORDS, THREAD_SLATE_WORDS, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, wspSkill, agentsLine, instructionsOf, skillFor } from "../src/skill.js";
@@ -82,6 +82,21 @@ describe("the wsp skill", () => {
     expect(instructions()).toContain("in the wsp skill");
   });
 
+  it("leaves room under the cut for a thread agent or two more, with the cloud on or off", async () => {
+    // Each agent the catalog adds lengthens the agents line, which every server's instructions carry.
+    const room = 60;
+    try {
+      for (const cloud of ["", "1"]) {
+        vi.resetModules();
+        vi.stubEnv(CLOUD_ENV, cloud);
+        const fresh = await import("../src/skill.js");
+        for (const scoped of [false, true]) expect(fresh.instructions(scoped).length, `cloud "${cloud}", scoped ${scoped}`).toBeLessThanOrEqual(INSTRUCTIONS_KEPT - room);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("opens a thread's own instructions with its slate, keyed on what the person wants to see, and leaves the others as they are", () => {
     expect(instructions(true)).toBe(`${THREAD_SLATE_WORDS}\n\n${instructions().replace(`${SLATE_WORDS}. `, "")}`);
     // A thread another thread started has no slate: its server's instructions are the thread's own with no word of one.
@@ -94,12 +109,12 @@ describe("the wsp skill", () => {
 
   it("says once a slate is written a request to see lands there, the person's result stays there, and the slate's own code lives in its files", () => {
     expect(THREAD_SLATE_WORDS).toContain("Once the slate is written, a request to see something lands there.");
-    expect(THREAD_SLATE_WORDS).toContain("Build and read it with the slate tools, never wsp from a shell, which may be another install.");
-    // Rulings 11 and 13: a one-off answer stays in chat, and the reply after a write is short and checked first.
-    expect(THREAD_SLATE_WORDS).toContain("A one-off answer, a comparison or an explanation, stays in chat unless they ask to see it.");
+    expect(THREAD_SLATE_WORDS).toContain("Build and read it with the slate tools, never wsp from a shell.");
+    // A one-off answer stays in chat, and the reply after a write is short and checked first.
+    expect(THREAD_SLATE_WORDS).toContain("A one-off answer or an explanation stays in chat unless they ask to see it.");
     // At medium effort agents fetched with another tool and answered in chat: the first call is the catalog, whatever fetches.
     expect(THREAD_SLATE_WORDS).toContain("your first tool call is slate_catalog, then slate_write; a list in chat is not a slate.");
-    expect(THREAD_SLATE_WORDS).toContain("Fetching data with another tool is no reason to answer in chat; show it on the slate.");
+    expect(THREAD_SLATE_WORDS).toContain("Show data fetched with another tool on the slate, not in chat.");
     for (const said of ["tick off", "as it goes", "keep an eye on", "what's unread", "live"]) expect(THREAD_SLATE_WORDS.slice(0, THREAD_SLATE_WORDS.indexOf("your first tool call")), said).toContain(said);
     expect(THREAD_SLATE_WORDS).toContain("Read the sketch a write answers before saying it works, then reply briefly: what you built and what waits on the person.");
     const text = wspSkill();
@@ -297,8 +312,11 @@ describe("the wsp skill", () => {
   it("the MCP instructions are what another agent is, the slate, what wsp is and where the skill is, the agents, and the roads to a child's end, whole inside what Claude Code keeps", () => {
     expect(instructions()).toBe(instructionsOf(THREAD_AGENTS));
     expect(instructions().startsWith(`${ANOTHER_AGENT_WORDS}. ${SLATE_WORDS}. Agents work on a project, a folder on one computer`)).toBe(true);
-    // The slate's sentence is second and under 220 characters with its full stop (10).
+    // The slate's sentence is second and under 220 characters with its full stop.
     expect(`${SLATE_WORDS}.`.length).toBeLessThan(220);
+    // This server is the person's own, not a thread's, so a slate call from it names the thread.
+    expect(SLATE_WORDS).not.toContain("This thread");
+    expect(SLATE_WORDS).toContain("naming the thread");
     expect(instructions().indexOf(`${SLATE_WORDS}.`)).toBe(ANOTHER_AGENT_WORDS.length + 2);
     // The skill's slate section stays under 600 tokens, counted at four characters a token.
     const text = wspSkill();

@@ -3,13 +3,14 @@
 // 20 and the warnings beside them, each with its piece, prop, line and a fix where one is computable. The same pass
 // serves a JSX-like write, the JSON form, a check and a patched result.
 import { fmtBytes } from "../format.js";
+import { escapeRegExp } from "../regexp.js";
 import { checkSlateExpression, parseSlateExpression, parseSlateFormat, slateDependencies, type SlateCheckScope, type SlateType } from "./expr.js";
 import { isSlateIcon, nearestSlateIcon } from "./icons.js";
 import { SLATE_PIECES, SLATE_RESERVED_PROPS, type SlateItemSpec, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
-import { SLATE_LIMITS } from "./limits.js";
-import { parseSlateOwnPath } from "./paths.js";
-import { SLATE_WARNINGS, nearest, orList, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
-import { SLATE_SOURCES, slateIsSeries, slateSourceType } from "./sources.js";
+import { SLATE_LIMITS, slateBytes } from "./limits.js";
+import { slateTable, parseSlateOwnPath, slateOwnName } from "./paths.js";
+import { SLATE_SECRET_IN_ARGS, SLATE_WARNINGS, nearest, orList, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
+import { SLATE_SOURCES, slateSourceType } from "./sources.js";
 import { SLATE_STEPS } from "./steps.js";
 import {
   SLATE_FILE_NAME, SLATE_ID, SLATE_NAME, SLATE_PANE_KINDS, SLATE_RUN_FIELDS, SLATE_SECRET_FIELDS, SlateSchema, isSlateBinding, isSlateFormat,
@@ -23,13 +24,12 @@ type Kind = "value" | "secret" | "derived" | "run";
 type Trigger = "press" | "submit" | "change" | "reaction";
 interface Where { piece?: string; prop?: string }
 
-const RUN_FIELD_TYPES: Record<(typeof SLATE_RUN_FIELDS)[number], SlateType> = {
+const RUN_FIELD_TYPES: Record<(typeof SLATE_RUN_FIELDS)[number], SlateType> = slateTable<SlateType>({
   state: { t: "string" }, why: { t: "string" }, exit: { t: "number" }, out: { t: "any" }, err: { t: "string" }, json: { t: "any" },
   lines: { t: "list", of: { t: "string" } }, startedAt: { t: "number" }, endedAt: { t: "number" }, ms: { t: "number" }, runs: { t: "number" }, cut: { t: "boolean" }, stale: { t: "boolean" },
   refreshing: { t: "boolean" }, text: { t: "boolean" },
-};
+});
 /** A plain own path written as text, "$x" or "$x.out": the agent meant the formula. */
-const OWN_PATH = /^\$[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])*$/;
 /** Words a head capitalises in Title Case and sentence case leaves alone: an acronym, or a word with a capital inside. */
 const KEPT_CAPS = /^[A-Z0-9]{2,}s?$|^.+[A-Z].*$/;
 /** Whether a head reads as Title Case: two or more words of four letters or more past the first, every one capitalised. */
@@ -50,7 +50,7 @@ function tokenIn(text: string): string | undefined {
 
 /** Attributes of a <run> that a piece is given by habit: the refusal points at the run. */
 const RUN_ATTRS: ReadonlySet<string> = new Set(["every", "cmd", "timeout", "always", "once", "interval", "refresh"]);
-const SECRET_FIELD_TYPES: Record<string, SlateType> = { set: { t: "boolean" }, len: { t: "number" }, at: { t: "number" } };
+const SECRET_FIELD_TYPES: Record<string, SlateType> = slateTable({ set: { t: "boolean" }, len: { t: "number" }, at: { t: "number" } });
 
 /** The type a literal start reads as: a list of records takes its first record's fields. */
 function literalType(v: SlateJson): SlateType {
@@ -153,7 +153,7 @@ class Validator {
       const token = tokenIn(text);
       if (token !== undefined) this.add("S520", `${file} holds a token written out (${token}...); let the code read it from the file it lives in, or from an env the run hands it`, { piece: file });
     }
-    if (JSON.stringify({ ...d, files: undefined }).length > SLATE_LIMITS.documentBytes) this.add("D208", `the document is over ${fmtBytes(SLATE_LIMITS.documentBytes)}`);
+    if (slateBytes(JSON.stringify({ ...d, files: undefined })) > SLATE_LIMITS.documentBytes) this.add("D208", `the document is over ${fmtBytes(SLATE_LIMITS.documentBytes)}`);
     this.names();
     this.limits();
     for (const [name, v] of Object.entries(d.values)) this.value(name, v.start, v.secret === true, v.keep === true);
@@ -189,7 +189,7 @@ class Validator {
     over(Object.keys(d.runs).length, SLATE_LIMITS.runs, "K707", "runs");
     over(d.reactions.length, SLATE_LIMITS.reactions, "A611", "reactions");
     over(Object.keys(d.pieces).length, SLATE_LIMITS.pieces, "D207", "pieces", "bind a list to a table or a list instead of writing rows");
-    const starts = JSON.stringify(Object.values(d.values).map(v => v.start)).length;
+    const starts = slateBytes(JSON.stringify(Object.values(d.values).map(v => v.start)));
     if (starts > SLATE_LIMITS.valuesBytes) this.add("S500", `the values' starts are over ${fmtBytes(SLATE_LIMITS.valuesBytes)}`);
   }
 
@@ -318,11 +318,13 @@ class Validator {
         for (const s of this.secretsIn(v)) secretEnv.push([k, s]);
       }
       (r.args ?? []).forEach((v, i) => {
-        this.propValue(v, w(`args[${i}]`), { secretOk: true });
+        const secret = isSlateBinding(v) ? slateOwnName(v.bind) : undefined;
+        if (secret !== undefined && this.kinds.get(secret) === "secret") this.add("S520", `args[${i}] is the secret $${secret}; ${SLATE_SECRET_IN_ARGS}`, w(`args[${i}]`), `env={{ ${secret.toUpperCase()}: $${secret} }}, or stdin={$${secret}}`);
+        else this.propValue(v, w(`args[${i}]`));
       });
       if (r.stdin !== undefined) this.propValue(r.stdin, w("stdin"), { secretOk: true });
       for (const [envName, secret] of secretEnv) {
-        const flag = new RegExp(`(?:^|\\s)(-{1,2}[A-Za-z][\\w-]*)(?:=|\\s+)["']?\\$\\{?${envName}\\b`);
+        const flag = new RegExp(`(?:^|\\s)(-{1,2}[A-Za-z][\\w-]*)(?:=|\\s+)["']?\\$\\{?${escapeRegExp(envName)}\\b`);
         const m = flag.exec(r.cmd);
         if (m !== null) {
           this.add("W011", `${envName} carries the secret $${secret}, and the command passes it after ${m[1]}, as an argument ps can read; hand it on stdin={$${secret}}, or let the program read ${envName} from its environment`, w("cmd"), `drop ${m[1]} "$${envName}" and use stdin={$${secret}} or the program's own ${envName}`);
@@ -346,7 +348,7 @@ class Validator {
     for (const [name, text] of Object.entries(files)) {
       if (!SLATE_FILE_NAME.test(name)) this.add("K708", `"${name}" is not a file name: letters, digits, dots, dashes and _, no slashes, not starting with a dot`, { piece: name }, name.replace(/^.*\//, "").replace(/^[.]+/, "").replace(/[^A-Za-z0-9._-]/g, "_") || undefined);
       for (const secret of secrets) {
-        if (new RegExp(`\\$\\{?${secret}\\b`).test(text)) this.add("S520", `${name} names the secret $${secret}; a file is stored as written, so a run hands the secret to it on stdin or in env`, { piece: name }, `env={{ ${secret.toUpperCase()}: $${secret} }} on the run, read from the environment in ${name}`);
+        if (new RegExp(`\\$\\{?${escapeRegExp(secret)}\\b`).test(text)) this.add("S520", `${name} names the secret $${secret}; a file is stored as written, so a run hands the secret to it on stdin or in env`, { piece: name }, `env={{ ${secret.toUpperCase()}: $${secret} }} on the run, read from the environment in ${name}`);
       }
     }
     for (const [run, r] of Object.entries(this.doc.runs)) {
@@ -429,27 +431,22 @@ class Validator {
   }
 
   private reactionCycles(): void {
-    const edges = new Map<string, Set<string>>();
-    const why = new Map<string, string>();
-    const add = (from: string, to: string, text: string): void => {
-      (edges.get(from) ?? edges.set(from, new Set()).get(from)!).add(to);
-      if (!why.has(`${from}>${to}`)) why.set(`${from}>${to}`, text);
-    };
-    for (const [name, expr] of Object.entries(this.doc.derived)) for (const d of roots(slateDependencies(expr))) add(d, name, `$${name} reads $${d}`);
+    // Nodes are whole paths: a write wakes a watcher of the same path, of a path above it, or of one under it.
+    const edges: { from: string; to: string; why: string }[] = [];
+    for (const [name, expr] of Object.entries(this.doc.derived)) for (const d of slateDependencies(expr)) edges.push({ from: d, to: `$${name}`, why: `$${name} reads ${d}` });
     for (const r of this.doc.reactions) {
       const change = (r.on as { change?: string[] }).change;
       if (change === undefined) continue;
-      const triggers = roots(change);
-      const targets = r.do.flatMap(s => (s.do === "set" || s.do === "toggle" ? [parseSlateOwnPath(s.path)?.name] : [])).filter((x): x is string => x !== undefined);
-      for (const t of triggers) for (const g of targets) add(t, g, `when change of $${t} sets $${g}`);
+      const targets = r.do.flatMap(s => (s.do === "set" || s.do === "toggle" ? [s.path] : []));
+      for (const t of change) for (const g of targets) edges.push({ from: t, to: g, why: `when change of ${t} sets ${g}` });
     }
+    const next = (n: string) => edges.filter(e => pathsOverlap(e.from, n));
     const state = new Map<string, "on" | "done">();
     let reported = false;
-    const visit = (n: string, stack: string[]): void => {
+    const visit = (n: string, stack: { node: string; why: string }[]): void => {
       if (reported || state.get(n) === "done") return;
       if (state.get(n) === "on") {
-        const cycle = [...stack.slice(stack.indexOf(n)), n];
-        const said = cycle.slice(0, -1).map((x, i) => why.get(`${x}>${cycle[i + 1]}`) ?? "");
+        const said = stack.slice(stack.findIndex(s => s.node === n) + 1).map(s => s.why);
         if (said.some(s => s.startsWith("when"))) {
           reported = true;
           this.add("A610", `reactions and derived values form a cycle: ${said.join("; ")}`, {}, "compute it as a <derived> value instead of setting it back");
@@ -457,10 +454,10 @@ class Validator {
         return;
       }
       state.set(n, "on");
-      for (const m of edges.get(n) ?? []) visit(m, [...stack, n]);
+      for (const e of next(n)) visit(e.to, [...stack, ...(stack.length === 0 ? [{ node: n, why: "" }] : []), { node: e.to, why: e.why }]);
       state.set(n, "done");
     };
-    for (const n of edges.keys()) visit(n, []);
+    for (const e of edges) visit(e.from, []);
   }
 
   // ---- pieces ----
@@ -476,6 +473,10 @@ class Validator {
       if (depth > SLATE_LIMITS.depth) { this.add("D206", `the tree is deeper than ${SLATE_LIMITS.depth}`, { piece: id }); return; }
       const p = d.pieces[id]!;
       const childRow = this.piece(id, p, row);
+      if (typeof p.fallback === "string" && p.fallback !== "drop") {
+        if (d.pieces[p.fallback] === undefined) this.add("D203", `fallback names ${p.fallback}, which is not a piece`, { piece: id, prop: "fallback" }, nearest(p.fallback, Object.keys(d.pieces)));
+        else walk(p.fallback, depth + 1, [...path, id], row);
+      }
       const children = p.children ?? [];
       if (children.length > SLATE_LIMITS.children) this.add("D207", `${id} has ${children.length} children; the most is ${SLATE_LIMITS.children}`, { piece: id }, "bind a list instead");
       for (const c of children) {
@@ -497,11 +498,10 @@ class Validator {
       return row;
     }
     if (p.when !== undefined) this.expr(p.when, { piece: id, prop: "when" }, { ...(row !== undefined ? { row } : {}) });
-    if (typeof p.fallback === "string" && p.fallback !== "drop" && this.doc.pieces[p.fallback] === undefined) this.add("D203", `fallback names ${p.fallback}, which is not a piece`, { piece: id, prop: "fallback" });
     const props = p.props ?? {};
     const itemProps = new Map(Object.entries(spec.items).map(([tag, s]) => [s.prop, { tag, spec: s }]));
     const items = props.items;
-    const rowType = spec.repeating === true ? this.itemsRow(items, id, row) : undefined;
+    const rowType = spec.repeating === true ? this.itemsRow(items, row) : undefined;
     for (const [name, v] of Object.entries(props)) {
       const item = itemProps.get(name);
       const scalars = Array.isArray(v) && v.every(x => typeof x === "string" || typeof x === "number");
@@ -518,7 +518,6 @@ class Validator {
     for (const [name, ps] of Object.entries(spec.props)) {
       if (ps.required !== true || props[name] !== undefined) continue;
       if (spec.interactive === true && name === "label") this.add("T307", `a ${p.type} needs a label for people using a screen reader`, { piece: id, prop: name }, `label="..."`);
-      else if (p.type === "form" && name === "tool") this.add("T304", `form fills an MCP tool's arguments and needs tool="server.tool"; for fields of your own, use <input label="..." value={$x} /> and a <button>`, { piece: id, prop: name });
       else this.add("T304", `${p.type} "${id}" needs ${name}`, { piece: id, prop: name });
     }
     for (const [tag, is] of Object.entries(spec.items)) {
@@ -537,23 +536,15 @@ class Validator {
       if (children.length > spec.childLimit.max) this.add("T309", `${p.type} takes at most ${spec.childLimit.max} child${spec.childLimit.max === 1 ? "" : "ren"}`, { piece: id });
       if (spec.childLimit.types.length > 0) for (const c of children) { const t = this.doc.pieces[c]?.type; if (t !== undefined && !spec.childLimit.types.includes(t)) this.add("T309", `${p.type} takes ${orList(spec.childLimit.types)} children, not ${t}`, { piece: id }); }
     }
-    if (p.type === "tabs" && children.length === 0) this.add("T309", "tabs holds the pieces its tabs show", { piece: id });
-    if (p.type === "list" && children.length !== 1) this.add("T309", "list holds one child, drawn once per row", { piece: id });
-    if (p.type === "checklist" && props.editable === true && !(isSlateBinding(props.items) && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(props.items.bind.trim()) && this.kinds.get(props.items.bind.trim().slice(1)) === "value")) {
-      this.add("S502", "an editable checklist writes its ticks back, so items binds a value: items={$steps}", { piece: id, prop: "items" });
-    }
     if (props.mono === true && spec.textProp !== undefined && sentence(props[spec.textProp])) this.add("W014", MONO_WARNING, { piece: id, prop: "mono" }, "drop mono");
-    if (p.type === "chart" && (props.x === undefined || (isSlateBinding(props.x) && props.x.bind.trim() === "index"))) this.add("W013", "the chart's x is each row's index, so its axis reads 0 to the count; give each row its time, for example x={item.at}", { piece: id, prop: "x" }, "x={item.at}");
-    if (p.type === "bars" && isSlateBinding(items) && slateIsSeries(items.bind.trim())) this.add("W003", `${items.bind} is a series over time; draw it as a line`, { piece: id, prop: "items" }, "<chart>");
-    else if (p.type === "bars" && isSlateBinding(props.name) && readsTime(props.name.bind)) this.add("W003", `bars name each row by ${props.name.bind}, a time: a series over time is a line`, { piece: id, prop: "name" }, "<chart>");
-    return spec.rowTemplate === true ? rowType : row;
+    spec.check?.({ props, kind: n => this.kinds.get(n), add: (code, message, prop, fix) => this.add(code, message, { piece: id, ...(prop !== undefined ? { prop } : {}) }, fix) });
+    return row;
   }
 
   /** The row type of a repeating piece's items, where its shape is known. */
-  private itemsRow(items: SlatePropValue | undefined, id: string, row: SlateType | undefined): SlateType {
+  private itemsRow(items: SlatePropValue | undefined, row: SlateType | undefined): SlateType {
     if (!isSlateBinding(items)) return { t: "any" };
     const { type } = checkSlateExpression(items.bind, this.scope(row, false));
-    void id;
     return type.t === "list" ? (type.of ?? { t: "any" }) : { t: "any" };
   }
 
@@ -595,22 +586,22 @@ class Validator {
     const name = w.prop!.split(".").at(-1)!;
     const enumWords = Array.isArray(ps.type) ? (ps.type as readonly string[]) : undefined;
     if (v === null) return;
-    const mark = type === "markdown" || ps.binds === "state" ? undefined : joiningMark(v);
+    const mark = ps.marks === true || ps.binds === "state" ? undefined : joiningMark(v);
     if (mark !== undefined) this.add("W012", `${name} joins words with "${mark}"; the kit separates things by layout, never a mark: give each its own piece, or join with a comma`, w, "separate pieces (facts, chips, a row) or a comma");
     if (isBound(v)) {
       if (ps.binds === "no") { this.add("T305", `${name} takes a literal, not a formula`, w); return; }
       if (ps.binds === "state") {
         const bind = isSlateBinding(v) ? v.bind.trim() : "";
-        const m = /^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(bind);
-        const kind = m !== null ? this.kinds.get(m[1]!) : undefined;
-        if (m === null) {
+        const m = slateOwnName(bind);
+        const kind = m !== undefined ? this.kinds.get(m) : undefined;
+        if (m === undefined) {
           const into = name === "value" ? "picked" : name;
           this.add("X410", `${name} on ${type} writes back, so it binds one plain value, not ${bind}; bind a value of its own and keep a list with append in a <when> if you need one per item`, w, `<value name="${into}" start={null} /> and ${name}={$${into}}`);
           return;
         }
-        if (kind === undefined) { this.add("S501", `$${m[1]} is not declared; add <value name="${m[1]}" start=... />`, w, nearest(m[1]!, [...this.kinds.keys()])); return; }
+        if (kind === undefined) { this.add("S501", `$${m} is not declared; add <value name="${m}" start=... />`, w, nearest(m, [...this.kinds.keys()])); return; }
         if (kind === "secret" && type !== "input") { this.add("S520", "a secret is typed into an input and nowhere else", w); return; }
-        if (kind !== "value" && kind !== "secret") { this.add("X410", `${name} on ${type} writes a value; $${m[1]} is ${kind === "derived" ? "derived" : "a run"}`, w); return; }
+        if (kind !== "value" && kind !== "secret") { this.add("X410", `${name} on ${type} writes a value; $${m} is ${kind === "derived" ? "derived" : "a run"}`, w); return; }
         return;
       }
       const t = this.propValue(v, w, { ...(row !== undefined ? { row } : {}), ...(enumWords !== undefined ? { enumWords } : {}) });
@@ -624,11 +615,10 @@ class Validator {
     if (ps.binds === "state" && ps.literal === true && ps.type === "boolean" && typeof v === "boolean") return;
     if (ps.binds === "state") { this.add("X410", `${name} on ${type} is two-way and binds a value: ${name}={$name}`, w, `${name}={$${typeof v === "string" && /^[a-z_]\w*$/.test(v) ? v : "name"}}`); return; }
     if (ps.type === "path") {
-      const m = typeof v === "string" ? /^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(v) : null;
-      if (m === null) { this.add("T303", `${name} names a run or a value as $name`, w); return; }
-      const kind = this.kinds.get(m[1]!);
-      if (type === "output" && kind !== "run") this.add("K702", `run names a run: $${m[1]} is ${kind ?? "not declared"}`, w, nearest(m[1]!, [...this.kinds].filter(([, k]) => k === "run").map(([n]) => `$${n}`)));
-      if (type === "form" && kind !== "value") this.add("S501", `into names a value: $${m[1]} is ${kind ?? "not declared"}`, w);
+      const m = typeof v === "string" ? slateOwnName(v) : undefined;
+      if (m === undefined) { this.add("T303", `${name} names a run or a value as $name`, w); return; }
+      const kind = this.kinds.get(m);
+      if (ps.names === "run" && kind !== "run") this.add("K702", `run names a run: $${m} is ${kind ?? "not declared"}`, w, nearest(m, [...this.kinds].filter(([, k]) => k === "run").map(([n]) => `$${n}`)));
       return;
     }
     if (enumWords !== undefined) {
@@ -668,10 +658,10 @@ class Validator {
       case "string": case "text":
         if (typeof v === "string") {
           if (looksLikePath(v)) this.add("W001", `${name} is the literal text "${v}", which reads like a path`, w, `${name}={${v}}`);
-          else if (OWN_PATH.test(v) || /\{\$[^}]*\}/.test(v)) this.add("W001", `${name} is the literal text "${v}", which reads like a formula; quotes show it as written`, w, `${name}={${v.replace(/^\{(.*)\}$/, "$1")}}`);
+          else if (parseSlateOwnPath(v) !== undefined || /\{\$[^}]*\}/.test(v)) this.add("W001", `${name} is the literal text "${v}", which reads like a formula; quotes show it as written`, w, `${name}={${v.replace(/^\{(.*)\}$/, "$1")}}`);
           if (v.includes("\u2014")) this.add("W004", "an em dash in the slate's words; use a comma, a colon or a full stop", w);
           if (/\p{Extended_Pictographic}/u.test(v)) this.add("W017", `${name} has an emoji; the slate's words carry none, so say it in words or give the piece an icon`, w);
-          if ((name === "title" || (type === "heading" && name === "value")) && titleCased(v)) this.add("W018", `${name} "${v}" is in Title Case; heads take sentence case`, w, `${name}="${sentenceCase(v)}"`);
+          if ((name === "title" || ps.head === true) && titleCased(v)) this.add("W018", `${name} "${v}" is in Title Case; heads take sentence case`, w, `${name}="${sentenceCase(v)}"`);
           return;
         }
         if (typeof v === "number" && ps.type === "text") return;
@@ -685,22 +675,21 @@ class Validator {
     const tally = (pred: (p: SlatePiece) => boolean): string[] => Object.entries(this.doc.pieces).filter(([, p]) => pred(p)).map(([id]) => id);
     const check = (ids: string[], what: string): void => { if (ids.length > 1) this.add("T311", `${what} on ${ids.join(", ")}; one per slate reads loud, the rest draw as default`, { piece: ids[1]! }); };
     check(tally(p => p.props?.tone === "accent"), "accent");
-    check(tally(p => p.type === "button" && p.props?.variant === "primary"), "primary");
+    check(tally(p => p.props?.variant === "primary"), "primary");
     check(tally(p => p.props?.size === "large"), "large");
   }
 }
 
-const TIME_FIELDS = new Set(["at", "time", "date", "ts", "timestamp", "when", "day", "hour", "minute"]);
-const TIME_FNS = /\b(?:date|time|ago|weekday)\s*\(/;
 
 /** A row's name that reads a time: item.at, item.date, or date(...) and its kin. */
-function readsTime(expr: string): boolean {
-  if (TIME_FNS.test(expr) || slateDependencies(expr).includes("time.now")) return true;
-  const field = /\bitem\.([A-Za-z_]+)\b/.exec(expr)?.[1];
-  return field !== undefined && TIME_FIELDS.has(field);
-}
 
 /** The names a list of own paths starts from. */
+/** Whether a write to one path can change what the other reads: the same path, or one above the other. */
+function pathsOverlap(a: string, b: string): boolean {
+  const under = (x: string, y: string): boolean => x.startsWith(y) && (x[y.length] === "." || x[y.length] === "[");
+  return a === b || under(a, b) || under(b, a);
+}
+
 function roots(paths: readonly string[]): string[] {
   return [...new Set(paths.filter(p => p.startsWith("$")).map(p => p.slice(1).split(/[.[]/)[0]!))];
 }

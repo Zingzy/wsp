@@ -10,7 +10,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, posix, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { writeOwn } from "@wsp/own-file";
-import { EXEC_DEADLINE_EXIT, EXEC_OUTPUT_MAX, EXEC_TIMEOUT_MAX_MS, runOutputTail } from "@wsp/protocol";
+import { EXEC_DEADLINE_EXIT, EXEC_OUTPUT_MAX, EXEC_TIMEOUT_MAX_MS, runOutputTail, SLATE_LIMITS, SLATE_SECRET_IN_ARGS } from "@wsp/protocol";
 import type { SlateJson } from "@wsp/protocol";
 
 export type RunState = "idle" | "held" | "running" | "done" | "failed" | "cancelled";
@@ -381,9 +381,9 @@ export function rewoundRecord(record: RunRecord, now: number = Date.now()): RunR
 }
 
 const DEFAULT_TIMEOUT_S = 60;
-const LINES_KEPT = 500;
-const RUNNING_MAX = 4;
-export const STARTS_PER_MINUTE = 12;
+const LINES_KEPT = SLATE_LIMITS.streamLines;
+const RUNNING_MAX = SLATE_LIMITS.runningAtOnce;
+export const STARTS_PER_MINUTE = SLATE_LIMITS.startsPerMinute;
 const TIMER_FLOOR_S = 10;
 /** Five failed starts in a row back an `always` timer off to one start every five minutes, until one succeeds (07). */
 const BACKOFF_AFTER = 5;
@@ -401,8 +401,6 @@ const HELD_BUSY = `${RUNNING_MAX} runs are already running`;
 export const HELD_BUDGET = `started ${STARTS_PER_MINUTE} times in a minute; press to run it again`;
 export const HELD_PRESSED = `pressed ${STARTS_PER_MINUTE} times in a minute; it can start again in a minute`;
 const HELD_ASLEEP = "the box was asleep, so this tick did not wake it; press to run it now";
-const SECRET_IN_ARGS = "a secret reaches a command through env or stdin, never as an argument, which ps can read";
-
 type HeldFor = "approval" | "busy" | "budget" | "pressed";
 
 interface Live {
@@ -728,7 +726,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     if (l.record.state === "running") stop(threadId, run, l, undefined);
     if (running(t) >= RUNNING_MAX) return hold(req, l, "busy");
     const inputs = req.inputs();
-    if ((inputs.args ?? []).some(input => "secret" in input)) return fail(req, l, SECRET_IN_ARGS);
+    if ((inputs.args ?? []).some(input => "secret" in input)) return fail(req, l, SLATE_SECRET_IN_ARGS);
     // On the thread's own machine the command takes that machine's environment, and SLATE_DIR there.
     const road = deps.road?.(threadId, decl.on ?? "thread");
     let env: Record<string, string>;

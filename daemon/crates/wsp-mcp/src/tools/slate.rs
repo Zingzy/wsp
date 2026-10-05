@@ -32,6 +32,9 @@ pub const STATE: Tool = Tool {
     listed: include_str!("../../record/tools/slate_state.json"),
     call: |host, args| Box::pin(state(host, args)),
 };
+/// The slate's tools by name, which a server for a thread with no slate leaves off.
+pub const NAMES: [&str; 4] = [CATALOG.name, WRITE.name, STATE.name, READ.name];
+
 pub const READ: Tool =
     Tool { name: "slate_read", listed: include_str!("../../record/tools/slate_read.json"), call: |host, args| Box::pin(read(host, args)) };
 

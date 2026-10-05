@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AccountRow } from "../usage.js";
+import { SLATE_LIMITS } from "./limits.js";
 
 // The slate's wire, version 2: the ops a window, the slate verbs and the Rust tool server send the host, what each
 // answers, and the events (01-architecture, "Wire operations"). Shapes the slate module owns (the document, a
@@ -211,8 +211,8 @@ export type SlateOpName = keyof typeof SLATE_OPS;
 export const SlatesGetAnswer = z.object({ slate: SlateView.nullable() });
 export type SlatesGetAnswer = z.infer<typeof SlatesGetAnswer>;
 
-/** What every write answers: the version stored and the sketch as text. */
-/** waiting: the runs held for the person's approval, which is no fault of the slate's, so never among its problems. */
+/** What every write answers: the version stored and the sketch as text. waiting is the runs held for the person's
+ * approval, which is no fault of the slate's, so never among its problems. */
 export const SlateWriteAnswer = z.object({ version: z.number().int(), text: z.string(), warnings: z.array(SlateWireProblem), problems: z.array(SlateWireProblem), waiting: z.array(z.string()).optional() });
 export type SlateWriteAnswer = z.infer<typeof SlateWriteAnswer>;
 
@@ -274,8 +274,8 @@ export const SessionSlateEvent = z.object({
   cause: SlateCause,
   version: z.number().int(),
   by: SlateBy,
-  /** The piece ids the write touched, at most 20. */
-  pieces: z.array(z.string()).max(20),
+  /** The piece ids the write touched, at most piecesNamed. */
+  pieces: z.array(z.string()).max(SLATE_LIMITS.piecesNamed),
   /** The run, for cause run. */
   run: z.string().optional(),
 });
@@ -289,7 +289,3 @@ export type SlateValuesEvent = z.infer<typeof SlateValuesEvent>;
 /** New lines of a streaming run, scrubbed, pushed and never recorded. */
 export const SlateRunEvent = z.object({ type: z.literal("slate.run"), workspaceId: z.string(), threadId: z.string(), run: z.string(), lines: z.array(z.string()) });
 export type SlateRunEvent = z.infer<typeof SlateRunEvent>;
-
-/** An account's row after a turn's limit reading folded into it, so a bound meter moves at once. */
-export const UsageAccountEvent = z.object({ type: z.literal("usage.account"), key: z.string(), row: AccountRow });
-export type UsageAccountEvent = z.infer<typeof UsageAccountEvent>;

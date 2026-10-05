@@ -16,9 +16,11 @@ export function slateChartAxis(values: readonly number[]): { from: number; to: n
   const tidy = (v: number): number => Number(v.toPrecision(12));
   const span = (parts: number): { from: number; to: number; parts: number } => {
     let magnitude = 10 ** Math.floor(Math.log10((high - low) / parts));
+    if (!(magnitude > 0 && Number.isFinite(magnitude))) return { from: low, to: high, parts };
     for (let i = 0; ; i++) {
       if (i === STEPS.length) (i = 0), (magnitude *= 10);
       const step = STEPS[i]! * magnitude;
+      if (!Number.isFinite(step * parts)) return { from: low, to: high, parts };
       if (step * parts < high - low) continue;
       const from = tidy(Math.floor(tidy(low / step)) * step);
       if (from + step * parts >= high) return { from, to: tidy(from + step * parts), parts };

@@ -3736,7 +3736,7 @@ const AgentsOnIn = z.string().optional().describe("the computer to read, by the 
 const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
 const AGENTS_READ_WORDS = "Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.";
 
-// --- the slate: a live panel per thread the agent builds and the person reads, presses and fills in (spec 10) ---
+// --- the slate: a live panel per thread the agent builds and the person reads, presses and fills in ---
 
 const SlateThreadIn = z.string().optional().describe("another thread's id");
 const SlateIfVersionIn = z.number().int().optional().describe("only at this version");
@@ -3855,6 +3855,7 @@ const SLATE_VERBS: readonly Verb[] = [
       const [a, b] = ctx.args;
       if ((a === undefined && !rehearsal) || ctx.args.length > 2) throw usageRefusal("wsp slate write takes a file, after a thread where it is not yours.", usageIs(ctx));
       const [ref, file] = b !== undefined ? [a, b] : a !== undefined && /\.(slate|json)$/.test(a) ? [undefined, a] : [a, undefined];
+      if (file === undefined && !rehearsal) throw usageRefusal("wsp slate write takes a .slate or .json file, after a thread where it is not yours.", usageIs(ctx));
       const client = await ctx.client();
       const ifVersion = ifVersionOf(ctx);
       const rehearse = { ...(Object.keys(values).length > 0 ? { values } : {}), ...(piece !== undefined ? { press: { piece, ...(row !== undefined ? { index: row } : {}), ...(action !== undefined ? { action } : {}) } } : {}) };
@@ -3947,9 +3948,9 @@ const SLATE_VERBS: readonly Verb[] = [
   },
 ];
 
-/** The tools a client that defers tools behind a search loads up front all the same: the slate's, which a model that
- * never searched never found. */
-export const LOADED_UP_FRONT: ReadonlySet<string> = new Set<string>(SLATE_TOOLS);
+/** The slate's tools: loaded up front by a client that defers tools behind a search, since a model that never searched
+ * never found them, and left off a server for a thread that has no slate. */
+export const SLATE_TOOL_NAMES: ReadonlySet<string> = new Set<string>(SLATE_TOOLS);
 
 /** The fields given, without the ones left out, so an absent input never rides the wire as undefined. */
 function pick<T extends Record<string, unknown>>(o: T): Partial<T> {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applySlatePatch, parseSlate, parseSlatePatch, printSlate, slateCatalog, slateStartValues, validateSlate, type SlateDoc } from "../../src/slate/index.js";
+import { applySlatePatch, parseSlate, parseSlatePatch, printSlate, resolveSlateProp, slateCatalog, slateStartValues, validateSlate, type SlateDoc } from "../../src/slate/index.js";
 import { SPEC_EXAMPLES } from "./examples.js";
 
 const doc = (text: string): SlateDoc => {
@@ -195,7 +195,7 @@ describe("a refusal a small model can act on", () => {
     const refused = parseSlate(`<slate><run name="p" cmd="python3 -c \\"print(1)\\"" /><text>x</text></slate>`);
     expect(refused.errors[0]).toMatchObject({ code: "P100", message: `attribute strings take no escapes (cmd at line 1): a backslash does not hide a " inside "..."`, fix: `cmd='echo "hi"', single quotes outside the double ones; with both quotes inside, the block form <run name="x">{\`...\`}</run>` });
     expect(parseSlate(`<slate><run name="p" cmd='python3 -c "print(1)"' /><text>x</text></slate>`).errors).toEqual([]);
-    // An entity is no escape either: nothing decodes it, so &quot; reached bash as the word quot (sol-low, round three).
+    // An entity is no escape either: nothing decodes it, so &quot; reached bash as the word quot.
     expect(parseSlate(`<slate><run name="p" cmd="python3 &quot;$SLATE_DIR/x.py&quot;" /><text>x</text></slate>`).errors[0]).toMatchObject({ code: "P100", message: "attribute strings take no HTML entities (cmd at line 1): &quot; stays as written, nothing decodes it", fix: `cmd='python3 "$SLATE_DIR/x.py"', single quotes outside the double ones` });
     expect(parseSlate(`<slate><text value="Q&amp;A" /></slate>`).errors[0]).toMatchObject({ code: "P100", fix: `write the character itself: value="... & ..."` });
     expect(parseSlate(`<slate><text value="spot & retail" /></slate>`).errors).toEqual([]);
@@ -224,5 +224,34 @@ describe("the printed slate", () => {
     const printed = printSlate(doc);
     expect(printed).toContain("run={$tests}");
     expect(parseSlate(printed).document!.pieces).toEqual(doc.pieces);
+  });
+});
+
+describe("text with holes", () => {
+  it("keeps a $ written right before a hole as a dollar sign", () => {
+    const written = parseSlate(`<slate><value name="price" start={12} /><text>Price: \${$price}</text></slate>`).document!;
+    const text = Object.values(written.pieces).find(p => p.type === "text")!.props!.value!;
+    expect(resolveSlateProp(text, { resolve: p => (p === "$price" ? 12 : undefined) })).toBe("Price: $12");
+    expect(parseSlate(printSlate(written)).document).toEqual(written);
+  });
+});
+
+describe("printing, then parsing again", () => {
+  const doc = (pieces: Record<string, unknown>, extra: object = {}): SlateDoc => validateSlate({ schema: 2, root: "top", values: { v: { start: 1 } }, derived: {}, runs: {}, reactions: [], pieces: { top: { type: "column", children: Object.keys(pieces) }, ...pieces }, ...extra }).document!;
+
+  it("gives back the same document for quotes, control characters, entities and backticks", () => {
+    const docs = [
+      doc({ t: { type: "text", props: { value: "x" } } }, { title: `He said "hi" and 'bye'` }),
+      doc({ b: { type: "button", props: { label: "Go" }, on: { press: [{ do: "send", text: "a\rb\u0001c" }] } } }),
+      doc({ s: { type: "section", props: { title: "Q&amp;A" } } }, { values: { v: { start: "a &amp; b" } } }),
+      doc({ s: { type: "section", props: { title: "x", note: { format: "a `b` ${$v} $${c}" } } } }),
+      doc({ o: { type: "output", props: { run: "$r" } } }, { runs: { r: { kind: "cmd", cmd: "echo '&amp;' \"x\"" } } }),
+    ];
+    for (const d of docs) {
+      expect(d).toBeDefined();
+      const back = parseSlate(printSlate(d));
+      expect(back.errors, printSlate(d)).toEqual([]);
+      expect(back.document).toEqual(d);
+    }
   });
 });

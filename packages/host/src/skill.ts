@@ -79,15 +79,15 @@ export function agentsLine(agents: readonly string[]): string {
  * rest (measured on 2.1.284, "Server instructions truncated from 7992 to 2048 chars"). */
 export const INSTRUCTIONS_KEPT = 2048;
 
-/** What a slate is, carried second so it lands inside what Claude Code keeps, under 220 characters with its full stop
- * (10, "The instructions sentence"); the skill's slate section sits past the cut. */
-export const SLATE_WORDS = "This thread can own a slate, a live panel the person reads, presses and fills in: when they ask for a panel, dashboard, form, checklist, tracker or walkthrough, or name the slate, call slate_catalog, then slate_write";
+/** What a slate is, carried second so it lands inside what Claude Code keeps, under 220 characters with its full stop;
+ * the skill's slate section sits past the cut. */
+export const SLATE_WORDS = "Each thread can own a slate, a live panel the person reads, presses and fills in: when they ask for a panel, dashboard, form, checklist, tracker or walkthrough, call slate_catalog, then slate_write naming the thread";
 
 /** What a thread's own tool server opens with, ahead of everything else: that the session is a thread with a slate
  * beside it, keyed on what the person wants to do rather than on the names of pieces, since they say "I wanna see
  * this live" and never "a panel". The slate tools' descriptions carry the same words, since tool search reads those. */
 export const THREAD_SLATE_WORDS =
-  "This session is a wsp thread with a slate, a live panel shown here that the person sees while you work. When they want to see, watch, monitor or keep an eye on something (live data, traffic, metrics, a price, logs, a PR, what's unread, progress as it goes), a dashboard, something to fill in or tick off (a form, a checklist, a walkthrough) or a flow laid out (a diagram), your first tool call is slate_catalog, then slate_write; a list in chat is not a slate. Fetching data with another tool is no reason to answer in chat; show it on the slate. A one-off answer, a comparison or an explanation, stays in chat unless they ask to see it. Build and read it with the slate tools, never wsp from a shell, which may be another install. Once the slate is written, a request to see something lands there. A run with every={60} refreshes it with no turns; never poll in the chat. Read the sketch a write answers before saying it works, then reply briefly: what you built and what waits on the person.";
+  "This session is a wsp thread with a slate, a live panel shown here that the person sees while you work. When they want to see, watch, monitor or keep an eye on something (live data, traffic, metrics, a price, logs, a PR, what's unread, progress as it goes), a dashboard, something to fill in or tick off (a form, checklist or walkthrough) or a flow laid out (a diagram), your first tool call is slate_catalog, then slate_write; a list in chat is not a slate. Show data fetched with another tool on the slate, not in chat. A one-off answer or an explanation stays in chat unless they ask to see it. Build and read it with the slate tools, never wsp from a shell. Once the slate is written, a request to see something lands there. A run with every={60} refreshes it with no turns; never poll in chat. Read the sketch a write answers before saying it works, then reply briefly: what you built and what waits on the person.";
 
 /** The MCP server's instructions, whole inside what Claude Code keeps: a thread's slate first, then what another agent
  * is, since it is the one fact an agent acts on before it has read anything else, what wsp is and where the skill is,
