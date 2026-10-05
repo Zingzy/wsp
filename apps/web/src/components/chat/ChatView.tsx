@@ -34,7 +34,7 @@ import { TimelineRuleLine } from "./TimelineRuleLine";
 import { MessagesTimeline, type MachineWait, type ReplyRuns } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
-import { rewindableReplies, type RewindableReply } from "./RewindDialog";
+import { lastReplies, rewindableReplies, type RewindableReply } from "./RewindDialog";
 import { requestRewind } from "../../shell/shellRequests";
 import { TRANSCRIPT_LOADING } from "../../transcript-words";
 import { useAppDark } from "../../settings/theme";
@@ -206,13 +206,8 @@ export function ChatView({
   const rewindableKey = [...rewindable.keys()].join("\n");
   const rewindableIds = useMemo(() => new Set(rewindableKey === "" ? [] : rewindableKey.split("\n")), [rewindableKey]);
   // A turn the agent wrote the slate in says so once, under its last reply.
-  const slatedKey = view.turns
-    .flatMap(turn => {
-      if (turn.slated !== true) return [];
-      const last = view.entries.findLast(e => e.kind === "message" && e.message.role === "assistant" && e.message.turnId === turn.turnId);
-      return last?.kind === "message" ? [last.message.id] : [];
-    })
-    .join("\n");
+  const replies = lastReplies(view.entries);
+  const slatedKey = view.turns.flatMap(turn => (turn.slated === true && replies.has(turn.turnId) ? [replies.get(turn.turnId)!] : [])).join("\n");
   const slatedIds = useMemo(() => new Set(slatedKey === "" ? [] : slatedKey.split("\n")), [slatedKey]);
   const rewindRef = useRef({ rewindable, threadId: turnRows.at(-1)?.threadId ?? threadId, agent: catalog?.label ?? agent ?? "", cutsConversation });
   rewindRef.current = { rewindable, threadId: turnRows.at(-1)?.threadId ?? threadId, agent: catalog?.label ?? agent ?? "", cutsConversation };

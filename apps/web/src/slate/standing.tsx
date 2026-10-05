@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The thread's standing approvals, from the slate tab's menu: one settings row per command, MCP server,
 // domain and reaction send the person allowed, each with Revoke. Revoking stops what it covered; the next start asks.
+import { SLATE_SEND_KEY } from "@wsp/protocol";
 import { useState } from "react";
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
@@ -18,7 +19,7 @@ export const STANDING_WORDS = {
 
 /** What a row names: the command or server as allowed, else the reaction sends, else its key. */
 function rowOf(key: string, approval: SlateRecord["approvals"][string]): { title: string; description: string } {
-  if (key === "send") return { title: STANDING_WORDS.sends, description: "send() in a reaction" };
+  if (key === SLATE_SEND_KEY) return { title: STANDING_WORDS.sends, description: "send() in a reaction" };
   return { title: approval.cmd ?? key, description: approval.run !== undefined ? STANDING_WORDS.run(approval.run) : key };
 }
 

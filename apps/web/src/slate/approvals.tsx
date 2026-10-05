@@ -9,7 +9,7 @@ import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTit
 import { Switch } from "../components/ui/switch.js";
 import { cn } from "../lib/utils.js";
 import { CommandBody, CONSENT_WORDS } from "./consent.js";
-import { ArgList, AskFiles, AskWhy, MCP_WORDS, ThenCommand } from "./mcp.js";
+import { ArgList, AskFiles, AskWhy, MCP_WORDS, ThenCommand, useAnswer } from "./mcp.js";
 import type { SlateApproval, SlateAsk } from "./model.js";
 
 export type BatchAsk = Extract<SlateAsk, { kind: "cmd" | "server" }>;
@@ -66,22 +66,9 @@ export function ApprovalsSheet({ asks, cadence, answer, onClose }: { asks: reado
   // The rows on the sheet as it opened start switched on; one that arrives while it is open starts off, so Allow all
   // never answers a row the person has not looked at.
   const [on, setOn] = useState<ReadonlySet<string>>(() => new Set(asks.map(ask => ask.key)));
-  const [busy, setBusy] = useState(false);
-  const [refused, setRefused] = useState<string | undefined>(undefined);
   const chosen = asks.filter(ask => on.has(ask.key));
-  const decide = (scope: SlateApproval) => {
-    setBusy(true);
-    setRefused(undefined);
-    void chosen
-      .reduce<Promise<unknown>>((before, ask) => before.then(() => answer(ask.key, scope)), Promise.resolve())
-      .then(
-        () => onClose(),
-        (error: unknown) => {
-          setBusy(false);
-          setRefused(error instanceof Error ? error.message : String(error));
-        },
-      );
-  };
+  // Each row switched on is answered by its own key, one after another, as one sheet at a time would.
+  const { busy, refused, decide } = useAnswer((scope: SlateApproval) => chosen.reduce<Promise<unknown>>((before, ask) => before.then(() => answer(ask.key, scope)), Promise.resolve()), onClose);
   const toggle = (key: string, checked: boolean) =>
     setOn(was => {
       const next = new Set(was);

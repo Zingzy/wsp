@@ -32,7 +32,8 @@ export const MCP_WORDS = {
   file: (name: string) => `It reads ${name}, which holds`,
 } as const;
 
-const dots = (value: unknown): boolean => typeof value === "string" && /^•+/.test(value);
+/** A value the host sent as dots: a secret, shown muted. */
+export const dots = (value: unknown): boolean => typeof value === "string" && /^•+/.test(value);
 const shown = (value: unknown): string => (typeof value === "string" ? value : JSON.stringify(value));
 
 /** Each argument by name with the value it carries, a secret as dots, in mono. */
@@ -84,10 +85,10 @@ export function ThenCommand({ then }: { then: string | undefined }) {
 }
 
 /** Calls answer and closes, or keeps the sheet open with the host's refusal under it. */
-function useAnswer(answer: (scope: SlateApproval) => Promise<unknown>, onClose: () => void) {
+export function useAnswer<T>(answer: (scope: T) => Promise<unknown>, onClose: () => void) {
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | undefined>(undefined);
-  const decide = (scope: SlateApproval) => {
+  const decide = (scope: T) => {
     setBusy(true);
     setRefused(undefined);
     void answer(scope).then(

@@ -3,7 +3,7 @@
 // piece only when something it reads moved. Pieces are keyed by id, so a new document redraws the pieces whose JSON
 // changed and nothing else; a binding change marks the pieces whose dependency set holds the path and redraws them
 // on the next frame, at most ten times a second. Nothing here knows React; the views subscribe by piece id.
-import { slateTruthy, type SlateJson, type SlatePropValue } from "@wsp/protocol";
+import { slateEqual, slateSegments, slateTruthy, type SlateJson, type SlatePropValue } from "@wsp/protocol";
 import { evaluate, resolveProp, type Resolve, type Row } from "./expr.js";
 import type { SlateDoc, SlatePiece } from "./model.js";
 import { expandDerived, getOwn, ownPath, pieceReads, setOwn, touches, walk } from "./paths.js";
@@ -278,7 +278,7 @@ export class SlateEngine {
     const mine = this.#mine.get(path);
     if (mine === undefined) return;
     const echoes = this.#sent.get(path) ?? [];
-    if (echoes.some(sent => same(sent, theirs))) return;
+    if (echoes.some(sent => slateEqual(sent, theirs))) return;
     if (this.#focused.has(path)) this.#held.set(path, theirs);
     else {
       this.#mine.delete(path);
@@ -313,7 +313,7 @@ export class SlateEngine {
   /** The host took the value. */
   settle(path: string, value: SlateJson): void {
     this.#remote = setOwn(this.#remote, path, value);
-    if (!this.#focused.has(path) && same(this.#mine.get(path), value)) {
+    if (!this.#focused.has(path) && slateEqual(this.#mine.get(path), value)) {
       this.#mine.delete(path);
       this.#sent.delete(path);
     }
@@ -575,26 +575,10 @@ export class SlateEngine {
 
 }
 
-function same(a: SlateJson | undefined, b: SlateJson | undefined): boolean {
-  return a === b || JSON.stringify(a) === JSON.stringify(b);
-}
 
 function walkFrom(item: SlateJson, rest: string): SlateJson | undefined {
-  let at: SlateJson | undefined = item;
-  const steps = rest.match(/\.[a-zA-Z_][a-zA-Z0-9_]*|\[-?\d+\]/g) ?? [];
-  for (const step of steps) {
-    if (at === null || at === undefined || typeof at !== "object") return undefined;
-    if (step.startsWith("[")) {
-      if (!Array.isArray(at)) return undefined;
-      const n = Number(step.slice(1, -1));
-      at = at[n < 0 ? at.length + n : n];
-    } else {
-      if (Array.isArray(at)) return undefined;
-      const key = step.slice(1);
-      at = Object.prototype.hasOwnProperty.call(at, key) ? at[key] : undefined;
-    }
-  }
-  return at;
+  const steps = slateSegments(rest);
+  return steps === undefined ? undefined : walk(item, steps);
 }
 
 function parentsOf(doc: SlateDoc | null): Map<string, string> {

@@ -3,7 +3,8 @@
 // each source whose input moved; the clock ticks once a second only while a drawn piece reads time.now; host-held
 // sources are held through slates.subscribe while bound and let go after; and a path the window does not hold is
 // asked of slates.resolve once and drawn as it comes. Nothing is held for a slate that is not on screen.
-import { foldThreads, threadKeyOf, type SlateJson, type ThreadView } from "@wsp/protocol";
+import { foldThreads, type SlateJson, type ThreadView } from "@wsp/protocol";
+import { threadWorkspaceIn } from "../../protocol/store.js";
 import type { SlateEngine } from "../engine.js";
 import { splitPath } from "../paths.js";
 import type { SlateApi, SlateRecord } from "../wire.js";
@@ -35,12 +36,8 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
   let threadCache: { sessions: unknown; out: { workspaceId: string | null; thread: ThreadView | null } } | null = null;
   const threadOf = (app: AppState) => {
     if (threadCache !== null && threadCache.sessions === app.sessions) return threadCache.out;
-    let out: { workspaceId: string | null; thread: ThreadView | null } = { workspaceId: null, thread: null };
-    for (const [workspaceId, rows] of Object.entries(app.sessions)) {
-      if (!rows.some(row => threadKeyOf(row) === threadId)) continue;
-      out = { workspaceId, thread: foldThreads(rows).find(t => (t.threadId ?? t.id) === threadId) ?? null };
-      break;
-    }
+    const workspaceId = threadWorkspaceIn(app.sessions, threadId);
+    const out = { workspaceId, thread: workspaceId === null ? null : (foldThreads(app.sessions[workspaceId] ?? []).find(t => (t.threadId ?? t.id) === threadId) ?? null) };
     threadCache = { sessions: app.sessions, out };
     return out;
   };

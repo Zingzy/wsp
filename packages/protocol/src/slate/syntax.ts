@@ -10,6 +10,7 @@ import { nearest, slateProblem, slateUnknownPiece, type SlateCode } from "./prob
 import { SLATE_STEPS } from "./steps.js";
 import { validateDocument, type SlateLines } from "./validate.js";
 import {
+  SLATE_SCHEMA,
   SLATE_ID, SLATE_NAME, SLATE_PANE_KINDS, isSlateBinding, isSlateFormat,
   type SlateDoc, type SlateJson, type SlatePatch, type SlatePatchOp, type SlatePiece, type SlateProblem, type SlatePropValue,
   type SlateReactionDecl, type SlateRunDecl, type SlateStep, type SlateValueDecl,
@@ -262,7 +263,7 @@ class Compiler {
   readonly errors: SlateProblem[] = [];
   readonly warnings: SlateProblem[] = [];
   readonly lines: SlateLines = new Map();
-  readonly doc: SlateDoc = { schema: 2, root: "", values: {}, derived: {}, runs: {}, reactions: [], pieces: {} };
+  readonly doc: SlateDoc = { schema: SLATE_SCHEMA, root: "", values: {}, derived: {}, runs: {}, reactions: [], pieces: {} };
   private readonly minted = new Map<string, number>();
   private readonly taken = new Set<string>();
   /** Names declared in this text and in the document a patch applies to. */

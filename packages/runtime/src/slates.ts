@@ -18,6 +18,7 @@ import {
   resolveSlateProp,
   runSlateBatch,
   roadOf,
+  SLATE_SEND_KEY,
   scopeOf,
   sketchSlate,
   slateCatalog,
@@ -206,7 +207,7 @@ const HELD_APPROVAL = "needs your approval";
 /** Why a command did not start: it starts in its thread's folder, never the host's own, and none is known. */
 const NO_FOLDER = "this host knows no folder for the thread, so the command did not start";
 /** The approval key that lets a slate's reactions message the agent. */
-export const SLATE_SEND_KEY = "send";
+export { SLATE_SEND_KEY };
 
 const problem = (code: string, name: string, message: string, extra: Partial<SlateProblem> = {}): SlateProblem => ({ code, name, message, ...extra });
 

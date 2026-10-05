@@ -58,7 +58,11 @@ export const str = (value: SlateJson | undefined): string | undefined =>
   value === undefined || value === null ? undefined : typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" ? String(value) : JSON.stringify(value);
 
 /** The sentence a control is held by: a non-empty text holds it, anything else (null, false, "") lets it go. */
-export const heldBy = (value: SlateJson | undefined): string | undefined => (typeof value === "string" && value.trim() !== "" ? value : undefined);
+export { slateHeldText as heldBy } from "@wsp/protocol";
+
+/** A cell or a fact that reads as a figure: a number, or text that is one with a unit or a rate after it. */
+const FIGURE = /^[-+]?[$€£₹¥]?\d[\d,]*(\.\d+)?\s?(%|[A-Za-z]{1,5}(\/[A-Za-z]+)?)?$/;
+export const isFigure = (value: SlateJson | undefined): boolean => typeof value === "number" || (typeof value === "string" && FIGURE.test(value.trim()));
 
 const WORD = /^[A-Za-z][a-z]*[,.:;!?]?$/;
 /** Text that reads as a sentence, three plain words or more, rather than a figure, an id, a time or a path: mono on

@@ -7,10 +7,9 @@ import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { placeOf } from "./runs.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
-import { isSentence, present, str, TONE_INK, toneOf } from "./look.js";
+import { isFigure, isSentence, present, str, TONE_INK, toneOf } from "./look.js";
 
 /** A value that reads as a figure: 5.3M, $4.64, 96.3495, 13s. */
-const FIGURE = /^[-+]?[$€£₹¥]?\d[\d,]*(\.\d+)?\s?(%|[A-Za-z]{1,5}(\/[A-Za-z]+)?)?$/;
 
 interface Fact {
   label: string;
@@ -40,7 +39,7 @@ export const facts: PieceView = {
     const place = placeOf(slate, id);
     // A list of figures is 12 px mono in the foreground, any other 13 px sans muted, one face for every value so a list
     // never alternates; a value that asks for mono keeps it, and a tone colours either.
-    const figures = list.every(fact => FIGURE.test(fact.value.trim()));
+    const figures = list.every(fact => isFigure(fact.value));
     const ink = (fact: Fact) => {
       const mono = fact.mono || figures;
       return cn(

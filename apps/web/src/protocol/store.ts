@@ -1495,8 +1495,11 @@ export function useLaunches(): Record<string, Launch> {
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }
 export function useSelectedThreadId(): string | null { return useStore(s => s.selectedThreadId); }
 /** The selected workspace's id, or null while a creation row is selected: no command may act on a creation's key. */
+/** The workspace selected, or none while the selection is a workspace still being made. */
+export const selectedWorkspaceIdOf = (s: Pick<State, "selectedId" | "creations">): string | null => (s.selectedId !== null && s.creations.some(c => c.key === s.selectedId) ? null : s.selectedId);
+
 export function useSelectedWorkspaceId(): string | null {
-  return useStore(s => (s.selectedId !== null && s.creations.some(c => c.key === s.selectedId) ? null : s.selectedId));
+  return useStore(selectedWorkspaceIdOf);
 }
 export function useCreation(key: string | null): Creation | null {
   return useStore(s => (key ? s.creations.find(c => c.key === key) ?? null : null));
@@ -1616,6 +1619,12 @@ export function threadRows(sessions: ReadonlyArray<SessionView>, workspaceId: st
   if (own.length > 0 || threadKey !== workspaceId) return own;
   const latest = sessions.at(-1);
   return latest === undefined ? NO_SESSIONS : [latest];
+}
+
+/** The workspace whose rows hold a thread, where its composer keeps its draft. */
+export function threadWorkspaceIn(sessions: Readonly<Record<string, ReadonlyArray<SessionView>>>, threadId: string): string | null {
+  for (const [workspaceId, rows] of Object.entries(sessions)) if (rows.some(row => threadKeyOf(row) === threadId)) return workspaceId;
+  return null;
 }
 
 /** Subscribe a component to raw protocol events (the thread, terminal and browser surfaces use this). */

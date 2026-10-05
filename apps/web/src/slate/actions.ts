@@ -175,7 +175,4 @@ export class ActionRunner {
   }
 }
 
-export function truthy(value: SlateJson | undefined): boolean {
-  if (value === undefined || value === null || value === false || value === 0 || value === "") return false;
-  return !(Array.isArray(value) && value.length === 0);
-}
+export { slateTruthy as truthy } from "@wsp/protocol";

@@ -16,6 +16,7 @@ import { str } from "./look.js";
 import { placeOf } from "./runs.js";
 import { Quiet } from "./quiet.js";
 import { Refreshing } from "./refreshing.js";
+import { isOwnName } from "../paths.js";
 
 /** A run state as the status mark's grammar says it. */
 export const RUN_WORDS: Record<SlateRunState, string> = {
@@ -45,7 +46,7 @@ function recordLines(record: { lines?: string[]; out?: SlateJson; err?: string }
   return text === "" ? [] : text.replace(/\n$/, "").split("\n");
 }
 
-const runName = (value: unknown): string | undefined => (typeof value === "string" && /^\$[a-zA-Z_][a-zA-Z0-9_]*$/.test(value) ? value.slice(1) : undefined);
+const runName = (value: unknown): string | undefined => (isOwnName(value) ? value.slice(1) : undefined);
 
 export const output: PieceView = {
   type: "output",

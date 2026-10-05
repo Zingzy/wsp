@@ -5,13 +5,13 @@
 export * from "./types.js";
 export { SLATE_LIMITS } from "./limits.js";
 export { SLATE_CODES, SLATE_WARNINGS, slateProblem, nearest as slateNearest, type SlateCode } from "./problems.js";
-export { parseSlateOwnPath, slateOwnPathText, getSlateValue, setSlateValue, slateStep, slateEqual } from "./paths.js";
+export { parseSlateOwnPath, slateSegments, slateOwnPathText, getSlateValue, setSlateValue, slateStep, slateEqual } from "./paths.js";
 export {
   parseSlateExpression, evaluateSlateExpression, evaluateSlateFormat, slateDependencies, slatePropDependencies, resolveSlateProp,
   parseSlateFormat, checkSlateExpression, slateTruthy, slateText, slateWord, slatePathText, walkSlateExpr, SLATE_FUNCTIONS, SLATE_PIPE_STEPS,
   type SlateExpr, type SlateEvalContext, type SlateFormatPart, type SlateCheckScope, type SlateType, type SlateTypeName,
 } from "./expr.js";
-export { slateFigure, SLATE_PIECES, SLATE_TONES, SLATE_ITEM_KINDS, SLATE_RESERVED_PROPS, type SlatePieceModule, type SlatePropSpec, type SlatePropType, type SlateItemSpec, type SlateSketchView } from "./kit.js";
+export { slateFigure, slateHeldText, SLATE_PIECES, SLATE_TONES, SLATE_ITEM_KINDS, SLATE_RESERVED_PROPS, type SlatePieceModule, type SlatePropSpec, type SlatePropType, type SlateItemSpec, type SlateSketchView } from "./kit.js";
 export { SLATE_ICONS, isSlateIcon, nearestSlateIcon, type SlateIcon } from "./icons.js";
 export { SLATE_SOURCES, slateSourceType, slateShapeText, slateShapeType, slateIsSeries, type SlateSourceModule, type SlateShape } from "./sources.js";
 export { SLATE_STEPS, slateDomainKey, slateLinkDomain, type SlateStepModule } from "./steps.js";

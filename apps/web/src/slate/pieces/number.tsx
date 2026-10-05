@@ -11,8 +11,8 @@ import type { PieceView } from "../SlateView.js";
 import { figure, NOTE, str, TONE_INK, toneOf } from "./look.js";
 import { isStatCell, ridersOf } from "./riders.js";
 import { placeOf } from "./runs.js";
+import { capitalised } from "../../settings/format.js";
 
-const capitalised = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
 
 /** Redraws when any of these pieces changes; subscribing also keeps them read while they draw nothing themselves. */
 export function usePiecesVersion(slate: SlateEngine, ids: readonly string[]): string {

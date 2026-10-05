@@ -16,7 +16,7 @@ import type { PieceViewProps, PieceView } from "../SlateView.js";
 import { truthy } from "../actions.js";
 import { placeOf } from "./runs.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
-import { isSentence, NOTE, present, rowKeys, str, TONE_INK, toneOf } from "./look.js";
+import { isFigure, isSentence, NOTE, present, rowKeys, str, TONE_INK, toneOf } from "./look.js";
 import { Outcome } from "./outcome.js";
 import { usePress } from "./press.js";
 import { pressTitle } from "./button.js";
@@ -31,8 +31,6 @@ type Row = { item: SlateJson; index: number };
 const shownColumns = (slate: SlateEngine, raw: SlatePropValue | undefined): Template[] => present(slate, raw, records(raw)).slice(0, 8);
 
 /** A figure as a cell shows it: a number, or text like 524 MB, 12%, $4.20 or 3 days. */
-const FIGURE = /^[-+]?[$€£₹¥]?\d[\d,]*(\.\d+)?\s?(%|[A-Za-z]{1,5}(\/s)?)?$/;
-const isFigure = (value: SlateJson | undefined): boolean => typeof value === "number" || (typeof value === "string" && FIGURE.test(value.trim()));
 
 function RowAction({ id, template, at, row, slate, raise }: Pick<PieceViewProps, "id" | "slate" | "raise"> & { template: Template; at: number; row: Row }) {
   const on = template["on"] as unknown as { press?: SlateStep | SlateStep[] } | undefined;

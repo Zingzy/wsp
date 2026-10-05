@@ -6,19 +6,24 @@ import type { SlateJson, SlateOwnPath, SlateValues } from "./types.js";
 const SEGMENT = /^(?:\.([a-zA-Z_][a-zA-Z0-9_]*)|\[(-?\d+)\])/;
 const UNSAFE = new Set(["__proto__", "constructor", "prototype"]);
 
-/** The name and the segments after it, or undefined when the text is not an own path. */
-export function parseSlateOwnPath(path: SlateOwnPath): { name: string; segs: (string | number)[] } | undefined {
-  const m = /^\$([a-zA-Z_][a-zA-Z0-9_]*)/.exec(path);
-  if (m === null) return undefined;
+/** The ".field" and "[index]" steps of what follows a path's head, or undefined when the text is not steps. */
+export function slateSegments(rest: string): (string | number)[] | undefined {
   const segs: (string | number)[] = [];
-  let rest = path.slice(m[0].length);
   while (rest.length > 0) {
     const s = SEGMENT.exec(rest);
     if (s === null) return undefined;
     segs.push(s[1] !== undefined ? s[1] : Number(s[2]));
     rest = rest.slice(s[0].length);
   }
-  return { name: m[1]!, segs };
+  return segs;
+}
+
+/** The name and the segments after it, or undefined when the text is not an own path. */
+export function parseSlateOwnPath(path: SlateOwnPath): { name: string; segs: (string | number)[] } | undefined {
+  const m = /^\$([a-zA-Z_][a-zA-Z0-9_]*)/.exec(path);
+  if (m === null) return undefined;
+  const segs = slateSegments(path.slice(m[0].length));
+  return segs === undefined ? undefined : { name: m[1]!, segs };
 }
 
 export const slateOwnPathText = (name: string, segs: readonly (string | number)[]): string =>

@@ -10,7 +10,7 @@ import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTit
 import { RUNS, type SlateEngine } from "./engine.js";
 import { cn } from "../lib/utils.js";
 import { isRunRecord, type SlateApproval, type SlateAsk, type SlateDoc } from "./model.js";
-import { AskFiles, AskWhy, ThenCommand } from "./mcp.js";
+import { AskFiles, AskWhy, dots, ThenCommand, useAnswer } from "./mcp.js";
 import { usePieceVersion } from "./SlateView.js";
 
 /** The prompt before a press opens a link to a domain this thread was not allowed to open. */
@@ -151,7 +151,6 @@ export function HeldRuns({ engine, asks, review, refuse }: { engine: SlateEngine
   );
 }
 
-const dots = (value: string): boolean => /^•+/.test(value);
 
 /** What a held command will run, as every sheet that approves one shows it: the text, its reshape, how often it runs,
  * each value it is handed, and where and how long it runs. */
@@ -198,19 +197,7 @@ export function CommandBody({ ask, cadence, lines }: { ask: Extract<SlateAsk, { 
 }
 
 export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask: Extract<SlateAsk, { kind: "cmd" }>; cadence: string; more?: number; answer(scope: SlateApproval): Promise<unknown>; onClose(): void }) {
-  const [busy, setBusy] = useState(false);
-  const [refused, setRefused] = useState<string | undefined>(undefined);
-  const decide = (scope: SlateApproval) => {
-    setBusy(true);
-    setRefused(undefined);
-    void answer(scope).then(
-      () => onClose(),
-      (error: unknown) => {
-        setBusy(false);
-        setRefused(error instanceof Error ? error.message : String(error));
-      },
-    );
-  };
+  const { busy, refused, decide } = useAnswer(answer, onClose);
   const body = (
     <div data-slate-consent={ask.run} className="flex min-w-0 flex-col gap-3 text-[13px] leading-5">
       <CommandBody ask={ask} cadence={cadence} lines={12} />

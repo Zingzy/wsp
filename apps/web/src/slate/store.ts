@@ -8,6 +8,7 @@ import { ActionRunner, StateSender, type SlateLink } from "./actions.js";
 import { SlateEngine } from "./engine.js";
 import { isRunRecord, type SlateAsk, type SlateDoc } from "./model.js";
 import type { SlateApi, SlateRecord } from "./wire.js";
+import { isOwnName } from "./paths.js";
 
 /** What the tab draws for a thread: nothing asked yet, the host's record, or no slate at all. */
 export interface SlateEntry {
@@ -200,7 +201,7 @@ export function slateEvent(e: SessionSlateEvent | SlateValuesEvent | SlateRunEve
       bundles.get(e.threadId)?.engine.applyValues(values, e.revision);
       // A run newly held is a sheet the record does not carry yet: the header row and Review read it from there.
       const asks = useSlateStore.getState().byThread[e.threadId]?.record?.asks ?? [];
-      const held = Object.entries(values).some(([path, value]) => /^\$[a-zA-Z_]\w*$/.test(path) && isRunRecord(value) && value.state === "held" && !asks.some(ask => `$${ask.run}` === path));
+      const held = Object.entries(values).some(([path, value]) => isOwnName(path) && isRunRecord(value) && value.state === "held" && !asks.some(ask => `$${ask.run}` === path));
       // An empty push is the host saying the asks changed: a server's tools arrived, or a call held for its confirm.
       const asked = Object.keys(values).length === 0 && useSlateStore.getState().byThread[e.threadId] !== undefined;
       if (held || asked) void loadSlate(e.threadId);
