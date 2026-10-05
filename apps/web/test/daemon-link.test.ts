@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
+import { RequestError, type DaemonApi } from "../src/protocol/client.js";
 import { connectDaemonLink, DaemonRequestError, UNWORDED_REFUSAL, type DaemonLink } from "../src/terminal/daemon-link.js";
 import { startRefusingDoor, type RefusingDoor } from "../../../packages/runtime/test/refusing-door.js";
 import { startTcpProxy, type TcpProxy } from "../../../packages/runtime/test/tcp-proxy.js";
@@ -190,4 +191,38 @@ describe("connectDaemonLink over the host's relay", () => {
     await until(() => proxy!.live() === 0);
     await expect(l.request("ping")).rejects.toThrow("not answering");
   }, 20_000);
+});
+
+describe("an open the host answers with a typed failure", () => {
+  /** A host that answers every open with the one failure given, as the page's client raises it. */
+  const answering = (failure: Error): DaemonApi => ({
+    open: async () => {
+      throw failure;
+    },
+    send: async () => ({ id: null, ok: true }),
+    close: async () => {},
+    onFrame: () => () => {},
+  });
+  const open = (failure: Error): DaemonLink => connectDaemonLink({ daemon: answering(failure), target: { workspaceId: "ws_a" }, onEvent: () => {}, backoffMs: () => 30, firstAnswerMs: 60 });
+
+  it("holds a refusal of the host's with its sentence, by its kind, where it would have read unanswered", async () => {
+    const said = "spoo is behind: daemon 118, host 120; wsp add spoo --update puts this wsp's daemon on it";
+    for (const kind of ["usage", "auth", "not-found", "ticket", "plan"]) {
+      link = open(new RequestError(said, kind));
+      await until(() => link!.status() === "refused");
+      expect(link.refusal()).toBe(said);
+      await new Promise(r => setTimeout(r, 120));
+      expect(link.status()).toBe("refused");
+      link.close();
+    }
+  });
+
+  it("goes on dialling through a failure with no kind and through the provider's passing answers, and reads unanswered once its bound passes", async () => {
+    for (const failure of [new Error("srv is not answering yet"), new RequestError("bad gateway", "transient"), new RequestError("slow down", "concurrency")]) {
+      link = open(failure);
+      await until(() => link!.status() === "unanswered");
+      expect(link.refusal()).toBeNull();
+      link.close();
+    }
+  });
 });
