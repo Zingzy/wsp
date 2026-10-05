@@ -3914,12 +3914,6 @@ export const PLACE_LEAVE_LINE = `wsp ${PLACE_LEAVE_VERB}`;
  * rather than one it is guessing. */
 export const imageCopyStaysLine = (size?: string): string => `the copy of your image${size === undefined ? "" : ` (${size})`} stays where it is`;
 
-/** How a computer of the person's own reaches this Mac, in the one clause both roads of the Add sheet say it in.
- * The computer opens the connection, never this host: at an address on the network, or at the name the door hands
- * it beside those addresses once this host is signed in, which is what a computer somewhere else has to go by.
- * Connects, not dials, and no name for the road between: neither is a word somebody meets on their first day. */
-export const PLACE_CONNECTS = "connects to this Mac over your network, or from outside it once you sign in";
-
 /** Everything wsp puts on a computer it is installed on, named once. The Add sheet writes its lines and the note
  * under them from this list and the Remove dialog writes its sentence from the same, so what a person is told
  * before they press Add is what they are told on the way out. Nothing here is called a shim: a person reads what
@@ -3952,11 +3946,6 @@ export const PLACES_WORDS = {
   addComputer: "Add a computer",
   connectProvider: "Connect a provider",
   sheet: {
-    description: `A computer you own runs workspaces for your wsp. It ${PLACE_CONNECTS}. You open nothing on it.`,
-    /** The one line both roads say, because it is the reason a person adds a computer at all: a turn already
-     * running there is that computer's own and its daemon holds it while this host sleeps, and only the start of
-     * the next one needs this host awake. */
-    whileAsleep: "Threads there keep running while this Mac sleeps; new ones start when it wakes.",
     install: "npm i -g @zingzy/wsp",
     /** The line typed in a terminal on the computer being joined. The token is the code and the fingerprint of the
      * key this host will prove, as joinToken writes them, so the line names which host it is joining. */

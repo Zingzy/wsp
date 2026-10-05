@@ -118,7 +118,7 @@ describe("workspace creation view", () => {
   });
   const emit = (e: EventUnion) => act(() => useStore.getState().applyEvent(e));
 
-  it("creating opens the empty thread it will become with one folded Setting up row; a message waits and goes to the workspace when it is up", async () => {
+  it("creating opens its setup in the middle of the page with the composer docked; a message waits and goes to the workspace when it is up", async () => {
     let finish!: (w: WorkspaceView) => void;
     const api = fakeApi([workspace]);
     const started: Array<{ workspaceId: string; prompt: string }> = [];
@@ -132,23 +132,26 @@ describe("workspace creation view", () => {
     void useStore.getState().createWorkspace("pr_1", "beta");
     const view = await screen.findByTestId("workspace-creation");
     expect(view.getAttribute("aria-busy")).toBe("true");
-    expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
+    expect(within(view).queryByRole("heading", { level: 1 })).toBeNull();
+    expect(view.querySelector("[data-chat-composer-dock]")!.hasAttribute("data-centred")).toBe(false);
     expect(screen.getByRole("banner").textContent).toContain("beta");
     // The compose glyph stays live: New thread opens on a project, which needs no workspace standing.
     expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBeNull();
     expect(within(view).queryByRole("progressbar")).toBeNull();
-    const fold = view.querySelector<HTMLElement>("[data-k=setting-up]")!;
-    expect(fold.textContent).toContain("Setting up");
-    expect(fold.textContent).toContain(CREATE_ASKED);
+    const card = view.querySelector<HTMLElement>("[data-settings-card=setting-up]")!;
+    expect(card.querySelector("[data-settings-head]")!.textContent).toBe("Setting up beta");
+    expect(card.textContent).toContain(CREATE_ASKED);
 
     emit(stage({}));
     emit(stage({ stage: "preview-route", message: "Preview route to the daemon minted.", elapsedMs: 3_400 }));
     emit(stage({ stage: "hostname-set", message: HOSTNAME_KEPT, elapsedMs: 5_100, detail: "hostname beta on m1 failed: read-only" }));
-    // The row names the step being waited on; naming the machine is a note on a step already taken.
-    expect(fold.textContent).toContain(CREATE_STEP_WORDS["preview-route"]);
-    fireEvent.click(fold);
-    const rows = within(within(view).getByRole("list", { name: "Setting up" })).getAllByRole("listitem");
-    expect(rows.map(r => r.textContent)).toEqual([`${CREATE_STEP_WORDS["fork-requested"]}0s`, `${CREATE_STEP_WORDS["preview-route"]}3s`, `${CREATE_STEP_WORDS["hostname-set"]}5s`]);
+    // One row per step, the last the one under way; naming the machine is a note on a step already taken.
+    const rows = [...view.querySelectorAll<HTMLElement>("[data-step-row]")];
+    expect(rows.map(r => [r.querySelector("[data-step-words] span")!.textContent, r.getAttribute("data-state")])).toEqual([
+      [CREATE_STEP_WORDS["fork-requested"], "done"],
+      [CREATE_STEP_WORDS["preview-route"], "done"],
+      [CREATE_STEP_WORDS["hostname-set"], "working"],
+    ]);
     expect(view.textContent).not.toMatch(/read-only|minted|starting beta/);
     expect(within(view).queryByRole("button", { name: "Retry" })).toBeNull();
 
@@ -172,7 +175,7 @@ describe("workspace creation view", () => {
     expect(useComposerDraftStore.getState().queues).toEqual({});
   });
 
-  it("with nothing typed the workspace takes the page as its empty thread with no loading line between, the question and the composer where they were", async () => {
+  it("with nothing typed the landed workspace keeps the finished setup as its first content and the composer at the foot, until the person leaves it", async () => {
     let finish!: (w: WorkspaceView) => void;
     const api = fakeApi([workspace]);
     api.createWorkspace = () => new Promise<WorkspaceView>(resolve => { finish = resolve; });
@@ -184,16 +187,25 @@ describe("workspace creation view", () => {
     void useStore.getState().createWorkspace("pr_1", "beta");
     const view = await screen.findByTestId("workspace-creation");
     emit(stage({}));
-    const dock = view.querySelector("[data-chat-composer-dock]")!;
-    expect(dock.hasAttribute("data-centred")).toBe(true);
+    expect(view.querySelector("[data-chat-composer-dock]")!.hasAttribute("data-centred")).toBe(false);
     const created: WorkspaceView = { ...workspace, id: "ws_beta", name: "beta" };
     emit({ type: "workspace.created", workspace: created });
     await act(async () => { finish(created); });
     expect(screen.queryByTestId("workspace-creation")).toBeNull();
     expect(useStore.getState().selectedId).toBe("ws_beta");
     expect(screen.queryByText(TRANSCRIPT_LOADING)).toBeNull();
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
-    expect(document.querySelector("[data-chat-composer-dock]")!.hasAttribute("data-centred")).toBe(true);
+    // Nothing moves as the create lands: the card stays with every step done, no question comes, the composer stays docked.
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    const card = document.querySelector<HTMLElement>("[data-settings-card=setting-up]")!;
+    expect(card.querySelector("[data-settings-head]")!.textContent).toBe("beta is set up");
+    expect([...card.querySelectorAll("[data-step-row]")].map(row => row.getAttribute("data-state"))).toEqual(["done"]);
+    expect(card.querySelector("canvas")).toBeNull();
+    expect(document.querySelector("[data-chat-composer-dock]")!.hasAttribute("data-centred")).toBe(false);
+    // Away and back, the workspace is an empty thread like any other.
+    act(() => useStore.getState().select(WS));
+    act(() => useStore.getState().select("ws_beta"));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?"));
+    expect(document.querySelector("[data-settings-card=setting-up]")).toBeNull();
   });
 
   it("a message left waiting under a creation before a reload never goes to the next workspace made", async () => {
@@ -233,12 +245,10 @@ describe("workspace creation view", () => {
     await act(() => useStore.getState().createWorkspace("pr_1", "beta"));
     const view = await screen.findByTestId("workspace-creation");
     expect(view.getAttribute("aria-busy")).toBe("false");
-    const fold = view.querySelector<HTMLElement>("[data-k=setting-up]")!;
-    expect(fold.textContent).toContain(CREATE_STEP_WORDS.failed);
-    fireEvent.click(fold);
-    const rows = within(within(view).getByRole("list", { name: "Setting up" })).getAllByRole("listitem");
+    expect(view.querySelector("[data-settings-head]")!.textContent).toBe(CREATE_STEP_WORDS.failed);
+    const rows = [...view.querySelectorAll<HTMLElement>("[data-step-row]")];
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.className).toContain("text-status-failed");
+    expect(rows[0]!.getAttribute("data-state")).toBe("failed");
     // The runtime's words are the refusal: they appear once, under the lead.
     expect(view.textContent!.split(CREATE_STEP_WORDS.failed)).toHaveLength(2);
     expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);

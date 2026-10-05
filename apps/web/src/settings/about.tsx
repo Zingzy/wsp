@@ -4,7 +4,7 @@
 // downloads and opens it, anywhere else Get is a link. Once newer files are
 // installed under a running host, Restart host stands in Get's place. The app's
 // half and the host's get a line each only once they run apart.
-import { placeDaemonBehind, releaseAbove, type BundleOutcome, type DesktopBridge, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
+import { releaseAbove, type BundleOutcome, type DesktopBridge, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
 import { useEffect, useState } from "react";
 import { onAnotherComputer } from "../boot.js";
 import { Mark } from "../brand/Brand.js";
@@ -120,7 +120,6 @@ export function versionCards(ctx: SettingsContext): SettingsCardData[] {
   const { release } = ctx;
   const behind = releaseBehind(ctx);
   const apart = inShell && app !== undefined && host !== undefined && app !== host;
-  const late = ctx.places.filter(place => placeDaemonBehind(place) !== undefined).map(place => place.name);
   const hover = release === null ? undefined : latestHover(release, ctx.now);
   const notes = release?.latest?.url ?? RELEASES;
   const step = restartShown(release) ? (
@@ -153,7 +152,6 @@ export function versionCards(ctx: SettingsContext): SettingsCardData[] {
           { kind: "line" as const, id: "host-version", label: ABOUT_WORDS.host, value: host, hover: hostHover(release), attrs: { "data-k": "host-version" } },
         ]
       : []),
-    ...(late.length === 0 ? [] : [{ kind: "line" as const, id: "computers-behind", label: ABOUT_WORDS.computersBehind, value: String(late.length), valueClass: "fact" as const, hover: ABOUT_WORDS.behindHover(late), attrs: { "data-k": "computers-behind" } }]),
   ];
   const whatsNew = (
     <Button size="xs" variant="outline" data-k="whats-new" {...(hover === undefined ? {} : { title: hover })} onClick={() => openPage(notes)}>

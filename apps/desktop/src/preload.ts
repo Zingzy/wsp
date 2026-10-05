@@ -6,6 +6,8 @@ import { shellArgFrom } from "./shell-args.js";
 
 /** What the first launch's page can ask the shell, answered only while that page is up. */
 export interface OnboardingBridge {
+  /** The name this computer's owner gave it, which every sentence on the page names it by. */
+  here(): Promise<string>;
   /** The catalog's agents as this computer has them, from the recipe scan's own detector. */
   agents(): Promise<AgentHere[]>;
   /** Writes the wsp server and skill into each named agent's own config. */
@@ -17,6 +19,7 @@ export interface OnboardingBridge {
 const bridge: DesktopBridge & OnboardingBridge = {
   version: shellArgFrom(process.argv, "version"),
   bundleHover: shellArgFrom(process.argv, "bundle-hover"),
+  here: (): Promise<string> => ipcRenderer.invoke("onboarding:here"),
   agents: () => ipcRenderer.invoke("onboarding:agents"),
   install: (ids: string[]): Promise<InstallReport> => ipcRenderer.invoke("onboarding:install", ids),
   finish: () => ipcRenderer.invoke("onboarding:finish"),

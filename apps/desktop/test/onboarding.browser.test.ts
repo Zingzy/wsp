@@ -42,11 +42,14 @@ const AGENTS = [
   { id: "crush", name: "Crush", found: false, configured: false },
 ];
 
+/** The name the shell reads for this computer, which every sentence on the page names it by. */
+const HERE = "zingzy's MacBook Pro";
+
 /** The words the agents screen says under its card and on its keycap. */
 const LINES = {
   some: "Agents you install later get the tools from Settings.",
   noneTicked: "Tick at least one agent. wsp works through the agents you give it.",
-  noneFound: "No agent found on this Mac. Install Claude Code or Codex, then press Check again.",
+  noneFound: `No agent found on ${HERE}. Install Claude Code or Codex, then press Check again.`,
 };
 const TOOLS_FIX = "Take the tick off that agent, or fix its config and press again.";
 
@@ -64,6 +67,7 @@ function stagePage(): string {
 
 /** The shell's bridge, answered in the page: the fixture's agents and an install that lands every id. */
 const bridge = (agents: ReadonlyArray<{ id: string; name: string; found: boolean; configured: boolean }> = AGENTS): string => `window.wsp = {
+  here: async () => ${JSON.stringify(HERE)},
   agents: async () => ${JSON.stringify(agents)},
   install: async ids => { window.__installed = ids; return { installed: ids.map(id => ({ id })), failures: [] }; },
   finish: async () => { window.__opened = true; },
@@ -288,10 +292,10 @@ describe.skipIf(renderSkipped !== undefined)("the first launch laid out in Chrom
     expect(await visible("#welcome")).toBe(false);
     expect(await visible("#agents")).toBe(true);
     expect(await page!.textContent("#agents h1")).toBe("Your agents drive wsp");
-    expect(await page!.textContent("#agents .sentence")).toBe("Each ticked agent gets the wsp tools and skill, so it can open threads and tasks on this Mac.");
+    expect(await page!.textContent("#agents .sentence")).toBe(`Each ticked agent gets the wsp tools and skill, so it can open threads and tasks on ${HERE}.`);
     expect(await rows()).toEqual([
-      { name: "Claude Code", state: "on this Mac", checked: true, disabled: false, mark: "claude" },
-      { name: "Codex", state: "on this Mac", checked: true, disabled: false, mark: "codex" },
+      { name: "Claude Code", state: "installed", checked: true, disabled: false, mark: "claude" },
+      { name: "Codex", state: "installed", checked: true, disabled: false, mark: "codex" },
       { name: "Gemini CLI", state: "not installed", checked: false, disabled: true, mark: "gemini" },
       { name: "Hermes", state: "not installed", checked: false, disabled: true, mark: "hermes" },
       { name: "OpenCode", state: "not installed", checked: false, disabled: true, mark: "opencode" },
@@ -369,7 +373,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch laid out in Chrom
   it("a read of the agents that fails says so in the refusal slot, with the shell's words on its title, and offers Check again", async () => {
     await agents("light", "reduce", UNREAD);
     expect(await page!.$$eval("#rows .row", els => els.length)).toBe(0);
-    expect(await page!.textContent("#status")).toBe("The agents on this Mac could not be read. Press Check again to read them again.");
+    expect(await page!.textContent("#status")).toBe(`The agents on ${HERE} could not be read. Press Check again to read them again.`);
     expect(await page!.getAttribute("#status", "title")).toContain("EACCES");
     expect(await page!.getAttribute("#status", "title")).not.toContain("Error invoking");
     expect(await keycap()).toBe("Check again");

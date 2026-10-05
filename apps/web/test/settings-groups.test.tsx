@@ -981,22 +981,13 @@ describe("General's Version card", () => {
     expect(generalMeta()).toBeUndefined();
   });
 
-  it("counts the computers whose daemon is behind in one line, naming them on hover, and draws none while every one is current", async () => {
+  it("draws no count of the computers whose daemon is behind: each one's own row on Computers says it, with its update", async () => {
     shell("0.2.0", "0.2.0");
     const behind = (id: string, name: string): PlaceView => ({ ...box, id, name, daemonVersion: DAEMON_VERSION - 3 });
-    useStore.setState({ places: [here, behind("p_spoo", "spoo"), behind("p_dev4", "dev4"), solari, { ...box, id: "p_new", name: "new", daemonVersion: DAEMON_VERSION }] });
+    useStore.setState({ places: [here, behind("p_spoo", "spoo"), behind("p_dev4", "dev4"), solari] });
     await mount({}, "general");
-    expect(lineLabels()).toEqual([ABOUT_WORDS.computersBehind]);
-    expect(wordOf("computers-behind")).toBe("2");
-    expect(lineOf("computers-behind")?.querySelector("[data-settings-word]")?.className.split(" ")).toContain("text-muted-foreground");
-    expect(lineOf("computers-behind")?.title).toBe("spoo, dev4: wsp add <name> --update");
-    act(() => useStore.setState({ places: [here, behind("p_spoo", "spoo")] }));
-    await settle();
-    expect(wordOf("computers-behind")).toBe("1");
-    expect(lineOf("computers-behind")?.title).toBe("spoo: wsp add spoo --update");
-    act(() => useStore.setState({ places: [here, box, solari] }));
-    await settle();
-    expect(lineOf("computers-behind")).toBeNull();
+    expect(lineLabels()).toEqual([]);
+    expect(document.querySelector("[data-settings-page]")?.textContent).not.toMatch(/behind|spoo|dev4/i);
   });
 
   it("opening General asks the host to check, which its floor keeps to one ask, and the answer lands on the card", async () => {

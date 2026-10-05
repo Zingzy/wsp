@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { fmtPx, listWords, offlineFor, placeUpdateLine, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type SendKey, type ServerSignIn, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { fmtPx, listWords, offlineFor, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type SendKey, type ServerSignIn, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
  * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
@@ -106,8 +106,10 @@ export const WHERE_WORDS = {
   cannotDial: "This wsp cannot dial a computer from here.",
   cannotSaveKey: "This wsp cannot save a key from here.",
   /** The first cell of each list's header row, which is the only name a section has. */
-  heads: { computer: "Computer", cores: "Cores", memory: "Memory", threads: "Threads", cloud: "Cloud", agents: "Agents", version: "Version", servers: "Tool servers", image: "Image", pending: "Pending", setup: "Setup" },
+  heads: { computer: "Computer", cores: "Cores", memory: "Memory", threads: "Threads", cloud: "Cloud", machines: "Machines", agents: "Agents", version: "Version", servers: "Tool servers", image: "Image", pending: "Pending", setup: "Setup" },
   yourImage: "Your image",
+  /** Which wsp and daemon a computer runs, each part the host carries for it, the one fact they make read together. */
+  runs: (wsp: string | undefined, daemon: number | undefined): string[] => [wsp === undefined ? "" : `wsp ${wsp}`, daemon === undefined ? "" : `daemon ${daemon}`].filter(part => part !== ""),
 } as const;
 
 /** A word as the first of a sentence or a state: its first letter capitalised, the rest as written. */
@@ -492,8 +494,6 @@ export const ABOUT_WORDS = {
   missedHover: (when: string, at: string): string => `Read ${when}; the releases page was not reached ${at}.`,
   unreachedHover: (at: string): string => `The releases page was not reached ${at}.`,
   offHover: "Update checks are off on the host: WSP_UPDATE_CHECK is 0.",
-  computersBehind: "Computers behind",
-  behindHover: (names: readonly string[]): string => `${names.join(", ")}: ${placeUpdateLine(names.length === 1 ? names[0]! : "<name>")}`,
   get: (version: string): string => `Get ${version}`,
   downloading: "Downloading",
   quitAndOpen: "Quit and open",

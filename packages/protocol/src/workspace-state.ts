@@ -78,10 +78,6 @@ export interface WorkspaceKindWords {
    * machine it forked, leaves this computer alone, and on a machine somebody owns takes off what it put there and
    * leaves the machine standing. */
   onDelete: MachineOnDelete;
-  /** The one line under the Workspace panel's name in the picker: what that panel holds for a workspace of this
-   * kind. Only a kind wsp drives pays by the hour or has a version behind it, so a kind that takes none of that
-   * names what it does hold rather than verbs its panel never offers. */
-  panel: string;
 }
 
 /** What a delete does to a machine, in the two moods the two sentences need: the clause the confirmation asks
@@ -113,8 +109,8 @@ export type ReadingRoad = "daemon" | "host" | false;
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind is a row
  * here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: machineId => `computer ${machineId} is gone in the cloud` }, panel: "Where it runs, its projects and what it costs." },
-  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: true, agents: true, onDelete: { asked: COMPUTER_LEFT, done: () => `its ${COMPUTER_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing." },
+  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: machineId => `computer ${machineId} is gone in the cloud` } },
+  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: true, agents: true, onDelete: { asked: COMPUTER_LEFT, done: () => `its ${COMPUTER_LEFT}` } },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
