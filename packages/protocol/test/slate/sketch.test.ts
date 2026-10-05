@@ -15,6 +15,17 @@ describe("the sketch", () => {
     expect(s.split("\n").every(l => l.length <= 100)).toBe(true);
   });
 
+  it("says a run started again after a failure is running again with a failed last run, never running with exit 1", () => {
+    const d = parseSlate(`<slate><run name="spot" cmd="echo 1" /><column><text>x</text></column></slate>`).document!;
+    const again = { spot: { state: "running", refreshing: true, exit: 1, ms: 40, runs: 2, startedAt: now, endedAt: now - 1000 } };
+    expect(sketchSlate(d, again, { version: 1, now })).toContain("$spot: running again; the last run failed (exit 1, 40 ms)");
+  });
+
+  it("the gold example keeps its history when a fetch fails, appending only a result", () => {
+    const gold = SLATE_EXAMPLES.find(e => e.title === "a live figure with an hour of history")!.text;
+    expect(gold).toContain("if($spot.exit == 0, last(append($hist,");
+  });
+
   it("says which facts the panel leaves out for having no value", () => {
     const d = parseSlate(`<slate><value name="v" start={null} /><facts id="f"><fact label="Health" value="ok" /><fact label="Version" value={$v} /></facts></slate>`).document!;
     expect(sketchSlate(d, { v: null }, { version: 1, now })).toContain("Health: ok  (no value yet, not shown: Version)  [f facts]");

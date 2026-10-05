@@ -635,7 +635,7 @@ describe("the slate v2 host, round 4", () => {
     const running = await probeOf(rt, threadId);
     expect(running).toMatchObject({ state: "running", refreshing: true, out: "run 1\n", exit: 0, runs: 2 });
     expect(running["startedAt"]).toBeGreaterThanOrEqual(running["endedAt"] as number);
-    expect((await rt.slates.read({}, asThread)).text).toMatch(/\$probe: running, refreshing \(exit 0, \d+ ms\)/);
+    expect((await rt.slates.read({}, asThread)).text).toMatch(/\$probe: running again; the last run succeeded \(exit 0, \d+ ms\)/);
     await vi.waitFor(async () => {
       await rt.slates.settled();
       expect(await probeOf(rt, threadId)).toMatchObject({ state: "done", out: "run 2\n" });

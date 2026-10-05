@@ -268,7 +268,10 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
     const r = values[name] as Partial<SlateRunRecord> | undefined;
     if (r?.state === undefined || r.state === "idle") continue;
     const facts = [r.exit !== undefined && r.exit !== null ? `exit ${r.exit}` : undefined, r.ms !== undefined ? `${r.ms} ms` : undefined].filter(Boolean);
-    runLines.push(`  $${name}: ${r.state}${r.refreshing === true ? ", refreshing" : ""}${r.text === true ? ", text only" : ""}${facts.length > 0 ? ` (${facts.join(", ")})` : ""}${r.why !== undefined ? ` ${r.why}` : ""}${r.stale === true ? ", stale: the command changed since it ran" : ""}`);
+    // A run started again keeps its last result while it runs; that result's exit is the last run's, said as such.
+    const said = facts.length > 0 ? ` (${facts.join(", ")})` : "";
+    const shown = r.refreshing === true ? `running again; the last run ${r.exit === 0 ? "succeeded" : "failed"}${r.text === true ? ", text only" : ""}${said}` : `${r.state}${r.text === true ? ", text only" : ""}${said}`;
+    runLines.push(`  $${name}: ${shown}${r.why !== undefined ? ` ${r.why}` : ""}${r.stale === true ? ", stale: the command changed since it ran" : ""}`);
   }
   if (runLines.length > 0) lines.push("runs:", ...runLines);
   if ((ctx.waiting ?? []).length > 0) lines.push(`waiting for the person's approval: ${ctx.waiting!.join(", ")}; each starts once they allow it on the slate. Until then nothing they feed has data: ask the person to allow them, and never call the panel live or ready`);
