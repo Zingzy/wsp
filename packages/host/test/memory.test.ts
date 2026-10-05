@@ -24,8 +24,8 @@ const HOST_MEMORY_BUDGET_MB = 40;
  * shapes took main from 35.9 to 36.1 MB on 2026-10-03. Main read 36.3 MB with the daemon's worktree ops; threads in
  * the project's folder and one turn in a worktree read 36.5, and the skill worked out at each ask rather than held
  * whole brought that to 36.4. Slates, their parser, kit, validator, runs and tools took main from 36.0 to 38.1 on
- * this Mac on 2026-10-05. */
-const HOST_MEMORY_CAP_MB = 38.5;
+ * this Mac on 2026-10-05, and CI read 38.6 with main's kept agent processes and PR reads merged in on 2026-10-06. */
+const HOST_MEMORY_CAP_MB = 39;
 
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");
