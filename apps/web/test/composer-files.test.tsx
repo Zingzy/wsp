@@ -6,12 +6,12 @@
 // fixture shape as chat-composer.test.tsx; no live daemon and no host.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { noImagesLine, sendRefusal, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { noImagesLine, sendRefusal, type EventUnion, type KeptAttachment, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
-import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
+import { DisconnectedError, RequestError, type Api, type ProtocolEvent, type StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { useComposerFilesStore } from "../src/components/chat/composerFiles.js";
@@ -69,6 +69,8 @@ const base64Of = (bytes: number, fill = 5): string => Buffer.from(new Uint8Array
 function fixtureApi(history: Record<string, SessionEvent[]> = {}, statuses: WorkspaceStatus[] = []) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const started: StartSessionOptions[] = [];
+  /** What the host keeps of a message's images, by workspace, thread, request id and place. */
+  const kept = new Map<string, KeptAttachment>();
   const workspaces = [workspace];
   const api: Api = {
     interruptSession: async () => "accepted",
@@ -93,9 +95,14 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, statuses: Work
       started.push(opts);
       return { id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running", prompt: opts.prompt, startedAt: 0 };
     },
+    sessionAttachment: async (workspaceId, threadId, requestId, index) => {
+      const image = kept.get(`${workspaceId}/${threadId}/${requestId}/${index}`);
+      if (image === undefined) throw new RequestError(`no image ${index + 1} kept on that message`, "not-found");
+      return image;
+    },
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
-  return { api, started, emit };
+  return { api, started, emit, kept };
 }
 
 async function setup(api: Api) {
@@ -484,6 +491,23 @@ describe("what a tab holds of the images it has sent", () => {
   });
 });
 
+/** One finished turn on thread thr_1 whose message carried one PNG of 2048 bytes, as the transcript keeps it. */
+function sentTurn(requestId: string, prompt: string): SessionEvent[] {
+  const turn = { workspaceId: WS, sessionId: "sess_1", turnId: "turn_1", threadId: "thr_1" };
+  return [
+    { type: "session.start", ...turn, prompt, requestId, attachments: [{ mediaType: "image/png", bytes: 2048, name: "shot.png" }] },
+    { type: "session.done", ...turn, result: { status: "completed", text: "a cat" } },
+    { type: "session.end", ...turn, exitCode: 0, sawResult: true },
+  ];
+}
+
+const imageRow = (): Promise<HTMLElement> =>
+  waitFor(() => {
+    const found = document.querySelector<HTMLElement>("[data-chat-image-row=true] [data-chat-image='shot.png'] img");
+    expect(found).not.toBeNull();
+    return found!.closest<HTMLElement>("[data-chat-image-row=true]")!;
+  });
+
 describe("the images on the send", () => {
   it("ride the start as bytes with their type, and the composer opens empty", async () => {
     const { api, started } = fixtureApi();
@@ -515,6 +539,58 @@ describe("the images on the send", () => {
     });
     expect(row.querySelectorAll("[data-chat-image='shot.png'] img")).toHaveLength(1);
     expect(row.textContent).not.toContain("[image");
+  });
+
+  it("the person's row draws its image again after the app restarts, read back from the host", async () => {
+    const { api, started, kept } = fixtureApi();
+    const first = await setup(api);
+    await typeInto(composerEditor(), "what does this show?");
+    act(() => void paste([pngFile("shot.png", 2048, 3)]));
+    await waitFor(() => expect(thumbs()).toHaveLength(1));
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    const { requestId } = started[0]!;
+    first.unmount();
+    // A restart: nothing this tab held in memory is left, and the thread comes back from the runtime's transcript.
+    useComposerFilesStore.setState({ pending: {}, refused: {}, queued: {}, sent: {} });
+    kept.set(`${WS}/thr_1/${requestId}/0`, { mediaType: "image/png", bytes: base64Of(2048, 3) });
+    api.sessionHistory = async () => sentTurn(requestId!, "what does this show?");
+    render(<WorkspaceThread workspaceId={WS} />);
+    const row = await imageRow();
+    expect(row.parentElement!.textContent).not.toContain("[image");
+  });
+
+  it("a message sent from the command line draws its image from the host, which this tab never held", async () => {
+    const { api, kept } = fixtureApi();
+    kept.set(`${WS}/thr_1/req_cli/0`, { mediaType: "image/png", bytes: base64Of(512, 9) });
+    api.sessionHistory = async () => sentTurn("req_cli", "look at this");
+    await setup(api);
+    const row = await imageRow();
+    expect(row.parentElement!.textContent).not.toContain("[image");
+  });
+
+  it("a read the socket dropped is asked again when the row next draws, since the host still has the image", async () => {
+    const { api, kept } = fixtureApi();
+    kept.set(`${WS}/thr_1/req_drop/0`, { mediaType: "image/png", bytes: base64Of(512, 9) });
+    const answer = api.sessionAttachment!;
+    let asked = 0;
+    api.sessionAttachment = async (...at) => (++asked === 1 ? Promise.reject(new DisconnectedError("closed")) : answer(...at));
+    api.sessionHistory = async () => sentTurn("req_drop", "look at this");
+    const first = await setup(api);
+    await waitFor(() => expect(asked).toBe(1));
+    expect(document.querySelector("[data-chat-image] img")).toBeNull();
+    first.unmount();
+    render(<WorkspaceThread workspaceId={WS} />);
+    await imageRow();
+    expect(asked).toBe(2);
+  });
+
+  it("a message whose image the host no longer keeps draws the record's words", async () => {
+    const { api } = fixtureApi();
+    api.sessionHistory = async () => sentTurn("req_gone", "look at this");
+    await setup(api);
+    await waitFor(() => expect(document.body.textContent).toContain("[image 2 KB png]"));
+    expect(document.querySelector("[data-chat-image] img")).toBeNull();
   });
 
   it("a message with no image sends no attachments field at all", async () => {

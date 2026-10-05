@@ -233,7 +233,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, attachmentKey, type KeptAttachment, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -1742,6 +1742,9 @@ export interface Runtime {
     list(workspaceId?: string, origin?: Caller): Promise<SessionView[]>;
     /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
     history(workspaceId: string, origin?: Caller): Promise<SessionEvent[]>;
+    /** One image a person's message carried on that workspace's thread, by the request id its start carries and its
+     * place in the message; refused as not found where the host keeps none. */
+    attachment(workspaceId: string, threadId: string, requestId: string, index: number, origin?: Caller): Promise<KeptAttachment>;
     /** Stops the session's running turn through its harness, or with task the one subagent of it the agent calls by that
      * id; a turn already over or an unknown id answers, never throws. */
     interrupt(sessionId: string, origin?: Caller, task?: string): Promise<SessionInterruptResult>;
@@ -1979,6 +1982,12 @@ const TRANSCRIPTS = "transcripts";
 const TRANSCRIPT_HEADS = "transcript-heads";
 /** Each transcript's index, beside it: what the host keeps of a transcript it does not hold. */
 const TRANSCRIPT_INDEX = "transcript-index";
+/** The images a person's messages carried, one blob each under its attachmentKey: the transcript keeps their records
+ * alone, and a client that did not send one, or sent it before a restart, draws it from here. */
+const ATTACHMENTS = "attachments";
+/** One document per workspace naming the images it keeps, by thread, so a thread or a workspace takes exactly its
+ * own with it whatever its transcript has since trimmed. */
+const ATTACHMENT_KEYS = "attachment-keys";
 /** One document per workspace: the turns sessions.list serves, read back at boot so the rows outlive the process. */
 const SESSIONS = "sessions";
 /** The name a person gave a workspace, keyed by its id, which its machines carry as a label across every rebuild:
@@ -3462,17 +3471,156 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The bytes each held transcript's events come to as JSON, kept beside it so a new event is not a walk of all of them. */
   const transcriptBytes = new Map<string, number>();
   const eventBytes = (e: SessionEvent): number => JSON.stringify(e).length;
-  /** Drops the oldest events until the rest are inside both caps, in place, and answers the bytes left; each dropped
-   * event goes to `gone`. */
+  /** Each event's size, measured once, for a transcript over its byte cap: one is walked whole at every event that
+   * lands. Only those, so a transcript inside it holds nothing more. */
+  const sizes = new WeakMap<SessionEvent, number>();
+  const sizeOf = (e: SessionEvent): number => {
+    const known = sizes.get(e);
+    if (known !== undefined) return known;
+    const size = eventBytes(e);
+    sizes.set(e, size);
+    return size;
+  };
+  /** One workspace's kept images, by thread: the key each one's bytes are a blob under, and its type. */
+  type KeptImages = { threads: Record<string, { key: string; mediaType: string }[]> };
+  const keptWrites = new Map<string, Promise<void>>();
+  /** One chain per workspace, so two sends writing at once cannot lose each other's keys. */
+  const onKept = (workspaceId: string, step: (held: KeptImages) => Promise<KeptImages | undefined>): Promise<void> => {
+    const next = (keptWrites.get(workspaceId) ?? Promise.resolve())
+      .then(async () => {
+        const held = ((await store.get(ATTACHMENT_KEYS, workspaceId)) as KeptImages | undefined) ?? { threads: {} };
+        // A step that wrote its own document answers nothing here.
+        const now = await step(held);
+        if (now === undefined) return;
+        if (Object.keys(now.threads).length === 0) await store.delete(ATTACHMENT_KEYS, workspaceId);
+        else await store.put(ATTACHMENT_KEYS, workspaceId, now);
+      })
+      .catch((e: unknown) => console.warn(`the images ${workspaceId}'s messages carried were not kept as asked: ${e instanceof Error ? e.message : String(e)}`));
+    keptWrites.set(workspaceId, next);
+    return next;
+  };
+  /** Keeps the images a send carried, for every client to draw again; a send no client could name keeps none. */
+  const keepSentImages = (workspaceId: string, threadId: string, requestId: string | undefined, attachments: readonly Attachment[]): Promise<void> => {
+    const kept = attachments.flatMap((a, index) => {
+      const key = attachmentKey(threadId, requestId, index);
+      return isImage(a.mediaType) && key !== undefined ? [{ key, mediaType: a.mediaType, bytes: a.bytes }] : [];
+    });
+    if (kept.length === 0) return Promise.resolve();
+    return onKept(workspaceId, async held => {
+      const had = (held.threads[threadId] ?? []).filter(h => !kept.some(k => k.key === h.key));
+      // The entry before the bytes: a crash between the two leaves an entry whose blob is missing, which reads as not
+      // found and goes with its thread, never a blob no document names and nothing can sweep.
+      await store.put(ATTACHMENT_KEYS, workspaceId, { threads: { ...held.threads, [threadId]: [...had, ...kept.map(({ key, mediaType }) => ({ key, mediaType }))] } });
+      for (const k of kept) await store.putBlob(ATTACHMENTS, k.key, Buffer.from(k.bytes, "base64"));
+      return undefined;
+    });
+  };
+  /** Takes these images away, a send's records having left the transcript, so no row can ask for them again. */
+  const dropKeptKeys = (workspaceId: string, keys: readonly string[]): Promise<void> =>
+    onKept(workspaceId, async held => {
+      const going = new Set(keys);
+      if (!Object.values(held.threads).some(list => list.some(k => going.has(k.key)))) return undefined;
+      for (const key of going) await store.deleteBlob(ATTACHMENTS, key);
+      const threads = Object.entries(held.threads).flatMap(([id, list]) => {
+        const left = list.filter(k => !going.has(k.key));
+        return left.length === 0 ? [] : [[id, left] as const];
+      });
+      return { threads: Object.fromEntries(threads) };
+    });
+  /** The keys of the images a start's message carried, which the host keeps while the start is in the transcript. */
+  const imageKeysOf = (e: SessionEvent): string[] =>
+    e.type !== "session.start" || e.threadId === undefined
+      ? []
+      : (e.attachments ?? []).flatMap((a, index) => {
+          const key = isImage(a.mediaType) ? attachmentKey(e.threadId!, e.requestId, index) : undefined;
+          return key === undefined ? [] : [key];
+        });
+  /** A trim's `gone` that lets the dropped starts' images go once the trim is done. */
+  const trimming = (workspaceId: string, also?: (e: SessionEvent) => void): { gone: (e: SessionEvent) => void; done: () => void } => {
+    const keys: string[] = [];
+    return {
+      gone: e => {
+        also?.(e);
+        keys.push(...imageKeysOf(e));
+      },
+      done: () => void (keys.length > 0 ? dropKeptKeys(workspaceId, keys) : undefined),
+    };
+  };
+  /** Takes these threads' kept images away, or every one of the workspace's. */
+  const dropSentImages = (workspaceId: string, threadIds: readonly string[] | "all"): Promise<void> =>
+    onKept(workspaceId, async held => {
+      const going = threadIds === "all" ? Object.keys(held.threads) : threadIds.filter(id => held.threads[id] !== undefined);
+      if (going.length === 0) return undefined;
+      for (const id of going) for (const k of held.threads[id] ?? []) await store.deleteBlob(ATTACHMENTS, k.key);
+      return { threads: Object.fromEntries(Object.entries(held.threads).filter(([id]) => !going.includes(id))) };
+    });
+
+  /** Drops events until the rest are inside both caps, in place, and answers the bytes left; each dropped event goes
+   * to `gone`. Every thread of a project's folder shares one transcript, and trimming it oldest first let a busy
+   * thread take a quiet thread's every event while its row stayed, so that thread opened on a blank page. So what
+   * goes first is the oldest event of the thread holding the most, outside each thread's newest turn, which no
+   * other thread's traffic takes; only a transcript still over its caps with nothing else left loses the oldest of
+   * what remains. The newest event stays. */
   const dropOldest = (events: SessionEvent[], bytes: number = events.reduce((n, e) => n + eventBytes(e), 0), gone?: (e: SessionEvent) => void): number => {
-    let drop = 0;
-    while (drop < events.length - 1 && (events.length - drop > TRANSCRIPT_CAP || bytes > TRANSCRIPT_BYTES)) bytes -= eventBytes(events[drop++]!);
-    if (gone !== undefined) for (let i = 0; i < drop; i++) gone(events[i]!);
-    if (drop > 0) events.splice(0, drop);
+    if (events.length <= TRANSCRIPT_CAP && bytes <= TRANSCRIPT_BYTES) return bytes;
+    // Each thread's newest turn starts at its last start, or is its last event where it has none.
+    const lastStart = new Map<string, number>();
+    const lastEvent = new Map<string, number>();
+    events.forEach((e, i) => {
+      const key = e.threadId ?? "";
+      lastEvent.set(key, i);
+      if (e.type === "session.start") lastStart.set(key, i);
+    });
+    // Sizes are read only where the bytes are what is over: a transcript over its count alone is trimmed by count.
+    const byteBound = bytes > TRANSCRIPT_BYTES;
+    const size = (e: SessionEvent): number => (byteBound ? sizeOf(e) : eventBytes(e));
+    const threads = new Map<string, { at: number[]; next: number; bytes: number }>();
+    events.forEach((e, i) => {
+      const key = e.threadId ?? "";
+      if (i >= (lastStart.get(key) ?? lastEvent.get(key)!)) return;
+      const held = threads.get(key) ?? { at: [], next: 0, bytes: 0 };
+      held.at.push(i);
+      if (byteBound) held.bytes += sizeOf(e);
+      threads.set(key, held);
+    });
+    const dropped = new Set<number>();
+    let count = events.length;
+    const drop = (i: number): void => {
+      dropped.add(i);
+      bytes -= size(events[i]!);
+      count--;
+    };
+    while (count > TRANSCRIPT_CAP || bytes > TRANSCRIPT_BYTES) {
+      const byBytes = bytes > TRANSCRIPT_BYTES;
+      let most: { at: number[]; next: number; bytes: number } | undefined;
+      for (const held of threads.values()) {
+        if (held.next >= held.at.length) continue;
+        if (most === undefined || (byBytes ? held.bytes > most.bytes : held.at.length - held.next > most.at.length - most.next)) most = held;
+      }
+      if (most === undefined) break;
+      const i = most.at[most.next++]!;
+      if (byteBound) most.bytes -= sizeOf(events[i]!);
+      drop(i);
+    }
+    for (let i = 0; i < events.length - 1 && (count > TRANSCRIPT_CAP || bytes > TRANSCRIPT_BYTES); i++) if (!dropped.has(i)) drop(i);
+    if (dropped.size === 0) return bytes;
+    let kept = 0;
+    for (let i = 0; i < events.length; i++) {
+      if (dropped.has(i)) gone?.(events[i]!);
+      else events[kept++] = events[i]!;
+    }
+    events.length = kept;
     return bytes;
   };
+  /** dropOldest with the dropped starts' images let go after it. */
+  const trimmed = (workspaceId: string, events: SessionEvent[], bytes?: number, also?: (e: SessionEvent) => void): number => {
+    const trim = trimming(workspaceId, also);
+    const left = dropOldest(events, bytes, trim.gone);
+    trim.done();
+    return left;
+  };
   const trimTranscript = (workspaceId: string, events: SessionEvent[]): void =>
-    void transcriptBytes.set(workspaceId, dropOldest(events, transcriptBytes.get(workspaceId), e => forgetChild(indexFor(workspaceId), e)));
+    void transcriptBytes.set(workspaceId, trimmed(workspaceId, events, transcriptBytes.get(workspaceId), e => forgetChild(indexFor(workspaceId), e)));
   /** A transcript held as the one opened last, the oldest of the others let go past the cap. */
   const holdTranscript = (workspaceId: string, events: SessionEvent[]): void => {
     transcripts.delete(workspaceId);
@@ -3534,7 +3682,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     all.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
     const held = [...all];
     dropOldest(held);
-    const head = all.slice(0, all.length - held.length);
+    const kept = new Set(held);
+    const head = all.filter(e => !kept.has(e));
     if (head.length > 0) await store.putBlob(TRANSCRIPT_HEADS, id, transcriptBlob({ workspaceId: id, events: head }));
     await store.putBlob(TRANSCRIPTS, id, transcriptBlob({ workspaceId: id, events: held }));
     const index = indexOf(held);
@@ -3589,7 +3738,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (landed !== undefined) return landed;
     const read = await readTranscript(workspaceId);
     const events = [...(read ?? []), ...(pendingEvents.get(workspaceId) ?? [])];
-    const bytes = dropOldest(events);
+    const bytes = trimmed(workspaceId, events);
     if (events.length > 0 && transcriptIndex.has(workspaceId)) {
       holdTranscript(workspaceId, events);
       transcriptBytes.set(workspaceId, bytes);
@@ -3685,7 +3834,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           return;
         }
         events = [...(read ?? []), ...(pendingEvents.get(workspaceId) ?? [])];
-        dropOldest(events);
+        trimmed(workspaceId, events);
       }
       unreadSaid.delete(workspaceId);
       await writeTranscript(workspaceId, events, pendingEvents.get(workspaceId)?.length ?? 0);
@@ -5587,6 +5736,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await store.deleteBlob(TRANSCRIPTS, id);
     await store.deleteBlob(TRANSCRIPT_HEADS, id);
     await store.deleteBlob(TRANSCRIPT_INDEX, id);
+    await dropSentImages(id, "all");
+    keptWrites.delete(id);
     await store.delete(WORKSPACE_NAMES, id);
     await store.delete(SESSIONS, id);
     await store.delete(CREATES, `workspace/${id}`);
@@ -8534,21 +8685,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /**
    * The turn's images on the road its adapter declared, filesBlocked having already turned away what cannot go. An
    * inline adapter is handed the bytes and nothing lands anywhere, so there is no folder to answer with. A file
-   * adapter is handed paths inside this send's own folder under the thread's images dir: two sends on one thread
-   * would otherwise write the same paths and the first turn would be handed the second's picture, since the landing
-   * happens before either turn is registered. The folder travels the same signed-URL road an import takes, since the
-   * exec body holds 16 KB, and the caller removes it when the turn it was sent for ends.
+   * adapter is handed paths inside this send's own folder (turnImagesDir), readied and written as the thread's files
+   * are: two sends on one thread would otherwise write the same paths and the first turn would be handed the
+   * second's picture, since the landing happens before either turn is registered. The caller removes the folder when
+   * the turn it was sent for ends.
    */
   const landImages = async (
     entry: LiveWorkspace,
     road: AttachmentRoad | undefined,
+    folder: string,
     dir: string,
     images: readonly Attachment[],
   ): Promise<{ images: TurnImage[]; dir?: string }> => {
     if (images.length === 0 || road === undefined) return { images: [] };
     if (road === "inline") return { images: images.map(({ mediaType, bytes }) => ({ mediaType, bytes })) };
+    const ready = await entry.machine.exec(landFilesLine(folder, dir), { timeoutMs: INLINE_EXEC_MS });
+    if (ready.exitCode !== 0) throw new Error(filesNotLandedLine(folder));
     const landed = images.map((image, index) => ({ ...image, path: imagePathIn(dir, index, image.mediaType) }));
-    await importInto(entry.machine, tarOf(landed.map(i => ({ path: i.path, mode: 0o600, content: Buffer.from(i.bytes, "base64") }))), "/", { overlay: true });
+    for (const image of landed) await landBytes(entry.machine, image.path, Buffer.from(image.bytes, "base64"));
     return { images: landed.map(({ mediaType, bytes, path }) => ({ mediaType, bytes, path })), dir };
   };
 
@@ -9885,7 +10039,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // The row that says the thread is spoken for also says who its turns tell: a send into the thread reads the
         // opener's notify off its rows, and inside the launch window this is the only one.
         sessions.set(turnId, { view, turnId, launch, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}) });
-        bus.emit({ type: "session.held", workspaceId, threadId });
+        bus.emit({ type: "session.held", workspaceId, threadId, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
       };
       hold();
       let outcome: SessionStartOutcome = "started";
@@ -9897,10 +10051,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // where the agent takes its prompt late.
       let landed = false;
       let snapshot: { from: Promise<string | undefined> | string; cwd: string } | undefined;
-      // This send's own folder on the machine, named by the request id it minted: the landing runs before any turn is
-      // registered, so two sends arriving together both pass the wait, and a folder they shared would leave the first
-      // turn holding the second's picture.
-      const sendDir = turnImagesDir(threadId, o.requestId, randomUUID());
+      // What this send's own folders on the machine are named by where its request id cannot be: the landing runs
+      // before any turn is registered, so two sends arriving together both pass the wait, and a folder they shared
+      // would leave the first turn holding the second's picture.
+      const minted = randomUUID();
       // Every road out of the window between the row above and runTurn is in here, since the row that says this
       // thread is working and the images this send put on the machine both belong to a turn that does not exist on
       // any of them: a refusal after a trip, a start that never opened. A steer leaves by returning and holds
@@ -9957,9 +10111,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             hold();
             if (landed) break;
             landed = true;
-            ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, sendDir, (o.attachments ?? []).filter(a => isImage(a.mediaType))));
             const landing = runsIn(entry, resume === undefined ? undefined : folderOf(workspaceId, resume), folder);
-            filePaths = await landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, randomUUID()), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
+            ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, landing, turnImagesDir(landing, threadId, o.requestId, minted), (o.attachments ?? []).filter(a => isImage(a.mediaType))));
+            filePaths = await landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, minted), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
             if (filePaths.length > 0) filesFolder = landing;
             const taken = promptsLate ? snapshotOf(entry, landing) : await snapshotOf(entry, landing);
             snapshot = taken === undefined ? undefined : { from: taken, cwd: landing };
@@ -10041,6 +10195,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             }),
         });
         handedOver = true;
+        void keepSentImages(workspaceId, threadId, o.requestId, o.attachments ?? []);
         // The thread's record, written at its first turn from what that turn runs at, once the turn is under way so a
         // launch that never opened leaves none; a thread from before the record existed gets one here too, off what
         // its rows said this turn runs at, so it is read the one way from now on. Persisted with the row as the turn
@@ -10133,6 +10288,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // workspaces; any other it names reads as every workspace verb reads it, so it learns nothing by asking.
       if (!treeStandsOn(workspaceId, origin)) await entryOf(workspaceId, origin);
       return (await openTranscript(workspaceId)).filter(e => drivesThread(e.threadId, origin)).map(e => ({ ...e }));
+    },
+
+    async attachment(workspaceId, threadId, requestId, index, origin) {
+      await ready();
+      if (!treeStandsOn(workspaceId, origin)) await entryOf(workspaceId, origin);
+      await keptWrites.get(workspaceId);
+      const key = attachmentKey(threadId, requestId, index);
+      const held = key === undefined || !drivesThread(threadId, origin) ? undefined : ((await store.get(ATTACHMENT_KEYS, workspaceId)) as KeptImages | undefined)?.threads[threadId]?.find(k => k.key === key);
+      const bytes = held === undefined ? undefined : await store.getBlob(ATTACHMENTS, held.key);
+      if (held === undefined || bytes === undefined) throw notFoundRefusal(`no image ${index + 1} kept on that message`);
+      return { mediaType: held.mediaType, bytes: bytes.toString("base64") };
     },
 
     async interrupt(sessionId, origin, task) {
@@ -10493,6 +10659,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await openTranscript(workspaceId);
       await dropCheckpoints(entry, threadId);
       await dropThreadFiles(entry, [threadId]);
+      await dropSentImages(workspaceId, [threadId]);
       for (const [id, s] of [...sessions]) if (s.view.threadId === threadId) sessions.delete(id);
       threadRecords.delete(threadId);
       await dropFromTranscript(workspaceId, e => e.threadId === threadId);
@@ -10517,6 +10684,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await openTranscript(workspaceId);
       // A launch that never got going can still have landed the files its send carried.
       await dropThreadFiles(entry, [threadId]);
+      await dropSentImages(workspaceId, [threadId]);
       for (const [id] of held) sessions.delete(id);
       threadRecords.delete(threadId);
       await dropFromTranscript(workspaceId, e => e.threadId === threadId);
@@ -12707,6 +12875,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // at every running workspace without waiting for it, and a write landing after the close is this process
       // touching a computer it no longer holds. Each sync is a read and a write, so the wait is milliseconds.
       await Promise.allSettled([...daemonSyncs.values()]);
+      await Promise.allSettled([...keptWrites.values()]);
       // The turns running on machines are not ended: each leads a process group on its own machine and its log is
       // there to be read again, so what this host lets go of is the reading of them, which is what holds this
       // process open after its last line.
