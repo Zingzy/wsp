@@ -85,14 +85,53 @@ export function getLive(workspaceId: string): WorkspaceLive {
   return live;
 }
 
+/** How many mounted readers hold each workspace's readings: a figure nobody draws is not sampled or sent. */
+const watching = new Map<string, number>();
+const watchFns = new Set<() => void>();
+
+/** Holds a workspace's readings until the returned release runs. */
+export function watchLive(workspaceId: string): () => void {
+  const held = watching.get(workspaceId) ?? 0;
+  watching.set(workspaceId, held + 1);
+  if (held === 0) for (const fn of watchFns) fn();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const left = (watching.get(workspaceId) ?? 1) - 1;
+    if (left > 0) {
+      watching.set(workspaceId, left);
+      return;
+    }
+    watching.delete(workspaceId);
+    for (const fn of watchFns) fn();
+  };
+}
+
+export function liveWatched(workspaceId: string): boolean {
+  return watching.has(workspaceId);
+}
+
+export function onLiveWatched(fn: () => void): () => void {
+  watchFns.add(fn);
+  return () => watchFns.delete(fn);
+}
+
 /** Test isolation: forget every workspace's samples. */
 export function resetLive(): void {
   registry.clear();
+  watching.clear();
 }
+
+/** Subscribes to the workspaces' readings and holds them for as long as the caller is mounted. */
+const heldOnChange = (workspaceIds: ReadonlyArray<string>, fn: () => void): (() => void) => {
+  const offs = workspaceIds.flatMap(id => [getLive(id).onChange(fn), watchLive(id)]);
+  return () => offs.forEach(off => off());
+};
 
 export function useWorkspaceLive(workspaceId: string): LiveState {
   return useSyncExternalStore(
-    fn => getLive(workspaceId).onChange(fn),
+    useCallback((fn: () => void) => heldOnChange([workspaceId], fn), [workspaceId]),
     () => getLive(workspaceId).snapshot(),
   );
 }
@@ -114,7 +153,7 @@ const sameReading = (a: MemoryReading | null, b: MemoryReading | null): boolean 
  * a pane says is not a render of that pane. */
 export function useOutOfMemoryReading(workspaceId: string, phase: WorkspacePhase): MemoryReading | null {
   const last = useRef<MemoryReading | null>(null);
-  const subscribe = useCallback((fn: () => void) => getLive(workspaceId).onChange(fn), [workspaceId]);
+  const subscribe = useCallback((fn: () => void) => heldOnChange([workspaceId], fn), [workspaceId]);
   const snapshot = useCallback(() => {
     const next = outOfMemoryReading(getLive(workspaceId).snapshot(), phase);
     if (!sameReading(last.current, next)) last.current = next;
@@ -128,10 +167,7 @@ export function useOutOfMemoryReading(workspaceId: string, phase: WorkspacePhase
 export function useOutOfMemoryReadings(workspaces: ReadonlyArray<{ id: string; phase: WorkspacePhase }>): Readonly<Record<string, MemoryReading>> {
   const last = useRef<Readonly<Record<string, MemoryReading>>>({});
   const subscribe = useCallback(
-    (fn: () => void) => {
-      const offs = workspaces.map(w => getLive(w.id).onChange(fn));
-      return () => offs.forEach(off => off());
-    },
+    (fn: () => void) => heldOnChange(workspaces.map(w => w.id), fn),
     [workspaces],
   );
   const snapshot = useCallback(() => {

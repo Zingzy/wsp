@@ -808,6 +808,8 @@ export interface Api {
    * kind's ride its daemon link. Asked again on every live transition, as the daemon link's own watches are: a
    * subscription dies with the socket that made it. Optional so a fixture with no host behind it need not fake it. */
   watchSys?(workspaceId: string): Promise<void>;
+  /** Ends this socket's watchSys for the workspace once no pane reads its figures. */
+  unwatchSys?(workspaceId: string): Promise<void>;
   /** The readings those asks push, for every workspace this socket asked about. */
   onSysSample?(fn: (e: WorkspaceSysEvent) => void): () => void;
   /** The workspace's cost ticks since the runtime began metering it, folded to the rate changes and the newest. Optional
@@ -953,6 +955,7 @@ export function makeApi(c: ProtocolClient): Api {
       onFrame: (channel, fn) => c.onDaemonFrame(channel, fn),
     },
     watchSys: async workspaceId => void (await c.request("sys.subscribe", { workspaceId })),
+    unwatchSys: async workspaceId => void (await c.request("sys.unsubscribe", { workspaceId })),
     onSysSample: fn => c.onSysSample(fn),
     portReach: async (id, port) => (await c.request<{ reach: PortReachView }>("workspaces.portReach", { workspaceId: id, port })).reach,
     portProbe: async (id, port) => (await c.request<{ probe: PortProbeView }>("workspaces.portProbe", { workspaceId: id, port })).probe,
