@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One state file, one host: the lock names the process serving it and the
 // port it bound, so a second host refuses and other local tools find it.
-import { existsSync, linkSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { authority, isWildcard, LOOPBACK, relayUrlOf, WS_PATH, type HostShape } from "@wsp/protocol";
 import { ownFolder } from "@wsp/own-file";
@@ -77,6 +77,27 @@ export const pidAlive = (pid: number): boolean => signalled(pid) !== "gone";
 /** Whether a pid is a process this login could signal, which is a process of its own. A lock naming a pid that
  * answers EPERM names another login's process on a number a dead host once had, which is the stale lock case. */
 export const ownPid = (pid: number): boolean => signalled(pid) === "own";
+
+/** Whether the program at a path is gone: nothing stands at that path now. /proc marks a program whose file was
+ * unlinked with " (deleted)" even where an upgrade put a new file at the same path, and that host still serves, so
+ * the mark alone says nothing; the host's own check and the lock's read the same fact through this. */
+export const programGone = (path: string): boolean => !existsSync(path.replace(/ \(deleted\)$/, ""));
+
+/** Whether a live pid runs a program that is gone: a host left on an AppImage's mount after the launch that mounted
+ * it ended, or on a copy of the app since removed. Such a host can start nothing again and serves out of files it can
+ * no longer read, so its lock holds nothing. Read off /proc, so a computer without one never says so. */
+function runsVanished(pid: number): boolean {
+  let exe: string;
+  try {
+    exe = readlinkSync(`/proc/${pid}/exe`);
+  } catch {
+    return false;
+  }
+  return programGone(exe);
+}
+
+/** Whether the process a lock names still holds it: alive, and running a program that is still there. */
+const holds = (lock: HostLock): boolean => pidAlive(lock.pid) && !runsVanished(lock.pid);
 
 function readLock(path: string): HostLock | undefined {
   const text = readText(path);
@@ -194,10 +215,17 @@ export function dialAddress(lock: { address?: string }): string {
   return isWildcard(at) ? LOOPBACK : at;
 }
 
-/** The host whose lock names this state file, when that process is still alive. */
+/** The host whose lock names this state file, when that process is still alive and its program is still there. */
 export function servingHost(statePath: string): HostLock | undefined {
   const held = readLock(lockPathFor(statePath));
-  return held !== undefined && pidAlive(held.pid) ? held : undefined;
+  return held !== undefined && holds(held) ? held : undefined;
+}
+
+/** The lock of a host still running whose program has gone, which holds the lock and serves nothing; nothing where
+ * the lock names no such process. Its manager has to be told to start it again, since to the manager it is up. */
+export function vanishedHost(statePath: string): HostLock | undefined {
+  const held = readLock(lockPathFor(statePath));
+  return held !== undefined && pidAlive(held.pid) && runsVanished(held.pid) ? held : undefined;
 }
 
 /** The host serving this state file here, started first when none does and the line was handed a starter; nothing
@@ -214,7 +242,7 @@ export async function heldOrStarted(statePath: string, start: HostStarter | unde
  * where a lock already stands in the place its link wanted. */
 export function refuseIfServed(lockPath: string, statePath: string): void {
   const held = readLock(lockPath);
-  if (held !== undefined && pidAlive(held.pid)) throw heldBy(held, statePath);
+  if (held !== undefined && holds(held)) throw heldBy(held, statePath);
 }
 
 /** Seeded with the requested port so a refusal during startup can name it;
@@ -258,7 +286,7 @@ function takeOverStale(lockPath: string, statePath: string, mine: string): void 
   const stale = readText(lockPath);
   if (stale !== undefined) {
     const held = lockOf(stale);
-    if (held !== undefined && pidAlive(held.pid)) throw heldBy(held, statePath);
+    if (held !== undefined && holds(held)) throw heldBy(held, statePath);
     const marker = holdMarker(lockPath, statePath);
     try {
       const now = readText(lockPath);
@@ -309,6 +337,12 @@ function markerHolder(marker: string): number | "unknown" | undefined {
 function tookFirst(lockPath: string, statePath: string): Error {
   const winner = readLock(lockPath);
   return winner !== undefined ? heldBy(winner, statePath) : new Error(`another wsp host just took ${lockPath}`);
+}
+
+/** Takes away the lock this process holds, and only that one: a host whose program went may have lost the lock to
+ * the host started in its place before it closes. */
+export function releaseLock(lockPath: string): void {
+  if (readLock(lockPath)?.pid === process.pid) rmSync(lockPath, { force: true });
 }
 
 /** The lock rewritten by the host holding it, swapped in whole, so a start reading it never meets half a file and

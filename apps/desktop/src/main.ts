@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adoptLoginPath, agentsHere, aimedHost, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, runningWsp, serviceAddressHere, shimPath, systemService, wspHome, type CliIO } from "@wsp/host";
 import { DEFAULT_PREFERENCES, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
@@ -21,7 +21,7 @@ import { guardWorkers, loadHostPage } from "./page-session.js";
 import { pagePreviews } from "./previews.js";
 import { QUIT_WORD, quitAnswer, quitChoice, quitPrompt } from "./quit.js";
 import { bundleOf, discardStage, inPlaceRefusal, settleStage, stageOf, stageUpdate, startSwap } from "./self-update.js";
-import { installShim, shimText } from "./shim.js";
+import { installShim, keepAppImage, shimText, type ShimTarget } from "./shim.js";
 import { trayModel, trayNotice, type TrayAct, type TrayModel, type TrayRow } from "./tray.js";
 import { vibrancyFor, windowOptions, type UpdateRoad } from "./window.js";
 import { isShellZoomChord, shellChordOf } from "./zoom.js";
@@ -598,10 +598,22 @@ if (process.env["WSP_DESKTOP_SMOKE"] === "1") Object.assign(globalThis, { wspTra
 function installCommand(): void {
   const shim = shimPath(wspHome());
   try {
-    io.log(`wsp command ${installShim(shim, shimText({ execPath: process.execPath, script: CLI_SCRIPT, ...forwarderHere() }))} at ${shim}`);
+    io.log(`wsp command ${installShim(shim, shimText(commandTarget()))} at ${shim}`);
   } catch (e) {
     throw new Error(`the wsp command could not be written at ${shim}: ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+/** What the command runs: this app's own files, or under an AppImage a copy of them that outlives this launch. */
+function commandTarget(): ShimTarget {
+  const here: ShimTarget = { execPath: process.execPath, script: CLI_SCRIPT, ...forwarderHere() };
+  const appdir = process.env["APPDIR"];
+  const image = process.env["APPIMAGE"];
+  if (!app.isPackaged || appdir === undefined || image === undefined) return here;
+  const started = Date.now();
+  const kept = keepAppImage(here, { appdir, image, version: app.getVersion() }, wspHome());
+  io.log(`wsp files at ${dirname(kept.execPath)} (${Date.now() - started} ms)`);
+  return kept;
 }
 
 /** The forwarder the shim puts in front of the bundled command, where this bundle carries a daemon for this

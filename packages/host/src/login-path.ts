@@ -4,8 +4,11 @@
 // or the Dock cannot see claude, codex or any other tool in a user folder, and
 // neither can anything it looks up or spawns. One read of the login shell at
 // the host's start settles it for the whole process. That PATH is the whole
-// trigger: any other one was meant by whoever set it, and replacing it would
-// make the start depend on the machine's rc files for no reason.
+// trigger on a Mac: any other one was meant by whoever set it, and replacing it
+// would make the start depend on the machine's rc files for no reason. Linux
+// has no such PATH to spot, so there the trigger is who started the process:
+// systemd hands the service its manager's PATH and a desktop hands an AppImage
+// the session's, and neither carries what the person's profile adds.
 //
 // Every road into the app awaits this before it builds a runtime, not merely
 // before it serves: building one asks this computer what it holds, and every
@@ -14,6 +17,7 @@
 // pays nothing for saying so.
 import { spawnRun } from "@wsp/collect";
 import { loginPathLine } from "@wsp/protocol";
+import { STARTED_BY_ENV } from "./host-lock.js";
 
 /** The PATH launchd gives an app it starts. The order it comes in is not fixed, so the reading is a set. */
 export const LAUNCHD_PATH = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
@@ -29,10 +33,14 @@ export interface LoginShellDeps {
   /** Runs the login shell and answers with everything it printed, or nothing where it failed or ran past its limit;
    * the real one unless a test hands over its own. */
   read?: (shell: string) => Promise<string | undefined>;
+  /** The platform the rule is read for; this one unless a test names another. */
+  platform?: string;
 }
 
-/** Whether this launch has to ask the login shell: its PATH is launchd's own set, in any order and nothing else. */
-export function needsLoginPath(env: NodeJS.ProcessEnv): boolean {
+/** Whether this launch has to ask the login shell: its PATH is launchd's own set, in any order and nothing else, or
+ * on Linux it is the service's host or an AppImage launch, whose PATH a manager or a desktop chose. */
+export function needsLoginPath(env: NodeJS.ProcessEnv, platform: string = process.platform): boolean {
+  if (platform === "linux" && (env[STARTED_BY_ENV] === "service" || (env["APPIMAGE"] ?? "") !== "")) return true;
   const dirs = (env["PATH"] ?? "").split(":").filter(dir => dir !== "");
   return dirs.length === LAUNCHD_PATH.length && LAUNCHD_PATH.every(dir => dirs.includes(dir));
 }
@@ -44,7 +52,7 @@ const runLoginShell = (shell: string, script: string): Promise<string | undefine
 /** Puts the person's login shell PATH on the environment, or says in one line why the one this launch was given
  * stands. A shell that fails, times out or prints nothing changes nothing. */
 export async function takeLoginPath(deps: LoginShellDeps): Promise<void> {
-  if (!needsLoginPath(deps.env)) return;
+  if (!needsLoginPath(deps.env, deps.platform)) return;
   const shell = deps.env["SHELL"];
   if (shell === undefined || shell === "") {
     deps.log(loginPathLine("SHELL names no login shell"));
