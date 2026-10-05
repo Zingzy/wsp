@@ -3736,7 +3736,7 @@ const AgentsOnIn = z.string().optional().describe("the computer to read, by the 
 const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
 const AGENTS_READ_WORDS = "Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.";
 
-// --- the slate: a live panel per thread the agent builds and the person reads, presses and fills in (spec 10) ---
+// --- the slate: a live panel per thread the agent builds and the person reads, presses and fills in ---
 
 const SlateThreadIn = z.string().optional().describe("another thread's id");
 const SlateIfVersionIn = z.number().int().optional().describe("only at this version");

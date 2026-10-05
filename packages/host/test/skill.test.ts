@@ -110,7 +110,7 @@ describe("the wsp skill", () => {
   it("says once a slate is written a request to see lands there, the person's result stays there, and the slate's own code lives in its files", () => {
     expect(THREAD_SLATE_WORDS).toContain("Once the slate is written, a request to see something lands there.");
     expect(THREAD_SLATE_WORDS).toContain("Build and read it with the slate tools, never wsp from a shell.");
-    // Rulings 11 and 13: a one-off answer stays in chat, and the reply after a write is short and checked first.
+    // A one-off answer stays in chat, and the reply after a write is short and checked first.
     expect(THREAD_SLATE_WORDS).toContain("A one-off answer or an explanation stays in chat unless they ask to see it.");
     // At medium effort agents fetched with another tool and answered in chat: the first call is the catalog, whatever fetches.
     expect(THREAD_SLATE_WORDS).toContain("your first tool call is slate_catalog, then slate_write; a list in chat is not a slate.");

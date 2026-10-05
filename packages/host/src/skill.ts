@@ -79,8 +79,8 @@ export function agentsLine(agents: readonly string[]): string {
  * rest (measured on 2.1.284, "Server instructions truncated from 7992 to 2048 chars"). */
 export const INSTRUCTIONS_KEPT = 2048;
 
-/** What a slate is, carried second so it lands inside what Claude Code keeps, under 220 characters with its full stop
- * (10, "The instructions sentence"); the skill's slate section sits past the cut. */
+/** What a slate is, carried second so it lands inside what Claude Code keeps, under 220 characters with its full stop;
+ * the skill's slate section sits past the cut. */
 export const SLATE_WORDS = "This thread can own a slate, a live panel the person reads, presses and fills in: when they ask for a panel, dashboard, form, checklist, tracker or walkthrough, or name the slate, call slate_catalog, then slate_write";
 
 /** What a thread's own tool server opens with, ahead of everything else: that the session is a thread with a slate

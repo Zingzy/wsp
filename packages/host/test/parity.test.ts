@@ -386,10 +386,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     try {
       const slate = (await client.listTools()).tools.filter(t => t.name.startsWith("slate_"));
       expect(slate.map(t => t.name).sort()).toEqual(["slate_catalog", "slate_read", "slate_state", "slate_write"]);
-      // 10 said 2,500; a check's rehearsal and read's document took it to 2,700, and descriptions in the words people
-      // say, which tool search matches, to 3,400; a few words on each input, after agents guessed at them, to 4,150; the
-      // held runs as their own field and the catalog's trigger words, after medium-effort agents answered in chat, to 4,300.
-      // _meta is read by the client and never reaches the model, so it is no part of what a session pays.
+      // Every session with a slate pays these schemas each turn; _meta is read by the client and never reaches the model.
       expect(slate.reduce((n, t) => n + JSON.stringify({ ...t, _meta: undefined }).length, 0)).toBeLessThan(4300);
       for (const t of slate) for (const [name, input] of Object.entries(t.inputSchema.properties ?? {})) expect((input as { description?: string }).description, `${t.name}.${name}`).toBeTruthy();
       // A Claude Code launch loads the server's tools up front, and every tool but the slate's opts back out of that.
