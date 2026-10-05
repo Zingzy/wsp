@@ -18,13 +18,10 @@ import { DIST, describeWithDists, distOf } from "./built-bin.js";
  * page goes red until it says the same thing. */
 const HOST_MEMORY_BUDGET_MB = 40;
 
-/** What the run is held to, under the promise so a regression is caught while the promise still holds: the host
- * read 31.3 MB on CI when this was first set, main read 35.1 MB on 2026-10-01, and the per-model usage rows, the
- * top threads and the fifteen-minute draw added about 0.1 MB more; the pull request pane's reply, resolve and react
- * shapes took main from 35.9 to 36.1 MB on 2026-10-03. Main read 36.3 MB with the daemon's worktree ops; threads in
- * the project's folder and one turn in a worktree read 36.5, and the skill worked out at each ask rather than held
- * whole brought that to 36.4. */
-const HOST_MEMORY_CAP_MB = 36.5;
+/** What the run is held to, under the promise so a regression is caught while the promise still holds. Main read
+ * 35.5 MB on Linux under Node 24 on 2026-10-05, most of it zod binding 24 methods onto every schema the protocol
+ * builds at load; bound on first read instead, it reads 26.5 there and 25.7 under Node 22. */
+const HOST_MEMORY_CAP_MB = 28.5;
 
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");
@@ -167,7 +164,10 @@ const RUN_CAP_MS = 240_000;
 /** Runs a script under a node of its own with collection exposed, and answers with everything it said. */
 function ran(script: string, home: string): Promise<{ out: string; code: number | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--expose-gc", "--input-type=module", "-e", script], {
+    // V8 keeps a function's bytecode until six collections pass with no call, and a forced collection does not count:
+    // a host that made less garbage on the way reached the quiet minute holding 1.5 MB more of its start-up code than
+    // one that collected ten times, with the same records held. So code no turn runs is let go at every collection.
+    const child = spawn(process.execPath, ["--expose-gc", "--stress-flush-code", "--input-type=module", "-e", script], {
       cwd: home,
       env: { ...process.env, HOME: home, WSP_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],

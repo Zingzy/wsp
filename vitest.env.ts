@@ -10,6 +10,7 @@
 // grep in packages/protocol/test/test-env.test.ts, which is deliberate.
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { AGENT_MODULES } from "./packages/catalog/src/agents/index.js";
 import { UPDATE_CHECK_ENV } from "./packages/protocol/src/env.js";
 
 /** The gates a person throws to turn a suite on, each read once to decide whether its file runs. Nothing else: a
@@ -40,7 +41,19 @@ for (const name of Object.keys(process.env)) if (name.startsWith("WSP_") && !(na
  * doing; vitest.agent-store.ts makes it and reads it. A worker reading this file is already inside it. */
 export const RUN_TMPDIR = /^wsp-run-\d+$/.test(basename(tmpdir())) ? tmpdir() : join(tmpdir(), `wsp-run-${process.pid}`);
 
+/** The runs that keep the person's own home: the live suites read the golden's state and the agents' logins off it,
+ * and the render suites Playwright's browsers, which it looks for under the home. */
+const REAL_HOME = process.env["WSP_LIVE"] === "1" || process.env["WSP_RENDER"] === "1";
+
+// An agent's store variable, CLAUDE_CONFIG_DIR as a wsp thread sets it among them, outranks HOME, so a case that lands
+// sessions would land them in the person's own store; without it every store is under the run's home.
+if (!REAL_HOME) for (const { stateHomeEnv } of AGENT_MODULES) if (stateHomeEnv !== undefined) delete process.env[stateHomeEnv];
+
+/** The home every case and every process it starts reads, under the run's own folder, so whatever lands in it is
+ * this run's doing; vitest.agent-store.ts makes it and fails the run naming anything left in it. */
+export const RUN_HOME = join(RUN_TMPDIR, "home");
+
 // The release check is off, so no host a test starts asks GitHub for the newest release. Every other wsp variable
 // is gone by the rule above, the launch pair, the home and a named host with the rest. TMPDIR puts every folder a
-// case or a process it starts makes under the run's own.
-export const TEST_ENV: Record<string, string> = { [UPDATE_CHECK_ENV]: "0", TMPDIR: RUN_TMPDIR };
+// case or a process it starts makes under the run's own, and HOME puts the person's home there too.
+export const TEST_ENV: Record<string, string> = { [UPDATE_CHECK_ENV]: "0", TMPDIR: RUN_TMPDIR, ...(REAL_HOME ? {} : { HOME: RUN_HOME }) };
