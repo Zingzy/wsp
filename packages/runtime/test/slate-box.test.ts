@@ -192,4 +192,50 @@ describe("a box thread's slate", () => {
     expect(scripts[0]).toContain(`exec bash -c 'pwd; printf %s "$SLATE_DIR"; cat "$SLATE_DIR/note.txt"'`);
     slates.close();
   }, 30_000);
+
+  it("a tick on a napping box wakes nothing and runs nothing, saying so, and a press wakes it and runs there", async () => {
+    const machine = bashMachine();
+    const scripts: string[] = [];
+    const run = machine.run.bind(machine);
+    machine.run = (script, opts) => (scripts.push(script), run(script, opts));
+    let asleep = true;
+    let woke = 0;
+    const thread = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    made.push(boxSlateDir(thread));
+    const folder = temp();
+    const slates = createSlates({
+      store: memoryStore(),
+      now: () => Date.now(),
+      record: () => {},
+      emit: () => {},
+      thread: () => ({ workspaceId: "w1", rootThreadId: thread, sessionId: "s1", folder, hostFolder: folder, computer: "spoo" }),
+      machineOf: () => machine,
+      asleep: () => asleep,
+      wake: async () => {
+        woke += 1;
+        asleep = false;
+      },
+      under: lead => [lead],
+      threadOfToken: () => thread,
+      sources: (threadId, workspaceId) => ({ threadId, workspaceId, now: Date.now(), rows: () => [] }) as never,
+      deliver: async () => ({ outcome: "started" }),
+      runEnv: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+    });
+    const asThread: Caller = { origin: "here", by: { kind: "thread", threadId: thread, workspaceId: "w1", rootThreadId: thread } };
+    const wrote = await slates.write({ text: `<slate title="Feed"><run name="feed" cmd="echo fed" every={60} timeout={20} /><column><output run={$feed} /><button id="go" label="Now" onPress={start($feed)} /></column></slate>` }, asThread);
+    // Shown: the timer ticks at once, onto a napping box.
+    slates.subscribe({ threadId: thread, sources: [] });
+    const feed = async () => (await slates.get(thread))!.values["feed"] as { state: string; why?: string; out?: string };
+    for (let i = 0; i < 50 && (await feed()).state !== "held"; i++) await new Promise(r => setTimeout(r, 50));
+    expect(await feed()).toMatchObject({ state: "held", why: "the box was asleep, so this tick did not wake it; press to run it now" });
+    expect((await slates.get(thread))!.asks).toEqual([]);
+    expect({ woke, scripts: scripts.length }).toEqual({ woke: 0, scripts: 0 });
+    // The person presses: approved, the box wakes once, and the command runs there.
+    const pressed = await slates.event({ threadId: thread, version: wrote.version, piece: "go", event: "press", requestId: "p1" });
+    await slates.approve({ threadId: thread, key: pressed.ask!.key, scope: "thread" });
+    for (let i = 0; i < 100 && (await feed()).state !== "done"; i++) await new Promise(r => setTimeout(r, 50));
+    expect(await feed()).toMatchObject({ state: "done", out: "fed\n" });
+    expect({ woke, scripts: scripts.length }).toEqual({ woke: 1, scripts: 1 });
+    slates.close();
+  }, 30_000);
 });

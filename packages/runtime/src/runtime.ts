@@ -3762,6 +3762,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const window = ran?.contextWindow ?? /\[([^\]]+)\]$/.exec(model ?? "")?.[1];
     return { ...(model !== undefined ? { model: baseModel(model) } : {}), ...(effort !== undefined ? { effort } : {}), ...(window !== undefined ? { contextWindow: window } : {}) };
   };
+  /** The workspace a thread runs on where that is a machine of its own, not this computer. */
+  const boxOf = (threadId: string): LiveWorkspace | undefined => {
+    const workspaceId = latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
+    const entry = workspaceId === undefined ? undefined : live.get(workspaceId);
+    return entry === undefined || isLocalWorkspace(entry.record) ? undefined : entry;
+  };
   const slates: Slates = createSlates({
     store,
     now: () => clock.now(),
@@ -3791,9 +3797,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       };
     },
     machineOf: threadId => {
-      const workspaceId = latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
-      const entry = workspaceId === undefined ? undefined : live.get(workspaceId);
-      return entry === undefined || isLocalWorkspace(entry.record) ? undefined : entry.machine;
+      const entry = boxOf(threadId);
+      return entry?.machine;
+    },
+    asleep: threadId => {
+      const entry = boxOf(threadId);
+      return entry !== undefined && entry.record.phase !== "running";
+    },
+    wake: async threadId => {
+      const entry = boxOf(threadId);
+      if (entry !== undefined) await workspaces.wake(entry.record.id);
     },
     loaded: () => ready(),
     settled: async threadId => {

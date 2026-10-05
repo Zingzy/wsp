@@ -135,6 +135,9 @@ export interface SlatesDeps {
   loaded?(): Promise<void>;
   /** The machine a thread runs on where that is not this computer, which its slate's commands then run on too. */
   machineOf?(threadId: string): Machine | undefined;
+  /** That machine naps: a timer never wakes it, a press does, through wake. */
+  asleep?(threadId: string): boolean;
+  wake?(threadId: string): Promise<void>;
   /** Whether the thread is settled, by the sidebar's own rule: its slate's timers, always ones too, wait until a window
    * shows the slate again. */
   settled?(threadId: string): Promise<boolean>;
@@ -409,7 +412,11 @@ export function createSlates(deps: SlatesDeps): Slates {
     road: (threadId, on) => {
       if (on === "host") return undefined;
       const machine = deps.machineOf?.(threadId);
-      return machine === undefined ? undefined : boxRoad(machine, threadId, () => records.get(threadId)?.document?.files ?? {});
+      return machine === undefined
+        ? undefined
+        : boxRoad(machine, threadId, () => records.get(threadId)?.document?.files ?? {}, async () => {
+            if (deps.asleep?.(threadId) === true) await deps.wake?.(threadId);
+          });
     },
     approvals,
     onRecord: moved,
@@ -847,7 +854,16 @@ export function createSlates(deps: SlatesDeps): Slates {
       const answer =
         asked.kind !== "cmd"
           ? mcp.start({ threadId: r.threadId, run, decl: asked as McpRunDecl, by, args: mcpArgsOf(r, asked as McpRunDecl), runs: count })
-          : runs.start({ threadId: r.threadId, run, decl: asked as CmdRunDecl, by, folder: folder!, inputs: inputsOf(r, decl as Extract<SlateRunDecl, { kind: "cmd" }>), ...(isRunRecord(prior) ? { last: prior as unknown as RunRecord } : {}) });
+          : runs.start({
+              threadId: r.threadId,
+              run,
+              decl: asked as CmdRunDecl,
+              by,
+              folder: folder!,
+              inputs: inputsOf(r, decl as Extract<SlateRunDecl, { kind: "cmd" }>),
+              ...(isRunRecord(prior) ? { last: prior as unknown as RunRecord } : {}),
+              ...((asked as CmdRunDecl).on !== "host" && deps.asleep?.(r.threadId) === true ? { asleep: true } : {}),
+            });
       startedBy.set(byKey(r.threadId, run), by);
       if (answer.record.state === "running") announce(r, "run", by, [], run);
       return { record: answer.record as SlateRunRecord, ...(answer.outcome === "held" && answer.ask !== undefined ? { ask: answer.ask } : {}) };

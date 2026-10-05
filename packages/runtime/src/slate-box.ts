@@ -36,8 +36,9 @@ export function boxLauncher(o: { payload: string; cwd: string; cmd: string }): s
   ].join("\n");
 }
 
-/** The thread's machine as the road its slate's commands run on. `files` reads the slate's files as they are now. */
-export function boxRoad(machine: Machine, threadId: string, files: () => Readonly<Record<string, string>>): RunRoad {
+/** The thread's machine as the road its slate's commands run on. `files` reads the slate's files as they are now;
+ * `ready` wakes the machine where it naps, before anything goes up. */
+export function boxRoad(machine: Machine, threadId: string, files: () => Readonly<Record<string, string>>, ready: () => Promise<void> = async () => {}): RunRoad {
   const dir = boxSlateDir(threadId);
   const road: RunRoad = {
     slateDir: dir,
@@ -47,6 +48,8 @@ export function boxRoad(machine: Machine, threadId: string, files: () => Readonl
       const failed = (e: unknown): void => on.end({ code: null, error: e instanceof Error ? e : new Error(String(e)), out: "", err: "", cut: false, timedOut: false });
       void (async () => {
         try {
+          // A press on a napping box wakes it first, as a message to it does.
+          await ready();
           const written = await putFiles(
             machine,
             [

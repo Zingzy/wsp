@@ -92,6 +92,8 @@ export interface RunStart {
   /** The host's record of the run, for a run this process has not seen yet: how many times it started and the last
    * result a start keeps. */
   last?: RunRecord;
+  /** The thread's machine is napping: a timer never wakes it, so a tick is held and says so; a press goes on. */
+  asleep?: boolean;
 }
 
 /** What the approval sheet shows. A secret's value is dots. */
@@ -390,6 +392,7 @@ const DOTS = "••••";
 const HELD_APPROVAL = "needs your approval";
 const HELD_BUSY = `${RUNNING_MAX} runs are already running`;
 const HELD_BUDGET = `started ${STARTS_PER_MINUTE} times in a minute; press to run it again`;
+const HELD_ASLEEP = "the box was asleep, so this tick did not wake it; press to run it now";
 const SECRET_IN_ARGS = "a secret reaches a command through env or stdin, never as an argument, which ps can read";
 
 type HeldFor = "approval" | "busy" | "budget";
@@ -801,6 +804,12 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     key,
     start(req) {
       const l = live(req.threadId, req.run, req.last);
+      // A tick on a napping box wakes nothing: the run waits with its last result in view, and no done fires.
+      if (req.asleep === true && req.by === "timer") {
+        if (l.record.state === "running") return { outcome: "noop", record: l.record };
+        delete l.held;
+        return { outcome: "held", record: write(req.threadId, req.run, l, { ...(l.result ?? {}), state: "held", why: HELD_ASLEEP, runs: l.record.runs }) };
+      }
       if (l.record.state === "running") {
         if (req.decl.once === true) return { outcome: "noop", record: l.record };
         stop(req.threadId, req.run, l, undefined);
