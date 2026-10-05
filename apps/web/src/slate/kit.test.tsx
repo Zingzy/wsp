@@ -82,7 +82,6 @@ describe("the richer kit in the renderer", () => {
     for (const [name, hist] of [
       ["flat data", [4141.8, 4141.8, 4141.8].map(at)],
       ["two equal points", [4141.8, 4141.8].map(at)],
-      ["one point", [at(4141.8, 0)]],
     ] as const) {
       it(`collapses ${name} to the legend's line, steady at the value`, () => {
         const { view } = draw(compiled(GOLD), { hist: [...hist] });
@@ -91,6 +90,15 @@ describe("the richer kit in the renderer", () => {
         expect(chart.querySelector("[data-slate-chart-flat]")!.textContent).toBe("steady at $4,141.80");
       });
     }
+
+    it("draws the plot for one sample, from the first read on, with its axis and its time", () => {
+      const { view } = draw(compiled(GOLD), { hist: [at(4141.8, 0)] });
+      const chart = view.container.querySelector("[data-slate-chart]")!;
+      expect(chart.querySelector("[data-slate-chart-flat]")).toBeNull();
+      expect(chart.querySelector("[data-usage-chart] svg[role=img] polyline")).not.toBeNull();
+      expect(ticks(view.container).length).toBeGreaterThan(1);
+      expect(chart.querySelectorAll("[data-k=tick]")).toHaveLength(1);
+    });
 
     it("draws the plot with its round axis once the value moves", () => {
       const { view } = draw(compiled(GOLD), { hist: [4141.8, 4160, 4141.8].map(at) });

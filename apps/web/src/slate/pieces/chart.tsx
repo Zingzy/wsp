@@ -51,7 +51,8 @@ export const chart: PieceView = {
     const shown = (v: number): string => `${figure(v, props["format"]) ?? ""}${unit === undefined ? "" : ` ${unit}`}`;
     const values = rows.length === 1 ? [rows[0]!.v, rows[0]!.v] : rows.map(r => r.v);
     // A series that holds one value the whole window says so on the legend's line; the plot comes back once it moves.
-    const flat = rows.length > 0 && rows.every(r => r.v === rows[0]!.v);
+    // One sample is not yet a series: it draws its plot, the axis and its point, from the first read on.
+    const flat = rows.length > 1 && rows.every(r => r.v === rows[0]!.v);
     // One chart per slate carries the accent; any other draws its line in the muted ink.
     const tone = slate.isLoud("accent", id) ? "accent" : "muted";
     const comma = label.indexOf(", ");
