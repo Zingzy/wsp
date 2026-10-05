@@ -365,6 +365,13 @@ describe("the slate v2 host", () => {
     expect(again.problems).toContainEqual(expect.objectContaining({ code: "R913", message: "$tick was not started: it already waits for the person to allow it on the slate, and starts once they do" }));
   });
 
+  it("a read names each approval by the run it is for, not by its key", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-approval-names-");
+    await rt.slates.write({ text: TICKER }, asThread);
+    await rt.slates.approve({ threadId, key: (await rt.slates.get(threadId))!.asks[0]!.key, scope: "thread" });
+    expect((await rt.slates.read({}, asThread)).approvals).toEqual({ $tick: "allowed" });
+  });
+
   it("a read carries each run's json without its out twice, cuts long output, and only a summary when it names paths", async () => {
     const { rt, threadId, asThread } = await threadOn("wsp-slates-read-size-");
     await rt.slates.write({ text: `<slate><run name="big" cmd='python3 -c "import json; print(json.dumps({\\"rows\\": [\\"x\\" * 50] * 200}))"' /><run name="raw" cmd='python3 -c "print(\\"y\\" * 9000)"' /><column><button id="go" label="Go" onPress={[start($big), start($raw)]} /></column></slate>` }, asThread);

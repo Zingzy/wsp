@@ -1172,7 +1172,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         runs: Object.fromEntries(Object.keys(doc?.runs ?? {}).map(name => [`$${name}`, clean(runShown(r.values[name], name, paths.length > 0))])),
         problems: [...misreads, ...problemsOf(r, views)],
         comments: r.comments,
-        approvals: Object.fromEntries(Object.entries(r.approvals).map(([k, a]) => [k, a.state])),
+        // By the run each approval is for, which is what the agent writes; the key only where no run declares it now.
+        approvals: Object.fromEntries(Object.entries(r.approvals).map(([k, a]) => { const run = approvalNames(r, k).run; return [run !== undefined ? `$${run}` : k, a.state]; })),
       };
     },
 
