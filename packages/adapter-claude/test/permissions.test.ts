@@ -3,7 +3,7 @@
 // answered. The request and response shapes here are the ones a real 2.1.263
 // binary sent and took on 2026-09-08, copied off that run.
 import { describe, expect, it } from "vitest";
-import { PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
+import { PERMISSION_ALLOW, PERMISSION_DENY, otherOptionId, pickedOptionId } from "@wsp/protocol";
 import { controlAnswerLine, controlErrorLine, controlLine, setModeLine } from "../src/permissions.js";
 
 const REQUEST_ID = "d9aa99d3-be4e-4a2b-8766-1b9494cde4f6";
@@ -111,6 +111,20 @@ describe("controlAnswerLine", () => {
         },
       },
     });
+  });
+
+  it("writes an answer typed in Other into the question's input, and asks no consent of a question that offers no choice", () => {
+    const questions = [
+      { question: "Which one?", header: "Pick", options: [{ label: "A", description: "" }, { label: "B", description: "" }], multiSelect: false },
+      { question: "A name?", header: "Name", options: [], multiSelect: false },
+    ];
+    const asked = ask({ tool_name: "AskUserQuestion", input: { questions } });
+    const picked = pickedOptionId([otherOptionId(0, "neither, C"), otherOptionId(1, "Webby")]);
+    const line = JSON.parse(controlAnswerLine(asked, picked, "unused"));
+    expect(line.response.response).toEqual({ behavior: "allow", updatedInput: { questions, answers: { "Which one?": "neither, C", "A name?": "Webby" } } });
+    const wordsOnly = ask({ tool_name: "AskUserQuestion", input: { questions: [questions[1]] } });
+    expect(wordsOnly.options).toEqual([]);
+    expect(JSON.parse(controlAnswerLine(wordsOnly, otherOptionId(0, "Webby"), "unused")).response.response.updatedInput.answers).toEqual({ "A name?": "Webby" });
   });
 
   it("refuses an option the prompt never offered", () => {

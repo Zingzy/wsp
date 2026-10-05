@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, QUESTION_TOOL, pickedOptionId, questionOptions, askingLine, threadWord, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent, type TurnResult } from "@wsp/protocol";
+import { HERE_PLACE_ID, PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, QUESTION_TOOL, deniedLine, otherOptionId, pickedOptionId, questionOptions, askingLine, threadWord, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime, type SessionHandle } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -26,7 +26,7 @@ interface Turn {
   /** Raises a prompt on the turn, as a CLI's control channel would. */
   raise: (ask?: Partial<PermissionAsk>) => void;
   /** What the adapter was asked to answer, in order: the option and the words a deny carries. */
-  answers: { askId: string; optionId: string; outcome: PermissionOutcome; denyMessage: string }[];
+  answers: { askId: string; optionId: string; outcome: PermissionOutcome; denyMessage: string; reason?: string }[];
   /** Ends the turn with a reply. */
   reply: () => void;
   interrupted: () => boolean;
@@ -245,6 +245,23 @@ describe("a permission prompt relayed into the chat", () => {
     await vi.waitFor(async () => expect(prompts(await history(workspaceId))).toHaveLength(2));
     expect(await rt.sessions.answer(handle.id, { askId: "ask_2", optionId: "mode:acceptEdits" })).toEqual({ outcome: "answered" });
     expect(turn.answers[1]).toMatchObject({ optionId: "mode:acceptEdits", outcome: "allowed" });
+    turn.reply();
+    await handle.finished;
+  });
+
+  it("a deny with the person's reason tells the agent the reason, and an answer typed in Other reaches the harness", async () => {
+    const { handle, turn, workspaceId } = await started();
+    turn.raise();
+    await vi.waitFor(async () => expect(prompts(await history(workspaceId))).toHaveLength(1));
+    expect(await rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_DENY, reason: "Run only the thread-rows file" })).toEqual({ outcome: "answered" });
+    expect(turn.answers[0]).toMatchObject({ outcome: "denied", denyMessage: deniedLine("Run only the thread-rows file"), reason: "Run only the thread-rows file" });
+
+    const input = JSON.stringify({ questions: [{ question: "Which one?", header: "Pick", options: [{ label: "A" }, { label: "B" }], multiSelect: false }] });
+    turn.raise({ askId: "ask_q", toolName: QUESTION_TOOL, input, options: questionOptions(QUESTION_TOOL, input) });
+    await vi.waitFor(async () => expect(prompts(await history(workspaceId))).toHaveLength(2));
+    const typed = otherOptionId(0, "neither, C");
+    expect(await rt.sessions.answer(handle.id, { askId: "ask_q", optionId: typed })).toEqual({ outcome: "answered" });
+    expect(turn.answers[1]).toMatchObject({ optionId: typed, outcome: "allowed" });
     turn.reply();
     await handle.finished;
   });
