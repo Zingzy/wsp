@@ -26,6 +26,7 @@ import { useSignInStore } from "../shell/signInStore.js";
 import { newId, useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { useComposerFilesStore } from "../components/chat/composerFiles.js";
 import { useComposerOptionsStore } from "../components/chat/composerOptionsStore.js";
+import { transcripts } from "../components/chat/transcripts.js";
 import type { ComposerStart } from "../components/chat/composerPicks.js";
 
 export interface CostTick {
@@ -775,14 +776,20 @@ export const useStore = create<State>((set, get) => {
     preferences: bootPreferences(),
     release: null,
     settingsOpen: false,
-    noteGap() { set(s => ({ gaps: s.gaps + 1 })); },
+    noteGap() {
+      transcripts.gap();
+      set(s => ({ gaps: s.gaps + 1 }));
+    },
     bind(api) {
+      transcripts.bind(api);
       set({ api });
       useComposerFilesStore.setState({ kept: api.sessionAttachment });
       capabilitiesSaid = false;
       sessionsSaid.clear();
       api.subscribe(e => {
         if (e.type === "workspace.status" || e.type === "workspace.cost") return holdForFrame(e);
+        // Before any view hears it: a view folding the bus itself asks the transcripts what they already held.
+        transcripts.apply(e);
         flushFrame();
         get().applyEvent(e);
       });

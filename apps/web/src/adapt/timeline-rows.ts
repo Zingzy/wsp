@@ -139,8 +139,10 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
           hasActivityRow = true;
         } else {
           const latestTool = findLast(visible, isToolLike);
+          // Named by its last row, which older events arriving above the group never move, so a list holding the
+          // reader's place keeps this row through a page landing.
           rows.push({
-            kind: "work-toggle", id: `work-toggle:${entry.id}`, createdAt: entry.createdAt, groupId: id, hiddenCount: visible.length, expanded,
+            kind: "work-toggle", id: `work-toggle:${grouped[grouped.length - 1]!.id}`, createdAt: entry.createdAt, groupId: id, hiddenCount: visible.length, expanded,
             summary: summarizeToolGroup(visible),
             summaryKind: toolGroupSummaryKind(visible),
             hasFailure: latestTool !== undefined && indicatesFailure(latestTool),

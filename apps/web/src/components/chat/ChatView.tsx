@@ -255,7 +255,10 @@ export function ChatView({
             </div>
           </>
         ) : (
+          // One list per thread shown: a thread drawn from what the transcripts hold replaces the last one with no
+          // loading line between, and opens at its own end rather than at the offset the last one was read to.
           <MessagesTimeline
+            key={thread.drawKey}
             isWorking={view.running}
             machineWait={machineWait}
             activeTurnStartedAt={view.activeTurnStartedAt}
@@ -279,6 +282,7 @@ export function ChatView({
             rewindableMessageIds={rewindableIds}
             onRewind={onRewind}
             replyRuns={replyRuns}
+            onReachTop={thread.older}
           />
         )}
       </div>

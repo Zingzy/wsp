@@ -237,6 +237,8 @@ export interface MessagesTimelineProps {
   replyRuns?: ReplyRuns | null;
   /** Where a selection quoted out of a reply goes; absent, a selection offers no Quote. */
   onQuote?: (quote: QuotedSelection) => void;
+  /** Asks for the thread's older events once the reader is within two screens of the oldest row held. */
+  onReachTop?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +278,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   footer = null,
   replyRuns = null,
   onQuote,
+  onReachTop,
 }: MessagesTimelineProps) {
   const latestTurn = turns[turns.length - 1] ?? null;
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
@@ -454,11 +457,23 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     return config ? { ...config, onReady: handleAnchorReady } : undefined;
   }, [anchorMessageId, handleAnchorReady, rows]);
 
+  const settledRef = useRef(false);
+  // The list's own signal fires after a page lands too, so a reader held at the top with no scroll event to give
+  // still gets the next page.
+  const handleStartReached = useCallback(() => {
+    if (settledRef.current) onReachTop?.();
+  }, [onReachTop]);
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
     const isAtEnd = resolveTimelineIsAtEnd(state, contentInsetEndAdjustment);
     if (isAtEnd !== undefined) {
       onIsAtEndChange(isAtEnd);
+    }
+    // Checked on every scroll and after every page lands, so a reader still at the top asks for the next one; not
+    // before the list first stood at its end, since it opens there and reads as at the top while it gets there.
+    if (isAtEnd === true) settledRef.current = true;
+    if (onReachTop !== undefined && settledRef.current && state !== undefined && (state.scroll ?? Infinity) < 2 * (state.scrollLength ?? 0)) {
+      onReachTop();
     }
     if (!state || minimapItems.length === 0) {
       return;
@@ -488,6 +503,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     minimapItems,
     minimapStripMap,
     onIsAtEndChange,
+    onReachTop,
   ]);
 
   useEffect(() => {
@@ -617,6 +633,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             }
             maintainVisibleContentPosition={maintainVisibleContentPosition}
             onScroll={handleScroll}
+            {...(onReachTop === undefined ? {} : { onStartReached: handleStartReached, onStartReachedThreshold: 2 })}
             className={cn(
               "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
               topFadeEnabled && "topbar-scroll-fade",

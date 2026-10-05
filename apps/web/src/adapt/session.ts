@@ -35,6 +35,9 @@ export interface SessionModel {
    * the thread runs on, by its catalog id, and the access its last turn started at. Null before a start carried it. */
   readonly agent: string | null;
   readonly permissionMode: string | null;
+  /** The folder the last session.start named, and where the agent's tool shell last was; null until one said. */
+  readonly cwd: string | null;
+  readonly shellCwd: string | null;
   /** Every reply block's latest run, by the block it was run from; the host records no step after a run's ending. */
   readonly runs: ReadonlyMap<string, SessionRunEvent>;
   /** The latest turn's step list, whatever state the turn is in; null where that turn wrote none. */
@@ -112,7 +115,23 @@ function nextPlan(earlier: PlanState | undefined, steps: ReadonlyArray<PlanStep>
   return { began, took, steps: keyed.map(({ key, step }) => ({ ...step, key, ...(took.has(key) ? { durationMs: took.get(key)! } : {}) })) };
 }
 
+/** The fold under deriveSession, kept open: each event folds onto what the ones before it built, so a thread that
+ * grows by one event costs one event, and the model reads what is built so far without changing it. */
+export interface SessionFold {
+  /** Folds the next event; `at` is its receipt clock where the wire left it unstamped. */
+  readonly add: (event: SessionEvent, at?: string) => void;
+  readonly model: () => SessionModel;
+  /** How many events the fold has taken. */
+  readonly size: () => number;
+}
+
 export function deriveSession(events: ReadonlyArray<SessionEvent>, options: DeriveSessionOptions = {}): SessionModel {
+  const fold = createSessionFold();
+  for (const [index, event] of events.entries()) fold.add(event, options.at?.(event, index));
+  return fold.model();
+}
+
+export function createSessionFold(): SessionFold {
   const timeline: TimelineEntry[] = [];
   const plans = new Map<string, PlanState>();
   const turns: TurnSummary[] = [];
@@ -122,10 +141,26 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
    * on a second row after the work the answer let through. */
   const promptRows = new Map<string, number>();
   let turn: TurnBuild | null = null;
-  let model: string | null = null;
+  let modelName: string | null = null;
   let harness: SessionHarness | null = null;
   let agent: string | null = null;
   let permissionMode: string | null = null;
+  let cwd: string | null = null;
+  let shellCwd: string | null = null;
+  let taken = 0;
+  /** The transcript position of the event being folded, which names the rows it opens: a thread held from the middle
+   * of a turn names a row the same before and after its older events arrive, so the list keeps the row in place. */
+  let place: number | undefined;
+  const opened = new Map<string, number>();
+  const rowId = (turnId: string, kind: "m" | "w", ordinal: number, call?: string): string => {
+    if (place === undefined) return `${turnId}:${kind}${ordinal}`;
+    // A call's row is named by the call, so a result held without its call, at the top of a window, names the row the
+    // call takes over once the older events arrive.
+    const base = call !== undefined ? `${turnId}:call:${call}` : `${turnId}:${kind}@${place}`;
+    const n = opened.get(base) ?? 0;
+    opened.set(base, n + 1);
+    return n === 0 ? base : `${base}.${n}`;
+  };
 
   const push = (entry: TimelineEntry): number => {
     timeline.push(entry);
@@ -206,12 +241,12 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
   };
   const addWork = (t: TurnBuild, entry: Omit<WorkLogEntry, "id" | "turnId">, at: string): number => {
     t.ordinal += 1;
-    const full: WorkLogEntry = { ...entry, id: `${t.summary.turnId}:w${t.ordinal}`, turnId: t.summary.turnId };
+    const full: WorkLogEntry = { ...entry, id: rowId(t.summary.turnId, "w", t.ordinal, entry.toolCallId), turnId: t.summary.turnId };
     return push({ id: full.id, kind: "work", createdAt: at, entry: full });
   };
   const addMessage = (t: TurnBuild, role: ChatMessage["role"], text: string, at: string, streaming: boolean, steered = false, carried?: Pick<ChatMessage, "attachments" | "requestId" | "sentOn">): number => {
     t.ordinal += 1;
-    const m: ChatMessage = { id: `${t.summary.turnId}:m${t.ordinal}`, role, text, turnId: t.summary.turnId, streaming, createdAt: at, updatedAt: at, ...(steered ? { steered } : {}), ...carried };
+    const m: ChatMessage = { id: rowId(t.summary.turnId, "m", t.ordinal), role, text, turnId: t.summary.turnId, streaming, createdAt: at, updatedAt: at, ...(steered ? { steered } : {}), ...carried };
     return push(messageEntry(m));
   };
   // The reply's content and cost, applied once at session.done; the state is set separately, so a turn whose process
@@ -301,14 +336,18 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     return turn;
   };
 
-  for (const [index, event] of events.entries()) {
-    const at = event.at !== undefined ? new Date(event.at).toISOString() : options.at?.(event, index) ?? "";
+  const add = (event: SessionEvent, received?: string): void => {
+    taken += 1;
+    place = event.pos;
+    const at = event.at !== undefined ? new Date(event.at).toISOString() : received ?? "";
+    if (event.type === "session.start" && event.cwd !== undefined) cwd = event.cwd;
+    if (event.type === "session.delta" && event.cwd !== undefined) shellCwd = event.cwd;
     switch (event.type) {
       case "session.start": {
         if (turn && turn.summary.state === "running") endRunningTurn(turn, at);
         const count = (startsBySession.get(event.sessionId) ?? 0) + 1;
         startsBySession.set(event.sessionId, count);
-        model = event.model ?? model;
+        modelName = event.model ?? modelName;
         harness = event.harness ?? harness;
         agent = event.agent ?? agent;
         permissionMode = event.permissionMode ?? permissionMode;
@@ -321,24 +360,24 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
           });
         }
         if (event.afterCut === true) addWork(turn, { createdAt: at, label: AFTER_CUT_LINE, tone: "notice", sourceActivityKind: "runtime.resume" }, at);
-        continue;
+        return;
       }
       case "session.delta": {
         applyDelta(turnFor(event, at), event, at);
-        continue;
+        return;
       }
       case "session.steer": {
         const t = turnFor(event, at);
         closeOpenMessage(t);
         addMessage(t, "user", event.prompt, at, false, true);
-        continue;
+        return;
       }
       case "session.notify": {
         const t = turnFor(event, at);
         closeOpenMessage(t);
         const label = event.notify === NOTIFY_ME ? "told you" : `told thread ${event.notify.slice(0, 8)}`;
         addWork(t, { createdAt: at, label, detail: event.text, tone: "notice", sourceActivityKind: "runtime.notify" }, at);
-        continue;
+        return;
       }
       case "session.permission": {
         const t = turnFor(event, at);
@@ -362,15 +401,15 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         if (event.parentToolUseId !== undefined) {
           changeFold(t, event.parentToolUseId, at, run => ({ ...run, prompts: [...run.prompts, permission] }));
           promptRows.set(event.askId, t.subagents.get(event.parentToolUseId)!);
-          continue;
+          return;
         }
         promptRows.set(event.askId, push({ id: `permission:${event.askId}`, kind: "permission", createdAt: at, permission }));
-        continue;
+        return;
       }
       case "session.permission.closed": {
         const index = promptRows.get(event.askId);
         const row = index === undefined ? undefined : timeline[index];
-        if (index === undefined || row === undefined) continue;
+        if (index === undefined || row === undefined) return;
         if (row.kind === "subagent") {
           replace(index, {
             ...row,
@@ -381,22 +420,22 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
               ),
             },
           });
-          continue;
+          return;
         }
-        if (row.kind !== "permission") continue;
+        if (row.kind !== "permission") return;
         replace(index, {
           ...row,
           permission: { ...row.permission, outcome: event.outcome, optionId: event.optionId ?? null },
         });
-        continue;
+        return;
       }
       case "session.changes": {
         const index = turns.findIndex(t => t.turnId === event.turnId);
-        if (index === -1) continue;
+        if (index === -1) return;
         const changes = { from: event.from, to: event.to, files: event.files, moved: event.moved };
         turns[index] = { ...turns[index]!, changes };
         if (turn !== null && turn.summary.turnId === event.turnId) turn.summary = turns[index]!;
-        continue;
+        return;
       }
       case "session.plan": {
         const t = turnFor(event, at);
@@ -414,11 +453,11 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
             t.planRow = push(entry);
           }
         }
-        continue;
+        return;
       }
       case "session.done": {
         recordReply(turnFor(event, at), event.result, at);
-        continue;
+        return;
       }
       case "session.end": {
         // An end for a turn nothing here opened is the runtime's word that a send never became a turn, sent so a wait
@@ -431,10 +470,10 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
           if (event.reason !== undefined) {
             push(workEntry({ id: `refusal:${event.turnId ?? event.sessionId}`, turnId: event.turnId ?? null, createdAt: at, label: event.reason, tone: "error", sourceActivityKind: "runtime.error" }, at));
           }
-          continue;
+          return;
         }
         const t = turn;
-        if (t.summary.state !== "running") continue;
+        if (t.summary.state !== "running") return;
         if (t.reply !== null) {
           setState(t, t.reply.status);
         } else {
@@ -443,27 +482,27 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
             : `session exited without a result (exit code ${event.exitCode ?? "unknown"})`);
           finishTurn(t, { status: "failed", error }, at);
         }
-        continue;
+        return;
       }
       case "session.run":
         runs.set(event.block, event);
-        continue;
+        return;
       case "session.moved":
       case "session.behind":
       case "session.subagent":
-        continue;
+        return;
       case "session.checkpoint": {
         // Taken once the turn is over, so a later turn may already be open: the row goes on its own turn's summary.
         const at = turns.findIndex(t => t.turnId === event.turnId);
-        if (at < 0) continue;
+        if (at < 0) return;
         const kept = { ...turns[at]!, checkpoint: { ref: event.ref ?? null, anchor: event.anchor ?? null, ...(event.kept !== undefined ? { kept: event.kept } : {}) } };
         turns[at] = kept;
         if (turn !== null && turn.summary.turnId === event.turnId) turn.summary = kept;
-        continue;
+        return;
       }
       default: {
         const _exhaustive: never = event;
-        continue;
+        return;
       }
     }
   }
@@ -627,17 +666,25 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     }
   }
 
-  const running = turn !== null && turn.summary.state === "running";
-  const messages: ChatMessage[] = [];
-  const workEntries: WorkLogEntry[] = [];
-  for (const entry of timeline) {
-    if (entry.kind === "message") messages.push(entry.message);
-    else if (entry.kind === "work") workEntries.push(entry.entry);
-  }
-  const latestTurn = turns[turns.length - 1] ?? null;
-  const latestPlan = latestTurn === null ? undefined : plans.get(latestTurn.turnId);
-  const plan = latestTurn === null || latestPlan === undefined ? null : { turnId: latestTurn.turnId, steps: latestPlan.steps };
-  return { turns, messages, workEntries, timeline, latestTurn, running, model, harness, agent, permissionMode, runs, plan };
+  /** The runs as a new map only when one moved, so a reader keyed on the map redraws when a run does and not on every
+   * event. */
+  let runsSeen = new Map(runs);
+  const model = (): SessionModel => {
+    const open = turn as TurnBuild | null;
+    const running = open !== null && open.summary.state === "running";
+    const messages: ChatMessage[] = [];
+    const workEntries: WorkLogEntry[] = [];
+    for (const entry of timeline) {
+      if (entry.kind === "message") messages.push(entry.message);
+      else if (entry.kind === "work") workEntries.push(entry.entry);
+    }
+    const latestTurn = turns[turns.length - 1] ?? null;
+    const latestPlan = latestTurn === null ? undefined : plans.get(latestTurn.turnId);
+    const plan = latestTurn === null || latestPlan === undefined ? null : { turnId: latestTurn.turnId, steps: latestPlan.steps };
+    if (runsSeen.size !== runs.size || [...runs].some(([block, run]) => runsSeen.get(block) !== run)) runsSeen = new Map(runs);
+    return { turns: [...turns], messages, workEntries, timeline: [...timeline], latestTurn, running, model: modelName, harness, agent, permissionMode, cwd, shellCwd, runs: runsSeen, plan };
+  };
+  return { add, model, size: () => taken };
 }
 
 /** Reasoning renders as one collapsed line (preview) that opens onto the text (detail). */

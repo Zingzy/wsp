@@ -925,3 +925,39 @@ describe("a new thread opens on the defaults", () => {
     expect(started[0]).not.toHaveProperty("thread");
   });
 });
+
+describe("a thread that ran, opened before its transcript lands", () => {
+  // The row says Claude on Sonnet at Accept edits; the project's default is Codex; the transcript never answers.
+  const ROW: SessionView = { id: "s_ran", workspaceId: WS, harness: "claude", status: "completed", prompt: "earlier", startedAt: 1, endedAt: 2, threadId: "thr_ran", model: "claude-sonnet-5", permissionMode: "acceptEdits" };
+  const never = <T,>() => new Promise<T>(() => {});
+
+  async function opened(heads: boolean) {
+    const made = markedApi({ table: [CLAUDE_WORDS, CODEX_WORDS], sessions: [ROW] });
+    made.api.sessionHistory = () => never();
+    if (heads) {
+      made.api.sessionHead = () => never();
+      made.api.sessionPage = () => never();
+    }
+    useStore.setState({ conn: "connecting", workspaces: [], statuses: {}, sessions: {}, harnesses: [], harnessesByWorkspace: {}, projects: [PROJECT], preferences: { ...DEFAULT_PREFERENCES, projectDefaults: { pr_1: { agent: "codex" } } } });
+    useStore.getState().bind(made.api);
+    useStore.getState().setConn("live");
+    await waitFor(() => expect(useStore.getState().sessions[WS]?.length).toBe(1));
+    render(<WorkspaceThread workspaceId={WS} threadId="thr_ran" />);
+    await waitFor(() => expect(picker("model")).not.toBeNull());
+  }
+
+  it("shows the thread's own agent, model and access off its row, not the project's default", async () => {
+    await opened(false);
+    expect(screen.getByText(/loading transcript/i)).toBeDefined();
+    await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("claude"));
+    expect(pickerValue("model")).toBe("claude-sonnet-5");
+    expect(picked("access")).toBe("acceptEdits");
+  });
+
+  it("does the same while its head is on its way", async () => {
+    await opened(true);
+    expect(screen.getByText(/loading transcript/i)).toBeDefined();
+    await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("claude"));
+    expect(pickerValue("model")).toBe("claude-sonnet-5");
+  });
+});

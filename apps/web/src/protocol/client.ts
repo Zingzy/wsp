@@ -112,9 +112,11 @@ import {
   ReleaseView,
   SealedImageBuilt,
   SealedImageView,
+  type HistoryPage,
   type KeptAttachment,
   type SessionEvent,
   type SessionView,
+  type ThreadHead,
   type SnapshotLineage,
   type SnapshotRollbackResult,
   type SnapshotStorage,
@@ -575,6 +577,11 @@ export interface Api {
   listSessions(id?: string): Promise<SessionView[]>;
   /** The workspace's persisted session events, oldest first: what a chat replays on mount. */
   sessionHistory(id: string): Promise<SessionEvent[]>;
+  /** One thread's facts and newest events, cut to a first paint. Optional so fixtures that draw a thread off the
+   * workspace's whole history need not fake it; a page without it reads the whole history, as before. */
+  sessionHead?(threadId: string): Promise<ThreadHead>;
+  /** One thread's newest events under `before`, at most `limit` of them. Optional with sessionHead. */
+  sessionPage?(workspaceId: string, threadId: string, window?: { before?: number; limit?: number }): Promise<HistoryPage>;
   /** One image a person's message carried, as the host kept it. Optional so fixtures that draw no image need not fake
    * it; a row then draws the record's words. */
   sessionAttachment?(workspaceId: string, threadId: string, requestId: string, index: number): Promise<KeptAttachment>;
@@ -925,6 +932,14 @@ export function makeApi(c: ProtocolClient): Api {
     portProbe: async (id, port) => (await c.request<{ probe: PortProbeView }>("workspaces.portProbe", { workspaceId: id, port })).probe,
     startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,
     sessionHistory: async id => (await c.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId: id })).events,
+    sessionHead: async threadId => {
+      const { facts, events, pos, total } = await c.request<ThreadHead>("sessions.head", { threadId });
+      return { facts, events, pos, total };
+    },
+    sessionPage: async (workspaceId, threadId, window = {}) => {
+      const { events, pos, total } = await c.request<HistoryPage>("sessions.history", { workspaceId, threadId, ...window });
+      return { events, pos, total };
+    },
     sessionAttachment: async (workspaceId, threadId, requestId, index) => (await c.request<{ attachment: KeptAttachment }>("sessions.attachment", { workspaceId, threadId, requestId, index })).attachment,
     listSessions: async id =>
       (await c.request<{ sessions: SessionView[] }>("sessions.list", id !== undefined ? { workspaceId: id } : {})).sessions,

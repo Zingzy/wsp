@@ -34,6 +34,7 @@ import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
 import { modelPicks } from "../components/chat/composerPicks.js";
 import { SidebarContent, SidebarGroupAction, SidebarMenuButton } from "../components/ui/sidebar.js";
+import { useWarmTiles } from "../components/chat/warmTiles.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
@@ -176,6 +177,7 @@ export function WorkspaceSidebar() {
    * tile at a time, the tile is the only editor, and the field stays until the store has the name. */
   const [renaming, setRenaming] = useState<{ rowId: string; saving: boolean } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  useWarmTiles(rootRef);
   const renameThread = useStore(s => s.renameThread);
   const renameWorkspace = useStore(s => s.renameWorkspace);
   const canRename = useStore(s => s.api?.renameSession !== undefined);
