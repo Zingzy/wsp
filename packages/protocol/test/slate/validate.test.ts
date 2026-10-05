@@ -328,3 +328,16 @@ describe("what round three's Haiku wrote", () => {
     expect(parseSlate(`<slate><run name="a" cmd="echo \\"hi\\"" /><column><text>x</text></column></slate>`).errors[0]!.fix).toContain(`with both quotes inside, the block form <run name="x">{\`...\`}</run>`);
   });
 });
+
+describe("a piece's fallback", () => {
+  const withPieces = (pieces: Record<string, unknown>): string[] =>
+    validateSlate({ schema: 2, root: "top", values: {}, derived: {}, runs: {}, reactions: [], pieces: { top: { type: "column", children: ["a"] }, ...pieces } }).errors.map(e => e.code);
+
+  it("is walked as a placed piece: it must exist, and may not lead back to itself", () => {
+    expect(withPieces({ a: { type: "sparkle", fallback: "a" } })).toContain("D205");
+    expect(withPieces({ a: { type: "sparkle", fallback: "gone" } })).toContain("D203");
+    expect(withPieces({ a: { type: "sparkle", fallback: "b" }, b: { type: "sparkle", fallback: "a" } })).toContain("D205");
+    expect(withPieces({ a: { type: "sparkle", fallback: "b" }, b: { type: "text", props: {} } })).toContain("T304");
+    expect(withPieces({ a: { type: "sparkle", fallback: "b" }, b: { type: "text", props: { value: "Hi" } } })).toEqual([]);
+  });
+});

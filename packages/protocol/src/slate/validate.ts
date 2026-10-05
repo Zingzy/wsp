@@ -477,6 +477,10 @@ class Validator {
       if (depth > SLATE_LIMITS.depth) { this.add("D206", `the tree is deeper than ${SLATE_LIMITS.depth}`, { piece: id }); return; }
       const p = d.pieces[id]!;
       const childRow = this.piece(id, p, row);
+      if (typeof p.fallback === "string" && p.fallback !== "drop") {
+        if (d.pieces[p.fallback] === undefined) this.add("D203", `fallback names ${p.fallback}, which is not a piece`, { piece: id, prop: "fallback" }, nearest(p.fallback, Object.keys(d.pieces)));
+        else walk(p.fallback, depth + 1, [...path, id], row);
+      }
       const children = p.children ?? [];
       if (children.length > SLATE_LIMITS.children) this.add("D207", `${id} has ${children.length} children; the most is ${SLATE_LIMITS.children}`, { piece: id }, "bind a list instead");
       for (const c of children) {
@@ -498,7 +502,6 @@ class Validator {
       return row;
     }
     if (p.when !== undefined) this.expr(p.when, { piece: id, prop: "when" }, { ...(row !== undefined ? { row } : {}) });
-    if (typeof p.fallback === "string" && p.fallback !== "drop" && this.doc.pieces[p.fallback] === undefined) this.add("D203", `fallback names ${p.fallback}, which is not a piece`, { piece: id, prop: "fallback" });
     const props = p.props ?? {};
     const itemProps = new Map(Object.entries(spec.items).map(([tag, s]) => [s.prop, { tag, spec: s }]));
     const items = props.items;
