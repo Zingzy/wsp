@@ -62,7 +62,7 @@
 // nothing says so in the menu. A file the caps turn away stands as a refused
 // chip beside the ones held, the sentence why on its hover.
 // Where the agent takes a side question, /btw and a question goes to the host
-// instead, starts no turn and opens the right panel on its answer.
+// instead, starts no turn and opens its own tab of the right panel on the answer.
 // The checkout row under the composer picks the folder a fresh thread starts
 // in; a resumed one is started where its harness last said it was. The
 // model, effort, context window and access picks in the box's footer ride a
@@ -84,7 +84,6 @@ import { useDaemonWire } from "../../files/wire";
 import { DaemonOpError, fsFiles, gitPrList } from "../../terminal/daemon-fs";
 import { useAgentsReport } from "../agents/useAgentsReport";
 import { addNotice } from "../../notices/store";
-import { useRightPanelStore, selectWorkspaceRightPanelState } from "../../rightPanelStore";
 import { collapseExpandedComposerCursor, detectComposerTrigger, enterSends, expandCollapsedComposerCursor, insertComposerBlock, isCollapsedCursorAdjacentToInlineToken, replaceTextRange } from "../../composer-logic";
 import { hostItemText, serializeComposerMention, splitPromptIntoComposerSegments } from "../../composer-editor-mentions";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
@@ -545,16 +544,12 @@ export function ChatComposer({
     [api, appendLocalError, appendUserTurn, dismissRefused, fastOn, files, folderStart, harnessId, hold, into, launched, launching, pinned, restoreFiles, sendFilesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
   );
 
-  /** Asks the host beside the thread and opens the right panel on the answer, putting the panel back as it was once
-   * the side question closes. */
+  /** Asks the host beside the thread and opens the side question's tab of the right panel on the answer. */
   const askAside = useCallback(
     (question: string) => {
       const method = api?.askAside;
       if (method === undefined || latestRow === null) return;
-      const panel = useRightPanelStore.getState();
-      const wasOpen = selectWorkspaceRightPanelState(panel.byWorkspaceId, workspaceId).isOpen;
-      const id = useAsideStore.getState().ask(workspaceId, question, wasOpen);
-      if (!wasOpen) panel.show(workspaceId);
+      const id = useAsideStore.getState().ask(workspaceId, question);
       void method(latestRow.id, question).then(
         result => useAsideStore.getState().answer(workspaceId, id, { answer: result.text }),
         (err: unknown) => useAsideStore.getState().answer(workspaceId, id, { error: err instanceof Error ? err.message : String(err) }),

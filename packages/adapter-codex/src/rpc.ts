@@ -52,12 +52,13 @@ export function threadResumeLine(o: ThreadOptions & { threadId: string }): strin
 }
 
 /** A copy of the thread that is never written to disk, in a read-only sandbox that asks nobody: what a side question
- * runs on, since no turn takes its tools off. */
+ * runs on, since no turn takes its tools off. excludeTurns leaves the history out of the reply alone, and 0.155.1
+ * refuses an ephemeral fork without it. */
 export function threadForkLine(o: { threadId: string; cwd?: string; model?: string; developerInstructions: string }): string {
   return line({
     id: REQUEST.thread,
     method: "thread/fork",
-    params: { threadId: o.threadId, ephemeral: true, sandbox: "read-only", approvalPolicy: "never", ...named({ cwd: o.cwd, model: o.model }), developerInstructions: o.developerInstructions },
+    params: { threadId: o.threadId, ephemeral: true, excludeTurns: true, sandbox: "read-only", approvalPolicy: "never", ...named({ cwd: o.cwd, model: o.model }), developerInstructions: o.developerInstructions },
   });
 }
 

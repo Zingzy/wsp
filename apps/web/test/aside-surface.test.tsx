@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The side question's surface in the right panel: the question, the crab and
-// Asking until the answer lands, then the answer as markdown, scrolling inside
-// the panel when it runs long, and Esc or the close control taking it away.
+// The side question's surface on its tab of the right panel: the question, the
+// crab and Asking until the answer lands, then the answer as markdown,
+// scrolling inside the panel when it runs long, and Esc taking it away.
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AsideSurface } from "../src/components/chat/AsideSurface.js";
@@ -14,7 +14,7 @@ describe("the side question's surface", () => {
     const view = render(<AsideSurface question={q} onClose={() => {}} />);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(at("aside-surface")).not.toBeNull();
-    expect(at("aside-surface")?.textContent).toContain("Side question");
+    expect(at("aside-surface")?.getAttribute("aria-label")).toBe("Side question");
     expect(at("aside-question")?.textContent).toBe(q);
     expect(at("aside-asking")?.textContent).toBe("Asking");
     expect(at("aside-asking")?.querySelector("canvas")).not.toBeNull();
@@ -32,7 +32,7 @@ describe("the side question's surface", () => {
     expect(at("aside-refused")?.textContent).toBe("claude takes no side question; send it as a message and the thread keeps it");
   });
 
-  it("fills the panel and scrolls a long answer inside it, the heading and close control staying put", () => {
+  it("fills the panel and scrolls a long answer inside it", () => {
     render(<AsideSurface question={q} answer={"line\n\n".repeat(80)} onClose={() => {}} />);
     expect(at("aside-surface")!.className).toMatch(/\bh-full\b|\bflex-1\b/);
     const body = at("aside-body")!;
@@ -40,17 +40,14 @@ describe("the side question's surface", () => {
     expect(body.className).toContain("flex-1");
   });
 
-  it("closes on Esc and on its close control", async () => {
+  it("closes on Esc, its tab's close being the only control it needs", async () => {
     const onClose = vi.fn();
     render(<AsideSurface question={q} answer="it is /root" onClose={onClose} />);
     await act(async () => {
       fireEvent.keyDown(window, { key: "Escape" });
     });
     expect(onClose).toHaveBeenCalledTimes(1);
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Close side question" }));
-    });
-    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("leaves an Esc another control already took", async () => {

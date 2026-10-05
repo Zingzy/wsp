@@ -19,7 +19,7 @@ function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string |
       onActivate={vi.fn()}
       onCloseSurface={vi.fn()}
       onAdd={over.onAdd ?? vi.fn()}
-      available={{ ...Object.fromEntries(PANE_KINDS.map(k => [k, true])), diff: over.diffAvailable ?? true, processes: over.processesAvailable ?? true, pr: over.prAvailable ?? false } as Record<RightPanelKind, boolean>}
+      available={{ ...Object.fromEntries(PANE_KINDS.map(k => [k, true])), diff: over.diffAvailable ?? true, processes: over.processesAvailable ?? true, pr: over.prAvailable ?? false, aside: false } as Record<RightPanelKind, boolean>}
     >
       <div data-pane />
     </RightPanelTabs>,
@@ -84,7 +84,8 @@ describe("the right panel's launcher", () => {
   it("draws each pane as its own card tile, 8px apart, that fills on hover, its key in mono", () => {
     draw({ diffAvailable: false, prAvailable: true });
     const browser = document.querySelector<HTMLElement>('[data-surface-launch="preview"]')!;
-    for (const kind of PANE_KINDS) {
+    // The side question opens from /btw alone and draws no tile.
+    for (const kind of PANE_KINDS.filter(k => k !== "aside")) {
       const tile = document.querySelector<HTMLElement>(`[data-surface-launch="${kind}"]`)!;
       for (const surface of TILE_SURFACE.split(" ")) expect(tile.classList).toContain(surface);
     }

@@ -512,7 +512,7 @@ export function WorkspaceSidebar() {
     </Tooltip>
   );
   const header = (
-    <div className="flex flex-col px-[var(--sidebar-content-inset)] pb-1" data-sidebar-search>
+    <div className="flex flex-col px-[var(--sidebar-content-inset)] pb-3" data-sidebar-search>
       <div className="relative">
         <SearchRow action={compose} />
       </div>

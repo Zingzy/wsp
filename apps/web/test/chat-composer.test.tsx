@@ -13,6 +13,7 @@ import type { Api, ConnStatus, ProtocolEvent, StartSessionOptions } from "../src
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
+import { useAsideStore } from "../src/components/chat/asideStore.js";
 import { composerSendBlock } from "../src/components/chat/ChatComposer.js";
 import { COMPOSER_WORDS } from "../src/components/chat/composerWords.js";
 import { provideDaemonWire } from "../src/files/wire.js";
@@ -908,7 +909,7 @@ describe("a side question from the composer", () => {
     await waitFor(() => expect(document.querySelector('[data-k="aside-surface"]')).toBeNull());
   });
 
-  it("a side question asked with the panel open takes the panel's place while it stands, and closing it gives the panel back as it was", async () => {
+  it("a side question asked with the panel open stands on a tab beside the panel's others, and closing its tab gives the panel back", async () => {
     const { api, answer } = asking(true);
     await setup(api);
     render(<PanelHost />);
@@ -918,11 +919,21 @@ describe("a side question from the composer", () => {
     await press(composerEditor(), "Escape");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(document.querySelector('[data-panel-host] [data-k="aside-surface"]')).not.toBeNull());
+    const tabs = () => [...document.querySelectorAll<HTMLElement>("[data-panel-host] [data-active-tab]")].map(tab => `${tab.textContent}${tab.dataset["activeTab"] === "true" ? "*" : ""}`);
+    // One strip: the pane that stood keeps its tab and the side question takes the next one, open on it.
+    expect(tabs()).toEqual(["Computer", "Side question*"]);
     answer("/root");
-    fireEvent.click(screen.getByRole("button", { name: "Close side question" }));
+    fireEvent.click(screen.getByRole("button", { name: "Computer" }));
+    await waitFor(() => expect(document.querySelector('[data-k="aside-surface"]')).toBeNull());
+    expect(tabs()).toEqual(["Computer*", "Side question"]);
+    // A tab put aside keeps its answer.
+    fireEvent.click(screen.getByRole("button", { name: "Side question" }));
+    await waitFor(() => expect(document.querySelector('[data-k="aside-answer"]')?.textContent).toContain("/root"));
+    fireEvent.click(screen.getByRole("button", { name: "Close Side question" }));
     await waitFor(() => expect(document.querySelector('[data-k="aside-surface"]')).toBeNull());
     expect(panelOpen()).toBe(true);
-    expect(useRightPanelStore.getState().byWorkspaceId[WS]?.activeSurfaceId).toBe("machine");
+    expect(tabs()).toEqual(["Computer*"]);
+    expect(useAsideStore.getState().byWorkspace[WS]).toBeUndefined();
   });
 });
 
