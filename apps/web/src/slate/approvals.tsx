@@ -108,6 +108,7 @@ export function ApprovalsSheet({ asks, cadence, answer, onClose }: { asks: reado
             })}
             <p className="text-muted-foreground">{CONSENT_WORDS.wrote}.</p>
             <p data-slate-consent-reach className="text-muted-foreground">{CONSENT_WORDS.reach}</p>
+            <p data-slate-consent-agent className="text-muted-foreground">{CONSENT_WORDS.agent}</p>
             {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}
           </div>
         </DialogPanel>

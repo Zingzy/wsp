@@ -86,6 +86,7 @@ export const CONSENT_WORDS = {
   run: "Run",
   wrote: "Written by the agent in this thread",
   reach: "If a script it names changes, it asks again. The command can read anything you can.",
+  agent: "With Always in this thread, the agent can start it too.",
   more: (n: number) => (n === 1 ? "1 more command waits after this one" : `${n} more commands wait after this one`),
 } as const;
 
@@ -215,6 +216,7 @@ export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask:
       <CommandBody ask={ask} cadence={cadence} lines={12} />
       <p className="text-muted-foreground">{CONSENT_WORDS.wrote}.</p>
       <p data-slate-consent-reach className="text-muted-foreground">{CONSENT_WORDS.reach}</p>
+      {ask.confirm === undefined ? <p data-slate-consent-agent className="text-muted-foreground">{CONSENT_WORDS.agent}</p> : null}
       {more > 0 ? <p data-slate-consent-more className="text-muted-foreground">{CONSENT_WORDS.more(more)}</p> : null}
       {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}
     </div>
