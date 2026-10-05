@@ -5,6 +5,7 @@
 // finish while that thread stands on a question, so the thread making the call
 // is stopped on that question too.
 import { serverTool } from "./format.js";
+import type { McpServerSpec } from "./index.js";
 
 /** The name the wsp MCP server has in every agent's config and in every launch that carries it, so an agent's
  * config on this computer and the launch a turn on a machine gets name one server and not two. */
@@ -16,8 +17,15 @@ export const MCP_SERVER_NAME = "wsp";
 export const SLATE_TOOLS = ["slate_catalog", "slate_write", "slate_state", "slate_read"] as const;
 export const SLATE_SERVER_NAME = "wsp_slate";
 
+/** Whether a launch gives its thread a slate: its wsp server is there, scoped on this computer or the guest one a box
+ * dials, and is not the server of a thread another thread started. Every adapter reads this one rule. */
+export function launchHasSlate(servers: Readonly<Record<string, Pick<McpServerSpec, "noSlate">>> | undefined): boolean {
+  const wsp = servers?.[MCP_SERVER_NAME];
+  return wsp !== undefined && wsp.noSlate !== true;
+}
+
 /** The slate's rules where a small model weighs them, at the end of the system prompt, for a thread whose launch
- * carries the scoped wsp server: in the server's instructions alone, behind the person's own CLAUDE.md and skills,
+ * has a slate: in the server's instructions alone, behind the person's own CLAUDE.md and skills,
  * Haiku read a token file first and drew in chat. Free of the 2,048 characters an MCP server's instructions keep. */
 export const SLATE_BRIEF = [
   "wsp slate. This session is a wsp thread with a slate, a live panel beside this conversation that the person sees. Before any other work, decide whether the request belongs on the slate. It does when the person:",
