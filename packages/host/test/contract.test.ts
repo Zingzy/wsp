@@ -794,6 +794,14 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(json.lines).toEqual([]);
   });
 
+  it("refuses wsp slate write with no file or rehearsal in the command line's own words, before it dials", async () => {
+    for (const args of [["notes.txt"], ["thread-1"]]) {
+      const io = captured();
+      expect(await cli(["slate", "write", ...args, "--state", statePath], io, undefined, ownEnv(), false)).toBe(EXIT_CODES.usage);
+      expect(io.errors.join("\n")).toContain("wsp slate write takes a .slate or .json file");
+    }
+  });
+
   it("refuses --no-slate without --scoped as a usage error, as the binary's flag table does", async () => {
     const io = captured();
     expect(await cli(["mcp", "--no-slate", "--state", statePath], io, undefined, ownEnv(), false)).toBe(EXIT_CODES.usage);

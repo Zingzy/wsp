@@ -3855,6 +3855,7 @@ const SLATE_VERBS: readonly Verb[] = [
       const [a, b] = ctx.args;
       if ((a === undefined && !rehearsal) || ctx.args.length > 2) throw usageRefusal("wsp slate write takes a file, after a thread where it is not yours.", usageIs(ctx));
       const [ref, file] = b !== undefined ? [a, b] : a !== undefined && /\.(slate|json)$/.test(a) ? [undefined, a] : [a, undefined];
+      if (file === undefined && !rehearsal) throw usageRefusal("wsp slate write takes a .slate or .json file, after a thread where it is not yours.", usageIs(ctx));
       const client = await ctx.client();
       const ifVersion = ifVersionOf(ctx);
       const rehearse = { ...(Object.keys(values).length > 0 ? { values } : {}), ...(piece !== undefined ? { press: { piece, ...(row !== undefined ? { index: row } : {}), ...(action !== undefined ? { action } : {}) } } : {}) };
