@@ -1132,7 +1132,8 @@ export function createSlates(deps: SlatesDeps): Slates {
 
     async read(p, caller) {
       const threadId = targetOf(p, caller, false);
-      const r = await needRecord(threadId);
+      // A thread with no slate yet reads as an empty one, which is what it has; a refusal read as something broken.
+      const r = (await recordOf(threadId)) ?? freshRecord(threadId);
       const asked = p.values ?? [];
       const paths = asked.includes("*") && r.document !== null ? boundPaths(r.document) : asked.filter(v => v !== "*");
       const views = await viewsFor(r, paths);

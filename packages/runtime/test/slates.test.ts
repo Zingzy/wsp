@@ -365,6 +365,12 @@ describe("the slate v2 host", () => {
     expect(again.problems).toContainEqual(expect.objectContaining({ code: "R913", message: "$tick was not started: it already waits for the person to allow it on the slate, and starts once they do" }));
   });
 
+  it("a thread with no slate yet reads as an empty slate, not a refusal", async () => {
+    const { rt, asThread } = await threadOn("wsp-slates-empty-read-");
+    const read = await rt.slates.read({}, asThread);
+    expect(read).toMatchObject({ version: 0, text: "slate v0, empty: write one with slate_write", problems: [] });
+  });
+
   it("a refused write names every error on its one line, numbered, not the first alone", async () => {
     const { rt, asThread } = await threadOn("wsp-slates-every-error-");
     const refused = rt.slates.write({ text: `<slate><column><text value={$nope} /><meter label="x" value={1} tone="loud" /></column></slate>` }, asThread);
