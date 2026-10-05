@@ -111,7 +111,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       value={props.item.id}
       data-composer-item-id={props.item.id}
       className={cn(
-        "cursor-pointer select-none gap-3 rounded-lg px-3 py-2! hover:bg-transparent hover:text-inherit data-highlighted:bg-transparent data-highlighted:text-inherit",
+        "cursor-pointer gap-3 rounded-lg px-3 py-2! hover:bg-transparent hover:text-inherit data-highlighted:bg-transparent data-highlighted:text-inherit",
         props.isActive && "bg-accent! text-accent-foreground!",
       )}
       onMouseMove={() => {

@@ -13,7 +13,7 @@
       body {
         margin: 0;
         height: 100vh;
-        overflow: hidden;
+        overflow-y: auto;
         color: var(--foreground);
         font: 14px/1.5 var(--font-sans);
         -webkit-font-smoothing: antialiased;
@@ -38,12 +38,13 @@
       @keyframes halo { from { opacity: 0; scale: 0.7; } }
 
       /* ---- the screen ---- */
-      .setup { margin: 0 auto; display: flex; height: 100%; width: 560px; max-width: 100%; flex-direction: column; align-items: center; }
+      /* A window too short for the screen scrolls the page, at the window's edge, rather than squeezing the card, which cut its last rows to a strip. */
+      .setup { margin: 0 auto; display: flex; min-height: 100%; width: 560px; max-width: 100%; flex-direction: column; align-items: center; }
       /* Two flex items sharing what the bands leave, so the screen stands centred and each stops at its least. */
       .margin { flex: 1 1 0; min-height: 48px; width: 100%; }
       .margin.bottom { min-height: 40px; }
       .head { margin-bottom: 64px; display: flex; width: 100%; flex: none; flex-direction: column; align-items: center; }
-      .content { display: flex; width: 100%; min-height: 0; flex-direction: column; }
+      .content { display: flex; width: 100%; flex: none; flex-direction: column; }
       .foot { position: relative; display: flex; width: 100%; flex: none; flex-direction: column; align-items: center; padding-top: 56px; }
       h1 { margin: 0; width: 100%; text-align: center; font: 600 34px/1.15 var(--font-sans); letter-spacing: -0.02em; }
       .sentence { margin: 16px 0 0; max-width: 440px; text-align: center; font-size: 15px; line-height: 1.5; color: var(--muted-foreground); }
@@ -184,7 +185,7 @@
       const LINES = {
         some: "Agents you install later get the tools from Settings.",
         noneTicked: "Tick at least one agent. wsp works through the agents you give it.",
-        noneFound: () => `No agent found${on()}. Install Claude Code or Codex, then press Check again.`,
+        noneFound: () => `No agent found${on()}. Threads start once you install one. Settings then gives it the tools.`,
       };
       /** Each refusal in two halves, what happened and what to do, both written to fit the slot's two lines at 560 px.
        * The shell's own words are never drawn: they are unbounded and would run past the slot into the keycap, so they
@@ -295,16 +296,21 @@
         return row;
       }
 
-      /** The keycap and the line follow the ticks: at least one agent takes the tools, or the press is held. */
+      /** The keycap and the line follow the ticks: at least one agent takes the tools, or the press is held. With no
+       * agent here the press opens wsp all the same. */
       function settle() {
         const open = $("open");
-        if (unread || found.length === 0) {
+        open.disabled = false;
+        if (unread) {
           open.firstChild.textContent = "Check again ";
-          open.disabled = false;
-          $("line").textContent = unread ? "" : LINES.noneFound();
+          $("line").textContent = "";
           return;
         }
         open.firstChild.textContent = "Open wsp ";
+        if (found.length === 0) {
+          $("line").textContent = LINES.noneFound();
+          return;
+        }
         const any = ticked().length > 0;
         open.disabled = !any;
         $("line").textContent = any ? LINES.some : LINES.noneTicked;
@@ -345,20 +351,22 @@
         let leaving = false;
         try {
           await reading;
-          if (unread || found.length === 0) {
+          if (unread) {
             reading = scan();
             await reading;
             return;
           }
           clearRefusal(slot);
-          const ids = ticked();
-          if (ids.length === 0) return;
-          const report = await window.wsp.install(ids);
-          if (report.failures.length > 0) {
-            const names = report.failures.map(f => found.find(a => a.id === f.id)?.name ?? f.id);
-            const happened = names.length === 1 ? `${names[0]}'s config would not take the wsp tools.` : `${capped(names)} would not take the wsp tools.`;
-            refuse(slot, happened, REFUSALS.tools.fix, report.failures.map(f => `${f.id}: ${f.error}`).join("\n"));
-            return;
+          if (found.length > 0) {
+            const ids = ticked();
+            if (ids.length === 0) return;
+            const report = await window.wsp.install(ids);
+            if (report.failures.length > 0) {
+              const names = report.failures.map(f => found.find(a => a.id === f.id)?.name ?? f.id);
+              const happened = names.length === 1 ? `${names[0]}'s config would not take the wsp tools.` : `${capped(names)} would not take the wsp tools.`;
+              refuse(slot, happened, REFUSALS.tools.fix, report.failures.map(f => `${f.id}: ${f.error}`).join("\n"));
+              return;
+            }
           }
           leaving = true;
           await window.wsp.finish();

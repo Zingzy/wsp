@@ -37,7 +37,7 @@ describe("StyledDiffCodeView", () => {
     );
 
     expect(testState.codeViewClassName).toBe(
-      "diff-render-surface [--code-background:var(--background)] outline-none min-h-0",
+      "diff-render-surface [--code-background:var(--background)] outline-none select-text min-h-0",
     );
     expect(testState.codeViewOptions).toMatchObject({
       theme: "pierre-dark",

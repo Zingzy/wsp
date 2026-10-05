@@ -589,7 +589,7 @@ export function WorkspaceSidebar() {
                 )}
               </li>
             ))}
-            {tiles.settled.length > 0 || settleable.length > 0 || dragging !== null ? (
+            {tiles.settled.length > 0 || dragging !== null ? (
               <li data-thread-selection-safe className={cn("mt-3 rounded-[var(--control-radius)] transition-colors duration-150", over === "settled" && "bg-sidebar-row-hover")} {...dropZone("settled")}>
                 <SectionRow
                   label={SECTION_WORDS.settled}
