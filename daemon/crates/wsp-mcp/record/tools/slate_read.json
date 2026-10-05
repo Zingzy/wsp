@@ -47,6 +47,7 @@
         "runs": {},
         "state": {},
         "problems": {},
+        "waiting": {},
         "comments": {},
         "approvals": {}
       },
@@ -112,6 +113,7 @@
         "runs": {},
         "state": {},
         "problems": {},
+        "waiting": {},
         "comments": {},
         "approvals": {}
       },

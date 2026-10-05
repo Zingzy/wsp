@@ -38,7 +38,9 @@
         "text": {
           "type": "string"
         },
-        "problems": {}
+        "problems": {},
+        "waiting": {},
+        "notStarted": {}
       },
       "required": [
         "version",
@@ -93,7 +95,9 @@
         "text": {
           "type": "string"
         },
-        "problems": {}
+        "problems": {},
+        "waiting": {},
+        "notStarted": {}
       },
       "required": [
         "version",
