@@ -5,13 +5,13 @@
 // the person. The host is a fake that plays one add; the box's own checks
 // and the plan off a computer's picks are read here too.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { writeStub } from "../../protocol/test/stub-script.js";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Manifest } from "@wsp/collect";
-import { RecipeFile, SETUP_STEP_WORDS, type AddLine, type PlaceSetup, type PlaceView, type PlaceWait } from "@wsp/protocol";
+import { RecipeFile, SETUP_STEP_WORDS, TOOL_PREFIX, type AddLine, type PlaceSetup, type PlaceView, type PlaceWait } from "@wsp/protocol";
 import { sshWordReach, type SshLocalRun } from "@wsp/engine";
 import { PassThrough } from "node:stream";
 import { gunzipSync } from "node:zlib";
@@ -264,35 +264,35 @@ describe("the checks a box passes before anything of wsp's goes on it", () => {
   const need = 400 * 1024 ** 2 + PLACE_CHECK_SPARE_BYTES;
 
   it("passes root on systemd with cgroup v2 and the room, and refuses each that is missing in a sentence naming the fix", () => {
-    expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd yes", "cgroup2 yes", `free ${10 * 1024 ** 3}`]), need)).toBeUndefined();
-    expect(placeCheckRefusal("spoo", "/home/dev", read(["uid 1000", "systemd yes"]), need)).toContain("not root");
+    expect(placeCheckRefusal("spoo", read(["uid 0", "systemd yes", "cgroup2 yes", `free ${10 * 1024 ** 3}`]), need)).toBeUndefined();
+    expect(placeCheckRefusal("spoo", read(["uid 1000", "systemd yes"]), need)).toContain("not root");
     // Root alone this time, said with what to do: a login with passwordless sudo is refused the same way.
-    const asUser = placeCheckRefusal("dev@10.0.0.9", "/home/dev", read(["uid 1000"]), need)!;
+    const asUser = placeCheckRefusal("dev@10.0.0.9", read(["uid 1000"]), need)!;
     expect(asUser).toContain("wsp needs root there");
     expect(asUser).toContain("add root@10.0.0.9 instead");
     // An alias is named by the host it reaches, beside the ssh config line that makes the alias log in as root.
-    const asAlias = placeCheckRefusal("spoo", "/home/dev", read(["uid 1000"]), need, "65.21.4.12")!;
+    const asAlias = placeCheckRefusal("spoo", read(["uid 1000"]), need, "65.21.4.12")!;
     expect(asAlias).toContain("add root@65.21.4.12 instead");
     expect(asAlias).toContain("User root under Host spoo");
     // The app draws these on the check's row, so neither says an internal word or a command for a terminal.
-    for (const said of [asUser, asAlias, placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd no"]), need)!]) {
+    for (const said of [asUser, asAlias, placeCheckRefusal("spoo", read(["uid 0", "systemd no"]), need)!]) {
       expect(said).not.toMatch(/\bdaemons?\b/i);
       expect(said).not.toMatch(/\bwsp (add|remove|leave|join|computers)\b/);
     }
-    expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd no"]), need)).toContain("runs no systemd");
-    expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd yes", "cgroup2 no"]), need)).toContain("no cgroup v2");
-    expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd yes", "cgroup2 yes", `free ${1024 ** 3}`]), need)).toContain("1 GB free under /root");
+    expect(placeCheckRefusal("spoo", read(["uid 0", "systemd no"]), need)).toContain("runs no systemd");
+    expect(placeCheckRefusal("spoo", read(["uid 0", "systemd yes", "cgroup2 no"]), need)).toContain("no cgroup v2");
+    expect(placeCheckRefusal("spoo", read(["uid 0", "systemd yes", "cgroup2 yes", `free ${1024 ** 3}`]), need)).toContain(`1 GB free on the disk wsp installs onto (${TOOL_PREFIX})`);
   });
 
   it("times each check on the box itself, since the three are read in one run, and each row carries its own time", () => {
     const checked = read(["uid 0", "ms root 2", "systemd yes", "cgroup2 yes", "ms system 3", `free ${10 * 1024 ** 3}`, "ms disk 14"]);
-    expect(placeCheckRows("spoo", "/root", checked, need).map(r => [r.step, r.ms])).toEqual([
+    expect(placeCheckRows("spoo", checked, need).map(r => [r.step, r.ms])).toEqual([
       ["root", 2],
       ["system", 3],
       ["disk", 14],
     ]);
     // A box whose date cannot count milliseconds says no time, and no row makes one up.
-    expect(placeCheckRows("spoo", "/root", read(["uid 0", "systemd yes", "cgroup2 yes"]), need).map(r => r.ms)).toEqual([undefined, undefined, undefined]);
+    expect(placeCheckRows("spoo", read(["uid 0", "systemd yes", "cgroup2 yes"]), need).map(r => r.ms)).toEqual([undefined, undefined, undefined]);
   });
 
   it("runs on a shell whose date cannot count milliseconds without an error, and says the facts all the same", () => {
@@ -309,8 +309,25 @@ describe("the checks a box passes before anything of wsp's goes on it", () => {
     expect(Object.keys(parsePlaceCheck(timed.stdout).ms ?? {}).sort()).toEqual(["disk", "root", "system"]);
   });
 
+  it("reads the free disk off the volume wsp installs onto, not the one the home sits on", () => {
+    // Two volumes: the home on one with 50 GB free, every other folder, wsp's install folder among them, on one with 3 GB.
+    const bin = mkdtempSync(join(tmpdir(), "wsp-check-df-"));
+    const home = join(bin, "home");
+    mkdirSync(home);
+    const handed = join(bin, "handed");
+    writeStub(join(bin, "df"), `#!/bin/sh\necho "$2" >> ${handed}\ncase "$2" in ${home}*) free=52428800 ;; *) free=3145728 ;; esac\necho "Filesystem 1024-blocks Used Available Capacity Mounted on"\necho "fake 104857600 1 $free 1% /"\n`);
+    const ran = spawnSync("/bin/sh", ["-c", PLACE_CHECK_SCRIPT], { encoding: "utf8", env: { ...process.env, HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}` } });
+    const folders = readFileSync(handed, "utf8").trim().split("\n");
+    rmSync(bin, { recursive: true, force: true });
+    expect(parsePlaceCheck(ran.stdout).freeBytes).toBe(3 * 1024 ** 3);
+    // wsp's install folder, or the nearest folder above it that is there, where the first install makes it.
+    const above = (dir: string): string[] => (dir === "/" ? ["/"] : [dir, ...above(dirname(dir))]);
+    for (const folder of folders) expect(above(TOOL_PREFIX)).toContain(folder);
+    expect(placeCheckRefusal("spoo", read(["uid 0", "systemd yes", "cgroup2 yes", `free ${3 * 1024 ** 3}`]), 4 * 1024 ** 3)).toContain(`3 GB free on the disk wsp installs onto (${TOOL_PREFIX})`);
+  });
+
   it("refuses nothing a box would not say, and reads no line that is not its own", () => {
-    expect(placeCheckRefusal("spoo", "/root", read([]), need)).toBeUndefined();
+    expect(placeCheckRefusal("spoo", read([]), need)).toBeUndefined();
     expect(parsePlaceCheck("uid 1000\nwsp-check systemd yes\n")).toEqual({ systemd: true });
   });
 });

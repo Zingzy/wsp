@@ -95,8 +95,9 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   PLACE_NEEDS_ROOT_LINE,
   SignInLine,
   macKindOf,
+  TOOL_PREFIX,
 } from "@wsp/protocol";
-import { GITHUB_TOKEN_ENV, MissingKnownHostsError, PlaceMachine, runChild, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
+import { GITHUB_TOKEN_ENV, MissingKnownHostsError, PlaceMachine, prefixVolume, runChild, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceStaging, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
 import { BackCutError, heldPlaceScript, placeBackHolder } from "./place-back.js";
 import { writeOwn } from "@wsp/own-file";
@@ -638,7 +639,7 @@ export const PLACE_CHECK_SCRIPT = [
     `if [ -d /run/systemd/system ]; then printf '${CHECK_MARK} systemd yes\\n'; else printf '${CHECK_MARK} systemd no\\n'; fi`,
     `if [ -f /sys/fs/cgroup/cgroup.controllers ]; then printf '${CHECK_MARK} cgroup2 yes\\n'; else printf '${CHECK_MARK} cgroup2 no\\n'; fi`,
   ]),
-  ...timedCheck("disk", [`df -Pk "$HOME" 2>/dev/null | awk 'NR==2 { printf "${CHECK_MARK} free %d\\n", $4 * 1024 }'`]),
+  ...timedCheck("disk", [`df -Pk ${prefixVolume(TOOL_PREFIX)} 2>/dev/null | awk 'NR==2 { printf "${CHECK_MARK} free %d\\n", $4 * 1024 }'`]),
 ].join("\n");
 
 /** What the check read off a box; a fact it did not answer is absent. */
@@ -673,14 +674,14 @@ export const PLACE_CHECK_SPARE_BYTES = 1024 ** 3;
 
 /** Why a box is refused at the check, naming what would fix it; nothing where it passes or would not say. `host` is
  * the hostname the address reached, which an ssh alias stands for. */
-export function placeCheckRefusal(address: string, home: string, check: PlaceCheck, needBytes: number, host?: string): string | undefined {
-  return placeCheckRows(address, home, check, needBytes, host).find(r => r.state === "failed")?.note;
+export function placeCheckRefusal(address: string, check: PlaceCheck, needBytes: number, host?: string): string | undefined {
+  return placeCheckRows(address, check, needBytes, host).find(r => r.state === "failed")?.note;
 }
 
 /** Each check the box passes or fails, on its own row in the order they are read, up to the first that fails:
  * root, then systemd with cgroup v2, then the room. A reading the box did not give passes, since the deploy's own
  * preflight stands behind it. */
-export function placeCheckRows(address: string, home: string, check: PlaceCheck, needBytes: number, host?: string): { step: PlaceCheckStep; state: "done" | "failed"; note?: string; ms?: number }[] {
+export function placeCheckRows(address: string, check: PlaceCheck, needBytes: number, host?: string): { step: PlaceCheckStep; state: "done" | "failed"; note?: string; ms?: number }[] {
   const at = address.slice(0, 64);
   const row = (step: PlaceCheckStep, state: "done" | "failed", note?: string) => ({ step, state, ...(note === undefined || note === "" ? {} : { note }), ...(check.ms?.[step] === undefined ? {} : { ms: check.ms[step] }) });
   const rows: ReturnType<typeof row>[] = [];
@@ -693,7 +694,7 @@ export function placeCheckRows(address: string, home: string, check: PlaceCheck,
   if (check.systemd === false) return [...rows, row("system", "failed", `${at} runs no systemd, which is what keeps wsp running there; wsp takes a Linux box that boots with systemd`)];
   if (check.cgroup2 === false) return [...rows, row("system", "failed", `${at} has no cgroup v2 (/sys/fs/cgroup/cgroup.controllers), which every workspace there is held in; boot it with the unified hierarchy`)];
   rows.push(row("system", "done", [check.systemd === true ? "systemd" : undefined, check.cgroup2 === true ? "cgroup v2" : undefined].filter(w => w !== undefined).join(", ")));
-  if (check.freeBytes !== undefined && check.freeBytes < needBytes) return [...rows, row("disk", "failed", `${at} has ${fmtBytes(check.freeBytes)} free under ${home}, and the base tools with a gigabyte to work in take ${fmtBytes(needBytes)}; free some room there and add it again`)];
+  if (check.freeBytes !== undefined && check.freeBytes < needBytes) return [...rows, row("disk", "failed", `${at} has ${fmtBytes(check.freeBytes)} free on the disk wsp installs onto (${TOOL_PREFIX}), and the base tools with a gigabyte to work in take ${fmtBytes(needBytes)}; free some room there and add it again`)];
   rows.push(row("disk", "done", check.freeBytes === undefined ? undefined : `${fmtBytes(check.freeBytes)} free`));
   return rows;
 }
@@ -822,7 +823,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     stage("chip", "done", chip === "" ? undefined : chip);
     // The three are read in one run, so each row moves once that run is back; a row after one that failed never ran.
     const checked = parsePlaceCheck((await machine.run(PLACE_CHECK_SCRIPT, { deadlineMs: SSH_DIAL_MS }).catch(() => undefined))?.stdout ?? "");
-    const rows = placeCheckRows(req.address, login.HOME, checked, floorBytes(false) + PLACE_CHECK_SPARE_BYTES, reach.host);
+    const rows = placeCheckRows(req.address, checked, floorBytes(false) + PLACE_CHECK_SPARE_BYTES, reach.host);
     for (const row of rows) {
       said(row.step, "running");
       said(row.step, row.state, row.note, undefined, row.ms);

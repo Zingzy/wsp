@@ -135,6 +135,30 @@
     "text": "MCP error -32602: Input validation error: Invalid arguments for tool computers_set: Invalid enum value. Expected 'on' | 'off', received 'yes' at spawn"
   },
   {
+    "tool": "computers_set",
+    "arguments": {
+      "computer": "attic",
+      "turn_limit": 1.5
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool computers_set: Expected integer, received float at turn_limit"
+  },
+  {
+    "tool": "computers_set",
+    "arguments": {
+      "computer": "attic",
+      "turn_limit": -1
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool computers_set: Number must be greater than or equal to 0 at turn_limit"
+  },
+  {
+    "tool": "computers_set",
+    "arguments": {
+      "computer": "attic",
+      "turn_limit": 25
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool computers_set: Number must be less than or equal to 24 at turn_limit"
+  },
+  {
     "tool": "workspaces_agents",
     "arguments": {
       "workspace": "w",
