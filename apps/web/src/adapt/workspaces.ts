@@ -17,17 +17,34 @@ export interface SidebarInput {
   readonly pauseModes?: Readonly<Record<string, PauseMode | undefined>>;
 }
 
+const NO_ROWS: ReadonlyArray<SessionView> = [];
+
+/** The snapshot last built for each workspace record and what it was built from, and the threads last folded from
+ * each list of rows: a frame about one workspace builds that one again, and every other row and thread keeps its
+ * identity. */
+const built = new WeakMap<WorkspaceView, { status: WorkspaceStatus | null; rows: ReadonlyArray<SessionView>; pauseMode: PauseMode | undefined; snapshot: SidebarProjectSnapshot }>();
+const folded = new WeakMap<ReadonlyArray<SessionView>, { project: string; threads: SidebarThreadSnapshot[] }>();
+
+function threadsOf(rows: ReadonlyArray<SessionView>, workspace: WorkspaceView): SidebarThreadSnapshot[] {
+  const held = folded.get(rows);
+  if (held !== undefined && held.project === workspace.project.name) return held.threads;
+  const threads = foldThreads(rows).map(thread => deriveThread(thread, workspace, rows.find(row => threadKeyOf(row) === thread.id)?.model));
+  folded.set(rows, { project: workspace.project.name, threads });
+  return threads;
+}
+
 export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapshot[] {
   return input.workspaces
     .filter(workspace => !bareFolder(workspace, (input.sessions?.[workspace.id]?.length ?? 0) > 0))
     .map(workspace => {
       const status = input.statuses?.[workspace.id] ?? null;
+      const rows = input.sessions?.[workspace.id] ?? NO_ROWS;
+      const pauseMode = input.pauseModes?.[workspace.project.id];
+      const held = built.get(workspace);
+      if (held !== undefined && held.status === status && held.rows === rows && held.pauseMode === pauseMode) return held.snapshot;
       const phase = status?.phase ?? workspace.phase;
       const state = workspaceStateOf({ phase }, status);
-      const rows = input.sessions?.[workspace.id] ?? [];
-      const threads = foldThreads(rows);
-      const pauseMode = input.pauseModes?.[workspace.project.id];
-      return {
+      const snapshot: SidebarProjectSnapshot = {
         id: workspace.id,
         projectKey: workspace.id,
         displayName: workspace.name,
@@ -42,8 +59,10 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
         reach: status?.reach.state ?? null,
         state,
         indicator: indicatorFor(state, pauseMode),
-        threads: threads.map(thread => deriveThread(thread, workspace, rows.find(row => threadKeyOf(row) === thread.id)?.model)),
-      } satisfies SidebarProjectSnapshot;
+        threads: threadsOf(rows, workspace),
+      };
+      built.set(workspace, { status, rows, pauseMode, snapshot });
+      return snapshot;
     })
     .sort(byCreation);
 }
