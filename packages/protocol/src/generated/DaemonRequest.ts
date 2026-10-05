@@ -141,6 +141,11 @@ machineId?: string, } | { "op": "git.prRead", cwd: string,
  */
 remote: string, branch?: string, number?: number, 
 /**
+ * What the last full read by this number saw, as the reply's `seen` gave it: one REST read compares it, and
+ * where nothing in it moved, nothing else is read.
+ */
+seen?: string, 
+/**
  * The workspace this frame is for, as on fs.list above.
  */
 machineId?: string, } | { "op": "git.prView", cwd: string, remote: string, number: number, 

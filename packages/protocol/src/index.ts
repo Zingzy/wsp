@@ -4259,6 +4259,7 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     remote: z.string(),
     branch: z.string().optional(),
     number: z.number().int().nonnegative().optional(),
+    seen: z.string().optional(),
     machineId: z.string().optional(),
   }),
   /** One pull request's page through that same command line, answered as a GitPrViewReply. */
@@ -4927,6 +4928,8 @@ export const DaemonErrorCode = z.enum([
   "no-host-cli",
   /** Git refused a fetch or a push for want of a credential on the computer it ran on, so nothing moved. */
   "no-git-credential",
+  /** The git host's command line refused a read for the account's rate limit. */
+  "rate-limited",
 ]);
 export type DaemonErrorCode = z.infer<typeof DaemonErrorCode>;
 
@@ -6741,8 +6744,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * blob given, or taken off where the blob is null. */
   z.object({ id: reqId, op: z.literal("workspaces.viewed"), workspaceId: z.string(), path: z.string().optional(), blob: z.string().nullable().optional() }),
   /** The workspace's pull request page, read through the git host's command line on this computer, or the running
-   * copy's where this computer has none, and answered as a GitPrViewReply; never kept, so every ask reads it anew. */
-  z.object({ id: reqId, op: z.literal("workspaces.pullRequestView"), workspaceId: z.string() }),
+   * copy's where this computer has none, and answered as a GitPrViewReply; the host holds a read a minute, and an ask
+   * with fresh reads it anew. */
+  z.object({ id: reqId, op: z.literal("workspaces.pullRequestView"), workspaceId: z.string(), fresh: z.boolean().optional() }),
   /** The workspace's pull request's diff against its base, read as the page is and cut on a file's boundary at
    * GIT_DIFF_CAP_BYTES, answered as a GitPrDiffReply naming every file the cut left out. */
   z.object({ id: reqId, op: z.literal("workspaces.pullRequestDiff"), workspaceId: z.string() }),

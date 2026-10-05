@@ -3,7 +3,8 @@
 // title, who opened it, the number as a link out, the one word with its dot and the branches; then three tabs with
 // their counts. Conversation is Status first, then the description, then Activity, the conversation alone; Commits is
 // one rail by day; Files is the tree, a file opening its diff in place. The page is read as the pane opens and on its
-// refresh, never kept; the head reads the fact the host pushes on the workspace's status.
+// refresh, which asks the host past the minute it holds a read; the head reads the fact the host pushes on the
+// workspace's status.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLinkIcon, GitBranchIcon, GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPullRequestIcon, RefreshCwIcon } from "lucide-react";
 import { START_WORDS, isPullRequestFact, isPullRequestNamed, type PullRequestItem, type PullRequestPage } from "@wsp/protocol";
@@ -66,12 +67,16 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
   const project = projects.find(p => p.id === workspace?.project.id);
   const base = isPullRequestNamed(seen) ? seen.base : (project?.base ?? project?.defaultBranch ?? "main");
   const diffAsk = useRef(0);
+  const refreshed = useRef(false);
   const [sending, setSending] = useState<readonly PullRequestItem[]>([]);
 
   useEffect(() => {
     if (view === undefined || !isPullRequestNamed(seen)) return;
     let gone = false;
-    view(workspaceId).then(
+    // Only the read a refresh asked for skips what the host holds.
+    const fresh = refreshed.current;
+    refreshed.current = false;
+    view(workspaceId, fresh).then(
       read => {
         if (gone) return;
         setPage(read);
@@ -88,6 +93,7 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
   }, [view, workspaceId, asked, isPullRequestNamed(seen) ? seen.number : null]);
 
   const refresh = useCallback(() => {
+    refreshed.current = true;
     setAsked(n => n + 1);
     diffAsk.current += 1;
     setDiff(null);
@@ -278,6 +284,7 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
             <h3 className={SECTION_HEAD}>{PR_WORDS.heads.activity}</h3>
             {page?.cut?.reviews === true ? <CutNote words={PR_WORDS.cut.reviews} /> : null}
             {page?.cut?.threads === true ? <CutNote words={PR_WORDS.cut.threads} /> : null}
+            {page?.cut?.comments === true ? <CutNote words={PR_WORDS.cut.comments} /> : null}
             <div className="mt-0.5">{page === null ? <TimelineSkeleton /> : <Timeline page={page} agent={agent} of={of} acts={acts} onOpenCommits={() => setTab("commits")} onQuote={quote} />}</div>
             {page === null || acts?.reply === undefined ? null : <CommentBox text={foot} setText={setFoot} onSend={body => acts.reply!(body)} fieldRef={footField} />}
           </section>

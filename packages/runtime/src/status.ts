@@ -153,6 +153,8 @@ export interface StatusApi {
   /** Refcounted: while at least one watcher holds this, the poller and cost
    * ticker run and their events ride the runtime bus. Returns the release. */
   watch(opts?: StatusWatchOptions): () => void;
+  /** Whether a watcher holds it now, which is a window open on this host. */
+  watched(): boolean;
   /** The workspace's cost ticks since metering began, across host restarts, folded to the rate changes and the newest tick. */
   history(workspaceId: string): Promise<WorkspaceCostEvent[]>;
   /** What each row of the places list has cost since midnight and since the first of the month, over every workspace
@@ -869,5 +871,5 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     });
   };
 
-  return { list, watch, history, spend };
+  return { list, watch, watched: () => watchers > 0, history, spend };
 }
