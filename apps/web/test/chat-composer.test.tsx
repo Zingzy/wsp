@@ -4,7 +4,7 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_PREFERENCES, HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, type EventUnion, type HarnessCatalog, type HostItem, type SessionEvent, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, type EventUnion, type HarnessCatalog, type HostItem, type ProjectView, type SessionEvent, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { clickIntoEditor, composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -47,6 +47,9 @@ const workspace: WorkspaceView = {
   claudeSessionId: "e16ed170-8257-4668-879e-fe836341633c",
 };
 
+/** The project the workspace is of: its remote is what the # list is kept by. */
+const PROJECT: ProjectView = { id: "pr_1", name: "the-project", computer: "default", source: { kind: "folder", path: "/root" }, path: "/root", remote: "https://github.com/dev/the-project.git", defaultBranch: "main", memoryKey: "-root", memoryDir: "/root/.claude-cfg/projects/-root/memory", createdAt: "t" };
+
 /** The runtime's row for the composer's harness, as the table serves it before a machine answers: the commands that
  * work only in the CLI's own terminal ride it, so the menu and the send read them before any session ran. */
 const SCREEN_COMMANDS = [
@@ -82,6 +85,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     watchStatuses: async () => statuses,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
+    projectsList: async () => [PROJECT],
     startSession: async opts => {
       started.push(opts);
       return { id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running", prompt: opts.prompt, startedAt: 0 };
@@ -736,27 +740,23 @@ describe("composer @ menu", () => {
     expect(menuNote()).toBeNull();
   });
 
-  it("asks for the pull requests and issues when the thread opens, so the first # draws them at once, and every # reads again and replaces them", async () => {
-    const LATER: HostItem = { kind: "pull-request", number: 881, title: "Queue cards", body: "", url: "https://github.com/Zingzy/wsp/pull/881" };
-    let lists = 0;
+  it("asks for the pull requests and issues at the first #, never as the thread opens, and a # within five minutes draws that answer", async () => {
     provideDaemonWire(WS, {
       request: async (op, params) => {
         asked.push({ op, params });
-        if (op !== "git.prList") return { files: [], truncated: false };
-        lists += 1;
-        if (lists === 1) return { items: [PR] };
-        await new Promise(resolve => setTimeout(resolve, 100));
-        return { items: [LATER, PR] };
+        return op === "git.prList" ? { items: [PR] } : { files: [], truncated: false };
       },
     });
     const { api } = fixtureApi([workspace]);
     await setup(api);
-    await waitFor(() => expect(asked.filter(call => call.op === "git.prList")).toEqual([{ op: "git.prList", params: { cwd: "/root" } }]));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(asked.filter(call => call.op === "git.prList")).toEqual([]);
     await typeInto(composerEditor(), "#");
-    // What was read ahead draws with the keystroke, and the token's own read replaces it.
-    expect(prRows()).toHaveLength(1);
-    await waitFor(() => expect(prRows()).toHaveLength(2));
-    expect(asked.filter(call => call.op === "git.prList")).toHaveLength(2);
+    await waitFor(() => expect(prRows()).toHaveLength(1));
+    expect(asked.filter(call => call.op === "git.prList")).toEqual([{ op: "git.prList", params: { cwd: "/root" } }]);
+    await typeInto(composerEditor(), " #");
+    await waitFor(() => expect(prRows()).toHaveLength(1));
+    expect(asked.filter(call => call.op === "git.prList")).toHaveLength(1);
   });
 
   it("a repository with nothing open says so in the menu, and a # matching nothing says that", async () => {

@@ -164,6 +164,9 @@ export interface AdapterAttachOptions {
    * after its process starts gives it to a run re-opened before it went. */
   prompt?: string;
   effort?: string;
+  /** Where the turn starts in the run's log, on a process that served earlier turns of the thread; absent reads the
+   * log from its first byte, which is where a process's first turn starts. */
+  from?: number;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -212,6 +215,12 @@ export interface ExecStream {
   /** On a run re-opened by attach, every line its channel had taken by then, a held line handed over included; absent
    * on a launched run and on a road that cannot read the channel back. */
   readonly taken?: readonly string[];
+  /** On a road whose process serves more than one turn: the turn on it is over and the process waits for the next,
+   * so no limit cuts it until nextTurn. Quiet between turns is not a stuck turn; whoever kept the process ends it. */
+  rest?(): void;
+  /** The process's next turn starts now: its idle and wall limits count from here, as a launched turn's do. Answers how
+   * many bytes the run's log held before it, which is where a reader that re-opens this turn starts. */
+  nextTurn?(): number;
   readonly exited: Promise<number | null>;
   /** The signal that ended the run, by the name the computer running it spells, once `exited` has settled; absent
    * where it ended on its own and on a road that cannot tell, which is every run read off a machine's exit file.
@@ -238,8 +247,9 @@ export interface ExecStreamFactory {
    * may take what is left of it. A machine that answers nothing rejects, since silence says nothing about the run
    * and must leave it running. Absent on a factory whose runs die with the process that launched them. `startedAt` is
    * when the turn began, in ms epoch off the row that survives a restart: the wall counts from it, so a host that
-   * restarts does not hand every turn it re-opens its whole cap again. */
-  attach?(run: string, options: { input: boolean; startedAt: number }): Promise<ExecStream | "gone">;
+   * restarts does not hand every turn it re-opens its whole cap again. `from` is the byte of the log a turn on a process
+   * that served earlier turns starts at, read from there rather than from the first byte. */
+  attach?(run: string, options: { input: boolean; startedAt: number; from?: number }): Promise<ExecStream | "gone">;
   /** Ends every run of this road the machine still holds that is not named in `keep`, and answers the ones it ended.
    * A host that went down mid-turn, and a turn whose row this host could not re-open, leave a harness process nobody
    * reads holding the machine's memory for its life, so a host that connects ends the runs it does not own. The runs

@@ -699,7 +699,8 @@ pub struct GitPrReply {
     pub created: bool,
 }
 
-/// The pull request for the branch or the number asked about, absent where the host knows none.
+/// The pull request for the branch or the number asked about, absent where the host knows none or where what was
+/// seen had not moved; `seen` is its last update, head commit and state, to ask with next time.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
@@ -707,6 +708,11 @@ pub struct GitPrReadReply {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub pr: Option<PullRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub seen: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unchanged: bool,
 }
 
 /// An issue, or a pull request read as the issue it also is: its text and its conversation, each body cut as a page
@@ -1024,9 +1030,9 @@ pub struct GitPrViewReply {
     pub cut: Option<PullRequestPageCut>,
 }
 
-/// The parts of a page read only in part: commits past gh's first 100, which carry no lines or checks of their own,
-/// reviews before the newest 100, which carry no id, and review threads before the newest 100, whose comments do not
-/// say whether they are resolved. Each is present only where true.
+/// The parts of a page read only in part, each left off the page: commits past the first 100, reviews before the newest
+/// 100, review threads before the newest 100 with their comments, and conversation comments before the newest 100.
+/// Each is present only where true.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]

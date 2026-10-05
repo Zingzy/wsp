@@ -59,6 +59,10 @@ dmg:
       path: /Applications
 win:
   icon: build/icon.ico
+# The static AppImage runtime, which carries its own FUSE: the default one dlopens libfuse.so.2, which stock Ubuntu
+# 24.04 and Arch do not install, and dies before any window.
+toolsets:
+  appimage: "1.0.3"
 linux:
   target:
     - target: AppImage

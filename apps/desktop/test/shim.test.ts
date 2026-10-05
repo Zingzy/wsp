@@ -3,12 +3,13 @@
 // that runs this app's own binary as node on the bundled command, written
 // where the MCP install's one constant says, rewritten when the app moved.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { daemonBinaryHere, shimPath } from "@wsp/host";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { installShim, shimText } from "../src/shim.js";
+import { writeStub } from "../../../packages/protocol/test/stub-script.js";
+import { installShim, keepAppImage, shimText } from "../src/shim.js";
 
 describe("the wsp shim", () => {
   let home: string;
@@ -45,6 +46,55 @@ describe("the wsp shim", () => {
       expect(ran.status, ran.stderr).toBe(0);
       expect(ran.stdout.trim().split("\n").map(l => JSON.parse(l) as unknown)).toEqual([["1", ...line]]);
     }
+  });
+
+  it("an AppImage's files are copied out of its mount under the wsp home once per image, and the command runs the copy after the mount has gone", () => {
+    // The mount the AppImage runtime makes for one launch and takes away when that launch ends.
+    const mount = join(home, ".mount_wsp.Ab12Cd");
+    const main = join(mount, "resources", "app", "main");
+    const daemon = join(mount, "resources", "app", "assets", "daemon", "aarch64-unknown-linux-musl", "wsp-daemon");
+    mkdirSync(main, { recursive: true });
+    mkdirSync(join(daemon, ".."), { recursive: true });
+    writeStub(join(mount, "wsp"), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`);
+    writeFileSync(join(main, "cli.mjs"), "console.log(JSON.stringify([process.env.ELECTRON_RUN_AS_NODE, ...process.argv.slice(2)]));\n");
+    writeStub(daemon, "#!/bin/sh\n");
+    const image = join(home, "wsp.AppImage");
+    writeFileSync(image, "an image");
+    const wspHome = join(home, ".wsp");
+    const here = { execPath: join(mount, "wsp"), script: join(main, "cli.mjs"), daemon };
+
+    const kept = keepAppImage(here, { appdir: mount, image, version: "0.2.0" }, wspHome);
+    for (const path of [kept.execPath, kept.script, kept.daemon!]) {
+      expect(path.startsWith(join(wspHome, "app", "0.2.0-"))).toBe(true);
+      expect(existsSync(path)).toBe(true);
+    }
+    expect(kept.script.slice(kept.execPath.length - "wsp".length)).toBe(join("resources", "app", "main", "cli.mjs"));
+    const path = shimPath(wspHome);
+    installShim(path, shimText({ execPath: kept.execPath, script: kept.script }));
+    expect(readFileSync(path, "utf8")).not.toContain(mount);
+
+    rmSync(mount, { recursive: true, force: true });
+    const ran = spawnSync(path, ["threads", "a b"], { encoding: "utf8" });
+    expect(ran.status, ran.stderr).toBe(0);
+    expect(JSON.parse(ran.stdout)).toEqual(["1", "threads", "a b"]);
+
+    // The next launch of the same image finds its copy; a rebuilt image is copied again and the copy before it stays
+    // for the host that may still run it, until the image after that.
+    mkdirSync(main, { recursive: true });
+    writeFileSync(join(main, "cli.mjs"), "");
+    writeStub(join(mount, "wsp"), "#!/bin/sh\n");
+    mkdirSync(join(daemon, ".."), { recursive: true });
+    writeStub(daemon, "#!/bin/sh\n");
+    expect(keepAppImage(here, { appdir: mount, image, version: "0.2.0" }, wspHome)).toEqual(kept);
+    expect(readFileSync(kept.script, "utf8")).toContain("ELECTRON_RUN_AS_NODE");
+    utimesSync(image, new Date(), new Date(Date.now() + 60_000));
+    const next = keepAppImage(here, { appdir: mount, image, version: "0.2.0" }, wspHome);
+    expect(next.execPath).not.toBe(kept.execPath);
+    const copyOf = (t: { execPath: string }): string => t.execPath.split("/").at(-2)!;
+    expect(readdirSync(join(wspHome, "app")).sort()).toEqual([copyOf(kept), copyOf(next)].sort());
+    utimesSync(image, new Date(), new Date(Date.now() + 120_000));
+    const third = keepAppImage(here, { appdir: mount, image, version: "0.2.0" }, wspHome);
+    expect(readdirSync(join(wspHome, "app")).sort()).toEqual([copyOf(next), copyOf(third)].sort());
   });
 
   it("writes the shim executable where the MCP install's constant says, keeps one that already says the same, and rewrites one that names another app", () => {
