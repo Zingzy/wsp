@@ -209,7 +209,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     const full: WorkLogEntry = { ...entry, id: `${t.summary.turnId}:w${t.ordinal}`, turnId: t.summary.turnId };
     return push({ id: full.id, kind: "work", createdAt: at, entry: full });
   };
-  const addMessage = (t: TurnBuild, role: ChatMessage["role"], text: string, at: string, streaming: boolean, steered = false, carried?: Pick<ChatMessage, "attachments" | "requestId">): number => {
+  const addMessage = (t: TurnBuild, role: ChatMessage["role"], text: string, at: string, streaming: boolean, steered = false, carried?: Pick<ChatMessage, "attachments" | "requestId" | "sentOn">): number => {
     t.ordinal += 1;
     const m: ChatMessage = { id: `${t.summary.turnId}:m${t.ordinal}`, role, text, turnId: t.summary.turnId, streaming, createdAt: at, updatedAt: at, ...(steered ? { steered } : {}), ...carried };
     return push(messageEntry(m));
@@ -317,6 +317,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
           addMessage(turn, "user", event.prompt, at, false, false, {
             ...(event.attachments !== undefined ? { attachments: event.attachments } : {}),
             ...(event.requestId !== undefined ? { requestId: event.requestId } : {}),
+            ...(event.threadId !== undefined ? { sentOn: { workspaceId: event.workspaceId, threadId: event.threadId } } : {}),
           });
         }
         if (event.afterCut === true) addWork(turn, { createdAt: at, label: AFTER_CUT_LINE, tone: "notice", sourceActivityKind: "runtime.resume" }, at);

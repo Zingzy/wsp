@@ -1646,6 +1646,8 @@ export const SessionHeldEvent = z.object({
   type: z.literal("session.held"),
   workspaceId: z.string(),
   threadId: z.string(),
+  /** The id the client minted for the sessions.start that holds it, so that client's own tile for the send goes. */
+  requestId: z.string().optional(),
 });
 export type SessionHeldEvent = z.infer<typeof SessionHeldEvent>;
 
@@ -6894,6 +6896,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("sessions.list"), workspaceId: z.string().optional() }),
   /** Replies with the workspace's persisted SessionEvent[] (oldest first, capped by the runtime). */
   z.object({ id: reqId, op: z.literal("sessions.history"), workspaceId: z.string() }),
+  /** Replies with { attachment: KeptAttachment }: one image a person's message carried, by the thread, the request id
+   * its start carries and its place in the message, which the host keeps until the thread or its workspace goes. */
+  z.object({ id: reqId, op: z.literal("sessions.attachment"), workspaceId: z.string(), threadId: z.string(), requestId: z.string(), index: z.number().int().nonnegative() }),
   /** Asks the harness to stop the session's running turn, or with task the one subagent of it the agent calls by that
    * id and nothing else; replies with a SessionInterruptResult. */
   z.object({ id: reqId, op: z.literal("sessions.interrupt"), sessionId: z.string(), task: z.string().optional() }),
@@ -7325,6 +7330,7 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.start",
   "sessions.list",
   "sessions.history",
+  "sessions.attachment",
   "sessions.interrupt",
   "sessions.steer",
   "sessions.rename",
@@ -7394,6 +7400,7 @@ export const DEVICE_OPS: readonly string[] = [
   "harnesses.list",
   "sessions.list",
   "sessions.history",
+  "sessions.attachment",
   "sessions.forget",
   "sessions.read",
   "sessions.settle",
@@ -7671,7 +7678,7 @@ export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
 export { compareVersions } from "./semver.mjs";
-export { attachedFilesPrompt, Attachment, attachmentBytes, attachmentLine, AttachmentRecord, attachmentRecord, FILE_MAX_BYTES, FILE_MAX_WORDS, FILES_AFTER_TURN, FILES_DIR, FILES_MAX, filePathIn, filesBlocked, filesNotLandedLine, filesRefusal, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, imagePathIn, imageTypeOf, isImage, dropFilesLine, landFilesLine, noImagesLine, notAFileLine, safeFileName, sendFilesDir, threadFilesDir, threadImagesDir, turnImagesDir, UNTYPED_FILE } from "./attachments.js";
+export { attachedFilesPrompt, Attachment, attachmentBytes, attachmentKey, attachmentLine, AttachmentRecord, attachmentRecord, KeptAttachment, FILE_MAX_BYTES, FILE_MAX_WORDS, FILES_AFTER_TURN, FILES_DIR, FILES_MAX, filePathIn, filesBlocked, filesNotLandedLine, filesRefusal, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, imagePathIn, imageTypeOf, isImage, dropFilesLine, landFilesLine, noImagesLine, notAFileLine, safeFileName, sendFilesDir, threadFilesDir, turnImagesDir, UNTYPED_FILE } from "./attachments.js";
 export * from "./oom.js";
 export { accruedAt, accruedPast, appendCostPoint, COST_HISTORY_CAP, dayStart, monthStart, rateAt, spentSince } from "./cost-history.js";
 export { leadAsk, openAsk, THREAD_SEED_CHARS, ThreadMessage, threadMarkdown, threadMessages, threadReplyRows, threadResult, threadSeed, ThreadVoice } from "./thread-read.js";

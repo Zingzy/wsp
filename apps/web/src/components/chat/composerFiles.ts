@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The files a composer is holding, the files a queued message waits with, the
-// files it turned away, and the files a send carried, all in memory only. Nothing here is persisted: the draft store writes to local
-// storage and a file would fill it; the stash alone keeps bytes there, under
-// its own cap. The bytes go to the host on the send and, for an image, to an
-// object URL for the thumbnail, and both go when the tab does. The bank keyed
-// by request id is what lets the transcript draw the images of a message this
-// browser sent; a transcript replayed after a reload has the records the
-// runtime kept and draws their words instead.
+// files it turned away, and the files a send carried, all in memory only.
+// Nothing here is persisted: the draft store writes to local storage and a
+// file would fill it; the stash alone keeps bytes there, under its own cap.
+// The bytes go to the host on the send and, for an image, to an object URL
+// for the thumbnail. The bank keyed by request id is what lets the transcript
+// draw the images of a message this browser sent; a row the bank does not hold
+// (a reload, another client's send, one past the bank's cap) reads its images
+// back from the host, which keeps them until the thread goes.
+import { useEffect } from "react";
 import { create } from "zustand";
-import { IMAGE_TYPES, filesRefusal, imageTypeOf, isImage, UNTYPED_FILE, type Attachment, type AttachmentRecord } from "@wsp/protocol";
+import { IMAGE_TYPES, filesRefusal, imageTypeOf, isImage, UNTYPED_FILE, type Attachment, type AttachmentRecord, type KeptAttachment } from "@wsp/protocol";
+import type { SentOn } from "../../adapt/view-model";
+import { RequestError } from "../../protocol/client";
 import { newId } from "./composerDraftStore";
 import type { StashedFile } from "./promptStashStore";
 
@@ -31,8 +35,8 @@ const revoke = (file: ComposerFile): void => {
   if (file.url !== undefined) URL.revokeObjectURL(file.url);
 };
 
-/** How many sends of one tab keep their images in memory. Beyond this the oldest let go and their rows read as any
- * other client's do. A message at both caps is fifty megabytes, so this bounds what one tab holds. */
+/** How many sends of one tab keep their images in memory. Beyond this the oldest let go and their rows read them
+ * back from the host. A message at both caps is fifty megabytes, so this bounds what one tab holds. */
 const SENT_KEPT = 10;
 
 /** Base64 in chunks: one spread of ten million bytes into fromCharCode overflows the argument stack. */
@@ -145,7 +149,12 @@ interface FilesState {
   /** Puts back what a refused send took, onto the queued message it came off when `rowId` names one, so the person's
    * files are not lost with the request. */
   restore(workspaceId: string, requestId: string, rowId?: string): void;
+  /** The host's road to an image it kept, which the store's bind hands in; none before a host is bound. */
+  kept?: (workspaceId: string, threadId: string, requestId: string, index: number) => Promise<KeptAttachment>;
+  /** Reads a message's images back from the host into the bank, where this tab does not hold them. */
+  recall(sent: SentOn & { requestId: string }, records: ReadonlyArray<AttachmentRecord>): Promise<void>;
 }
+
 
 const without = <T,>(record: Record<string, T>, key: string): Record<string, T> => {
   const { [key]: _gone, ...rest } = record;
@@ -240,31 +249,62 @@ export const useComposerFilesStore = create<FilesState>()((set, get) => ({
     return rows;
   },
   sendAs(workspaceId, requestId, rowId) {
-    set(s => {
-      const rows = (rowId === undefined ? s.pending[workspaceId] : s.queued[rowId]) ?? NONE;
-      if (rows.length === 0) return s;
-      const left = rowId === undefined ? { pending: without(s.pending, workspaceId) } : { queued: without(s.queued, rowId) };
-      // A tab left open all day would otherwise hold every file it ever sent; the oldest sends let go of theirs,
-      // and their rows in the transcript fall back to the runtime's records, as another client's already do.
-      const sent = { ...s.sent, [requestId]: rows };
-      const keys = Object.keys(sent);
-      for (const old of keys.slice(0, Math.max(0, keys.length - SENT_KEPT))) {
-        for (const file of sent[old] ?? NONE) revoke(file);
-        delete sent[old];
-      }
-      return { ...left, sent };
-    });
+    const rows = (rowId === undefined ? get().pending[workspaceId] : get().queued[rowId]) ?? NONE;
+    if (rows.length === 0) return;
+    set(s => ({ ...(rowId === undefined ? { pending: without(s.pending, workspaceId) } : { queued: without(s.queued, rowId) }), sent: banked(s.sent, requestId, rows) }));
   },
   restore(workspaceId, requestId, rowId) {
+    const rows = get().sent[requestId];
+    if (rows === undefined) return;
     set(s => {
-      const rows = s.sent[requestId];
-      if (rows === undefined) return s;
       const sent = without(s.sent, requestId);
       if (rowId !== undefined) return { sent, queued: { ...s.queued, [rowId]: rows } };
       return { sent, pending: { ...s.pending, [workspaceId]: [...rows, ...(s.pending[workspaceId] ?? NONE)] } };
     });
   },
+  async recall(sent, records) {
+    const { requestId } = sent;
+    const read = get().kept;
+    if (read === undefined || get().sent[requestId] !== undefined || recalling.has(requestId)) return;
+    recalling.add(requestId);
+    const settled = await Promise.allSettled(
+      records.map(async (record, index): Promise<ComposerFile> => {
+        // A file that is not an image draws as a chip off its record alone, so only its place is held.
+        if (!isImage(record.mediaType)) return { id: newId(), mediaType: record.mediaType, name: record.name ?? "file", bytes: "", size: record.bytes };
+        const image = await read(sent.workspaceId, sent.threadId, requestId, index);
+        return fileFromStash({ mediaType: image.mediaType, name: record.name ?? `image ${index + 1}`, bytes: image.bytes, size: record.bytes });
+      }),
+    );
+    recalling.delete(requestId);
+    const files = settled.flatMap(r => (r.status === "fulfilled" ? [r.value] : []));
+    if (files.length < records.length) {
+      releaseFiles(files);
+      // Only the host saying it keeps none ends the asking; a dropped socket is asked again when the row next draws.
+      const missing = settled.every(r => r.status === "fulfilled" || (r.reason instanceof RequestError && r.reason.kind === "not-found"));
+      if (missing) unkept.add(requestId);
+      return;
+    }
+    // Not trimmed to SENT_KEPT: a row read back is on screen, and trimming another row that is would read it back in turn.
+    set(s => (s.sent[requestId] !== undefined ? s : { sent: { ...s.sent, [requestId]: files } }));
+  },
 }));
+
+/** The request ids being read back now, and the ones the host answered it keeps nothing for, which are not asked
+ * again. */
+const recalling = new Set<string>();
+const unkept = new Set<string>();
+
+/** The bank with one send's files in it. A tab left open all day would otherwise hold every file it ever sent, so
+ * the oldest sends past SENT_KEPT let go of theirs, and their rows read them back from the host when drawn. */
+function banked(bank: Record<string, ReadonlyArray<ComposerFile>>, requestId: string, rows: ReadonlyArray<ComposerFile>): Record<string, ReadonlyArray<ComposerFile>> {
+  const sent = { ...bank, [requestId]: rows };
+  const keys = Object.keys(sent);
+  for (const old of keys.slice(0, Math.max(0, keys.length - SENT_KEPT))) {
+    for (const file of sent[old] ?? NONE) revoke(file);
+    delete sent[old];
+  }
+  return sent;
+}
 
 export function useComposerFiles(workspaceId: string): ReadonlyArray<ComposerFile> {
   return useComposerFilesStore(s => s.pending[workspaceId] ?? NONE);
@@ -279,7 +319,17 @@ export function useQueuedFiles(): Readonly<Record<string, ReadonlyArray<Composer
   return useComposerFilesStore(s => s.queued);
 }
 
-/** The files this tab sent under that request id, or none when the message came from another client or a reload. */
-export function useSentFiles(requestId: string | undefined): ReadonlyArray<ComposerFile> {
-  return useComposerFilesStore(s => (requestId === undefined ? NONE : s.sent[requestId] ?? NONE));
+/** The files a person's message carried: this tab's own where it holds them, else read back from the host while the
+ * message names an image and the thread it was sent on. */
+export function useSentFiles(message: { readonly requestId?: string; readonly attachments?: ReadonlyArray<AttachmentRecord>; readonly sentOn?: SentOn }): ReadonlyArray<ComposerFile> {
+  const { requestId, attachments, sentOn } = message;
+  const files = useComposerFilesStore(s => (requestId === undefined ? NONE : s.sent[requestId] ?? NONE));
+  const images = attachments?.some(r => isImage(r.mediaType)) === true;
+  const workspaceId = sentOn?.workspaceId;
+  const threadId = sentOn?.threadId;
+  useEffect(() => {
+    if (requestId === undefined || workspaceId === undefined || threadId === undefined || !images || files.length > 0 || unkept.has(requestId)) return;
+    void useComposerFilesStore.getState().recall({ workspaceId, threadId, requestId }, attachments ?? []);
+  }, [requestId, workspaceId, threadId, images, files.length, attachments]);
+  return files;
 }

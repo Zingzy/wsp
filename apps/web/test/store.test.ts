@@ -176,13 +176,34 @@ describe("the workspace the address opens on", () => {
     hash("");
     (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: true, version: "0.0.0", statePath: "/Users/dev/.wsp/state.json" };
     await refreshed(rows());
-    expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_b" });
+    expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": { workspaceId: "ws_b" } });
     useStore.getState().select("ws_a", "thr_1");
-    expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_a" });
+    expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": { workspaceId: "ws_a", threadId: "thr_1" } });
     useStore.setState({ creations: [{ key: "c1", name: "new", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }], selectedId: "c1" });
-    expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_a" });
+    expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": { workspaceId: "ws_a", threadId: "thr_1" } });
     useStore.setState({ selectedId: null });
     expect(await refreshed(rows())).toBe("ws_a");
+  });
+
+  it("a relaunch opens the thread the person had open, not the workspace's newest; one deleted since opens the workspace without a word", async () => {
+    const older: SessionView = { id: "s1", workspaceId: "ws_b", harness: "codex", status: "completed", threadId: "thr_old", prompt: "first", startedAt: 1 };
+    const newer: SessionView = { id: "s2", workspaceId: "ws_b", harness: "codex", status: "completed", threadId: "thr_new", prompt: "second", startedAt: 2 };
+    const { api } = fakeApi([view("ws_a"), view("ws_b")], [older, newer]);
+    useStore.setState({ api });
+    hash("");
+    await useStore.getState().refresh();
+    useStore.getState().select("ws_b", "thr_old");
+    // The app opens at its bare address after a restart: what it remembers is all that says where the person was.
+    useStore.setState({ selectedId: null, selectedThreadId: null });
+    hash("");
+    await useStore.getState().refresh();
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_b", "thr_old"]);
+
+    useStore.setState({ selectedId: null, selectedThreadId: null });
+    hash("");
+    api.listSessions = async () => [newer];
+    await useStore.getState().refresh();
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId, lastNotice()]).toEqual(["ws_b", null, null]);
   });
 
   it("a thread link opens that thread when the list carries it; a thread the list does not carry falls back to the workspace with a word", async () => {
@@ -661,12 +682,46 @@ describe("store sessions", () => {
     expect(useStore.getState().launches["ws_a"]?.title).toBe("read the port list");
 
     sessions.push({ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1" });
-    emit({ type: "session.start", workspaceId: "ws_a", sessionId: "c1" });
+    emit({ type: "session.start", workspaceId: "ws_a", sessionId: "c1", requestId: "r1" });
     // The rows land first: dropping the send before them would leave the workspace reading as having no thread at
     // all in the moment between the two.
     expect(useStore.getState().launches["ws_a"]).toBeDefined();
     await flush();
     expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+    expect(useStore.getState().launches["ws_a"]).toBeUndefined();
+  });
+
+  it("drops a send once the row that holds its thread is in, before the agent announces itself", async () => {
+    const sessions: SessionView[] = [];
+    const { api, emit } = fakeApi([view("ws_a")], sessions);
+    useStore.getState().bind(api);
+    await flush();
+    useStore.getState().launching("ws_a", { requestId: "r1", title: "read the port list", harness: "codex" });
+
+    // Codex takes seconds to answer its first thread; the held row is the thread from the moment it lands, and the
+    // send standing beside it would draw one thread as two tiles until then.
+    sessions.push({ id: "t1", workspaceId: "ws_a", harness: "codex", status: "running", threadId: "th_1", prompt: "read the port list" });
+    emit({ type: "session.held", workspaceId: "ws_a", threadId: "th_1", requestId: "r1" });
+    await flush();
+    expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+    expect(useStore.getState().launches["ws_a"]).toBeUndefined();
+  });
+
+  it("drops only the send a held row or a start answers, by its request id, not every send on the workspace", async () => {
+    const sessions: SessionView[] = [{ id: "t0", workspaceId: "ws_a", harness: "codex", status: "completed", threadId: "th_A", prompt: "older" }];
+    const { api, emit } = fakeApi([view("ws_a")], sessions);
+    useStore.getState().bind(api);
+    await flush();
+    useStore.getState().launching("ws_a", { requestId: "r_B", title: "a new thread", harness: "codex" });
+    // A send into thread A on the same folder holds A while B's codex is still starting: B's tile stands.
+    sessions.push({ id: "t1", workspaceId: "ws_a", harness: "codex", status: "running", threadId: "th_A", prompt: "more" });
+    emit({ type: "session.held", workspaceId: "ws_a", threadId: "th_A", requestId: "r_A" });
+    emit({ type: "session.start", workspaceId: "ws_a", sessionId: "c_A", threadId: "th_A", prompt: "more", requestId: "r_A" });
+    await flush();
+    expect(useStore.getState().launches["ws_a"]?.requestId).toBe("r_B");
+    sessions.push({ id: "t2", workspaceId: "ws_a", harness: "codex", status: "running", threadId: "th_B", prompt: "a new thread" });
+    emit({ type: "session.held", workspaceId: "ws_a", threadId: "th_B", requestId: "r_B" });
+    await flush();
     expect(useStore.getState().launches["ws_a"]).toBeUndefined();
   });
 

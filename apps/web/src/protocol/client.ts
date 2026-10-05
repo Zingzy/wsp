@@ -112,6 +112,7 @@ import {
   ReleaseView,
   SealedImageBuilt,
   SealedImageView,
+  type KeptAttachment,
   type SessionEvent,
   type SessionView,
   type SnapshotLineage,
@@ -573,6 +574,9 @@ export interface Api {
   listSessions(id?: string): Promise<SessionView[]>;
   /** The workspace's persisted session events, oldest first: what a chat replays on mount. */
   sessionHistory(id: string): Promise<SessionEvent[]>;
+  /** One image a person's message carried, as the host kept it. Optional so fixtures that draw no image need not fake
+   * it; a row then draws the record's words. */
+  sessionAttachment?(workspaceId: string, threadId: string, requestId: string, index: number): Promise<KeptAttachment>;
   /** Stops the session's running turn; takes the runtime's session id (SessionView.id), not the harness id the events carry.
    * accepted means the turn's done is already on the wire; not-running and not-found are answers, not errors. Optional so
    * fixtures that never stop a turn need not fake it; the composer offers no stop without it. */
@@ -917,6 +921,7 @@ export function makeApi(c: ProtocolClient): Api {
     portProbe: async (id, port) => (await c.request<{ probe: PortProbeView }>("workspaces.portProbe", { workspaceId: id, port })).probe,
     startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,
     sessionHistory: async id => (await c.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId: id })).events,
+    sessionAttachment: async (workspaceId, threadId, requestId, index) => (await c.request<{ attachment: KeptAttachment }>("sessions.attachment", { workspaceId, threadId, requestId, index })).attachment,
     listSessions: async id =>
       (await c.request<{ sessions: SessionView[] }>("sessions.list", id !== undefined ? { workspaceId: id } : {})).sessions,
     // Parsed, not trusted: an outcome outside the enum must not read as accepted.
