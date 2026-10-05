@@ -5,7 +5,7 @@
 // recompute before reactions fire, reactions fire in document order, a set in one round is seen by the next, and
 // past 8 rounds the batch stops with R910.
 import { evaluateSlateExpression, resolveSlateProp, type SlateEvalContext } from "./expr.js";
-import { SLATE_LIMITS } from "./limits.js";
+import { SLATE_LIMITS, slateBytes } from "./limits.js";
 import { getSlateValue, parseSlateOwnPath, setSlateValue, slateEqual } from "./paths.js";
 import { slateProblem, type SlateCode } from "./problems.js";
 import { SLATE_STEPS } from "./steps.js";
@@ -121,16 +121,22 @@ class Batch {
     if (kind === "derived") { this.problem("A607", `$${p.name} is derived and cannot be written; write the value it reads`); return; }
     if (kind === "run" && !((by === "run" || by === "host") && p.segs.length === 0)) { this.problem("A607", `$${p.name} is a run; its result is the host's to write`); return; }
     if (kind === "secret" && !(p.segs.length === 0 && isSlateSecretHandle(value) && by !== "agent")) { this.problem("S520", `$${p.name} is a secret; only the person's typing fills it, and its value is its handle`); return; }
-    this.set(path, value);
+    const refused = this.set(path, value);
+    if (refused !== undefined) this.problem(refused.code, refused.why);
   }
 
   /** Sets a path; answers why not when it cannot. */
-  private set(path: string, value: SlateJson): string | undefined {
+  private set(path: string, value: SlateJson): { code: SlateCode; why: string } | undefined {
     const next = setSlateValue(this.values, path, value);
-    if (next === undefined) return `${path} steps into a value that is not a list or a record`;
-    if (JSON.stringify(next).length > SLATE_LIMITS.valuesBytes) return `the values would pass ${SLATE_LIMITS.valuesBytes / 1024} KB (S500)`;
+    if (next === undefined) return { code: "A607", why: `${path} steps into a value that is not a list or a record, or past ${SLATE_LIMITS.listItems} items` };
+    if (slateBytes(JSON.stringify(next)) > SLATE_LIMITS.valuesBytes) return { code: "S500", why: `the values would pass ${SLATE_LIMITS.valuesBytes / 1024} KB` };
     if (!slateEqual(getSlateValue(this.values, path), value)) this.values = next;
     return undefined;
+  }
+
+  private setStep(path: string, value: SlateJson): string | undefined {
+    const refused = this.set(path, value);
+    return refused === undefined ? undefined : `${refused.why} (${refused.code})`;
   }
 
   /** Runs a list of steps; stops at the first refusal, which is listed as R912. */
@@ -155,7 +161,7 @@ class Batch {
         if (kind === "derived" || kind === "run") return `$${p.name} is ${kind === "derived" ? "derived" : "a run"} and cannot be written (A607)`;
         if (kind === "secret") return `$${p.name} is a secret; only the person's typing fills it (S520)`;
         const value = s.do === "set" ? (resolveSlateProp(s.value, ctx()) ?? null) : getSlateValue(this.values, s.path) !== true;
-        return this.set(s.path, value);
+        return this.setStep(s.path, value);
       }
       case "start": {
         const decl = this.doc.runs[s.run];
@@ -163,7 +169,7 @@ class Batch {
         const current = this.values[s.run] as Partial<SlateRunRecord> | undefined;
         if ("once" in decl && decl.once === true && current?.state === "running") return undefined;
         this.out.starts.push({ run: s.run, by: from.by, why: from.reaction !== undefined ? `reaction ${from.reaction}` : `a ${this.ctx.event?.kind ?? "press"} on ${from.piece}` });
-        if (this.ctx.start !== undefined) return this.set(`$${s.run}`, this.ctx.start(s.run, from.by) as unknown as SlateJson);
+        if (this.ctx.start !== undefined) return this.setStep(`$${s.run}`, this.ctx.start(s.run, from.by) as unknown as SlateJson);
         return undefined;
       }
       case "cancel":

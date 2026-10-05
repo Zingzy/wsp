@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSlate, runSlateBatch, slateStartValues, type SlateDoc, type SlateRunRecord } from "../../src/slate/index.js";
+import { parseSlate, runSlateBatch, slateStartValues, validateSlate, SLATE_LIMITS, type SlateDoc, type SlateRunRecord } from "../../src/slate/index.js";
 import { SPEC_EXAMPLES } from "./examples.js";
 
 const doc = (decls: string, pieces = `<text>x</text>`): SlateDoc => {
@@ -109,5 +109,23 @@ describe("the batch", () => {
     expect(b1.values.check).toEqual({ state: "held", why: "needs your approval", runs: 0 });
     const b2 = runSlateBatch(c, b1.values, [{ path: "$check", value: { state: "done", exit: 0, out: "wsp-landing\n  Framework: Next.js", runs: 1 } }], { by: "run" });
     expect(b2.values.step).toBe(3);
+  });
+});
+
+describe("the size of a write", () => {
+  it("lists S500 when a write would pass the values cap, and keeps the values as they were", () => {
+    const d = doc(`  <value name="notes" start="" />`);
+    const r = runSlateBatch(d, slateStartValues(d), [{ path: "$notes", value: "x".repeat(300_000) }], { by: "person" });
+    expect(r.problems.map(p => p.code)).toEqual(["S500"]);
+    expect(r.values.notes).toBe("");
+  });
+
+  it("counts the document and the values in UTF-8 bytes, not characters", () => {
+    const title = "\u20ac".repeat(30_000);
+    expect(title.length).toBeLessThan(SLATE_LIMITS.documentBytes);
+    const d = doc(`  <value name="notes" start="" />`);
+    expect(validateSlate({ ...d, title }).errors.map(e => e.code)).toContain("D208");
+    const r = runSlateBatch(d, slateStartValues(d), [{ path: "$notes", value: "\u20ac".repeat(100_000) }], { by: "person" });
+    expect(r.problems.map(p => p.code)).toEqual(["S500"]);
   });
 });

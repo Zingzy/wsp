@@ -20,12 +20,14 @@ import {
   roadOf,
   scopeOf,
   sketchSlate,
+  slateBytes,
   slateCatalog,
   slateDependencies,
   slateEqual,
   slateNearest,
   slateDomainKey,
   setSlateValue,
+  SLATE_LIMITS,
   SLATE_SOURCES,
   slateStep,
   slateText,
@@ -186,7 +188,6 @@ type BatchSend = SlateBatchResult["sends"][number] & { values?: Record<string, S
 
 const SNAPSHOTS_KEPT = 100;
 const SNAPSHOT_BYTES = 8 * 1024 * 1024;
-const VALUES_BYTES = 256 * 1024;
 const MESSAGE_CHARS = 20_000;
 const REQUEST_KEPT_MS = 10 * 60_000;
 /** How many presses a request id is remembered for at most, the oldest dropped first. */
@@ -352,7 +353,7 @@ const SAID: Record<"send" | "steer" | "queue", Record<"started" | "steered" | "q
   queue: { started: "Sent", steered: "Sent into the running turn; this agent takes messages mid-turn", queued: "Waiting for the turn to end" },
 };
 
-const sizeOf = (value: unknown): number => Buffer.byteLength(JSON.stringify(value));
+const sizeOf = (value: unknown): number => slateBytes(JSON.stringify(value));
 const isRunRecord = (v: SlateJson | undefined): v is SlateJson & { state: string; runs: number; why?: string } =>
   typeof v === "object" && v !== null && !Array.isArray(v) && typeof v["state"] === "string" && typeof v["runs"] === "number";
 const asJson = (v: unknown): SlateJson => v as SlateJson;
@@ -1002,8 +1003,8 @@ export function createSlates(deps: SlatesDeps): Slates {
     // A timer's or the agent's start is no step of the document: it starts here and its record goes in as a run's write.
     const timed = (o.starts ?? []).map(s => ({ path: `$${s.run}`, value: asJson(startNow(r, s.run, s.by, views).record) }));
     const result = runSlateBatch(doc, r.values, [...input, ...timed], ctx);
-    if (sizeOf(result.values) > VALUES_BYTES) {
-      keepProblems(r, [problem("S500", "values-too-big", `the values would be ${sizeOf(result.values)} bytes; a slate holds at most ${VALUES_BYTES}`)]);
+    if (sizeOf(result.values) > SLATE_LIMITS.valuesBytes) {
+      keepProblems(r, [problem("S500", "values-too-big", `the values would be ${sizeOf(result.values)} bytes; a slate holds at most ${SLATE_LIMITS.valuesBytes}`)]);
       await save(r);
       return { asks, started: [], sends: [] };
     }
@@ -1131,7 +1132,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   };
 
   const writeDocument = async (r: SlateRecord, next: SlateDoc | null, values: SlateValues, by: "agent" | "person", cause: SlateCause, pieces: string[], warnings: SlateProblem[]): Promise<SlateWriteAnswer> => {
-    if (sizeOf(values) > VALUES_BYTES) throw invalid([problem("S500", "values-too-big", `the values are ${sizeOf(values)} bytes; a slate holds at most ${VALUES_BYTES}`)], warnings);
+    if (sizeOf(values) > SLATE_LIMITS.valuesBytes) throw invalid([problem("S500", "values-too-big", `the values are ${sizeOf(values)} bytes; a slate holds at most ${SLATE_LIMITS.valuesBytes}`)], warnings);
     dropDeclared(r, next);
     if (r.version > 0) r.previous = { ...snapOf(r), version: r.version };
     // A clear keeps the values; a document write keeps what both documents declare and fires nothing (02).

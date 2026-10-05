@@ -7,7 +7,7 @@ import { escapeRegExp } from "../regexp.js";
 import { checkSlateExpression, parseSlateExpression, parseSlateFormat, slateDependencies, type SlateCheckScope, type SlateType } from "./expr.js";
 import { isSlateIcon, nearestSlateIcon } from "./icons.js";
 import { SLATE_PIECES, SLATE_RESERVED_PROPS, type SlateItemSpec, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
-import { SLATE_LIMITS } from "./limits.js";
+import { SLATE_LIMITS, slateBytes } from "./limits.js";
 import { slateTable, parseSlateOwnPath } from "./paths.js";
 import { SLATE_WARNINGS, nearest, orList, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
 import { SLATE_SOURCES, slateIsSeries, slateSourceType } from "./sources.js";
@@ -154,7 +154,7 @@ class Validator {
       const token = tokenIn(text);
       if (token !== undefined) this.add("S520", `${file} holds a token written out (${token}...); let the code read it from the file it lives in, or from an env the run hands it`, { piece: file });
     }
-    if (JSON.stringify({ ...d, files: undefined }).length > SLATE_LIMITS.documentBytes) this.add("D208", `the document is over ${fmtBytes(SLATE_LIMITS.documentBytes)}`);
+    if (slateBytes(JSON.stringify({ ...d, files: undefined })) > SLATE_LIMITS.documentBytes) this.add("D208", `the document is over ${fmtBytes(SLATE_LIMITS.documentBytes)}`);
     this.names();
     this.limits();
     for (const [name, v] of Object.entries(d.values)) this.value(name, v.start, v.secret === true, v.keep === true);
@@ -190,7 +190,7 @@ class Validator {
     over(Object.keys(d.runs).length, SLATE_LIMITS.runs, "K707", "runs");
     over(d.reactions.length, SLATE_LIMITS.reactions, "A611", "reactions");
     over(Object.keys(d.pieces).length, SLATE_LIMITS.pieces, "D207", "pieces", "bind a list to a table or a list instead of writing rows");
-    const starts = JSON.stringify(Object.values(d.values).map(v => v.start)).length;
+    const starts = slateBytes(JSON.stringify(Object.values(d.values).map(v => v.start)));
     if (starts > SLATE_LIMITS.valuesBytes) this.add("S500", `the values' starts are over ${fmtBytes(SLATE_LIMITS.valuesBytes)}`);
   }
 
