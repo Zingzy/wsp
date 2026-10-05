@@ -38,8 +38,10 @@ import { provideDaemonWire } from "../src/files/wire.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { useStore } from "../src/protocol/store.js";
-import { fakeWire, folderCrumbRow, imported, LEVELS, LISTING, PROJECT_DEST, resetSurfaces, shownFolder, WS } from "./surface-harness.js";
+import { fakeWire, folderCrumbRow, imported, LEVELS, LISTING, PROJECT_DEST, resetSurfaces, shownFolder, view, WS } from "./surface-harness.js";
 import { provideDaemonHello } from "../src/files/wire.js";
+import { WorkspaceTerminals, provideTerminals } from "../src/terminal/link.js";
+import { LINK_DOWN_WORDS } from "../src/adapt/index.js";
 
 beforeEach(resetSurfaces);
 
@@ -272,6 +274,24 @@ describe("files surface", () => {
     provideDaemonHello(WS, null);
     render(<FilesSurface workspaceId={WS} theme="dark" />);
     expect(screen.getAllByText("The thread is not running.")).toHaveLength(2);
+  });
+
+  it("says why this window's link is down, in place of saying a running thread is not running", () => {
+    const said = "spoo is behind: daemon 118, host 120; wsp add spoo --update puts this wsp's daemon on it";
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING }));
+    provideDaemonHello(WS, null);
+    act(() => useStore.setState({ statuses: { [WS]: { ...view, machineState: "running", reach: { state: "reachable" }, size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0 } as never } }));
+    const wt = new WorkspaceTerminals({ request: async () => ({ ok: true }) });
+    act(() => provideTerminals(WS, wt));
+    render(<FilesSurface workspaceId={WS} theme="dark" />);
+    act(() => wt.feedStatus("refused", said));
+    expect(document.querySelector("[data-slot='empty-title']")?.textContent).toBe(LINK_DOWN_WORDS.refused);
+    expect(document.querySelector("[data-slot='empty-description']")?.textContent).toBe(said);
+    act(() => wt.feedStatus("unanswered"));
+    expect(document.querySelector("[data-slot='empty-title']")?.textContent).toBe(LINK_DOWN_WORDS.unanswered);
+    expect(document.querySelector("[data-slot='empty-description']")?.textContent).toBe("Nothing has answered on api");
+    expect(document.body.textContent).not.toContain("The thread is not running.");
+    act(() => provideTerminals(WS, null));
   });
 
   it("says this computer's own daemon is not running and offers the start, in place of telling a person to wake it", async () => {

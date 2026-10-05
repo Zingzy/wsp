@@ -83,6 +83,36 @@ describe("the preload's bridge", () => {
     expect(wsp.droppedPath(dropped)).toBeUndefined();
   });
 
+  it("hands the shell the header's ground and ink in #rrggbb, resolved off the page's tokens, and nothing when either cannot be painted", async () => {
+    const wsp = await bridge();
+    // The page's tokens as a probe resolves them, and a canvas that paints two spellings, as the renderer paints every
+    // one; anything else leaves the fill as it was.
+    const tokens: Record<string, string> = { "var(--titlebar-ground, transparent)": "oklch(0.145 0 none)", "var(--titlebar-ink, transparent)": "rgb(200, 203, 212)" };
+    const painted: Record<string, number[]> = { "oklch(0.145 0 none)": [10, 10, 10, 255], "rgb(200, 203, 212)": [200, 203, 212, 255], transparent: [0, 0, 0, 0] };
+    let fill = "#000000";
+    const pen = {
+      set fillStyle(value: string) {
+        if (value in painted) fill = value;
+      },
+      fillRect: () => {},
+      getImageData: () => ({ data: painted[fill] ?? [0, 0, 0, 255] }),
+    };
+    const probe = { style: { color: "" }, remove: () => {} };
+    vi.stubGlobal("document", { createElement: (tag: string) => (tag === "canvas" ? { getContext: () => pen } : probe), documentElement: { append: () => {} } });
+    vi.stubGlobal("getComputedStyle", (el: typeof probe) => ({ color: tokens[el.style.color] ?? "transparent" }));
+    try {
+      send.mockClear();
+      wsp.setTitleBar();
+      expect(send).toHaveBeenLastCalledWith("titlebar:set", { color: "#0a0a0a", symbolColor: "#c8cbd4" });
+      send.mockClear();
+      delete tokens["var(--titlebar-ink, transparent)"];
+      wsp.setTitleBar();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("says when a terminal has focus and hands back the chords the shell stood aside from, unsubscribing with the same listener", async () => {
     const wsp = await bridge();
     wsp.setTerminalFocus(true);
