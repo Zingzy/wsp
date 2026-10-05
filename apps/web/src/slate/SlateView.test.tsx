@@ -298,6 +298,9 @@ describe("the slate renderer", () => {
       fireEvent.click(screen.getByRole("button", { name: "Take theirs" }));
       frame();
       expect((screen.getByLabelText("Note for the agent") as HTMLInputElement).value).toBe("from the agent");
+      // The blur sent abc; taking theirs sends the agent's value back, so the host holds what the window shows.
+      await act(async () => vi.advanceTimersByTime(300));
+      expect(vi.mocked(link.writeState).mock.calls.at(-1)).toEqual([{ $note: "from the agent" }]);
     } finally {
       vi.useRealTimers();
     }

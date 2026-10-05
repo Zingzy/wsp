@@ -336,8 +336,9 @@ export class SlateEngine {
     return theirs === undefined || mine === undefined || this.#focused.has(path) ? undefined : { mine, theirs };
   }
 
-  /** Take theirs: the held value replaces the person's. */
-  takeTheirs(path: string): void {
+  /** Take theirs: the held value replaces the person's, and is answered for the caller to send, since the host may
+   * hold what the person typed after it. */
+  takeTheirs(path: string): SlateJson | undefined {
     const theirs = this.#held.get(path);
     this.#held.delete(path);
     this.#mine.delete(path);
@@ -345,6 +346,7 @@ export class SlateEngine {
     if (theirs !== undefined) this.#remote = setOwn(this.#remote, path, theirs);
     this.#view = null;
     this.invalidate([path]);
+    return theirs;
   }
 
   /** Keep mine: the person's value stands and goes to the host again. */

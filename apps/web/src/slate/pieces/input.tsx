@@ -174,7 +174,8 @@ function TextInput({ piece, props, slate, sender, raise, path }: PieceViewProps 
             variant="ghost"
             size="xs"
             onClick={() => {
-              slate.takeTheirs(path);
+              const theirs = slate.takeTheirs(path);
+              if (theirs !== undefined) void sender.now(path, theirs);
               setConflict(undefined);
             }}
           >
