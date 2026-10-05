@@ -278,6 +278,8 @@ import {
   type ReviewVerdict,
   type StartResult,
   type WorkspaceFrom,
+  SETTLE_MS,
+  threadSettled,
 } from "@wsp/protocol";
 import { PLAN_RESETS, secretsOf } from "./adapters.js";
 import { accountOf, accountOnComputer, accountRows, createBurn, createPriceTable, createUsageLedger, resetDetailsDue, usageComputerName, type Vaulted } from "./usage.js";
@@ -3782,6 +3784,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       };
     },
     loaded: () => ready(),
+    settled: async threadId => {
+      const latest = latestOn(threadId);
+      if (latest === undefined) return false;
+      const own = threadRecords.get(threadId);
+      const prefs = await preferences.get();
+      const facts = { working: latest.status === "running", asking: latest.waitingOn !== undefined, failed: latest.status === "failed", startedAt: latest.startedAt ?? null, endedAt: latest.endedAt ?? null, readAt: own?.readAt ?? null, settledAt: own?.settledAt ?? null };
+      return threadSettled(facts, clock.now(), SETTLE_MS[prefs.settleAfter]);
+    },
     under: lead => treeUnder(lead),
     threadOfToken: token => threadOfToken(token),
     mcpServer: async (threadId, name) => {

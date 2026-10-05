@@ -764,6 +764,35 @@ describe("the slate v2 host, round 4", () => {
     expect(realpathSync(String(((await again.slates.get(threadId))!.values["where"] as { out: string }).out).split("\n")[0]!)).toBe(realpathSync(inner));
   }, 30_000);
 
+  it("a settled thread stops its timed runs, always ones too, and opening its slate starts them again at once", async () => {
+    const store = memoryStore();
+    const { rt, root, threadId, asThread } = await threadOn("wsp-slates-settled-", { store });
+    await rt.slates.write({ text: `<slate title="Feed"><run name="feed" cmd="echo hi" every={3600} always timeout={20} /><column><output run={$feed} /></column></slate>` }, asThread);
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.asks).toHaveLength(1);
+    }, { timeout: 5_000 });
+    await rt.slates.approve({ threadId, key: (await rt.slates.get(threadId))!.asks[0]!.key, scope: "thread" });
+    const feed = async (on: Runtime) => (await on.slates.get(threadId))!.values["feed"] as { state: string; runs: number };
+    await vi.waitFor(async () => expect(await feed(rt)).toMatchObject({ state: "done", runs: 1 }), { timeout: 10_000 });
+    await rt.sessions.settle([threadId]);
+    await rt.close();
+    runtimes.splice(runtimes.indexOf(rt), 1);
+
+    // The new host arms the always timer as it boots, which ticks at once; the thread is settled, so nothing starts.
+    const again = host(root, store, [], []);
+    await again.slates.ready();
+    await new Promise(resolve => setTimeout(resolve, 1_500));
+    await again.slates.settled();
+    expect(await feed(again)).toMatchObject({ state: "done", runs: 1 });
+    // A window opens the slate: the run it held starts now, not an hour from now.
+    again.slates.subscribe({ threadId, sources: [] });
+    await vi.waitFor(async () => {
+      await again.slates.settled();
+      expect(await feed(again)).toMatchObject({ state: "done", runs: 2 });
+    }, { timeout: 10_000 });
+  }, 30_000);
+
   it("a timer that ticks as the host boots starts its run in the thread's folder, never the host process's", async () => {
     let inner = "";
     const store = memoryStore();

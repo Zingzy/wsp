@@ -127,6 +127,9 @@ export interface SlatesDeps {
   thread(threadId: string): SlateThreadFacts | undefined;
   /** The host's workspaces loaded, which a thread's facts are read off; the slates recover only after. */
   loaded?(): Promise<void>;
+  /** Whether the thread is settled, by the sidebar's own rule: its slate's timers, always ones too, wait until a window
+   * shows the slate again. */
+  settled?(threadId: string): Promise<boolean>;
   /** Every thread under the lead, the lead included. */
   under(lead: string): string[];
   threadOfToken(token: string): string;
@@ -401,14 +404,24 @@ export function createSlates(deps: SlatesDeps): Slates {
       const r = records.get(threadId);
       if (r !== undefined) deps.emit({ type: "slate.run", workspaceId: r.workspaceId, threadId, run, lines: [line] });
     },
-    onTimer: (threadId, run) => {
-      void serial(threadId, async () => {
-        const r = records.get(threadId);
-        if (r?.document?.runs[run] === undefined) return;
-        await batch(r, [], "timer", { starts: [{ run, by: "timer" }] });
-      }).catch(() => {});
-    },
+    onTimer: (threadId, run) => timed(threadId, run),
   });
+
+  /** Runs a settled thread's timer skipped while no window showed the slate, started the moment one does. */
+  const skipped = new Map<string, Set<string>>();
+  /** The windows showing each thread's slate, whatever sources they hold. */
+  const windows = new Map<string, number>();
+  function timed(threadId: string, run: string): void {
+    void serial(threadId, async () => {
+      const r = records.get(threadId);
+      if (r?.document?.runs[run] === undefined) return;
+      if ((windows.get(threadId) ?? 0) === 0 && (await deps.settled?.(threadId)) === true) {
+        skipped.set(threadId, (skipped.get(threadId) ?? new Set()).add(run));
+        return;
+      }
+      await batch(r, [], "timer", { starts: [{ run, by: "timer" }] });
+    }).catch(() => {});
+  }
 
   const mcp = createSlateMcp({
     server: (threadId, name) => (deps.mcpServer === undefined ? Promise.reject(new Error("this host starts no MCP servers for a slate")) : deps.mcpServer(threadId, name)),
@@ -1349,9 +1362,13 @@ export function createSlates(deps: SlatesDeps): Slates {
       const held = holds.get(p.threadId) ?? new Map<string, number>();
       holds.set(p.threadId, held);
       for (const s of p.sources) held.set(s, (held.get(s) ?? 0) + 1);
-      // A slate with any hold on it counts as shown for its timers (01, "slates.subscribe").
+      // A slate with any hold on it counts as shown for its timers (01, "slates.subscribe"), and what a settled
+      // thread's timers skipped starts now rather than at their next tick.
+      windows.set(p.threadId, (windows.get(p.threadId) ?? 0) + 1);
       runs.shown(p.threadId, true);
       mcp.shown(p.threadId, true);
+      for (const run of skipped.get(p.threadId) ?? []) timed(p.threadId, run);
+      skipped.delete(p.threadId);
       if (p.sources.includes("pr")) {
         const r = records.get(p.threadId);
         if (r !== undefined) deps.watchPr?.(r.workspaceId);
@@ -1360,6 +1377,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       return () => {
         if (released) return;
         released = true;
+        windows.set(p.threadId, Math.max(0, (windows.get(p.threadId) ?? 1) - 1));
         for (const s of p.sources) {
           const n = (held.get(s) ?? 1) - 1;
           if (n <= 0) held.delete(s);
@@ -1421,6 +1439,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         const dir = folderOf(threadId);
         if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
         holds.delete(threadId);
+        skipped.delete(threadId);
+        windows.delete(threadId);
         await deps.store.delete(SLATES, threadId);
       });
     },

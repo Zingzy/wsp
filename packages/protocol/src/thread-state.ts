@@ -78,3 +78,29 @@ export function subagentStateWord(state: SubagentState): string {
 export function needsYouLine(ask: Pick<SessionPermissionEvent, "toolName" | "input" | "detail">): string {
   return `${threadStateWord("waiting").toLowerCase()}: ${askingLine(ask)}`;
 }
+
+/** A thread as the Settled fold reads it, its times ms epoch on the host's clock. */
+export interface SettleFacts {
+  working: boolean;
+  asking: boolean;
+  failed: boolean;
+  startedAt: number | null;
+  endedAt: number | null;
+  readAt: number | null;
+  settledAt: number | null;
+}
+
+/** Whether the thread belongs in the Settled fold, the one rule the sidebar folds by and the host stops a settled
+ * slate's timers by: nothing running and nothing asked, and either the person settled it by hand with nothing
+ * happening since, or it was seen after it ended and has been quiet `settleMs` since the later of its last activity
+ * and that showing. A null `settleMs` is never, so only a hand settles; a thread nobody has seen since it finished, one
+ * that failed, and one `held` (open, or in a pinned tree) never fold by time; one with no times has no quiet to read. */
+export function threadSettled(t: SettleFacts, nowMs: number, settleMs: number | null, held = false): boolean {
+  if (t.asking || t.working) return false;
+  const times = [t.startedAt, t.endedAt].filter((at): at is number => at !== null);
+  const last = times.length === 0 ? null : Math.max(...times);
+  if (t.settledAt !== null && (last === null || t.settledAt >= last)) return true;
+  const seen = t.endedAt === null || (t.readAt !== null && t.readAt >= t.endedAt);
+  if (held || settleMs === null || t.failed || last === null || !seen) return false;
+  return nowMs - Math.max(last, t.readAt ?? last) >= settleMs;
+}

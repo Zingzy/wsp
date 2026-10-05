@@ -5,7 +5,7 @@
 // which model state wsp's wire does not carry. Contract types are hand-written
 // against the wsp thread snapshot (startedAt and endedAt instead of createdAt,
 // updatedAt and the turn projection).
-import { DEFAULT_PREFERENCES, SETTLE_MS, type SessionStatus, type ThreadSection } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, SETTLE_MS, threadSettled, type SessionStatus, type ThreadSection } from "@wsp/protocol";
 import { cn } from "../lib/utils";
 import { activeThreadAnchorTimestampMs, toSortableTimestamp } from "./threadSort";
 
@@ -245,13 +245,6 @@ export interface SettleInput extends SidebarThreadStatusInput, ThreadTimestamps 
   readonly settledAt: string | null;
 }
 
-/** The last thing that happened on the thread: its latest turn's start or its end, whichever is later. A message
-    into the thread is a turn, so it moves this too. */
-function lastActivityMs(thread: ThreadTimestamps): number | null {
-  const times = [thread.startedAt, thread.endedAt].map(at => toSortableTimestamp(at ?? undefined)).filter(at => at !== null);
-  return times.length === 0 ? null : Math.max(...times);
-}
-
 /** Whether a window has shown the thread since its latest turn ended, which a failed turn needs as much as a
     finished one before it may fold by time. */
 function isThreadSeen(thread: SettleInput): boolean {
@@ -260,21 +253,16 @@ function isThreadSeen(thread: SettleInput): boolean {
   return ended === null || (read !== null && read >= ended);
 }
 
-/** Whether the thread belongs in the Settled fold: nothing running and nothing asked, and either the person settled it
-    by hand with nothing happening since, or a window has shown it since it ended and it has been quiet
-    `settleMs` since then, the person's pick on General, counted from the later of its last activity and that
-    showing; a null `settleMs` is never, and only a hand settles. Three threads never
-    fold by time and wait for a hand: one nobody has seen since it finished, one whose turn failed, and one `held`
-    names: the one open in the centre, so a thread being read does not leave the list under the reader, and one in a
-    tree the person pinned. One whose
-    times are all missing has no quiet to read, so it stays out rather than falling into a group kept shut. */
+/** Whether the thread belongs in the Settled fold, by the protocol's one rule (threadSettled), the one the host stops
+    a settled slate's timers by; `held` names the thread open in the centre and one in a pinned tree. */
 export function isThreadSettled(thread: SettleInput, nowMs: number, held = false, settleMs: number | null = SETTLE_MS[DEFAULT_PREFERENCES.settleAfter]): boolean {
-  if (thread.asking !== null || isThreadWorking(thread)) return false;
-  const last = lastActivityMs(thread);
-  const settled = toSortableTimestamp(thread.settledAt ?? undefined);
-  if (settled !== null && (last === null || settled >= last)) return true;
-  if (held || settleMs === null || thread.status === "failed" || last === null || !isThreadSeen(thread)) return false;
-  return nowMs - Math.max(last, toSortableTimestamp(thread.readAt ?? undefined) ?? last) >= settleMs;
+  const ms = (at: string | null | undefined) => toSortableTimestamp(at ?? undefined);
+  return threadSettled(
+    { working: isThreadWorking(thread), asking: thread.asking !== null, failed: thread.status === "failed", startedAt: ms(thread.startedAt), endedAt: ms(thread.endedAt), readAt: ms(thread.readAt), settledAt: ms(thread.settledAt) },
+    nowMs,
+    settleMs,
+    held,
+  );
 }
 
 /** Whether the thread has been read and is quiet, so "Settle all read" takes it: no finish nobody has seen, no failure
