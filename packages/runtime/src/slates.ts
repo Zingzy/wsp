@@ -198,11 +198,14 @@ const refused = (p: SlateProblem, kind: string): Error => Object.assign(new Erro
 
 /** A write the parser or the validator refused, with every error it found and the warnings beside them. */
 function invalid(errors: SlateProblem[], warnings: SlateProblem[]): Error {
-  const first = errors[0]!;
-  const where = [first.line !== undefined ? `line ${first.line}` : undefined, first.piece !== undefined ? (first.prop !== undefined ? `${first.piece}.${first.prop}` : first.piece) : undefined].filter(w => w !== undefined).join(", ");
-  const more = errors.length > ERRORS_LISTED ? `, and ${errors.length - ERRORS_LISTED} more` : "";
-  const fix = first.fix !== undefined ? `. Did you mean ${first.fix}?` : "";
-  const message = `slate refused: ${errors.length} error${errors.length === 1 ? "" : "s"}${more}; the first: ${where === "" ? "" : `${where}: `}${first.code} ${first.name} ${first.message}${fix}`;
+  const said = (p: SlateProblem): string => {
+    const where = [p.line !== undefined ? `line ${p.line}` : undefined, p.piece !== undefined ? (p.prop !== undefined ? `${p.piece}.${p.prop}` : p.piece) : undefined].filter(w => w !== undefined).join(", ");
+    return `${where === "" ? "" : `${where}: `}${p.code} ${p.name} ${p.message}${p.fix !== undefined ? `. Did you mean ${p.fix}?` : ""}`;
+  };
+  // Every error at once, so a slate with seven mistakes takes one rewrite and not seven; one line, as every refusal is.
+  const listed = errors.slice(0, ERRORS_LISTED);
+  const more = errors.length > ERRORS_LISTED ? ` And ${errors.length - ERRORS_LISTED} more.` : "";
+  const message = `slate refused: ${errors.length} error${errors.length === 1 ? "" : "s"}: ${listed.length === 1 ? said(listed[0]!) : listed.map((p, i) => `${i + 1}) ${said(p)}`).join(" ")}${more}`;
   return Object.assign(new Error(message), { kind: "invalid", errors: errors.slice(0, ERRORS_LISTED), warnings });
 }
 

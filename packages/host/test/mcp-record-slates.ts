@@ -40,7 +40,7 @@ export const SLATE_ANSWERED: Record<string, Case[]> = {
       case: "refused with every error",
       arguments: { text: "<slate><meter value=\"usage.weekley.percent\" /></slate>" },
       env: TURN,
-      replies: { "slates.write": refused({ error: "slate refused: 1 error; the first: line 9, week.value: X401 path-unknown", kind: "invalid", errors: [PROBLEM], warnings: [] }) },
+      replies: { "slates.write": refused({ error: "slate refused: 1 error: line 9, week.value: X401 path-unknown", kind: "invalid", errors: [PROBLEM], warnings: [] }) },
     },
     { case: "a thread nobody has", arguments: { thread: "zz", text: "<clear />" }, replies: { "sessions.list": SESSIONS } },
   ],

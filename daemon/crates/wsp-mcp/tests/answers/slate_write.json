@@ -126,9 +126,9 @@
         "WSP_TURN": "turn-token-1"
       },
       "replies": {
-        "slates.write": "{\"id\":1,\"ok\":false,\"error\":\"slate refused: 1 error; the first: line 9, week.value: X401 path-unknown\",\"kind\":\"invalid\",\"errors\":[{\"code\":\"X401\",\"name\":\"path-unknown\",\"line\":9,\"piece\":\"week\",\"prop\":\"value\",\"message\":\"usage.weekley.percent is not a path \\\"\u0085\\\"\",\"fix\":\"usage.week.percent\"}],\"warnings\":[]}"
+        "slates.write": "{\"id\":1,\"ok\":false,\"error\":\"slate refused: 1 error: line 9, week.value: X401 path-unknown\",\"kind\":\"invalid\",\"errors\":[{\"code\":\"X401\",\"name\":\"path-unknown\",\"line\":9,\"piece\":\"week\",\"prop\":\"value\",\"message\":\"usage.weekley.percent is not a path \\\"\u0085\\\"\",\"fix\":\"usage.week.percent\"}],\"warnings\":[]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"slate refused: 1 error; the first: line 9, week.value: X401 path-unknown\"}],\"structuredContent\":{\"error\":\"slate refused: 1 error; the first: line 9, week.value: X401 path-unknown\",\"class\":\"usage\",\"exit\":3,\"errors\":[{\"code\":\"X401\",\"name\":\"path-unknown\",\"line\":9,\"piece\":\"week\",\"prop\":\"value\",\"message\":\"usage.weekley.percent is not a path \\\"\\u0085\\\"\",\"fix\":\"usage.week.percent\"}],\"warnings\":[]},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"slate refused: 1 error: line 9, week.value: X401 path-unknown\"}],\"structuredContent\":{\"error\":\"slate refused: 1 error: line 9, week.value: X401 path-unknown\",\"class\":\"usage\",\"exit\":3,\"errors\":[{\"code\":\"X401\",\"name\":\"path-unknown\",\"line\":9,\"piece\":\"week\",\"prop\":\"value\",\"message\":\"usage.weekley.percent is not a path \\\"\\u0085\\\"\",\"fix\":\"usage.week.percent\"}],\"warnings\":[]},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "slates.write",
