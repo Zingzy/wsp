@@ -149,7 +149,7 @@ describe("the header and the body through a settle", () => {
     ];
     const { center, container } = await mount(fixtureApi(transcript, ROWS), "Adding GET /ready.");
     const crumb = () => container.querySelector("[data-shell-center] [data-thread-breadcrumb]")!.textContent;
-    await waitFor(() => expect(crumb()).toBe("make me a simple server"));
+    await waitFor(() => expect(crumb()).toBe("the-project/make me a simple server"));
     expect(center().queryByText("Checking the keychain.")).toBeNull();
     expect(useStore.getState().selectedThreadId).toBe("thr_a");
     expect(window.location.hash).toBe(`#w/${WS}/t/thr_a`);
