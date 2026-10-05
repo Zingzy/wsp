@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, PROJECT_DIR_ENV, SAVED_SPEND_TAIL_BYTES, savedSpendCommand, userMessageLine } from "../src/landmines.js";
+import { shellQuote, SLATE_BRIEF } from "@wsp/protocol";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -193,6 +194,15 @@ describe("buildCommand", () => {
     expect(cmd).not.toContain("--strict-mcp-config");
     expect(buildCommand({ sessionId })).not.toContain("--mcp-config");
     expect(buildCommand({ sessionId, mcpServers: {} })).not.toContain("--mcp-config");
+  });
+
+  it("a thread's own scoped wsp server brings the slate's brief to the end of the system prompt, and no other launch does", () => {
+    const scoped = buildCommand({ sessionId, mcpServers: { wsp: { command: "/opt/wsp", args: ["mcp", "--scoped"] } } });
+    expect(scoped).toContain(`--append-system-prompt ${shellQuote(SLATE_BRIEF)}`);
+    expect(SLATE_BRIEF).toContain("your first tool call is mcp__wsp__slate_catalog");
+    expect(SLATE_BRIEF).toContain("Never read that file or put its value in a tool call.");
+    expect(buildCommand({ sessionId, mcpServers: { wsp: { command: "/opt/wsp", args: ["mcp"] } } })).not.toContain("--append-system-prompt");
+    expect(buildCommand({ sessionId })).not.toContain("--append-system-prompt");
   });
 
   it("sends no model or effort flag when none was picked", () => {
