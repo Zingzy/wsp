@@ -3,15 +3,18 @@
 // WorkspaceTerminals in the registry, linked through the host's relay.
 import { homedir } from "node:os";
 import type { DaemonLinkStatus, WorkspaceView } from "@wsp/protocol";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { getDaemonRoot } from "../src/files/wire.js";
+import { createElement } from "react";
+import { render } from "@testing-library/react";
+import { getDaemonRoot, provideDaemonHello, useDaemonWire } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { getProcs, resetProcs } from "../src/machine/procs.js";
 import { terminalEmptyLine, terminalPaneState, terminalPaneTitle } from "../src/adapt/index.js";
 import { getTerminals } from "../src/terminal/link.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
+import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { caps } from "./caps.js";
 import { harnessMachineToken, startRelayHarness, type RelayHarness } from "./relay-harness.js";
 import { clearNotices } from "./notice-text.js";
@@ -169,10 +172,57 @@ describe("wireTerminals", () => {
     await until(() => getTerminals("ws_b")?.status() === "live");
   }, 15_000);
 
+  it("dials a folder on this computer only while something on screen reads it, and a machine always", async () => {
+    const { api } = fakeApi([{ ...view("ws_here"), kind: "local" }, { ...view("ws_other"), kind: "local" }, view("ws_fork")], () => relay!);
+    unwire = wireTerminals(useStore, { backoffMs: () => 30 });
+    useStore.getState().bind(api);
+    await until(() => getTerminals("ws_fork")?.status() === "live");
+    expect(getTerminals("ws_here")!.status()).toBe("opening");
+    expect(getTerminals("ws_other")!.status()).toBe("opening");
+
+    useTerminalDrawerStore.getState().setOpen("ws_here", true);
+    try {
+      await until(() => getTerminals("ws_here")!.status() === "live");
+      expect(getTerminals("ws_other")!.status()).toBe("opening");
+    } finally {
+      useTerminalDrawerStore.getState().setOpen("ws_here", false);
+    }
+    await until(() => getTerminals("ws_here")!.status() !== "live");
+    expect(getTerminals("ws_fork")!.status()).toBe("live");
+  }, 15_000);
+
+  it("a first read of an idle folder's daemon, as Files, the pull request pane and the composer make, dials it and keeps its first frame", async () => {
+    const { api } = fakeApi([{ ...view("ws_here"), kind: "local" }], () => relay!);
+    unwire = wireTerminals(useStore, { backoffMs: () => 30 });
+    useStore.getState().bind(api);
+    await new Promise(r => setTimeout(r, 100));
+    expect(getTerminals("ws_here")!.status()).toBe("opening");
+    expect(getDaemonRoot("ws_here")).toBeNull();
+
+    // The surface reading the wire is what dials; the daemon's hello is the first frame on the channel.
+    const Reads = () => (useDaemonWire("ws_here"), null);
+    const first = render(createElement(Reads));
+    await until(() => getTerminals("ws_here")!.status() === "live" && getDaemonRoot("ws_here") !== null);
+    expect(getDaemonRoot("ws_here")).toBe(process.env["HOME"] ?? homedir());
+    first.unmount();
+    await until(() => getTerminals("ws_here")!.status() !== "live");
+
+    // Idle again, and the next first use dials again and hears the hello again.
+    provideDaemonHello("ws_here", null);
+    const again = render(createElement(Reads));
+    try {
+      await until(() => getTerminals("ws_here")!.status() === "live" && getDaemonRoot("ws_here") !== null);
+    } finally {
+      again.unmount();
+    }
+  }, 15_000);
+
   it("asks no daemon for the readings of the workspace that is this computer, and puts no link's health on its rows", async () => {
     const { api } = fakeApi([{ ...view("ws_here"), kind: "local" }, view("ws_fork")], () => relay!);
     unwire = wireTerminals(useStore, { backoffMs: () => 30 });
     useStore.getState().bind(api);
+    useTerminalDrawerStore.getState().setOpen("ws_here", true);
+    onTestFinished(() => useTerminalDrawerStore.getState().setOpen("ws_here", false));
 
     await until(() => getTerminals("ws_here")?.status() === "live" && getTerminals("ws_fork")?.status() === "live");
     // The fork reads its own machine and pushes over its link; this computer is read in the host, so asking its
