@@ -923,6 +923,8 @@ describe("runtime wire types", () => {
       "usage.reset",
       // A recipe is read off this computer's disk and resolved against it, and a save or a remove writes there.
       "recipes.list", "recipes.get", "recipes.save", "recipes.remove", "recipes.options",
+      // A slate's write and read are its agent's; a press, an approval and a cancel start or stop a run on this computer.
+      "slates.write", "slates.read", "slates.event", "slates.approve", "slates.cancel",
     ];
     for (const op of held) {
       expect(wire.RUNTIME_OPS, op).toContain(op);
