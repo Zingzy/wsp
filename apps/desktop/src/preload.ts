@@ -19,6 +19,8 @@ export interface OnboardingBridge {
 const bridge: DesktopBridge & OnboardingBridge = {
   version: shellArgFrom(process.argv, "version"),
   bundleHover: shellArgFrom(process.argv, "bundle-hover"),
+  updatesInPlace: shellArgFrom(process.argv, "update-in-place") === "1",
+  updateWhy: shellArgFrom(process.argv, "update-why"),
   here: (): Promise<string> => ipcRenderer.invoke("onboarding:here"),
   agents: () => ipcRenderer.invoke("onboarding:agents"),
   install: (ids: string[]): Promise<InstallReport> => ipcRenderer.invoke("onboarding:install", ids),
@@ -28,6 +30,7 @@ const bridge: DesktopBridge & OnboardingBridge = {
   switchHost: (alias: string | null): Promise<HostOutcome> => ipcRenderer.invoke("hosts:switch", alias),
   getBundle: (ask: { version: string }): Promise<BundleOutcome> => ipcRenderer.invoke("bundle:get", ask),
   quitAndOpen: (): Promise<BundleOutcome> => ipcRenderer.invoke("bundle:open"),
+  discardUpdate: (): Promise<BundleOutcome> => ipcRenderer.invoke("bundle:discard"),
   localFonts: (family: string): Promise<LocalFontFace[]> => ipcRenderer.invoke("fonts:local", family),
   fontFamilies: (): Promise<string[]> => ipcRenderer.invoke("fonts:families"),
   pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("folder:pick"),
