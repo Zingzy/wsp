@@ -5597,6 +5597,9 @@ export function placeDaemonBehind(place: { daemonVersion?: number }): string | u
   return version === undefined || version >= DAEMON_VERSION ? undefined : `daemon ${version}, host ${DAEMON_VERSION}`;
 }
 
+/** The first daemon that answers fs.folders. */
+export const FS_FOLDERS_DAEMON_VERSION = 73;
+
 /** The line that moves a place onto this wsp's daemon, which is the fix half of every sentence about a place that
  * is behind. */
 export const placeUpdateLine = (name: string): string => `wsp add ${name} --update`;
