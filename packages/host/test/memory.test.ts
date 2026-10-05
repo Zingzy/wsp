@@ -54,7 +54,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { createRuntime, jsonFileStore } from ${JSON.stringify(distOf("runtime"))};
+import { createRuntime, sqliteStore } from ${JSON.stringify(distOf("runtime"))};
 import { recipeShelf, startHost, localWiring, stateWriterHere } from ${JSON.stringify(DIST)};
 import { fakeCopier, NoProviderBackend } from ${JSON.stringify(distOf("engine"))};
 import { DAEMON_VERSION } from ${JSON.stringify(distOf("protocol"))};
@@ -95,7 +95,7 @@ const scripted = () => ({
 // measured is the host's own bookkeeping.
 const copier = fakeCopier();
 const daemon = async () => ({ version: DAEMON_VERSION, road: { url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }, sysSamples: async () => () => {}, close: async () => {} });
-const store = jsonFileStore(statePath, stateWriterHere());
+const store = sqliteStore(statePath, stateWriterHere());
 const runtime = createRuntime({
   backend: new NoProviderBackend(),
   local: localWiring(home, undefined, daemon, statePath, copier),
