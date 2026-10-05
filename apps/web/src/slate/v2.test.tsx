@@ -316,6 +316,9 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
     expect(hints[1]).toMatch(/^(⌘|Ctrl) ↵Save$/);
     fireEvent.focus(field);
     fireEvent.change(field, { target: { value: "WSP-12" } });
+    // The Enter that commits a word typed through an input method submits nothing.
+    await act(async () => fireEvent.keyDown(field, { key: "Enter", isComposing: true }));
+    expect(slates.event).not.toHaveBeenCalled();
     await act(async () => fireEvent.keyDown(field, { key: "Enter" }));
     await waitFor(() => expect(slates.event).toHaveBeenCalledWith(tid(), expect.objectContaining({ piece: "ask", event: "submit" })));
   });

@@ -76,7 +76,8 @@ function SecretInput({ path, label, props, slate, sender }: { path: string; labe
         }}
         onBlur={send}
         onKeyDown={event => {
-          if (event.key !== "Enter") return;
+          // The Enter that commits a word typed through an input method is the input method's, not a send.
+          if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
           event.preventDefault();
           send();
         }}
@@ -119,7 +120,7 @@ function TextInput({ piece, props, slate, sender, raise, path }: PieceViewProps 
     sender.type(path, value);
   };
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== "Enter" || piece.on?.submit === undefined) return;
+    if (event.key !== "Enter" || event.nativeEvent.isComposing || piece.on?.submit === undefined) return;
     if (lines > 1 && !(event.metaKey || event.ctrlKey)) return;
     event.preventDefault();
     submit.press();
