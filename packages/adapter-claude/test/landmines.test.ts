@@ -185,7 +185,10 @@ describe("buildCommand", () => {
   it("servers handed to a turn ride one --mcp-config as the JSON a config file holds, and the config dir's own are kept", () => {
     const cmd = buildCommand({ sessionId, mcpServers: { wsp: { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"] } } });
     const flag = /--mcp-config '(.+?)' /.exec(cmd)?.[1];
-    expect(JSON.parse(flag!)).toEqual({ mcpServers: { wsp: { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"] } } });
+    // The wsp server loads up front, so the slate tools that do not opt out of it are in the prompt with no search.
+    expect(JSON.parse(flag!)).toEqual({ mcpServers: { wsp: { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"], alwaysLoad: true } } });
+    const docs = /--mcp-config '(.+?)' /.exec(buildCommand({ sessionId, mcpServers: { docs: { command: "npx", args: [] } } }))?.[1];
+    expect(JSON.parse(docs!)).toEqual({ mcpServers: { docs: { command: "npx", args: [] } } });
     // Strict would drop the servers the person's own config names, which this turn still wants.
     expect(cmd).not.toContain("--strict-mcp-config");
     expect(buildCommand({ sessionId })).not.toContain("--mcp-config");

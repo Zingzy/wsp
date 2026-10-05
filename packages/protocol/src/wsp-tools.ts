@@ -10,6 +10,12 @@ import { serverTool } from "./format.js";
  * config on this computer and the launch a turn on a machine gets name one server and not two. */
 export const MCP_SERVER_NAME = "wsp";
 
+/** The slate's tools, and the name a launch serves them under again for a harness that keeps a server's tools behind
+ * a search until asked: Codex lists tools up front only per server (omit_tools_from, codex-rs/core/src/tools/
+ * spec_plan.rs at rust-v0.155.1), and an agent that never searched never found the slate. */
+export const SLATE_TOOLS = ["slate_catalog", "slate_write", "slate_state", "slate_read"] as const;
+export const SLATE_SERVER_NAME = "wsp_slate";
+
 /** How long an agent that holds its own limit on a tool call lets a wsp call run, which Codex reads as the server
  * entry's tool_timeout_sec: 300 s by default since openai/codex#28234, 60 s before it. A send or a run waits through
  * a wake before its turn starts, and a paused Boat's wake is its resume and then its daemon's budget to answer, which

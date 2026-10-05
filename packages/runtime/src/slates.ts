@@ -23,6 +23,7 @@ import {
   slateDependencies,
   slateEqual,
   slateNearest,
+  SLATE_SOURCES,
   slateStep,
   slateText,
   threadWord,
@@ -182,16 +183,29 @@ export const SLATE_SEND_KEY = "send";
 
 const problem = (code: string, name: string, message: string, extra: Partial<SlateProblem> = {}): SlateProblem => ({ code, name, message, ...extra });
 
+/** A path a read named that can only read null: one of the slate's own names without its $, or no source at all. */
+function misread(doc: SlateDoc | null, path: string): SlateProblem[] {
+  if (!/^[A-Za-z_]\w*(\.\w+|\[\d+\])*$/.test(path)) return [];
+  const root = path.split(/[.[]/)[0]!;
+  if (doc?.runs[root] !== undefined) return [problem("X401", "path-unknown", `${path} is not a source: $${root} is a run, read as $${path}; its record is also under runs.$${root}`, { fix: `$${path}` })];
+  if (doc?.values[root] !== undefined || doc?.derived[root] !== undefined) return [problem("X401", "path-unknown", `${path} is not a source: $${root} is a value, read as $${path}`, { fix: `$${path}` })];
+  if (SLATE_SOURCES[root] === undefined) return [problem("X401", "path-unknown", `${root} is not a source and not this slate's; a slate's own names start with $`)];
+  return [];
+}
+
 /** A refusal for a reason other than what was written: the version moved, too fast, nothing to undo. */
 const refused = (p: SlateProblem, kind: string): Error => Object.assign(new Error(`${p.code} ${p.name}: ${p.message}`), { kind, code: p.code });
 
 /** A write the parser or the validator refused, with every error it found and the warnings beside them. */
 function invalid(errors: SlateProblem[], warnings: SlateProblem[]): Error {
-  const first = errors[0]!;
-  const where = [first.line !== undefined ? `line ${first.line}` : undefined, first.piece !== undefined ? (first.prop !== undefined ? `${first.piece}.${first.prop}` : first.piece) : undefined].filter(w => w !== undefined).join(", ");
-  const more = errors.length > ERRORS_LISTED ? `, and ${errors.length - ERRORS_LISTED} more` : "";
-  const fix = first.fix !== undefined ? `. Did you mean ${first.fix}?` : "";
-  const message = `slate refused: ${errors.length} error${errors.length === 1 ? "" : "s"}${more}; the first: ${where === "" ? "" : `${where}: `}${first.code} ${first.name} ${first.message}${fix}`;
+  const said = (p: SlateProblem): string => {
+    const where = [p.line !== undefined ? `line ${p.line}` : undefined, p.piece !== undefined ? (p.prop !== undefined ? `${p.piece}.${p.prop}` : p.piece) : undefined].filter(w => w !== undefined).join(", ");
+    return `${where === "" ? "" : `${where}: `}${p.code} ${p.name} ${p.message}${p.fix !== undefined ? `. Did you mean ${p.fix}?` : ""}`;
+  };
+  // Every error at once, so a slate with seven mistakes takes one rewrite and not seven; one line, as every refusal is.
+  const listed = errors.slice(0, ERRORS_LISTED);
+  const more = errors.length > ERRORS_LISTED ? ` And ${errors.length - ERRORS_LISTED} more.` : "";
+  const message = `slate refused: ${errors.length} error${errors.length === 1 ? "" : "s"}: ${listed.length === 1 ? said(listed[0]!) : listed.map((p, i) => `${i + 1}) ${said(p)}`).join(" ")}${more}`;
   return Object.assign(new Error(message), { kind: "invalid", errors: errors.slice(0, ERRORS_LISTED), warnings });
 }
 
@@ -548,8 +562,8 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   const scrub = (r: SlateRecord, text: string): string => runs.secrets.scrub(r.threadId, text);
 
-  const sketched = (r: SlateRecord, views: ReadonlyMap<string, SlateJson | undefined>, check = false): string => {
-    const text = sketchSlate(r.document, r.values, { ...contextOf(r, views), version: r.version, ...(check ? { check: true } : {}) });
+  const sketched = (r: SlateRecord, views: ReadonlyMap<string, SlateJson | undefined>, check = false, asked: SlateProblem[] = []): string => {
+    const text = sketchSlate(r.document, r.values, { ...contextOf(r, views), version: r.version, ...(check ? { check: true } : { problems: [...asked, ...problemsOf(r, views)] }) });
     return scrub(r, /^slate v\d/.test(text) ? text : text.replace(/^slate\b/, `slate v${r.version}`));
   };
   const sketchOf = async (r: SlateRecord): Promise<string> => sketched(r, await viewsFor(r));
@@ -583,7 +597,9 @@ export function createSlates(deps: SlatesDeps): Slates {
       for (const path of boundPaths(r.document)) if (!path.startsWith("$") && resolveIn(views, path) === undefined) found.push(problem("R900", "data-missing", `${path} has no value yet`));
       for (const name of Object.keys(r.document.runs)) {
         const rec = r.values[name];
-        if (isRunRecord(rec) && rec.state === "held") found.push(problem("R913", "run-held", `$${name} waits: ${rec.why ?? HELD_APPROVAL}`));
+        if (!isRunRecord(rec) || rec.state !== "held") continue;
+        const why = rec.why ?? HELD_APPROVAL;
+        found.push(problem("R913", "run-held", why === HELD_APPROVAL || why === HELD_CONFIRM ? `$${name} waits for the person to allow it on the slate, which asks them; it starts once they do` : `$${name} waits: ${why}`));
       }
     }
     return found;
@@ -955,6 +971,14 @@ export function createSlates(deps: SlatesDeps): Slates {
     r.revision += 1;
     records.set(r.threadId, r);
     armTimers(r);
+    if (next !== null) {
+      // A timed run the person has not allowed asks now, shown or not, so this answer and their slate both say it waits.
+      const asking = await viewsFor(r);
+      for (const [run, decl] of Object.entries(next.runs)) {
+        const rec = r.values[run];
+        if (decl.every !== undefined && isRunRecord(rec) && rec.state === "idle" && provisional(r, run).state === "held") r.values[run] = asJson(startNow(r, run, "timer", asking).record);
+      }
+    }
     await save(r);
     announce(r, cause, by, pieces);
     if (next !== null && /\bpr\.checks\b/.test(JSON.stringify(next))) deps.watchPr?.(r.workspaceId);
@@ -1065,8 +1089,12 @@ export function createSlates(deps: SlatesDeps): Slates {
             const near = slateNearest(run, Object.keys(doc.runs));
             throw invalid([problem("K702", "run-name", `$${run} is not a run`, near !== undefined ? { fix: `$${near}` } : {})], []);
           }
+          const decl = doc.runs[run]!;
+          const rec = r.values[run];
           if (approvedAlways(r, run)) starts.push({ run, by: by === "agent" ? "agent" : "person" });
-          else held.push(problem("R913", "run-held", `$${run} was not started: it starts from here once the person says "Always in this thread" to it`));
+          else if (isRunRecord(rec) && rec.state === "held") held.push(problem("R913", "run-held", `$${run} was not started: it already waits for the person to allow it on the slate, and starts once they do`));
+          else if (decl.kind !== "resource" && decl.confirm !== undefined) held.push(problem("R913", "run-held", `$${run} was not started: it has confirm, so it asks the person every start and only a press or a <when> starts it`));
+          else held.push(problem("R913", "run-held", `$${run} was not started: you start only a run the person allowed "Always in this thread"; a press, a <when> or every= starts it and the slate asks them`));
         }
         const input: { path: string; value: SlateJson }[] = [];
         for (const [written, value] of Object.entries(p.values ?? {})) {
@@ -1104,14 +1132,16 @@ export function createSlates(deps: SlatesDeps): Slates {
 
     async read(p, caller) {
       const threadId = targetOf(p, caller, false);
-      const r = await needRecord(threadId);
+      // A thread with no slate yet reads as an empty one, which is what it has; a refusal read as something broken.
+      const r = (await recordOf(threadId)) ?? freshRecord(threadId);
       const asked = p.values ?? [];
       const paths = asked.includes("*") && r.document !== null ? boundPaths(r.document) : asked.filter(v => v !== "*");
       const views = await viewsFor(r, paths);
       const ctx = contextOf(r, views);
       const doc = r.document;
       const clean = (v: SlateJson): SlateJson => mapStrings(v, s => scrub(r, s));
-      const sketch = p.sketch !== false ? sketched(r, views) : `slate v${r.version}`;
+      const misreads = paths.flatMap(path => misread(doc, path));
+      const sketch = p.sketch !== false ? sketched(r, views, false, misreads) : `slate v${r.version}`;
       return {
         version: r.version,
         text: [sketch, ...(p.text !== false && doc !== null ? ["", printSlate(doc)] : [])].join("\n"),
@@ -1120,7 +1150,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         state: Object.fromEntries(Object.entries(r.values).filter(([name]) => doc?.runs[name] === undefined).map(([name, v]) => [`$${name}`, clean(v)])),
         derived: Object.fromEntries(Object.keys(doc?.derived ?? {}).map(name => [`$${name}`, clean(ctx.resolve(`$${name}`) ?? null)])),
         runs: Object.fromEntries(Object.keys(doc?.runs ?? {}).map(name => [`$${name}`, clean(r.values[name] ?? null)])),
-        problems: problemsOf(r, views),
+        problems: [...misreads, ...problemsOf(r, views)],
         comments: r.comments,
         approvals: Object.fromEntries(Object.entries(r.approvals).map(([k, a]) => [k, a.state])),
       };

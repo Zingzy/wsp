@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSlate, parseSlatePatch, printSlate, slateCatalog, validateSlate, SLATE_CODES, SLATE_ICONS } from "../../src/slate/index.js";
+import { parseSlate, parseSlatePatch, printSlate, slateCatalog, validateSlate, SLATE_CODES, SLATE_ICONS, SLATE_RUN_FIELDS } from "../../src/slate/index.js";
 import { SPEC_EXAMPLES } from "./examples.js";
 
 const wrap = (pieces: string, decls = ""): string => `<slate title="T">\n${decls}\n  <column>\n    ${pieces}\n  </column>\n</slate>`;
@@ -216,7 +216,7 @@ describe("writes the sessions were refused", () => {
     for (const n of ["mail", "gem", "inbox", "trending-up", "trending-down", "thermometer", "cloud-rain", "sun", "dollar-sign", "indian-rupee"]) expect(SLATE_ICONS, n).toContain(n);
     clean(wrap(`<heading icon="gem">Gold</heading><number label="Change" value={$d} icon={$d >= 0 ? 'trending-up' : 'trending-down'} />`, `  <value name="d" start={1} />`));
     clean(wrap(`<facts><fact label="Mail" value="3" icon={'inbox'} /></facts>`));
-    expect(all(wrap(`<heading icon="gold-bar">Gold</heading>`))).toContain("T306");
+    expect(all(wrap(`<heading icon="gold-bar">Gold</heading>`))).toContain("W016");
   });
 
   it("takes camelCase piece ids, and a piece id may be a run's name", () => {
@@ -242,6 +242,15 @@ describe("writes the sessions were refused", () => {
     }
     for (const piece of [`<text mono>{$pid}</text>`, `<text mono>2026-10-04 17:23 UTC</text>`, `<text mono>src/slate/kit.ts</text>`, `<text mono>PID 19271</text>`, `<facts><fact label="Head" value="b5ebeeff4" mono /></facts>`]) {
       expect(all(wrap(piece, decls)), piece).not.toContain("W014");
+    }
+  });
+});
+
+describe("every field a run reads", () => {
+  it("type-checks each of SLATE_RUN_FIELDS, refreshing and text among them, instead of throwing", () => {
+    for (const field of SLATE_RUN_FIELDS) {
+      const r = parseSlate(`<slate><run name="p" cmd="echo 1" /><text value={if($p.${field}, "a", "b")} /></slate>`);
+      expect(r.errors, field).toEqual([]);
     }
   });
 });

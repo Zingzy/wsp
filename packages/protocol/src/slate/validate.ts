@@ -22,9 +22,10 @@ type Kind = "value" | "secret" | "derived" | "run";
 type Trigger = "press" | "submit" | "change" | "reaction";
 interface Where { piece?: string; prop?: string }
 
-const RUN_FIELD_TYPES: Record<string, SlateType> = {
+const RUN_FIELD_TYPES: Record<(typeof SLATE_RUN_FIELDS)[number], SlateType> = {
   state: { t: "string" }, why: { t: "string" }, exit: { t: "number" }, out: { t: "any" }, err: { t: "string" }, json: { t: "any" },
   lines: { t: "list", of: { t: "string" } }, startedAt: { t: "number" }, endedAt: { t: "number" }, ms: { t: "number" }, runs: { t: "number" }, cut: { t: "boolean" }, stale: { t: "boolean" },
+  refreshing: { t: "boolean" }, text: { t: "boolean" },
 };
 const SECRET_FIELD_TYPES: Record<string, SlateType> = { set: { t: "boolean" }, len: { t: "number" }, at: { t: "number" } };
 
@@ -176,7 +177,7 @@ class Validator {
         const fix = nearest(String(first), SLATE_RUN_FIELDS);
         return { code: "X401", message: `$${name}.${String(first)} is not a field of a run's result; the fields are ${SLATE_RUN_FIELDS.join(", ")}`, ...(fix !== undefined ? { fix: `$${name}.${fix}` } : {}) };
       }
-      return segs.length === 1 ? RUN_FIELD_TYPES[first]! : { t: "any" };
+      return segs.length === 1 ? RUN_FIELD_TYPES[first as (typeof SLATE_RUN_FIELDS)[number]] : { t: "any" };
     }
     let t: SlateType = kind === "derived" ? this.derivedType(name) : literalType(this.doc.values[name]!.start);
     for (const s of segs) {
@@ -607,7 +608,8 @@ class Validator {
       case "icon": {
         if (isSlateIcon(v)) return;
         const fix = typeof v === "string" ? nearestSlateIcon(v) : undefined;
-        this.add("T306", `${JSON.stringify(v)} is not an icon in the kit${fix !== undefined ? `; did you mean ${fix}?` : ""} slate_catalog icons lists them`, w, fix !== undefined ? `icon="${fix}"` : undefined);
+        // An icon is decoration: a name the kit lacks draws none and never stops the write.
+        this.add("W016", `${JSON.stringify(v)} is not an icon in the kit, so it draws none${fix !== undefined ? `; did you mean ${fix}?` : ""} slate_catalog icons lists them`, w, fix !== undefined ? `icon="${fix}"` : undefined);
         return;
       }
       case "string": case "text":
@@ -658,6 +660,7 @@ export function validateDocument(doc: SlateDoc, lines?: SlateLines): { errors: S
 export function validateSlate(input: unknown): { document?: SlateDoc; errors: SlateProblem[]; warnings: SlateProblem[] } {
   if (typeof input !== "object" || input === null || Array.isArray(input)) return { errors: [slateProblem("D202", "a document is an object with schema, root, values, derived, runs, reactions and pieces")], warnings: [] };
   const schema = (input as { schema?: unknown }).schema;
+  if (schema === undefined) return { errors: [slateProblem("D200", "this JSON is not a slate: a slate is the JSX-like text slate_catalog shows, sent as text, never JSON of your own", { fix: `<slate title="Gold"><number label="Spot" value={$spot.json.usd} unit="USD" /></slate>` })], warnings: [] };
   if (schema !== 2) return { errors: [slateProblem("D200", `schema ${JSON.stringify(schema)} is not a version this host knows; this host reads schema 2`, { fix: "update wsp" })], warnings: [] };
   const filled = { values: {}, derived: {}, runs: {}, reactions: [], ...(input as object) };
   const parsed = SlateSchema.safeParse(filled);

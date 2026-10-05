@@ -130,3 +130,12 @@ describe("expressions", () => {
     expect(r.errors.map(e => e.code)).toEqual(["S520", "X401"]);
   });
 });
+
+describe("ago and until", () => {
+  it("say which way the time runs: ago(t) is \"30s ago\", until(t) \"in 4m\"", () => {
+    const now = Date.parse("2026-10-05T00:00:00Z");
+    const ctx = { now, resolve: (p: string) => (p === "time.now" ? now : undefined) };
+    expect(evaluateSlateExpression(`ago(${now - 30_000})`, ctx)).toBe("30s ago");
+    expect(evaluateSlateExpression(`until(${now + 240_000})`, ctx)).toBe("in 4m");
+  });
+});

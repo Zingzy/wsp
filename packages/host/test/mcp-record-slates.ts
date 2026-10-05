@@ -40,7 +40,7 @@ export const SLATE_ANSWERED: Record<string, Case[]> = {
       case: "refused with every error",
       arguments: { text: "<slate><meter value=\"usage.weekley.percent\" /></slate>" },
       env: TURN,
-      replies: { "slates.write": refused({ error: "slate refused: 1 error; the first: line 9, week.value: X401 path-unknown", kind: "invalid", errors: [PROBLEM], warnings: [] }) },
+      replies: { "slates.write": refused({ error: "slate refused: 1 error: line 9, week.value: X401 path-unknown", kind: "invalid", errors: [PROBLEM], warnings: [] }) },
     },
     { case: "a thread nobody has", arguments: { thread: "zz", text: "<clear />" }, replies: { "sessions.list": SESSIONS } },
   ],
@@ -62,6 +62,6 @@ export const SLATE_ANSWERED: Record<string, Case[]> = {
       replies: { "slates.read": reply({ version: 23, text: SKETCH, document: { schema: 2, root: "r" }, values: { "$env.state": "done", "usage.week.percent": 46.5 }, runs: { env: { state: "done", exit: 0, out: "wrote .env [secret:token]" } }, problems: [], approvals: { "run:env": "allowed" } }) },
     },
     { case: "a child without its sketch", arguments: { thread: "t-child-1", sketch: false }, replies: { "sessions.list": SESSIONS, "slates.read": reply({ version: 1, text: "", values: {} }) } },
-    { case: "no slate", arguments: {}, replies: { "slates.read": refused({ error: "Z802 no-slate: this thread has no slate: write one", kind: "usage" }) } },
+    { case: "no slate", arguments: {}, replies: { "slates.read": reply({ version: 0, text: "slate v0, empty: write one with slate_write", values: {}, problems: [] }) } },
   ],
 };

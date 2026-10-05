@@ -15,6 +15,37 @@ describe("the sketch", () => {
     expect(s.split("\n").every(l => l.length <= 100)).toBe(true);
   });
 
+  it("says which facts the panel leaves out for having no value", () => {
+    const d = parseSlate(`<slate><value name="v" start={null} /><facts id="f"><fact label="Health" value="ok" /><fact label="Version" value={$v} /></facts></slate>`).document!;
+    expect(sketchSlate(d, { v: null }, { version: 1, now })).toContain("Health: ok  (no value yet, not shown: Version)  [f facts]");
+  });
+
+  it("draws bars to the panel's scale, the longest row full with no max, and says how many rows it left out", () => {
+    const d = parseSlate(`<slate><column><bars id="hits" label="Hits" items={$rows} name={item.n} value={item.v} /></column><value name="rows" start={[]} /></slate>`).document!;
+    const many = [["CA", 284], ["CN", 102], ["US", 71], ["DE", 40], ["FR", 30], ["IN", 20], ["JP", 10], ["BR", 5], ["MX", 2]].map(([n, v]) => ({ n, v }));
+    const s = sketchSlate(d, { rows: many }, { version: 1, now });
+    expect(s).toContain("  CA  [##########] 284");
+    expect(s).toContain("  CN  [####......] 102");
+    expect(s).toContain("and 1 more rows");
+  });
+
+  it("marks a piece that reads a run's result before the run has one, and not one that reads its state", () => {
+    const d = parseSlate(`<slate>
+  <run name="market" cmd="echo '{}'" />
+  <column>
+    <text id="closed" when={!$market.json.open}>Market closed</text>
+    <number id="spot" label="Spot" value={$market.json.v} />
+    <text id="waiting" when={$market.state == "idle"}>Waiting</text>
+  </column>
+</slate>`).document!;
+    const before = sketchSlate(d, slateStartValues(d), { version: 1, now });
+    expect(before).toContain("Market closed (reads $market, not run yet)  [closed text]");
+    expect(before).toContain("Spot  not read yet  [spot number]");
+    expect(before).toContain("Waiting  [waiting text]");
+    const ran = { ...slateStartValues(d), market: { state: "done", exit: 0, out: '{"open":false}', json: { open: false }, runs: 1, startedAt: now - 1000, endedAt: now } };
+    expect(sketchSlate(d, ran, { version: 2, now })).toContain("Market closed  [closed text]");
+  });
+
   it("draws the setup slate as the person sees it, the secret as dots, and the runs that moved", () => {
     const d = setup();
     const handle = { secret: true, set: true, len: 24, at: now };
@@ -54,7 +85,16 @@ describe("the sketch", () => {
 
 describe("the catalog", () => {
   it("keeps the index near 1,000 tokens and its example valid", () => {
-    expect(slateTokens(slateCatalog())).toBeLessThan(1060);
+    // What ago and until print and what a chart's x takes, after agents guessed both, took it from 1,060 to 1,090;
+    // tool= runs on the first page and what a formula holds, after agents missed both, to 1,110.
+    expect(slateTokens(slateCatalog())).toBeLessThan(1110);
+    expect(slateCatalog()).toContain("then tool resource>");
+    expect(slateCatalog()).toContain("with operators, a ? b : c, [lists], {records} and functions, never methods or =>.");
+    expect(slateCatalog("pipes")).toBe(slateCatalog("steps"));
+    expect(slateCatalog("tool")).toBe(slateCatalog("runs"));
+    expect(slateCatalog("file")).toContain("The <file name=\"x.py\"> declaration, code a run calls as $SLATE_DIR/x.py, is in slate_catalog runs.");
+    expect(slateCatalog()).toContain(`ago(t) "30s ago", until(t) "in 4m".`);
+    expect(slateCatalog()).toContain("time is a chart, x in ms or ISO;");
     expect(parseSlate(SLATE_INDEX_EXAMPLE).errors).toEqual([]);
     expect(slateCatalog()).toContain(SLATE_INDEX_EXAMPLE);
   });
@@ -65,10 +105,21 @@ describe("the catalog", () => {
   });
 
   it("answers runs, functions, steps, handlers and examples within their budgets", () => {
-    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(590);
+    // A line for each run attribute, after small models guessed what always and once did, took it from 590 to 660.
+    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(660);
     for (const n of ["functions", "steps", "handlers"]) expect(slateTokens(slateCatalog(n)), n).toBeLessThan(600);
     expect(slateTokens(slateCatalog("examples"))).toBeLessThan(3500);
     for (const e of SLATE_EXAMPLES) expect(parseSlate(e.text).errors, e.title).toEqual([]);
+  });
+
+  it("the runs entry gives each run attribute a line of its own, and says what shown, a failed run, stale and a restart mean", () => {
+    const lines = slateCatalog("runs").split("\n");
+    for (const attr of ["name", "cmd", "env", "every", "always", "once", "timeout", "on", "confirm", "then", "tool"]) expect(lines.some(l => l.startsWith(`${attr}:`) || l.startsWith(`${attr}=`)), attr).toBe(true);
+    const text = slateCatalog("runs");
+    expect(text).toContain("while the Slate tab is on screen in the app");
+    expect(text).toContain("A failed run's out and json are its own, often empty");
+    expect(text).toContain("stale: the command changed since this result.");
+    expect(text).toContain("<value> state and each run's last result outlive an app or host restart.");
   });
 
   it("names the nearest entry for a wrong name", () => {

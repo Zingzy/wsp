@@ -349,6 +349,47 @@ describe("the slate v2 host", () => {
     release();
   }, 30_000);
 
+  it("a timed run the person has not allowed reads held from the write, and the write's sketch says it waits on them", async () => {
+    const { rt, threadId, asThread } = await threadOn("wsp-slates-timed-held-");
+    const wrote = await rt.slates.write({ text: TICKER }, asThread);
+    const waits = "$tick waits for the person to allow it on the slate, which asks them; it starts once they do";
+    expect(wrote.problems).toContainEqual(expect.objectContaining({ code: "R913", message: waits }));
+    expect(wrote.text).toContain(`R913 slate: ${waits}`);
+    expect(wrote.text).toContain("$tick: held needs your approval");
+    const view = (await rt.slates.get(threadId))!;
+    expect(view.values["tick"]).toMatchObject({ state: "held" });
+    expect(view.asks.map(a => a.run)).toEqual(["tick"]);
+    const read = await rt.slates.read({}, asThread);
+    expect(read.runs).toMatchObject({ $tick: { state: "held" } });
+    const again = await rt.slates.state({ start: ["tick"] }, asThread);
+    expect(again.problems).toContainEqual(expect.objectContaining({ code: "R913", message: "$tick was not started: it already waits for the person to allow it on the slate, and starts once they do" }));
+  });
+
+  it("a thread with no slate yet reads as an empty slate, not a refusal", async () => {
+    const { rt, asThread } = await threadOn("wsp-slates-empty-read-");
+    const read = await rt.slates.read({}, asThread);
+    expect(read).toMatchObject({ version: 0, text: "slate v0, empty: write one with slate_write", problems: [] });
+  });
+
+  it("a refused write names every error on its one line, numbered, not the first alone", async () => {
+    const { rt, asThread } = await threadOn("wsp-slates-every-error-");
+    const refused = rt.slates.write({ text: `<slate><column><text value={$nope} /><meter label="x" value={1} tone="loud" /></column></slate>` }, asThread);
+    await expect(refused).rejects.toThrow(/^slate refused: 2 errors: 1\) .*S501 .* 2\) .*T306 /);
+    await expect(rt.slates.write({ text: `<slate><text value={$nope} /></slate>` }, asThread)).rejects.toThrow(/^slate refused: 1 error: [^1].*S501/);
+  });
+
+  it("a read asked for a run or a value without its $ says where it is, and one that names no source says so", async () => {
+    const { rt, asThread } = await threadOn("wsp-slates-misread-");
+    await rt.slates.write({ text: TICKER }, asThread);
+    const read = await rt.slates.read({ values: ["tick", "ticks", "spot.json", "time.now", "$ticks", "len(git.changed)"] }, asThread);
+    expect(read.problems.filter(p => p.code === "X401")).toEqual([
+      { code: "X401", name: "path-unknown", message: "tick is not a source: $tick is a run, read as $tick; its record is also under runs.$tick", fix: "$tick" },
+      { code: "X401", name: "path-unknown", message: "ticks is not a source: $ticks is a value, read as $ticks", fix: "$ticks" },
+      { code: "X401", name: "path-unknown", message: "spot is not a source and not this slate's; a slate's own names start with $" },
+    ]);
+    expect(read.text).toContain("X401 slate: tick is not a source");
+  });
+
   it("a read answers the JSX-like form by default and the JSON document only when asked", async () => {
     const { rt, asThread } = await threadOn("wsp-slates-read-");
     await rt.slates.write({ text: TICKER }, asThread);
@@ -661,7 +702,7 @@ describe("the slate v2 host, round 4", () => {
     await rt.slates.write({ text: PROBE }, asThread);
 
     const before = await rt.slates.state({ start: ["probe"] }, asThread);
-    expect(before.problems).toContainEqual(expect.objectContaining({ code: "R913", message: `$probe was not started: it starts from here once the person says "Always in this thread" to it` }));
+    expect(before.problems).toContainEqual(expect.objectContaining({ code: "R913", message: `$probe was not started: you start only a run the person allowed "Always in this thread"; a press, a <when> or every= starts it and the slate asks them` }));
     const untouched = (await rt.slates.get(threadId))!;
     expect(untouched.values["probe"]).toMatchObject({ state: "idle" });
     expect(untouched.asks).toEqual([]);
@@ -690,7 +731,7 @@ describe("the slate v2 host, round 4", () => {
 
     // A run that asks every time waits for the person whoever starts it.
     const ask = await rt.slates.state({ start: ["ask"] }, asThread);
-    expect(ask.problems.map(p => p.code)).toContain("R913");
+    expect(ask.problems).toContainEqual(expect.objectContaining({ code: "R913", message: "$ask was not started: it has confirm, so it asks the person every start and only a press or a <when> starts it" }));
     expect((await rt.slates.get(threadId))!.values["ask"]).toMatchObject({ state: "idle" });
 
     // A held that reads false holds nothing, and the sketch says nothing of it.

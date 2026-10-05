@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applySlatePatch, parseSlate, parseSlatePatch, printSlate, slateStartValues, type SlateDoc } from "../../src/slate/index.js";
+import { applySlatePatch, parseSlate, parseSlatePatch, printSlate, slateCatalog, slateStartValues, validateSlate, type SlateDoc } from "../../src/slate/index.js";
 import { SPEC_EXAMPLES } from "./examples.js";
 
 const doc = (text: string): SlateDoc => {
@@ -178,5 +178,37 @@ describe("patches", () => {
     expect(apply(`<remove name="steps" />\n<text id="eta">{len($steps)}</text>`).errors[0]!.code).toBe("S501");
     expect(apply(`<clear />`)).toMatchObject({ document: null });
     expect(apply(`<undo />`).errors[0]!.code).toBe("V752");
+  });
+});
+
+describe("a refusal a small model can act on", () => {
+  it("JSON sent as text or as a document says a slate is JSX-like text and shows one", () => {
+    const asText = parseSlate(`{"title": "Gold", "pieces": []}`);
+    expect(asText.errors[0]).toMatchObject({ code: "P100", message: "this is JSON, and a slate is JSX-like text that starts with <slate>; slate_catalog shows it", fix: `<slate title="Gold"><number label="Spot" value={$spot.json.usd} unit="USD" /></slate>` });
+    const asDocument = validateSlate({ title: "Gold", sections: [] });
+    expect(asDocument.errors[0]).toMatchObject({ code: "D200", message: "this JSON is not a slate: a slate is the JSX-like text slate_catalog shows, sent as text, never JSON of your own" });
+    expect(validateSlate({ schema: 3 }).errors[0]).toMatchObject({ code: "D200", fix: "update wsp" });
+  });
+
+  it("an escaped quote in an attribute string shows the quoting that works", () => {
+    const refused = parseSlate(`<slate><run name="p" cmd="python3 -c \\"print(1)\\"" /><text>x</text></slate>`);
+    expect(refused.errors[0]).toMatchObject({ code: "P100", message: `attribute strings take no escapes (cmd at line 1): a backslash does not hide a " inside "..."`, fix: `cmd='echo "hi"', single quotes outside the double ones` });
+    expect(parseSlate(`<slate><run name="p" cmd='python3 -c "print(1)"' /><text>x</text></slate>`).errors).toEqual([]);
+  });
+});
+
+describe("the catalog's patch entry", () => {
+  it("every element it shows applies to a slate, and rule 6 points at it", () => {
+    let d = parseSlate(`<slate><column id="root"><column id="list"><text id="eta">x</text><text id="price">p</text></column><column id="other"><text id="o">o</text></column></column></slate>`).document!;
+    const shown = slateCatalog("patch").split("\n").slice(1).filter(l => l.includes(": ")).map(l => l.slice(0, l.indexOf(": "))).filter(l => l.startsWith("<") && !l.includes("...") && !l.includes(", "));
+    expect(shown.length).toBeGreaterThan(4);
+    for (const p of [...shown, `<value name="hist" start={[]} />`, `<remove name="hist" />`]) {
+      const parsed = parseSlatePatch(p, d);
+      expect(parsed.errors, p).toEqual([]);
+      const applied = applySlatePatch(d, slateStartValues(d), parsed.patch!, parsed.lines);
+      expect(applied.errors, p).toEqual([]);
+      d = applied.document!;
+    }
+    expect(slateCatalog()).toContain("slate_catalog patch");
   });
 });
