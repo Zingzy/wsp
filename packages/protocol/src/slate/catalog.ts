@@ -20,7 +20,7 @@ export function slateTokens(text: string): number {
 
 export const SLATE_RULES: readonly string[] = [
   "One <slate>, one root piece, declarations beside it. Give an id to a piece you will change.",
-  "prop=\"text\" is literal; prop={formula} reads live data or $values; a text child with {holes} fills a sentence. Nothing in braces is JavaScript.",
+  "prop=\"text\" is literal; prop={formula} reads live data or $values with operators, a ? b : c, [lists], {records} and functions, never methods or =>. A text child with {holes} fills a sentence.",
   "Props are meaning, never style. held is a sentence that disables: bind it to a condition.",
   "A list binds to items; item and index read the row.",
   "A press reaches you only through send(\"literal text\", $path); <when> chains run without you.",
@@ -85,7 +85,7 @@ function index(): string {
     "bars compare categories; time is a chart, x in ms or ISO; a flow is a diagram.",
     "Sources, read only:",
     ...["thread", "usage", "cost", "time", "git", "pr"].map(sourceLine),
-    "Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once confirm then> <file name> <when change={$path} or done={$run} do={steps}>",
+    "Declarations: <value name start> <secret name> <derived name value> <run name cmd env args stdin on timeout every always once confirm then tool resource> <file name> <when change={$path} or done={$run} do={steps}>",
     `Steps: ${Object.keys(SLATE_STEPS).join(" ")}. Functions: ${Object.keys(SLATE_FUNCTIONS).join(" ")}. ago(t) gives "30s", until(t) "in 4m".`,
     `After |: ${Object.keys(SLATE_PIPE_STEPS).join(" ")}. $run reads state exit out err json; a secret only .set .len.`,
     "Rules:",
@@ -180,12 +180,13 @@ function handlersEntry(): string {
 export function slateCatalog(name?: string): string {
   if (name === undefined || name === "" || name === "index") return index();
   const n = name.trim();
+  if (n === "file") return `${pieceEntry(SLATE_PIECES[n]!)}\nThe <file name="x.py"> declaration, code a run calls as $SLATE_DIR/x.py, is in slate_catalog runs.`;
   if (SLATE_PIECES[n] !== undefined) return pieceEntry(SLATE_PIECES[n]);
   if (SLATE_SOURCES[n] !== undefined) return sourceEntry(n);
   switch (n) {
-    case "runs": case "run": return RUNS;
+    case "runs": case "run": case "tool": case "tools": case "mcp": return RUNS;
     case "functions": return functionsEntry();
-    case "steps": return stepsEntry();
+    case "steps": case "pipes": case "pipe": return stepsEntry();
     case "handlers": return handlersEntry();
     case "examples": return SLATE_EXAMPLES.map(e => `${e.title}:\n${e.text}`).join("\n\n");
     case "icons": case "icon": return `icon="<name>" or icon={formula}; a name off this list draws none. Lucide names: ${SLATE_ICONS.join(" ")}`;

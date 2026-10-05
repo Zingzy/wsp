@@ -85,8 +85,14 @@ describe("the sketch", () => {
 
 describe("the catalog", () => {
   it("keeps the index near 1,000 tokens and its example valid", () => {
-    // What ago and until print and what a chart's x takes, after agents guessed both, took it from 1,060 to 1,090.
-    expect(slateTokens(slateCatalog())).toBeLessThan(1090);
+    // What ago and until print and what a chart's x takes, after agents guessed both, took it from 1,060 to 1,090;
+    // tool= runs on the first page and what a formula holds, after agents missed both, to 1,110.
+    expect(slateTokens(slateCatalog())).toBeLessThan(1110);
+    expect(slateCatalog()).toContain("then tool resource>");
+    expect(slateCatalog()).toContain("with operators, a ? b : c, [lists], {records} and functions, never methods or =>.");
+    expect(slateCatalog("pipes")).toBe(slateCatalog("steps"));
+    expect(slateCatalog("tool")).toBe(slateCatalog("runs"));
+    expect(slateCatalog("file")).toContain("The <file name=\"x.py\"> declaration, code a run calls as $SLATE_DIR/x.py, is in slate_catalog runs.");
     expect(slateCatalog()).toContain(`ago(t) gives "30s", until(t) "in 4m".`);
     expect(slateCatalog()).toContain("time is a chart, x in ms or ISO;");
     expect(parseSlate(SLATE_INDEX_EXAMPLE).errors).toEqual([]);
