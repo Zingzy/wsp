@@ -6,7 +6,10 @@
 // the store at a turn's end and on a refresh, names the session on the machine
 // when a client renames the thread, and keeps the answer on the rows a thread
 // is folded from.
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { createCodexAdapter } from "@wsp/adapter-codex";
 import { THREAD_AGENTS, type ThreadAgent } from "@wsp/catalog";
@@ -20,6 +23,9 @@ import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
+import { fakeAppServer } from "../../adapter-codex/test/fake-app-server.js";
+
+const run = promisify(execFile);
 
 const SESSION = "33333333-3333-4333-8333-333333333333";
 const TITLE_COMMAND = "wsp-title-read";
@@ -51,6 +57,8 @@ function titledAdapter(
     endsOnInterrupt?: boolean;
     /** Every start's options, so a test can read what the launch carried. */
     starts?: HarnessStartOptions[];
+    /** A real adapter's store write in place of the stand-in one keepsNames gives. */
+    writer?: HarnessAdapter["renameSession"];
   } = {},
 ): HarnessAdapterFactory {
   const reader: HarnessAdapter["sessionTitle"] =
@@ -68,7 +76,7 @@ function titledAdapter(
     steers: false,
     ...(options.keepsTitles === false ? {} : { sessionTitle: reader }),
     ...(options.maker !== undefined ? { titleFor: options.maker } : {}),
-    ...(options.keepsNames === true ? { renameSession: writer } : {}),
+    ...(options.writer !== undefined ? { renameSession: options.writer } : options.keepsNames === true ? { renameSession: writer } : {}),
     start: o => {
       options.starts?.push(o);
       const sessionId = o.resume ?? options.sessionOf?.(o.prompt) ?? SESSION;
@@ -588,6 +596,34 @@ describe("the title the harness makes for a thread", () => {
     await new Promise(r => setTimeout(r, 5));
     expect(asked).toEqual([]);
     expect(await titleOf(rt, ws.id)).toBe("Ticket 411 review");
+  });
+
+  it("writes the name again at the turn's end when codex had not written the thread when it was given", async () => {
+    // Codex inserts a thread's index row with ON CONFLICT DO NOTHING, so a name given before its first turn is written
+    // has nowhere to land: the app server refuses it then and takes it once the turn has written the thread.
+    const server = fakeAppServer({ "thread/name/set": [{ error: { code: -32600, message: `no rollout found for thread id ${SESSION}` } }, { result: {} }] });
+    const codex = createCodexAdapter({ exec: () => { throw new Error("no turns here"); }, home: server.home, login: "codex login", baseEnv: { PATH: server.path } });
+    const named = () => server.requests().filter(r => r["method"] === "thread/name/set");
+    const turn = gate<void>();
+    const { backend } = titledBackend(() => OPENING);
+    const inner = backend.execImpl;
+    backend.execImpl = async (m, cmd) => (cmd.includes("thread/name/set") ? { exitCode: 0, stdout: (await run("bash", ["-c", cmd], { env: { PATH: "/usr/bin:/bin", HOME: tmpdir() } })).stdout, stderr: "" } : inner(m, cmd));
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ writer: codex.renameSession, hold: () => turn.wait }) } });
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      const handle = await rt.sessions.start(ws.id, { prompt: OPENING, title: "Ticket 411 review" });
+      await until(() => named().length === 1);
+      turn.open();
+      await handle.finished;
+      await until(() => named().length === 2);
+      expect(named().map(r => r["params"])).toEqual([
+        { threadId: SESSION, name: "Ticket 411 review" },
+        { threadId: SESSION, name: "Ticket 411 review" },
+      ]);
+      expect(await titleOf(rt, ws.id)).toBe("Ticket 411 review");
+    } finally {
+      server.remove();
+    }
   });
 
   it("refuses a start named with nothing at all", async () => {

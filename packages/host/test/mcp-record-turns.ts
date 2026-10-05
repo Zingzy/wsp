@@ -441,6 +441,7 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
     { case: "a codex command", arguments: { thread: THREAD }, replies: asked([ask("command_execution", { command: "touch hi.txt", cwd: "/w" }, CONSENT, "Allow me to create hi.txt?")]) },
     { case: "a codex file change", arguments: { thread: THREAD }, replies: asked([ask("file_change", { changes: [{ path: "/w/src/a.rs", kind: "update" }] }, CONSENT)]) },
     { case: "several codex file changes", arguments: { thread: THREAD }, replies: asked([ask("file_change", { changes: [{ path: "/w/a.rs", kind: "update" }, { path: "b.rs", kind: "add" }] }, CONSENT)]) },
+    { case: "with a reason", arguments: { thread: THREAD, reason: "count them with awk \u0085 \"instead\"" }, replies: asked([ask("Bash", { command: "wc -l < /etc/hosts" }, CONSENT)]) },
     { case: "no option by that id", arguments: { thread: THREAD }, replies: asked([ask("Bash", { command: "ls" }, CONSENT)], { "sessions.answer": answer("no-option") }) },
     { case: "unsupported", arguments: { thread: THREAD }, replies: asked([ask("Bash", { command: "ls" }, CONSENT)], { "sessions.answer": answer("unsupported") }) },
     { case: "not found", arguments: { thread: THREAD }, replies: asked([ask("Bash", { command: "ls" }, CONSENT)], { "sessions.answer": answer("not-found") }) },

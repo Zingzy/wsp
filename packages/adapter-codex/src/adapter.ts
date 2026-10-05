@@ -170,7 +170,7 @@ export interface CodexAdapter {
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */
   sessionTitle: SessionTitleReader;
-  /** Names the thread in that same index, in the column the CLI's own rename writes. */
+  /** Names the thread through the app server's own rename, which writes the column that read takes. */
   renameSession: SessionRenamer;
   /** Asks the CLI itself, in one read-only turn, for a name for a thread it has just replied in. */
   titleFor: SessionTitleMaker;
@@ -1182,7 +1182,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     revert,
     probeCatalog,
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
-    renameSession: (threadId, title, exec) => exec(renameCommand({ home: deps.home, threadId, title })).then(parseRename),
+    renameSession: (threadId, title, exec) =>
+      exec(renameCommand({ home: deps.home, threadId, title, baseEnv: deps.baseEnv, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) })).then(parseRename),
     titleFor: (turn, exec) =>
       exec(
         titleForCommand({

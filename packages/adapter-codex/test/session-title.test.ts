@@ -10,7 +10,9 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
 import type { SessionRenameWrite } from "@wsp/protocol";
+import { createCodexAdapter } from "../src/adapter.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "../src/session-title.js";
+import { fakeAppServer, type Json } from "./fake-app-server.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 const THREAD = "01a079b6-6f04-7f73-84d6-40e9e6885ffd";
@@ -116,72 +118,52 @@ describe("the title Codex makes for a thread", () => {
   });
 });
 
-/** The rename as the guest runs it: one bash line, its stdout read the way the adapter reads it. */
-const renameTo = async (home: string, threadId: string, title: string): Promise<SessionRenameWrite> =>
-  parseRename((await run("bash", ["-c", renameCommand({ home, threadId, title })])).stdout);
+const NO_ROLLOUT = { error: { code: -32600, message: `no rollout found for thread id ${THREAD}` } };
 
-/** The name column as sqlite holds it, read past the adapter's own precedence. */
-const nameOf = async (home: string, db: string, threadId: string): Promise<string> =>
-  (await run("sqlite3", [join(home, db), `select coalesce(name, '<null>') from threads where id = '${threadId}';`])).stdout.trim();
+/** The real adapter's renamer, its one shell line run under bash against the fake app server's home and PATH. */
+const renameThrough = (f: ReturnType<typeof fakeAppServer>, title: string, threadId = THREAD): Promise<SessionRenameWrite> => {
+  const codex = createCodexAdapter({ exec: () => { throw new Error("no turns here"); }, home: f.home, login: "codex login", baseEnv: { PATH: f.path } });
+  return codex.renameSession(threadId, title, async command => (await run("bash", ["-c", command], { env: { PATH: "/usr/bin:/bin", HOME: tmpdir() } })).stdout);
+};
 
 describe("naming a Codex thread from wsp", () => {
-  it("sets the name column the CLI's own rename writes, leaving the derived title where it is, and the read gives it back", async () => {
-    const home = await codexHome({ "state_5.sqlite": [row(THREAD, "say hi", null)] });
-    expect(await renameTo(home, THREAD, "the name he typed in wsp")).toEqual({ kind: "written" });
-    expect(await nameOf(home, "state_5.sqlite", THREAD)).toBe("the name he typed in wsp");
-    expect((await run("sqlite3", [join(home, "state_5.sqlite"), `select title from threads where id = '${THREAD}';`])).stdout.trim()).toBe("say hi");
-    expect(await titleOf(home, THREAD)).toBe("the name he typed in wsp");
+  const made: (() => void)[] = [];
+  afterAll(() => made.splice(0).forEach(remove => remove()));
+  const fake = (answers: Json) => {
+    const f = fakeAppServer(answers);
+    made.push(f.remove);
+    return f;
+  };
+
+  it("asks codex's own app server to name the thread, which writes the index row itself where it has none yet", async () => {
+    const f = fake({ "thread/name/set": { result: {} } });
+    expect(await renameThrough(f, "the name he typed in wsp")).toEqual({ kind: "written" });
+    expect(f.requests().map(r => [r["method"], r["params"]])).toEqual([
+      ["initialize", { clientInfo: { name: "wsp", version: "0" } }],
+      ["initialized", {}],
+      ["thread/name/set", { threadId: THREAD, name: "the name he typed in wsp" }],
+    ]);
   });
 
-  it("names the thread in the highest schema version, the db the read picks too", async () => {
-    const home = await codexHome({
-      "state_5.sqlite": [row(THREAD, "old schema", null)],
-      "state_10.sqlite": [row(THREAD, "live schema", null)],
-    });
-    expect(await renameTo(home, THREAD, "the live name")).toEqual({ kind: "written" });
-    expect(await nameOf(home, "state_10.sqlite", THREAD)).toBe("the live name");
-    expect(await nameOf(home, "state_5.sqlite", THREAD)).toBe("<null>");
+  it("carries a name holding quotes and a newline as its own bytes", async () => {
+    const f = fake({ "thread/name/set": { result: {} } });
+    expect(await renameThrough(f, "it's \"here\"\n'); drop table threads; --")).toEqual({ kind: "written" });
+    expect(f.requests().find(r => r["method"] === "thread/name/set")?.["params"]).toEqual({ threadId: THREAD, name: "it's \"here\"\n'); drop table threads; --" });
   });
 
-  it("keeps a name holding a quote and a newline, and takes one over an earlier one", async () => {
-    const home = await codexHome({ "state_5.sqlite": [row(THREAD, "say hi", "an older name")] });
-    expect(await renameTo(home, THREAD, "it's\nhere")).toEqual({ kind: "written" });
-    expect(await titleOf(home, THREAD)).toBe("it's\nhere");
+  it("says no session when codex has no rollout for the thread yet, which is a thread whose first turn has not written it", async () => {
+    expect(await renameThrough(fake({ "thread/name/set": NO_ROLLOUT }), "the name")).toEqual({ kind: "no-session" });
   });
 
-  it("says no session only when the index answered and holds no such thread; a home with no index at all is a failure naming it", async () => {
-    const home = await codexHome({ "state_5.sqlite": [row("01a079b6-bba9-77d1-8eed-a6f11fd839b4", "another thread", null)] });
-    expect(await renameTo(home, THREAD, "the name")).toEqual({ kind: "no-session" });
-    expect(await nameOf(home, "state_5.sqlite", "01a079b6-bba9-77d1-8eed-a6f11fd839b4")).toBe("<null>");
-    expect(await renameTo(await codexHome({}), THREAD, "the name")).toEqual({ kind: "failed", error: "no codex thread index on the machine" });
-    expect(await renameTo(join(tmpdir(), "wsp-codex-nowhere"), THREAD, "the name")).toEqual({ kind: "failed", error: "no codex home on the machine" });
+  it("says failed with codex's own words for any other refusal, and when the server never answered", async () => {
+    expect(await renameThrough(fake({ "thread/name/set": { error: { code: -32603, message: "database is locked" } } }), "the name")).toEqual({ kind: "failed", error: "database is locked" });
+    expect(await renameThrough(fake({ "thread/name/set": "exit" }), "the name")).toEqual({ kind: "failed", error: "codex's app server did not answer the rename" });
   });
 
-  it("says failed with sqlite's own line when the index refused the write, never that the thread is not there", async () => {
-    // The index is there and the table is not what the write expects, which is what a refused write looks like from
-    // here: sqlite3 stops at the first error, so changes() never runs and its message is all the machine gives.
-    const home = mkdtempSync(join(tmpdir(), "wsp-codex-title-"));
-    homes.push(home);
-    await run("sqlite3", [join(home, "state_5.sqlite"), "create table other (id text);"]);
-    const wrote = await renameTo(home, THREAD, "the name");
-    expect(wrote.kind).toBe("failed");
-    expect(wrote.kind === "failed" ? wrote.error : "").toContain("no such table: threads");
-  });
-
-  it("refuses a thread id that is not a plain slug, and a name that closes the SQL string lands as its own bytes", async () => {
+  it("refuses a thread id that is not a plain slug before anything runs", () => {
     expect(() => renameCommand({ home: "/root/.codex", threadId: "x' or '1'='1", title: "x" })).toThrow(/plain slug/);
-    const home = await codexHome({ "state_5.sqlite": [row(THREAD, "say hi", null)] });
-    expect(await renameTo(home, THREAD, "'); drop table threads; --")).toEqual({ kind: "written" });
-    expect(await titleOf(home, THREAD)).toBe("'); drop table threads; --");
   });
 
-  it("reads the rows changed as the answer, and a stdout it does not know as a failure carrying what was said", () => {
-    expect(parseRename("changed 1\n")).toEqual({ kind: "written" });
-    expect(parseRename("changed 0\n")).toEqual({ kind: "no-session" });
-    expect(parseRename("failed database is locked\n")).toEqual({ kind: "failed", error: "database is locked" });
-    expect(parseRename("")).toEqual({ kind: "failed", error: "the machine said nothing about the write" });
-    expect(parseRename("Error: attempt to write a readonly database\n")).toEqual({ kind: "failed", error: "Error: attempt to write a readonly database" });
-  });
 });
 
 describe("the commit message Codex drafts", () => {

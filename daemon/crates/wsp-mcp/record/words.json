@@ -254,7 +254,7 @@
     "thread_rename": "wsp thread rename <thread> \"<title>\"",
     "thread_forget": "wsp thread forget <thread>",
     "thread_allow": "wsp thread allow <thread>",
-    "thread_deny": "wsp thread deny <thread>",
+    "thread_deny": "wsp thread deny <thread> [--reason \"<words>\"]",
     "send": "wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] \"<message>\"",
     "restart": "wsp restart",
     "stop": "wsp stop <thread> [--task <id>]",
