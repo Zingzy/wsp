@@ -24,7 +24,7 @@ export const SLATE_RULES: readonly string[] = [
   "Props are meaning, never style. held is a sentence that disables: bind it to a condition.",
   "A list binds to items; item and index read the row.",
   "A press reaches you only through send(\"literal text\", $path); <when> chains run without you.",
-  "Write once, then patch by id: <props id=\"price\" value={$spot.json.v} />; never resend the whole slate.",
+  "Write once, then patch by id: <props id=\"price\" value={$spot.json.v} />; never resend the whole slate; slate_catalog patch.",
   "Simple and airy unless asked for more: few pieces, one idea per section, short labels. Separate things by layout, never by ·, • or |.",
   "One heading per section: its title or a heading, never bold text.",
   "Status and last-checked lines small and muted, beside their subject.",
@@ -163,6 +163,15 @@ Chain: <when done={$check} do={set($ok, $check.exit == 0)} />; done fires on any
 Code only the slate uses goes in <file name="x.py"> and runs as $SLATE_DIR/x.py; project code runs where it is.
 A tool's json is its structured result, else its text parsed; one marked text only keeps json empty unless its text is JSON. The person allows a server once per thread, a destructive tool every start. A secret in args returns as [secret:name].`;
 
+const PATCH = `patch: elements without <slate>, sent as text to slate_write; one write may hold several.
+<props id="price" tone="warning" />: merges these props into the piece.
+<text id="eta">Ready</text>: a piece with an id that exists replaces it whole, children too.
+<add under="list" at={0}><text id="new">New</text></add>: adds pieces under a piece, at an index from 0, else last.
+<move id="new" under="other" at={1} />: moves a piece.
+<remove id="new" />: removes a piece and what it holds. <remove name="hist" /> removes a declaration.
+<value name="hist" start={[]} />, <run ...>, <derived ...>, <file name="x.py">...</file>: adds the declaration or replaces the one of that name.
+<clear /> empties the slate; <undo /> goes back one write. Each stands alone in its write.`;
+
 function functionsEntry(): string {
   const shown = new Set(["percent", "pct", "tokens", "usd", "duration", "ago", "until", "date", "plural", "word", "short", "num", "json", "contains", "orElse", "len", "first", "pluck"]);
   return ["Functions (pure; a null argument gives null unless the function takes one):", ...Object.entries(SLATE_FUNCTIONS).map(([n, f]) => (shown.has(n) ? `${f.sig}: ${f.example}` : f.sig))].join("\n");
@@ -186,12 +195,13 @@ export function slateCatalog(name?: string): string {
   switch (n) {
     case "runs": case "run": case "tool": case "tools": case "mcp": return RUNS;
     case "functions": return functionsEntry();
+    case "patch": case "patches": return PATCH;
     case "steps": case "pipes": case "pipe": return stepsEntry();
     case "handlers": return handlersEntry();
     case "examples": return SLATE_EXAMPLES.map(e => `${e.title}:\n${e.text}`).join("\n\n");
     case "icons": case "icon": return `icon="<name>" or icon={formula}; a name off this list draws none. Lucide names: ${SLATE_ICONS.join(" ")}`;
     default: {
-      const options = [...Object.keys(SLATE_PIECES), ...Object.keys(SLATE_SOURCES), "runs", "functions", "steps", "handlers", "icons", "examples"];
+      const options = [...Object.keys(SLATE_PIECES), ...Object.keys(SLATE_SOURCES), "runs", "functions", "steps", "handlers", "patch", "icons", "examples"];
       const fix = nearest(n, options);
       return `${n} is not in the catalog${fix !== undefined ? `; did you mean ${fix}?` : "."} Ask for a piece, a source, runs, functions, steps, handlers, icons or examples; a server's tools are the host's to answer.`;
     }
