@@ -6,6 +6,18 @@ import type { SlateEngine } from "../engine.js";
 import { truthy } from "../actions.js";
 import { whenOf } from "../paths.js";
 
+/** Each row's React key off the key it was given: the index where it has none, its text where it is one, its JSON
+ * otherwise, and the index added where two rows give the same, so no two rows share a key. */
+export function rowKeys(given: readonly (SlateJson | undefined)[]): string[] {
+  const seen = new Set<string>();
+  return given.map((value, index) => {
+    const base = value === undefined || value === null ? `#${index}` : typeof value === "string" ? value : JSON.stringify(value);
+    const key = seen.has(base) ? `${base}#${index}` : base;
+    seen.add(key);
+    return key;
+  });
+}
+
 export type Tone = "default" | "muted" | "good" | "warning" | "bad" | "info" | "accent";
 const TONES: ReadonlySet<string> = new Set(["default", "muted", "good", "warning", "bad", "info", "accent"]);
 

@@ -16,7 +16,7 @@ import type { PieceViewProps, PieceView } from "../SlateView.js";
 import { truthy } from "../actions.js";
 import { placeOf } from "./runs.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
-import { isSentence, NOTE, present, str, TONE_INK, toneOf } from "./look.js";
+import { isSentence, NOTE, present, rowKeys, str, TONE_INK, toneOf } from "./look.js";
 import { Outcome } from "./outcome.js";
 import { usePress } from "./press.js";
 import { pressTitle } from "./button.js";
@@ -83,10 +83,6 @@ export const ROWS_DRAWN = 200;
 /** How many of a table's rows draw: what its rows prop asks for, never past ROWS_DRAWN. */
 const drawnRows = (asked: SlateJson | undefined, length: number): number => Math.min(typeof asked === "number" ? Math.max(0, Math.floor(asked)) : length, ROWS_DRAWN);
 
-function rowKey(slate: SlateEngine, key: SlatePropValue | undefined, row: Row): string {
-  const value = key === undefined ? undefined : slate.resolve(key, row);
-  return value === undefined || value === null ? `#${row.index}` : typeof value === "string" ? value : JSON.stringify(value);
-}
 
 const NAME = "text-sm leading-5 text-foreground";
 const WORD = "text-[13px] leading-5 text-muted-foreground";
@@ -117,6 +113,8 @@ export const table: PieceView = {
     const columns = shownColumns(slate, piece.props?.["columns"]);
     const actions = records(piece.props?.["rowActions"]).slice(0, 3);
     const shown = items.slice(0, drawnRows(props["rows"], items.length));
+    const keyProp = piece.props?.["key"];
+    const keys = rowKeys(shown.map((item, index) => (keyProp === undefined ? undefined : slate.resolve(keyProp, { item, index }))));
     const place = placeOf(slate, id);
     const inset = place === "inside" ? "" : INSET;
     const card = place === "inside" ? "" : CARD_SURFACE;
@@ -189,11 +187,11 @@ export const table: PieceView = {
                 );
                 const className = cn("col-span-full grid grid-cols-subgrid items-start gap-x-4", ROW, inset);
                 return opens ? (
-                  <OpenRow key={rowKey(slate, piece.props?.["key"], row)} id={id} template={actions[0]!} row={row} raise={raise} className={className} label={`${str(slate.resolve(actions[0]!["label"], row)) ?? ""}, ${name}`}>
+                  <OpenRow key={keys[index]} id={id} template={actions[0]!} row={row} raise={raise} className={className} label={`${str(slate.resolve(actions[0]!["label"], row)) ?? ""}, ${name}`}>
                     {body}
                   </OpenRow>
                 ) : (
-                  <div key={rowKey(slate, piece.props?.["key"], row)} role="row" className={className}>
+                  <div key={keys[index]} role="row" className={className}>
                     {body}
                   </div>
                 );
@@ -267,11 +265,11 @@ export const table: PieceView = {
               );
               const className = cn("col-span-full grid grid-cols-subgrid items-baseline", ROW);
               return opens ? (
-                <OpenRow key={rowKey(slate, piece.props?.["key"], row)} id={id} template={actions[0]!} row={row} raise={raise} className={className} label={`${str(slate.resolve(actions[0]!["label"], row)) ?? ""}, ${str(slate.resolve(columns[title]?.["value"], row)) ?? ""}`}>
+                <OpenRow key={keys[index]} id={id} template={actions[0]!} row={row} raise={raise} className={className} label={`${str(slate.resolve(actions[0]!["label"], row)) ?? ""}, ${str(slate.resolve(columns[title]?.["value"], row)) ?? ""}`}>
                   {body}
                 </OpenRow>
               ) : (
-                <div key={rowKey(slate, piece.props?.["key"], row)} role="row" className={className}>
+                <div key={keys[index]} role="row" className={className}>
                   {body}
                 </div>
               );

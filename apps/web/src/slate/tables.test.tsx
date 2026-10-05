@@ -2,7 +2,7 @@
 // A table is a list in the settings grammar: it fills the card it stands in, the first column the row's name at the
 // left taking the room, figure columns right-aligned at the end; stacked tables share one column template.
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseSlate, slateStartValues, type SlateDoc } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
@@ -29,6 +29,19 @@ const ends = (t: HTMLElement) => [...cells(t)].map(td => td.className.includes("
 const tracks = (t: HTMLElement) => t.style.gridTemplateColumns;
 
 describe("a table in its card", () => {
+  it("gives every row its own key when two rows give the same one or a key is an object", () => {
+    const said = vi.spyOn(console, "error").mockImplementation(() => {});
+    const c = draw(`<slate><column>
+<table id="t" items={[{ n: 'a', v: 1 }, { n: 'a', v: 2 }]} key={item.n}><col title="Name" value={item.n} /><col title="V" value={item.v} /></table>
+<checklist id="c" items={[{ id: { x: 1 }, t: 'one' }, { id: { x: 2 }, t: 'two' }]} key={item.id} title={item.t} done={false} />
+</column></slate>`);
+    const keyed = said.mock.calls.filter(call => call.some(arg => typeof arg === "string" && arg.includes("same key")));
+    said.mockRestore();
+    expect(keyed).toEqual([]);
+    expect(table(c, "t").querySelectorAll("[role=row]:not([data-slate-head])")).toHaveLength(2);
+    expect(c.querySelector('[data-slate-checklist="c"]')!.querySelectorAll("li")).toHaveLength(2);
+  });
+
   it("draws at most 200 rows and says how many more there are", () => {
     const doc = parseSlate(`<slate><value name="rows" start={[]} /><table id="t" items={$rows}><col title="Name" value={item.n} /></table></slate>`).document!;
     const engine = new SlateEngine("t1", () => undefined, manualScheduler());
