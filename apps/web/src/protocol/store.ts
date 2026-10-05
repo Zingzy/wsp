@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type Attachment, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PendingComputer, type PlaceSettingsAsk, type PlaceSettingWord, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
+import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type Attachment, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PendingComputer, type PlaceSettingsAsk, type PlaceSettingWord, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft, type AccountRow } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -11,6 +11,7 @@ import type { Launch, SidebarProjectSnapshot } from "../adapt/view-model.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { failureOf, type Failure } from "./failure.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
+import { refetchSlates, slateEvent } from "../slate/store.js";
 import { lastOpen, rememberOpen, type LastOpen } from "./lastWorkspace.js";
 import { claimKept, claiming, claimsAnswered, keepCreations, keptCreations, letGo, own } from "./keptCreations.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
@@ -204,6 +205,11 @@ interface State {
   preferences: Preferences;
   /** The newest release as the host last read it; null until it answers, and on a host that reads none. */
   release: ReleaseView | null;
+  /** Every sign-in's row by its key, as usage.accounts answered and usage.account pushes keep it; null until a slate
+   * that binds usage asks for it. */
+  usageAccounts: Record<string, AccountRow> | null;
+  /** Reads the accounts once; a slate's usage source asks when it is first bound. */
+  loadUsageAccounts(): void;
   /** Whether the centre shows the settings page in place of the selected workspace's thread. */
   settingsOpen: boolean;
   bind(api: Api): void;
@@ -478,6 +484,9 @@ let initJobViews = 0;
 /** How many of one place's build frames are kept: every stage of a build and the tail of its install steps. */
 export const GOLDEN_FRAMES_KEPT = 64;
 
+/** Whether usage.accounts was asked since the last gap, so every slate binding usage asks once between them. */
+let usageAccountsAsked = false;
+
 export const useStore = create<State>((set, get) => {
   /** A record the host answered, and its agent lists read again where it moved what they are marked by. */
   const preferencesLanded = (preferences: Preferences, before: Preferences): void => {
@@ -749,8 +758,24 @@ export const useStore = create<State>((set, get) => {
     gaps: 0,
     preferences: bootPreferences(),
     release: null,
+    usageAccounts: null,
+    loadUsageAccounts() {
+      if (usageAccountsAsked) return;
+      usageAccountsAsked = true;
+      void get().api?.usageAccounts?.().then(
+        answer => set(s => ({ usageAccounts: { ...Object.fromEntries(answer.accounts.map(row => [row.key, row])), ...s.usageAccounts } })),
+        () => {
+          usageAccountsAsked = false;
+        },
+      );
+    },
     settingsOpen: false,
-    noteGap() { set(s => ({ gaps: s.gaps + 1 })); },
+    noteGap() {
+      set(s => ({ gaps: s.gaps + 1 }));
+      refetchSlates();
+      usageAccountsAsked = false;
+      if (get().usageAccounts !== null) get().loadUsageAccounts();
+    },
     bind(api) {
       set({ api });
       useComposerFilesStore.setState({ kept: api.sessionAttachment });
@@ -1361,6 +1386,7 @@ export const useStore = create<State>((set, get) => {
           return;
         }
         case "session.done":
+          slateEvent(e);
           // The reply is in, but the row stays running until the process exits (session.end): a turn is not over while
           // its agent keeps working, and a send that met a done-but-running row would be one the runtime refuses.
           return;
@@ -1397,6 +1423,14 @@ export const useStore = create<State>((set, get) => {
         }
         case "preferences.changed":
           if (preferenceSetsInFlight === 0) preferencesLanded(e.preferences, get().preferences);
+          return;
+        case "session.slate":
+        case "slate.values":
+        case "slate.run":
+          slateEvent(e);
+          return;
+        case "usage.account":
+          set(s => ({ usageAccounts: { ...s.usageAccounts, [e.key]: e.row } }));
           return;
         case "release.changed":
           set({ release: e.release });

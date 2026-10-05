@@ -5,7 +5,7 @@
 // so the line carries only the folder and the MCP servers' config overrides.
 // No listener is ever named: stdio is the server's default transport, and a
 // socket would let anything on the machine drive the agent.
-import { inFolder, LAUNCH_ENV, launchWords, MCP_SERVER_NAME, programWord, shellQuote, WSP_TOOL_TIMEOUT_SEC, type AgentLaunch, type McpServerSpec } from "@wsp/protocol";
+import { inFolder, LAUNCH_ENV, launchWords, MCP_SERVER_NAME, programWord, shellQuote, SLATE_SERVER_NAME, SLATE_TOOLS, WSP_TOOL_TIMEOUT_SEC, type AgentLaunch, type McpServerSpec } from "@wsp/protocol";
 
 const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 /** The sandbox modes thread/start takes; the one that turns the sandbox off is the one that asks nobody. */
@@ -58,15 +58,26 @@ const SERVER_NAME_RE = /^[A-Za-z0-9_-]+$/;
 /** Each server as a whole config entry: an override naming only env_vars for a server the config does not hold stops
  * codex at start (measured on codex-cli 0.155.1). */
 function serverFlags(servers: Readonly<Record<string, McpServerSpec>>): string[] {
-  return Object.entries(servers).flatMap(([name, spec]) => {
-    if (!SERVER_NAME_RE.test(name)) throw new Error(`an MCP server name must be one plain word of a config key, got "${name}"`);
+  const entry = (name: string, spec: McpServerSpec): string[] => {
     const at = `mcp_servers.${name}`;
     return [
       config(`${at}.command`, spec.command),
       configRaw(`${at}.args`, JSON.stringify(spec.args)),
       // Codex hands a server only its own short list of variables (codex-rs/rmcp-client/src/utils.rs at
       // rust-v0.155.1), so the launch's are named for the wsp one: names only, the values stay in the environment.
-      ...(name === MCP_SERVER_NAME ? [configRaw(`${at}.env_vars`, JSON.stringify(LAUNCH_ENV)), configRaw(`${at}.tool_timeout_sec`, String(WSP_TOOL_TIMEOUT_SEC))] : []),
+      ...(name === MCP_SERVER_NAME || name === SLATE_SERVER_NAME ? [configRaw(`${at}.env_vars`, JSON.stringify(LAUNCH_ENV)), configRaw(`${at}.tool_timeout_sec`, String(WSP_TOOL_TIMEOUT_SEC))] : []),
+    ];
+  };
+  return Object.entries(servers).flatMap(([name, spec]) => {
+    if (!SERVER_NAME_RE.test(name)) throw new Error(`an MCP server name must be one plain word of a config key, got "${name}"`);
+    if (name !== MCP_SERVER_NAME) return entry(name, spec);
+    const slate = JSON.stringify(SLATE_TOOLS);
+    return [
+      ...entry(name, spec),
+      configRaw(`mcp_servers.${name}.disabled_tools`, slate),
+      ...entry(SLATE_SERVER_NAME, spec),
+      configRaw(`mcp_servers.${SLATE_SERVER_NAME}.enabled_tools`, slate),
+      configRaw(`mcp_servers.${SLATE_SERVER_NAME}.omit_tools_from`, JSON.stringify(["deferred"])),
     ];
   });
 }

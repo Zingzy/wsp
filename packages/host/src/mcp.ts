@@ -8,7 +8,7 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { instructions } from "./skill.js";
-import { VERBS, c1Escaped, dialHost, hasTool, toolFailure, toolName, type DialOpts, type HostClient, type Verb, type VerbDeps } from "./verbs.js";
+import { LOADED_UP_FRONT, VERBS, c1Escaped, dialHost, hasTool, toolFailure, toolName, type DialOpts, type HostClient, type Verb, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 export interface Dialer {
@@ -53,18 +53,21 @@ const pickOf = (opts: { env: VerbDeps["env"]; host?: string; start?: VerbDeps["s
   ...(opts.start !== undefined ? { start: opts.start } : {}),
 });
 
-export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"]; skip?: (verb: Verb) => boolean; elsewhere?: boolean; hostWaitMs?: number }): McpServer {
-  const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: instructions() });
+export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"]; skip?: (verb: Verb) => boolean; elsewhere?: boolean; hostWaitMs?: number; scoped?: boolean }): McpServer {
+  const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: instructions(opts.scoped === true) });
   const deps: VerbDeps = { statePath, env: opts.env, client: opts.dial ?? dialer(statePath, pickOf(opts)), ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}), ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}), ...(opts.elsewhere === true ? { elsewhere: true } : {}), ...(opts.hostWaitMs !== undefined ? { hostWaitMs: opts.hostWaitMs } : {}) };
   for (const verb of VERBS) {
     if (!hasTool(verb) || opts.skip?.(verb) === true) continue;
-    server.registerTool(toolName(verb.name), { description: verb.tool.description, inputSchema: verb.tool.input, outputSchema: verb.tool.output }, args => verb.tool.call(args, deps).catch((e: unknown) => toolFailure(e, "usage" in verb ? verb.usage : undefined)));
+    const name = toolName(verb.name);
+    // A Claude Code launch loads this server's tools up front (alwaysLoad); every tool but the slate's stays behind its tool search.
+    const listed = { _meta: { "anthropic/alwaysLoad": LOADED_UP_FRONT.has(name) } };
+    server.registerTool(name, { description: verb.tool.description, inputSchema: verb.tool.input, outputSchema: verb.tool.output, ...listed }, args => verb.tool.call(args, deps).catch((e: unknown) => toolFailure(e, "usage" in verb ? verb.usage : undefined)));
   }
   return server;
 }
 
 /** The server on stdio until the agent is done with it: its stdin ending closes the transport, and the host socket with it. */
-export async function serveMcp(statePath: string, opts: { alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"] }, streams: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
+export async function serveMcp(statePath: string, opts: { alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"]; scoped?: boolean }, streams: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
   const dial = dialer(statePath, pickOf(opts));
   const server = mcpServer(statePath, { dial, ...opts });
   const transport = new StdioServerTransport(streams.input, c1Escaped(streams.output));

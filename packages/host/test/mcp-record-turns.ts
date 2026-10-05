@@ -122,7 +122,8 @@ async function pickWords(): Promise<Record<string, unknown>> {
   const notOne = async (c: HarnessCatalog, picks: Parameters<typeof startPicks>[1]): Promise<string> => (await said(c, picks)).replace("L (V)", "{options}");
   const legacy = (await said(catalog({ models: option, legacyModels: [{ value: "LV", label: "LL" }] }), { model: "{value}" })).replace("LL (LV)", "{legacy}").replace("L (V)", "{options}");
   const fixed = catalog({ models: option });
-  const refusedStart = await refused(() => checkedStart(answering({ "harnesses.list": { harnesses: [fixed] } }), "t", undefined, { model: "{value}" }));
+  // A start on a workspace: a thread here leaves its model to the agent installed here, so only a workspace's is checked first.
+  const refusedStart = await refused(() => checkedStart(answering({ "harnesses.list": { harnesses: [fixed] } }), "t", undefined, { model: "{value}" }, "{workspace}"));
   // An agent that maps ask alone, refusing plan: the sentence the start says, with what it refused standing in.
   const asking = catalog({ label: "{label}", permissionModes: option, access: { ask: "V" } });
   const accessRefused = await refused(() => checkedStart(answering({ "harnesses.list": { harnesses: [asking] } }), "t", undefined, { access: "plan" }));

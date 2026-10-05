@@ -1,0 +1,134 @@
+{
+  "cloudOff": {
+    "name": "slate_read",
+    "description": "Reads this thread's slate: what the person filled in or pressed, live values, run output and logs, and the sketch: the panel's words as the person sees them.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "another thread's id"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "$run.json, $value, source path, or *"
+        },
+        "text": {
+          "type": "boolean",
+          "description": "false: no JSX-like form"
+        },
+        "sketch": {
+          "type": "boolean",
+          "description": "false: no sketch"
+        },
+        "document": {
+          "type": "boolean",
+          "description": "true: add stored JSON"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "document": {},
+        "values": {},
+        "derived": {},
+        "runs": {},
+        "state": {},
+        "problems": {},
+        "waiting": {},
+        "comments": {},
+        "approvals": {}
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  },
+  "cloudOn": {
+    "name": "slate_read",
+    "description": "Reads this thread's slate: what the person filled in or pressed, live values, run output and logs, and the sketch: the panel's words as the person sees them.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "another thread's id"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "$run.json, $value, source path, or *"
+        },
+        "text": {
+          "type": "boolean",
+          "description": "false: no JSX-like form"
+        },
+        "sketch": {
+          "type": "boolean",
+          "description": "false: no sketch"
+        },
+        "document": {
+          "type": "boolean",
+          "description": "true: add stored JSON"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "document": {},
+        "values": {},
+        "derived": {},
+        "runs": {},
+        "state": {},
+        "problems": {},
+        "waiting": {},
+        "comments": {},
+        "approvals": {}
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  }
+}

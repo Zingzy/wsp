@@ -22,7 +22,6 @@ export interface ChartLine {
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(n => (n + 0.5) / 16);
 const CELL = 2;
 export const CHART_HEIGHT = 300;
-const HEIGHT = CHART_HEIGHT;
 const PAD = 6;
 
 /** The dither under each line, biggest first: the lead at full density and each line after it lighter, each on its
@@ -127,13 +126,34 @@ function useThemeTick(): number {
   return tick;
 }
 
-export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly number[]; lines: readonly ChartLine[]; stepWord: (t: number) => string; ticks: ReadonlyArray<{ at: number; word: string }> }) {
+export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGHT = CHART_HEIGHT, figure = fmtTokens, axisFigure = figure, label = "Tokens over the range", axis, small = false }: {
+  steps: readonly number[];
+  lines: readonly ChartLine[];
+  stepWord: (t: number) => string;
+  ticks: ReadonlyArray<{ at: number; word: string }>;
+  height?: number;
+  /** The words for a figure on the axis and in the tooltip. */
+  figure?: (v: number) => string;
+  /** The axis's own words where they differ: a unit the legend already names is not said again on every tick. */
+  axisFigure?: (v: number) => string;
+  label?: string;
+  /** A fixed axis from the caller, its figures drawn as plain text, split in four unless it names fewer parts; without
+   * one it runs from 0 to a round top in four and the figures roll. */
+  axis?: { readonly from: number; readonly to: number; readonly parts?: number };
+  /** The panel's size: the axis figures and ticks at 11 px, the gutter as wide as the widest figure and 8 px off the
+   * plot, so the widest figure starts on the section's left edge and the plot ends on its right. */
+  small?: boolean;
+}) {
   const [hovered, setHovered] = useState<number | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const from = axis?.from ?? 0;
+  const lines = from === 0 ? given : given.map(line => ({ ...line, points: line.points.map(v => v - from) }));
   const themeTick = useThemeTick();
   const n = steps.length;
-  const top = niceTop(Math.max(0, ...lines.flatMap(line => line.points)));
+  const top = axis === undefined ? niceTop(Math.max(0, ...lines.flatMap(line => line.points))) : axis.to - axis.from;
   const total = (line: ChartLine): number => line.points.reduce((a, b) => a + b, 0);
+  const parts = axis?.parts ?? 4;
+  const marks = Array.from({ length: parts + 1 }, (_, g) => g);
   const lead = [...lines].sort((a, b) => total(b) - total(a))[0];
   const x = (i: number): number => (n > 1 ? (i / (n - 1)) * 100 : 0);
   const dataKey = lines.map(line => `${line.key}:${line.points.join(",")}`).join("|");
@@ -166,29 +186,29 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
   }, []);
 
   return (
-    <div data-usage-chart="tokens" className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-3">
-      <div data-k="y-axis" aria-hidden className="relative font-mono text-xs leading-none text-muted-foreground tabular-nums" style={{ height: HEIGHT }}>
-        {[0, 1, 2, 3, 4].map(g => (
+    <div data-usage-chart="tokens" className={cn("grid grid-cols-[auto_minmax(0,1fr)] gap-y-3", small ? "gap-x-2" : "gap-x-3")}>
+      <div data-k="y-axis" aria-hidden className={cn("relative font-mono leading-none whitespace-nowrap text-muted-foreground tabular-nums", small ? "text-[11px]" : "text-xs")} style={{ height: HEIGHT }}>
+        {marks.map(g => (
           <span key={g} data-k="y-tick" className="invisible block h-0 text-right">
-            {fmtTokens((top * g) / 4)}
+            {axisFigure(from + (top * g) / parts)}
           </span>
         ))}
-        {[0, 1, 2, 3, 4].map(g => (
-          <span key={g} className="absolute right-0 -translate-y-1/2" style={{ top: HEIGHT - PAD - (g / 4) * (HEIGHT - PAD * 2) }}>
-            <DigitRoll value={fmtTokens((top * g) / 4)} />
+        {marks.map(g => (
+          <span key={g} className="absolute right-0 -translate-y-1/2" style={{ top: HEIGHT - PAD - (g / parts) * (HEIGHT - PAD * 2) }}>
+            {axis === undefined ? <DigitRoll rollIn value={axisFigure(from + (top * g) / parts)} /> : axisFigure(from + (top * g) / parts)}
           </span>
         ))}
       </div>
       <div className="relative" style={{ height: HEIGHT }}>
         <svg aria-hidden className="absolute inset-0 size-full overflow-visible text-border" viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none">
-          {[1, 2, 3, 4].map(g => {
-            const gy = HEIGHT - PAD - (g / 4) * (HEIGHT - PAD * 2);
+          {marks.slice(1).map(g => {
+            const gy = HEIGHT - PAD - (g / parts) * (HEIGHT - PAD * 2);
             return <line key={g} x1={0} x2={100} y1={gy} y2={gy} stroke="currentColor" strokeDasharray="2 4" vectorEffect="non-scaling-stroke" />;
           })}
           <line x1={0} x2={100} y1={HEIGHT - PAD} y2={HEIGHT - PAD} stroke="currentColor" vectorEffect="non-scaling-stroke" />
         </svg>
         <canvas ref={canvas} aria-hidden className="absolute inset-0 size-full" />
-        <svg role="img" aria-label="Tokens over the range" className="absolute inset-0 size-full overflow-visible" viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none">
+        <svg role="img" aria-label={label} className="absolute inset-0 size-full overflow-visible" viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none">
           {[...lines].reverse().map(line => (
             <g
               key={line.key}
@@ -212,10 +232,12 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
                 delay={0}
                 render={<span data-k="point" className="h-full flex-1" style={n > 1 && (i === 0 || i === n - 1) ? { flexGrow: 0.5 } : undefined} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(current => (current === i ? null : current))} />}
               />
-              <TooltipPopup side="top" sideOffset={6}>
+              {/* In the panel the hover opens beside its line at the plot's top, flipping at the far edge, so it never
+                  rises over the legend and the section head, nor runs past the panel's left edge. */}
+              <TooltipPopup {...(small ? { side: "right", align: "start", sideOffset: 8 } : { side: "top", sideOffset: 6 })}>
                 <span className="flex flex-col gap-1">
                   <span className="font-mono text-xs text-muted-foreground tabular-nums">{stepWord(t)}</span>
-                  {lines
+                  {given
                     .filter(line => (line.points[i] ?? 0) > 0)
                     .map(line => (
                       <span key={line.key} data-k="point-figure" className="flex items-center justify-between gap-4 text-xs">
@@ -223,7 +245,7 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
                           <span aria-hidden className={cn("h-0.5 w-3 rounded-full bg-current", line.ink.className)} style={line.ink.style} />
                           {line.label}
                         </span>
-                        <span className="font-mono tabular-nums">{fmtTokens(line.points[i] ?? 0)}</span>
+                        <span className="font-mono tabular-nums">{figure(line.points[i] ?? 0)}</span>
                       </span>
                     ))}
                 </span>
@@ -233,7 +255,7 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
         </div>
       </div>
       <span aria-hidden />
-      <div className="relative h-4 font-mono text-xs leading-4 text-muted-foreground tabular-nums">
+      <div className={cn("relative h-4 font-mono leading-4 text-muted-foreground tabular-nums", small ? "text-[11px]" : "text-xs")}>
         {ticks.map(tick => (
           <span key={tick.at} data-k="tick" className={cn("absolute top-0", tick.at === 0 ? "" : tick.at === 1 ? "-translate-x-full" : "-translate-x-1/2")} style={{ left: `${tick.at * 100}%` }}>
             {tick.word}

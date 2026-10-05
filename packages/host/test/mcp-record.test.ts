@@ -19,7 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, agentName } from "@wsp/catalog";
 import { SEAL_REFUSAL } from "@wsp/keys";
-import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, PROVIDER_KEY_WORDS, RecipeFile, type PendingComputer, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
+import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, problemListsOf, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, PROVIDER_KEY_WORDS, RecipeFile, type PendingComputer, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { hostExitedLine, noHostAnsweredLine, startingHostLine, upArgs } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
@@ -34,6 +34,7 @@ import { absolutePath, DEFAULTS_LABELS, defaultsValueLine, noDefaultsAnsweredLin
 import { VERSION } from "../src/version.js";
 import { ADD_TOOL_FIX, ADD_TOOL_MS, addToolRefusal } from "../src/setup-follow.js";
 import { WORKSPACE_ANSWERED, workspaceWords } from "./mcp-record-workspaces.js";
+import { SLATE_ANSWERED } from "./mcp-record-slates.js";
 import { READS } from "./mcp-record-reads.js";
 
 const CRATE = fileURLToPath(new URL("../../../daemon/crates/wsp-mcp/", import.meta.url));
@@ -60,23 +61,26 @@ async function withServer<T>(use: (client: Client) => Promise<T>): Promise<T> {
   }
 }
 
-/** What this package's server lists and greets with in one state of WSP_CLOUD. The flag is read once as each module
- * loads, so the modules are loaded afresh under it. */
-async function servedIn(cloud: boolean): Promise<{ instructions: string; tools: Record<string, unknown>[] }> {
+/** What this package's server lists and greets with in one state of WSP_CLOUD, and what a thread's own server greets
+ * with. The flag is read once as each module loads, so the modules are loaded afresh under it. */
+async function servedIn(cloud: boolean): Promise<{ instructions: string; scoped: string; tools: Record<string, unknown>[] }> {
   vi.resetModules();
   vi.stubEnv(CLOUD_ENV, cloud ? "1" : "");
   try {
     const { mcpServer: fresh } = await import("../src/mcp.js");
-    const instructions = (await import("../src/skill.js")).instructions();
-    const server = fresh("/nonexistent/state.json", { env: {} });
-    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "record", version: "0" });
-    await server.connect(toServer);
-    await client.connect(toClient);
-    const tools = (await client.listTools()).tools as Record<string, unknown>[];
-    await client.close();
-    await server.close();
-    return { instructions, tools };
+    const greeted = async (scoped: boolean): Promise<{ instructions: string; tools: Record<string, unknown>[] }> => {
+      const server = fresh("/nonexistent/state.json", { env: {}, scoped });
+      const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: "record", version: "0" });
+      await server.connect(toServer);
+      await client.connect(toClient);
+      const said = { instructions: client.getInstructions() ?? "", tools: (await client.listTools()).tools as Record<string, unknown>[] };
+      await client.close();
+      await server.close();
+      return said;
+    };
+    const { instructions, tools } = await greeted(false);
+    return { instructions, scoped: (await greeted(true)).instructions, tools };
   } finally {
     vi.unstubAllEnvs();
   }
@@ -320,7 +324,7 @@ function answeringHost(replies: Record<string, string>, asked: Record<string, un
           close(HOST_STOPPING_CLOSE);
         });
       }
-      if (frame["ok"] !== true) throw Object.assign(new Error(String(frame["error"])), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {});
+      if (frame["ok"] !== true) throw Object.assign(new Error(String(frame["error"])), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {}, problemListsOf(frame));
       return frame as T;
     },
     events: async () => {},
@@ -650,6 +654,7 @@ const ANSWERED: Answered = {
   ],
   ...TURN_ANSWERED,
   ...READS,
+  ...SLATE_ANSWERED,
 };
 
 /** The record, made where nothing of the computer recording it reaches it: a clock a read prints is in UTC, which
@@ -676,7 +681,7 @@ async function regeneratedHere(): Promise<Files> {
   const files: Files = new Map();
   const [off, on] = [await servedIn(false), await servedIn(true)];
   const readsHere = VERBS.filter(hasTool).filter(GUEST_SERVED.skip).map(v => toolName(v.name));
-  files.set("record/server.json", fileText({ name: "wsp", version: VERSION, instructions: { cloudOff: off.instructions, cloudOn: on.instructions }, protocolVersions: SUPPORTED_PROTOCOL_VERSIONS, latestProtocolVersion: LATEST_PROTOCOL_VERSION, readsHere }));
+  files.set("record/server.json", fileText({ name: "wsp", version: VERSION, instructions: { cloudOff: off.instructions, cloudOn: on.instructions, scopedCloudOff: off.scoped, scopedCloudOn: on.scoped }, protocolVersions: SUPPORTED_PROTOCOL_VERSIONS, latestProtocolVersion: LATEST_PROTOCOL_VERSION, readsHere }));
   files.set("record/exit.json", fileText({ codes: EXIT_CODES, kinds: KIND_CLASS }));
   files.set("record/words.json", fileText({ ...(await words()), workspaces: await workspaceWords(answeredLine, replies => answeringHost(replies, [])) }));
   files.set("record/host.json", fileText(host()));

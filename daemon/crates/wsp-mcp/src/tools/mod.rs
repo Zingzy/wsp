@@ -24,6 +24,7 @@ pub(crate) mod said;
 mod servers;
 mod setup;
 mod skills;
+mod slate;
 mod start;
 mod target;
 mod terminal_config;
@@ -132,6 +133,10 @@ pub const TOOLS: &[Tool] = &[
     recipes::SHOW,
     recipes::SAVE,
     recipes::REMOVE,
+    slate::CATALOG,
+    slate::WRITE,
+    slate::STATE,
+    slate::READ,
 ];
 
 /// The tool of that name the state lists, with its entry there; none where that state lists no such tool, which the

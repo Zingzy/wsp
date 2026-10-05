@@ -22,7 +22,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/
 import { DiffSurface } from "../diffs/DiffSurface.js";
 import { FilePreviewSurface } from "../files/FilePreviewSurface.js";
 import { FilesSurface } from "../files/FilesSurface.js";
-import { useAbsentComputer, useStatus, useWorkspace } from "../protocol/store.js";
+import { useAbsentComputer, useSelectedThreadId, useStatus, useWorkspace } from "../protocol/store.js";
+import { SlateSurface } from "../slate/SlateSurface.js";
 import { PullRequestSurface } from "../pull-request/PullRequestSurface.js";
 import { useAppDark } from "../settings/theme.js";
 import { PANE_KINDS, paneOf, type PaneContext, type RightPanelKind } from "../panes.js";
@@ -74,6 +75,7 @@ const PANE_VIEWS: { readonly [K in RightPanelKind]: PaneView<K> } = {
     Surface: ({ workspaceId }) => <AsidePane workspaceId={workspaceId} />,
     close: workspaceId => useAsideStore.getState().close(workspaceId),
   },
+  slate: { Surface: () => <SlateSurface /> },
 };
 const viewOf = (kind: RightPanelKind): PaneView<RightPanelKind> => PANE_VIEWS[kind] as PaneView<RightPanelKind>;
 
@@ -119,7 +121,8 @@ export function RightPanel({
   }, [pruneBrowserTabs, workspaceId, openBrowserTabIds]);
 
   const pr = useStatus(here ? null : workspaceId)?.pr;
-  const at: PaneContext = { here, workspace, absent, pr };
+  const threadId = useSelectedThreadId();
+  const at: PaneContext = { here, workspace, absent, pr, threadId };
   const available = Object.fromEntries(PANE_KINDS.map(kind => [kind, paneOf(kind).available(at)])) as Record<RightPanelKind, boolean>;
   const unavailableReasons = Object.fromEntries(
     PANE_KINDS.flatMap(kind => {

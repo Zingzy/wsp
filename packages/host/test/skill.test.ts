@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { ANOTHER_AGENT_WORDS, BACKGROUND_WORK_WORDS, COORDINATOR_HANDOFF, LOGIN_CHOICES, NOTIFY_CALLER, SessionStartOutcome, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
-import { instructions, INSTRUCTIONS_KEPT, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, wspSkill, agentsLine, instructionsOf, skillFor } from "../src/skill.js";
+import { instructions, INSTRUCTIONS_KEPT, SLATE_WORDS, THREAD_SLATE_WORDS, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, wspSkill, agentsLine, instructionsOf, skillFor } from "../src/skill.js";
 import { CLOUD_ON } from "../src/cloud.js";
 import { hasTool, CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
 import { SERVICE_MANAGERS } from "../src/service.js";
@@ -75,10 +75,58 @@ describe("the wsp skill", () => {
     for (const words of [NOTIFY_CALLER, COORDINATOR_HANDOFF, BACKGROUND_WORK_WORDS]) expect(instructions(), words.slice(0, 40)).toContain(words);
   });
 
-  it("opens the instructions with what another agent is, inside the part an agent keeps of them", () => {
-    expect(instructions().length).toBeGreaterThan(INSTRUCTIONS_KEPT);
-    expect(instructions().slice(0, INSTRUCTIONS_KEPT)).toContain(`${ANOTHER_AGENT_WORDS}.`);
+  it("opens the instructions with what another agent is, and keeps them whole inside what Claude Code keeps", () => {
+    expect(instructions().length).toBeLessThanOrEqual(INSTRUCTIONS_KEPT);
+    expect(instructions(true).length).toBeLessThanOrEqual(INSTRUCTIONS_KEPT);
     expect(instructions().startsWith(`${ANOTHER_AGENT_WORDS}.`)).toBe(true);
+    expect(instructions()).toContain("in the wsp skill");
+  });
+
+  it("opens a thread's own instructions with its slate, keyed on what the person wants to see, and leaves the others as they are", () => {
+    expect(instructions(true)).toBe(`${THREAD_SLATE_WORDS}\n\n${instructions().replace(`${SLATE_WORDS}. `, "")}`);
+    expect(THREAD_SLATE_WORDS.length).toBeLessThan(INSTRUCTIONS_KEPT / 2);
+    expect(instructions()).not.toContain(THREAD_SLATE_WORDS);
+    expect(instructions(true).slice(0, INSTRUCTIONS_KEPT)).toContain(`${ANOTHER_AGENT_WORDS}.`);
+  });
+
+  it("says once a slate is written a request to see lands there, the person's result stays there, and the slate's own code lives in its files", () => {
+    expect(THREAD_SLATE_WORDS).toContain("Once the slate is written, a request to see something lands there.");
+    expect(THREAD_SLATE_WORDS).toContain("Build and read it with the slate tools, never wsp from a shell, which may be another install.");
+    // Rulings 11 and 13: a one-off answer stays in chat, and the reply after a write is short and checked first.
+    expect(THREAD_SLATE_WORDS).toContain("A one-off answer, a comparison or an explanation, stays in chat unless they ask to see it.");
+    // At medium effort agents fetched with another tool and answered in chat: the first call is the catalog, whatever fetches.
+    expect(THREAD_SLATE_WORDS).toContain("your first tool call is slate_catalog, then slate_write; a list in chat is not a slate.");
+    expect(THREAD_SLATE_WORDS).toContain("Fetching data with another tool is no reason to answer in chat; show it on the slate.");
+    for (const said of ["tick off", "as it goes", "keep an eye on", "what's unread", "live"]) expect(THREAD_SLATE_WORDS.slice(0, THREAD_SLATE_WORDS.indexOf("your first tool call")), said).toContain(said);
+    expect(THREAD_SLATE_WORDS).toContain("Read the sketch a write answers before saying it works, then reply briefly: what you built and what waits on the person.");
+    const text = wspSkill();
+    const section = text.slice(text.indexOf("### slate\n"), text.indexOf("\n## ", text.indexOf("### slate\n")));
+    for (const words of [
+      "a request to see something lands there", "gets its result there unless they ask in the chat",
+      "Code only the slate uses goes in a `<file name=\"x.py\">`, run as `\"$SLATE_DIR/x.py\"`; code the project already has is called where it is.",
+      "give a `<secret name=\"token\" />` input; never ask them to paste it into a file or the chat",
+      "Build and read it with the slate tools (`slate_catalog`, `slate_write`, `slate_state`, `slate_read`), never `wsp` from a shell",
+      "one heading per section", "status and last-checked lines small and muted", "actions at the end of their row with one primary per section",
+      "mono only for figures, ids, times and paths", "every live number with its window and unit", "nothing centered but a lone figure or card",
+    ]) expect(section, words).toContain(words);
+  });
+
+  // slate-reach.json is what people say when a slate is the answer, the owner's own words among them; no model reads
+  // it here, it only holds the instructions and the tool descriptions, which tool search matches, to those words.
+  it("says every word the slate reach prompts rely on in a thread's instructions and in a slate tool's description", () => {
+    const reach = JSON.parse(readFileSync(new URL("./slate-reach.json", import.meta.url), "utf8")) as { prompt: string; intent: string[] }[];
+    const said = (text: string, word: string): boolean => new RegExp(`\\b${word}\\b`, "i").test(text);
+    const kept = instructions(true).slice(0, INSTRUCTIONS_KEPT);
+    const described = VERBS.filter(hasTool).filter(v => v.name.startsWith("slate ")).map(v => v.tool.description);
+    expect(described).toHaveLength(4);
+    for (const { prompt, intent } of reach) {
+      expect(intent.length, prompt).toBeGreaterThan(0);
+      for (const word of intent) {
+        expect(said(prompt, word), `${word} in "${prompt}"`).toBe(true);
+        expect(said(kept, word), `${word} in a thread's instructions`).toBe(true);
+        expect(described.some(d => said(d, word)), `${word} in a slate tool's description`).toBe(true);
+      }
+    }
   });
 
   it("says a send is never refused for meeting a turn, and names the steer, the queue and the reply tail in the runtime's own words", () => {
@@ -88,8 +136,6 @@ describe("the wsp skill", () => {
     expect(section).toContain("(outcome `queued`)");
     expect(section).toContain(`\`${stillWorkingLine()}\``);
     expect(section).toContain("Two sends keep the order they arrived in");
-    // The opening paragraph, which the MCP instructions carry, cannot say the old rule either.
-    expect(instructions()).toContain("a send is never refused for meeting a turn");
   });
 
   it("no section of the skill still teaches the wait or the refusal, whichever section an agent opens first", () => {
@@ -120,9 +166,6 @@ describe("the wsp skill", () => {
     expect(section).not.toContain("whoever opened it");
     expect(section).not.toContain("one you started or one under it");
     expect(section).toContain("goes to the person");
-    // The instructions carry it too, since an agent holding only the tools reads nothing else.
-    expect(instructions()).toContain("how one thread talks to another");
-    expect(instructions()).toContain("A thread reaches every thread of its own tree, the lead that started it, the threads beside it under that lead and the threads it started, wherever each runs, and nothing else");
   });
 
   it("says a thread reaches its whole tree wherever each runs, the lead that started it included, and that stopping the lead stops the tree", () => {
@@ -134,7 +177,6 @@ describe("the wsp skill", () => {
     expect(wspSkill()).not.toContain("the threads it started and the threads under those, and nothing else");
     const section = wspSkill().slice(wspSkill().indexOf("### send"), wspSkill().indexOf("### threads wait"));
     expect(section).toContain("A stop cascades: stopping your lead stops every thread under it, your siblings and you among them.");
-    expect(instructions()).toContain("Stopping a thread stops every thread under it");
   });
 
   it("quotes the line a reply ends on when a background command is still running, as the adapter words it", () => {
@@ -249,43 +291,32 @@ describe("the wsp skill", () => {
     expect(setup.trimEnd().endsWith("that thread shows in the person's sidebar.")).toBe(true);
   });
 
-  it("the MCP instructions are what another agent is, the skill's opening paragraph, the walkthrough's, the line pointing back at the skill and the command line, and the rules", () => {
-    const skill = `---\nname: x\ndescription: y\n---\n\n# x\n\nOne.\nTwo.\n\n${SETUP_HEADING}\n\nThree.\n\n1. Not this.\n\n${RULES_HEADING}\n\nFour.\n\n- A rule.\n\n## Later\n\nNor this.\n`;
-    expect(instructionsOf(skill, ["claude"]).startsWith(`${ANOTHER_AGENT_WORDS}. One. Two. Three. ${agentsLine(["claude"])} The steps, with the exact line to run`)).toBe(true);
-    expect(instructionsOf(skill, ["claude"]).endsWith("Four.\n- A rule.")).toBe(true);
-    expect(instructionsOf(skill, ["claude"])).not.toContain("Not this.");
-    expect(() => instructionsOf("---\nname: x\n", ["claude"])).toThrow("never closes");
-    expect(() => instructionsOf(`# x\n\n${SETUP_HEADING}\n\nThree.\n`, ["claude"])).toThrow("no opening paragraph");
-    expect(() => instructionsOf("---\nname: x\n---\n\n# x\n\nOne.\n\n## Later\n", ["claude"])).toThrow(`the skill has no ${SETUP_HEADING} section`);
-    expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n`, ["claude"])).toThrow(`the skill has no ${RULES_HEADING} section`);
-    expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n\n${RULES_HEADING}\n\nFour.\n`, ["claude"])).toThrow(`${RULES_HEADING} has no rules`);
-    expect(instructions()).toBe(instructionsOf(wspSkill(), THREAD_AGENTS));
-    expect(instructions().startsWith(`${ANOTHER_AGENT_WORDS}. A project is a folder on one computer, a git repo or not`)).toBe(true);
-    // A caller holding only the tools reads the whole sequence here or nowhere: health check, the recipe from what
-    // their agents used, the question about the heavy rows, the person's init line, then the host started here.
-    expect(instructions()).toContain("The road is a health check");
-    expect(instructions()).toContain("`wsp recipe --tick used`");
-    expect(instructions()).toContain("`wsp recipe scan`, which prints every option and writes nothing");
-    expect(instructions()).toContain("two questions to them, the heavy rows with their sizes and the sign-ins with their default choice");
-    expect(instructions()).toContain("then `wsp init --recipe ~/.wsp/recipe.json --non-interactive --json`, which you run detached from a shell");
-    expect(instructions()).toContain("prints one JSON line per sign-in");
-    expect(instructions()).toContain("Starting the host is neither: any command that needs one starts it");
-    expect(instructions()).not.toContain("their own terminal");
-    expect(instructions()).toContain("prefer the `wsp` command line");
-    // An agent holding only the tools reads here that a project is a folder, and which listings show projects and threads.
-    expect(instructions()).toContain("A project is a folder on one computer, a git repo or not, recorded with `wsp add`");
-    expect(instructions()).toContain("Start with `wsp projects` to see the projects and `wsp threads` to see the threads in them");
+  it("the MCP instructions are what another agent is, the slate, what wsp is and where the skill is, the agents, and the roads to a child's end, whole inside what Claude Code keeps", () => {
+    expect(instructions()).toBe(instructionsOf(THREAD_AGENTS));
+    expect(instructions().startsWith(`${ANOTHER_AGENT_WORDS}. ${SLATE_WORDS}. Agents work on a project, a folder on one computer`)).toBe(true);
+    // The slate's sentence is second and under 220 characters with its full stop (10).
+    expect(`${SLATE_WORDS}.`.length).toBeLessThan(220);
+    expect(instructions().indexOf(`${SLATE_WORDS}.`)).toBe(ANOTHER_AGENT_WORDS.length + 2);
+    // The skill's slate section stays under 600 tokens, counted at four characters a token.
+    const text = wspSkill();
+    const section = text.slice(text.indexOf("### slate\n"), text.indexOf("\n## ", text.indexOf("### slate\n")));
+    expect(section.length / 4).toBeLessThan(600);
+    // The setup walkthrough and the other rules are the skill's alone: Claude Code cut them off and Codex copied them
+    // into every deferred tool's entry.
+    expect(instructions()).toContain("Setup, every verb and the rules are in the wsp skill");
+    expect(instructions()).not.toContain("The road is a health check");
+    expect(wspSkill()).toContain("The road is a health check");
     // Everything but the rules is one line, so a client that shows the instructions as a paragraph shows them whole.
     expect(instructions().split("\n").filter(line => !line.startsWith("- "))).toHaveLength(1);
     expect(instructions()).not.toContain("## ");
   });
 
-  it("the rules for running work on a machine are thirteen lines stated as facts about machines, twelve with no cloud, and the instructions carry the same lines", () => {
+  it("the rules for running work on a machine are fourteen lines stated as facts about machines, thirteen with no cloud, and the instructions carry the first two and the background one", () => {
     const from = wspSkill().indexOf(`\n${RULES_HEADING}\n`);
     expect(from, RULES_HEADING).toBeGreaterThan(-1);
     const section = wspSkill().slice(from, wspSkill().indexOf("\n## ", from + 1));
     const rules = section.split("\n").filter(line => line.startsWith("- "));
-    expect(rules).toHaveLength(CLOUD_ON ? 13 : 12);
+    expect(rules).toHaveLength(CLOUD_ON ? 14 : 13);
     // A command meant for the person closes the section, in the one sentence the launch context quotes too.
     expect(rules.at(-1)).toBe(`- ${RUN_BLOCK_WORDS}.`);
     // The two roads to a child's end open the section: which one holds is the first thing a caller has to decide.
@@ -293,8 +324,10 @@ describe("the wsp skill", () => {
     expect(rules[1]).toContain(COORDINATOR_HANDOFF);
     // Then what another agent is, before any rule that starts one.
     expect(rules[2]).toBe(`- ${ANOTHER_AGENT_WORDS}.`);
-    // The one home: the instructions end on the same lines, so neither door can state a rule the other does not.
-    expect(instructions().split("\n").slice(1)).toEqual(rules);
+    // The instructions end on the roads to a child's end and the background road, each the skill's words.
+    const carried = instructions().split("\n").slice(1);
+    expect(carried).toHaveLength(3);
+    for (const [line, words] of carried.map((line, at) => [line, [NOTIFY_CALLER, COORDINATOR_HANDOFF, BACKGROUND_WORK_WORDS][at]!] as const)) expect(line).toContain(words);
     // Whole sentences a reader with no history can act on: no ticket number, no date, nothing that happened once.
     for (const rule of rules) {
       expect(rule, rule.slice(0, 40)).toMatch(/\.$/);

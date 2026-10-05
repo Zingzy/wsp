@@ -212,6 +212,7 @@ import {
   usageRefusal,
   validatorRefusal,
   verbFailure,
+  problemListsOf,
   waitTimedOutLine,
   workspaceAsleepAgainLine,
   workspaceKind,
@@ -348,6 +349,7 @@ import {
   usedPrice,
   windowCell,
   type LimitKind,
+  SLATE_TOOLS,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
@@ -534,7 +536,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
       const text = JSON.stringify({ ...params, id, op });
       ws.send(seal === undefined ? text : seal.seal(text));
     });
-    if (frame.ok !== true) throw Object.assign(new Error(typeof frame["error"] === "string" ? frame["error"] : `${op} failed`), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {});
+    if (frame.ok !== true) throw Object.assign(new Error(typeof frame["error"] === "string" ? frame["error"] : `${op} failed`), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {}, problemListsOf(frame));
     return frame as T;
   };
   let timer: NodeJS.Timeout | undefined;
@@ -2101,8 +2103,10 @@ export const BUILT_IN_TABLE_CLAUSE = "; wsp's built-in table says so, since no a
  * once the machine was there: an empty task or message, an agent the host has no adapter for, a pick the agent's
  * catalog does not list. Named a workspace, this asks that workspace's own machine, the same lists the app's composer
  * shows and the start itself will check against, so a model only that machine's config knows (a provider the agent is
- * routed to) is not refused here for being absent from a table. Without one, or on a workspace that is not running,
- * the table answers, and the start on the machine checks the rest. */
+ * routed to) is not refused here for being absent from a table. On a workspace that is not running the table answers,
+ * and the start on the machine checks the rest. Without one, a thread on this computer, there is no machine to spare,
+ * so the model and effort are the start's alone to check, against the agent installed here; the access is wsp's word,
+ * read off wsp's own map either way. */
 export async function checkedStart(client: HostClient, task: string, harness: string | undefined, picks: Picks, workspaceId?: string): Promise<void> {
   if (task.trim() === "") throw usageRefusal(EMPTY_MESSAGE_LINE, "Put it in quotes after the flags.");
   const { harnesses } = await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list", workspaceId === undefined ? undefined : { workspaceId });
@@ -2114,12 +2118,15 @@ export async function checkedStart(client: HostClient, task: string, harness: st
     throw usageRefusal(noAdapterLine(harness, all.map(c => c.harness)), "Name one of those with --agent.");
   }
   const asked = picksOf(picks);
-  try {
-    startPicks(table, asked, true);
-  } catch (e) {
-    const said = e instanceof Error ? e.message : String(e);
-    const clause = (e as { offered?: number }).offered === 0 ? BUILT_IN_TABLE_CLAUSE : BUILT_IN_LIST_CLAUSE;
-    throw usageRefusal(table?.source === "table" ? `${said}${clause}` : said, "Drop the flag, or give it a value the agent offers.");
+  // The table is the pinned binary's list; the agent installed here may be newer, and the start reads its own.
+  if (workspaceId !== undefined) {
+    try {
+      startPicks(table, asked, true);
+    } catch (e) {
+      const said = e instanceof Error ? e.message : String(e);
+      const clause = (e as { offered?: number }).offered === 0 ? BUILT_IN_TABLE_CLAUSE : BUILT_IN_LIST_CLAUSE;
+      throw usageRefusal(table?.source === "table" ? `${said}${clause}` : said, "Drop the flag, or give it a value the agent offers.");
+    }
   }
   const refused = asked.access === undefined || table === undefined ? null : accessRefusal(table, asked.access);
   if (refused !== null) throw usageRefusal(`${refused}.`, "Name one it takes, or drop --access.");
@@ -3738,6 +3745,226 @@ const AgentsWorkspaceIn = z.string().optional().describe("the workspace to read,
 const AgentsOnIn = z.string().optional().describe("the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on");
 const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
 const AGENTS_READ_WORDS = "Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.";
+
+// --- the slate: a live panel per thread the agent builds and the person reads, presses and fills in (spec 10) ---
+
+const SlateThreadIn = z.string().optional().describe("another thread's id");
+const SlateIfVersionIn = z.number().int().optional().describe("only at this version");
+/** What every slate tool answers: the version and the sketch as text, the rest an open record the text already says. */
+const slateOut = <K extends string>(...rest: K[]) => ({ version: z.number().int(), text: z.string(), ...(Object.fromEntries(rest.map(k => [k, z.unknown()])) as Record<K, z.ZodUnknown>) });
+
+/** The thread a slate line names, as the host takes it: one named by id or prefix, else the turn this line runs
+ * inside, else nothing, which the host reads off the caller's own token. */
+async function slateTarget(client: HostClient, ref: string | undefined, env: VerbDeps["env"]): Promise<{ threadId?: string; turnToken?: string }> {
+  if (ref !== undefined) {
+    const thread = await threadOf(client, ref);
+    return { threadId: thread.threadId ?? thread.id };
+  }
+  const token = turnTokenOf(env);
+  return token !== undefined ? { turnToken: token } : {};
+}
+
+/** A slate op's answer without the reply frame's own id and ok, so both doors print the answer alone. */
+async function slateAsk<T extends { text: string }>(client: HostClient, op: string, params: Record<string, unknown>): Promise<T> {
+  const { id: _id, ok: _ok, ...answer } = await client.request<Record<string, unknown>>(op, params);
+  return answer as T;
+}
+
+/** The sketch as the one frame ahead of the result, and the result without it. */
+function emitSlate(ctx: VerbContext, answer: { text: string }): void {
+  const { text, ...rest } = answer;
+  ctx.out.emit({ text }, text);
+  ctx.out.emit(rest);
+}
+
+/** A slate file as a write sends it: the JSX-like form for .slate, the stored document for .json. */
+function slateFile(ctx: VerbContext, path: string): { text: string } | { document: Record<string, unknown> } {
+  if (ctx.elsewhere === true) throw usageRefusal(`${path} is a file on your machine, which this host cannot read:`, "pass the slate to slate_write as text instead.");
+  const at = resolve(ctx.cwd ?? process.cwd(), path);
+  if (!path.endsWith(".slate") && !path.endsWith(".json")) throw usageRefusal(`${path} is neither a .slate nor a .json file:`, "write the JSX-like form to a .slate file or the stored form to a .json file.");
+  let text: string;
+  try {
+    text = readFileSync(at, "utf8");
+  } catch {
+    throw usageRefusal(`there is no file at ${at}:`, "name a .slate or .json file that is there.");
+  }
+  if (path.endsWith(".slate")) return { text };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw usageRefusal(`${path} does not parse as JSON (${e instanceof Error ? e.message : String(e)}):`, "fix the JSON or write the JSX-like form to a .slate file.");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw usageRefusal(`${path} holds no JSON object:`, "write the stored document, an object with schema, root and pieces.");
+  return { document: parsed as Record<string, unknown> };
+}
+
+const ifVersionOf = (ctx: VerbContext): number | undefined => {
+  const raw = ctx.flags["if-version"];
+  if (typeof raw !== "string") return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) throw usageRefusal(`--if-version takes a version number, and ${raw} is not one.`, usageIs(ctx));
+  return n;
+};
+
+/** A $path=json word of a state line: the value parsed as JSON, else taken as the text it is. */
+function stateValue(word: string): [string, unknown] | undefined {
+  const at = word.indexOf("=");
+  if (at <= 0) return undefined;
+  const raw = word.slice(at + 1);
+  try {
+    return [word.slice(0, at), JSON.parse(raw)];
+  } catch {
+    return [word.slice(0, at), raw];
+  }
+}
+
+const SLATE_VERBS: readonly Verb[] = [
+  {
+    name: "slate catalog",
+    usage: "wsp slate catalog [<name>]",
+    about: "what a slate can hold: the index of pieces, sources, steps, functions and rules, or one entry in full",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length > 1) throw usageRefusal("wsp slate catalog takes one name at most.", usageIs(ctx));
+      const client = await ctx.client();
+      const read = await slateAsk<{ text: string }>(client, "slates.catalog", { ...(await slateTarget(client, undefined, ctx.env)), ...pick({ name: ctx.args[0] }) });
+      ctx.out.emit(read, read.text);
+      return 0;
+    },
+    tool: tool({
+      description: "What a slate, the live panel beside the chat, can hold: every piece, and the runs that keep it fresh. Call it first whenever the person wants to see, watch, monitor or keep an eye on something, tick things off as they go, or see what's unread, even when another tool fetches the data.",
+      input: { name: z.string().optional().describe("leave out first: the index of every piece; then an entry, like runs") },
+      output: { text: z.string() },
+      call: async ({ name }, deps) => {
+        const client = await deps.client();
+        const read = await slateAsk<{ text: string }>(client, "slates.catalog", { ...(await slateTarget(client, undefined, deps.env)), ...pick({ name }) });
+        return asText(read.text, read);
+      },
+    }),
+  },
+  {
+    name: "slate write",
+    usage: "wsp slate write [<thread>] [<file>] [--check] [--set <path>=<json>]... [--press <piece>] [--row <n>] [--action <n>] [--if-version <n>]",
+    about: "writes the thread's slate from a .slate file (a whole <slate> or a patch) or a .json document and prints its sketch; --check stores nothing, and with --set or --press rehearses values and a press on a copy, the file optional",
+    page: "agent",
+    options: { check: { type: "boolean" }, set: { type: "string", multiple: true }, press: { type: "string" }, row: { type: "string" }, action: { type: "string" }, "if-version": { type: "string" } },
+    run: async ctx => {
+      const values: Record<string, unknown> = {};
+      for (const word of flagList(ctx.flags, "set")) {
+        const pair = stateValue(word);
+        if (pair === undefined) throw usageRefusal(`--set ${word} is not <path>=<json>:`, "write it like --set '$i=2'.");
+        values[pair[0]] = pair[1];
+      }
+      const piece = typeof ctx.flags["press"] === "string" ? ctx.flags["press"] : undefined;
+      const row = typeof ctx.flags["row"] === "string" ? Number(ctx.flags["row"]) : undefined;
+      const action = typeof ctx.flags["action"] === "string" ? Number(ctx.flags["action"]) : undefined;
+      for (const [flag, n] of [["row", row], ["action", action]] as const) if (n !== undefined && (piece === undefined || !Number.isInteger(n) || n < 0)) throw usageRefusal(`--${flag} goes with --press, a whole number from 0:`, usageIs(ctx));
+      const rehearsal = Object.keys(values).length > 0 || piece !== undefined;
+      const [a, b] = ctx.args;
+      if ((a === undefined && !rehearsal) || ctx.args.length > 2) throw usageRefusal("wsp slate write takes a file, after a thread where it is not yours.", usageIs(ctx));
+      const [ref, file] = b !== undefined ? [a, b] : a !== undefined && /\.(slate|json)$/.test(a) ? [undefined, a] : [a, undefined];
+      const client = await ctx.client();
+      const ifVersion = ifVersionOf(ctx);
+      const rehearse = { ...(Object.keys(values).length > 0 ? { values } : {}), ...(piece !== undefined ? { press: { piece, ...(row !== undefined ? { index: row } : {}), ...(action !== undefined ? { action } : {}) } } : {}) };
+      const wrote = await slateAsk<{ text: string }>(client, "slates.write", { ...(await slateTarget(client, ref, ctx.env)), ...(file !== undefined ? slateFile(ctx, file) : {}), ...(ctx.flags["check"] === true ? { check: true } : {}), ...rehearse, ...(ifVersion !== undefined ? { ifVersion } : {}) });
+      emitSlate(ctx, wrote);
+      return 0;
+    },
+    tool: tool({
+      description: "Writes this thread's slate, the live panel shown here beside the chat. Use it to show the person anything they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), or a dashboard, a form to fill in or a checklist. A run with every= refreshes itself on a timer with no turns, so nothing polls.",
+      input: {
+        thread: SlateThreadIn,
+        text: z.string().optional().describe("JSX-like text: a <slate>, or a patch"),
+        document: z.record(z.string(), z.unknown()).optional().describe("JSON form from slate_read; not for writing"),
+        check: z.boolean().optional().describe("validate, write nothing"),
+        values: z.record(z.string(), z.unknown()).optional().describe("with check: $path: value"),
+        press: z.string().optional().describe("with check: piece id to press"),
+        row: z.number().int().optional().describe("pressed row, from 0"),
+        action: z.number().int().optional().describe("row action, from 0"),
+        if_version: SlateIfVersionIn,
+      },
+      output: slateOut("warnings", "problems", "waiting"),
+      stream: ["text"],
+      call: async ({ thread, text, document, check, values, press, row, action, if_version }, deps) => {
+        const client = await deps.client();
+        const pressed = press === undefined ? undefined : { piece: press, ...pick({ index: row, action }) };
+        const wrote = await slateAsk<{ text: string }>(client, "slates.write", { ...(await slateTarget(client, thread, deps.env)), ...pick({ text, document, check, values, press: pressed, ifVersion: if_version }) });
+        return asText(wrote.text, wrote);
+      },
+    }),
+  },
+  {
+    name: "slate state",
+    usage: "wsp slate state [<thread>] [<path>=<json>...] [--start <run>]... [--if-version <n>]",
+    about: "sets the slate's $values by path, like '$steps[2].done=true' or 'i=2', starts runs the person let run every time, and prints its sketch",
+    page: "agent",
+    options: { "if-version": { type: "string" }, start: { type: "string", multiple: true } },
+    run: async ctx => {
+      const values: Record<string, unknown> = {};
+      const rest: string[] = [];
+      for (const word of ctx.args) {
+        const pair = stateValue(word);
+        if (pair === undefined) rest.push(word);
+        else values[pair[0]] = pair[1];
+      }
+      const start = flagList(ctx.flags, "start");
+      if (rest.length > 1 || (Object.keys(values).length === 0 && start.length === 0)) throw usageRefusal("wsp slate state takes $path=<json> words or --start <run>, after a thread where it is not yours.", usageIs(ctx));
+      const client = await ctx.client();
+      const ifVersion = ifVersionOf(ctx);
+      const wrote = await slateAsk<{ text: string }>(client, "slates.state", { ...(await slateTarget(client, rest[0], ctx.env)), ...(Object.keys(values).length > 0 ? { values } : {}), ...(start.length > 0 ? { start } : {}), ...(ifVersion !== undefined ? { ifVersion } : {}) });
+      emitSlate(ctx, wrote);
+      return 0;
+    },
+    tool: tool({
+      description: "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire. start starts a run the person allowed to run always.",
+      input: { thread: SlateThreadIn, values: z.record(z.string(), z.unknown()).optional().describe("$path: new value"), start: z.array(z.string()).optional().describe("runs allowed always"), if_version: SlateIfVersionIn },
+      output: slateOut("problems", "waiting", "notStarted"),
+      stream: ["text"],
+      call: async ({ thread, values, start, if_version }, deps) => {
+        const client = await deps.client();
+        const wrote = await slateAsk<{ text: string }>(client, "slates.state", { ...(await slateTarget(client, thread, deps.env)), ...pick({ values, start, ifVersion: if_version }) });
+        return asText(wrote.text, wrote);
+      },
+    }),
+  },
+  {
+    name: "slate read",
+    usage: "wsp slate read [<thread>] [--values <path>]... [--no-text] [--no-sketch] [--document]",
+    about: "the slate as it stands: the sketch, then the JSX-like form, the values, derived values, runs, problems and the paths named; --no-text leaves out the JSX-like form, --document adds the stored JSON",
+    page: "agent",
+    options: { values: { type: "string", multiple: true }, "no-text": { type: "boolean" }, "no-sketch": { type: "boolean" }, document: { type: "boolean" } },
+    run: async ctx => {
+      if (ctx.args.length > 1) throw usageRefusal("wsp slate read takes one thread at most.", usageIs(ctx));
+      const client = await ctx.client();
+      const values = flagList(ctx.flags, "values");
+      const read = await slateAsk<{ text: string }>(client, "slates.read", { ...(await slateTarget(client, ctx.args[0], ctx.env)), ...(values.length > 0 ? { values } : {}), ...(ctx.flags["no-text"] === true ? { text: false } : {}), ...(ctx.flags["no-sketch"] === true ? { sketch: false } : {}), ...(ctx.flags["document"] === true ? { document: true } : {}) });
+      emitSlate(ctx, read);
+      return 0;
+    },
+    tool: tool({
+      description: "Reads this thread's slate: what the person filled in or pressed, live values, run output and logs, and the sketch: the panel's words as the person sees them.",
+      input: { thread: SlateThreadIn, values: z.array(z.string()).optional().describe("$run.json, $value, source path, or *"), text: z.boolean().optional().describe("false: no JSX-like form"), sketch: z.boolean().optional().describe("false: no sketch"), document: z.boolean().optional().describe("true: add stored JSON") },
+      output: slateOut("document", "values", "derived", "runs", "state", "problems", "waiting", "comments", "approvals"),
+      stream: ["text"],
+      call: async ({ thread, values, text, sketch, document }, deps) => {
+        const client = await deps.client();
+        const read = await slateAsk<{ text: string }>(client, "slates.read", { ...(await slateTarget(client, thread, deps.env)), ...pick({ values, text, sketch, document }) });
+        return asText(read.text, read);
+      },
+    }),
+  },
+];
+
+/** The tools a client that defers tools behind a search loads up front all the same: the slate's, which a model that
+ * never searched never found. */
+export const LOADED_UP_FRONT: ReadonlySet<string> = new Set<string>(SLATE_TOOLS);
+
+/** The fields given, without the ones left out, so an absent input never rides the wire as undefined. */
+function pick<T extends Record<string, unknown>>(o: T): Partial<T> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
 
 /** Every verb, the cloud's among them; VERBS below is the table this process answers. */
 export const ALL_VERBS: readonly Verb[] = [
@@ -5732,6 +5959,7 @@ export const ALL_VERBS: readonly Verb[] = [
     }),
   },
   ...ANSWER_VERBS,
+  ...SLATE_VERBS,
   {
     name: "send",
     usage: 'wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"',
@@ -6130,6 +6358,17 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   fast: "run the turn in the agent's fast mode, on a model that offers one; refused naming the model otherwise",
   file: "a file on this computer to send with the message: an image goes as an image, any other file lands in the thread's folder and the message names its path; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",
+  "slate write check": "validate and sketch the slate, storing nothing",
+  "slate write set": "with --check, a value to rehearse against, like '$i=2' or 'picked=1'; repeats",
+  "slate write press": "with --check, a piece to rehearse a press on, after the --set values",
+  "slate write row": "the row index of the --press piece inside a list, from 0",
+  "slate write action": "which row action of a --press table to rehearse, from 0",
+  "if-version": "the version a read printed; refused with V750 when the document moved past it",
+  "slate state start": "a run to start now that the person said \"Always in this thread\" to; any other answers held; repeats",
+  "slate read values": "a path to resolve now, like '$check.exit' or usage.week.percent, or * for every bound one; repeats",
+  "slate read no-text": "leave out the slate in the JSX-like form a patch is written against",
+  "slate read document": "also print the stored JSON document",
+  "slate read no-sketch": "leave the sketch out",
   threads: "how many threads may run on that computer at once; a new one waits past it",
   machines: "how many machines may run on that cloud at once",
   spend: "the dollars a day that cloud may spend before it starts no new machine",

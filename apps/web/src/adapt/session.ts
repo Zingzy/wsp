@@ -452,6 +452,18 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       case "session.behind":
       case "session.subagent":
         continue;
+      case "session.slate": {
+        // One line per turn however many writes it made; a person's write and the host's draw none.
+        if (event.by !== "agent") continue;
+        if (turn !== null && turn.summary.turnId === event.turnId) {
+          turn.summary = { ...turn.summary, slated: true };
+          turns[turns.length - 1] = turn.summary;
+          continue;
+        }
+        const at = turns.findIndex(t => t.turnId === event.turnId);
+        if (at >= 0) turns[at] = { ...turns[at]!, slated: true };
+        continue;
+      }
       case "session.checkpoint": {
         // Taken once the turn is over, so a later turn may already be open: the row goes on its own turn's summary.
         const at = turns.findIndex(t => t.turnId === event.turnId);

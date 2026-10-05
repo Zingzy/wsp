@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, PROJECT_DIR_ENV, SAVED_SPEND_TAIL_BYTES, savedSpendCommand, userMessageLine } from "../src/landmines.js";
+import { shellQuote, SLATE_BRIEF } from "@wsp/protocol";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -185,11 +186,23 @@ describe("buildCommand", () => {
   it("servers handed to a turn ride one --mcp-config as the JSON a config file holds, and the config dir's own are kept", () => {
     const cmd = buildCommand({ sessionId, mcpServers: { wsp: { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"] } } });
     const flag = /--mcp-config '(.+?)' /.exec(cmd)?.[1];
-    expect(JSON.parse(flag!)).toEqual({ mcpServers: { wsp: { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"] } } });
+    // The wsp server loads up front, so the slate tools that do not opt out of it are in the prompt with no search.
+    expect(JSON.parse(flag!)).toEqual({ mcpServers: { wsp: { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"], alwaysLoad: true } } });
+    const docs = /--mcp-config '(.+?)' /.exec(buildCommand({ sessionId, mcpServers: { docs: { command: "npx", args: [] } } }))?.[1];
+    expect(JSON.parse(docs!)).toEqual({ mcpServers: { docs: { command: "npx", args: [] } } });
     // Strict would drop the servers the person's own config names, which this turn still wants.
     expect(cmd).not.toContain("--strict-mcp-config");
     expect(buildCommand({ sessionId })).not.toContain("--mcp-config");
     expect(buildCommand({ sessionId, mcpServers: {} })).not.toContain("--mcp-config");
+  });
+
+  it("a thread's own scoped wsp server brings the slate's brief to the end of the system prompt, and no other launch does", () => {
+    const scoped = buildCommand({ sessionId, mcpServers: { wsp: { command: "/opt/wsp", args: ["mcp", "--scoped"] } } });
+    expect(scoped).toContain(`--append-system-prompt ${shellQuote(SLATE_BRIEF)}`);
+    expect(SLATE_BRIEF).toContain("your first tool call is mcp__wsp__slate_catalog");
+    expect(SLATE_BRIEF).toContain("Never read that file or put its value in a tool call.");
+    expect(buildCommand({ sessionId, mcpServers: { wsp: { command: "/opt/wsp", args: ["mcp"] } } })).not.toContain("--append-system-prompt");
+    expect(buildCommand({ sessionId })).not.toContain("--append-system-prompt");
   });
 
   it("sends no model or effort flag when none was picked", () => {

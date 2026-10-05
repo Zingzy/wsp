@@ -127,6 +127,7 @@ import {
   WorkspaceSysEvent,
   type WorkspaceView,
 } from "@wsp/protocol";
+import { slateApi, type SlateApi } from "../slate/wire.js";
 
 export type ProtocolEvent = EventUnion;
 type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void };
@@ -800,6 +801,8 @@ export interface Api {
   /** Builds the image's copy at a place, by its id; `force` copies a record that holds no sign-ins. Progress rides
    * golden.stage frames carrying the place. Optional so a fixture that presses no Copy need not fake it. */
   imageBuild?(place: string, force?: boolean): Promise<SealedImageBuilt>;
+  /** A thread's slate, the window's own ops. Optional so a fixture with no slate need not fake it. */
+  slates?: SlateApi;
 }
 
 /** Which daemon a channel is to: a workspace's, or a computer's own by its place, HERE_PLACE_ID for this one. */
@@ -1093,6 +1096,7 @@ export function makeApi(c: ProtocolClient): Api {
     spend: async () => PlaceSpend.array().parse((await c.request<{ places?: unknown }>("cost.spend")).places),
     usageUsed: async (range, split) => UsedAnswer.parse((await c.request<{ used?: unknown }>("usage.used", { range, split, outside: true })).used),
     usageAccounts: async () => AccountsAnswer.parse(await c.request<unknown>("usage.accounts")),
+    slates: slateApi(c),
     usageReset: async account => ResetAnswer.parse(await c.request<unknown>("usage.reset", { account })),
     placesReadings: async (placeId, range) => ReadingsAnswer.parse(await c.request<unknown>("places.readings", { placeId, range })),
     // Parsed, not trusted: the lineage renders and forks only snapshots the wire type vouches for.

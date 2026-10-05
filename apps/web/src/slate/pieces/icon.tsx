@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The icons a slate may name, each imported by name so the bundle carries these and no others. The protocol's
+// SLATE_ICONS is the list of names and a test holds the two equal.
+import {
+  ActivityIcon, AlarmClockIcon, ArchiveIcon, ArrowDownIcon, ArrowDownRightIcon, ArrowLeftIcon, ArrowRightIcon,
+  ArrowUpIcon, ArrowUpRightIcon, AwardIcon, BanIcon, BanknoteIcon, BatteryIcon, BellIcon, BitcoinIcon, BookIcon,
+  BookOpenIcon, BookmarkIcon, BotIcon, BoxIcon, BrainIcon, BriefcaseIcon, BugIcon, BuildingIcon, CalculatorIcon,
+  CalendarDaysIcon, CalendarIcon, CarIcon, ChartBarIcon, ChartColumnIcon, ChartLineIcon, ChartPieIcon, CheckIcon,
+  ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, CircleDashedIcon, CircleDotIcon,
+  CircleHelpIcon, CircleIcon, CircleXIcon, ClipboardCheckIcon, ClipboardListIcon, ClockIcon, CloudDownloadIcon,
+  CloudIcon, CloudLightningIcon, CloudOffIcon, CloudRainIcon, CloudSnowIcon, CloudSunIcon, CloudUploadIcon,
+  Code2Icon, CoinsIcon, ContainerIcon, CopyIcon, CpuIcon, CreditCardIcon, DatabaseIcon, DollarSignIcon, DownloadIcon,
+  DropletIcon, EuroIcon, ExternalLinkIcon, EyeIcon, EyeOffIcon, FileCheckIcon, FileCodeIcon, FileDiffIcon, FileIcon,
+  FileJsonIcon, FileTextIcon, FlagIcon, FlameIcon, FolderGitIcon, FolderIcon, FolderOpenIcon, FunnelIcon, GaugeIcon,
+  GemIcon, GiftIcon, GitBranchIcon, GitCommitHorizontalIcon, GitForkIcon, GitMergeIcon, GitPullRequestClosedIcon,
+  GitPullRequestIcon, GithubIcon, GitlabIcon, GlobeIcon, HardDriveIcon, HashIcon, HeartIcon, HistoryIcon,
+  HourglassIcon, HouseIcon, ImageIcon, InboxIcon, IndianRupeeIcon, InfoIcon, KeyIcon, KeyRoundIcon, KeyboardIcon,
+  LaptopIcon, LayersIcon, LayoutDashboardIcon, LayoutGridIcon, LightbulbIcon, Link2Icon, LinkIcon, ListChecksIcon,
+  ListIcon, ListTodoIcon, LoaderCircleIcon, LockIcon, LockOpenIcon, MailIcon, MailOpenIcon, MapIcon, MapPinIcon,
+  MemoryStickIcon, MessageCircleIcon, MessageSquareIcon, MessageSquareTextIcon, MessagesSquareIcon, MinusIcon,
+  MonitorIcon, MoonIcon, NavigationIcon, NetworkIcon, NewspaperIcon, OctagonAlertIcon, PackageIcon, PaletteIcon,
+  PauseIcon, PencilIcon, PercentIcon, PhoneIcon, PiggyBankIcon, PinIcon, PlaneIcon, PlayIcon, PlugIcon, PlusIcon,
+  PoundSterlingIcon, PowerIcon, PuzzleIcon, ReceiptIcon, RefreshCcwIcon, RefreshCwIcon, RepeatIcon, RocketIcon,
+  RotateCcwIcon, RouterIcon, SaveIcon, SearchIcon, SendIcon, ServerIcon, SettingsIcon, Share2Icon, ShieldAlertIcon,
+  ShieldCheckIcon, ShieldIcon, ShoppingCartIcon, ShuffleIcon, SlidersHorizontalIcon, SmartphoneIcon, SnowflakeIcon,
+  SparklesIcon, SquareIcon, SquareTerminalIcon, StarIcon, StoreIcon, SunIcon, TableIcon, TagIcon, TargetIcon,
+  TerminalIcon, ThermometerIcon, ThumbsDownIcon, ThumbsUpIcon, TicketIcon, TimerIcon, TrainFrontIcon, Trash2Icon,
+  TrendingDownIcon, TrendingUpIcon, TriangleAlertIcon, TrophyIcon, TruckIcon, UploadIcon, UserIcon, UsersIcon,
+  WalletIcon, WebhookIcon, WifiIcon, WifiOffIcon, WindIcon, WorkflowIcon, WrenchIcon, XIcon, ZapIcon,
+  type LucideIcon,
+} from "lucide-react";
+import type { SlateJson } from "@wsp/protocol";
+import { cn } from "../../lib/utils.js";
+
+export const SLATE_ICON_VIEWS: Readonly<Record<string, LucideIcon>> = {
+  activity: ActivityIcon, "alarm-clock": AlarmClockIcon, archive: ArchiveIcon, "arrow-down": ArrowDownIcon,
+  "arrow-down-right": ArrowDownRightIcon, "arrow-left": ArrowLeftIcon, "arrow-right": ArrowRightIcon,
+  "arrow-up": ArrowUpIcon, "arrow-up-right": ArrowUpRightIcon, award: AwardIcon, ban: BanIcon,
+  banknote: BanknoteIcon, battery: BatteryIcon, bell: BellIcon, bitcoin: BitcoinIcon, book: BookIcon,
+  "book-open": BookOpenIcon, bookmark: BookmarkIcon, bot: BotIcon, box: BoxIcon, brain: BrainIcon,
+  briefcase: BriefcaseIcon, bug: BugIcon, building: BuildingIcon, calculator: CalculatorIcon, calendar: CalendarIcon,
+  "calendar-days": CalendarDaysIcon, car: CarIcon, "chart-bar": ChartBarIcon, "chart-column": ChartColumnIcon,
+  "chart-line": ChartLineIcon, "chart-pie": ChartPieIcon, check: CheckIcon, "chevron-down": ChevronDownIcon,
+  "chevron-right": ChevronRightIcon, circle: CircleIcon, "circle-alert": CircleAlertIcon,
+  "circle-check": CircleCheckIcon, "circle-dashed": CircleDashedIcon, "circle-dot": CircleDotIcon,
+  "circle-help": CircleHelpIcon, "circle-x": CircleXIcon, "clipboard-check": ClipboardCheckIcon,
+  "clipboard-list": ClipboardListIcon, clock: ClockIcon, cloud: CloudIcon, "cloud-download": CloudDownloadIcon,
+  "cloud-lightning": CloudLightningIcon, "cloud-off": CloudOffIcon, "cloud-rain": CloudRainIcon,
+  "cloud-snow": CloudSnowIcon, "cloud-sun": CloudSunIcon, "cloud-upload": CloudUploadIcon, code: Code2Icon,
+  coins: CoinsIcon, container: ContainerIcon, copy: CopyIcon, cpu: CpuIcon, "credit-card": CreditCardIcon,
+  database: DatabaseIcon, "dollar-sign": DollarSignIcon, download: DownloadIcon, droplet: DropletIcon,
+  euro: EuroIcon, "external-link": ExternalLinkIcon, eye: EyeIcon, "eye-off": EyeOffIcon, file: FileIcon,
+  "file-check": FileCheckIcon, "file-code": FileCodeIcon, "file-diff": FileDiffIcon, "file-json": FileJsonIcon,
+  "file-text": FileTextIcon, flag: FlagIcon, flame: FlameIcon, folder: FolderIcon, "folder-git": FolderGitIcon,
+  "folder-open": FolderOpenIcon, funnel: FunnelIcon, gauge: GaugeIcon, gem: GemIcon, gift: GiftIcon,
+  "git-branch": GitBranchIcon, "git-commit-horizontal": GitCommitHorizontalIcon, "git-fork": GitForkIcon,
+  "git-merge": GitMergeIcon, "git-pull-request": GitPullRequestIcon,
+  "git-pull-request-closed": GitPullRequestClosedIcon, github: GithubIcon, gitlab: GitlabIcon, globe: GlobeIcon,
+  "hard-drive": HardDriveIcon, hash: HashIcon, heart: HeartIcon, history: HistoryIcon, hourglass: HourglassIcon,
+  house: HouseIcon, image: ImageIcon, inbox: InboxIcon, "indian-rupee": IndianRupeeIcon, info: InfoIcon,
+  key: KeyIcon, "key-round": KeyRoundIcon, keyboard: KeyboardIcon, laptop: LaptopIcon, layers: LayersIcon,
+  "layout-dashboard": LayoutDashboardIcon, "layout-grid": LayoutGridIcon, lightbulb: LightbulbIcon, link: LinkIcon,
+  "link-2": Link2Icon, list: ListIcon, "list-checks": ListChecksIcon, "list-todo": ListTodoIcon,
+  "loader-circle": LoaderCircleIcon, lock: LockIcon, "lock-open": LockOpenIcon, mail: MailIcon,
+  "mail-open": MailOpenIcon, map: MapIcon, "map-pin": MapPinIcon, "memory-stick": MemoryStickIcon,
+  "message-circle": MessageCircleIcon, "message-square": MessageSquareIcon,
+  "message-square-text": MessageSquareTextIcon, "messages-square": MessagesSquareIcon, minus: MinusIcon,
+  monitor: MonitorIcon, moon: MoonIcon, navigation: NavigationIcon, network: NetworkIcon, newspaper: NewspaperIcon,
+  "octagon-alert": OctagonAlertIcon, package: PackageIcon, palette: PaletteIcon, pause: PauseIcon,
+  pencil: PencilIcon, percent: PercentIcon, phone: PhoneIcon, "piggy-bank": PiggyBankIcon, pin: PinIcon,
+  plane: PlaneIcon, play: PlayIcon, plug: PlugIcon, plus: PlusIcon, "pound-sterling": PoundSterlingIcon,
+  power: PowerIcon, puzzle: PuzzleIcon, receipt: ReceiptIcon, "refresh-ccw": RefreshCcwIcon,
+  "refresh-cw": RefreshCwIcon, repeat: RepeatIcon, rocket: RocketIcon, "rotate-ccw": RotateCcwIcon,
+  router: RouterIcon, save: SaveIcon, search: SearchIcon, send: SendIcon, server: ServerIcon, settings: SettingsIcon,
+  "share-2": Share2Icon, shield: ShieldIcon, "shield-alert": ShieldAlertIcon, "shield-check": ShieldCheckIcon,
+  "shopping-cart": ShoppingCartIcon, shuffle: ShuffleIcon, "sliders-horizontal": SlidersHorizontalIcon,
+  smartphone: SmartphoneIcon, snowflake: SnowflakeIcon, sparkles: SparklesIcon, square: SquareIcon,
+  "square-terminal": SquareTerminalIcon, star: StarIcon, store: StoreIcon, sun: SunIcon, table: TableIcon,
+  tag: TagIcon, target: TargetIcon, terminal: TerminalIcon, thermometer: ThermometerIcon,
+  "thumbs-down": ThumbsDownIcon, "thumbs-up": ThumbsUpIcon, ticket: TicketIcon, timer: TimerIcon,
+  "train-front": TrainFrontIcon, "trash-2": Trash2Icon, "trending-down": TrendingDownIcon,
+  "trending-up": TrendingUpIcon, "triangle-alert": TriangleAlertIcon, trophy: TrophyIcon, truck: TruckIcon,
+  upload: UploadIcon, user: UserIcon, users: UsersIcon, wallet: WalletIcon, webhook: WebhookIcon, wifi: WifiIcon,
+  "wifi-off": WifiOffIcon, wind: WindIcon, workflow: WorkflowIcon, wrench: WrenchIcon, x: XIcon, zap: ZapIcon,
+};
+
+/** A named icon at the size its place takes, in the muted ink unless the caller gives one; nothing for no name. */
+export function SlateIcon({ name, className }: { name: SlateJson | undefined; className?: string }) {
+  const Icon = typeof name === "string" ? SLATE_ICON_VIEWS[name] : undefined;
+  if (Icon === undefined) return null;
+  return <Icon aria-hidden data-slate-icon={name} className={cn("size-3.5 shrink-0 text-muted-foreground", className)} />;
+}

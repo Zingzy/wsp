@@ -233,13 +233,13 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, attachmentKey, type KeptAttachment, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, everyModel, effortsFor, modelOf, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noCwdLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, attachmentKey, type KeptAttachment, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { GITHUB_TOKEN_ENV, isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
-import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
+import { baseModel, boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
 import { holdsRepo, ownerRepoOf, projectForRepo, seedChoiceFrom } from "@wsp/protocol";
 import { taskStopRefusedLine, taskStopUnsupportedLine, type SubagentView, type TaskStop } from "@wsp/protocol";
 import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, modelIdRefusal, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
@@ -253,6 +253,7 @@ import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone
 import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
 import { makePlaceDoor, NO_PLACE_DOOR, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
 import type { BlobMark, Store } from "./store.js";
+import { createSlates, type Slates } from "./slates.js";
 import { RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, resetNoLoginsLine, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type AgentSignInState, type ResetAnswer, type UsageRange, type UsageSplit, type UsedAnswer } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, modelLabel, smallestModel } from "./harness-catalog.js";
 import {
@@ -488,6 +489,8 @@ export interface EventBus {
  * that no transcript keeps. 5000 bounds it at one transcript's worth of memory (TRANSCRIPT_CAP); a cursor that fell
  * off it gets a gap, and the client refetches the list, the statuses and sessions.history and converges from those. */
 const EVENT_RING_CAP = 5000;
+/** How often a pull request with a pending check is read while a slate watches its checks. */
+const SLATE_PR_POLL_MS = 30_000;
 
 /** How long a machine's catalog answer stands before the binary is asked again; t3code's provider health cadence. */
 export const CATALOG_TTL_MS = 5 * 60_000;
@@ -1715,6 +1718,8 @@ export interface Runtime {
         startedBy?: SessionOrigin;
         /** The client's id for this send, stamped on the turn's session.start as sent. */
         requestId?: string;
+        /** Set where a press in the thread's slate sent this message; stamped on the turn's start or steer. */
+        via?: "slate";
         /** The id a send to several models opens each of its threads under, stamped on the row as sent. */
         attempt?: string;
         /** Who the end of every turn on the thread this start opens is told, each a thread id or NOTIFY_ME: the line
@@ -1907,6 +1912,8 @@ export interface Runtime {
   /** The two usage records, never added together: what was used, split four ways over a range, and what each account
    * signed in anywhere may still use. */
   readonly usage: UsageDoor;
+  /** Each thread's slate: its record, the ops a window and the slate verbs send, and a press into the thread. */
+  readonly slates: Slates;
   /** The computers paired with this host and the one time codes that pair them, one collection each on this state
    * file, so a restart neither locks a paired computer out nor keeps a revoked one in. */
   readonly devices: DeviceDoor;
@@ -3949,6 +3956,114 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     bus.emit(event);
   };
 
+  /** The newest accrued cost each workspace's meter pushed, for a slate's cost source. */
+  const accrued = new Map<string, number>();
+  bus.on("workspace.cost", e => {
+    if (e.type === "workspace.cost") accrued.set(e.workspaceId, e.accruedUsd);
+  });
+  /** The model, effort and window a thread's own turns ran with, read off its rows as the composer reads them: for
+   * each, the last turn that named one, the window split back off the model the CLI announced. */
+  const ownPicks = (workspaceId: string, threadId: string): { model?: string; effort?: string; contextWindow?: string } => {
+    const rows = rowsOn(threadId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+    const ran = rows.filter(r => r.model !== undefined).at(-1);
+    const session = startedAs(workspaceId, threadId);
+    const model = ran?.model ?? (session === undefined ? undefined : resumedFact(workspaceId, session, "model"));
+    const effort = rows.filter(r => r.effort !== undefined).at(-1)?.effort;
+    const window = ran?.contextWindow ?? /\[([^\]]+)\]$/.exec(model ?? "")?.[1];
+    return { ...(model !== undefined ? { model: baseModel(model) } : {}), ...(effort !== undefined ? { effort } : {}), ...(window !== undefined ? { contextWindow: window } : {}) };
+  };
+  const slates: Slates = createSlates({
+    store,
+    now: () => clock.now(),
+    record: e => record(e),
+    emit: e => bus.emit(e),
+    thread: threadId => {
+      const latest = latestOn(threadId);
+      const workspaceId = latest?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
+      if (workspaceId === undefined) return undefined;
+      const running = [...sessions.values()].find(s => s.view.threadId === threadId && s.view.status === "running");
+      const entry = live.get(workspaceId);
+      // A run starts where the thread's next turn would: the folder its session ran in, a --cwd or a worktree.
+      const ranIn = latest?.cwd ?? (latest?.claudeSessionId === undefined ? undefined : folderOf(workspaceId, latest.claudeSessionId));
+      return {
+        workspaceId,
+        rootThreadId: rootOf(threadId),
+        sessionId: latest?.claudeSessionId ?? latest?.id ?? threadId,
+        ...(running !== undefined ? { turnId: running.turnId } : {}),
+        ...(entry !== undefined ? { folder: runsIn(entry, ranIn, checkoutOf(entry.record)), computer: computerOf(entry) } : {}),
+      };
+    },
+    loaded: () => ready(),
+    under: lead => treeUnder(lead),
+    threadOfToken: token => threadOfToken(token),
+    mcpServer: async (threadId, name) => {
+      const workspaceId = latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
+      const harness = latestOn(threadId)?.harness ?? threadRecords.get(threadId)?.harness;
+      const entry = workspaceId === undefined ? undefined : live.get(workspaceId);
+      if (entry === undefined || harness === undefined) throw new Error(`thread ${threadId} has no workspace this host holds`);
+      if (!isLocalWorkspace(entry.record)) throw new Error("a slate's tool runs start their server on this computer, and this thread runs on another");
+      const reader = opts.agentsReader;
+      if (reader?.server === undefined) throw new Error("this host reads no agent's MCP config");
+      return reader.server({ kind: "here", projects: [{ id: workspaceId!, name: "thread", path: checkoutOf(entry.record) }] }, { agent: harness, name });
+    },
+    sources: (threadId, workspaceId) => ({
+      threadId,
+      workspaceId,
+      now: clock.now(),
+      rows: () => rowsOn(threadId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0)),
+      results: () => (transcripts.get(workspaceId) ?? []).flatMap(e => (e.type === "session.done" && e.threadId === threadId ? [e.result] : [])),
+      account: async () => {
+        const entry = live.get(workspaceId);
+        const harness = latestOn(threadId)?.harness ?? threadRecords.get(threadId)?.harness;
+        if (entry === undefined || harness === undefined) return undefined;
+        const key = usageAccountOf(entry, harness).key;
+        return (await usageAccounts()).accounts.find(a => a.key === key);
+      },
+      workspace: () => {
+        const entry = live.get(workspaceId);
+        if (entry === undefined) return undefined;
+        const project = entry.record.project;
+        return {
+          computer: computerOf(entry),
+          ...(project !== undefined ? { project: projectHeld(project).name } : {}),
+          folder: checkoutOf(entry.record),
+          ...(entry.checkout !== undefined ? { checkout: entry.checkout } : {}),
+          ...(entry.pr !== undefined ? { pr: entry.pr } : {}),
+          rateUsdPerHour: entry.record.size === undefined ? 0 : backendFor(entry.record).pricing.rateUsdPerHour(entry.record.size),
+          accruedUsd: accrued.get(workspaceId) ?? 0,
+        };
+      },
+    }),
+    deliver: async ({ threadId, workspaceId, prompt, requestId }) => {
+      let queuedNow: (() => void) | undefined;
+      const queued = new Promise<{ outcome: "queued" }>(resolve => {
+        queuedNow = () => resolve({ outcome: "queued" });
+      });
+      const off = bus.on("session.queued", e => {
+        if (e.type === "session.queued" && e.requestId === requestId) queuedNow?.();
+      });
+      try {
+        const started = sessionsApi.start(workspaceId, { prompt, thread: threadId, requestId, startedBy: "person", via: "slate" });
+        const first = await Promise.race([started, queued]);
+        if ("outcome" in first && !("turnId" in first)) {
+          started.catch((e: unknown) => console.warn(`a press waiting in thread ${threadWord(threadId)} was not sent: ${e instanceof Error ? e.message : String(e)}`));
+          return { outcome: "queued" };
+        }
+        return { outcome: first.outcome, turnId: first.turnId };
+      } finally {
+        off();
+      }
+    },
+    watchPr: workspaceId => {
+      const entry = live.get(workspaceId);
+      if (entry !== undefined) pollPullRequest(entry);
+    },
+    runEnv: () => local?.env() ?? (process.env as Record<string, string>),
+    ...(opts.statePath !== undefined ? { secretsFile: join(stateFolder(), "slates.secrets.json"), slatesDir: join(stateFolder(), "slates") } : {}),
+  });
+  // A run that was running when the host stopped is failed and its done fires once, at start (02, "Host restart").
+  void slates.ready().catch((e: unknown) => console.warn(`the slates were not loaded: ${e instanceof Error ? e.message : String(e)}`));
+
   /** The harness session a thread's newest start in the transcript announced: what a send resumes once the thread's
    * rows have fallen off the index cap. */
   const startedAs = (workspaceId: string, threadId: string): string | undefined => transcriptIndex.get(workspaceId)?.starts.get(threadId);
@@ -4971,12 +5086,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     delete entry.prPoll;
     const fact = entry.pr;
     if (!isPullRequestFact(fact) || fact.state !== "open" || live.get(entry.record.id) !== entry) return;
+    // A slate bound to the checks reads a pending one every 30 s rather than every three minutes (06-sources).
+    const pending = fact.checks.some(c => c.state === "pending") && slates.watchesPr(entry.record.id);
     entry.prPoll = clock.schedule(
       () => {
         delete entry.prPoll;
         void readPullRequest(entry, true);
       },
-      PR_POLL_MS,
+      pending ? SLATE_PR_POLL_MS : PR_POLL_MS,
       { unref: true },
     );
   };
@@ -9089,7 +9206,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return { id: taken.sessionId, workspaceId, turnId: taken.turnId, outcome: taken.outcome, finished: Promise.resolve(result), view: () => sessions.get(taken.sessionId)?.view ?? held.view, interrupt: async () => {} };
   };
 
-  const recordSteer = (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string }): void => {
+  const recordSteer = (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate" }): void => {
     record({
       type: "session.steer",
       workspaceId: s.view.workspaceId,
@@ -9098,6 +9215,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(s.view.threadId !== undefined ? { threadId: s.view.threadId } : {}),
       prompt: o.prompt,
       ...(o.requestId !== undefined ? { requestId: o.requestId } : {}),
+      ...(o.via !== undefined ? { via: o.via } : {}),
       // Read off the row the turn writes its open prompt on: a message that joined a turn stopped on one waits for
       // the person as the turn does, and the caller says so rather than going quiet until the prompt is answered.
       ...(s.view.asking !== undefined ? { waiting: true } : {}),
@@ -9215,7 +9333,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     scopeDeviceId?: string;
     outcome: SessionStartOutcome;
     /** What this turn's own session.start row carries, for the road that still has to write it. */
-    opening: { prompt: string; requestId?: string; afterCut?: boolean; title?: string; attachments?: readonly AttachmentRecord[] };
+    opening: { prompt: string; requestId?: string; via?: "slate"; afterCut?: boolean; title?: string; attachments?: readonly AttachmentRecord[] };
     /** The message the agent is handed and the effort it runs at, kept beside the run while the turn runs. */
     asked?: TurnAsked;
     /** The harness session this turn resumes, so the row it takes over keeps who opened the thread and with what. */
@@ -9298,6 +9416,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         void persistSessions(workspaceId);
         bus.emit({ type: "thread.marked", workspaceId, threadIds: undone });
       }
+      // The slate's snapshot is keyed by the turn and never waits on the machine, so every turn that ends has one.
+      void slates.turnEnded({ threadId, turnId }).catch((e: unknown) => console.warn(`the slate of thread ${threadWord(threadId)} was not kept at the end of turn ${turnId}: ${e instanceof Error ? e.message : String(e)}`));
       const kept = keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(anchor !== undefined ? { anchor } : {}), ...(keptWhy !== undefined ? { kept: keptWhy } : {}) });
       checkpointsLanding.set(threadId, kept);
       void kept.finally(() => {
@@ -9433,6 +9553,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             threadId,
             prompt: opening.prompt,
             ...(opening.requestId !== undefined ? { requestId: opening.requestId } : {}),
+            ...(opening.via !== undefined ? { via: opening.via } : {}),
             ...(opening.afterCut === true ? { afterCut: true } : {}),
             ...(opening.attachments !== undefined ? { attachments: [...opening.attachments] } : {}),
             ...(event.model !== undefined ? { model: event.model } : {}),
@@ -9563,7 +9684,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const account = usageAccountOf(entry, view.harness, turnAccount);
           void ledger
             .limit({ key: account.key, agent: view.harness, label: account.label, road: account.road, computer: usageComputerOf(entry.record), limit: event.limit })
-            .then(({ before, after }) => alerts.read(before, after))
+            .then(async ({ before, after }) => {
+              await alerts.read(before, after);
+              // The row as the Usage page reads it now, so a slate's bound meter moves the moment a turn reports.
+              const row = (await usageAccounts()).accounts.find(a => a.key === account.key);
+              if (row !== undefined) bus.emit({ type: "usage.account", key: account.key, row });
+            })
             .catch((e: unknown) => console.warn(`the limits of ${account.key} were not kept: ${e instanceof Error ? e.message : String(e)}`));
           return;
         }
@@ -9916,7 +10042,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A start that names no agent runs the project's, else the person's default, else the catalog's first, so the
       // command line, the composer and a tool all open the next thread on the same agent.
       const overrides = prefs.projectDefaults[entry.record.project];
-      const o = { ...opened, harness: carried?.harness ?? opened.harness ?? defaultAgentOf(prefs, entry) };
+      // A send, a notify or a press that names no model, effort or window runs on the thread's own last picks: a
+      // resume that names none runs on the CLI's default rather than the thread's.
+      const own = !opens && opened.model === undefined && opened.effort === undefined && opened.contextWindow === undefined ? ownPicks(workspaceId, threadId) : {};
+      const o = { ...opened, ...(own.contextWindow !== undefined ? { contextWindow: own.contextWindow } : {}), harness: carried?.harness ?? opened.harness ?? defaultAgentOf(prefs, entry) };
       if (carried !== undefined) {
         delete o.permissionMode;
         delete o.access;
@@ -10083,14 +10212,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const picksFor = (session: string | undefined): StartPicks => {
           const access = named ?? (catalog === undefined ? undefined : listedPick(catalog.permissionModes, accessOf(workspaceId, threadId, session)));
           const open = session === undefined ? (resolved?.open ?? {}) : {};
-          const model = o.model ?? open.model;
-          const effort = o.effort ?? open.effort;
+          // The thread's own picks, like its access, only where the lists in front of us still carry them.
+          const model = o.model ?? (catalog === undefined || catalog.models.length === 0 ? own.model : listedPick(everyModel(catalog), own.model)) ?? open.model;
+          const ownEffort = catalog === undefined || catalog.efforts.length === 0 ? own.effort : listedPick(effortsFor(catalog, modelOf(catalog, model)), own.effort);
+          const effort = o.effort ?? ownEffort ?? open.effort;
           return startPicks(catalog, { ...o, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: access }, session === undefined, session === undefined ? undefined : resumedFact(workspaceId, session, "model"));
         };
         // A pick the lists do not carry is refused here, before this send waits on anything; the picks themselves
         // are decided below the loop, against the session this send turns out to resume.
         picksFor(resume);
         const folder = await threadFolder(entry, o);
+        if (o.cwd !== undefined && isLocalWorkspace(entry.record) && !existsSync(folder)) throw Object.assign(new Error(noCwdLine(homeShortened(folder, homedir()))), { kind: "usage" });
         const limitDetails = await limitDetailsDue(entry, harness);
         // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time. Nothing
         // below this loop may await: the wait ends the moment no turn is running, and every line from there to
@@ -10177,7 +10309,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           turnToken,
           outcome,
           ...(scoped !== undefined ? { scopeDeviceId: scoped.deviceId } : {}),
-          opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
+          opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(o.via !== undefined ? { via: o.via } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
           asked: { prompt: handed, ...(picks.effort !== undefined ? { effort: picks.effort } : {}) },
           ...(imagesDir !== undefined ? { imagesDir } : {}),
           ...(snapshot !== undefined ? { snapshot } : {}),
@@ -10577,6 +10709,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         besideRunning();
         const back = await restore(rewound.before);
         delete held!.rewound;
+        // The slate follows the conversation, which undo never puts back: it stays as the rewind left it.
         await done();
         return { turns: 0, files: Number(back["files"] ?? 0) };
       }
@@ -10651,6 +10784,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw conflict(rewindKeptLine(keptWhy, before !== undefined));
       }
       if (cutsConversation) await dropFromTranscript(workspaceId, e => e.threadId === threadId && cut.includes(e.turnId ?? ""));
+      await slates.rewound({ threadId, turnId: order[at]!, cut });
       await done();
       return { turns: cutsConversation ? cut.length : 0, ...(moved !== undefined ? { files: Number(moved["files"] ?? 0) } : {}), ...(shared ? { kept: REWIND_SHARED_LINE } : {}) };
     },
@@ -10681,6 +10815,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       threadRecords.delete(threadId);
       await dropFromTranscript(workspaceId, e => e.threadId === threadId);
       await persistSessions(workspaceId);
+      await slates.forget(threadId);
       return { workspaceId, threads: 1 };
     },
 
@@ -10704,6 +10839,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await dropSentImages(workspaceId, [threadId]);
       for (const [id] of held) sessions.delete(id);
       threadRecords.delete(threadId);
+      await slates.forget(threadId);
       await dropFromTranscript(workspaceId, e => e.threadId === threadId);
       await persistSessions(workspaceId);
     },
@@ -12736,6 +12872,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     workspaces,
     projects,
     sessions: sessionsApi,
+    slates,
     devices: deviceDoor,
     ...(placeDoor !== undefined ? { places: placeDoor } : {}),
     ...(opts.recipes !== undefined ? { recipes: opts.recipes } : {}),
@@ -12886,6 +13023,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await sweeping;
       idle.close();
       alerts.close();
+      slates.close();
       // An agent's version or sign-in command that never answers would otherwise outlive this process.
       opts.agentsReader?.close?.();
       // What this host started on a machine finishes before it lets that machine go: the boot fires a daemon sync

@@ -248,6 +248,12 @@ const CALLED: readonly Called[] = [
   { tool: "run", argv: ["run", "nope", "--branch", "b", "t"], arguments: { project: "nope", branch: "b", message: "t" }, refused: true },
   { tool: "merge_in", argv: ["merge", "in", "nope", "beta"], arguments: { lead: "nope", child: "beta" }, refused: true },
   { tool: "exec", argv: ["exec", "nope"], after: ["--", "true"], arguments: { workspace: "nope", argv: ["true"] }, refused: true },
+  { tool: "slate_catalog", argv: ["slate", "catalog"], arguments: {}, text: "prose" },
+  { tool: "slate_catalog", argv: ["slate", "catalog", "meter"], arguments: { name: "meter" }, text: "prose" },
+  { tool: "slate_write", argv: ["slate", "write", "nope", "x.slate"], arguments: { thread: "nope", text: "<clear />" }, refused: true },
+  { tool: "slate_state", argv: ["slate", "state", "nope", "$x=1"], arguments: { thread: "nope", values: { $x: 1 } }, refused: true },
+  { tool: "slate_read", argv: ["slate", "read", "nope"], arguments: { thread: "nope" }, refused: true },
+  { tool: "slate_read", argv: ["slate", "read"], arguments: {}, refused: true },
   ...WORKSPACE_CALLED,
 ];
 

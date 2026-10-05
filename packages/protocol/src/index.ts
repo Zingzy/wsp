@@ -19,6 +19,7 @@ import { effortsFor, everyModel, markedDefault, modelOf } from "./harness-picks.
 import { AccessChoice, AgentDefaults, AgentDefaultsPatch, ProjectOverrides, ProjectOverridesPatch, AgentSetupSet, patchedFields } from "./thread-defaults.js";
 import { GENERAL_DEFAULTS, GENERAL_FIELDS, patchedGeneral } from "./general-prefs.js";
 import { UsageAlertEvent } from "./plan-alerts.js";
+import { SessionSlateEvent, SLATE_OPS, SlateRunEvent, SlateValuesEvent, UsageAccountEvent } from "./slate/wire.js";
 import { RecipeFile } from "./recipe-file.js";
 import { ProjectHue, ProjectIcon } from "./project-look.js";
 import type { OutsideLine } from "./outside-line.js";
@@ -1441,7 +1442,7 @@ function listed(subject: string, word: string, options: ReadonlyArray<HarnessOpt
   if (value === undefined || options.some(o => o.value === value) || legacy.some(o => o.value === value) || hidden.some(o => o.value === value)) return;
   const older = legacy.length === 0 ? "" : `; legacy: ${optionWords(legacy)}`;
   const said = options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}${older}`;
-  throw Object.assign(new Error(said), { offered: options.length });
+  throw Object.assign(new Error(said), { offered: options.length, kind: "invalid" });
 }
 
 function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined, runsOn: string | undefined): void {
@@ -1554,6 +1555,8 @@ export const SessionStartEvent = z.object({
   /** The id the client minted for the sessions.start that opened this turn, stamped by the runtime; absent when the
    * client sent none. Two clients sending the same text at the same moment are told apart by this, not the prompt. */
   requestId: z.string().optional(),
+  /** Set where the message came from a press in the thread's slate, so the timeline says so. */
+  via: z.literal("slate").optional(),
   /** Set when the thread's previous turn ended with no exit code and no result (a deadline, a host restart, a nap
    * that ended it), so clients say the harness resumes a transcript that may be missing context; absent otherwise. */
   afterCut: z.literal(true).optional(),
@@ -1623,6 +1626,8 @@ export const SessionSteerEvent = z.object({
   prompt: z.string(),
   /** The id the client minted for the sessions.steer, as on session.start. */
   requestId: z.string().optional(),
+  /** Set where the message came from a press in the thread's slate, as on session.start. */
+  via: z.literal("slate").optional(),
   /** Set where the turn this message joined was stopped on a permission prompt nobody had answered when it landed:
    * the message is in and the turn takes it up once the person answers, which is what the caller says rather than
    * waiting in silence. */
@@ -1877,6 +1882,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionMovedEvent,
   SessionBehindEvent,
   SessionSubagentEvent,
+  SessionSlateEvent,
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
@@ -3733,6 +3739,10 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionMovedEvent.extend(sequenced),
   SessionBehindEvent.extend(sequenced),
   SessionSubagentEvent.extend(sequenced),
+  SessionSlateEvent.extend(sequenced),
+  SlateValuesEvent.extend(sequenced),
+  SlateRunEvent.extend(sequenced),
+  UsageAccountEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   SessionHeldEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
@@ -6472,6 +6482,25 @@ export const placeFileText = (file: PlaceFile): string => `${JSON.stringify(file
 /** The refusal a second join on one computer gets: a place file is the one wsp this computer belongs to. */
 export const ALREADY_JOINED_LINE = `this computer is already a place in a wsp; ${PLACE_LEAVE_LINE} first`;
 
+/** Each slate op as a request of this table: the envelope's id and op beside the params wire.ts declares. */
+function slateOps() {
+  const op = <N extends keyof typeof SLATE_OPS>(name: N) => z.object({ id: reqId, op: z.literal(name) }).extend(SLATE_OPS[name].shape as (typeof SLATE_OPS)[N]["shape"]);
+  return [
+    op("slates.get"),
+    op("slates.write"),
+    op("slates.state"),
+    op("slates.read"),
+    op("slates.catalog"),
+    op("slates.event"),
+    op("slates.approve"),
+    op("slates.cancel"),
+    op("slates.shown"),
+    op("slates.subscribe"),
+    op("slates.unsubscribe"),
+    op("slates.resolve"),
+  ] as const;
+}
+
 const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),
   z.object({ id: reqId, op: z.literal("ticket.issue"), purpose: TicketPurpose }),
@@ -7259,6 +7288,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Writes the record and the vault, sealed to the passphrase, to `dest` on this computer. Replies with
    * { exported: SealedImageExport }. The passphrase is never logged and never kept. */
   z.object({ id: reqId, op: z.literal("image.export"), dest: z.string().min(1), passphrase: z.string().min(IMAGE_PASSPHRASE_MIN).max(256), name: z.string().optional() }),
+  // A thread's slate: the window's ops and the slate verbs' (packages/protocol/src/slate/wire.ts).
+  ...slateOps(),
 ]);
 
 /** Every request carries where it reached the host from: here, this computer's own app, CLI or MCP, or relayed from
@@ -7340,6 +7371,11 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.rename",
   "sessions.read",
   "sessions.search",
+  // A thread writes and reads its own slate, and a lead reads a child's; the window's own slate ops are not here.
+  "slates.write",
+  "slates.state",
+  "slates.read",
+  "slates.catalog",
 ];
 
 /** The ops a computer the person paired may send with no role of its own, and the whole of them, for the reason
@@ -7430,6 +7466,15 @@ export const DEVICE_OPS: readonly string[] = [
   "release.check",
   "host.terminalConfig",
   "init.get",
+  // A window on a paired computer draws a slate and writes its state; a press, an approval and a cancel act on the
+  // person's computer, so they are not here.
+  "slates.get",
+  "slates.state",
+  "slates.catalog",
+  "slates.shown",
+  "slates.subscribe",
+  "slates.unsubscribe",
+  "slates.resolve",
 ];
 
 /** The one sentence a thread's own token is refused an op with. It names the op rather than guessing why a caller
@@ -7672,7 +7717,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceComputerName } from "./place-name.js";
 export { needsYouLine, subagentStateWord, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingDropped, placeSettingNamed, placeSettingsLine, placeTakes, settingFor, napMsOf, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
-export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
+export { MCP_SERVER_NAME, SLATE_BRIEF, SLATE_SERVER_NAME, SLATE_TOOLS, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";
 export * from "./project-look.js";
@@ -7749,3 +7794,5 @@ export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, launchWords, PERMISSION_ALLOW, PERMISSION_DENY, programWord } from "./adapter-port.js";
 export { CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TaskStop, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";
+export * from "./slate/index.js";
+export * from "./slate/wire.js";

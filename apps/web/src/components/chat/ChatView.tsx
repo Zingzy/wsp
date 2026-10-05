@@ -205,6 +205,15 @@ export function ChatView({
   // replies can be rewound moves, never on a streamed chunk: a settled reply would redraw on every one.
   const rewindableKey = [...rewindable.keys()].join("\n");
   const rewindableIds = useMemo(() => new Set(rewindableKey === "" ? [] : rewindableKey.split("\n")), [rewindableKey]);
+  // A turn the agent wrote the slate in says so once, under its last reply.
+  const slatedKey = view.turns
+    .flatMap(turn => {
+      if (turn.slated !== true) return [];
+      const last = view.entries.findLast(e => e.kind === "message" && e.message.role === "assistant" && e.message.turnId === turn.turnId);
+      return last?.kind === "message" ? [last.message.id] : [];
+    })
+    .join("\n");
+  const slatedIds = useMemo(() => new Set(slatedKey === "" ? [] : slatedKey.split("\n")), [slatedKey]);
   const rewindRef = useRef({ rewindable, threadId: turnRows.at(-1)?.threadId ?? threadId, agent: catalog?.label ?? agent ?? "", cutsConversation });
   rewindRef.current = { rewindable, threadId: turnRows.at(-1)?.threadId ?? threadId, agent: catalog?.label ?? agent ?? "", cutsConversation };
   const onRewind = useCallback(
@@ -277,6 +286,7 @@ export function ChatView({
             timestampFormat={timestampFormat}
             onQuote={onQuote}
             rewindableMessageIds={rewindableIds}
+            slatedMessageIds={slatedIds}
             onRewind={onRewind}
             replyRuns={replyRuns}
           />

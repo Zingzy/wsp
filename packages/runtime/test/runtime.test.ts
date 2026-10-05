@@ -1193,7 +1193,8 @@ describe("runtime session history", () => {
       m.end();
       await handle.finished;
       const resumed = await rt.sessions.start(ws.id, { prompt: "more", thread: handle.view().threadId! });
-      expect(m.lastStart()!.model).toBeUndefined();
+      // A send that names no model runs on the one the thread ran on, as its agent announced it.
+      expect(m.lastStart()!.model).toBe("claude-sonnet-4-5");
       m.done("ok");
       m.end();
       await resumed.finished;

@@ -1,0 +1,157 @@
+{
+  "tool": "slate_write",
+  "cases": [
+    {
+      "case": "a whole slate from this turn",
+      "arguments": {
+        "text": "<slate title=\"Vercel\">\n  <secret name=\"token\" />\n</slate>"
+      },
+      "env": {
+        "WSP_TURN": "turn-token-1"
+      },
+      "replies": {
+        "slates.write": "{\"id\":1,\"ok\":true,\"version\":3,\"text\":\"slate v3 \\\"Vercel \u0085 setup 🧪\\\", 4 pieces, 2 bound, 0 problems\\nToken  ••••  [token input]\\n\\\"Next\\\" held: paste the project  [next button]\",\"warnings\":[{\"code\":\"W004\",\"name\":\"copy-style\",\"message\":\"a long dash in a literal\"}],\"took\":0.30000000000000004}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"slate v3 \\\"Vercel \\u0085 setup 🧪\\\", 4 pieces, 2 bound, 0 problems\\nToken  ••••  [token input]\\n\\\"Next\\\" held: paste the project  [next button]\"}],\"structuredContent\":{\"version\":3,\"text\":\"slate v3 \\\"Vercel \\u0085 setup 🧪\\\", 4 pieces, 2 bound, 0 problems\\nToken  ••••  [token input]\\n\\\"Next\\\" held: paste the project  [next button]\",\"warnings\":[{\"code\":\"W004\",\"name\":\"copy-style\",\"message\":\"a long dash in a literal\"}],\"took\":0.30000000000000004}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "slates.write",
+          "turnToken": "turn-token-1",
+          "text": "<slate title=\"Vercel\">\n  <secret name=\"token\" />\n</slate>"
+        }
+      ]
+    },
+    {
+      "case": "a check on a named thread",
+      "arguments": {
+        "thread": "t-child",
+        "text": "<props id=\"week\" tone=\"warning\" />",
+        "check": true,
+        "if_version": 2
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"threadId\":\"t-child-1\",\"workspaceId\":\"w\",\"harness\":\"claude\",\"status\":\"completed\"},{\"id\":\"s-2\",\"workspaceId\":\"w\",\"harness\":\"codex\",\"status\":\"running\"}]}",
+        "slates.write": "{\"id\":1,\"ok\":true,\"version\":2,\"text\":\"slate v2, 1 piece, 1 bound, 0 problems\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"slate v2, 1 piece, 1 bound, 0 problems\"}],\"structuredContent\":{\"version\":2,\"text\":\"slate v2, 1 piece, 1 bound, 0 problems\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "slates.write",
+          "threadId": "t-child-1",
+          "text": "<props id=\"week\" tone=\"warning\" />",
+          "check": true,
+          "ifVersion": 2
+        }
+      ]
+    },
+    {
+      "case": "a rehearsal of values and a press",
+      "arguments": {
+        "check": true,
+        "values": {
+          "i": 2,
+          "$picked": [
+            1
+          ]
+        },
+        "press": "next",
+        "row": 0
+      },
+      "env": {
+        "WSP_TURN": "turn-token-1"
+      },
+      "replies": {
+        "slates.write": "{\"id\":1,\"ok\":true,\"version\":4,\"text\":\"slate v4, 2 pieces, 1 bound, 0 problems\\nwould start $grade (a press on next)\",\"warnings\":[],\"problems\":[]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"slate v4, 2 pieces, 1 bound, 0 problems\\nwould start $grade (a press on next)\"}],\"structuredContent\":{\"version\":4,\"text\":\"slate v4, 2 pieces, 1 bound, 0 problems\\nwould start $grade (a press on next)\",\"warnings\":[],\"problems\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "slates.write",
+          "turnToken": "turn-token-1",
+          "check": true,
+          "values": {
+            "i": 2,
+            "$picked": [
+              1
+            ]
+          },
+          "press": {
+            "piece": "next",
+            "index": 0
+          }
+        }
+      ]
+    },
+    {
+      "case": "the stored form",
+      "arguments": {
+        "document": {
+          "schema": 2,
+          "root": "r",
+          "pieces": {
+            "r": {
+              "type": "text"
+            }
+          }
+        }
+      },
+      "replies": {
+        "slates.write": "{\"id\":1,\"ok\":true,\"version\":1,\"text\":\"slate v1, 1 piece, 0 bound, 0 problems\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"slate v1, 1 piece, 0 bound, 0 problems\"}],\"structuredContent\":{\"version\":1,\"text\":\"slate v1, 1 piece, 0 bound, 0 problems\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "slates.write",
+          "document": {
+            "schema": 2,
+            "root": "r",
+            "pieces": {
+              "r": {
+                "type": "text"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "refused with every error",
+      "arguments": {
+        "text": "<slate><meter value=\"usage.weekley.percent\" /></slate>"
+      },
+      "env": {
+        "WSP_TURN": "turn-token-1"
+      },
+      "replies": {
+        "slates.write": "{\"id\":1,\"ok\":false,\"error\":\"slate refused: 1 error: line 9, week.value: X401 path-unknown\",\"kind\":\"invalid\",\"errors\":[{\"code\":\"X401\",\"name\":\"path-unknown\",\"line\":9,\"piece\":\"week\",\"prop\":\"value\",\"message\":\"usage.weekley.percent is not a path \\\"\u0085\\\"\",\"fix\":\"usage.week.percent\"}],\"warnings\":[]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"slate refused: 1 error: line 9, week.value: X401 path-unknown\"}],\"structuredContent\":{\"error\":\"slate refused: 1 error: line 9, week.value: X401 path-unknown\",\"class\":\"usage\",\"exit\":3,\"errors\":[{\"code\":\"X401\",\"name\":\"path-unknown\",\"line\":9,\"piece\":\"week\",\"prop\":\"value\",\"message\":\"usage.weekley.percent is not a path \\\"\\u0085\\\"\",\"fix\":\"usage.week.percent\"}],\"warnings\":[]},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "slates.write",
+          "turnToken": "turn-token-1",
+          "text": "<slate><meter value=\"usage.weekley.percent\" /></slate>"
+        }
+      ]
+    },
+    {
+      "case": "a thread nobody has",
+      "arguments": {
+        "thread": "zz",
+        "text": "<clear />"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"threadId\":\"t-child-1\",\"workspaceId\":\"w\",\"harness\":\"claude\",\"status\":\"completed\"},{\"id\":\"s-2\",\"workspaceId\":\"w\",\"harness\":\"codex\",\"status\":\"running\"}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no thread zz\"}],\"structuredContent\":{\"error\":\"no thread zz\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        }
+      ]
+    }
+  ]
+}

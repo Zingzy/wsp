@@ -87,7 +87,7 @@ fn take(line: &[u8], host: &Arc<Host>, answer: &mpsc::UnboundedSender<String>, c
     let id = id.to_string();
     match method.as_str() {
         "initialize" => {
-            let _ = answer.send(result(&id, &greeting(params.as_ref(), host.cloud())));
+            let _ = answer.send(result(&id, &greeting(params.as_ref(), host.cloud(), host.args().scoped)));
         }
         "ping" => {
             let _ = answer.send(result(&id, "{}"));
@@ -114,8 +114,8 @@ fn take(line: &[u8], host: &Arc<Host>, answer: &mpsc::UnboundedSender<String>, c
 }
 
 /// The version the client asked for where this server speaks it, else the newest it speaks, and the instructions for
-/// the state WSP_CLOUD names.
-fn greeting(params: Option<&Value>, cloud: bool) -> String {
+/// the state WSP_CLOUD names, a thread's own when the server is scoped.
+fn greeting(params: Option<&Value>, cloud: bool, scoped: bool) -> String {
     let server = record::server();
     let asked = params.and_then(|p| p["protocolVersion"].as_str());
     let version = asked.filter(|v| server.protocol_versions.iter().any(|s| s == v)).unwrap_or(&server.latest_protocol_version);
@@ -123,7 +123,12 @@ fn greeting(params: Option<&Value>, cloud: bool) -> String {
         protocol_version: version,
         capabilities: serde_json::json!({ "tools": { "listChanged": true } }),
         server_info: serde_json::json!({ "name": server.name, "version": server.version }),
-        instructions: if cloud { &server.instructions.cloud_on } else { &server.instructions.cloud_off },
+        instructions: match (scoped, cloud) {
+            (false, false) => &server.instructions.cloud_off,
+            (false, true) => &server.instructions.cloud_on,
+            (true, false) => &server.instructions.scoped_cloud_off,
+            (true, true) => &server.instructions.scoped_cloud_on,
+        },
     };
     serde_json::to_string(&greeting).unwrap_or_default()
 }
@@ -219,6 +224,18 @@ mod tests {
         );
         let taken = json!({ "workspace": "w", "argv": ["ls"] });
         assert_eq!(refused_before_call("exec", listed, Some(taken.clone())), Ok(taken));
+    }
+
+    #[test]
+    fn a_scoped_server_greets_with_the_threads_own_instructions() {
+        let said = |cloud, scoped| serde_json::from_str::<Value>(&greeting(None, cloud, scoped)).unwrap()["instructions"].as_str().unwrap().to_owned();
+        let server = record::server();
+        for cloud in [false, true] {
+            assert!(said(cloud, true).starts_with("This session is a wsp thread with a slate"));
+            assert!(!said(cloud, false).contains("This session is a wsp thread"));
+        }
+        assert_eq!(said(false, false), server.instructions.cloud_off);
+        assert_eq!(said(true, true), server.instructions.scoped_cloud_on);
     }
 
     #[test]
