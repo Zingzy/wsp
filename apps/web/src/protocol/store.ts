@@ -488,8 +488,28 @@ export const GOLDEN_FRAMES_KEPT = 64;
 let usageAccountsAsked = false;
 /** The rows pushed since usage.accounts was last asked: newer than its answer, so they stand over it. */
 let usageAccountsPushed: Record<string, AccountRow> = {};
+/** One frame at 60 Hz: how long a status row or a cost tick waits for the rest of its burst. */
+export const FRAME_MS = 16;
 
 export const useStore = create<State>((set, get) => {
+  /** Status rows and cost ticks held for the next frame: a poll's 125 rows are one render, not 125. Each frame is the
+   * whole of its workspace's entry, so the newest in a frame supersedes the older; any other event, and every write to
+   * a status outside the event stream, lands the held ones first, so nothing is applied out of the order it arrived in. */
+  let held: { statuses: Record<string, WorkspaceStatus>; costs: Record<string, CostTick> } | null = null;
+  let frame: ReturnType<typeof setTimeout> | null = null;
+  const flushFrame = (): void => {
+    if (frame !== null) clearTimeout(frame);
+    frame = null;
+    const landing = held;
+    held = null;
+    if (landing !== null) set(s => ({ statuses: { ...s.statuses, ...landing.statuses }, costs: { ...s.costs, ...landing.costs } }));
+  };
+  const holdForFrame = (e: Extract<ProtocolEvent, { type: "workspace.status" | "workspace.cost" }>): void => {
+    held ??= { statuses: {}, costs: {} };
+    if (e.type === "workspace.status") held.statuses[e.status.id] = e.status;
+    else held.costs[e.workspaceId] = { rateUsdPerHour: e.rateUsdPerHour, accruedUsd: e.accruedUsd, at: e.at };
+    frame ??= setTimeout(flushFrame, FRAME_MS);
+  };
   /** A record the host answered, and its agent lists read again where it moved what they are marked by. */
   const preferencesLanded = (preferences: Preferences, before: Preferences): void => {
     set({ preferences });
@@ -551,6 +571,7 @@ export const useStore = create<State>((set, get) => {
   const setPhase = (id: string, phase: WorkspacePhase, machineId?: string, gone?: string): void => {
     const words = phase !== "gone" ? { gone: undefined } : gone !== undefined ? { gone } : {};
     const patch = { phase, ...(machineId !== undefined ? { machineId } : {}), ...words };
+    flushFrame();
     set(s => ({
       workspaces: s.workspaces.map(w => (w.id === id ? { ...w, ...patch } : w)),
       statuses: s.statuses[id] ? { ...s.statuses, [id]: { ...s.statuses[id]!, ...patch } } : s.statuses,
@@ -661,7 +682,10 @@ export const useStore = create<State>((set, get) => {
       .catch((e: unknown) => noticeFailure(e, said => `Workspaces not read: ${said}`));
     void api
       .watchStatuses()
-      .then(statuses => set({ statuses: Object.fromEntries(statuses.map(s => [s.id, s])) }))
+      .then(statuses => {
+        flushFrame();
+        set({ statuses: Object.fromEntries(statuses.map(s => [s.id, s])) });
+      })
       .catch((e: unknown) => noticeFailure(e, said => `Live status is not coming from the host: ${said}`));
     // A refused list clears the rows: a forward that closed while the socket was down must not stay listed.
     void api
@@ -786,7 +810,11 @@ export const useStore = create<State>((set, get) => {
       useComposerFilesStore.setState({ kept: api.sessionAttachment });
       capabilitiesSaid = false;
       sessionsSaid.clear();
-      api.subscribe(e => get().applyEvent(e));
+      api.subscribe(e => {
+        if (e.type === "workspace.status" || e.type === "workspace.cost") return holdForFrame(e);
+        flushFrame();
+        get().applyEvent(e);
+      });
       readCapabilities(api);
       // A failed lookup reads as sealed: the row is a door, not a gate, and the create's own error says the rest.
       void api
@@ -1176,6 +1204,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
     applyWorkspace(workspace) {
+      flushFrame();
       set(s => ({
         workspaces: s.workspaces.map(w => (w.id === workspace.id ? { ...w, ...workspace } : w)),
         statuses: s.statuses[workspace.id] ? { ...s.statuses, [workspace.id]: { ...s.statuses[workspace.id]!, ...workspace } } : s.statuses,

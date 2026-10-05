@@ -136,7 +136,6 @@ interface TimelineRowSharedState {
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   onToggleWorkEntry: (anchorKey: string) => void;
   onAnswerPermission: (sessionId: string, askId: string, optionId: string) => void;
-  dockedAskId: string | null;
   workGroupViewState: WorkGroupViewState;
   replyRuns: ReplyRuns | null;
 }
@@ -215,9 +214,6 @@ export interface MessagesTimelineProps {
   onRewind?: (messageId: MessageId) => void;
   /** Answers a relayed permission prompt; the turn it blocks runs or is refused as the option says. */
   onAnswerPermission?: (sessionId: string, askId: string, optionId: string) => void;
-  /** The prompt answered where the composer stands, by its ask id: its row here keeps the record and offers
-   * nothing, while every other open prompt (another thread's, a subagent's) keeps its own buttons. */
-  dockedAskId?: string | null;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenFile?: (path: string, line?: number) => void;
   markdownCwd: string | undefined;
@@ -267,7 +263,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   slatedMessageIds = EMPTY_REWINDABLE,
   onRewind = NOOP_REWIND,
   onAnswerPermission = NOOP_ANSWER_PERMISSION,
-  dockedAskId = null,
   onImageExpand,
   onOpenFile,
   markdownCwd,
@@ -543,7 +538,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       slatedMessageIds,
       onRewind,
       onAnswerPermission,
-      dockedAskId,
       onImageExpand,
       onOpenFile,
       onOpenTurnDiff,
@@ -565,7 +559,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       slatedMessageIds,
       onRewind,
       onAnswerPermission,
-      dockedAskId,
       onImageExpand,
       onOpenFile,
       onOpenTurnDiff,
@@ -1167,7 +1160,7 @@ function ProposedPlanTimelineRow({
 
 function PermissionTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "permission" }> }) {
   const ctx = use(TimelineRowCtx);
-  return <PermissionPromptRow asker={row.asker} permission={row.permission} onAnswer={ctx.onAnswerPermission} docked={ctx.dockedAskId === row.permission.askId} />;
+  return <PermissionPromptRow asker={row.asker} permission={row.permission} onAnswer={ctx.onAnswerPermission} />;
 }
 
 function SubagentTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "subagent" }> }) {

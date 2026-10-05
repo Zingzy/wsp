@@ -405,6 +405,21 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     }
   });
 
+  it("every readings op a window sends stays with the windows and says why, so a new one sits nowhere only by failing here", () => {
+    const verbs = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
+    const tools = readFileSync(new URL("../src/mcp.ts", import.meta.url), "utf8");
+    const WINDOW_ONLY: Record<string, string> = {
+      "sys.subscribe": "starts the two-second readings a live pane draws while it is open; the command line and the MCP tool have no pane, and wsp computers prints a computer's cores and memory now",
+      "sys.unsubscribe": "stops those readings when the last pane drawing them closes, which only a window that subscribed has to do",
+    };
+    expect(RUNTIME_OPS.filter(op => op.startsWith("sys.")).sort()).toEqual(Object.keys(WINDOW_ONLY).sort());
+    for (const [op, why] of Object.entries(WINDOW_ONLY)) {
+      expect(verbs.includes(`"${op}"`), `${op} is sent by a verb, so it is no longer a window's alone`).toBe(false);
+      expect(tools.includes(`"${op}"`), `${op} is sent by a tool, so it is no longer a window's alone`).toBe(false);
+      expect(why, `${op} says why it has no verb`).toMatch(/\S/);
+    }
+  });
+
   it("the Changes and Pull request panes' own ops that no verb sends say why they stay with the pane", () => {
     const verbs = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
     const PANE_ONLY: Record<string, string> = {

@@ -589,9 +589,8 @@ export interface Api {
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
    * options; takes the runtime's session id, as interruptSession does. answered means the tool call it blocks ran or
    * was refused and the closing event is on the wire; every other outcome closed nothing here. Optional so fixtures
-   * whose harness raises no prompt need not fake it; without it a prompt row's options do nothing. A deny may carry the
-   * person's reason, what the agent should do instead. */
-  answerPermission?(sessionId: string, askId: string, optionId: string, reason?: string): Promise<SessionAnswerOutcome>;
+   * whose harness raises no prompt need not fake it; without it a prompt row's options do nothing. */
+  answerPermission?(sessionId: string, askId: string, optionId: string): Promise<SessionAnswerOutcome>;
   /** Moves the session's running turn to another access mode, from its next tool call on; takes the runtime's session
    * id, as interruptSession does. set means the turn in front of the person now runs at the picked mode; every other
    * outcome moved nothing, and the pick reaches the agent with the next message instead. Optional so fixtures without
@@ -769,6 +768,8 @@ export interface Api {
    * kind's ride its daemon link. Asked again on every live transition, as the daemon link's own watches are: a
    * subscription dies with the socket that made it. Optional so a fixture with no host behind it need not fake it. */
   watchSys?(workspaceId: string): Promise<void>;
+  /** Ends this socket's watchSys for the workspace once no pane reads its figures. */
+  unwatchSys?(workspaceId: string): Promise<void>;
   /** The readings those asks push, for every workspace this socket asked about. */
   onSysSample?(fn: (e: WorkspaceSysEvent) => void): () => void;
   /** The workspace's cost ticks since the runtime began metering it, folded to the rate changes and the newest. Optional
@@ -920,6 +921,7 @@ export function makeApi(c: ProtocolClient): Api {
       onFrame: (channel, fn) => c.onDaemonFrame(channel, fn),
     },
     watchSys: async workspaceId => void (await c.request("sys.subscribe", { workspaceId })),
+    unwatchSys: async workspaceId => void (await c.request("sys.unsubscribe", { workspaceId })),
     onSysSample: fn => c.onSysSample(fn),
     portReach: async (id, port) => (await c.request<{ reach: PortReachView }>("workspaces.portReach", { workspaceId: id, port })).reach,
     portProbe: async (id, port) => (await c.request<{ probe: PortProbeView }>("workspaces.portProbe", { workspaceId: id, port })).probe,
@@ -933,8 +935,8 @@ export function makeApi(c: ProtocolClient): Api {
       SessionInterruptOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.interrupt", { sessionId })).outcome),
     steerSession: async (sessionId, prompt, requestId) =>
       SessionSteerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.steer", { sessionId, prompt, requestId })).outcome),
-    answerPermission: async (sessionId, askId, optionId, reason) =>
-      SessionAnswerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.answer", { sessionId, askId, optionId, ...(reason === undefined ? {} : { reason }) })).outcome),
+    answerPermission: async (sessionId, askId, optionId) =>
+      SessionAnswerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.answer", { sessionId, askId, optionId })).outcome),
     setSessionAccess: async (sessionId, permissionMode) =>
       SessionAccessOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.access", { sessionId, permissionMode })).outcome),
     // Parsed, not trusted: an outcome outside the enum must not read as renamed.
