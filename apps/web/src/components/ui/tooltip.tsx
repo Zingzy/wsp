@@ -2,6 +2,7 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 
 import { cn } from "../../lib/utils";
+import { TOOLTIP_SKIN } from "./hover-skin";
 
 const TooltipCreateHandle = TooltipPrimitive.createHandle;
 
@@ -44,7 +45,7 @@ function TooltipPopup({
             "relative flex h-(--popup-height,auto) w-(--popup-width,auto) text-balance rounded-md text-popover-foreground text-[13px] transition-[width,height,translate,opacity] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] data-[side=top]:data-starting-style:translate-y-0.5 data-[side=top]:data-ending-style:translate-y-0.5 data-[side=bottom]:data-starting-style:-translate-y-0.5 data-[side=bottom]:data-ending-style:-translate-y-0.5 data-[side=left]:data-starting-style:translate-x-0.5 data-[side=left]:data-ending-style:translate-x-0.5 data-[side=right]:data-starting-style:-translate-x-0.5 data-[side=right]:data-ending-style:-translate-x-0.5 data-ending-style:opacity-0 data-starting-style:opacity-0 data-instant:duration-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
             variant === "glass"
               ? "dropdown-glass shadow-xl shadow-black/25 before:hidden"
-              : "border bg-popover not-dark:bg-clip-padding shadow-md/5",
+              : TOOLTIP_SKIN,
             className,
           )}
           data-slot="tooltip-popup"

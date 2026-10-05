@@ -6,10 +6,10 @@ import { cn } from "../../lib/utils";
 
 /** One glass backdrop until a top attachment needs the composer to cover its overlap. */
 function Shell({
-  contextStrip = false,
+  tray = false,
   className,
   ...props
-}: ComponentProps<"div"> & { contextStrip?: boolean }) {
+}: ComponentProps<"div"> & { tray?: boolean }) {
   return (
     <div
       data-slot="composer-shell"
@@ -22,8 +22,8 @@ function Shell({
         "before:pointer-events-none before:absolute before:inset-0 before:z-0 before:rounded-[22px] before:bg-[color-mix(in_srgb,var(--chat-composer-glass-surface)_var(--chat-composer-glass-opacity),transparent)] before:glass-backdrop before:transition-[background-color] before:duration-200 before:ease-out motion-reduce:before:transition-none",
         "not-supports-[(backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px))]:before:bg-(--chat-composer-glass-surface)",
         "has-data-[composer-banner-surface=attached]:before:hidden",
-        // The strip under the box is quiet text on the page, so the glass stops at the box's own foot.
-        contextStrip && "[--chat-composer-context-extension:2rem] sm:[--chat-composer-context-extension:1.75rem] before:bottom-(--chat-composer-context-extension)",
+        // The tray under the box draws its own glass, so the box's stops at the box's own foot.
+        tray && "[--chat-composer-tray-height:2.25rem] sm:[--chat-composer-tray-height:2rem] before:bottom-(--chat-composer-tray-height)",
         className,
       )}
       {...props}
@@ -68,13 +68,18 @@ function Main({ className, ...props }: ComponentProps<"div">) {
   );
 }
 
-/** The line under the box: the folder, the access and the branch as quiet text on the page, no tray around them. */
-function ContextStrip({ className, ...props }: ComponentProps<"div">) {
+/** The line under the box seated in a tray joined to the box's foot, as T3 Code seats its toolbar: inset from the box's
+ * sides, its top tucked under the box and masked there so the two glasses never stack, its own glass and hairline
+ * below, so the chat scrolling behind reads through glass and never through the row's words. */
+function Tray({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
-      data-slot="composer-context-strip"
+      data-slot="composer-tray"
       className={cn(
-        "@container/strip relative mx-auto mt-1 flex h-7 w-[calc(100%-2*var(--chat-composer-drawer-inset))] items-center gap-1 overflow-x-clip overflow-y-visible ps-1 pe-2 sm:h-6",
+        "@container/strip relative isolate z-0 mx-auto -mt-4 flex h-[calc(1rem+var(--chat-composer-tray-height))] w-[calc(100%-2*var(--chat-composer-drawer-inset))] items-center gap-1 overflow-x-clip overflow-y-visible ps-1.5 pe-2 pt-4",
+        "before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-b-[16px] before:border before:border-(--chat-composer-outline) before:mask-[linear-gradient(to_bottom,transparent_0_1rem,black_1rem)]",
+        "before:bg-[color-mix(in_srgb,var(--chat-composer-glass-surface)_var(--chat-composer-glass-opacity),transparent)] before:glass-backdrop",
+        "not-supports-[(backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px))]:before:bg-(--chat-composer-glass-surface)",
         className,
       )}
       {...props}
@@ -82,4 +87,4 @@ function ContextStrip({ className, ...props }: ComponentProps<"div">) {
   );
 }
 
-export const ComposerSurface = { Shell, Host, Main, ContextStrip };
+export const ComposerSurface = { Shell, Host, Main, Tray };

@@ -80,6 +80,13 @@ export function turnStartLine(o: { threadId: string; text: string; images?: read
   return line({ id: REQUEST.turn, method: "turn/start", params: { threadId: o.threadId, input, ...named({ effort: o.effort }) } });
 }
 
+/** The server's own compaction of the thread's context, which it runs as a turn of its own: turn/started, a
+ * contextCompaction item, then turn/completed (measured on 0.155.1, 2026-10-05). Sent under the turn's id, so a
+ * refusal fails the turn as a turn/start refusal does. */
+export function threadCompactStartLine(o: { threadId: string }): string {
+  return line({ id: REQUEST.turn, method: "thread/compact/start", params: { threadId: o.threadId } });
+}
+
 export function turnSteerLine(id: string, o: { threadId: string; turnId: string; text: string }): string {
   return line({ id, method: "turn/steer", params: { threadId: o.threadId, expectedTurnId: o.turnId, input: [textInput(o.text)] } });
 }

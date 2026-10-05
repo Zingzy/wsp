@@ -228,6 +228,7 @@ const catalogs: HarnessCatalog[] = [
     renames: true,
     images: true,
     movesAccess: true,
+    compacts: "/compact",
     access: { ask: "default", "auto-edit": "acceptEdits", full: "bypassPermissions" },
     bypassMode: "bypassPermissions",
     // The CLI's own screens, as the runtime's table names them; the chat replay announces them beside the rest.
@@ -432,7 +433,12 @@ const CHAT_SLASH_COMMANDS = ["compact", "context", "cost", "init", "review", "lo
 const chatHistory: SessionEvent[] = [
   { type: "session.start", ...chatTurn, prompt: "Bump the lockfile and run the gate.", harness: { slashCommands: CHAT_SLASH_COMMANDS } },
   { type: "session.delta", ...chatTurn, kind: "text", text: CHAT_MARKDOWN },
-  { type: "session.done", ...chatTurn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
+  {
+    type: "session.done",
+    ...chatTurn,
+    // ?ring=1 has the reply say what the model held, so the top bar draws the context ring.
+    result: { status: "completed", durationMs: 2400, costUsd: 0.004, ...(params.get("ring") === "1" ? { tokens: { input: 78_000, output: 400, context: 78_400, window: 1_000_000 } } : {}) },
+  },
 ];
 
 // ?chat=diagram replays a reply with a Mermaid flowchart whose label carries a script tag, a Mermaid fence that does
@@ -498,12 +504,22 @@ const HOSTILE_MARKDOWN = [
 const hostileHistory: SessionEvent[] = [
   { type: "session.start", ...chatTurn, prompt: "Draw what the page said." },
   { type: "session.delta", ...chatTurn, kind: "text", text: HOSTILE_MARKDOWN },
-  { type: "session.done", ...chatTurn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
+  {
+    type: "session.done",
+    ...chatTurn,
+    // ?ring=1 has the reply say what the model held, so the top bar draws the context ring.
+    result: { status: "completed", durationMs: 2400, costUsd: 0.004, ...(params.get("ring") === "1" ? { tokens: { input: 78_000, output: 400, context: 78_400, window: 1_000_000 } } : {}) },
+  },
 ];
 const diagramHistory: SessionEvent[] = [
   { type: "session.start", ...chatTurn, prompt: "Draw the build and give me the formula." },
   { type: "session.delta", ...chatTurn, kind: "text", text: DIAGRAM_MARKDOWN },
-  { type: "session.done", ...chatTurn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
+  {
+    type: "session.done",
+    ...chatTurn,
+    // ?ring=1 has the reply say what the model held, so the top bar draws the context ring.
+    result: { status: "completed", durationMs: 2400, costUsd: 0.004, ...(params.get("ring") === "1" ? { tokens: { input: 78_000, output: 400, context: 78_400, window: 1_000_000 } } : {}) },
+  },
 ];
 
 const api: Api = {

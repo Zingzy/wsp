@@ -40,6 +40,9 @@ describe("the agents wsp can open a thread on", () => {
       expect(adapter.steers, id).toBe(true);
       // And a side question: Claude Code on a fork with its tools off, Codex on an ephemeral read-only fork.
       expect(typeof adapter.aside, id).toBe("function");
+      // And its own compaction as a message: Claude Code's /compact runs headless, Codex's adapter sends it as the
+      // server's thread/compact/start.
+      expect(adapter.compacts, id).toBe("/compact");
     }
     // Both take the servers on their launch: Claude Code as --mcp-config, Codex as config overrides.
     expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "claude"))).toBe(true);

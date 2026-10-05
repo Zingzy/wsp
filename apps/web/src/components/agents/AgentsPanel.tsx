@@ -13,7 +13,7 @@ import { AGENTS_PAGE_WORDS, capitalised, SETTINGS_WORDS } from "../../settings/f
 import { Slash } from "../../settings/grid.js";
 import type { AgentsLevel, AgentsTab } from "../../settings/settingsStore.js";
 import { addNotice, noticeFailure } from "../../notices/store.js";
-import { surfaceShortcutTargetsTypingContext } from "../RightPanelTabs.js";
+import { isTypingTarget } from "../../keyOwners.js";
 import { Button } from "../ui/button.js";
 import { SegmentedControl } from "../ui/segmented-control.js";
 import { AGENTS_LIST_WORDS as W, pausedReport, type RowsContext } from "./agentsRows.js";
@@ -62,7 +62,7 @@ export function AgentsPanel({ on, read, ctx: given, now }: AgentsPanelProps) {
   // page holds what was typed into it, so there only Escape on the page itself or on its back leaves it.
   const onKeyDown = (e: KeyboardEvent<HTMLElement>): void => {
     const target = e.target as HTMLElement;
-    if (e.key !== "Escape" || level === null || !e.currentTarget.contains(target) || surfaceShortcutTargetsTypingContext(target)) return;
+    if (e.key !== "Escape" || level === null || !e.currentTarget.contains(target) || isTypingTarget(target)) return;
     if (level.kind === "add" && target !== backButton.current && target.closest(CONTROL) !== null) return;
     e.preventDefault();
     e.stopPropagation();

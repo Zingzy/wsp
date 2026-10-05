@@ -186,7 +186,7 @@ describe("New thread from Cmd+T", () => {
     // The computer's icon is the one the Computers page draws for it, the person's own pick included.
     act(() => useStore.setState(s => ({ preferences: { ...s.preferences, computerLook: { here: { icon: "home" } } } })));
     expect(where()!.querySelector("[data-composer-computer] [data-computer-glyph]")?.getAttribute("data-computer-glyph")).toBe("home");
-    expect(document.querySelectorAll("[data-slot=composer-context-strip]")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-slot=composer-tray]")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Runs on this Mac" }));
     const menu = await screen.findByRole("menu");
     expect(within(menu).getAllByRole("menuitemradio").map(item => item.textContent)).toEqual(["this Mac", "spoo"]);
