@@ -5215,6 +5215,7 @@ const DAEMON_CONTENTS = [
   "1557c21f49fe3ec9248ca8c405e450b0f201e9bc4fd3f552bfd0f36132272b17",
   "1ee653af3b44dc450246290cc7bb7617da6ec8f062d9e859452472019e52e51e",
   "1fb569928a97d7ba40fd54d251dc4202f267133344e7da3153f3f4aa723e180e",
+  "c92b490e1481821bfdc26584e0f8b19e73e28fefeefeae6fb61c189ad098d88e",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5554,7 +5555,8 @@ const DAEMON_CONTENTS = [
  * and state): one REST read compares them, and where none moved it answers unchanged with nothing else run and none of
  * the GraphQL budget spent; a read with nothing seen makes no such read. A read the git host refused for its rate limit
  * carries the code rate-limited, and a branch so refused never reads as having no pull request. git.prView reads the
- * page on one GraphQL call in place of four, the newest 100 conversation comments with the rest marked cut. */
+ * page on one GraphQL call in place of four, the newest 100 conversation comments with the rest marked cut.
+ * Version 121: leave tests take a temp install root, never /opt/wsp. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
