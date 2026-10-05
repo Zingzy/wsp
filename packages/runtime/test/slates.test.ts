@@ -11,6 +11,7 @@ import { LocalBackend } from "@wsp/engine";
 import { REWIND_NO_UNDO_LINE, type AdapterEvent, type Caller, type EventUnion, type SlateView, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
+import { SLATES } from "../src/slates.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, testPlatform } from "./stub-backend.js";
 
@@ -968,6 +969,28 @@ describe("the slate v2 host, round 5", () => {
     await rt.sessions.delete(threadId);
     expect(existsSync(dir)).toBe(false);
   }, 60_000);
+
+  it("deleting a thread deletes its slate, its folder and its runs, a running one killed before it finishes", async () => {
+    const store = memoryStore();
+    const { rt, root, threadId, asThread } = await threadOn("wsp-slates-delete-", { store });
+    const marker = join(root, "finished");
+    await rt.slates.write({ text: `<slate title="Long"><value name="go" start={0} /><run name="long" cmd='sleep 2; touch "${marker}"' timeout={20} /><when change={$go} do={start($long)} /><column><output run={$long} /></column><file name="note.txt">{\`kept\`}</file></slate>` }, asThread);
+    await rt.slates.state({ threadId, values: { $go: 1 } });
+    await rt.slates.approve({ threadId, key: (await rt.slates.get(threadId))!.asks[0]!.key, scope: "thread" });
+    await vi.waitFor(async () => {
+      await rt.slates.settled();
+      expect((await rt.slates.get(threadId))!.values["long"]).toMatchObject({ state: "running" });
+    }, { timeout: 10_000 });
+    const dir = join(root, "state", "slates", threadId);
+    expect(await store.get(SLATES, threadId)).toBeDefined();
+
+    await rt.sessions.delete(threadId);
+    expect(await rt.slates.get(threadId)).toBeNull();
+    expect(await store.get(SLATES, threadId)).toBeUndefined();
+    expect(existsSync(dir)).toBe(false);
+    await new Promise(resolve => setTimeout(resolve, 3_000));
+    expect(existsSync(marker)).toBe(false);
+  }, 30_000);
 
   it("refuses a file that names a secret", async () => {
     const { rt, asThread } = await threadOn("wsp-slates-filesecret-");
