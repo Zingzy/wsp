@@ -112,6 +112,10 @@ pub struct Options {
     /// The workspace AppArmor profile a leave run as root takes off; the one a root install writes where unset. A
     /// test names a file under its own temp home, since a leave there would otherwise take the machine's own.
     pub apparmor_profile: Option<PathBuf>,
+    /// The folder a leave run as root takes wsp's install out of: the prefix under it, the links into the prefix and
+    /// what the setup listed under its /usr/local and /opt. The computer's own / where unset; a test names its own
+    /// temp folder, since a leave there would otherwise take the machine's own /opt/wsp.
+    pub install_root: Option<PathBuf>,
     /// Where this daemon keeps its readings a minute apart; its token's folder's readings where unset.
     pub readings_dir: Option<PathBuf>,
     /// How often the kept readings read the computer; the rule's own where unset. Only a case has use for another.
@@ -159,6 +163,7 @@ impl Options {
             ssh_programs: None,
             ssh_idle_ms: None,
             apparmor_profile: None,
+            install_root: None,
             readings_dir: None,
             readings_interval_ms: None,
         }

@@ -325,9 +325,10 @@ async fn place_daemon(place: &Place, tune: impl FnOnce(&mut Options)) -> Running
     options.place_file = Some(place.file.clone());
     options.runtime_root = Some(place.home.path().join("runtime"));
     options.roots_path = Some(place_daemon_paths(place.home.path()).roots_path);
-    // A leave run as root takes the workspace profile off, so the one it reads is under this case's home, never the
-    // machine's own.
+    // A leave run as root takes the workspace profile and wsp's install off, so the ones it reads are under this case's
+    // home, never the machine's own.
     options.apparmor_profile = Some(place.home.path().join("apparmor.d").join("wsp-workspace"));
+    options.install_root = Some(place.home.path().to_path_buf());
     tune(&mut options);
     let lines = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&lines);
@@ -767,6 +768,12 @@ async fn answers_place_leave_with_what_the_sweep_took_and_then_ends_the_daemon()
     let mut ws = host.held().await;
     let mut events = Vec::new();
     let answer = ask(&mut ws, 21, "place.leave", &mut events).await;
+    for path in answer["swept"].as_array().unwrap() {
+        assert!(
+            std::path::Path::new(path.as_str().unwrap()).starts_with(place.home.path()),
+            "the leave took {path}, outside its temp root"
+        );
+    }
     // The sweep is the real one over that home: the place file, its key and the token are gone and named, and
     // wsp's own folder goes last and whole, so nothing of wsp's is left under the home.
     let swept =
