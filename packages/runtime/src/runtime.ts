@@ -10553,7 +10553,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           moduleOf(entry.record.kind).keepsAgents && cutAt === undefined
             ? {
                 fixed: JSON.stringify({ harness, cwd, mcpServers: o.mcpServers, version: catalog?.version, setup: setupPlace(entry) === undefined ? undefined : setups.launchOf(setupPlace(entry)!, harness) }),
-                picks: { ...picks, ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}) },
+                // A pick filled in from the thread's own last turn is the one its kept process already runs at, so only
+                // what this send named is held against the process; the fill stands for a cold launch.
+                picks: Object.fromEntries(
+                  Object.entries({ ...picks, ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}) }).filter(
+                    ([pick]) => !(resume !== undefined && ((pick === "model" && opened.model === undefined) || (pick === "effort" && opened.effort === undefined) || (pick === "contextWindow" && own.contextWindow !== undefined))),
+                  ),
                 ),
               }
             : undefined;
