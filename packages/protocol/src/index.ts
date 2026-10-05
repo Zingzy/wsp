@@ -100,6 +100,13 @@ export const TURN_IDLE_MS = 10 * 60_000;
  * percent of one core clears it, which a vitest batch or a packager does many times over; a harness process waking
  * on its own timers stays under it, so a turn nothing is working on is still cut at TURN_IDLE_MS. */
 export const TURN_WORK_TICKS_PER_S = 5;
+/** How long a thread's agent process is kept up after its turn on the computer the host runs on, for the next send
+ * to skip the agent's boot. Half of the gaps from a turn's end to the thread's next send were under 30 minutes across
+ * 299 turns on 147 threads (2026-09-27 to 10-04). */
+export const AGENT_KEEP_MS = 30 * 60_000;
+/** The most agent processes kept up between turns on that computer at once, the one idle longest ended first: an
+ * idle one holds 200 to 400 MB with its MCP servers. */
+export const AGENTS_KEPT = 6;
 /** How long a harness gets to exit on its own after the result its turn ended on, before the runtime ends it and its
  * tree. Long enough for the harness to flush its own session store and go, short enough that a machine running turns
  * all day never carries more than the one it is on: seven finished turns' processes were found alive on one guest,
@@ -1439,7 +1446,7 @@ function listed(subject: string, word: string, options: ReadonlyArray<HarnessOpt
   if (value === undefined || options.some(o => o.value === value) || legacy.some(o => o.value === value) || hidden.some(o => o.value === value)) return;
   const older = legacy.length === 0 ? "" : `; legacy: ${optionWords(legacy)}`;
   const said = options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}${older}`;
-  throw Object.assign(new Error(said), { kind: "usage", offered: options.length });
+  throw Object.assign(new Error(said), { offered: options.length });
 }
 
 function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined, runsOn: string | undefined): void {
@@ -6858,10 +6865,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * link that computer is holding: nothing is dialled, and it is refused where that computer is not connected.
    * HERE_PLACE_ID names the computer the host runs on, whose own daemon is dialled. One of the two, never both. */
   z.object({ id: reqId, op: z.literal("daemon.open"), workspaceId: z.string().optional(), placeId: z.string().optional() }),
-  /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until the socket goes.
-   * The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon; refused for
-   * every other kind, which reads them over its own daemon link with sys.watch. Replies `{}`. */
+  /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until sys.unsubscribe or
+   * the socket goes. The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon;
+   * refused for every other kind, which reads them over its own daemon link with sys.watch. Replies `{}`. */
   z.object({ id: reqId, op: z.literal("sys.subscribe"), workspaceId: z.string() }),
+  /** Stops this socket's sys.subscribe for the workspace; replies `{}` whether or not it held one. */
+  z.object({ id: reqId, op: z.literal("sys.unsubscribe"), workspaceId: z.string() }),
   /** Sends one frame down a channel this socket opened and replies with a DaemonSendReply carrying the daemon's own
    * answer, ok or not. Refused (ok false, no kind) when the channel is not this socket's or died before the daemon
    * answered. */
@@ -7434,6 +7443,7 @@ export const DEVICE_OPS: readonly string[] = [
   "projectGoldens.list",
   "projectGoldens.remove",
   "sys.subscribe",
+  "sys.unsubscribe",
   "harnesses.list",
   "sessions.list",
   "sessions.history",
@@ -7780,5 +7790,7 @@ export * from "./app-ports.js";
 export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, launchWords, PERMISSION_ALLOW, PERMISSION_DENY, programWord } from "./adapter-port.js";
+export { keepRun } from "./kept-run.js";
+export type { KeptAgent, KeptRun, KeptTurn } from "./kept-run.js";
 export { ANALYTICS_ENV, CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TaskStop, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";

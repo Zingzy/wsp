@@ -122,6 +122,58 @@ describe("the readings of the workspace that is this computer", () => {
     await until(() => sampler.listeners === 0);
   });
 
+  it("stop for a workspace no pane watches any more, and never start for one nobody asked about", async () => {
+    const sampler = fakeSampler();
+    const workspaceId = await served(sampler);
+    const other = (await createOn(rt!, { on: HERE_PLACE_ID, name: "another folder" })).id;
+    const c = await client();
+
+    expect(await c.request("sys.subscribe", { workspaceId })).toMatchObject({ ok: true });
+    await until(() => sampler.listeners === 1);
+    expect(await c.request("sys.unsubscribe", { workspaceId })).toMatchObject({ ok: true });
+    await until(() => sampler.listeners === 0);
+    sampler.emit(sample(4));
+    // A reading the socket would have been sent arrives before a reply asked after it, so the empty list is final.
+    expect(await c.request("sys.unsubscribe", { workspaceId: other })).toMatchObject({ ok: true });
+    expect(c.events.filter(e => e.type === "workspace.sys")).toEqual([]);
+
+    // Watching again opens it again, and the folder nobody asked about still gets nothing.
+    expect(await c.request("sys.subscribe", { workspaceId })).toMatchObject({ ok: true });
+    await until(() => sampler.listeners === 1);
+    sampler.emit(sample(5));
+    await until(() => samplesOn(c, workspaceId).length === 1);
+    expect(samplesOn(c, other)).toEqual([]);
+    c.close();
+    await until(() => sampler.listeners === 0);
+  });
+
+  it("are each window's own: one window that stops or closes leaves the other's readings going", async () => {
+    const sampler = fakeSampler();
+    const workspaceId = await served(sampler);
+    const one = await client();
+    const two = await client();
+    expect(await one.request("sys.subscribe", { workspaceId })).toMatchObject({ ok: true });
+    expect(await two.request("sys.subscribe", { workspaceId })).toMatchObject({ ok: true });
+    await until(() => sampler.listeners === 2);
+
+    expect(await one.request("sys.unsubscribe", { workspaceId })).toMatchObject({ ok: true });
+    await until(() => sampler.listeners === 1);
+    sampler.emit(sample(6));
+    await until(() => samplesOn(two, workspaceId).length === 1);
+    expect(await one.request("sys.unsubscribe", { workspaceId })).toMatchObject({ ok: true });
+    expect(samplesOn(one, workspaceId)).toEqual([]);
+
+    // The first window watching again and then closing takes only its own watch with it.
+    expect(await one.request("sys.subscribe", { workspaceId })).toMatchObject({ ok: true });
+    await until(() => sampler.listeners === 2);
+    one.close();
+    await until(() => sampler.listeners === 1);
+    sampler.emit(sample(7));
+    await until(() => samplesOn(two, workspaceId).length === 2);
+    two.close();
+    await until(() => sampler.listeners === 0);
+  });
+
   it("are refused for a machine that reads its own, which a pane asks over its daemon link", async () => {
     const sampler = fakeSampler();
     await served(sampler);

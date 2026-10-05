@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, type Dirent } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, posix, relative, resolve as resolvePathOn } from "node:path";
 import { CARRIED_DIR_NAMES, CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, type ThreadAgent, TOOL_PREFIX, catalogIdOfRow, gitHostOf, remoteHost, serverValuesOf, guestEnv, installEnv, installHomes, loginHomeIn, sharedOn } from "@wsp/catalog";
@@ -125,6 +125,7 @@ import {
   DISK_USE_CMD,
   diskUsePct,
 } from "@wsp/engine";
+import { AGENT_KEEP_MS, AGENTS_KEPT, type KeptAgent } from "@wsp/protocol";
 import type { AgentsReport, AgentsSignInEvent, AgentsTarget, DaemonFrame, DaemonResponse, EditorChoice, EditorId, PlaceReport, RecipeFile, RecipeOptions, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
   AdapterAttachOptions,
@@ -242,7 +243,7 @@ import { GITHUB_TOKEN_ENV, isNoProvider, isPlaceAbsent, projectStateKey, putFile
 import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
 import { holdsRepo, ownerRepoOf, projectForRepo, seedChoiceFrom } from "@wsp/protocol";
 import { taskStopRefusedLine, taskStopUnsupportedLine, type SubagentView, type TaskStop } from "@wsp/protocol";
-import { accessMode, accessRefusal, accessWordRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, modelIdRefusal, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, pickRefusal, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
+import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, modelIdRefusal, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
 import { agentSetups, keyOf, realFolderHere, realFolderScript } from "./agent-setup.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -381,6 +382,8 @@ export interface HarnessStartOptions {
   /** The version the agent's binary on this machine answered the catalog probe with; absent where the probe got no
    * answer and wsp's own table stood in. */
   version?: string;
+  /** The agent's process stays up once the turn is over, for the thread's next send; kept() hands it over. */
+  keep?: true;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -393,8 +396,15 @@ export interface HarnessSession {
   /** The process this turn leads on the computer the host runs on, where it runs there; absent on a turn running on
    * another machine, whose pids are not this computer's. */
   readonly pid?: number;
-  /** Stops the process this session owns; finished settles after it, once session.end has been emitted. */
+  /** Where this turn starts in its run's log, on a process that served the thread's earlier turns: what a later host
+   * re-opens the turn from. */
+  readonly from?: number;
+  /** Stops the turn; finished settles after it, once session.end has been emitted. On a process kept between turns
+   * the process stays up where the agent took the stop. */
   interrupt(): Promise<void>;
+  /** Once the turn is over, its agent's process still up for the thread's next turn; absent on an adapter that keeps
+   * none, and nothing where this turn's process went with it. */
+  kept?(): KeptAgent<HarnessSession> | undefined;
   /** Present on a harness that takes a message mid-turn; absent means it cannot. not-running when the turn had not
    * started or had ended when the message was offered. */
   steer?(prompt: string): Promise<"accepted" | "not-running">;
@@ -471,8 +481,6 @@ export interface HarnessAdapter {
 
 /** Called per session start with the workspace's CURRENT machine (it can change on wake/upgrade). */
 export type HarnessAdapterFactory = (ctx: HarnessAdapterContext) => HarnessAdapter;
-/** What a start names of its agent and picks, read against that agent's lists before a folder is made for it. */
-export type StartPicksAsked = { harness?: string; model?: string; effort?: string; access?: AccessChoice; permissionMode?: string; fast?: boolean };
 
 // --- events -------------------------------------------------------------------
 
@@ -1574,9 +1582,8 @@ export interface Runtime {
     bringBack(o: { workspaceId: string; title?: string; body?: string }, origin?: Caller): Promise<BringBackResult>;
     /** The record of the folder a thread on this computer runs in, made at its first thread: the project folder, the
      * caller's own folder when a thread asks naming nothing, the worktree holding a branch, or the folder a cwd
-     * names inside the project or a worktree of its repo. cwd is the folder the start runs in where it named one.
-     * picks, where given, are read against the agent's lists on this computer before any folder is made or found. */
-    folderFor(o: { project?: string; branch?: string; cwd?: string; picks?: StartPicksAsked }, origin?: Caller): Promise<{ workspace: WorkspaceView; cwd?: string }>;
+     * names inside the project or a worktree of its repo. cwd is the folder the start runs in where it named one. */
+    folderFor(o: { project?: string; branch?: string; cwd?: string }, origin?: Caller): Promise<{ workspace: WorkspaceView; cwd?: string }>;
     /** The worktree holding a branch of a project's repo on this computer, made under the host's folder where none
      * holds it. */
     worktree(o: { project: string; branch: string }, origin?: Caller): Promise<WorktreeMade>;
@@ -2292,13 +2299,96 @@ interface TurnLive {
 interface TurnAsked {
   prompt: string;
   effort?: string;
+  /** The message as the person typed it, where the agent was handed more (the paths of the files it carried): what
+   * the turn's own start row shows, written by a host that re-opens a turn before its first row went. */
+  typed?: string;
+}
+
+/** How long a closing host waits for the agents it kept to exit on their EOF before it lets go of reading them. */
+const KEPT_CLOSE_WAIT_MS = 2_000;
+
+/** A thread's agent process kept up between its turns: what its launch fixed, the session it holds, the turn token and
+ * device its environment carries, the box its stream reads for a turn stopped on a person, how its session file stood
+ * when its last turn ended, when that was, and the cancel of the keep's own clock. */
+interface KeptProcess {
+  workspaceId: string;
+  agent: KeptAgent<HarnessSession>;
+  launch: KeptLaunch;
+  session: string;
+  turnToken: string;
+  scopeDeviceId?: string;
+  waiting: { on: boolean };
+  file?: SessionFileStamp;
+  usedAt: number;
+  cancel: () => void;
+}
+
+/** A launch as a kept process is matched against: what is fixed for the life of the process (the agent, the folder, the
+ * MCP servers named, the binary's version and the person's setup for it), and the picks a send made. */
+interface KeptLaunch {
+  fixed: string;
+  picks: Readonly<Record<string, unknown>>;
+}
+
+/** Whether a send's launch is the kept one's: the same fixed part, and every pick the send names the one the process
+ * runs at. A send into a thread that names no model or effort leaves the session at its own, which is the process's. */
+function launchesAs(kept: KeptLaunch, send: KeptLaunch): boolean {
+  return kept.fixed === send.fixed && Object.entries(send.picks).every(([pick, value]) => kept.picks[pick] === value);
+}
+
+/** How a kept agent's session file stood when its turn ended: the path it was found at and its size, or no path where
+ * the agent had written none yet. */
+interface SessionFileStamp {
+  path?: string;
+  size: number;
+}
+
+/** The one file under `folder` whose name ends in `name`, `depth` folders down, newest folders first. */
+function findSessionFile(folder: string, name: string, depth: number): string | undefined {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(folder, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+  if (depth === 0) {
+    const file = entries.find(e => e.isFile() && e.name.endsWith(name));
+    return file === undefined ? undefined : join(folder, file.name);
+  }
+  for (const dir of entries.filter(e => e.isDirectory()).sort((a, b) => b.name.localeCompare(a.name))) {
+    const found = findSessionFile(join(folder, dir.name), name, depth - 1);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+function sizeOf(path: string): number {
+  try {
+    return statSync(path).size;
+  } catch {
+    return -1;
+  }
+}
+
+function stampSessionFile(at: KeptAgent<unknown>["sessionFile"], known?: string): SessionFileStamp | undefined {
+  if (at === undefined) return undefined;
+  const path = known ?? findSessionFile(at.folder, at.name, at.depth);
+  return path === undefined ? { size: -1 } : { path, size: sizeOf(path) };
+}
+
+/** Whether the session file stands as the stamp found it: the same size where one was found, still none where none
+ * was. An agent that names no file is taken at its word. */
+function sameSessionFile(at: KeptAgent<unknown>["sessionFile"], stamp: SessionFileStamp | undefined): boolean {
+  if (at === undefined || stamp === undefined) return true;
+  const now = stampSessionFile(at, stamp.path);
+  return now !== undefined && now.path === stamp.path && now.size === stamp.size;
 }
 
 /** A turn's message read back off the host's own session index, nothing where the document holds anything else. */
 function readAsked(raw: unknown): TurnAsked | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
-  const { prompt, effort } = raw as Record<string, unknown>;
-  return typeof prompt === "string" ? { prompt, ...(typeof effort === "string" ? { effort } : {}) } : undefined;
+  const { prompt, effort, typed } = raw as Record<string, unknown>;
+  return typeof prompt === "string" ? { prompt, ...(typeof effort === "string" ? { effort } : {}), ...(typeof typed === "string" ? { typed } : {}) } : undefined;
 }
 
 /** A thread scope read back off the host's own session index: the shape the runtime minted, and nothing where the
@@ -2351,10 +2441,11 @@ interface SessionIndexRecord {
   /** reply is the held status of a turn whose result landed while its process still ran, on a row still running;
    * run is where that turn is on its machine, so a host that comes back re-opens it rather than failing it, and
    * turnToken is what that surviving process still has in its environment, so the host that re-opens it can answer
-   * for it. All three are written for a running row alone. snapshot is the commit the turn's launch took of its
+   * for it; from is where the turn starts in that run's log, on a process that served the thread's earlier turns. All
+   * of these are written for a running row alone. snapshot is the commit the turn's launch took of its
    * folder, which the turn's changes are read against wherever it ends; written while the turn runs and until that
    * read is in. */
-  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; run?: string; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string })[];
+  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string })[];
   /** Every thread of the workspace by its runtime id; absent on a document from before threads had a record. */
   threads?: Record<string, ThreadRecord>;
 }
@@ -2654,6 +2745,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** The road a turn on this kind's machine reaches this host by, written on the token minted into it and
      * stamped on every request that token makes: a machine's is relayed, and this computer's is here. */
     turnRoad: ScopedRoad;
+    /** Whether a thread's agent process is kept up between its turns here, for the next send to skip its boot: on the
+     * computer the host runs on, and on no machine, where a 4 GB box holds two threads' agents already. */
+    keepsAgents: boolean;
     /** Whether this machine's daemon can be dialled at all, asked before a road is opened so nothing mints a preview
      * route to find out: a cloud fork needs one, this computer's daemon is on it. Read as truthy, the way the reach
      * word and the status poller read it before this seam existed. */
@@ -2876,6 +2970,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       wspMcp: () => ({ command: "wsp", args: ["mcp"] }),
       turnReach: () => ({}),
       turnRoad: "relayed",
+      keepsAgents: false,
       // A workspace whose computer answers its daemon frames has no daemon of its own to dial and no route worth
       // minting: nothing listens inside it, and the road to its files and its git is the link this host holds.
       hasDaemon: entry => servedByItsComputer(entry) === undefined && Boolean(entry.machine.previewUrl),
@@ -2930,6 +3025,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               return url === undefined || url === "" ? undefined : { url };
             },
             turnRoad: "here",
+            keepsAgents: true,
             hasDaemon: () => local.daemonRoad !== undefined,
             daemonRoad: localRoad,
             ...(local.restartDaemon !== undefined ? { restartDaemon: local.restartDaemon } : {}),
@@ -3267,10 +3363,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * refuses. Only where the workspace has a road to this host, since a token with nowhere to go is one more secret
    * for nothing.
    */
-  const threadLaunch = async (entry: LiveWorkspace, threadId: string, rootThreadId: string, o: { aside?: true } = {}): Promise<{ scoped?: Awaited<ReturnType<typeof deviceDoor.mint>>; env: Record<string, string>; wsp?: McpServerSpec }> => {
+  const threadLaunch = async (entry: LiveWorkspace, threadId: string, rootThreadId: string): Promise<{ scoped?: Awaited<ReturnType<typeof deviceDoor.mint>>; env: Record<string, string>; wsp?: McpServerSpec }> => {
     const reach = agentsReach(entry);
     if (reach === undefined) return { env: {} };
-    const scoped = await deviceDoor.mint(`thread ${threadWord(threadId)}`, { kind: "thread", threadId, workspaceId: entry.record.id, rootThreadId }, Date.now(), { road: moduleOf(entry.record.kind).turnRoad, ...o });
+    const scoped = await deviceDoor.mint(`thread ${threadWord(threadId)}`, { kind: "thread", threadId, workspaceId: entry.record.id, rootThreadId }, Date.now(), moduleOf(entry.record.kind).turnRoad);
     return {
       scoped,
       env: {
@@ -3496,7 +3592,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
    * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
    * takes the row, since a restart could re-open nothing from it. */
-  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; asked?: TurnAsked; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> }>();
+  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> }>();
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
@@ -3916,6 +4012,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(s.notifyRoad !== undefined ? { notifyRoad: s.notifyRoad } : {}),
         ...(s.view.status === "running" && s.turnLive?.reply !== undefined ? { reply: s.turnLive.reply } : {}),
         ...(s.view.status === "running" && s.run !== undefined ? { run: s.run } : {}),
+        ...(s.view.status === "running" && s.from !== undefined ? { from: s.from } : {}),
         ...(s.view.status === "running" && s.asked !== undefined ? { asked: s.asked } : {}),
         ...(s.view.status === "running" && s.turnToken !== undefined ? { turnToken: s.turnToken } : {}),
         // Beside the turn token and for the same reason: the process out there still holds this device, so a host
@@ -5840,6 +5937,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     transcriptIndex.delete(id);
     daemonNotes.delete(id);
     for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
+    for (const [threadId, kept] of keptAgents) if (kept.workspaceId === id) reapKept(threadId);
     for (const [threadId, held] of threadRecords) if (held.workspaceId === id) threadRecords.delete(threadId);
     viewedMarks.delete(id);
     live.get(id)?.prPoll?.();
@@ -6379,7 +6477,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       await Promise.all(moved.map(id => store.delete(TRANSCRIPTS, id)));
       for (const id of await store.keys(WORKSPACES)) if (!transcriptIndex.has(id)) await loadIndex(id);
-      const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string }[] = [];
+      const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string }[] = [];
       /** Turns that ended while their card was still being read: the commit stayed on the row for this host to read. */
       const unread: { view: SessionView; turnId: string; snapshot?: string }[] = [];
       for (const raw of await store.list(SESSIONS)) {
@@ -6408,7 +6506,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
           continue;
         }
-        for (const { turnId, notify, notifyBy, notifyRoad, reply, run, asked: storedAsked, turnToken, scopeDeviceId, snapshot, ...view } of index.sessions) {
+        for (const { turnId, notify, notifyBy, notifyRoad, reply, run, from, asked: storedAsked, turnToken, scopeDeviceId, snapshot, ...view } of index.sessions) {
           const by = readScope(notifyBy);
           const asked = readAsked(storedAsked);
           const road = readRoad(notifyRoad);
@@ -6420,6 +6518,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             notifyRoad?: WorkspaceOrigin;
             turnLive?: TurnLive;
             run?: string;
+            from?: number;
             asked?: TurnAsked;
             turnToken?: string;
             scopeDeviceId?: string;
@@ -6437,6 +6536,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ...(road !== undefined ? { notifyRoad: road } : {}),
             ...(reply !== undefined ? { turnLive: { reply } } : {}),
             ...(run !== undefined ? { run } : {}),
+            ...(typeof from === "number" && Number.isSafeInteger(from) && from >= 0 ? { from } : {}),
             ...(asked !== undefined ? { asked } : {}),
             ...(turnToken !== undefined ? { turnToken } : {}),
             ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}),
@@ -6491,7 +6591,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const thread = device.scope?.threadId;
         if (thread !== undefined && !threadRuns(thread)) await deviceDoor.revoke(device.id);
       }
-      await deviceDoor.revokeAsides();
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
       // Not waited on: a fetch of a big copy's branches takes seconds, and the records it drops leave as they go.
       copiesMoving = moveOldCopies().catch((e: unknown) => console.warn(`the move off old copies stopped: ${e instanceof Error ? e.message : String(e)}`));
@@ -6558,6 +6657,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const next: ThreadRecord & { workspaceId: string } = { ...base, ...stamps };
       for (const key of Object.keys(stamps) as (keyof typeof stamps)[]) if (stamps[key] === undefined) delete next[key];
       threadRecords.set(threadId, next);
+      // A thread the person settled is done with: its kept agent goes now rather than at the end of the keep.
+      if (next.settledAt !== undefined) reapKept(threadId);
       if (next.snoozedUntil !== undefined) wakeAt(threadId, next.snoozedUntil);
       touched.set(workspaceId, [...(touched.get(workspaceId) ?? []), threadId]);
     }
@@ -6948,13 +7049,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * named one. Nothing named runs in the project folder, or beside the thread asking; a branch runs in the worktree
    * holding it, the project folder when it is that folder's own branch; a cwd runs where it is, inside the project
    * folder or a worktree of its repo and nowhere else. */
-  const folderFor = async (o: { project?: string; branch?: string; cwd?: string; picks?: StartPicksAsked }, origin: Caller | undefined): Promise<{ entry: LiveWorkspace; cwd?: string }> => {
+  const folderFor = async (o: { project?: string; branch?: string; cwd?: string }, origin: Caller | undefined): Promise<{ entry: LiveWorkspace; cwd?: string }> => {
     const scope = scopeOf(origin);
     const asking = scope === undefined ? undefined : live.get(scope.workspaceId);
     const project = o.project !== undefined ? await projectsDoor.resolve(o.project, origin) : asking !== undefined ? projectHeld(asking.record.project) : undefined;
     if (project === undefined) throw Object.assign(new Error(NAME_A_PROJECT_LINE), { kind: "usage" });
     if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
-    if (o.picks !== undefined) await picksHold(project, o.picks);
     const beside = asking !== undefined && copiesFolder(asking.record.kind) && asking.record.project === project.id ? asking : undefined;
     if (o.branch !== undefined && o.cwd !== undefined) throw Object.assign(new Error(BRANCH_OR_CWD_LINE), { kind: "usage" });
     const top = project.git?.top;
@@ -7330,7 +7430,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** A start's picks read against the agent's lists before a folder is made or moved for it, by the rule the start
    * itself refuses them with, so a pick the agent does not take costs no git work. */
-  const picksHold = async (project: ProjectView, o: StartPicksAsked): Promise<void> => {
+  const picksHold = async (project: ProjectView, o: { harness?: string; model?: string; effort?: string; access?: AccessChoice; permissionMode?: string }): Promise<void> => {
     if (!copiesFolder(kindForComputer(project.computer))) return;
     const home = await projectFolder(project);
     const prefs = preferencesHeld ?? (await preferences.get());
@@ -7339,17 +7439,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (table === undefined) return;
     const { adapter } = await launchAdapterFor(home, harness);
     const resolved = defaultsOn(await catalogOn(table, home, adapter), prefs, prefs.projectDefaults[home.record.project]);
-    // This road is the command line's and the tools', so it names the flag to drop; namedMode speaks for the app too.
-    const refused = o.access === undefined ? null : accessWordRefusal(resolved.catalog, o.access);
-    if (refused !== null) throw refused;
     const named = o.permissionMode ?? (o.access === undefined ? undefined : namedMode(resolved.catalog, harness, o.access));
     const model = o.model ?? resolved.open.model;
     const effort = o.effort ?? resolved.open.effort;
-    try {
-      startPicks(resolved.catalog, { ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(named !== undefined ? { permissionMode: named } : {}), ...(o.fast === true ? { fast: true } : {}) }, true);
-    } catch (e) {
-      throw pickRefusal(e, resolved.catalog);
-    }
+    startPicks(resolved.catalog, { ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(named !== undefined ? { permissionMode: named } : {}) }, true);
   };
 
   /** The line a start on a pull request leaves for its thread, by the record of the folder that was left behind. */
@@ -8659,6 +8752,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       .then(() => write(sessionId, title, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)))
       .then(
         wrote => {
+          if (wrote.kind === "written") restampKept(sessionId);
           if (wrote.kind === "failed") console.warn(noNameWriteLogLine(sessionId, entry.record.id, wrote.error));
         },
         (e: unknown) => console.warn(noNameWriteLogLine(sessionId, entry.record.id, e instanceof Error ? e.message : String(e))),
@@ -8945,6 +9039,80 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return latest;
   };
+  /** Each thread's agent process kept up between its turns on this computer, by thread: what its launch fixed, which a
+   * next turn has to match to run on it, and the turn token and device its environment still carries, which name the
+   * thread for as long as the process is kept and are taken away when it goes. A thread's running turn holds its
+   * process and is not in here; its end puts the process back. */
+  const keptAgents = new Map<string, KeptProcess>();
+
+  /** Ends one thread's kept process and takes its token and device away with it. */
+  const reapKept = (threadId: string, o?: { now: true }): void => {
+    const kept = keptAgents.get(threadId);
+    if (kept === undefined) return;
+    keptAgents.delete(threadId);
+    endKept(threadId, kept, o);
+  };
+  const endKept = (threadId: string, kept: KeptProcess, o?: { now: true }): void => {
+    kept.cancel();
+    if (kept.scopeDeviceId !== undefined) void deviceDoor.revoke(kept.scopeDeviceId).catch((e: unknown) => console.warn(`the token of thread ${threadWord(threadId)} was not taken away: ${e instanceof Error ? e.message : String(e)}`));
+    void kept.agent.close(o).catch((e: unknown) => console.warn(`the kept agent of thread ${threadWord(threadId)} did not end: ${e instanceof Error ? e.message : String(e)}`));
+  };
+
+  /** This host wrote into a harness session's own file (a title, a rename): the processes kept on that session stamp
+   * the file again, or the next send would read the host's own write as the person resuming the session elsewhere. */
+  const restampKept = (harnessSessionId: string): void => {
+    for (const kept of keptAgents.values()) {
+      if (kept.session !== harnessSessionId) continue;
+      const file = stampSessionFile(kept.agent.sessionFile, kept.file?.path);
+      if (file !== undefined) kept.file = file;
+    }
+  };
+
+  /** The process a thread's next turn runs on, taken out of the keep: only where it was launched exactly as this turn
+   * would be, resumes the session this turn resumes, and nothing else wrote that session since its last turn (the
+   * person resumed it in a terminal). Any other kept process of the thread is ended here, and the turn boots cold. */
+  const takeKept = (threadId: string, launch: KeptLaunch | undefined, session: string | undefined): KeptProcess | undefined => {
+    const kept = keptAgents.get(threadId);
+    if (kept === undefined) return undefined;
+    if (launch === undefined || !launchesAs(kept.launch, launch) || kept.session !== session || !sameSessionFile(kept.agent.sessionFile, kept.file)) {
+      reapKept(threadId);
+      return undefined;
+    }
+    keptAgents.delete(threadId);
+    kept.cancel();
+    return kept;
+  };
+
+  /** A turn's process put back in the keep once the turn is over: the thread's next send runs on it until the keep
+   * runs out, the thread goes, or a seventh would be kept, which ends the one idle longest. Answers whether it was
+   * kept, since the turn's token and device stay with the process only then. */
+  const holdKept = (threadId: string, o: Omit<KeptProcess, "file" | "usedAt" | "cancel">): boolean => {
+    if (closing || !threadRecords.has(threadId)) {
+      void o.agent.close().catch(() => {});
+      return false;
+    }
+    reapKept(threadId);
+    const file = stampSessionFile(o.agent.sessionFile);
+    const kept: KeptProcess = { ...o, ...(file !== undefined ? { file } : {}), usedAt: clock.now(), cancel: () => {} };
+    const timer = clock.schedule(() => {
+      if (keptAgents.get(threadId) === kept) reapKept(threadId);
+    }, AGENT_KEEP_MS, { unref: true });
+    kept.cancel = timer;
+    keptAgents.set(threadId, kept);
+    // A process that went on its own takes its token with it; nothing is left to close.
+    void o.agent.exited.then(() => {
+      if (keptAgents.get(threadId) !== kept) return;
+      keptAgents.delete(threadId);
+      kept.cancel();
+      if (kept.scopeDeviceId !== undefined) void deviceDoor.revoke(kept.scopeDeviceId).catch(() => {});
+    });
+    while (keptAgents.size > AGENTS_KEPT) {
+      const [oldest] = [...keptAgents].reduce((a, b) => (b[1].usedAt < a[1].usedAt ? b : a));
+      reapKept(oldest);
+    }
+    return true;
+  };
+
   /** The thread a request came out of, by the token that request's own launch environment carries: the row holding
    * that token beside its session id. Every token this host knows it minted into one turn's launch, so one no row
    * carries names a turn the caller is not, and it is refused rather than read as the person, which would send a
@@ -8953,6 +9121,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // Only a row still running answers: a turn the runtime ended from this side (a nap, a stop, a restart it could
     // not re-open) never reaches the exit that drops its token, and a token whose turn is over names nobody.
     for (const s of sessions.values()) if (s.turnToken === token && s.view.status === "running" && s.view.threadId !== undefined) return s.view.threadId;
+    // A process kept between turns still holds the token its first turn was launched with.
+    for (const [threadId, kept] of keptAgents) if (kept.turnToken === token) return threadId;
     throw new Error(NO_SUCH_TURN);
   };
   /** Every thread the tree under this one holds, whether or not anything on it is running: read off the parent each
@@ -9337,6 +9507,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * started still running, so the turn's idle clock does not run out under a question nobody has answered yet nor
      * under a quiet watch on work the turn started. Absent on a road that hands the adapter no stream of its own. */
     waiting?: { on: boolean };
+    /** What the turn's process was launched with, where it may be kept for the thread's next turn once this one is over. */
+    keep?: { launch: KeptLaunch };
     open: (onEvent: (event: AdapterEvent) => void) => HarnessSession;
   }): SessionHandle => {
     const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, notifyRoad, turnToken, scopeDeviceId } = t;
@@ -9719,6 +9891,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     };
 
+    // A process kept from an earlier turn reads the box that turn left, which may still say it was waiting.
+    readsWaiting();
     idle.hold(workspaceId);
     let started: HarnessSession;
     try {
@@ -9789,7 +9963,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
     if (turnId !== rowId) sessions.delete(turnId);
-    sessions.set(rowId, { view, turnId, calls, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(t.asked !== undefined ? { asked: t.asked } : {}), ...(typeof t.snapshot?.from === "string" ? { snapshot: t.snapshot.from } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
+    sessions.set(rowId, { view, turnId, calls, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(started.from !== undefined ? { from: started.from } : {}), ...(t.asked !== undefined ? { asked: t.asked } : {}), ...(typeof t.snapshot?.from === "string" ? { snapshot: t.snapshot.from } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
     void persistSessions(workspaceId);
     // A launch that hands its prompt over late resolves its snapshot after the row exists; the row takes it then.
     const taking = t.snapshot?.from;
@@ -9807,9 +9981,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const row = sessions.get(rowId);
       if (row !== undefined && row.turnToken === turnToken) delete row.turnToken;
       if (row?.turnId === turnId && !changesOut) delete row.snapshot;
+      // A process kept for the thread's next turn keeps the token and the device in its environment, which name the
+      // thread until the keep ends it.
+      const agent = t.keep !== undefined ? started.kept?.() : undefined;
+      const keeps =
+        agent !== undefined &&
+        !ended &&
+        turnToken !== undefined &&
+        view.claudeSessionId !== undefined &&
+        holdKept(threadId, { workspaceId, agent, launch: t.keep!.launch, session: view.claudeSessionId, turnToken, ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), waiting: t.waiting ?? { on: false } });
+      if (agent !== undefined && !keeps) void agent.close().catch(() => {});
       // The process is gone, so the token in its environment names nothing that can be asked for anything: it is
       // taken away here, the one exit both the reply road and the failure road reach.
-      if (scopeDeviceId !== undefined) {
+      if (scopeDeviceId !== undefined && !keeps) {
         void deviceDoor.revoke(scopeDeviceId).catch((e: unknown) => console.warn(`the token of thread ${threadWord(threadId)} was not taken away: ${e instanceof Error ? e.message : String(e)}`));
       }
       if (!ended) view.status = status;
@@ -9887,7 +10071,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * `cannot` covers a row with no run recorded (a host from before this road, or a harness whose runs die with it),
    * no workspace or no machine running under it, no adapter for its harness in this process, and a handle that is
    * not one this host could have launched. */
-  const reattach = async (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string }): Promise<Reopened> => {
+  const reattach = async (s: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string }): Promise<Reopened> => {
     const { view, run } = s;
     const threadId = view.threadId;
     const entry = live.get(view.workspaceId);
@@ -9919,6 +10103,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(view.model !== undefined ? { model: view.model } : {}),
         ...(view.cwd !== undefined ? { cwd: view.cwd } : {}),
         ...(s.asked !== undefined ? { prompt: s.asked.prompt, ...(s.asked.effort !== undefined ? { effort: s.asked.effort } : {}) } : {}),
+        ...(s.from !== undefined ? { from: s.from } : {}),
         onEvent: event => (sink === undefined ? void held.push(event) : sink(event)),
       });
     } catch (e: unknown) {
@@ -9957,7 +10142,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(s.snapshot !== undefined && view.cwd !== undefined ? { snapshot: { from: s.snapshot, cwd: view.cwd } } : {}),
         outcome: "started",
         waiting,
-        opening: { prompt: view.prompt ?? "" },
+        // The row's own prompt is the thread's opening once a later turn takes the row over, so the start row a
+        // re-opened turn still owes is written from what was typed for this turn.
+        opening: { prompt: s.asked?.typed ?? s.asked?.prompt ?? view.prompt ?? "" },
         open: forward => {
           sink = forward;
           for (const event of held.splice(0)) forward(event);
@@ -10173,6 +10360,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // thing.
       let handedOver = false;
       let failure: string | undefined;
+      let keptTaken: KeptProcess | undefined;
       try {
         const table = harnessCatalog(harness);
         // Checked against the binary's own lists, the ones the composer shows for this workspace, with the marks on
@@ -10268,6 +10456,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // A rewind's cut rides the first resume after it, on a harness that takes one there.
         const cutAt = resume !== undefined && adapter.resumesAt === true ? threadRecords.get(threadId)?.resumeAt : undefined;
         const handed = attachedFilesPrompt(o.prompt, filePaths);
+        // What a launch fixes for the life of the agent's process: a turn runs on the thread's kept process only where
+        // its own launch would be the same, and a rewind's cut is a launch of its own.
+        const launchKey: KeptLaunch | undefined =
+          moduleOf(entry.record.kind).keepsAgents && cutAt === undefined
+            ? {
+                fixed: JSON.stringify({ harness, cwd, mcpServers: o.mcpServers, version: catalog?.version, setup: setupPlace(entry) === undefined ? undefined : setups.launchOf(setupPlace(entry)!, harness) }),
+                picks: { ...picks, ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}) },
+              }
+            : undefined;
+        const kept = takeKept(threadId, launchKey, resume);
+        // The kept process carries the token and the device its first turn was launched with; this send's go unused.
+        if (kept !== undefined) dropScope();
+        const promptAfter = promptsLate && snapshot?.from instanceof Promise ? snapshot.from.then(() => {}) : undefined;
+        keptTaken = kept;
         const handle = runTurn({
           entry,
           view,
@@ -10276,18 +10478,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(notify !== undefined ? { notify } : {}),
           ...(notifyBy !== undefined ? { notifyBy } : {}),
           ...(notifyRoad !== undefined ? { notifyRoad } : {}),
-          turnToken,
+          turnToken: kept?.turnToken ?? turnToken,
           outcome,
-          ...(scoped !== undefined ? { scopeDeviceId: scoped.deviceId } : {}),
+          ...((): { scopeDeviceId?: string } => {
+            const device = kept !== undefined ? kept.scopeDeviceId : scoped?.deviceId;
+            return device !== undefined ? { scopeDeviceId: device } : {};
+          })(),
+          ...(launchKey !== undefined ? { keep: { launch: kept?.launch ?? launchKey } } : {}),
           opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(opens ? { opensThread: true } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
-          asked: { prompt: handed, ...(picks.effort !== undefined ? { effort: picks.effort } : {}) },
+          asked: { prompt: handed, ...(picks.effort !== undefined ? { effort: picks.effort } : {}), ...(handed !== o.prompt ? { typed: o.prompt } : {}) },
           ...(imagesDir !== undefined ? { imagesDir } : {}),
           ...(snapshot !== undefined ? { snapshot } : {}),
           ...(resume !== undefined ? { resume } : {}),
           ...(cutAt !== undefined ? { cutAt } : {}),
-          waiting,
+          waiting: kept?.waiting ?? waiting,
           open: onEvent =>
-            adapter.start({
+            kept !== undefined
+              ? kept.agent.next({ prompt: handed, ...(images.length > 0 ? { images } : {}), ...(promptAfter !== undefined ? { after: promptAfter } : {}), onEvent })
+              : adapter.start({
               prompt: handed,
               ...(resume !== undefined ? { resume } : {}),
               ...(cutAt !== undefined ? { resumeAt: cutAt } : {}),
@@ -10298,7 +10506,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(images.length > 0 ? { images } : {}),
               ...(mcpServers !== undefined ? { mcpServers } : {}),
               ...(limitDetails ? { limitDetails: true as const } : {}),
-              ...(promptsLate && snapshot?.from instanceof Promise ? { promptAfter: snapshot.from.then(() => {}) } : {}),
+              ...(promptAfter !== undefined ? { promptAfter } : {}),
+              ...(launchKey !== undefined ? { keep: true as const } : {}),
               ...(catalog?.source === "harness" && catalog.version !== null ? { version: catalog.version } : {}),
               // The thread's earlier turns as its transcript holds them, this one left out since its message follows.
               ...(resume !== undefined ? { seed: async () => threadSeed(threadMessages((await openTranscript(workspaceId)).filter(e => e.turnId !== turnId), threadId)) } : {}),
@@ -10342,6 +10551,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           launched();
         }
         if (!handedOver && imagesDir !== undefined) dropImages(entry, imagesDir);
+        // A kept process taken for a turn that never opened on it holds the thread's token with nobody to answer for it.
+        if (!handedOver && keptTaken !== undefined) endKept(threadId, keptTaken);
       }
     },
 
@@ -10527,6 +10738,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A store that refused the write says nothing about which sessions it has, so its own line travels as the answer.
       if (wrote.kind === "failed") return { outcome: "failed", error: wrote.error };
       if (wrote.kind === "no-session") return { outcome: "no-session" };
+      restampKept(harnessSessionId);
       // Every turn of the thread shares the harness's session, and the fold reads the latest turn's title. The name
       // is the person's, so a title the harness is still thinking about is thrown away when it lands.
       for (const row of sessions.values()) {
@@ -10603,7 +10815,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // with, since a harness resuming a session that announced a server it no longer has tells the model so, and the
       // answer opens on it. The harness keeps every tool off; the token goes back the moment the answer is in.
       const threadId = threadKeyOf(latest);
-      const { scoped, env: launchEnv, wsp } = await threadLaunch(entry, threadId, rootOf(threadId), { aside: true });
+      const { scoped, env: launchEnv, wsp } = await threadLaunch(entry, threadId, rootOf(threadId));
       try {
         const { adapter } = adapterFor(entry, harness, launchEnv, undefined, servers);
         if (adapter.aside === undefined) throw new Error(asideUnsupportedLine(harness));
@@ -10656,6 +10868,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const conflict = (line: string): Error => Object.assign(new Error(line), { kind: "conflict" });
       // Every refusal comes before anything is written: nothing below this block moves a file or a row.
       if (rows.some(r => r.view.status === "running")) throw conflict(REWIND_WORKING_LINE);
+      // A kept agent holds the conversation as it stood before the cut in its own memory.
+      reapKept(threadId);
       const tree = treeUnder(threadId);
       const under = foldThreads([...sessions.values()].map(s => s.view).filter(v => v.threadId !== undefined && tree.includes(v.threadId)));
       const running = under.filter(t => t.status === "running");
@@ -10775,6 +10989,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         return { workspaceId, worktree: tree.path, threads: threads.size };
       }
       if (threadRuns(threadId)) throw Object.assign(new Error(THREAD_WORKING_LINE), { kind: "conflict" });
+      reapKept(threadId);
       await openTranscript(workspaceId);
       await dropCheckpoints(entry, threadId);
       await dropThreadFiles(entry, [threadId]);
@@ -13000,6 +13215,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // process open after its last line.
       for (const stop of [...machineReading]) stop();
       machineReading.clear();
+      // A kept agent is no turn: it is ended rather than left idle with nothing to send to it, its tree at once, since
+      // an agent slow to exit on its EOF would outlast the reader that reaps its group (a tail pump was left behind
+      // so); the wait for it is short, and the next host's sweep ends what is left.
+      const keptGoing = [...keptAgents.keys()].map(threadId => {
+        const exited = keptAgents.get(threadId)!.agent.exited;
+        reapKept(threadId, { now: true });
+        return exited;
+      });
+      if (keptGoing.length > 0) await Promise.race([Promise.allSettled(keptGoing), new Promise(resolve => setTimeout(resolve, KEPT_CLOSE_WAIT_MS).unref())]);
       await local?.close?.();
       await placeDoor?.close();
       closed = true;
