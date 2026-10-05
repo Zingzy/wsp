@@ -3762,6 +3762,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const window = ran?.contextWindow ?? /\[([^\]]+)\]$/.exec(model ?? "")?.[1];
     return { ...(model !== undefined ? { model: baseModel(model) } : {}), ...(effort !== undefined ? { effort } : {}), ...(window !== undefined ? { contextWindow: window } : {}) };
   };
+  /** The workspace a thread runs on where that is a machine of its own, not this computer. */
+  const boxOf = (threadId: string): LiveWorkspace | undefined => {
+    const workspaceId = latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
+    const entry = workspaceId === undefined ? undefined : live.get(workspaceId);
+    return entry === undefined || isLocalWorkspace(entry.record) ? undefined : entry;
+  };
   const slates: Slates = createSlates({
     store,
     now: () => clock.now(),
@@ -3773,15 +3779,34 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (workspaceId === undefined) return undefined;
       const running = [...sessions.values()].find(s => s.view.threadId === threadId && s.view.status === "running");
       const entry = live.get(workspaceId);
-      // A run starts where the thread's next turn would: the folder its session ran in, a --cwd or a worktree.
+      // A run starts where the thread's next turn would: the folder its session ran in, a --cwd or a worktree, else
+      // the folder the workspace's kind holds its project in, on that kind's computer.
       const ranIn = latest?.cwd ?? (latest?.claudeSessionId === undefined ? undefined : folderOf(workspaceId, latest.claudeSessionId));
+      if (entry === undefined) return { workspaceId, rootThreadId: rootOf(threadId), sessionId: latest?.claudeSessionId ?? latest?.id ?? threadId, ...(running !== undefined ? { turnId: running.turnId } : {}) };
+      const folder = runsIn(entry, ranIn, moduleOf(entry.record.kind).folder(entry.record) ?? checkoutOf(entry.record));
+      // A run on the host from a thread on a box starts in the project's folder here, where the project is also here.
+      const here = isLocalWorkspace(entry.record) ? folder : existsSync(checkoutOf(entry.record)) ? checkoutOf(entry.record) : homedir();
       return {
         workspaceId,
         rootThreadId: rootOf(threadId),
         sessionId: latest?.claudeSessionId ?? latest?.id ?? threadId,
         ...(running !== undefined ? { turnId: running.turnId } : {}),
-        ...(entry !== undefined ? { folder: runsIn(entry, ranIn, checkoutOf(entry.record)), computer: computerOf(entry) } : {}),
+        folder,
+        hostFolder: here,
+        computer: computerOf(entry),
       };
+    },
+    machineOf: threadId => {
+      const entry = boxOf(threadId);
+      return entry?.machine;
+    },
+    asleep: threadId => {
+      const entry = boxOf(threadId);
+      return entry !== undefined && entry.record.phase !== "running";
+    },
+    wake: async threadId => {
+      const entry = boxOf(threadId);
+      if (entry !== undefined) await workspaces.wake(entry.record.id);
     },
     loaded: () => ready(),
     settled: async threadId => {
@@ -9857,10 +9882,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // person's other servers stay (measured on 2.1.284 and 0.155.1 against the user-scope config; a project's own
       // .mcp.json naming wsp was not measured). A harness that takes none is refused where a caller named servers and
       // left alone here, since the person asked for a thread, not for tools.
-      // A thread another thread started has no slate: its server is told so, on this computer where the server is the
-      // host's own wsp and knows the word; a box's may be older, and the slate tools refuse such a thread either way.
+      // A thread another thread started has no slate: its launch says nothing of one, and on this computer, where the
+      // server is the host's own wsp and knows the word, its server is told too. A box's server is served by this host
+      // as a guest, which reads the same off the thread's token; the box's own wsp may be older and never sees a word.
       const sub = tree.rootThreadId !== undefined && tree.rootThreadId !== threadId;
-      const wsp = reach?.wsp !== undefined && sub && reach.wsp.args.includes(SCOPED_MCP_ARG) ? { ...reach.wsp, args: [...reach.wsp.args, NO_SLATE_MCP_ARG] } : reach?.wsp;
+      const wsp = reach?.wsp === undefined || !sub ? reach?.wsp : { ...reach.wsp, noSlate: true as const, ...(reach.wsp.args.includes(SCOPED_MCP_ARG) ? { args: [...reach.wsp.args, NO_SLATE_MCP_ARG] } : {}) };
       const mcpServers =
         scoped !== undefined && wsp !== undefined && adapter.mcpServers === true
           ? { [MCP_SERVER_NAME]: wsp, ...o.mcpServers }

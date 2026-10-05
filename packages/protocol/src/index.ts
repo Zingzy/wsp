@@ -1356,6 +1356,9 @@ export type ReviewPostResult = z.infer<typeof ReviewPostResult>;
 export interface McpServerSpec {
   command: string;
   args: readonly string[];
+  /** The wsp server of a thread another thread started, which has no slate: the launch says nothing of one. Read by
+   * the adapter that builds the launch and never put on its line, which a box's older wsp would refuse. */
+  noSlate?: true;
 }
 
 /** What a start that names MCP servers for a harness whose adapter renders none for its CLI is refused with. The

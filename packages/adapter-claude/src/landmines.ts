@@ -2,7 +2,7 @@
 // NOTICE; logic only) and measured behavior in solari-poc/RESULTS.md.
 
 import { randomUUID } from "node:crypto";
-import { inFolder, launchWords, MCP_SERVER_NAME, NO_SLATE_MCP_ARG, programWord, SCOPED_MCP_ARG, shellQuote, SLATE_BRIEF } from "@wsp/protocol";
+import { inFolder, launchWords, MCP_SERVER_NAME, programWord, SCOPED_MCP_ARG, shellQuote, SLATE_BRIEF } from "@wsp/protocol";
 import type { AgentLaunch, McpServerSpec, TurnImage } from "@wsp/protocol";
 import { PERMISSION_PROMPT_TOOL, SKIP_PROMPTS_MODE } from "./permissions.js";
 
@@ -166,7 +166,7 @@ function permissionFlags(mode: string | undefined): string[] {
  * not one another thread started, which has no slate. */
 function briefFlag(servers: Readonly<Record<string, McpServerSpec>> | undefined): string[] {
   const wsp = servers?.[MCP_SERVER_NAME];
-  return wsp !== undefined && wsp.args.includes(SCOPED_MCP_ARG) && !wsp.args.includes(NO_SLATE_MCP_ARG) ? [`--append-system-prompt ${shellQuote(SLATE_BRIEF)}`] : [];
+  return wsp !== undefined && wsp.args.includes(SCOPED_MCP_ARG) && wsp.noSlate !== true ? [`--append-system-prompt ${shellQuote(SLATE_BRIEF)}`] : [];
 }
 
 /**

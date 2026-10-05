@@ -82,9 +82,13 @@ describe("buildCommand", () => {
   });
 
   it("serves a thread another thread started no slate server, and keeps the slate tools off its wsp one", () => {
-    const command = buildCommand({ mcpServers: { wsp: { command: "/opt/wsp/bin/wsp", args: ["mcp", "--scoped", "--no-slate"] } } });
-    expect(command).toContain(`-c mcp_servers.wsp.disabled_tools='${JSON.stringify(["slate_catalog", "slate_write", "slate_state", "slate_read"])}'`);
-    expect(command).not.toContain("wsp_slate");
+    for (const wsp of [{ command: "/opt/wsp/bin/wsp", args: ["mcp", "--scoped", "--no-slate"], noSlate: true as const }, { command: "wsp", args: ["mcp"], noSlate: true as const }]) {
+      const command = buildCommand({ mcpServers: { wsp } });
+      expect(command).toContain(`-c mcp_servers.wsp.disabled_tools='${JSON.stringify(["slate_catalog", "slate_write", "slate_state", "slate_read"])}'`);
+      expect(command).not.toContain("wsp_slate");
+      // The mark is the adapter's to read, never a word on the line a box's wsp would have to take.
+      expect(command).not.toContain("noSlate");
+    }
   });
 
   it("refuses a server name that is not one plain word of a config key", () => {
