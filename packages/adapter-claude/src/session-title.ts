@@ -61,8 +61,9 @@ export function parseSessionTitle(stdout: string): string | null {
  * One shell line for the guest that asks the CLI itself to name a thread: a print-mode turn on the question, with
  * the prompt on stdin rather than in the argv (a brief's excerpt would hit the kernel's per-argument cap) and the
  * whole answer as one JSON object. --safe-mode leaves the person's own customizations out of a question, their
- * SessionStart hooks, CLAUDE.md, skills, plugins and MCP servers, and leaves auth alone; no tool is allowed either,
- * since the answer is one line of words and a tool call would cost a turn of its own. Never --bare, whatever else
+ * SessionStart hooks, CLAUDE.md, skills, plugins and MCP servers, and leaves auth alone; it keeps their permissions,
+ * so the tools are taken away by --tools '' (an empty --allowed-tools removes none, and on 2.1.289 the question ran
+ * the opening's own shell command in 4 of 5 asks). Never --bare, whatever else
  * it skips: its auth is strictly ANTHROPIC_API_KEY, with OAuth and the keychain never read (measured on 2.1.263:
  * with no key in the environment, a --bare question against a signed-in store answers "Failed to authenticate"
  * where a --safe-mode question against that same store answers the title), so on a computer whose person signed in
@@ -79,7 +80,7 @@ export function titleForCommand(options: { prompt: string; model?: string; baseE
 
 /** The print-mode question as the title asks it: the person's customizations off, no tool, and their sign-in read. */
 const questionLine = (model: string | undefined, launch: AgentLaunch | undefined): string =>
-  [`${programWord("claude", launch)} -p`, "--safe-mode", "--output-format json", "--allowed-tools ''", ...(model === undefined ? [] : [`--model ${shellQuote(model)}`])].join(" ");
+  [`${programWord("claude", launch)} -p`, "--safe-mode", "--output-format json", "--tools ''", ...(model === undefined ? [] : [`--model ${shellQuote(model)}`])].join(" ");
 
 /**
  * One shell line for the guest that asks the CLI for a commit message: the same print-mode question the title asks,

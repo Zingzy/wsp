@@ -223,7 +223,7 @@ async function reapRun(base: string, graceMs = RUN_STOP_MS): Promise<void> {
     for (let waited = 0; waited < graceMs && groupExists(pid); waited += GRACE_POLL_MS) await sleep(Math.min(GRACE_POLL_MS, graceMs - waited));
     signalGroup(pid, "SIGKILL");
   }
-  for (const suffix of ["sh", "log", "pid", "exit", "in", "held", "fifo", "tail"]) rmSync(`${base}.${suffix}`, { force: true });
+  for (const suffix of ["sh", "log", "pid", "exit", "in", "held", "late", "fifo", "tail"]) rmSync(`${base}.${suffix}`, { force: true });
   rmSync(`${base}.d`, { recursive: true, force: true });
 }
 
@@ -234,6 +234,15 @@ function releaseHeld(base: string): void {
   if (held === undefined) return;
   if (existsSync(`${base}.d`) && existsSync(`${base}.in`) && statSync(`${base}.in`).size === 0) appendFileSync(`${base}.in`, held);
   rmSync(`${base}.held`, { force: true });
+}
+
+/** A line written after the seed and held until it is due goes in once, onto a run that has not ended: a host that
+ * went between the append and the drop left it in the channel already. */
+function releaseLate(base: string): void {
+  const late = readFile(`${base}.late`);
+  if (late === undefined) return;
+  if (existsSync(`${base}.d`) && !existsSync(`${base}.exit`) && !(readFile(`${base}.in`) ?? "").includes(late)) appendFileSync(`${base}.in`, late);
+  rmSync(`${base}.late`, { force: true });
 }
 
 /** One complete line at a time out of a growing byte stream: what precedes each newline is yielded, the tail waits
@@ -302,7 +311,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
   /** The one reader both roads share: a launch that has just started its child, and an attach to a run an earlier
    * host process left behind. The log is read from its first byte either way, so a run that printed while no host
    * was listening is replayed to whoever attaches. */
-  const open = (base: string, hasInput: boolean, o: { launch?: { failed?: Error }; startedAt?: number } = {}): ExecStream => {
+  const open = (base: string, hasInput: boolean, o: { launch?: { failed?: Error }; startedAt?: number; taken?: readonly string[] } = {}): ExecStream => {
     const { launch } = o;
     // The idle clock runs from this reader's first second, since nothing on disk records when the run's last byte
     // landed; the wall runs from the turn's own start, which an attach is handed.
@@ -480,6 +489,15 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
           return;
         }
       },
+      writeAfter: (line, after) => {
+        if (!hasInput) throw new Error("this stream has no input channel");
+        writeOwned(`${base}.late`, `${line}\n`);
+        void after.then(
+          () => releaseLate(base),
+          () => rmSync(`${base}.late`, { force: true }),
+        );
+      },
+      ...(o.taken !== undefined ? { taken: o.taken } : {}),
       exited,
     } satisfies ExecStream;
   };
@@ -550,7 +568,10 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
       await reapRun(run);
       return "gone";
     }
-    return open(run, input, { startedAt });
+    if (!input) return open(run, input, { startedAt });
+    releaseLate(run);
+    const taken = (readFile(`${run}.in`) ?? "").split("\n").filter(line => line !== "" && line !== endMarker(run));
+    return open(run, input, { startedAt, taken });
   };
 
   factory.sweep = async keep => {

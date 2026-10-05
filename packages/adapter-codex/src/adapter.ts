@@ -96,6 +96,8 @@ export interface CodexStartOptions {
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
   /** The turn reads each banked reset in full rather than their count alone. */
   limitDetails?: boolean;
+  /** The server boots and opens the thread at once, and turn/start goes once this settles. */
+  promptAfter?: Promise<void>;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -159,6 +161,8 @@ export interface CodexAdapter {
   readonly attachments: "file";
   /** Servers ride the launch as `-c mcp_servers.<name>...` overrides over the config under CODEX_HOME. */
   readonly mcpServers: true;
+  /** A start takes promptAfter: the server touches no file before turn/start hands it the prompt. */
+  readonly waitsForPrompt: true;
   /** Makes the binary describe itself under the same home as a session, without running a turn. */
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */
@@ -422,6 +426,14 @@ const APPROVALS: Readonly<Record<string, string>> = {
   "item/fileChange/requestApproval": "file_change",
 };
 
+const isTurnStart = (line: string): boolean => {
+  try {
+    return (JSON.parse(line) as { method?: unknown }).method === "turn/start";
+  } catch {
+    return false;
+  }
+};
+
 export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
   const sessions = new Map<string, CodexSession>();
   const env = buildEnv({ base: deps.baseEnv, home: deps.home, ...(deps.apiKey !== undefined ? { apiKey: deps.apiKey } : {}) });
@@ -438,6 +450,11 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     model?: string;
     cwd?: string;
     turnLine?: (threadId: string) => string;
+    /** What turn/start waits on once the thread answers; a stop in the meantime sends no turn at all. */
+    promptAfter?: Promise<void>;
+    /** A re-opened run's turn, written when the replayed log shows the thread answered and the run's channel holds no
+     * turn: a host that went before it handed the prompt over leaves the turn owed. */
+    owedTurn?: (threadId: string) => string;
     /** A side question's own run: every approval it raises is declined here, it joins no registry, and it has a wall. */
     aside?: true;
     /** A run that asks the thread things and runs no turn (a revert), declined and unregistered as a side question
@@ -722,6 +739,16 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       emit({ type: "permission.ask", sessionId: threadId, ask });
     };
 
+    /** The turn goes once its prompt is due and not after a stop; held beside the run meanwhile where the road keeps
+     * one, so a host that goes inside the wait leaves it for the next. */
+    const handOver = (line: string): void => {
+      const due = (o.promptAfter ?? Promise.resolve()).then(() => {
+        if (interruptRequested || exited) throw new Error("the turn was stopped before its prompt was due");
+      });
+      if (o.promptAfter !== undefined && stream.writeAfter !== undefined) stream.writeAfter(line, due);
+      else void due.then(() => stream.write(line), () => {});
+    };
+
     const side = (id: RequestId, answer: Record<string, unknown> | undefined): void => {
       const next = o.sideRun!(id, answer);
       if (typeof next === "string") void stream.write(next);
@@ -735,7 +762,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         legacy ||= !announced && thread?.historyMode === "legacy";
         announce(str(thread?.id), str(answer?.model) ?? str(thread?.model), str(answer?.cwd) ?? str(thread?.cwd));
         if (o.sideRun !== undefined) side(id, answer);
-        else if (o.turnLine !== undefined) void stream.write(o.turnLine(threadId));
+        else if (o.turnLine !== undefined) handOver(o.turnLine(threadId));
+        else if (o.owedTurn !== undefined && stream.taken !== undefined && !stream.taken.some(isTurnStart)) void stream.write(o.owedTurn(threadId));
         return;
       }
       if (o.sideRun !== undefined && (id === REQUEST.turns || id === REQUEST.revert)) {
@@ -1025,6 +1053,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       command,
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
       turnLine: threadId => turnStartLine({ threadId, text: options.prompt, ...(images !== undefined ? { images } : {}), ...(options.effort !== undefined ? { effort: options.effort } : {}) }),
+      ...(options.promptAfter !== undefined ? { promptAfter: options.promptAfter } : {}),
       onEvent: options.onEvent,
     });
   };
@@ -1121,6 +1150,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
                   startedAt: options.startedAt,
                   ...(options.model !== undefined ? { model: options.model } : {}),
                   ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+                  ...(options.prompt !== undefined ? { owedTurn: (threadId: string) => turnStartLine({ threadId, text: options.prompt!, ...(options.effort !== undefined ? { effort: options.effort } : {}) }) } : {}),
                   onEvent: options.onEvent,
                 });
           },
@@ -1129,6 +1159,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     sessions,
     steers: true,
     mcpServers: true,
+    waitsForPrompt: true,
     aside,
     revert,
     probeCatalog,
