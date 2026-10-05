@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineConfig } from "tsup";
+import { buildDefines } from "../../packages/wspx/scripts/build-defines.mjs";
 
 // Two self-contained bundles, the window's main and the wsp command the shim
 // runs: every workspace package and its deps ride inside, so the packaged app
@@ -14,6 +15,7 @@ export default defineConfig([
     platform: "node",
     target: "node22",
     external: ["electron", "bufferutil", "utf-8-validate"],
+    define: buildDefines(),
     // The host's wsp skill rides in as text, the way its own build inlines it.
     loader: { ".md": "text" },
     outExtension: () => ({ js: ".mjs" }),
