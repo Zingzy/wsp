@@ -6064,6 +6064,7 @@ export const PlaceReport = z.object({
   arch: z.string().max(32),
   os: z.string().max(200),
   shape: WorkspaceSize,
+  /** What is free on the volume a setup installs onto: wsp's install folder's, or the nearest folder above it that is there. */
   diskFreeBytes: z.number().int().nonnegative().optional(),
   /** The size of that same disk, off the same read: what a setup keeps free there is a share of it. */
   diskSizeBytes: z.number().int().nonnegative().optional(),

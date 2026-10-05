@@ -51,12 +51,16 @@ const DF_COLUMN = { size: 2, used: 3, free: 4 } as const;
 export const dfKbCmd = (columns: readonly (keyof typeof DF_COLUMN)[], path = "/root"): string => `df -Pk ${path} | awk 'NR==2{print ${columns.map(c => `$${DF_COLUMN[c]}`).join(", ")}}'`;
 export const FREE_KB_CMD = dfKbCmd(["free"]);
 export const USED_KB_CMD = dfKbCmd(["used"]);
+/** The folder df reads for a computer somebody owns, as a shell word: wsp's install folder, where every manager there
+ * installs, or where that is not there yet the nearest folder above it, which is where the first install makes it.
+ * The place report and the check before a join read their disk off the same folder, so every floor agrees. */
+export const prefixVolume = (prefix: string): string => `"$(p=${shellQuote(prefix)}; until [ -e "$p" ]; do p=$(dirname "$p"); done; echo "$p")"`;
 /** How a df that did not answer reads, for dfRead and for the rejected exec diskUse catches. */
 const dfFailed = (res: ExecResult): string => `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}`;
-/** The columns asked for off one df, in bytes; a full disk is free 0 and an empty one used 0, so only a size of zero
- * is a reading no disk has; a rejected exec throws. */
-async function dfRead(machine: Machine, columns: readonly (keyof typeof DF_COLUMN)[]): Promise<{ bytes: number[] } | { reason: string }> {
-  const res = await machine.exec(dfKbCmd(columns), { timeoutMs: INLINE_EXEC_MS });
+/** The columns asked for off one df, in bytes, under /root or on the volume a prefix installs onto; a full disk is free
+ * 0 and an empty one used 0, so only a size of zero is a reading no disk has; a rejected exec throws. */
+async function dfRead(machine: Machine, columns: readonly (keyof typeof DF_COLUMN)[], prefix?: string): Promise<{ bytes: number[] } | { reason: string }> {
+  const res = await machine.exec(prefix === undefined ? dfKbCmd(columns) : dfKbCmd(columns, prefixVolume(prefix)), { timeoutMs: INLINE_EXEC_MS });
   const printed = res.stdout.trim();
   const kb = printed.split(/\s+/).map(Number);
   const size = columns.indexOf("size");
@@ -177,21 +181,21 @@ export function roadOf(stdout: string): ToolRoad | undefined {
 export type FreeDisk = { kind: "free"; bytes: number } | { kind: "unknown"; reason: string };
 
 /** One df column read off the machine, in bytes; a df that fails or prints no number is reported, never assumed. */
-async function dfRootBytes(machine: Machine, column: "used" | "free"): Promise<{ bytes: number } | { reason: string }> {
-  const read = await dfRead(machine, [column]);
+async function dfRootBytes(machine: Machine, column: "used" | "free", prefix?: string): Promise<{ bytes: number } | { reason: string }> {
+  const read = await dfRead(machine, [column], prefix);
   return "bytes" in read ? { bytes: read.bytes[0]! } : read;
 }
 
-/** What df says is free under /root. */
-export async function freeBytes(machine: Machine): Promise<FreeDisk> {
-  const read = await dfRootBytes(machine, "free");
+/** What df says is free under /root, or on the volume the prefix installs onto where one is named. */
+export async function freeBytes(machine: Machine, prefix?: string): Promise<FreeDisk> {
+  const read = await dfRootBytes(machine, "free", prefix);
   return "bytes" in read ? { kind: "free", bytes: read.bytes } : { kind: "unknown", reason: read.reason };
 }
 
-/** What df says is used under /root and the size of the disk it sits on, off one exec; a df that fails or prints
- * no pair of numbers is reported, never assumed. */
-export async function diskUse(machine: Machine): Promise<DiskUse> {
-  const read = await dfRead(machine, ["used", "size"]).catch((e: unknown) => ({ reason: dfFailed({ exitCode: 1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }) }));
+/** What df says is used under /root, or on the volume the prefix installs onto where one is named, and the size of
+ * that disk, off one exec; a df that fails or prints no pair of numbers is reported, never assumed. */
+export async function diskUse(machine: Machine, prefix?: string): Promise<DiskUse> {
+  const read = await dfRead(machine, ["used", "size"], prefix).catch((e: unknown) => ({ reason: dfFailed({ exitCode: 1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }) }));
   return "bytes" in read ? { kind: "use", usedBytes: read.bytes[0]!, sizeBytes: read.bytes[1]! } : { kind: "unknown", reason: read.reason };
 }
 
@@ -207,8 +211,8 @@ export async function usedBytes(machine: Machine): Promise<number | undefined> {
 }
 
 /** The df reading that closes a stage's last line, so the run's log says what each stage left on the disk. */
-export async function freeNote(machine: Machine): Promise<string | undefined> {
-  const free = await freeBytes(machine);
+export async function freeNote(machine: Machine, prefix?: string): Promise<string | undefined> {
+  const free = await freeBytes(machine, prefix);
   return free.kind === "free" ? `${fmtBytes(free.bytes)} free` : undefined;
 }
 
@@ -297,14 +301,14 @@ function skippedByReason(skipped: readonly ToolResult[]): string {
 type Run = (cmd: string, label: string, road: RoadName, step?: GoldenStep) => Promise<ExecResult>;
 
 /** Homebrew's autoremove then cleanup, each under the guard; the phrase says what came back or what failed, nothing when neither. */
-async function brewHousekeeping(machine: Machine, run: Run, path: string): Promise<string | undefined> {
-  const before = await freeBytes(machine);
+async function brewHousekeeping(machine: Machine, run: Run, path: string, prefix?: string): Promise<string | undefined> {
+  const before = await freeBytes(machine, prefix);
   const failed: string[] = [];
   for (const cmd of brewHousekeepingCmds(path)) {
     const res = await run(cmd, "Homebrew cleanup", "brew");
     if (res.exitCode !== 0) failed.push(reasonOf(res, roadLimitS("brew")));
   }
-  const after = await freeBytes(machine);
+  const after = await freeBytes(machine, prefix);
   if (failed.length > 0) return `Homebrew cleanup failed (${failed.join("; ")})`;
   if (before.kind === "free" && after.kind === "free" && after.bytes > before.bytes) return `Homebrew cleanup freed ${fmtBytes(after.bytes - before.bytes)}`;
   return undefined;
@@ -409,7 +413,8 @@ export interface InstallToolsOptions {
    * computer somebody owns, whose home every workspace there writes. */
   path?: string;
   /** The folder of wsp's own the managers install under on a computer somebody owns, whose knobs ride the line
-   * beside that PATH; absent on a machine wsp forked, where each manager keeps its own folder under the home. */
+   * beside that PATH and whose volume the disk is read off; absent on a machine wsp forked, where each manager keeps
+   * its own folder under the home and df reads /root. */
   prefix?: string;
   /** What the loop keeps free on the disk, TOOLS_DISK_FLOOR unless the caller holds more back. */
   floor?: number;
@@ -452,9 +457,9 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     if (cleanedAtFloor) return undefined;
     cleanedAtFloor = true;
     stage(`${why}; cleaning up before skipping`);
-    const brew = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run, path) : undefined;
+    const brew = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run, path, opts.prefix) : undefined;
     const swept = await sweep();
-    const after = await freeBytes(machine);
+    const after = await freeBytes(machine, opts.prefix);
     stage(closing(brew, swept, after.kind === "free" ? `${fmtBytes(after.bytes)} free` : after.reason));
     return after;
   };
@@ -475,7 +480,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       landed({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
       continue;
     }
-    let free = reading ?? (await freeBytes(machine));
+    let free = reading ?? (await freeBytes(machine, opts.prefix));
     reading = undefined;
     if (free.kind === "unknown" && !dfWarned) {
       dfWarned = true;
@@ -523,7 +528,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       installed.add(tool.id);
       if (tool.id === "tools/homebrew") out.homebrew = { ...HOMEBREW };
       const road = roadOf(res.stdout);
-      const left = await freeBytes(machine);
+      const left = await freeBytes(machine, opts.prefix);
       reading = left;
       const bytes = free.kind === "free" && left.kind === "free" ? Math.max(0, free.bytes - left.bytes) : undefined;
       landed({ id: tool.id, label: tool.label, outcome: "installed", ...(tool.note !== undefined ? { note: tool.note } : {}), ms, ...(bytes !== undefined ? { bytes } : {}), ...(road !== undefined ? { road } : {}) });
@@ -534,7 +539,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
   await verifyCommands(machine, tools, out.tools, stage, path, opts.prefix);
   await verifyChecks(machine, tools, out.tools, stage, path, opts.prefix);
   await readPins(machine, tools, out.tools, stage, path, opts.prefix);
-  const housekeeping = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run, path) : undefined;
-  stage(closing(summarize(out.tools, housekeeping), await sweep(), await freeNote(machine)));
+  const housekeeping = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run, path, opts.prefix) : undefined;
+  stage(closing(summarize(out.tools, housekeeping), await sweep(), await freeNote(machine, opts.prefix)));
   return out;
 }

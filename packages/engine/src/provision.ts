@@ -281,7 +281,7 @@ async function toolsStep(machine: Machine, plan: ProvisionPlan, steps: readonly 
   /** What each row read as the loop reached it, so a row the checks corrected after the loop is said again rather
    * than standing in the log on that computer as it first read. */
   const said = new Map<string, string>();
-  const disk = await diskUse(machine);
+  const disk = await diskUse(machine, plan.prefix);
   const tools = await installTools(
     machine,
     steps,

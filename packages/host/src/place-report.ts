@@ -90,9 +90,13 @@ export function wspArgvOf(run: RunningWsp = runningWsp()): string[] {
   return [command, ...args];
 }
 
-/** How much room is left on the volume the work folder sits on, the one number a person asks about before they send
- * a long job to a laptop, and how big it is; nothing when this computer will not say. */
-function diskRoom(folder: string): { free: number; size: number } | undefined {
+/** How much room is left on the volume a setup installs onto and how big it is, the two numbers its floor and its
+ * size check read; nothing when this computer will not say. The volume is wsp's install folder's, or where that is not
+ * there yet the nearest folder above it, which is where the first install makes it; the install loop's df walks up the
+ * same way. */
+function diskRoom(systemRoot = "/"): { free: number; size: number } | undefined {
+  let folder = join(systemRoot, TOOL_PREFIX);
+  while (!existsSync(folder) && dirname(folder) !== folder) folder = dirname(folder);
   try {
     const fs = statfsSync(folder);
     return { free: Number(fs.bavail) * Number(fs.bsize), size: Number(fs.blocks) * Number(fs.bsize) };
@@ -143,6 +147,9 @@ export interface PlaceReportOptions {
   home?: string;
   env?: Readonly<Record<string, string | undefined>>;
   run?: RunningWsp;
+  /** The folder this computer's /opt sits under, which the disk is read off: the computer's own unless a caller hands
+   * another. */
+  systemRoot?: string;
 }
 
 /** The engine a project's own containers would run on here, off the login PATH; the docker-first rule is the
@@ -177,10 +184,8 @@ function readTextOr(path: string): string | undefined {
 /** What this computer is, read off the machine alone with no shell started: the part of the report the host's own
  * row of the places list shows, which every verb that lists places reads. */
 export function placeFacts(opts: Omit<PlaceReportOptions, "run">): Pick<PlaceSelfReport, "name" | "platform" | "arch" | "os" | "shape" | "diskFreeBytes" | "diskSizeBytes" | "runsWorkspaces" | "engine" | "workspacesBlocked"> {
-  const home = opts.home ?? homedir();
   const env = opts.env ?? process.env;
-  const work = workFolderIn(home);
-  const room = diskRoom(existsSync(work) ? work : home);
+  const room = diskRoom(opts.systemRoot);
   return {
     name: opts.name,
     platform: platform() === "darwin" ? "darwin" : "linux",

@@ -98,6 +98,7 @@ pub struct PlaceReport {
     #[serde(deserialize_with = "bounded::<_, 0, 200>")]
     pub os: String,
     pub shape: WorkspaceSize,
+    /// What is free on the volume a setup installs onto: wsp's install folder's, or the nearest folder above it that is there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub disk_free_bytes: Option<u64>,

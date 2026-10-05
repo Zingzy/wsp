@@ -1,0 +1,1 @@
+A place report reads its free disk and its size off the volume a setup installs onto, wsp's install folder or the nearest folder above it that is there, where it read the work folder's or the home's, so the size check and the install loop read one volume.
