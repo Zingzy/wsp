@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentsHere, aimedHost, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, runningWsp, shimPath, systemService, wspHome, type CliIO } from "@wsp/host";
+import { adoptLoginPath, agentsHere, aimedHost, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, runningWsp, serviceAddressHere, shimPath, systemService, wspHome, type CliIO } from "@wsp/host";
 import { DEFAULT_PREFERENCES, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import { BrowserWindow, Menu, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { awakeWanted } from "./awake.js";
@@ -18,9 +20,10 @@ import { hostFeed, type FeedEvent, type FeedState, type HostFeed } from "./host-
 import { guardWorkers, loadHostPage } from "./page-session.js";
 import { pagePreviews } from "./previews.js";
 import { QUIT_WORD, quitAnswer, quitChoice, quitPrompt } from "./quit.js";
+import { bundleOf, discardStage, inPlaceRefusal, settleStage, stageOf, stageUpdate, startSwap } from "./self-update.js";
 import { installShim, shimText } from "./shim.js";
 import { trayModel, trayNotice, type TrayAct, type TrayModel, type TrayRow } from "./tray.js";
-import { vibrancyFor, windowOptions } from "./window.js";
+import { vibrancyFor, windowOptions, type UpdateRoad } from "./window.js";
 import { isShellZoomChord, shellChordOf } from "./zoom.js";
 
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
@@ -32,7 +35,14 @@ const CLI_SCRIPT = here("./cli.mjs");
 const refuse = (q: string): Promise<string> => Promise.reject(new Error(`no terminal to ask: ${q}`));
 const io: CliIO = { log: l => console.log(l), error: l => console.error(l), ask: refuse, askSecret: refuse };
 
-const newWindow = (preload?: string): BrowserWindow => new BrowserWindow(windowOptions(process.platform, app.getVersion(), preload));
+/** The bundle a packaged mac app runs from; the smoke drives its bundle out of dist and takes no update. */
+const ownBundle = process.platform === "darwin" && app.isPackaged && process.env["WSP_DESKTOP_SMOKE"] !== "1" ? bundleOf(process.execPath) : undefined;
+/** Read once at launch: where the bundle stands does not move while it runs. */
+const updateWhy = ownBundle === undefined ? undefined : inPlaceRefusal(ownBundle);
+const inPlaceBundle = updateWhy === undefined ? ownBundle : undefined;
+const updateRoad: UpdateRoad = { inPlace: inPlaceBundle !== undefined, ...(updateWhy !== undefined ? { why: updateWhy } : {}) };
+
+const newWindow = (preload?: string): BrowserWindow => new BrowserWindow(windowOptions(process.platform, app.getVersion(), preload, updateRoad));
 
 function launch(): Launch {
   const env = process.env["WSP_HOME"];
@@ -192,6 +202,14 @@ ipcMain.on("drop:allowed", event => {
   event.returnValue = may(event, "drop:allowed");
 });
 
+/** launchctl's name for the host service this app installed for its state file, which the swap restarts on the new
+ * files; empty where none is registered. */
+function serviceTarget(): string {
+  const at = serviceAddressHere(where().statePath);
+  const unit = systemService().manager?.unit(at);
+  return unit !== undefined && existsSync(unit.path) ? `gui/${at.uid}/${unit.name}` : "";
+}
+
 // A download the app then opens, so the app's own host's page alone may ask; built once the Downloads path is readable.
 let bundleRoad: BundleShell | undefined;
 const bundles = (): BundleShell =>
@@ -206,9 +224,20 @@ const bundles = (): BundleShell =>
     quit: () => app.quit(),
     running: app.getVersion(),
     packaged: app.isPackaged,
+    ...(inPlaceBundle === undefined
+      ? {}
+      : {
+          inPlace: {
+            dir: stageOf(inPlaceBundle),
+            stage: (zip, version) => stageUpdate(zip, version, inPlaceBundle),
+            swap: (staged, version) => startSwap({ pid: process.pid, bundle: inPlaceBundle, staged, version, service: serviceTarget(), log: join(app.getPath("userData"), "update.log") }),
+            discard: () => discardStage(inPlaceBundle),
+          },
+        }),
   }));
 answer("bundle:get", (_event, ask) => bundles().get(ask));
 answer("bundle:open", () => bundles().open());
+answer("bundle:discard", () => bundles().discard());
 
 // The device token of a host somewhere else is the shell's to hold: the page asks for it over the bridge and it never
 // rides in the page the host served.
@@ -600,6 +629,9 @@ function moveGate(): MoveGate {
 app
   .whenReady()
   .then(async () => {
+    // First, before any dialog can hold the launch: a swap that opened this bundle waits on this to keep it, and
+    // any other launch clears what an earlier update left beside the bundle.
+    if (ownBundle !== undefined) settleStage(ownBundle, app.getVersion());
     const moved = await offerMove(moveGate(), {
       ask: prompt => dialog.showMessageBox(prompt).then(picked => picked.response),
       move: () => app.moveToApplicationsFolder(),

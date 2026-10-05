@@ -3,11 +3,11 @@
 // screen and left alone when the person is already looking at it, the waits
 // keyed until the event that closes them, and the noise said nowhere.
 import { act, render } from "@testing-library/react";
-import { NEEDS_YOU, askingLine, initNeedsYouLine, setupNeedsYouLine, setupReadyLine, waitLine, type InitJob, type PlaceView, type ReleaseView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { NEEDS_YOU, askingLine, initNeedsYouLine, setupNeedsYouLine, setupReadyLine, waitLine, type InitJob, type PlaceView, type BundleOutcome, type DesktopBridge, type ReleaseView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { HOST_NOTICE_WORDS, RELEASE_SAID_KEY, useHostNotices } from "../src/notices/hostNotices.js";
+import { HOST_NOTICE_WORDS, RELEASE_SAID_KEY, UPDATE_READY_KEY, useHostNotices } from "../src/notices/hostNotices.js";
 import { useNotices, type Notice } from "../src/notices/store.js";
 import { closeAdd, openSetup, useAddFlow } from "../src/settings/add/addFlow.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
@@ -76,6 +76,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   delete (window as unknown as { __WSP__?: unknown }).__WSP__;
+  delete window.wsp;
   act(() => useNotices.getState().clear());
 });
 
@@ -445,6 +446,106 @@ describe("a workspace gone and a newer release", () => {
     act(() => useStore.setState({ release: view("0.3.0") }));
     expect(notices()).toHaveLength(1);
     open.mockRestore();
+  });
+});
+
+describe("a newer release on an app that replaces itself", () => {
+  const settle = (): Promise<void> => act(async () => await new Promise(resolve => setTimeout(resolve, 0)));
+  /** An app of 0.1.0 on its own host, whose shell stages a release when asked. */
+  const shell = (over: Partial<DesktopBridge> = {}) => {
+    const getBundle = vi.fn(async (_ask: { version: string }): Promise<BundleOutcome> => ({ ok: true }));
+    const quitAndOpen = vi.fn(async (): Promise<BundleOutcome> => ({ ok: true }));
+    const discardUpdate = vi.fn(async (): Promise<BundleOutcome> => ({ ok: true }));
+    const bridge = { version: "0.1.0", updatesInPlace: true, getBundle, quitAndOpen, discardUpdate, hosts: async () => ({ here: "zingzy's MacBook Pro", current: null, hosts: [] }), ...over };
+    window.wsp = bridge;
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { version: "0.1.0" };
+    return bridge;
+  };
+
+  it("downloads it in the background and says nothing until it is ready, then says it with the running threads' fate, Restart and Later", async () => {
+    let finish: (outcome: BundleOutcome) => void = () => undefined;
+    const { getBundle, quitAndOpen } = shell({ getBundle: vi.fn(() => new Promise<BundleOutcome>(resolve => (finish = resolve))) });
+    act(() => useStore.setState({ release: releaseView("0.2.0") }));
+    await settle();
+    expect(getBundle).toHaveBeenCalledWith({ version: "0.2.0" });
+    expect(notices()).toEqual([]);
+    finish({ ok: true });
+    await settle();
+    expect(notices()).toMatchObject([{ kind: "note", key: UPDATE_READY_KEY, text: HOST_NOTICE_WORDS.ready("0.2.0"), detail: HOST_NOTICE_WORDS.keepRunning(1), action: { word: HOST_NOTICE_WORDS.restart }, later: { word: HOST_NOTICE_WORDS.later } }]);
+    expect(getBundle).toHaveBeenCalledTimes(1);
+    expect(quitAndOpen).not.toHaveBeenCalled();
+    act(() => notices()[0]!.action!.run());
+    await settle();
+    expect(quitAndOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes the checked copy when the person says Later", async () => {
+    const { discardUpdate, quitAndOpen } = shell();
+    act(() => useStore.setState({ release: releaseView("0.2.0") }));
+    await settle();
+    act(() => notices()[0]!.later!.run());
+    await settle();
+    expect(discardUpdate).toHaveBeenCalledTimes(1);
+    expect(quitAndOpen).not.toHaveBeenCalled();
+  });
+
+  it("says nothing of threads where none is running", async () => {
+    shell();
+    act(() => useStore.setState({ sessions: { ws_1: [{ ...ROW, status: "completed" }] }, release: releaseView("0.2.0") }));
+    await settle();
+    expect(notices()).toHaveLength(1);
+    expect(notices()[0]!.detail).toBeUndefined();
+  });
+
+  it("downloads it with General's Version card showing too, since the card's Get shares the one download", async () => {
+    const { getBundle } = shell();
+    act(() => {
+      useStore.setState({ settingsOpen: true });
+      useSettingsStore.getState().go({ kind: "group", group: "general" });
+    });
+    act(() => useStore.setState({ release: releaseView("0.2.0") }));
+    await settle();
+    expect(getBundle).toHaveBeenCalledWith({ version: "0.2.0" });
+    expect(texts()).toEqual([HOST_NOTICE_WORDS.ready("0.2.0")]);
+  });
+
+  it("says a download or a restart that failed in the shell's own words", async () => {
+    const { quitAndOpen } = shell({ getBundle: vi.fn(async (): Promise<BundleOutcome> => ({ ok: false, error: "wsp-0.2.0-mac.zip failed its signature check and was deleted" })) });
+    act(() => useStore.setState({ release: releaseView("0.2.0") }));
+    await settle();
+    expect(notices()).toMatchObject([{ kind: "error", text: HOST_NOTICE_WORDS.notReady("0.2.0", "wsp-0.2.0-mac.zip failed its signature check and was deleted") }]);
+    expect(quitAndOpen).not.toHaveBeenCalled();
+    act(() => useNotices.getState().clear());
+    const refused = shell({ quitAndOpen: vi.fn(async (): Promise<BundleOutcome> => ({ ok: false, error: "the checked update is gone; get it again" })) });
+    act(() => useStore.setState({ release: releaseView("0.3.0") }));
+    await settle();
+    act(() => notices()[0]!.action!.run());
+    await settle();
+    expect(refused.quitAndOpen).toHaveBeenCalledTimes(1);
+    expect(texts()[0]).toBe(HOST_NOTICE_WORDS.notRestarted("the checked update is gone; get it again"));
+  });
+
+  it("asks nothing on a page a host somewhere else serves", async () => {
+    const { getBundle } = shell({ hosts: async () => ({ here: "zingzy's MacBook Pro", current: "spoo", hosts: [] }) });
+    act(() => useStore.setState({ release: releaseView("0.2.0") }));
+    await settle();
+    expect(getBundle).not.toHaveBeenCalled();
+    expect(notices()).toEqual([]);
+  });
+
+  it("on an app that cannot replace itself, keeps the note and says why", async () => {
+    window.wsp = { version: "0.1.0", updateWhy: "The app runs from its disk image, so it cannot replace itself. Move wsp to Applications." };
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { version: "0.1.0" };
+    act(() => useStore.setState({ release: releaseView("0.2.0") }));
+    expect(notices()).toMatchObject([{ kind: "note", text: HOST_NOTICE_WORDS.released("0.2.0"), detail: "The app runs from its disk image, so it cannot replace itself. Move wsp to Applications.", action: { word: "Get" } }]);
+  });
+
+  it("leaves a host that is behind on its own to the note, since the app already runs the release", async () => {
+    const { getBundle } = shell({ version: "0.2.0" });
+    act(() => useStore.setState({ release: releaseView("0.2.0") }));
+    await settle();
+    expect(getBundle).not.toHaveBeenCalled();
+    expect(texts()).toEqual([HOST_NOTICE_WORDS.released("0.2.0")]);
   });
 });
 

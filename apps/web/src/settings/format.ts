@@ -501,6 +501,7 @@ export const ABOUT_WORDS = {
   get: (version: string): string => `Get ${version}`,
   downloading: "Downloading",
   quitAndOpen: "Quit and open",
+  restartToUpdate: "Restart to update",
   restartHost: "Restart host",
   restartHover: "Drops open terminal panes, localhost forwards and any sign-in in progress; running turns continue.",
   restartRuns: "Restart host runs them.",
@@ -536,6 +537,9 @@ export const COMPUTER_PAGE_WORDS = {
   napTitle: "Nap a quiet workspace after",
   napLine: "A workspace with no running turn stops and wakes on the next message.",
   napNever: "Never",
+  turnLimitTitle: "Turn limit",
+  turnLimitLine: "Stops a turn that runs this long. Send to the thread to continue where it stopped.",
+  turnLimitOff: "Off",
   threadsHere: "Threads here",
   spawnTitle: "Agents may start agents",
   spawnLine: (depth: number, machines?: number): string =>
