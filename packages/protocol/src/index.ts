@@ -6925,10 +6925,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * link that computer is holding: nothing is dialled, and it is refused where that computer is not connected.
    * HERE_PLACE_ID names the computer the host runs on, whose own daemon is dialled. One of the two, never both. */
   z.object({ id: reqId, op: z.literal("daemon.open"), workspaceId: z.string().optional(), placeId: z.string().optional() }),
-  /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until the socket goes.
-   * The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon; refused for
-   * every other kind, which reads them over its own daemon link with sys.watch. Replies `{}`. */
+  /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until sys.unsubscribe or
+   * the socket goes. The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon;
+   * refused for every other kind, which reads them over its own daemon link with sys.watch. Replies `{}`. */
   z.object({ id: reqId, op: z.literal("sys.subscribe"), workspaceId: z.string() }),
+  /** Stops this socket's sys.subscribe for the workspace; replies `{}` whether or not it held one. */
+  z.object({ id: reqId, op: z.literal("sys.unsubscribe"), workspaceId: z.string() }),
   /** Sends one frame down a channel this socket opened and replies with a DaemonSendReply carrying the daemon's own
    * answer, ok or not. Refused (ok false, no kind) when the channel is not this socket's or died before the daemon
    * answered. */
@@ -7517,6 +7519,7 @@ export const DEVICE_OPS: readonly string[] = [
   "projectGoldens.list",
   "projectGoldens.remove",
   "sys.subscribe",
+  "sys.unsubscribe",
   "harnesses.list",
   "sessions.list",
   "sessions.history",
