@@ -4,7 +4,6 @@
 // and the crab where the caller has no other place for it. The kind's tone
 // inks the whole slot; a slot with none keeps the row's own ink.
 import { cn } from "../../lib/utils.js";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
 import { Crab } from "./Crab.js";
 import type { StatusKind, ThreadStatusInput } from "./kinds/index.js";
 import { RESTING } from "./kinds/resting.js";
@@ -36,23 +35,14 @@ export function ThreadStatus({
 }) {
   const kind = given ?? (settled ? RESTING : threadStatusOf(thread));
   const Glyph = kind.glyph;
-  // A state drawn as its glyph alone says its word on the hover, as the design's state marks do.
-  const glyph = Glyph === undefined ? null : <Glyph aria-hidden className="size-3 shrink-0" />;
   return (
     <span
       data-thread-status={kind.id}
       data-tone={kind.tone}
       className={cn("inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums", className, kind.tone !== undefined && "font-medium", kind.ink)}
     >
-      {glyph !== null && kind.glyphOnly && kind.word !== undefined ? (
-        <Tooltip>
-          <TooltipTrigger render={<span className="inline-flex shrink-0 items-center" />}>{glyph}</TooltipTrigger>
-          <TooltipPopup side="top">{kind.word}</TooltipPopup>
-        </Tooltip>
-      ) : (
-        glyph
-      )}
-      {kind.word !== undefined && <span data-status-word className={kind.timed || kind.glyphOnly ? "sr-only" : undefined}>{kind.word}</span>}
+      {Glyph !== undefined && <Glyph aria-hidden className="size-3 shrink-0" />}
+      {kind.word !== undefined && <span className={kind.timed || kind.glyphOnly ? "sr-only" : undefined}>{kind.word}</span>}
       {kind.timed && <WorkingSince since={thread.startedAt} />}
       {kind.aged && age !== undefined && <span>{age}</span>}
       {crab && kind.crab && <Crab />}

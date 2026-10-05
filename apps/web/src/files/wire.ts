@@ -4,7 +4,7 @@
 // which every path must resolve inside, so pickers, pins and session starts
 // are built absolute. terminal/wiring.ts provides both alongside the terminal
 // model, so they ride the same socket; a test provides fakes.
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import type { TerminalWire } from "../terminal/link.js";
 
 export interface DaemonHello {
@@ -51,7 +51,33 @@ function subscribe(fn: () => void): () => void {
   return () => fns.delete(fn);
 }
 
+/** How many mounted surfaces read each workspace's daemon, which is what keeps a folder's link dialled. */
+const held = new Map<string, number>();
+const heldFns = new Set<() => void>();
+
+function holdDaemonWire(workspaceId: string): () => void {
+  const was = held.get(workspaceId) ?? 0;
+  held.set(workspaceId, was + 1);
+  if (was === 0) for (const fn of heldFns) fn();
+  return () => {
+    const left = (held.get(workspaceId) ?? 1) - 1;
+    if (left > 0) return void held.set(workspaceId, left);
+    held.delete(workspaceId);
+    for (const fn of heldFns) fn();
+  };
+}
+
+export function daemonWireHeld(workspaceId: string): boolean {
+  return held.has(workspaceId);
+}
+
+export function onDaemonWireHeld(fn: () => void): () => void {
+  heldFns.add(fn);
+  return () => heldFns.delete(fn);
+}
+
 export function useDaemonWire(workspaceId: string): TerminalWire | null {
+  useEffect(() => holdDaemonWire(workspaceId), [workspaceId]);
   return useSyncExternalStore(subscribe, () => getDaemonWire(workspaceId));
 }
 

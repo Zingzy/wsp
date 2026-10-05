@@ -66,6 +66,9 @@ export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "d
 /** How often the log is read and the limits are read against the clock; the cloud road polls its guest the same way,
  * slower because every poll there is a round trip. */
 const POLL_MS = 100;
+/** How often a process kept between turns is read while no turn is open: it prints nothing then, and its next turn
+ * wakes the reader at once. */
+const RESTING_POLL_MS = 1_000;
 /** How often the reap looks at the group it asked to go, while it waits out the one stop grace both roads give. */
 const GRACE_POLL_MS = 200;
 /** A handle this factory could have minted: a name of this shape inside the run folder it launches into. Read off
@@ -138,6 +141,57 @@ const readGroupWork: GroupWorkReader = (pgid, then) => {
 };
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+/** One process of a run's group, by its pid and its parent's. */
+interface GroupRow {
+  pid: number;
+  ppid: number;
+}
+
+/** Every process of one group as ps reports it; nothing where ps will not answer, which ends nothing. */
+function groupRows(pgid: number): Promise<GroupRow[]> {
+  return new Promise(resolve => {
+    try {
+      execFile("ps", ["-axo", "pid=,ppid=,pgid="], (err, stdout) => {
+        if (err !== null) return resolve([]);
+        resolve(
+          stdout.split("\n").flatMap(line => {
+            const [pid, ppid, group] = line.trim().split(/\s+/).map(Number);
+            return group === pgid && Number.isSafeInteger(pid) && Number.isSafeInteger(ppid) ? [{ pid: pid!, ppid: ppid! }] : [];
+          }),
+        );
+      });
+    } catch {
+      resolve([]);
+    }
+  });
+}
+
+/** The group's processes whose parent is not in it, the leader aside: one whose parent went is the system's now. */
+const orphansOf = (rows: readonly GroupRow[], leader: number): number[] => rows.filter(r => r.pid !== leader && !rows.some(o => o.pid === r.ppid)).map(r => r.pid);
+
+/** What a turn left running in its run's group: every orphan the run did not start with, and every process under one. */
+function leftovers(rows: readonly GroupRow[], leader: number, own: ReadonlySet<number>): number[] {
+  const left = new Set(orphansOf(rows, leader).filter(pid => !own.has(pid)));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const r of rows) {
+      if (left.has(r.ppid) && !left.has(r.pid)) {
+        left.add(r.pid);
+        grew = true;
+      }
+    }
+  }
+  return [...left];
+}
+
+function signalPid(pid: number, sig: NodeJS.Signals): void {
+  try {
+    process.kill(pid, sig);
+  } catch {
+    return;
+  }
+}
 
 /** What a run's own folder and its files are readable by: the person whose turn it is and nobody else on this
  * computer. A Mac has other logins on it, and a run's script carries the whole launch environment. */
@@ -311,12 +365,28 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
   /** The one reader both roads share: a launch that has just started its child, and an attach to a run an earlier
    * host process left behind. The log is read from its first byte either way, so a run that printed while no host
    * was listening is replayed to whoever attaches. */
-  const open = (base: string, hasInput: boolean, o: { launch?: { failed?: Error }; startedAt?: number; taken?: readonly string[] } = {}): ExecStream => {
+  const open = (base: string, hasInput: boolean, o: { launch?: { failed?: Error }; startedAt?: number; from?: number; taken?: readonly string[] } = {}): ExecStream => {
     const { launch } = o;
     // The idle clock runs from this reader's first second, since nothing on disk records when the run's last byte
     // landed; the wall runs from the turn's own start, which an attach is handed.
-    const startedAt = o.startedAt ?? now();
-    const activity = turnActivity(now());
+    let startedAt = o.startedAt ?? now();
+    let activity = turnActivity(now());
+    /** Between two turns of a process kept for the next one: no limit reads the quiet, since no turn is open to be stuck. */
+    let resting = false;
+    /** The run's own orphans as they stood when its process first printed, before any turn of it could run a tool: the
+     * input pump, which the launch backgrounds out of its parent on purpose. An orphan after that is what a turn left. */
+    let ownOrphans: Promise<Set<number>> | undefined;
+    /** A turn's end on a kept process ends what the turn left running in the group, as the reap of a turn's whole group
+     * did: a command the agent left going holds the turn's token, which otherwise would outlive the turn by the keep.
+     * The agent, the servers it started and its input stay. */
+    const endLeftovers = async (): Promise<void> => {
+      const pid = leader();
+      if (pid === undefined || ownOrphans === undefined) return;
+      const own = await ownOrphans;
+      const left = leftovers(await groupRows(pid), pid, own);
+      for (const stray of left) signalPid(stray, "SIGTERM");
+      if (left.length > 0) setTimeout(() => left.filter(alive).forEach(stray => signalPid(stray, "SIGKILL")), RUN_STOP_MS).unref();
+    };
     let killed = false;
     let inputClosed = false;
     let finishCode: number | null | undefined;
@@ -342,7 +412,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     /** The poll runs whether or not anybody is reading yet: the run is on this computer either way, so its limits,
      * its ending and its reap cannot wait on a consumer. What it reads is queued for whoever iterates. */
     const lines = new Lines();
-    let offset = 0;
+    let offset = o.from ?? 0;
     let downs = 0;
     let reading = false;
     /** Set once a read took everything the log held at that moment, short of a chunk: until then a limit waits, and
@@ -409,14 +479,14 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         if (waiting()) activity.touch(at);
         const quietMs = activity.quietMs(at);
         const pid = leader();
-        if (pid !== undefined && !reading && readsWork(limits.idleMs, quietMs)) {
+        if (pid !== undefined && !reading && !resting && readsWork(limits.idleMs, quietMs)) {
           reading = true;
           readWork(pid, ticks => {
             reading = false;
             if (ticks !== undefined) activity.read(ticks, at);
           });
         }
-        const cut = turnCut(limits, at - startedAt, quietMs);
+        const cut = resting ? undefined : turnCut(limits, at - startedAt, quietMs);
         if (cut !== undefined && caughtUp && !exitSeen) return settle(null, cut);
 
         // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete.
@@ -424,6 +494,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         const ended = readFile(`${base}.exit`)?.trim();
         const chunk = readLog();
         if (chunk.length > 0) {
+          if (ownOrphans === undefined && hasInput && pid !== undefined) ownOrphans = groupRows(pid).then(rows => new Set(orphansOf(rows, pid)));
           activity.touch(now());
           lines.feed(chunk.toString("utf8"));
           if (chunk.length < EXEC_CHUNK_BYTES) caughtUp = true;
@@ -438,7 +509,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         if (cut !== undefined) return settle(null, cut);
         // The leader is checked after the exit file: one that finished in between shows as down with no exit yet.
         if ((pid === undefined || !alive(pid)) && ++downs > 1) return settle(null);
-        await nap(pollMs);
+        await nap(resting ? RESTING_POLL_MS : pollMs);
       }
     };
     // Nothing the poll does may reach this process's own error road: a reader that threw would take the host and
@@ -496,6 +567,21 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
           () => releaseLate(base),
           () => rmSync(`${base}.late`, { force: true }),
         );
+      },
+      rest: () => {
+        resting = true;
+        void endLeftovers();
+      },
+      nextTurn: () => {
+        resting = false;
+        startedAt = now();
+        activity = turnActivity(now());
+        wake?.();
+        try {
+          return statSync(`${base}.log`).size;
+        } catch {
+          return offset;
+        }
       },
       ...(o.taken !== undefined ? { taken: o.taken } : {}),
       exited,
@@ -557,7 +643,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     return stream;
   };
 
-  factory.attach = async (run, { input, startedAt }) => {
+  factory.attach = async (run, { input, startedAt, from }) => {
     if (!minted(run)) throw new Error(`${run} is not a run this host could have launched`);
     // The claim is what says the run is still here, and this computer's own answer is the only one there is: a
     // folder that is gone is a run that is gone, and nothing else may end one.
@@ -568,10 +654,11 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
       await reapRun(run);
       return "gone";
     }
-    if (!input) return open(run, input, { startedAt });
+    const at = { startedAt, ...(from !== undefined ? { from } : {}) };
+    if (!input) return open(run, input, at);
     releaseLate(run);
     const taken = (readFile(`${run}.in`) ?? "").split("\n").filter(line => line !== "" && line !== endMarker(run));
-    return open(run, input, { startedAt, taken });
+    return open(run, input, { ...at, taken });
   };
 
   factory.sweep = async keep => {
