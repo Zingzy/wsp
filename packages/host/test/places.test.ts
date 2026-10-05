@@ -7,7 +7,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { promisify } from "node:util";
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
-import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, statfsSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, relative, resolve } from "node:path";
@@ -750,6 +750,23 @@ describe("what this computer says about itself", () => {
     expect(existsSync(read)).toBe(false);
     await placeReport({ name: "x", home, env: { PATH: "/usr/bin", HOME: home } });
     expect(readFileSync(read, "utf8")).toBe("read\n");
+  });
+
+  it("reads its disk off the volume wsp installs onto, not the one its home sits on", async ctx => {
+    // Two volumes: the home on the disk the temp folder sits on, the computer's /opt on a tmpfs.
+    const home = tmp("report-volume-home");
+    const system = existsSync("/dev/shm") ? mkdtempSync("/dev/shm/wsp-report-volume-") : undefined;
+    if (system !== undefined) dirs.push(system);
+    const sizeOf = (path: string): number => {
+      const fs = statfsSync(path);
+      return Number(fs.blocks) * Number(fs.bsize);
+    };
+    if (system === undefined || sizeOf(system) === sizeOf(home)) return ctx.skip();
+    // wsp's install folder is not there before its first install, so the read is the folder it would be made in.
+    const report = await placeReport({ name: "x", home, env: { PATH: "/usr/bin", HOME: home }, systemRoot: system });
+    expect(report.diskSizeBytes).toBe(sizeOf(system));
+    mkdirSync(join(system, TOOL_PREFIX), { recursive: true });
+    expect((await placeReport({ name: "x", home, env: { PATH: "/usr/bin", HOME: home }, systemRoot: system })).diskSizeBytes).toBe(sizeOf(system));
   });
 
   it("leaves a store folder that is not a plain path out of the login, since what is there lands in a command", async () => {
