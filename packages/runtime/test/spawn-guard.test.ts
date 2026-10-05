@@ -529,7 +529,26 @@ describe("agents spawning agents", () => {
     expect(child.view().parentThreadId).toBe(leadThread);
     const [leadLaunch, childLaunch] = held.launches;
     expect(leadLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ ...wspMcp, args: [...wspMcp.args, SCOPED_MCP_ARG] });
-    expect(childLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ ...wspMcp, args: [...wspMcp.args, SCOPED_MCP_ARG, NO_SLATE_MCP_ARG] });
+    expect(childLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ ...wspMcp, args: [...wspMcp.args, SCOPED_MCP_ARG, NO_SLATE_MCP_ARG], noSlate: true });
+    held.end(1);
+    held.end(0);
+    await child.finished;
+    await lead.finished;
+    await rt.close();
+  });
+
+  it("a thread another thread started on a box is marked as having no slate with its line left as the box's wsp takes it", async () => {
+    const held = heldAdapter({ takesMcpServers: true });
+    const rt = runtimeWith({ claude: held.factory }, { here: { url: "http://127.0.0.1:4801" } });
+    const box = await createOn(rt, { golden: "snap_g", name: "box", agents: AGENTS_ON });
+    const lead = await rt.sessions.start(box.id, { prompt: "lead" });
+    const leadThread = lead.view().threadId!;
+    const child = await rt.sessions.start(box.id, { prompt: "builder" }, asThread({ kind: "thread", threadId: leadThread, workspaceId: box.id, rootThreadId: leadThread }));
+    expect(child.view().parentThreadId).toBe(leadThread);
+    const [leadLaunch, childLaunch] = held.launches;
+    expect(leadLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ command: "wsp", args: ["mcp"] });
+    // An older wsp on the box refuses a word it does not know, so the mark rides beside the line, never on it.
+    expect(childLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ command: "wsp", args: ["mcp"], noSlate: true });
     held.end(1);
     held.end(0);
     await child.finished;

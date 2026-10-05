@@ -9882,10 +9882,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // person's other servers stay (measured on 2.1.284 and 0.155.1 against the user-scope config; a project's own
       // .mcp.json naming wsp was not measured). A harness that takes none is refused where a caller named servers and
       // left alone here, since the person asked for a thread, not for tools.
-      // A thread another thread started has no slate: its server is told so, on this computer where the server is the
-      // host's own wsp and knows the word; a box's may be older, and the slate tools refuse such a thread either way.
+      // A thread another thread started has no slate: its launch says nothing of one, and on this computer, where the
+      // server is the host's own wsp and knows the word, its server is told too. A box's server is served by this host
+      // as a guest, which reads the same off the thread's token; the box's own wsp may be older and never sees a word.
       const sub = tree.rootThreadId !== undefined && tree.rootThreadId !== threadId;
-      const wsp = reach?.wsp !== undefined && sub && reach.wsp.args.includes(SCOPED_MCP_ARG) ? { ...reach.wsp, args: [...reach.wsp.args, NO_SLATE_MCP_ARG] } : reach?.wsp;
+      const wsp = reach?.wsp === undefined || !sub ? reach?.wsp : { ...reach.wsp, noSlate: true as const, ...(reach.wsp.args.includes(SCOPED_MCP_ARG) ? { args: [...reach.wsp.args, NO_SLATE_MCP_ARG] } : {}) };
       const mcpServers =
         scoped !== undefined && wsp !== undefined && adapter.mcpServers === true
           ? { [MCP_SERVER_NAME]: wsp, ...o.mcpServers }

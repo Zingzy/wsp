@@ -93,7 +93,7 @@ export const THREAD_SLATE_WORDS =
  * is, since it is the one fact an agent acts on before it has read anything else, what wsp is and where the skill is,
  * the agents the host has adapters for, and the two roads to a child's end with the background road. */
 export function instructionsOf(agents: readonly string[], scoped = false, slate = true): string {
-  const body = [[`${ANOTHER_AGENT_WORDS}.`, ...(scoped ? [] : [`${SLATE_WORDS}.`]), ESSENTIALS, agentsLine(agents)].join(" "), ...[`${NOTIFY_CALLER}, so nothing is polled.`, `${COORDINATOR_HANDOFF}.`, `${BACKGROUND_WORK_WORDS}.`].map(rule => `- ${rule}`)].join("\n");
+  const body = [[`${ANOTHER_AGENT_WORDS}.`, ...(scoped || !slate ? [] : [`${SLATE_WORDS}.`]), ESSENTIALS, agentsLine(agents)].join(" "), ...[`${NOTIFY_CALLER}, so nothing is polled.`, `${COORDINATOR_HANDOFF}.`, `${BACKGROUND_WORK_WORDS}.`].map(rule => `- ${rule}`)].join("\n");
   return scoped && slate ? `${THREAD_SLATE_WORDS}\n\n${body}` : body;
 }
 
