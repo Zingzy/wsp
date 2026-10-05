@@ -2,7 +2,7 @@
 // The pieces of kit wsp/2 (05-pieces), one self-contained entry each: props, items, events, its sketch line and its
 // catalog text. The compiler, the validator, the sketch and the catalog read these and switch on no type name of
 // their own, so adding a piece is one entry here and one view in the web app.
-import { fmtBytes, fmtCost, fmtInr, fmtTokens } from "../format.js";
+import { fmtBytes, fmtCost, fmtDuration, fmtInr, fmtTokens } from "../format.js";
 import { slateAxisWord, slateChartAxis } from "./chart.js";
 import { slateResultShape, sketchSlateResult } from "./shape.js";
 import { isSlateSecretHandle, type SlateEventName, type SlateJson, type SlatePropValue, type SlateRunDecl, type SlateRunRecord } from "./types.js";
@@ -140,19 +140,27 @@ function bar(value: SlateJson | undefined, max: SlateJson | undefined): string {
   return `[${"#".repeat(cells)}${".".repeat(10 - cells)}]`;
 }
 
-function figure(format: string, value: SlateJson | undefined, max: SlateJson | undefined): string {
-  if (!isNum(value)) return shown(value);
+/** A number in the words a piece's format names, the one rule the panel and the sketch both draw it by: a percent of
+ * max where there is one, a fraction over max, a duration from milliseconds, an integer with its thousands grouped,
+ * and any other format the number itself to two places. */
+export function slateFigure(value: number, format: string, max?: number): string {
+  const plain = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
   switch (format) {
-    case "percent": return `${Math.round(isNum(max) && max > 0 ? (value / max) * 100 : value)}%`;
-    case "fraction": return `${value}/${shown(max)}`;
+    case "percent": return `${Math.round(max !== undefined && max > 0 ? (value / max) * 100 : value)}%`;
+    case "fraction": return `${plain(value)}/${max === undefined ? "" : plain(max)}`;
     case "tokens": return fmtTokens(value);
     case "bytes": return fmtBytes(value);
     case "usd": return fmtCost(value);
     case "inr": return fmtInr(value);
-    case "integer": return String(Math.round(value));
+    case "duration": return fmtDuration(value);
+    case "integer": return Math.round(value).toLocaleString("en-US");
     case "none": return "";
-    default: return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+    default: return plain(value);
   }
+}
+
+function figure(format: string, value: SlateJson | undefined, max: SlateJson | undefined): string {
+  return isNum(value) && Number.isFinite(value) ? slateFigure(value, format, isNum(max) ? max : undefined) : shown(value);
 }
 
 /** The items of a list prop whose when holds; a check with no thread keeps them all. */

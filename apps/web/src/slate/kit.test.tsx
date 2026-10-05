@@ -3,7 +3,7 @@
 // the quiz's choices write the pick, and every icon a slate may name has its component.
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { parseSlate, slateChartAxis, slateStartValues, SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { parseSlate, sketchSlate, slateChartAxis, slateStartValues, SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { SLATE_VIEWS } from "./pieces";
@@ -71,6 +71,28 @@ describe("the richer kit in the renderer", () => {
     const { view } = draw(example("a live figure with an hour of history"));
     expect(view.container.querySelector("[data-slate-chart]")!.textContent).toContain("Not read yet");
     expect(view.container.querySelector("[data-slate-status=muted]")!.textContent).toBe("Waiting");
+  });
+
+  it("draws each figure as the sketch the agent reads prints it", () => {
+    const doc = compiled(`<slate><column>
+<number id="n1" label="Plain" value={2.5} />
+<number id="n2" label="Count" value={1234} format="integer" />
+<number id="n3" label="Took" value={3600} format="duration" />
+<number id="n4" label="Spent" value={12.5} format="usd" />
+<number id="n5" label="Used" value={1500000} format="tokens" />
+<number id="n6" label="Disk" value={2048} format="bytes" />
+<meter id="m1" label="Seats" value={1234} max={5000} format="fraction" />
+<bars id="b1" label="Load" items={[{ n: 'web', v: 2.5 }]} name={item.n} value={item.v} />
+</column></slate>`);
+    const { view } = draw(doc);
+    const sketch = sketchSlate(doc, slateStartValues(doc));
+    const drawn = [
+      ...["n1", "n2", "n3", "n4", "n5", "n6"].map(id => piece(view.container, id).querySelector(".tabular-nums")!.textContent!.trim()),
+      piece(view.container, "m1").textContent!.match(/[\d,.]+\/[\d,.]+/)![0],
+      piece(view.container, "b1").querySelector(".tabular-nums")!.textContent!.trim(),
+    ];
+    expect(drawn).toEqual(["2.5", "1,234", "3.6s", "$12.50", "1.5M", "2 KB", "1,234/5,000", "2.5"]);
+    for (const figure of drawn) expect(sketch).toContain(figure);
   });
 
   describe("the chart's axis", () => {

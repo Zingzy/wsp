@@ -38,7 +38,7 @@ export const bars: PieceView = {
                   <span aria-hidden className="block h-1 w-14 overflow-hidden rounded-full bg-foreground/10">
                     <span className={cn("block h-full rounded-full", row.tone === undefined ? "bg-foreground/55" : TONE_FILL[toneOf(row.tone, slate, id)])} style={{ width: `${Math.round(share * 1000) / 10}%` }} />
                   </span>
-                  <span className="min-w-12 text-right font-mono text-xs leading-5 tabular-nums text-foreground">{format === "none" ? null : format === "percent" ? `${Math.round(share * 100)}%` : figure(row.value, "integer")}</span>
+                  <span className="min-w-12 text-right font-mono text-xs leading-5 tabular-nums text-foreground">{format === "none" ? null : format === "percent" ? `${Math.round(share * 100)}%` : figure(row.value, "value")}</span>
                 </span>
               </div>
             );
