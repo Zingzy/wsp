@@ -9,7 +9,7 @@ import { Button } from "../components/ui/button.js";
 import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { RUNS, type SlateEngine } from "./engine.js";
 import { cn } from "../lib/utils.js";
-import { isRunRecord, type SlateApproval, type SlateAsk, type SlateDoc } from "./model.js";
+import { isRunRecord, type SlateApproval, type SlateAsk, type SlateDoc, type SlateRunDecl } from "./model.js";
 import { AskFiles, AskWhy, dots, ThenCommand, useAnswer } from "./mcp.js";
 import { usePieceVersion } from "./SlateView.js";
 
@@ -106,13 +106,20 @@ export function cadenceOf(doc: SlateDoc | null, run: string): string {
   return when.length > 0 ? `Runs each time ${when.join(" or ")}` : "Runs when you press it";
 }
 
+/** What a held run's row names it by, for each kind of run. */
+const RUN_LINE: { [K in SlateRunDecl["kind"]]: (decl: Extract<SlateRunDecl, { kind: K }>) => string } = {
+  cmd: decl => decl.cmd,
+  tool: decl => `${decl.server}.${decl.tool}`,
+  resource: decl => `${decl.server}:${decl.uri}`,
+};
+
 /** The slate's held runs in document order, each with the host's sheet where the record carries one. */
 export function heldRuns(engine: SlateEngine, asks: readonly SlateAsk[]): { run: string; cmd: string; ask: SlateAsk | undefined; why: string | undefined }[] {
   return Object.entries(engine.document?.runs ?? {}).flatMap(([run, decl]) => {
     const record = engine.values[run];
     if (!isRunRecord(record) || record.state !== "held") return [];
     const ask = asks.find(a => a.run === run);
-    const cmd = ask?.kind === "cmd" ? ask.cmd : decl.kind === "cmd" ? decl.cmd : decl.kind === "tool" ? `${decl.server}.${decl.tool}` : `${decl.server}:${decl.uri}`;
+    const cmd = ask?.kind === "cmd" ? ask.cmd : (RUN_LINE[decl.kind] as (d: SlateRunDecl) => string)(decl);
     return [{ run, cmd: cmd.split("\n")[0] ?? cmd, ask, why: record.why }];
   });
 }

@@ -105,6 +105,8 @@ function OpenRow({ id, template, row, raise, className, label, children }: Pick<
 
 export const table: PieceView = {
   type: "table",
+  card: false,
+  aligns: true,
   rowScoped: ["columns", "rowActions", "key"],
   component: function TablePiece({ id, piece, props, slate, raise }) {
     const items = Array.isArray(props["items"]) ? props["items"] : [];

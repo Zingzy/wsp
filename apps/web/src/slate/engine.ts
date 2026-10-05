@@ -6,6 +6,7 @@
 import { slateEqual, slateSegments, slateTruthy, type SlateJson, type SlatePropValue } from "@wsp/protocol";
 import { evaluate, resolveProp, type Resolve, type Row } from "./expr.js";
 import type { SlateDoc, SlatePiece } from "./model.js";
+import { viewOf } from "./pieces/registry.js";
 import { expandDerived, getOwn, ownPath, pieceReads, setOwn, touches, walk } from "./paths.js";
 
 /** A slate's own entry by name, never one off Object.prototype: a value may be called toString. */
@@ -138,7 +139,7 @@ export class SlateEngine {
     // its children, and a table reads what the tables beside it read.
     const placed = new Set(changed);
     for (const id of changed) for (const child of doc?.pieces[id]?.children ?? []) placed.add(child);
-    for (const id of placed) if (doc?.pieces[id]?.type === "table") for (const other of this.tablesBeside(id)) placed.add(other);
+    for (const id of placed) if (viewOf(doc?.pieces[id]?.type)?.aligns === true) for (const other of this.tablesBeside(id)) placed.add(other);
     for (const id of placed) this.#reads.delete(id);
     // A piece's reads go through the derived values it names to what those read, so a changed formula changes what
     // every piece reads, and each redraws with the new formula.
@@ -256,7 +257,7 @@ export class SlateEngine {
       if (seen.has(at)) return;
       seen.add(at);
       const piece = this.piece(at);
-      if (piece === undefined || (!top && (piece.type === "section" || piece.type === "output"))) return;
+      if (piece === undefined || (!top && viewOf(piece.type)?.saysRefreshing === true)) return;
       const own = this.#readsOf(at);
       own.when.forEach(note);
       own.props.forEach(note);
@@ -460,18 +461,20 @@ export class SlateEngine {
     return this.#parents.get(id);
   }
 
-  /** The tables drawn in the same section as this one (the slate's root where there is none), itself included,
-   * so stacked tables can share their column widths. */
+  /** The pieces of this one's type drawn within the same bound (the slate's root where there is none), itself
+   * included, so stacked tables can share their column widths. */
   tablesBeside(id: string): string[] {
+    const type = this.piece(id)?.type;
+    const bounds = (at: string): boolean => viewOf(this.piece(at)?.type)?.bounds === true;
     let group = this.#parents.get(id);
-    while (group !== undefined && this.piece(group)?.type !== "section" && this.#parents.has(group)) group = this.#parents.get(group);
+    while (group !== undefined && !bounds(group) && this.#parents.has(group)) group = this.#parents.get(group);
     if (group === undefined) return [id];
     const out: string[] = [];
     const visit = (at: string) => {
       const piece = this.piece(at);
       if (piece === undefined) return;
-      if (piece.type === "table") out.push(at);
-      if (at === group || piece.type !== "section") for (const child of piece.children ?? []) visit(child);
+      if (piece.type === type) out.push(at);
+      if (at === group || !bounds(at)) for (const child of piece.children ?? []) visit(child);
     };
     visit(group);
     return out;
@@ -483,7 +486,7 @@ export class SlateEngine {
       const piece = this.piece(id);
       const derived = this.#doc?.derived ?? {};
       let own = piece === undefined ? { when: [], props: [] } : pieceReads(piece);
-      if (piece?.type === "table") {
+      if (viewOf(piece?.type)?.aligns === true) {
         const beside = this.tablesBeside(id).flatMap(other => (other === id ? [] : pieceReads(this.piece(other)!).props));
         own = { when: own.when, props: [...new Set([...own.props, ...beside])] };
       }
@@ -601,7 +604,7 @@ function loudOf(doc: SlateDoc | null): Map<Loud, string> {
     if (props["variant"] === "primary" && !out.has("primary")) out.set("primary", id);
     if (props["size"] === "large" && !out.has("large")) out.set("large", id);
     // A chart draws its line in the accent unless it names another tone, so the first chart takes the slate's one hue.
-    if ((props["tone"] === "accent" || (piece.type === "chart" && props["tone"] === undefined)) && !out.has("accent")) out.set("accent", id);
+    if ((props["tone"] === "accent" || (viewOf(piece.type)?.accent === true && props["tone"] === undefined)) && !out.has("accent")) out.set("accent", id);
     for (const child of piece.children ?? []) visit(child);
   };
   visit(doc.root);

@@ -50,6 +50,7 @@ const runName = (value: unknown): string | undefined => (isOwnName(value) ? valu
 
 export const output: PieceView = {
   type: "output",
+  saysRefreshing: true,
   rowScoped: ["run"],
   fills: true,
   component: function OutputPiece({ id, piece, props, slate, raise, cancel, sender }) {

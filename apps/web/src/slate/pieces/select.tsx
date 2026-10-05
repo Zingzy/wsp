@@ -22,6 +22,7 @@ function optionsOf(value: SlateJson | undefined): { value: string; label: string
 
 export const select: PieceView = {
   type: "select",
+  control: true,
   component: function SelectPiece({ id, piece, props, slate, sender, raise }) {
     const path = twoWayPath(piece.props?.["value"]);
     const options = optionsOf(Array.isArray(props["options"]) ? present(slate, piece.props?.["options"], props["options"]) : undefined);

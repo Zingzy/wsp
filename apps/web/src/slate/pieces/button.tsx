@@ -50,6 +50,8 @@ function hoverTitle(note: string | undefined, steps: SlateStep | SlateStep[] | u
 
 export const button: PieceView = {
   type: "button",
+  card: false,
+  control: true,
   component: function ButtonPiece({ id, piece, props, slate, raise }) {
     const { busy, said, refused, press } = usePress(() => raise("press"));
     const label = str(props["label"]) ?? "";

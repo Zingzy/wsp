@@ -31,7 +31,27 @@ export interface PieceView {
   rowScoped?: readonly string[];
   /** As a row of a section's card, the piece draws its own rows edge to edge rather than taking the row's inset. */
   fills?: boolean | ((slate: SlateEngine, id: string) => boolean);
+  /** In a group, whether the piece is a row of a card; absent, it is. A piece that stands bare between cards says no. */
+  card?: boolean | ((slate: SlateEngine, id: string) => boolean);
+  /** Whether the piece lays its children out in cards. */
+  group?: boolean | ((slate: SlateEngine, id: string) => boolean);
+  /** Heads what stands beside it: a row holding it is a head row, not a row of a card. */
+  heads?: true;
+  /** A piece a person acts with: a row of nothing else is the slate's toolbar. */
+  control?: true;
+  /** Lines its columns up with the pieces of its type beside it, which read each other's props to do so. */
+  aligns?: true;
+  /** The edge of what lines up: pieces that align do so within it. */
+  bounds?: true;
+  /** Says its own refreshing, so a refreshing run under it is not said again above it. */
+  saysRefreshing?: true;
+  /** Takes the slate's one accent when it names no tone. */
+  accent?: true;
 }
+
+/** A flag of a piece view that is either fixed or read off the piece's place. */
+export const flagOf = (flag: boolean | ((slate: SlateEngine, id: string) => boolean) | undefined, slate: SlateEngine, id: string, absent: boolean): boolean =>
+  flag === undefined ? absent : typeof flag === "function" ? flag(slate, id) : flag;
 
 export type PieceViews = Readonly<Record<string, PieceView>>;
 

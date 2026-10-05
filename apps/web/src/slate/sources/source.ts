@@ -34,5 +34,7 @@ export interface SourceModule {
   readonly held?: true;
   /** Asked of the window once while bound, for a fact it holds nowhere else. */
   wants?(ctx: SourceContext): void;
+  /** How often the window reads it again on its own, in ms, given the drawn paths under it; absent, never. */
+  tick?(paths: readonly string[]): number;
 }
 

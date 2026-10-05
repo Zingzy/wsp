@@ -15,6 +15,7 @@ function inHeaderRow(slate: SlateEngine, id: string): boolean {
 
 export const text: PieceView = {
   type: "text",
+  card: false,
   component: ({ id, piece, props, slate }) => {
     // A text following a status beside a number rides that number's note.
     if (riddenBy(slate, id) !== undefined) return null;

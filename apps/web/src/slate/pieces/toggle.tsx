@@ -23,6 +23,7 @@ function filters(slate: SlateEngine, id: string): boolean {
 
 export const toggle: PieceView = {
   type: "toggle",
+  control: true,
   component: function TogglePiece({ id, piece, props, slate, sender, raise }) {
     const fieldId = useId();
     const path = twoWayPath(piece.props?.["value"]);

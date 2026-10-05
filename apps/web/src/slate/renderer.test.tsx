@@ -10,6 +10,8 @@ import { SLATE_VIEWS } from "./pieces";
 import { SlateView } from "./SlateView";
 import { ConsentSheet } from "./consent";
 import { fakeLink, manualScheduler, slate } from "./testing";
+import { registerViews } from "./pieces/registry";
+import { isCardRow, isGroup, isToolbar } from "./pieces/runs";
 
 afterEach(cleanup);
 
@@ -318,6 +320,39 @@ describe("what the kit adds", () => {
     render(<ConsentSheet ask={{ key: "k", run: "kill", kind: "cmd", cmd: 'kill "$PID"', env: { PID: "19271" }, args: [], computer: "this Mac", folder: "/tmp", timeoutS: 10, why: "asks every time", confirm: "Kill node (PID 19271)?" }} cadence="Runs when you press it" answer={async () => {}} onClose={() => {}} />);
     expect(document.body.textContent).toContain("Kill node (PID 19271)?");
     expect(document.body.querySelector("[data-slate-consent-cmd]")!.textContent).toBe('kill "$PID"');
+  });
+});
+
+describe("a piece's layout read off its view", () => {
+  it("lays out a new kind of piece by the flags its view gives, with nothing else told of it", () => {
+    registerViews({
+      knob: { type: "knob", component: () => null, control: true },
+      ledger: { type: "ledger", component: () => null, card: false, aligns: true },
+      panel: { type: "panel", component: () => null, card: false, group: true, bounds: true },
+    });
+    const engine = new SlateEngine("t1", () => undefined, manualScheduler());
+    engine.setRecord(
+      slate({
+        root: "root",
+        pieces: {
+          root: { type: "column", children: ["tools", "p"] },
+          tools: { type: "row", children: ["k1", "k2"] },
+          k1: { type: "knob" },
+          k2: { type: "knob" },
+          p: { type: "panel", children: ["l1", "l2"] },
+          l1: { type: "ledger" },
+          l2: { type: "ledger" },
+        },
+      }),
+      {},
+      1,
+      1,
+    );
+    expect(isToolbar(engine, "tools")).toBe(true);
+    expect(isCardRow(engine, "tools")).toBe(false);
+    expect(isGroup(engine, "p")).toBe(true);
+    expect(isCardRow(engine, "l1")).toBe(false);
+    expect(engine.tablesBeside("l1").sort()).toEqual(["l1", "l2"]);
   });
 });
 

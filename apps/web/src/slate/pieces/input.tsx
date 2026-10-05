@@ -90,6 +90,7 @@ function SecretInput({ path, label, props, slate, sender }: { path: string; labe
 
 export const input: PieceView = {
   type: "input",
+  control: true,
   component: function InputPiece(view) {
     const { piece, props, slate, sender, raise } = view;
     const path = twoWayPath(piece.props?.["value"]);

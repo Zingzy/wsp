@@ -10,6 +10,7 @@ import { inBarSwitch, placeOf } from "./runs.js";
 
 export const bars: PieceView = {
   type: "bars",
+  card: false,
   rowScoped: ["name", "value", "tone", "key"],
   component: ({ id, piece, props, slate }) => {
     const items = Array.isArray(props["items"]) ? props["items"] : [];

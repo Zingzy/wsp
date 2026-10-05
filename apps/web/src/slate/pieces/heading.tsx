@@ -9,6 +9,8 @@ const ARIA: Record<string, number> = { title: 2, section: 3, label: 4 };
 
 export const heading: PieceView = {
   type: "heading",
+  card: false,
+  heads: true,
   component: ({ props }) => (
     <div role="heading" aria-level={ARIA[String(props["level"] ?? "section")] ?? 3} className={cn(SECTION_HEAD, "min-w-0 break-words")}>
       {str(props["value"])}

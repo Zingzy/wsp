@@ -5,7 +5,8 @@ import { gapOf } from "./look.js";
 import { Strip } from "./grid.js";
 import { isStatCell, isStrip } from "./riders.js";
 import { BarSwitch } from "./barswitch.js";
-import { isBarHolder } from "./runs.js";
+import { isBarHolder, isToolbar } from "./runs.js";
+import { viewOf } from "./registry.js";
 
 const ALIGN: Record<string, string> = { start: "justify-start", center: "justify-center", end: "justify-end", between: "justify-between" };
 /** With no align set, the buttons, the state word and a list of facts after the row's text sit at its end, and a
@@ -15,6 +16,7 @@ const ENDS =
 
 export const row: PieceView = {
   type: "row",
+  card: (slate, id) => !isToolbar(slate, id) && !(slate.piece(id)?.children ?? []).some(child => viewOf(slate.piece(child)?.type)?.heads === true),
   // A row of one number and the words that ride its note is that number's stat cell, padded as one; a row of numbers is
   // the stat strip.
   fills: (slate, id) => isStatCell(slate, id) || isStrip(slate, id),

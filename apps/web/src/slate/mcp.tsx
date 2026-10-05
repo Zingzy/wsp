@@ -30,6 +30,7 @@ export const MCP_WORDS = {
   call: "Call",
   then: "Then its result goes on stdin to",
   file: (name: string) => `It reads ${name}, which holds`,
+  use: (server: string) => `Use ${server}`,
 } as const;
 
 /** A value the host sent as dots: a secret, shown muted. */
@@ -198,5 +199,37 @@ export function ToolConfirmSheet({ ask, answer, onClose }: { ask: SlateToolAsk; 
         </AlertDialogFooter>
       </AlertDialogPopup>
     </AlertDialog>
+  );
+}
+
+/** A server waiting for consent as a row of the several-at-once sheet: what the one-server sheet would show. */
+export function ServerRow({ ask, cadence }: { ask: SlateServerAsk; cadence: string }) {
+  const resource = ask.tool !== undefined && ask.tool.includes("://");
+  return (
+    <>
+      <p className="text-foreground">
+        {MCP_WORDS.use(ask.server)}
+        {ask.tool === undefined ? null : (
+          <span className="text-muted-foreground">
+            {" "}
+            {resource ? MCP_WORDS.reads.toLowerCase() : MCP_WORDS.calls.toLowerCase()} <code data-slate-consent-tool className="font-mono text-xs tabular-nums text-foreground">{ask.tool}</code>
+          </span>
+        )}
+      </p>
+      <ArgList args={ask.args} />
+      <ThenCommand then={ask.then} />
+      <AskFiles files={ask.files} />
+      <p data-slate-consent-cadence className="text-muted-foreground">
+        {cadence}
+      </p>
+      <p data-slate-consent-where className="text-foreground">
+        on {ask.computer}
+      </p>
+      <AskWhy why={ask.why} />
+      <p className="text-muted-foreground">
+        {ask.tools.length === 0 ? null : <>{MCP_WORDS.lists(ask.server, ask.tools.length)}. </>}
+        {MCP_WORDS.covers(ask.server)}
+      </p>
+    </>
   );
 }

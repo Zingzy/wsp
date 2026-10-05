@@ -14,12 +14,13 @@ import { useSelectedThreadId, useStore } from "../protocol/store.js";
 import { requestComposerFocus } from "../shell/shellRequests.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { ApprovalsSheet, batchable } from "./approvals.js";
-import { cadenceOf, ConsentSheet, HeldRuns, LinkConsent } from "./consent.js";
+import { askKind } from "./askKinds.js";
+import { cadenceOf, HeldRuns, LinkConsent } from "./consent.js";
 import { slateDomainKey } from "@wsp/protocol";
 import { DOC, RUNS } from "./engine.js";
-import { ServerConsentSheet, ToolConfirmSheet } from "./mcp.js";
 import { isRunRecord, type SlateApproval, type SlateAsk } from "./model.js";
 import { SLATE_VIEWS } from "./pieces/index.js";
+import { viewOf } from "./pieces/registry.js";
 import { Refreshing } from "./pieces/refreshing.js";
 import { bindSources } from "./sources/binder.js";
 import { SlateView, usePieceVersion } from "./SlateView.js";
@@ -117,7 +118,7 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
   usePieceVersion(engine, RUNS);
   const api = useStore(s => s.api?.slates ?? null);
   const root = engine.document?.root;
-  const refreshing = root !== undefined && engine.piece(root)?.type !== "section" && engine.refreshingUnder(root);
+  const refreshing = root !== undefined && viewOf(engine.piece(root)?.type)?.saysRefreshing !== true && engine.refreshingUnder(root);
   const title = engine.document?.title ?? "Slate";
   const copy = () => void api?.sketch(threadId).then(text => navigator.clipboard?.writeText(text));
   const [standing, setStanding] = useState(false);
@@ -244,9 +245,7 @@ function Consent({ threadId }: { threadId: string }) {
   };
   const cadence = cadenceOf(slateBundle(threadId).engine.document, ask.run);
   const answer = (scope: SlateApproval) => slateLink(threadId).approve(ask.key, scope).then(() => void loadSlate(threadId));
-  if (ask.kind === "server") return <ServerConsentSheet key={ask.key} ask={ask} cadence={cadence} answer={answer} onClose={close} />;
-  if (ask.kind === "tool") return <ToolConfirmSheet key={ask.key} ask={ask} answer={answer} onClose={close} />;
-  return <ConsentSheet key={ask.key} ask={ask} cadence={cadence} more={unseen.filter(a => a.key !== ask.key).length} answer={answer} onClose={close} />;
+  return askKind(ask).sheet({ ask, cadence, more: unseen.filter(a => a.key !== ask.key).length, answer, onClose: close });
 }
 
 /** The prompt a press's link waits on, until the person opens it, allows its domain, or says no. */

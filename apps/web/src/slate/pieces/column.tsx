@@ -14,6 +14,8 @@ const ALIGN: Record<string, string> = { start: "items-start", center: "items-cen
 
 export const column: PieceView = {
   type: "column",
+  card: (slate, id) => !isGroup(slate, id),
+  group: (slate, id) => !isStrip(slate, id) && (slate.parentId(id) === undefined || isGroup(slate, slate.parentId(id)!)),
   // A column of a status and its text beside a number rides that number's note.
   fills: isStrip,
   component: ({ id, piece, props, slate, children }) =>

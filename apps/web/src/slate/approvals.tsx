@@ -8,16 +8,16 @@ import { Button } from "../components/ui/button.js";
 import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { Switch } from "../components/ui/switch.js";
 import { cn } from "../lib/utils.js";
-import { CommandBody, CONSENT_WORDS } from "./consent.js";
-import { ArgList, AskFiles, AskWhy, MCP_WORDS, ThenCommand, useAnswer } from "./mcp.js";
+import { askKind } from "./askKinds.js";
+import { CONSENT_WORDS } from "./consent.js";
+import { useAnswer } from "./mcp.js";
 import type { SlateApproval, SlateAsk } from "./model.js";
 
 export type BatchAsk = Extract<SlateAsk, { kind: "cmd" | "server" }>;
 
 export const APPROVALS_WORDS = {
   title: (asks: readonly BatchAsk[]) =>
-    asks.every(ask => ask.kind === "cmd") ? `Run these ${asks.length} commands?` : `Let this slate run these ${asks.length}?`,
-  server: (server: string) => `Use ${server}`,
+    asks.every(ask => askKind(ask).row?.command === true) ? `Run these ${asks.length} commands?` : `Let this slate run these ${asks.length}?`,
   allowAll: "Allow all",
   allow: (n: number) => `Allow ${n}`,
   once: CONSENT_WORDS.once,
@@ -27,40 +27,10 @@ export const APPROVALS_WORDS = {
 /** The asks one sheet can answer together, one row per key: commands with no confirm, and servers. */
 export function batchable(asks: readonly SlateAsk[]): BatchAsk[] {
   const rows = new Map<string, BatchAsk>();
-  for (const ask of asks) if ((ask.kind === "cmd" && ask.confirm === undefined) || ask.kind === "server") if (!rows.has(ask.key)) rows.set(ask.key, ask);
+  for (const ask of asks) if (askKind(ask).row?.batchable(ask) === true && !rows.has(ask.key)) rows.set(ask.key, ask as BatchAsk);
   return [...rows.values()];
 }
 
-function ServerRow({ ask, cadence }: { ask: Extract<SlateAsk, { kind: "server" }>; cadence: string }) {
-  const resource = ask.tool !== undefined && ask.tool.includes("://");
-  return (
-    <>
-      <p className="text-foreground">
-        {APPROVALS_WORDS.server(ask.server)}
-        {ask.tool === undefined ? null : (
-          <span className="text-muted-foreground">
-            {" "}
-            {resource ? MCP_WORDS.reads.toLowerCase() : MCP_WORDS.calls.toLowerCase()} <code data-slate-consent-tool className="font-mono text-xs tabular-nums text-foreground">{ask.tool}</code>
-          </span>
-        )}
-      </p>
-      <ArgList args={ask.args} />
-      <ThenCommand then={ask.then} />
-      <AskFiles files={ask.files} />
-      <p data-slate-consent-cadence className="text-muted-foreground">
-        {cadence}
-      </p>
-      <p data-slate-consent-where className="text-foreground">
-        on {ask.computer}
-      </p>
-      <AskWhy why={ask.why} />
-      <p className="text-muted-foreground">
-        {ask.tools.length === 0 ? null : <>{MCP_WORDS.lists(ask.server, ask.tools.length)}. </>}
-        {MCP_WORDS.covers(ask.server)}
-      </p>
-    </>
-  );
-}
 
 export function ApprovalsSheet({ asks, cadence, answer, onClose }: { asks: readonly BatchAsk[]; cadence(run: string): string; answer(key: string, scope: SlateApproval): Promise<unknown>; onClose(): void }) {
   // The rows on the sheet as it opened start switched on; one that arrives while it is open starts off, so Allow all
@@ -88,8 +58,8 @@ export function ApprovalsSheet({ asks, cadence, answer, onClose }: { asks: reado
               const picked = on.has(ask.key);
               return (
                 <div key={ask.key} data-slate-approval={ask.key} data-on={picked} className={cn("flex min-w-0 gap-3", picked ? undefined : "opacity-60")}>
-                  <Switch checked={picked} onCheckedChange={checked => toggle(ask.key, checked)} aria-label={ask.kind === "cmd" ? ask.cmd : APPROVALS_WORDS.server(ask.server)} className="mt-1.5" />
-                  <div className="flex min-w-0 flex-1 flex-col gap-2">{ask.kind === "cmd" ? <CommandBody ask={ask} cadence={cadence(ask.run)} lines={4} /> : <ServerRow ask={ask} cadence={cadence(ask.run)} />}</div>
+                  <Switch checked={picked} onCheckedChange={checked => toggle(ask.key, checked)} aria-label={askKind(ask).row!.label(ask)} className="mt-1.5" />
+                  <div className="flex min-w-0 flex-1 flex-col gap-2">{askKind(ask).row!.body(ask, cadence(ask.run))}</div>
                 </div>
               );
             })}

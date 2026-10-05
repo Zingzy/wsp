@@ -76,6 +76,7 @@ function IconButton({ label, onClick, children }: { label: string; onClick?: () 
 
 export const diagram: PieceView = {
   type: "diagram",
+  card: false,
   component: function DiagramPiece({ props }) {
     const code = str(props["value"]) ?? "";
     const label = str(props["label"]);
