@@ -139,19 +139,22 @@ describe("the words a link gets", () => {
     expect(refused.kind).toBe("refused");
     expect(terminalEmptyLine(refused)).toContain("403");
     expect(terminalEmptyLine(refused)).toContain("cross-origin websocket denied");
+    // The pane over a frozen frame and a surface that reads over the link say why in the same muted line.
+    expect(terminalPaneHints(refused, null, null)).toEqual([link.refusal()]);
+    expect(linkDownLine(refused)).toBe(link.refusal());
     saysNoMachine(refused);
   }, 20_000);
 
-  it("the main screen carries the link's own line while it is down, and says nothing while it is open", async () => {
+  it("a surface that reads over the link carries its own line while it is down, and says nothing while it is open", async () => {
     const dead = await deadPort();
     harness = await startRelayHarness({ road: () => `ws://127.0.0.1:${dead}` });
     link = connect(harness, { backoffMs: () => 25, firstAnswerMs: 80 });
-    // A first dial inside its bound is not down, so the main screen does not shout on every page load.
+    // A first dial inside its bound is not down, so a surface does not shout on every page load.
     expect(linkDownLine(paneOf(link))).toBeNull();
 
     await until(() => link!.status() === "unanswered");
     expect(linkDownLine(paneOf(link))).toBe(`Nothing has answered on ${MAC}`);
-    // One place for the words: the main screen says the pane's own sentence, never a second copy of it.
+    // One place for the words: the surface says the pane's own sentence, never a second copy of it.
     expect(linkDownLine(paneOf(link))).toBe(terminalPaneTitle(paneOf(link)));
 
     harness.setRoad(`ws://127.0.0.1:${harness.daemon.port}`);
@@ -160,7 +163,7 @@ describe("the words a link gets", () => {
   }, 20_000);
 });
 
-describe("the word a resting tile wears while its workspace's link is down", () => {
+describe("the word for a workspace's link that is down", () => {
   it("is one capitalised word per down kind, and nothing while the link is not down", () => {
     const at = (kind: string) => linkDownWord({ kind } as TerminalPaneState);
     expect(at("reconnecting")).toBe(LINK_DOWN_WORDS.reconnecting);

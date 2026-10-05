@@ -45,6 +45,9 @@ pub enum DaemonErrorCode {
     /// Git refused a fetch or a push for want of a credential on the computer it ran on: nothing moved, and the
     /// fix is that computer's sign-in, which the lead's rows name beside the child whose push it stopped.
     NoGitCredential,
+    /// The git host's command line refused a read for the account's rate limit, which no retry within the hour
+    /// lifts on its own.
+    RateLimited,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

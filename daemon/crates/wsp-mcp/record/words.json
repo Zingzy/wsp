@@ -251,6 +251,7 @@
     "worktree": "wsp worktree <project> <branch>",
     "worktree_remove": "wsp worktree remove <project> <branch> [--force]",
     "thread_read": "wsp thread read <thread> [--last]",
+    "thread_head": "wsp thread head <thread>",
     "thread_rename": "wsp thread rename <thread> \"<title>\"",
     "thread_forget": "wsp thread forget <thread>",
     "thread_allow": "wsp thread allow <thread>",

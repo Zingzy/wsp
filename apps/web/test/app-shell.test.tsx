@@ -440,12 +440,12 @@ describe("the header row", () => {
     act(() => useStore.getState().select("ws_a", "thr_1"));
     const crumb = () => banner().querySelector("[data-thread-breadcrumb]")!;
     expect(crumb().textContent).toBe("the-project/add a health route");
-    act(() => useStore.setState({ sessions: rows("Run a command: wsp --version") }));
-    // The header shows the state as its glyph alone, the word for a screen reader; the sentence rides the hover.
-    expect(crumb().textContent).toBe("the-project/add a health route");
-    expect(crumb().querySelector("[data-breadcrumb-waiting]")!.getAttribute("aria-label")).toBe("Needs you");
+    act(() => useStore.setState({ sessions: rows("Run: wsp --version") }));
+    expect(crumb().textContent).toBe("the-project/add a health routeNeeds you");
+    // The whole sentence is the hover text; the header shows the word alone.
+    expect(crumb().querySelector("[data-breadcrumb-thread] + [title]")!.getAttribute("title")).toBe("Run: wsp --version");
     act(() => useStore.setState({ sessions: rows() }));
-    expect(crumb().querySelector("[data-breadcrumb-waiting]")).toBeNull();
+    expect(crumb().textContent).toBe("the-project/add a health route");
   });
 
   it("the compose glyph sits in the search row and opens New thread on the selected workspace's project rather than inside it, and stays live on New thread itself", async () => {
@@ -577,6 +577,21 @@ describe("the macOS desktop window", () => {
     const container = document.querySelector('[data-slot="sidebar-container"]')!;
     expect(container.className).toContain("sidebar-vibrancy");
     expect(container.className).not.toContain("sidebar-glass");
+  });
+
+  it("with the wco class a Linux window carries: both header rows drag the window and the sidebar keeps its own paint, with no Mac glass", async () => {
+    document.documentElement.classList.add("wco");
+    try {
+      await mountShell();
+      expect(sidebarHeader().className).toContain("drag-region");
+      expect(banner().querySelector("[data-header-row]")!.className).toContain("drag-region");
+      expect(noDrag(sidebarHeader()).every(Boolean)).toBe(true);
+      const container = document.querySelector('[data-slot="sidebar-container"]')!;
+      expect(container.className).toContain("sidebar-glass");
+      expect(container.className).not.toContain("sidebar-vibrancy");
+    } finally {
+      document.documentElement.classList.remove("wco");
+    }
   });
 
   it("without the class, a browser tab or another platform: nothing drags and the sidebar paints its own glass", async () => {

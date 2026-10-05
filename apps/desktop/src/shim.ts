@@ -5,8 +5,9 @@
 // Where the bundle carries the daemon binary, the script runs its forwarder in
 // front of that command, so every agent's `wsp mcp` rides the host already
 // running rather than holding a node process of its own for the whole session.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { shellQuote } from "@wsp/protocol";
 
 export interface ShimTarget {
@@ -31,4 +32,38 @@ export function installShim(path: string, text: string): "written" | "kept" {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, text, { mode: 0o755 });
   return "written";
+}
+
+/** The AppImage this launch runs from: the folder its runtime mounted for this launch alone, the image file itself,
+ * and the app's version. */
+export interface AppImageLaunch {
+  appdir: string;
+  image: string;
+  version: string;
+}
+
+/** The target moved out of an AppImage's mount, which goes when the launch that made it ends, into a copy under the
+ * wsp home that the command and the service can run after it. One copy per image file, named by the version and the
+ * file's size and time so a rebuilt image of one version is copied again; the copy is made whole beside its place and
+ * renamed in. The copy made before it stays, since the service's host may still run it until its next start; any
+ * older one goes, and a host still running one stops once its program is gone. */
+export function keepAppImage(target: ShimTarget, launch: AppImageLaunch, home: string): ShimTarget {
+  const image = statSync(launch.image);
+  const name = `${launch.version}-${createHash("sha256").update(`${image.size}:${image.mtimeMs}`).digest("hex").slice(0, 8)}`;
+  const root = join(home, "app");
+  const kept = join(root, name);
+  if (!existsSync(kept)) {
+    const part = `${kept}.${process.pid}.part`;
+    rmSync(part, { recursive: true, force: true });
+    cpSync(launch.appdir, part, { recursive: true, verbatimSymlinks: true });
+    renameSync(part, kept);
+  }
+  const others = readdirSync(root)
+    .filter(other => other !== name)
+    .map(other => ({ other, made: statSync(join(root, other)).mtimeMs }))
+    .sort((a, b) => b.made - a.made);
+  const before = others.find(({ other }) => !other.endsWith(".part"))?.other;
+  for (const { other } of others) if (other !== before) rmSync(join(root, other), { recursive: true, force: true });
+  const moved = (path: string): string => join(kept, relative(launch.appdir, path));
+  return { execPath: moved(target.execPath), script: moved(target.script), ...(target.daemon !== undefined ? { daemon: moved(target.daemon) } : {}) };
 }
