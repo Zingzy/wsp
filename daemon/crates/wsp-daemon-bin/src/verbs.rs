@@ -62,6 +62,8 @@ pub(crate) enum Verb {
         host: Option<String>,
         #[arg(long)]
         scoped: bool,
+        #[arg(long = "no-slate", requires = "scoped")]
+        no_slate: bool,
         #[arg(long)]
         json: bool,
         #[arg(long, requires = "scoped")]
@@ -276,8 +278,8 @@ pub(crate) fn run(verb: Verb) -> i32 {
             wsp_guest::run_here(&line, &wsp_argv)
         }
         #[cfg(feature = "mcp")]
-        Verb::Mcp { state, host, scoped, json, guest, wsp_argv } => {
-            wsp_mcp::run(&wsp_mcp::Args { state, host, scoped, json, guest, wsp: wsp_argv })
+        Verb::Mcp { state, host, scoped, no_slate, json, guest, wsp_argv } => {
+            wsp_mcp::run(&wsp_mcp::Args { state, host, scoped, no_slate, json, guest, wsp: wsp_argv })
         }
     }
 }
@@ -301,8 +303,8 @@ fn served_here(line: &[String], wsp: &[String]) -> Option<wsp_mcp::Args> {
         return None;
     }
     match <Forwarded as clap::Parser>::try_parse_from(line).ok()?.verb {
-        Verb::Mcp { state, host, scoped, json, guest: false, wsp_argv } if wsp_argv.is_empty() => {
-            Some(wsp_mcp::Args { state, host, scoped, json, guest: false, wsp: wsp.to_vec() })
+        Verb::Mcp { state, host, scoped, no_slate, json, guest: false, wsp_argv } if wsp_argv.is_empty() => {
+            Some(wsp_mcp::Args { state, host, scoped, no_slate, json, guest: false, wsp: wsp.to_vec() })
         }
         _ => None,
     }

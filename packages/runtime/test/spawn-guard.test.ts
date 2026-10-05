@@ -16,6 +16,7 @@ import { HERE_PLACE_ID,
   RUNTIME_OPS,
   LAUNCH_ENV,
   SCOPED_MCP_ARG,
+  NO_SLATE_MCP_ARG,
   SCOPED_TOKEN_ROAD_REFUSAL,
   THREAD_OPS,
   threadOpRefusal,
@@ -514,6 +515,25 @@ describe("agents spawning agents", () => {
     await onLead.finished;
     await gone(rt);
     expect(await rt.devices.list()).toEqual([]);
+    await rt.close();
+  });
+
+  it("a thread another thread started on this computer runs its wsp tools marked as having no slate, and its lead does not", async () => {
+    const held = heldAdapter({ takesMcpServers: true });
+    const wspMcp = { command: "node", args: ["/opt/wsp/dist/bin.js", "mcp"] };
+    const rt = runtimeWith({ claude: held.factory }, { here: { url: "http://127.0.0.1:4801" }, wspMcp });
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: AGENTS_ON });
+    const lead = await rt.sessions.start(mac.id, { prompt: "lead" });
+    const leadThread = lead.view().threadId!;
+    const child = await rt.sessions.start(mac.id, { prompt: "builder" }, asThread({ kind: "thread", threadId: leadThread, workspaceId: mac.id, rootThreadId: leadThread }));
+    expect(child.view().parentThreadId).toBe(leadThread);
+    const [leadLaunch, childLaunch] = held.launches;
+    expect(leadLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ ...wspMcp, args: [...wspMcp.args, SCOPED_MCP_ARG] });
+    expect(childLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ ...wspMcp, args: [...wspMcp.args, SCOPED_MCP_ARG, NO_SLATE_MCP_ARG] });
+    held.end(1);
+    held.end(0);
+    await child.finished;
+    await lead.finished;
     await rt.close();
   });
 

@@ -84,6 +84,9 @@ describe("the wsp skill", () => {
 
   it("opens a thread's own instructions with its slate, keyed on what the person wants to see, and leaves the others as they are", () => {
     expect(instructions(true)).toBe(`${THREAD_SLATE_WORDS}\n\n${instructions().replace(`${SLATE_WORDS}. `, "")}`);
+    // A thread another thread started has no slate: its server's instructions are the thread's own with no word of one.
+    expect(instructions(true, false)).toBe(instructions().replace(`${SLATE_WORDS}. `, ""));
+    expect(instructions(true, false).toLowerCase()).not.toContain("slate");
     expect(THREAD_SLATE_WORDS.length).toBeLessThan(INSTRUCTIONS_KEPT / 2);
     expect(instructions()).not.toContain(THREAD_SLATE_WORDS);
     expect(instructions(true).slice(0, INSTRUCTIONS_KEPT)).toContain(`${ANOTHER_AGENT_WORDS}.`);

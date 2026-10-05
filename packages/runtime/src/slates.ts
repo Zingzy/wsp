@@ -506,8 +506,17 @@ export function createSlates(deps: SlatesDeps): Slates {
   const requests = new Map<string, { at: number; answer: Promise<SlateEventAnswer> }>();
   const holds = new Map<string, Map<string, number>>();
 
+  /** A thread another thread started has no slate: every slate tool tells it so in one line. */
+  const refuseSubThread = (caller: Caller | undefined): void => {
+    const scope = scopeOf(caller);
+    if (scope !== undefined && scope.rootThreadId !== scope.threadId) {
+      throw Object.assign(new Error("Z803 sub-thread: a thread another thread started has no slate; tell the thread that started you what to show, and it puts it on its own"), { kind: "usage", code: "Z803" });
+    }
+  };
+
   /** The thread a slate op is about, read off the caller's token before any argument (12, cross-thread). */
   const targetOf = (p: SlateTarget, caller: Caller | undefined, write: boolean): string => {
+    refuseSubThread(caller);
     const scope = scopeOf(caller);
     if (scope !== undefined) {
       if (p.threadId === undefined || p.threadId === scope.threadId) return scope.threadId;
@@ -1220,6 +1229,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     },
 
     async catalog(p, caller) {
+      refuseSubThread(caller);
       const text = slateCatalog(p.name);
       const name = p.name?.trim();
       if (name === undefined || name === "" || !text.startsWith(`${name} is not in the catalog`)) return { text };

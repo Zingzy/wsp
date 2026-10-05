@@ -53,8 +53,8 @@ const pickOf = (opts: { env: VerbDeps["env"]; host?: string; start?: VerbDeps["s
   ...(opts.start !== undefined ? { start: opts.start } : {}),
 });
 
-export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"]; skip?: (verb: Verb) => boolean; elsewhere?: boolean; hostWaitMs?: number; scoped?: boolean }): McpServer {
-  const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: instructions(opts.scoped === true) });
+export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"]; skip?: (verb: Verb) => boolean; elsewhere?: boolean; hostWaitMs?: number; scoped?: boolean; noSlate?: boolean }): McpServer {
+  const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: instructions(opts.scoped === true, opts.noSlate !== true) });
   const deps: VerbDeps = { statePath, env: opts.env, client: opts.dial ?? dialer(statePath, pickOf(opts)), ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}), ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}), ...(opts.elsewhere === true ? { elsewhere: true } : {}), ...(opts.hostWaitMs !== undefined ? { hostWaitMs: opts.hostWaitMs } : {}) };
   for (const verb of VERBS) {
     if (!hasTool(verb) || opts.skip?.(verb) === true) continue;
@@ -67,7 +67,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: V
 }
 
 /** The server on stdio until the agent is done with it: its stdin ending closes the transport, and the host socket with it. */
-export async function serveMcp(statePath: string, opts: { alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"]; scoped?: boolean }, streams: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
+export async function serveMcp(statePath: string, opts: { alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"]; scoped?: boolean; noSlate?: boolean }, streams: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
   const dial = dialer(statePath, pickOf(opts));
   const server = mcpServer(statePath, { dial, ...opts });
   const transport = new StdioServerTransport(streams.input, c1Escaped(streams.output));

@@ -77,6 +77,12 @@ describe("buildCommand", () => {
     expect(buildCommand({ mcpServers: { docs: { command: "npx", args: [] } } })).not.toContain("wsp_slate");
   });
 
+  it("serves a thread another thread started no slate server, and keeps the slate tools off its wsp one", () => {
+    const command = buildCommand({ mcpServers: { wsp: { command: "/opt/wsp/bin/wsp", args: ["mcp", "--scoped", "--no-slate"] } } });
+    expect(command).toContain(`-c mcp_servers.wsp.disabled_tools='${JSON.stringify(["slate_catalog", "slate_write", "slate_state", "slate_read"])}'`);
+    expect(command).not.toContain("wsp_slate");
+  });
+
   it("refuses a server name that is not one plain word of a config key", () => {
     expect(() => buildCommand({ mcpServers: { "a.b": { command: "x", args: [] } } })).toThrow("server name");
   });

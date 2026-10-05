@@ -793,6 +793,21 @@ describe("the slate v2 host, round 4", () => {
     }, { timeout: 10_000 });
   }, 30_000);
 
+  it("a thread another thread started has no slate: every slate tool refuses it in one plain line, and its lead's slate works on", async () => {
+    const { rt, threadId, workspaceId, asThread } = await threadOn("wsp-slates-sub-");
+    const child = await rt.sessions.start(workspaceId, { prompt: "builder" }, asThread);
+    await child.finished;
+    const childThread = child.view().threadId!;
+    expect(child.view().parentThreadId).toBe(threadId);
+    const asChild: Caller = { origin: "here", by: { kind: "thread", threadId: childThread, workspaceId, rootThreadId: threadId } };
+    const said = "Z803 sub-thread: a thread another thread started has no slate; tell the thread that started you what to show, and it puts it on its own";
+    await expect(rt.slates.write({ text: `<slate><column><text>x</text></column></slate>` }, asChild)).rejects.toThrow(said);
+    await expect(rt.slates.read({}, asChild)).rejects.toThrow(said);
+    await expect(rt.slates.state({ values: { $x: 1 } }, asChild)).rejects.toThrow(said);
+    await expect(rt.slates.catalog({}, asChild)).rejects.toThrow(said);
+    expect((await rt.slates.write({ text: `<slate><column><text>x</text></column></slate>` }, asThread)).version).toBe(1);
+  }, 30_000);
+
   it("a timer that ticks as the host boots starts its run in the thread's folder, never the host process's", async () => {
     let inner = "";
     const store = memoryStore();

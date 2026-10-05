@@ -92,11 +92,11 @@ export const THREAD_SLATE_WORDS =
 /** The MCP server's instructions, whole inside what Claude Code keeps: a thread's slate first, then what another agent
  * is, since it is the one fact an agent acts on before it has read anything else, what wsp is and where the skill is,
  * the agents the host has adapters for, and the two roads to a child's end with the background road. */
-export function instructionsOf(agents: readonly string[], scoped = false): string {
+export function instructionsOf(agents: readonly string[], scoped = false, slate = true): string {
   const body = [[`${ANOTHER_AGENT_WORDS}.`, ...(scoped ? [] : [`${SLATE_WORDS}.`]), ESSENTIALS, agentsLine(agents)].join(" "), ...[`${NOTIFY_CALLER}, so nothing is polled.`, `${COORDINATOR_HANDOFF}.`, `${BACKGROUND_WORK_WORDS}.`].map(rule => `- ${rule}`)].join("\n");
-  return scoped ? `${THREAD_SLATE_WORDS}\n\n${body}` : body;
+  return scoped && slate ? `${THREAD_SLATE_WORDS}\n\n${body}` : body;
 }
 
 /** The MCP server's instructions, worked out when a server opens, for the same reason; a thread's own server opens
- * with its slate. */
-export const instructions = (scoped = false): string => instructionsOf(THREAD_AGENTS, scoped);
+ * with its slate, unless another thread started that thread, which has no slate and hears nothing of one. */
+export const instructions = (scoped = false, slate = true): string => instructionsOf(THREAD_AGENTS, scoped, slate);
