@@ -209,6 +209,18 @@ describe("execDetached over a scripted guest", () => {
     expect(before.calls).toEqual([]);
   });
 
+  it("a cancel during the pause between polls cuts the pause short rather than waiting it out", async () => {
+    // A poll that fails while the machine naps is retried a whole pollMs later, the longest pause the loop takes.
+    const g = guest([{ nap: true }, { nap: true }]);
+    const cancel = new AbortController();
+    setTimeout(() => cancel.abort(), 50);
+    const t0 = Date.now();
+    const res = await execDetached(g.machine, "sleep 999", { deadlineMs: 600_000, pollMs: 60_000, signal: cancel.signal });
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    expect(res.exitCode).toBe(CANCELLED_EXIT);
+    expect(g.kills).toHaveLength(1);
+  });
+
   it("a poll that fails while the machine naps is retried after a pause and the run completes", async () => {
     const g = guest([{ out: "before\n" }, { nap: true }, { nap: true }, { out: "after\n", exit: 0 }]);
     const res = await execDetached(g.machine, "true", { deadlineMs: 10_000, pollMs: 1 });
