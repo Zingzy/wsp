@@ -2639,6 +2639,10 @@ export type BundleOutcome = { ok: true } | { ok: false; error: string };
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
 export const DESKTOP_MAC_CLASS = "desktop-mac";
 
+/** The class the desktop preload puts on the html element where the shell draws the window controls over the page:
+ * the header row is the window's frame and leaves the room the titlebar-area variables name for the controls. */
+export const DESKTOP_WCO_CLASS = "wco";
+
 /** A key press the desktop shell took from its own menu and handed to the page, spelled the way a keyboard event
  * spells it, so the page's one keybinding table answers it. */
 export interface ShellChord {
@@ -2688,6 +2692,9 @@ export interface DesktopBridge {
   setTheme(theme: ThemePreference): void;
   /** Whether the page draws glass, so the window's own glass is on under it and off under a page drawn solid. */
   setGlass(glass: boolean): void;
+  /** The page's theme moved: window controls the shell draws over the page take the header's ground and ink again,
+   * read off the page's --titlebar-ground and --titlebar-ink. */
+  setTitleBar(): void;
   /** Something the person should hear about outside the app (a build waiting, a machine up, a prompt, a finished
    * turn): the shell shows a system notification while its window has no focus, and nothing while it has, since the
    * page already says it. The page decides nothing about focus; the shell owns that. */

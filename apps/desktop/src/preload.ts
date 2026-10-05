@@ -16,6 +16,25 @@ export interface OnboardingBridge {
   finish(): Promise<void>;
 }
 
+/** One of the page's colour tokens in #rrggbb, the one spelling Electron's colour parser reads for every theme: the
+ * token resolves on an element of the page, and its oklch or color-mix on a canvas pixel as the page paints it.
+ * Nothing for a clear or unresolved colour. */
+function hexOf(token: string): string | undefined {
+  const probe = document.createElement("span");
+  probe.style.color = `var(${token}, transparent)`;
+  document.documentElement.append(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  const pen = document.createElement("canvas").getContext("2d");
+  if (pen === null) return undefined;
+  // A colour the canvas cannot parse leaves the fill as it was, so the fill starts clear.
+  pen.fillStyle = "transparent";
+  pen.fillStyle = color;
+  pen.fillRect(0, 0, 1, 1);
+  const [r = 0, g = 0, b = 0, a = 0] = pen.getImageData(0, 0, 1, 1).data;
+  return a === 0 ? undefined : `#${[r, g, b].map(n => n.toString(16).padStart(2, "0")).join("")}`;
+}
+
 const bridge: DesktopBridge & OnboardingBridge = {
   version: shellArgFrom(process.argv, "version"),
   bundleHover: shellArgFrom(process.argv, "bundle-hover"),
@@ -48,6 +67,11 @@ const bridge: DesktopBridge & OnboardingBridge = {
   },
   setTheme: (theme: ThemePreference): void => ipcRenderer.send("theme:set", theme),
   setGlass: (glass: boolean): void => ipcRenderer.send("glass:set", glass),
+  setTitleBar: (): void => {
+    const color = hexOf("--titlebar-ground");
+    const symbolColor = hexOf("--titlebar-ink");
+    if (color !== undefined && symbolColor !== undefined) ipcRenderer.send("titlebar:set", { color, symbolColor });
+  },
   sayOutside: (line: OutsideLine): void => ipcRenderer.send("outside:say", line),
   setBadge: (count: number): void => ipcRenderer.send("badge:set", count),
   loginStart: (): Promise<boolean | null> => ipcRenderer.invoke("service:login"),
