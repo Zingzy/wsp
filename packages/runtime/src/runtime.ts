@@ -233,7 +233,7 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
-import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent, NO_SLATE_MCP_ARG } from "@wsp/protocol";
+import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent, NO_SLATE_MCP_ARG, PR_POLL_IDLE_MS } from "@wsp/protocol";
 import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, everyModel, effortsFor, modelOf, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noCwdLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, attachmentKey, type KeptAttachment, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine, PERMISSION_DENIED_LINE } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
@@ -255,6 +255,7 @@ import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
 import { makePlaceDoor, NO_PLACE_DOOR, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
 import type { BlobMark, Store } from "./store.js";
 import { createSlates, type Slates } from "./slates.js";
+import { memoryGitHubCache, type GitHubCache } from "./github-cache.js";
 import { RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, resetNoLoginsLine, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type AgentSignInState, type ResetAnswer, type UsageRange, type UsageSplit, type UsedAnswer } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, modelLabel, smallestModel } from "./harness-catalog.js";
 import {
@@ -273,7 +274,7 @@ import {
   takenNameAfter,
   withCloses,
   type IssueRead,
-  type PullRequest,
+  PullRequest,
   type ReviewDraft,
   type ReviewPostResult,
   type ReviewVerdict,
@@ -519,6 +520,12 @@ export const SESSION_TITLE_TTL_MS = 10_000;
 /** How long a copy's checkout, once read, answers a tile or a pane asking again without asking git: every tile reads
  * it as it mounts, and a sidebar of twenty is one read, not twenty. */
 export const CHECKOUT_TTL_MS = 10_000;
+
+/** How long a pull request's page read stands for another open of it. */
+export const PR_PAGE_HOLD_MS = 60_000;
+
+/** How long a git host's rate limit refusal answers every read on the road that met it. */
+export const RATE_LIMIT_HOLD_MS = 60_000;
 /** A grep of one session file or a row out of one sqlite; a guest slower than this keeps the title it last gave. */
 const SESSION_TITLE_TIMEOUT_MS = 15_000;
 /** How many of a workspace's harness sessions one refresh asks about, newest first: a store read is an exec on the
@@ -886,6 +893,10 @@ interface LiveWorkspace {
   prReading?: Promise<PullRequestSeen | undefined>;
   /** Cancels the next timed read of an open pull request with a check still running. */
   prPoll?: () => void;
+  /** The interval that timed read was armed at. */
+  prPollMs?: number;
+  /** The head commit a read by branch last found no pull request at: the branch is not read again until it moves. */
+  prNoneAt?: string;
 }
 
 /** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. A notice is a second
@@ -1117,6 +1128,8 @@ export interface RuntimeOptions {
   idle?: { defaultWindowMs?: number };
   /** Drives the idle window and the transcript debounce; tests inject one they advance by hand. */
   clock?: Clock;
+  /** Where the reads off a git host keep their bodies and ETags; held in memory where none is given. */
+  githubCache?: GitHubCache;
   /** How long a seal waits for a killed machine to read gone (tests shrink it). */
   killConfirm?: KillConfirm;
   /** How long a seal waits between snapshot attempts the provider refused (tests shrink it). */
@@ -1599,8 +1612,8 @@ export interface Runtime {
     /** The workspace's viewed marks; with a path, the mark on that file set against the blob or taken off at null. */
     viewed(o: { workspaceId: string; path?: string; blob?: string | null }, origin?: Caller): Promise<ViewedMarks>;
     /** The workspace's pull request page, read through the git host's command line on this computer, or the running
-     * copy's where this computer has none; never kept. */
-    pullRequestView(o: { workspaceId: string }, origin?: Caller): Promise<PullRequestPage>;
+     * copy's where this computer has none; held PR_PAGE_HOLD_MS unless asked fresh. */
+    pullRequestView(o: { workspaceId: string; fresh?: boolean }, origin?: Caller): Promise<PullRequestPage>;
     /** The workspace's pull request's diff against its base, read as the page is and cut at GIT_DIFF_CAP_BYTES. */
     pullRequestDiff(o: { workspaceId: string }, origin?: Caller): Promise<GitPrDiffReply>;
     /** Sends items of the page to the workspace's agent as one message, read off the page anew, into the thread a fix
@@ -3313,6 +3326,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const goneConfirmMs = opts.goneConfirmMs ?? GONE_CONFIRM_MS;
   const lateReadMs = opts.wake?.lateReadMs ?? WAKE_LATE_READ_MS;
   const clock = opts.clock ?? realClock;
+  const githubCache = opts.githubCache ?? memoryGitHubCache();
   /** What the provider says the machine is, bounded by its own read; undefined where the read could not be had. */
   const readsState = (machine: Machine): Promise<MachineState | undefined> =>
     until(machine.state(), clock.now() + providerReadMs, `state of ${machine.id}`, clock).catch(() => undefined);
@@ -5155,14 +5169,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const readHost = async <T>(entry: LiveWorkspace, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<T> =>
     (await readHostOn(entry, frame, parse)).read;
 
-  /** The same read, saying whether it was this computer's own command line that answered. */
+  /** The same read, saying whether it was this computer's own command line that answered. What it answers is held
+   * by remote and number alone, since this computer's command line answers it wherever one is signed in here. */
   const readHostOn = async <T>(entry: LiveWorkspace, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<{ read: T; here: boolean }> => {
     try {
-      return { read: await onThisComputer(async (ask, home) => parse(await ask(frame(home)))), here: true };
+      return { read: await heldOff("here", () => onThisComputer(async (ask, home) => parse(await ask(frame(home))))), here: true };
     } catch (e) {
       if (!isNoHostCli(e) || !copyReadsHost(entry)) throw e;
     }
-    return { read: await withDaemon(entry, async ask => parse(await ask(frame(checkoutOf(entry.record))))), here: false };
+    return { read: await heldOff(entry.record.id, () => withDaemon(entry, async ask => parse(await ask(frame(checkoutOf(entry.record)))))), here: false };
+  };
+
+  /** The git host's rate limit refusal, by the road whose command line met it: this computer's, or a copy's. A road
+   * that met one answers every read with it for RATE_LIMIT_HOLD_MS rather than running its command line against an
+   * empty budget once per pane open. gh's refusal names no reset, so the hold does not end at one. */
+  const rateLimited = new Map<string, { until: number; refusal: unknown }>();
+  const heldOff = async <T>(road: string, read: () => Promise<T>): Promise<T> => {
+    const held = rateLimited.get(road);
+    if (held !== undefined && clock.now() < held.until) throw held.refusal;
+    try {
+      return await read();
+    } catch (e) {
+      if (e instanceof DaemonRefusal && e.code === "rate-limited") rateLimited.set(road, { until: clock.now() + RATE_LIMIT_HOLD_MS, refusal: e });
+      throw e;
+    }
   };
 
   /** The workspace with the pull request it has, by number, and its project's remote; refused where it has none. */
@@ -5173,9 +5203,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return { entry, remote: projectHeld(entry.record.project).remote, number };
   };
 
+  const pageKey = (remote: string, number: number): string => `page:${remote}#${number}`;
+
+  /** A pull request's page, held PR_PAGE_HOLD_MS per remote and number so a pane reopened or remounted within it reads
+   * nothing; a refresh asks fresh, and every write as the person drops what is held. */
+  const readPage = async (entry: LiveWorkspace, remote: string, number: number, fresh: boolean): Promise<{ page: GitPrViewReply; here: boolean }> => {
+    const key = pageKey(remote, number);
+    const held = fresh ? undefined : githubCache.get(key);
+    if (held !== undefined && clock.now() - held.fetchedAt < PR_PAGE_HOLD_MS) return held.body as { page: GitPrViewReply; here: boolean };
+    const fetchedAt = clock.now();
+    const { read: page, here } = await readHostOn(entry, cwd => ({ op: "git.prView", cwd, remote, number }), r => GitPrViewReply.parse(r));
+    githubCache.set(key, { body: { page, here }, fetchedAt });
+    clock.schedule(() => githubCache.get(key)?.fetchedAt === fetchedAt && githubCache.delete(key), PR_PAGE_HOLD_MS, { unref: true });
+    return { page, here };
+  };
+
   /** A write on the git host as the person, through this computer's own signed-in command line alone, as a merge and
    * a review post are: a copy's gh sits on a PATH its agent can write, so nothing posts as the person through it. */
-  const postAsPerson = async <T>(remote: string, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<T> => {
+  const postAsPerson = async <T>(remote: string, number: number, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<T> => {
+    githubCache.delete(pageKey(remote, number));
     try {
       return await onThisComputer(async (ask, home) => parse(await ask(frame(home))));
     } catch (e) {
@@ -5187,27 +5233,57 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The host a project's remote lives on, as a sentence about its command line names it. */
   const hostOfRemote = (remote: string): string => gitHostOf(remote)?.sshHosts[0] ?? remoteHost(remote) ?? remote;
 
+  /** How often an open pull request is read again: PR_POLL_MS while a window is open, PR_POLL_IDLE_MS while none is. */
+  const prPollMs = (): number => (status.watched() ? PR_POLL_MS : PR_POLL_IDLE_MS);
+
+  const prKey = (remote: string, number: number): string => `pr:${remote}#${number}`;
+
   /** The workspace's pull request read through the git host's command line, kept on the entry and pushed on its status:
    * on view, at a turn's end, after a bring back, a merge, a fix and an update, and on a timer while it is open. An
-   * open one known by number is read by number, otherwise by the copy's branch; a merged or closed
-   * one is never read again. Within CHECKOUT_TTL_MS the fact held answers unless the caller forces a read. A read the
-   * host refused for any reason but a missing command line keeps the last fact, whose time says how old it is. */
-  const readPullRequest = (entry: LiveWorkspace, force: boolean): Promise<PullRequestSeen | undefined> => {
+   * open one known by number is read by number with what its last read saw, so an unchanged one costs one REST read
+   * and runs nothing else, unless the caller asks for the whole; otherwise it is read by the copy's branch, and a
+   * branch that had none is not read again on view until its head moves. A merged or closed one is never read again. On view an open one read
+   * within the poll interval answers as held, since its timer keeps it, and anything else within CHECKOUT_TTL_MS. A
+   * read the host refused for any reason but a missing command line keeps the last fact, whose time says how old it is. */
+  const readPullRequest = (entry: LiveWorkspace, force: boolean, whole = false): Promise<PullRequestSeen | undefined> => {
     const kept = entry.record.pr;
     if (kept !== undefined && kept.state !== "open") return Promise.resolve(entry.pr);
     const held = entry.pr;
-    if (!force && held !== undefined && clock.now() - held.readAt < CHECKOUT_TTL_MS) return Promise.resolve(held);
-    if (entry.prReading !== undefined) return entry.prReading;
+    const hold = isPullRequestFact(held) ? prPollMs() : CHECKOUT_TTL_MS;
+    if (!force && held !== undefined && clock.now() - held.readAt < hold) {
+      // A window opened or closed since the timer was armed: it reads at the interval now in force, from the last read.
+      if (isPullRequestFact(held) && entry.prPoll !== undefined && entry.prPollMs !== hold) pollPullRequest(entry, held.readAt);
+      return Promise.resolve(held);
+    }
+    if (!force && kept === undefined && entry.prNoneAt !== undefined && entry.prNoneAt === entry.checkout?.head) return Promise.resolve(held);
+    if (entry.prReading !== undefined && !whole) return entry.prReading;
     const reading = (async (): Promise<PullRequestSeen | undefined> => {
       const project = projectHeld(entry.record.project);
       if (project.remote === "") return entry.pr;
-      const branch = kept === undefined ? (entry.checkout ?? (await readCheckout(entry, false)))?.branch : undefined;
+      const checkout = kept === undefined ? (entry.checkout ?? (await readCheckout(entry, false))) : undefined;
+      const branch = checkout?.branch;
       const base = entry.record.base ?? project.base;
       if (kept === undefined && (branch === undefined || branch === base || branch.startsWith("("))) return entry.pr;
+      const cached = kept !== undefined ? githubCache.get(prKey(project.remote, kept.number)) : undefined;
+      const body = PullRequest.safeParse(cached?.body);
+      // A check finishing moves nothing of what is seen, so one still running, or an ask for the whole, reads in full.
+      const seen = !whole && body.success && cached?.tag !== undefined && !body.data.checks.some(c => c.state === "pending") ? cached.tag : undefined;
       const at = clock.now();
       try {
-        const read = await readHost(entry, cwd => ({ op: "git.prRead", cwd, remote: project.remote, ...(kept !== undefined ? { number: kept.number } : { branch }) }), r => GitPrReadReply.parse(r).pr);
-        await takePullRequest(entry, read === undefined ? undefined : { ...read, readAt: at });
+        const read = await readHost(
+          entry,
+          cwd => ({ op: "git.prRead", cwd, remote: project.remote, ...(kept !== undefined ? { number: kept.number } : { branch }), ...(seen !== undefined ? { seen } : {}) }),
+          r => GitPrReadReply.parse(r),
+        );
+        if (read.unchanged === true && body.success) {
+          await takePullRequest(entry, { ...body.data, readAt: at });
+          return entry.pr;
+        }
+        const pr = read.pr;
+        if (pr !== undefined && read.seen !== undefined) githubCache.set(prKey(project.remote, pr.number), { body: pr, tag: read.seen, fetchedAt: at });
+        if (pr === undefined && kept === undefined) entry.prNoneAt = checkout?.head;
+        else delete entry.prNoneAt;
+        await takePullRequest(entry, pr === undefined ? undefined : { ...pr, readAt: at });
       } catch (e) {
         if (isNoHostCli(e)) {
           const host = hostOfRemote(project.remote);
@@ -5246,19 +5322,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The one timed read an open pull request waits on; nothing is armed for a merged or closed one, which is never
    * read again. */
-  const pollPullRequest = (entry: LiveWorkspace): void => {
+  const pollPullRequest = (entry: LiveWorkspace, from = clock.now()): void => {
     entry.prPoll?.();
     delete entry.prPoll;
     const fact = entry.pr;
     if (!isPullRequestFact(fact) || fact.state !== "open" || live.get(entry.record.id) !== entry) return;
-    // A slate bound to the checks reads a pending one every 30 s rather than every three minutes (06-sources).
+    // A slate bound to the checks reads a pending one every 30 s rather than at the idle or watched pace (06-sources).
     const pending = fact.checks.some(c => c.state === "pending") && slates.watchesPr(entry.record.id);
+    const ms = pending ? SLATE_PR_POLL_MS : prPollMs();
+    entry.prPollMs = ms;
     entry.prPoll = clock.schedule(
       () => {
         delete entry.prPoll;
         void readPullRequest(entry, true);
       },
-      pending ? SLATE_PR_POLL_MS : PR_POLL_MS,
+      Math.max(0, from + ms - clock.now()),
       { unref: true },
     );
   };
@@ -5298,7 +5376,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const mergeSettings = async (remote: string): Promise<GitRepoReadReply> => {
     const cached = repoSettings.get(remote);
     if (cached !== undefined && clock.now() - cached.at < REPO_SETTINGS_MS) return cached.read;
-    const read = GitRepoReadReply.parse(await onThisComputer((ask, home) => ask({ op: "git.repoRead", cwd: home, remote })));
+    const read = GitRepoReadReply.parse(await heldOff("here", () => onThisComputer((ask, home) => ask({ op: "git.repoRead", cwd: home, remote }))));
     repoSettings.set(remote, { at: clock.now(), read });
     return read;
   };
@@ -8452,9 +8530,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return { viewed: marks };
     },
 
-    async pullRequestView({ workspaceId }, origin) {
+    async pullRequestView({ workspaceId, fresh }, origin) {
       const { entry, remote, number } = await pullRequestOn(workspaceId, origin);
-      const { read: page, here } = await readHostOn(entry, cwd => ({ op: "git.prView", cwd, remote, number }), r => GitPrViewReply.parse(r));
+      const { page, here } = await readPage(entry, remote, number, fresh === true);
       const merge = await mergeSettings(remote).catch(() => undefined);
       return { ...page, ...(merge !== undefined ? { merge } : {}), sent: entry.record.prSent ?? [], postsAsYou: here };
     },
@@ -8468,23 +8546,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (body.trim() === "") throw Object.assign(new Error(REPLY_EMPTY_LINE), { kind: "invalid" });
       const { remote, number } = await pullRequestOn(workspaceId, origin);
       const where = { ...(replyTo !== undefined ? { replyTo } : {}), ...(threadId !== undefined ? { threadId } : {}) };
-      return postAsPerson(remote, cwd => ({ op: "git.prReply", cwd, remote, number, ...where, body }), r => GitPrReplyReply.parse(r));
+      return postAsPerson(remote, number, cwd => ({ op: "git.prReply", cwd, remote, number, ...where, body }), r => GitPrReplyReply.parse(r));
     },
 
     async pullRequestResolve({ workspaceId, threadId, resolved }, origin) {
       const { remote, number } = await pullRequestOn(workspaceId, origin);
-      return postAsPerson(remote, cwd => ({ op: "git.prResolve", cwd, remote, number, threadId, resolved }), r => GitPrResolveReply.parse(r));
+      return postAsPerson(remote, number, cwd => ({ op: "git.prResolve", cwd, remote, number, threadId, resolved }), r => GitPrResolveReply.parse(r));
     },
 
     async pullRequestReact({ workspaceId, subject, content, on }, origin) {
       const { remote, number } = await pullRequestOn(workspaceId, origin);
-      return postAsPerson(remote, cwd => ({ op: "git.prReact", cwd, remote, number, subject, content, on }), r => GitPrReactReply.parse(r));
+      return postAsPerson(remote, number, cwd => ({ op: "git.prReact", cwd, remote, number, subject, content, on }), r => GitPrReactReply.parse(r));
     },
 
     async pullRequestSend({ workspaceId, items }, origin) {
       const { entry, remote, number } = await pullRequestOn(workspaceId, origin);
       await copyBlocked(entry);
-      const page = await readHost(entry, cwd => ({ op: "git.prView", cwd, remote, number }), r => GitPrViewReply.parse(r));
+      const { page } = await readPage(entry, remote, number, false);
       const same = (a: PullRequestItem, b: PullRequestItem): boolean => a.kind === b.kind && a.id === b.id;
       const asked = items.filter((item, n) => items.findIndex(other => same(item, other)) === n);
       const said = await toFirstThread(workspaceId, pullRequestSendPrompt(page, asked, number), origin);
@@ -8518,7 +8596,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const branch = entry.checkout?.branch ?? (isPullRequestFact(entry.pr) ? entry.pr.branch : base);
         prompt = conflictsPrompt({ base, branch, files: updated.conflicts });
       } else {
-        const fact = await readPullRequest(entry, false);
+        // Read whole: a check that failed since the last read moves nothing a lighter read compares.
+        const fact = await readPullRequest(entry, true, true);
         if (!isPullRequestFact(fact)) throw new Error(noPullRequestRefusal(entry.record.name));
         const failed = fact.checks.find(c => c.name === check);
         if (failed === undefined) throw new Error(noSuchCheckRefusal(check, fact.checks.map(c => c.name)));
@@ -8558,6 +8637,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const done = GitPrMergeReply.parse(
         await onThisComputer((ask, home) => ask({ op: "git.prMerge", cwd: home, remote, number: fact.number, method: by, auto: whenChecksPass === true, headOid: head ?? fact.headOid })),
       );
+      githubCache.delete(pageKey(remote, fact.number));
       await readPullRequest(entry, true);
       return { number: fact.number, method: by, merged: done.merged, autoArmed: done.autoArmed };
     },
@@ -8685,6 +8765,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       entry.record.review = { ...draft, posted: { url: done.url, at: clock.now(), folded: done.folded } };
       await persist(entry.record);
       bus.emit({ type: "workspace.review", workspaceId });
+      githubCache.delete(pageKey(remote, from.number));
       void readPullRequest(entry, true);
       return { url: done.url, number: from.number, comments: ticked.length - done.folded.length, folded: done.folded.length };
     },

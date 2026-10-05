@@ -26,6 +26,7 @@ import {
   HOST_STOPPING_CLOSE,
   isJoinedComputer,
   HostFolderListing,
+  FS_FOLDERS_DAEMON_VERSION,
   placeBehindLine,
   placeDaemonBehind,
   providerFoldersRefusal,
@@ -475,9 +476,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     const row = rows.find(place => place.id === placeId);
     if (row === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, rows.map(place => place.name))), { kind: "usage" });
     if (!isJoinedComputer(row)) throw Object.assign(new Error(providerFoldersRefusal(row.name)), { kind: "usage" });
-    const report = await places().reportOf(row.id);
-    const behind = report === undefined ? undefined : placeDaemonBehind(report);
-    if (behind !== undefined) throw new Error(placeBehindLine(row.name, behind));
+    // A daemon older than 60 cannot seal the link this rides, so only one from 60 to 72 is here without fs.folders.
+    const version = (await places().reportOf(row.id))?.daemonVersion;
+    if (version !== undefined && version < FS_FOLDERS_DAEMON_VERSION) throw new Error(placeBehindLine(row.name, placeDaemonBehind({ daemonVersion: version })!));
     const link = places().channel(row.id, () => {});
     if (link === undefined) throw new Error(absentComputer(row.name, null).sentence);
     try {
@@ -1369,7 +1370,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               });
               return;
             case "workspaces.pullRequestView":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestView({ workspaceId: msg.workspaceId }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestView({ workspaceId: msg.workspaceId, ...(msg.fresh === true ? { fresh: true } : {}) }, origin)) });
               return;
             case "workspaces.pullRequestDiff":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestDiff({ workspaceId: msg.workspaceId }, origin)) });

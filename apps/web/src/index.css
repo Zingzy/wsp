@@ -125,6 +125,19 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --workspace-controls-right: calc(
     100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px) + 0.75rem
   );
+  /* The window controls the shell draws over the header: on its ground, in the ink the pane toggles' glyphs take. */
+  --titlebar-ground: var(--background);
+  --titlebar-ink: color-mix(in srgb, var(--foreground) 80%, var(--background));
+  /* A system that puts the window controls at the left gives the sidebar's trigger the room after them. */
+  --header-frame-inset: calc(env(titlebar-area-x, 0px) + var(--sidebar-content-inset));
+}
+
+/* The window controls stand over the top right of the page, so whatever reaches the window's right edge there ends
+   before them: the page's header, an inline right panel's tab bar, and a banner over the header. */
+.wco [data-shell-center]:last-child > header,
+.wco [data-preview-panel-mode="inline"] [data-right-panel-tabbar],
+.wco :is([data-disconnected-banner], [data-sign-in-banner]) {
+  padding-right: var(--workspace-controls-right);
 }
 
 /* The system stacks, and the font tokens declared outside the inline theme so

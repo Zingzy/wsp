@@ -2648,6 +2648,10 @@ export type BundleOutcome = { ok: true } | { ok: false; error: string };
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
 export const DESKTOP_MAC_CLASS = "desktop-mac";
 
+/** The class the desktop preload puts on the html element where the shell draws the window controls over the page:
+ * the header row is the window's frame and leaves the room the titlebar-area variables name for the controls. */
+export const DESKTOP_WCO_CLASS = "wco";
+
 /** A key press the desktop shell took from its own menu and handed to the page, spelled the way a keyboard event
  * spells it, so the page's one keybinding table answers it. */
 export interface ShellChord {
@@ -2697,6 +2701,9 @@ export interface DesktopBridge {
   setTheme(theme: ThemePreference): void;
   /** Whether the page draws glass, so the window's own glass is on under it and off under a page drawn solid. */
   setGlass(glass: boolean): void;
+  /** The page's theme moved: window controls the shell draws over the page take the header's ground and ink again,
+   * read off the page's --titlebar-ground and --titlebar-ink. */
+  setTitleBar(): void;
   /** Something the person should hear about outside the app (a build waiting, a machine up, a prompt, a finished
    * turn): the shell shows a system notification while its window has no focus, and nothing while it has, since the
    * page already says it. The page decides nothing about focus; the shell owns that. */
@@ -4345,6 +4352,7 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     remote: z.string(),
     branch: z.string().optional(),
     number: z.number().int().nonnegative().optional(),
+    seen: z.string().optional(),
     machineId: z.string().optional(),
   }),
   /** One pull request's page through that same command line, answered as a GitPrViewReply. */
@@ -5013,6 +5021,8 @@ export const DaemonErrorCode = z.enum([
   "no-host-cli",
   /** Git refused a fetch or a push for want of a credential on the computer it ran on, so nothing moved. */
   "no-git-credential",
+  /** The git host's command line refused a read for the account's rate limit. */
+  "rate-limited",
 ]);
 export type DaemonErrorCode = z.infer<typeof DaemonErrorCode>;
 
@@ -5204,6 +5214,7 @@ const DAEMON_CONTENTS = [
   "2d3c09680f6c9dca01d8915f8d7be7306ba0db7fc6e1734353a86bf5afaa4e4e",
   "1557c21f49fe3ec9248ca8c405e450b0f201e9bc4fd3f552bfd0f36132272b17",
   "1ee653af3b44dc450246290cc7bb7617da6ec8f062d9e859452472019e52e51e",
+  "1fb569928a97d7ba40fd54d251dc4202f267133344e7da3153f3f4aa723e180e",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5538,7 +5549,12 @@ const DAEMON_CONTENTS = [
  * Version 118: A leave run as root first takes what the setup wrote under /usr/local and /opt, read off the list in
  * /opt/wsp: each path still as wsp left it, hashed in one pass, a folder once empty, and nothing the computer had
  * before wsp; the list goes last, and while it still holds lines /opt/wsp stays and the leave says so.
- * Version 119: setup sign-ins, cut syncs and the size check survive their edges. */
+ * Version 119: setup sign-ins, cut syncs and the size check survive their edges.
+ * Version 120: git.prRead asks a pull request named by number with what its last read saw (its last update, head commit
+ * and state): one REST read compares them, and where none moved it answers unchanged with nothing else run and none of
+ * the GraphQL budget spent; a read with nothing seen makes no such read. A read the git host refused for its rate limit
+ * carries the code rate-limited, and a branch so refused never reads as having no pull request. git.prView reads the
+ * page on one GraphQL call in place of four, the newest 100 conversation comments with the rest marked cut. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5593,6 +5609,9 @@ export function placeDaemonBehind(place: { daemonVersion?: number }): string | u
   const version = place.daemonVersion;
   return version === undefined || version >= DAEMON_VERSION ? undefined : `daemon ${version}, host ${DAEMON_VERSION}`;
 }
+
+/** The first daemon that answers fs.folders. */
+export const FS_FOLDERS_DAEMON_VERSION = 73;
 
 /** The line that moves a place onto this wsp's daemon, which is the fix half of every sentence about a place that
  * is behind. */
@@ -6847,8 +6866,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * blob given, or taken off where the blob is null. */
   z.object({ id: reqId, op: z.literal("workspaces.viewed"), workspaceId: z.string(), path: z.string().optional(), blob: z.string().nullable().optional() }),
   /** The workspace's pull request page, read through the git host's command line on this computer, or the running
-   * copy's where this computer has none, and answered as a GitPrViewReply; never kept, so every ask reads it anew. */
-  z.object({ id: reqId, op: z.literal("workspaces.pullRequestView"), workspaceId: z.string() }),
+   * copy's where this computer has none, and answered as a GitPrViewReply; the host holds a read a minute, and an ask
+   * with fresh reads it anew. */
+  z.object({ id: reqId, op: z.literal("workspaces.pullRequestView"), workspaceId: z.string(), fresh: z.boolean().optional() }),
   /** The workspace's pull request's diff against its base, read as the page is and cut on a file's boundary at
    * GIT_DIFF_CAP_BYTES, answered as a GitPrDiffReply naming every file the cut left out. */
   z.object({ id: reqId, op: z.literal("workspaces.pullRequestDiff"), workspaceId: z.string() }),

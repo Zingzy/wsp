@@ -332,6 +332,43 @@ describe.skipIf(renderSkipped !== undefined)("the first launch laid out in Chrom
     await page!.screenshot({ path: join(SHOTS, `onboarding-agents-${theme}.png`) });
   });
 
+  it("asks the shell to read its title bar colours, and under the class a Linux window carries they paint its own ground and the pane toggles' ink, in both appearances", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme, "reduce", `${bridge()}\nwindow.__asked = 0; window.wsp.setTitleBar = () => { window.__asked += 1; };\ndocument.addEventListener("DOMContentLoaded", () => document.documentElement.classList.add("wco"));`);
+      const read = await page!.evaluate(() => {
+        const pen = document.createElement("canvas").getContext("2d")!;
+        const rgba = (color: string): number[] => {
+          pen.clearRect(0, 0, 1, 1);
+          pen.fillStyle = color;
+          pen.fillRect(0, 0, 1, 1);
+          return [...pen.getImageData(0, 0, 1, 1).data];
+        };
+        const resolve = (css: string): number[] => {
+          const probe = document.createElement("span");
+          probe.style.color = css;
+          document.documentElement.append(probe);
+          const color = getComputedStyle(probe).color;
+          probe.remove();
+          return rgba(color);
+        };
+        return {
+          asked: (window as unknown as { __asked: number }).__asked,
+          ground: resolve("var(--titlebar-ground, transparent)"),
+          page: rgba(getComputedStyle(document.querySelector(".ground")!).backgroundColor),
+          ink: resolve("var(--titlebar-ink, transparent)"),
+          mixed: resolve("color-mix(in srgb, var(--foreground) 80%, var(--background))"),
+        };
+      });
+      expect(read.asked).toBeGreaterThan(0);
+      expect(read.ground).toEqual(read.page);
+      expect(read.ink).toEqual(read.mixed);
+      expect(read.ink[3]).toBe(255);
+      expect(read.ink).not.toEqual(read.ground);
+      await page!.close();
+      page = undefined;
+    }
+  });
+
   it("holds Open wsp while no agent is ticked and says why, and a tick frees it; the press installs into the ticked ones and opens wsp", async () => {
     await agents("light");
     await page!.click("#rows .row:nth-child(1)");

@@ -25,7 +25,7 @@ export const PR_WORDS = {
   sent: (ago: string): string => `Sent ${ago}`,
   /** Who wrote it where GitHub names no account, which is one deleted since. */
   deletedAccount: "a deleted account",
-  cut: { commits: "Showing the first 100 commits", reviews: "Showing the latest 100 reviews", threads: "Showing the latest 100 review threads" },
+  cut: { commits: "Showing the first 100 commits", reviews: "Showing the latest 100 reviews", threads: "Showing the latest 100 review threads", comments: "Showing the latest 100 comments" },
   leftNotice: "left a notice",
   show: "Show",
   hide: "Hide",
