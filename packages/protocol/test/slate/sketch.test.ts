@@ -310,3 +310,20 @@ describe("the sketch of the sessions' writes", () => {
     expect(sketch(fine, { rows: [...rows, { at: "2026-10-04T19:48:00Z", n: null }], m: 3 })).toContain("0 problems");
   });
 });
+
+describe("the sketch's size", () => {
+  it("holds the pieces to the line cap, and cuts above the problems and warnings the header counts", () => {
+    const rows = Array.from({ length: 8 }, (_, i) => `{ n: "row ${i}" }`).join(", ");
+    const tables = Array.from({ length: 30 }, (_, i) => `<table id="t${i}" items={[${rows}]}><col title="N" value={item.n} /></table>`).join("\n");
+    const names = Array.from({ length: 60 }, (_, i) => `v${i}`);
+    const text = `<slate>\n${names.map(n => `<value name="${n}" start="" />`).join("\n")}\n<column>\n<text>a \u2014 b</text>\n${tables}\n</column>\n</slate>`;
+    const r = parseSlate(text);
+    expect(r.errors).toEqual([]);
+    const values = Object.fromEntries(names.map(n => [n, "x".repeat(200)]));
+    const sketch = sketchSlate(r.document!, values, { warnings: r.warnings });
+    const pieceLines = sketch.split("\n").slice(1, sketch.split("\n").indexOf("values:"));
+    expect(pieceLines.filter(l => !l.startsWith("... and")).length).toBeLessThanOrEqual(SLATE_LIMITS.sketchPieceLines);
+    expect(sketch.length).toBeLessThanOrEqual(SLATE_LIMITS.sketchTokens * 4);
+    expect(sketch).toContain("W004");
+  });
+});

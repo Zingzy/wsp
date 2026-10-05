@@ -245,7 +245,11 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
     const transparent = module.holdsChildren && out.every(l => l === "") && look.length === 0;
     if (!transparent) {
       emit(indent, out[0] ?? "", tag(id, piece, v, look));
-      for (const more of out.slice(1)) if (pieceLines < SLATE_LIMITS.sketchPieceLines) lines.push(`${indent}${cut(more, SLATE_LIMITS.sketchColumns - indent.length)}`);
+      for (const more of out.slice(1)) {
+        if (pieceLines >= SLATE_LIMITS.sketchPieceLines) break;
+        pieceLines++;
+        lines.push(`${indent}${cut(more, SLATE_LIMITS.sketchColumns - indent.length)}`);
+      }
     }
     if (piece.type === "section" && v.prop("open") === false) return;
     for (const child of piece.children ?? []) walk(child, transparent ? depth : depth + 1);
@@ -275,15 +279,21 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
   if ((ctx.waiting ?? []).length > 0) lines.push(`waiting for the person's approval: ${ctx.waiting!.join(", ")}; each starts once they allow it on the slate. Until then nothing they feed has data: ask the person to allow them, and never call the panel live or ready`);
   const files = Object.entries(doc.files ?? {});
   if (files.length > 0) lines.push(`files in $SLATE_DIR: ${files.map(([name, text]) => `${name} (${fmtBytes(new TextEncoder().encode(text).length)})`).join(", ")}`);
+  const notes: string[] = [];
   if (problems.length > 0) {
-    lines.push("problems:");
-    for (const p of problems) lines.push(`  ${p.code} ${p.piece ?? "slate"}${p.prop !== undefined ? `.${p.prop}` : ""}${p.line !== undefined ? ` (line ${p.line})` : ""}: ${p.message}`);
+    notes.push("problems:");
+    for (const p of problems) notes.push(`  ${p.code} ${p.piece ?? "slate"}${p.prop !== undefined ? `.${p.prop}` : ""}${p.line !== undefined ? ` (line ${p.line})` : ""}: ${p.message}`);
   }
   if (warned.length > 0) {
-    lines.push("warnings, stored all the same; fix them before the person reads the slate:");
-    for (const p of warned) lines.push(`  ${p.code} ${p.piece ?? "slate"}${p.prop !== undefined ? `.${p.prop}` : ""}${p.line !== undefined ? ` (line ${p.line})` : ""}: ${p.message}${p.fix !== undefined ? `. Fix: ${p.fix}` : ""}`);
+    notes.push("warnings, stored all the same; fix them before the person reads the slate:");
+    for (const p of warned) notes.push(`  ${p.code} ${p.piece ?? "slate"}${p.prop !== undefined ? `.${p.prop}` : ""}${p.line !== undefined ? ` (line ${p.line})` : ""}: ${p.message}${p.fix !== undefined ? `. Fix: ${p.fix}` : ""}`);
   }
-  const text = [head, ...lines].join("\n");
+  // The header counts the problems and warnings, so a long sketch is cut above them, never through them.
   const capChars = SLATE_LIMITS.sketchTokens * 4;
-  return text.length <= capChars ? text : `${text.slice(0, capChars - 20)}\n... (cut)`;
+  const body = [head, ...lines].join("\n");
+  const tail = notes.join("\n");
+  const whole = tail === "" ? body : `${body}\n${tail}`;
+  if (whole.length <= capChars) return whole;
+  const kept = [body.slice(0, Math.max(head.length, capChars - tail.length - 20)), "... (cut)", ...(tail === "" ? [] : [tail])].join("\n");
+  return kept.length <= capChars ? kept : `${kept.slice(0, capChars - 20)}\n... (cut)`;
 }
