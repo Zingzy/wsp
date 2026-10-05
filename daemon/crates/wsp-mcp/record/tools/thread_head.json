@@ -1,0 +1,2528 @@
+{
+  "cloudOff": {
+    "name": "thread_head",
+    "description": "The thread's head (by id, or a prefix of it): facts, the thread as threads lists it with the model, effort and context window its latest turn runs on and turnId while a turn runs; events, as many of the thread's newest transcript events as fit in 64 KB, oldest first, each tool result past 2 KB cut with cut set to its whole length; pos, the newest position the transcript has issued, which every event carries as its own pos; and total, how many events of the thread the transcript holds. It is the cheap look at a thread: read the whole conversation with thread_read. Nothing on a machine is touched and the thread is not marked read.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "the thread's id, or a prefix of it that names one, as threads lists them"
+        }
+      },
+      "required": [
+        "thread"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "facts": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "harness": {
+              "type": "string"
+            },
+            "startedBy": {
+              "type": "string",
+              "enum": [
+                "person",
+                "cli",
+                "agent"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "running",
+                "completed",
+                "interrupted",
+                "failed"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "claudeSessionId": {
+              "type": "string"
+            },
+            "startedAt": {
+              "type": "number"
+            },
+            "endedAt": {
+              "type": "number"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "turns": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "ran": {
+              "type": "boolean"
+            },
+            "parentThreadId": {
+              "type": "string"
+            },
+            "rootThreadId": {
+              "type": "string"
+            },
+            "attempt": {
+              "type": "string"
+            },
+            "asking": {
+              "type": "string"
+            },
+            "waitingOn": {
+              "type": "object",
+              "properties": {
+                "threadId": {
+                  "type": "string"
+                },
+                "workspaceId": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "object",
+                  "properties": {
+                    "askId": {
+                      "type": "string"
+                    },
+                    "toolName": {
+                      "type": "string"
+                    },
+                    "toolUseId": {
+                      "type": "string"
+                    },
+                    "parentToolUseId": {
+                      "type": "string"
+                    },
+                    "input": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "effect": {
+                            "type": "string",
+                            "enum": [
+                              "allow",
+                              "deny",
+                              "mode",
+                              "answer"
+                            ]
+                          },
+                          "mode": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "effect"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "askId",
+                    "toolName",
+                    "input",
+                    "options"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "threadId",
+                "workspaceId",
+                "sessionId",
+                "title",
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "setupRefusal": {
+              "type": "string"
+            },
+            "costUsd": {
+              "type": "number"
+            },
+            "pid": {
+              "type": "integer"
+            },
+            "readAt": {
+              "type": "number"
+            },
+            "settledAt": {
+              "type": "number"
+            },
+            "pinnedAt": {
+              "type": "number"
+            },
+            "snoozedUntil": {
+              "type": "number"
+            },
+            "wokeAt": {
+              "type": "number"
+            },
+            "section": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "enum": [
+                    "needs-you",
+                    "working",
+                    "done",
+                    "idle"
+                  ]
+                },
+                "whileState": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "whileState"
+              ],
+              "additionalProperties": false
+            },
+            "rewoundAt": {
+              "type": "number"
+            },
+            "permissionMode": {
+              "type": "string"
+            },
+            "fast": {
+              "type": "boolean"
+            },
+            "model": {
+              "type": "string"
+            },
+            "effort": {
+              "type": "string"
+            },
+            "contextWindow": {
+              "type": "string"
+            },
+            "turnId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "workspaceId",
+            "harness",
+            "startedBy",
+            "status",
+            "title",
+            "sessionId",
+            "turns",
+            "ran"
+          ],
+          "additionalProperties": false
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.start"
+                  },
+                  "workspaceId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "number"
+                  },
+                  "turnId": {
+                    "type": "string"
+                  },
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "pos": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "bytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "mediaType",
+                        "bytes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "afterCut": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "opensThread": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "startedBy": {
+                    "$ref": "#/properties/facts/properties/startedBy"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "cwd": {
+                    "type": "string"
+                  },
+                  "permissionMode": {
+                    "type": "string"
+                  },
+                  "agent": {
+                    "type": "string"
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "harness": {
+                    "type": "object",
+                    "properties": {
+                      "slashCommands": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "permissionMode": {
+                        "type": "string"
+                      },
+                      "agents": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.delta"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "thinking",
+                      "note",
+                      "tool_use",
+                      "tool_result"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "toolName": {
+                    "type": "string"
+                  },
+                  "toolUseId": {
+                    "type": "string"
+                  },
+                  "isError": {
+                    "type": "boolean"
+                  },
+                  "parentToolUseId": {
+                    "type": "string"
+                  },
+                  "cwd": {
+                    "type": "string"
+                  },
+                  "line": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "cut": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "kind",
+                  "text"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.done"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "result": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "completed",
+                          "interrupted",
+                          "failed"
+                        ]
+                      },
+                      "durationMs": {
+                        "type": "number"
+                      },
+                      "waitedMs": {
+                        "type": "number"
+                      },
+                      "costUsd": {
+                        "type": "number"
+                      },
+                      "tokens": {
+                        "type": "object",
+                        "properties": {
+                          "input": {
+                            "type": "number"
+                          },
+                          "output": {
+                            "type": "number"
+                          },
+                          "cached": {
+                            "type": "number"
+                          },
+                          "cacheWrite": {
+                            "type": "number"
+                          },
+                          "reasoning": {
+                            "type": "number"
+                          },
+                          "context": {
+                            "type": "number"
+                          },
+                          "window": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "input",
+                          "output"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "model": {
+                        "type": "string"
+                      },
+                      "models": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "model": {
+                              "type": "string"
+                            },
+                            "tokens": {
+                              "type": "object",
+                              "properties": {
+                                "input": {
+                                  "type": "number"
+                                },
+                                "output": {
+                                  "type": "number"
+                                },
+                                "cached": {
+                                  "type": "number"
+                                },
+                                "cacheWrite": {
+                                  "type": "number"
+                                },
+                                "reasoning": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "input",
+                                "output",
+                                "cached",
+                                "cacheWrite",
+                                "reasoning"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "costUsd": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "model",
+                            "tokens"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "error": {
+                        "type": "string"
+                      },
+                      "refusal": {
+                        "type": "string",
+                        "enum": [
+                          "sign-in"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "result"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.end"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "exitCode": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "sawResult": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "exitCode",
+                  "sawResult"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.steer"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "waiting": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "prompt"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.notify"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "notify": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "notify",
+                  "text"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.permission"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "askId": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/askId"
+                  },
+                  "toolName": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/toolName"
+                  },
+                  "toolUseId": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/toolUseId"
+                  },
+                  "parentToolUseId": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/parentToolUseId"
+                  },
+                  "input": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/input"
+                  },
+                  "detail": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/detail"
+                  },
+                  "options": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/options"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "askId",
+                  "toolName",
+                  "input",
+                  "options"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.permission.closed"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "askId": {
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "allowed",
+                      "denied",
+                      "unanswered",
+                      "cancelled"
+                    ]
+                  },
+                  "optionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "askId",
+                  "outcome"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.checkpoint"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "ref": {
+                    "type": "string"
+                  },
+                  "anchor": {
+                    "type": "string"
+                  },
+                  "kept": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.changes"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "additions": {
+                          "type": "number"
+                        },
+                        "deletions": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "kind",
+                        "additions",
+                        "deletions"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "moved": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "shared": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "from",
+                  "to",
+                  "files",
+                  "moved"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.plan"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "working",
+                            "done"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.run"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "block": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "running",
+                      "exited",
+                      "moved",
+                      "lost"
+                    ]
+                  },
+                  "ptyId": {
+                    "type": "string"
+                  },
+                  "exitCode": {
+                    "type": "integer"
+                  },
+                  "signal": {
+                    "type": "integer"
+                  },
+                  "output": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "runId",
+                  "block",
+                  "command",
+                  "state"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.moved"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "branch": {
+                    "type": "string"
+                  },
+                  "fresh": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "from",
+                  "to"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.behind"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "text"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.subagent"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "task": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "running",
+                      "done",
+                      "failed",
+                      "stopped"
+                    ]
+                  },
+                  "parentToolUseId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "depth": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "line": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "task",
+                  "state"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "pos": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "facts",
+        "events",
+        "pos",
+        "total"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "thread_head",
+    "description": "The thread's head (by id, or a prefix of it): facts, the thread as threads lists it with the model, effort and context window its latest turn runs on and turnId while a turn runs; events, as many of the thread's newest transcript events as fit in 64 KB, oldest first, each tool result past 2 KB cut with cut set to its whole length; pos, the newest position the transcript has issued, which every event carries as its own pos; and total, how many events of the thread the transcript holds. It is the cheap look at a thread: read the whole conversation with thread_read. Nothing on a machine is touched and the thread is not marked read.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "the thread's id, or a prefix of it that names one, as threads lists them"
+        }
+      },
+      "required": [
+        "thread"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "facts": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "harness": {
+              "type": "string"
+            },
+            "startedBy": {
+              "type": "string",
+              "enum": [
+                "person",
+                "cli",
+                "agent"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "running",
+                "completed",
+                "interrupted",
+                "failed"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "claudeSessionId": {
+              "type": "string"
+            },
+            "startedAt": {
+              "type": "number"
+            },
+            "endedAt": {
+              "type": "number"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "turns": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "ran": {
+              "type": "boolean"
+            },
+            "parentThreadId": {
+              "type": "string"
+            },
+            "rootThreadId": {
+              "type": "string"
+            },
+            "attempt": {
+              "type": "string"
+            },
+            "asking": {
+              "type": "string"
+            },
+            "waitingOn": {
+              "type": "object",
+              "properties": {
+                "threadId": {
+                  "type": "string"
+                },
+                "workspaceId": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "object",
+                  "properties": {
+                    "askId": {
+                      "type": "string"
+                    },
+                    "toolName": {
+                      "type": "string"
+                    },
+                    "toolUseId": {
+                      "type": "string"
+                    },
+                    "parentToolUseId": {
+                      "type": "string"
+                    },
+                    "input": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "effect": {
+                            "type": "string",
+                            "enum": [
+                              "allow",
+                              "deny",
+                              "mode",
+                              "answer"
+                            ]
+                          },
+                          "mode": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "effect"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "askId",
+                    "toolName",
+                    "input",
+                    "options"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "threadId",
+                "workspaceId",
+                "sessionId",
+                "title",
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            "setupRefusal": {
+              "type": "string"
+            },
+            "costUsd": {
+              "type": "number"
+            },
+            "pid": {
+              "type": "integer"
+            },
+            "readAt": {
+              "type": "number"
+            },
+            "settledAt": {
+              "type": "number"
+            },
+            "pinnedAt": {
+              "type": "number"
+            },
+            "snoozedUntil": {
+              "type": "number"
+            },
+            "wokeAt": {
+              "type": "number"
+            },
+            "section": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "enum": [
+                    "needs-you",
+                    "working",
+                    "done",
+                    "idle"
+                  ]
+                },
+                "whileState": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "whileState"
+              ],
+              "additionalProperties": false
+            },
+            "rewoundAt": {
+              "type": "number"
+            },
+            "permissionMode": {
+              "type": "string"
+            },
+            "fast": {
+              "type": "boolean"
+            },
+            "model": {
+              "type": "string"
+            },
+            "effort": {
+              "type": "string"
+            },
+            "contextWindow": {
+              "type": "string"
+            },
+            "turnId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "workspaceId",
+            "harness",
+            "startedBy",
+            "status",
+            "title",
+            "sessionId",
+            "turns",
+            "ran"
+          ],
+          "additionalProperties": false
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.start"
+                  },
+                  "workspaceId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "number"
+                  },
+                  "turnId": {
+                    "type": "string"
+                  },
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "pos": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "bytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "mediaType",
+                        "bytes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "afterCut": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "opensThread": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "startedBy": {
+                    "$ref": "#/properties/facts/properties/startedBy"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "cwd": {
+                    "type": "string"
+                  },
+                  "permissionMode": {
+                    "type": "string"
+                  },
+                  "agent": {
+                    "type": "string"
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "harness": {
+                    "type": "object",
+                    "properties": {
+                      "slashCommands": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "permissionMode": {
+                        "type": "string"
+                      },
+                      "agents": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.delta"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "thinking",
+                      "note",
+                      "tool_use",
+                      "tool_result"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "toolName": {
+                    "type": "string"
+                  },
+                  "toolUseId": {
+                    "type": "string"
+                  },
+                  "isError": {
+                    "type": "boolean"
+                  },
+                  "parentToolUseId": {
+                    "type": "string"
+                  },
+                  "cwd": {
+                    "type": "string"
+                  },
+                  "line": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "cut": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "kind",
+                  "text"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.done"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "result": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "completed",
+                          "interrupted",
+                          "failed"
+                        ]
+                      },
+                      "durationMs": {
+                        "type": "number"
+                      },
+                      "waitedMs": {
+                        "type": "number"
+                      },
+                      "costUsd": {
+                        "type": "number"
+                      },
+                      "tokens": {
+                        "type": "object",
+                        "properties": {
+                          "input": {
+                            "type": "number"
+                          },
+                          "output": {
+                            "type": "number"
+                          },
+                          "cached": {
+                            "type": "number"
+                          },
+                          "cacheWrite": {
+                            "type": "number"
+                          },
+                          "reasoning": {
+                            "type": "number"
+                          },
+                          "context": {
+                            "type": "number"
+                          },
+                          "window": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "input",
+                          "output"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "model": {
+                        "type": "string"
+                      },
+                      "models": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "model": {
+                              "type": "string"
+                            },
+                            "tokens": {
+                              "type": "object",
+                              "properties": {
+                                "input": {
+                                  "type": "number"
+                                },
+                                "output": {
+                                  "type": "number"
+                                },
+                                "cached": {
+                                  "type": "number"
+                                },
+                                "cacheWrite": {
+                                  "type": "number"
+                                },
+                                "reasoning": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "input",
+                                "output",
+                                "cached",
+                                "cacheWrite",
+                                "reasoning"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "costUsd": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "model",
+                            "tokens"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "error": {
+                        "type": "string"
+                      },
+                      "refusal": {
+                        "type": "string",
+                        "enum": [
+                          "sign-in"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "result"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.end"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "exitCode": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "sawResult": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "exitCode",
+                  "sawResult"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.steer"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "waiting": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "prompt"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.notify"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "notify": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "notify",
+                  "text"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.permission"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "askId": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/askId"
+                  },
+                  "toolName": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/toolName"
+                  },
+                  "toolUseId": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/toolUseId"
+                  },
+                  "parentToolUseId": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/parentToolUseId"
+                  },
+                  "input": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/input"
+                  },
+                  "detail": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/detail"
+                  },
+                  "options": {
+                    "$ref": "#/properties/facts/properties/waitingOn/properties/prompt/properties/options"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "askId",
+                  "toolName",
+                  "input",
+                  "options"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.permission.closed"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "askId": {
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "allowed",
+                      "denied",
+                      "unanswered",
+                      "cancelled"
+                    ]
+                  },
+                  "optionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "askId",
+                  "outcome"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.checkpoint"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "ref": {
+                    "type": "string"
+                  },
+                  "anchor": {
+                    "type": "string"
+                  },
+                  "kept": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.changes"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "additions": {
+                          "type": "number"
+                        },
+                        "deletions": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "kind",
+                        "additions",
+                        "deletions"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "moved": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "shared": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "from",
+                  "to",
+                  "files",
+                  "moved"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.plan"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "working",
+                            "done"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.run"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "block": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "running",
+                      "exited",
+                      "moved",
+                      "lost"
+                    ]
+                  },
+                  "ptyId": {
+                    "type": "string"
+                  },
+                  "exitCode": {
+                    "type": "integer"
+                  },
+                  "signal": {
+                    "type": "integer"
+                  },
+                  "output": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "runId",
+                  "block",
+                  "command",
+                  "state"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.moved"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "branch": {
+                    "type": "string"
+                  },
+                  "fresh": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "from",
+                  "to"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.behind"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "text"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.subagent"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "task": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "running",
+                      "done",
+                      "failed",
+                      "stopped"
+                    ]
+                  },
+                  "parentToolUseId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "depth": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "line": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "task",
+                  "state"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "pos": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "facts",
+        "events",
+        "pos",
+        "total"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}
