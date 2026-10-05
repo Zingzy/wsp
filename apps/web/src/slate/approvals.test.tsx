@@ -9,7 +9,7 @@ import type { Api } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { useRightPanelStore } from "../rightPanelStore";
 import { SlateSurface } from "./SlateSurface";
-import { useSlateStore } from "./store";
+import { askConsent, useSlateStore } from "./store";
 import type { SlateApi, SlateRecord } from "./wire";
 
 afterEach(cleanup);
@@ -126,6 +126,20 @@ describe("several commands waiting", () => {
     expect(late.getAttribute("aria-checked")).toBe("false");
     await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Allow 2" })));
     expect(vi.mocked(slates.approve).mock.calls.map(c => c[1])).toEqual(["k-link", "k-disk"]);
+  });
+
+  it("shows why a run held for a limit waits instead of a Review that opens nothing, and a stuck review never blocks the next sheet", async () => {
+    const budget = "started 12 times in a minute; press to run it again";
+    const slates = open(record(DOC, { disk: { state: "held", why: budget, runs: 3 } }, []));
+    const threadId = useStore.getState().selectedThreadId!;
+    await waitFor(() => expect(document.querySelector('[data-slate-held="disk"]')).not.toBeNull());
+    const held = document.querySelector<HTMLElement>('[data-slate-held="disk"]')!;
+    expect(held.querySelector("[data-slate-held-why]")!.textContent).toBe(budget);
+    expect(held.querySelector("button")).toBeNull();
+    // A review asked for it anyway (an older window, a race): the reload finds no sheet and the ask is dropped.
+    act(() => askConsent(threadId, { run: "disk" }));
+    await waitFor(() => expect(useSlateStore.getState().asking[threadId]).toBeUndefined());
+    expect(slates.get).toHaveBeenCalledTimes(2);
   });
 
   it("Allow all writes each command's own approval for the thread, the same call one sheet at a time makes", async () => {

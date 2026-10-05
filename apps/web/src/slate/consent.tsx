@@ -97,13 +97,13 @@ export function cadenceOf(doc: SlateDoc | null, run: string): string {
 }
 
 /** The slate's held runs in document order, each with the host's sheet where the record carries one. */
-export function heldRuns(engine: SlateEngine, asks: readonly SlateAsk[]): { run: string; cmd: string; ask: SlateAsk | undefined }[] {
+export function heldRuns(engine: SlateEngine, asks: readonly SlateAsk[]): { run: string; cmd: string; ask: SlateAsk | undefined; why: string | undefined }[] {
   return Object.entries(engine.document?.runs ?? {}).flatMap(([run, decl]) => {
     const record = engine.values[run];
     if (!isRunRecord(record) || record.state !== "held") return [];
     const ask = asks.find(a => a.run === run);
     const cmd = ask?.kind === "cmd" ? ask.cmd : decl.kind === "cmd" ? decl.cmd : decl.kind === "tool" ? `${decl.server}.${decl.tool}` : `${decl.server}:${decl.uri}`;
-    return [{ run, cmd: cmd.split("\n")[0] ?? cmd, ask }];
+    return [{ run, cmd: cmd.split("\n")[0] ?? cmd, ask, why: record.why }];
   });
 }
 
@@ -114,18 +114,27 @@ export function HeldRuns({ engine, asks, review, refuse }: { engine: SlateEngine
   if (held.length === 0) return null;
   return (
     <div className="flex shrink-0 flex-col gap-1 px-3 pb-1">
-      {held.map(({ run, cmd, ask }) => (
+      {held.map(({ run, cmd, ask, why }) => (
         <div key={run} data-slate-held={run} className="flex h-7 min-w-0 items-center gap-2 text-[13px]">
           <span className="shrink-0 text-muted-foreground">{CONSENT_WORDS.wants}</span>
           <code className="min-w-0 flex-1 truncate font-mono text-xs tabular-nums text-foreground" title={cmd}>
             {cmd}
           </code>
-          <Button variant="outline" size="xs" onClick={() => review(run)}>
-            {CONSENT_WORDS.review}
-          </Button>
-          <Button variant="ghost" size="xs" disabled={ask === undefined} onClick={() => (ask === undefined ? undefined : refuse(ask))}>
-            {CONSENT_WORDS.dont}
-          </Button>
+          {ask === undefined ? (
+            // Held for a limit, not for the person: there is nothing to review, only why it waits.
+            <span data-slate-held-why className="shrink-0 text-xs text-muted-foreground">
+              {why}
+            </span>
+          ) : (
+            <>
+              <Button variant="outline" size="xs" onClick={() => review(run)}>
+                {CONSENT_WORDS.review}
+              </Button>
+              <Button variant="ghost" size="xs" onClick={() => refuse(ask)}>
+                {CONSENT_WORDS.dont}
+              </Button>
+            </>
+          )}
         </div>
       ))}
     </div>

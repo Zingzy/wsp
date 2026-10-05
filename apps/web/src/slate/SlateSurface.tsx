@@ -165,7 +165,13 @@ function Consent({ threadId }: { threadId: string }) {
   const unseen = (asks ?? []).filter(a => !(seen ?? []).includes(a.key));
   const ask = asking === undefined ? unseen[0] : (asking.ask ?? asks?.find(a => a.run === asking.run));
   useEffect(() => {
-    if (asking !== undefined && ask === undefined) void loadSlate(threadId);
+    if (asking === undefined || ask !== undefined) return;
+    // A run held for the start limit or the four-at-once cap has no sheet: once the record says so, stop asking, or
+    // no later sheet in this thread would open.
+    void loadSlate(threadId).then(entry => {
+      const found = entry?.record?.asks.some(a => a.run === asking.run) === true;
+      if (!found && useSlateStore.getState().asking[threadId] === asking) askConsent(threadId, undefined);
+    });
   }, [asking, ask, threadId]);
   const batch = batchable(asks ?? []);
   if (asking === undefined && batch.length > 1 && batch.some(a => !(seen ?? []).includes(a.key))) {
