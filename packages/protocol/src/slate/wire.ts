@@ -276,6 +276,8 @@ export const SessionSlateEvent = z.object({
   at: z.number().optional(),
   turnId: z.string().optional(),
   threadId: z.string(),
+  /** Its place in the workspace's transcript, as every session event carries it (sessionScope in index.ts). */
+  pos: z.number().int().positive().optional(),
   cause: SlateCause,
   version: z.number().int(),
   by: SlateBy,
