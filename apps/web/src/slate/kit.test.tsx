@@ -73,6 +73,16 @@ describe("the richer kit in the renderer", () => {
     expect(view.container.querySelector("[data-slate-status=muted]")!.textContent).toBe("Waiting");
   });
 
+  it("draws a ring as the meter row", () => {
+    const { view } = draw(compiled(`<slate><column>
+<ring id="r" label="Disk" value={40} max={80} />
+<meter id="m" label="Disk" value={40} max={80} />
+</column></slate>`));
+    const ring = piece(view.container, "r");
+    expect(ring.querySelector("circle")).toBeNull();
+    expect(ring.textContent).toBe(piece(view.container, "m").textContent);
+  });
+
   it("draws each figure as the sketch the agent reads prints it", () => {
     const doc = compiled(`<slate><column>
 <number id="n1" label="Plain" value={2.5} />

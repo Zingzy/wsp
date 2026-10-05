@@ -144,6 +144,20 @@ describe("several commands waiting", () => {
     expect(slates.get).toHaveBeenCalledTimes(2);
   });
 
+  it("opens no sheet over the person's typing elsewhere, keeps the held row, and opens it once they stop", async () => {
+    const composer = document.body.appendChild(document.createElement("textarea"));
+    composer.focus();
+    try {
+      open(record(DOC, held("link"), [LINK]));
+      await waitFor(() => expect(document.querySelector('[data-slate-held="link"]')).not.toBeNull());
+      expect(screen.queryByRole("dialog")).toBeNull();
+      act(() => composer.blur());
+      expect(await screen.findByRole("dialog", { name: "Run this command?" })).toBeTruthy();
+    } finally {
+      composer.remove();
+    }
+  });
+
   it("Allow all writes each command's own approval for the thread, the same call one sheet at a time makes", async () => {
     const slates = open(record(DOC, held("link", "disk"), [LINK, DISK]));
     const sheet = await screen.findByRole("dialog", { name: "Run these 2 commands?" });

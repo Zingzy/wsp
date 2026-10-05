@@ -246,7 +246,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   },
   number: {
     type: "number", level: "core", purpose: "A figure with a label.", holdsChildren: false,
-    props: { label: str(req), value: { type: "text", binds: "yes", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), note: str(), size: enm(["normal", "large"]), icon: icon(), trend: { type: "list", binds: "yes", of: "number" } },
+    props: { label: str(req), value: { type: "text", binds: "yes", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), note: str(), size: enm(["normal", "large"]), icon: icon(), trend: { type: "list", binds: "yes", of: "number", about: "read in the sketch alone; the panel's stat cell draws its figure alone, so a trend the person sees is a sparkline beside it" } },
     items: {}, events: [],
     sketch: v => {
       const value = v.prop("value");
@@ -254,7 +254,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
       const line = numbers(v.prop("trend"));
       return join2(shown(v.prop("label")), [fig, shown(v.prop("unit"))].filter(Boolean).join(" "), shown(v.prop("note")), line.length > 1 ? `trend ${line.at(0)} to ${line.at(-1)}` : "");
     },
-    fallback: "text", example: `<number label="Spent" value={thread.cost.usd} format="usd" icon="zap" trend={pluck($hist, 'v')} />`,
+    fallback: "text", example: `<number label="Spent" value={thread.cost.usd} format="usd" icon="zap" />`,
   },
   meter: {
     type: "meter", level: "core", purpose: "One value against a maximum.", holdsChildren: false,
@@ -312,7 +312,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
     fallback: "its source as code", example: "<diagram label=\"Deploy\" value={`flowchart LR\n  build --> test --> ship\n  classDef now stroke-width:3px\n  class ${$step} now`} />",
   },
   sparkline: {
-    type: "sparkline", level: "core", purpose: "A small line beside text; number's trend draws one beside a figure.", holdsChildren: false,
+    type: "sparkline", level: "core", purpose: "A small line beside text, the way to show a figure's trend.", holdsChildren: false,
     props: { label: str(req), values: { type: "list", binds: "yes", required: true, of: "number" }, tone: tone() }, items: {}, events: [],
     sketch: v => trend(shown(v.prop("label")), numbers(v.prop("values"))),
     fallback: "text", example: `<sparkline label="Load" values={pluck($hist, 'v')} />`,

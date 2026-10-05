@@ -214,12 +214,35 @@ function refuse(threadId: string, ask: SlateAsk): void {
  * waiting and one this window has not shown, one sheet for all of them; else the first held run whose sheet this
  * window has not shown yet, so a run a timer or a reaction wants asks as soon as the tab shows it. A sheet closed,
  * answered or not, does not open on its own again; a row's Review opens it. */
+/** Whether the person is typing somewhere other than the slate: a sheet that would open on its own waits until they
+ * stop, and the held run's row still offers Review meanwhile. */
+function useTypingElsewhere(): boolean {
+  const typingNow = (): boolean => {
+    const at = document.activeElement;
+    if (!(at instanceof HTMLElement) || at.closest("[data-slate-surface]") !== null) return false;
+    return at.isContentEditable || at instanceof HTMLTextAreaElement || (at instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit"].includes(at.type));
+  };
+  const [typing, setTyping] = useState(typingNow);
+  useEffect(() => {
+    const read = () => setTyping(typingNow());
+    const left = () => queueMicrotask(read);
+    document.addEventListener("focusin", read);
+    document.addEventListener("focusout", left);
+    return () => {
+      document.removeEventListener("focusin", read);
+      document.removeEventListener("focusout", left);
+    };
+  }, []);
+  return typing;
+}
+
 function Consent({ threadId }: { threadId: string }) {
   const asking = useSlateStore(s => s.asking[threadId]);
+  const typing = useTypingElsewhere();
   const asks = useSlateStore(s => s.byThread[threadId]?.record?.asks);
   const seen = useSlateStore(s => s.seen[threadId]);
   const unseen = (asks ?? []).filter(a => !(seen ?? []).includes(a.key));
-  const ask = asking === undefined ? unseen[0] : (asking.ask ?? asks?.find(a => a.run === asking.run));
+  const ask = asking === undefined ? (typing ? undefined : unseen[0]) : (asking.ask ?? asks?.find(a => a.run === asking.run));
   useEffect(() => {
     if (asking === undefined || ask !== undefined) return;
     // A run held for the start limit or the four-at-once cap has no sheet: once the record says so, stop asking, or
@@ -230,7 +253,7 @@ function Consent({ threadId }: { threadId: string }) {
     });
   }, [asking, ask, threadId]);
   const batch = batchable(asks ?? []);
-  if (asking === undefined && batch.length > 1 && batch.some(a => !(seen ?? []).includes(a.key))) {
+  if (asking === undefined && !typing && batch.length > 1 && batch.some(a => !(seen ?? []).includes(a.key))) {
     const document = slateBundle(threadId).engine.document;
     const closeAll = () => {
       for (const a of batch) markSeen(threadId, a.key);
