@@ -352,6 +352,11 @@ pub enum DaemonOp {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         number: Option<u64>,
+        /// What the last full read by this number saw, as the reply's `seen` gave it: one REST read compares it, and
+        /// where nothing in it moved, nothing else is read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        seen: Option<String>,
         /// The workspace this frame is for, as on fs.list above.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
