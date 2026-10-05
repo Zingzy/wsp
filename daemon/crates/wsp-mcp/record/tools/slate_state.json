@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "slate_state",
-    "description": "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire. start runs ones the person approved always.",
+    "description": "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire. start starts a run the person allowed to run always.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -56,7 +56,7 @@
   },
   "cloudOn": {
     "name": "slate_state",
-    "description": "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire. start runs ones the person approved always.",
+    "description": "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire. start starts a run the person allowed to run always.",
     "inputSchema": {
       "type": "object",
       "properties": {

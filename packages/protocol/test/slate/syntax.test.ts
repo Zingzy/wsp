@@ -188,6 +188,7 @@ describe("a refusal a small model can act on", () => {
     const asDocument = validateSlate({ title: "Gold", sections: [] });
     expect(asDocument.errors[0]).toMatchObject({ code: "D200", message: "this JSON is not a slate: a slate is the JSX-like text slate_catalog shows, sent as text, never JSON of your own" });
     expect(validateSlate({ schema: 3 }).errors[0]).toMatchObject({ code: "D200", fix: "update wsp" });
+    expect(validateSlate({ slate: "<slate><text>x</text></slate>" }).errors[0]).toMatchObject({ code: "D200", message: "this JSON wraps slate markup; send the markup itself as text, not inside document" });
   });
 
   it("an escaped quote in an attribute string shows the quoting that works", () => {

@@ -395,7 +395,9 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       // Small models sent JSON of their own as document; the inputs say which one takes the slate.
       const write = slate.find(t => t.name === "slate_write")!.inputSchema.properties as Record<string, { description?: string }>;
       expect(write["text"]!.description).toContain("JSX-like text");
-      expect(write["document"]!.description).toContain("use text");
+      expect(write["document"]!.description).toContain("not for writing");
+      expect(write["check"]!.description).toBe("validate, write nothing");
+      expect(slate.find(t => t.name === "slate_read")!.description).toContain("the panel's words as the person sees them");
     } finally {
       await client.close();
     }

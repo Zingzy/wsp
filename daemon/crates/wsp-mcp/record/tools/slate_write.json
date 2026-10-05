@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "slate_write",
-    "description": "Writes this thread's slate, the live panel shown here beside the chat. Use it to show the person anything they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), or a dashboard, a form to fill in or a checklist. A run with every= refreshes itself on a timer with no turns, so nothing streams into the chat and nothing polls in a loop.",
+    "description": "Writes this thread's slate, the live panel shown here beside the chat. Use it to show the person anything they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), or a dashboard, a form to fill in or a checklist. A run with every= refreshes itself on a timer with no turns, so nothing polls.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -16,11 +16,11 @@
         "document": {
           "type": "object",
           "additionalProperties": {},
-          "description": "the stored form slate_read gives; use text"
+          "description": "JSON form from slate_read; not for writing"
         },
         "check": {
           "type": "boolean",
-          "description": "store nothing"
+          "description": "validate, write nothing"
         },
         "values": {
           "type": "object",
@@ -75,7 +75,7 @@
   },
   "cloudOn": {
     "name": "slate_write",
-    "description": "Writes this thread's slate, the live panel shown here beside the chat. Use it to show the person anything they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), or a dashboard, a form to fill in or a checklist. A run with every= refreshes itself on a timer with no turns, so nothing streams into the chat and nothing polls in a loop.",
+    "description": "Writes this thread's slate, the live panel shown here beside the chat. Use it to show the person anything they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), or a dashboard, a form to fill in or a checklist. A run with every= refreshes itself on a timer with no turns, so nothing polls.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -90,11 +90,11 @@
         "document": {
           "type": "object",
           "additionalProperties": {},
-          "description": "the stored form slate_read gives; use text"
+          "description": "JSON form from slate_read; not for writing"
         },
         "check": {
           "type": "boolean",
-          "description": "store nothing"
+          "description": "validate, write nothing"
         },
         "values": {
           "type": "object",
