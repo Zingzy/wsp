@@ -33,7 +33,7 @@ describe("the daemon this computer's panes dial", () => {
   it("says why it did not start in one line, once, whatever a redialling page asks", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const tries = { n: 0 };
-    const wiring = localWiring(dir, { HOME: dir }, failing(tries, "wsp-daemon binary missing"));
+    const wiring = localWiring(dir, { HOME: dir }, failing(tries, "wsp-daemon binary missing"), join(dir, ".wsp", "state.json"));
     await expect(wiring.daemonRoad!()).rejects.toThrow("wsp-daemon binary missing");
     await expect(wiring.daemonRoad!()).rejects.toThrow("wsp-daemon binary missing");
     // The reason is not kept: every dial tries again, and the log reads the same reason once.
@@ -53,7 +53,7 @@ describe("the daemon this computer's panes dial", () => {
       if (tries++ === 0) throw new Error("address in use");
       return { road, close: async () => {} } as unknown as Awaited<ReturnType<LocalDaemonStart>>;
     };
-    const wiring = localWiring(dir, { HOME: dir }, start);
+    const wiring = localWiring(dir, { HOME: dir }, start, join(dir, ".wsp", "state.json"));
     await expect(wiring.daemonRoad!()).rejects.toThrow("address in use");
     expect(await wiring.daemonRoad!()).toEqual(road);
     await wiring.close!();
@@ -69,7 +69,7 @@ describe("the daemon this computer's panes dial", () => {
         close: async () => void closed.push(n),
       } as unknown as Awaited<ReturnType<LocalDaemonStart>>;
     };
-    const wiring = localWiring(dir, { HOME: dir }, start);
+    const wiring = localWiring(dir, { HOME: dir }, start, join(dir, ".wsp", "state.json"));
     expect((await wiring.daemonRoad!()).url).toBe("http://127.0.0.1:1");
     await wiring.restartDaemon!();
     expect(closed).toEqual([1]);
@@ -84,7 +84,7 @@ describe("the daemon this computer's panes dial", () => {
       started++;
       return { road: { url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }, close: async () => {} } as unknown as Awaited<ReturnType<LocalDaemonStart>>;
     };
-    const wiring = localWiring(dir, { HOME: dir }, start);
+    const wiring = localWiring(dir, { HOME: dir }, start, join(dir, ".wsp", "state.json"));
     await wiring.restartDaemon!();
     expect(started).toBe(1);
     await wiring.close!();
@@ -92,7 +92,7 @@ describe("the daemon this computer's panes dial", () => {
 
   it("raises the reason a restart could not start one, so the button that asked says what refused it", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const wiring = localWiring(dir, { HOME: dir }, failing({ n: 0 }, "address in use"));
+    const wiring = localWiring(dir, { HOME: dir }, failing({ n: 0 }, "address in use"), join(dir, ".wsp", "state.json"));
     await expect(wiring.restartDaemon!()).rejects.toThrow("address in use");
   });
 
@@ -127,7 +127,7 @@ describe("the daemon this computer's panes dial", () => {
         },
         close: async () => {},
       }) as unknown as Awaited<ReturnType<LocalDaemonStart>>;
-    const wiring = localWiring(dir, { HOME: dir }, start);
+    const wiring = localWiring(dir, { HOME: dir }, start, join(dir, ".wsp", "state.json"));
     const samples: { cpu: number }[] = [];
     const detach = await wiring.sysSamples!(s => samples.push(s as { cpu: number }));
     expect(samples).toEqual([{ cpu: 1 }]);

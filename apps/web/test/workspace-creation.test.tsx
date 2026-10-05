@@ -117,6 +117,18 @@ describe("the creation page", () => {
     expect(`${view.textContent}\n${hovers(view)}`).not.toMatch(/sethostname|two tries|Daemon answered|minted|starting beta|hostname/i);
   });
 
+  it("stands what the step waits for in the step's place, once, each ask in place of the last rather than a row of its own", async () => {
+    const wait = "waiting for Solari to serve the image; asking again in 15s";
+    useStore.setState({ creations: [making([line("fork-requested", "starting beta on solari", 400)])] } as never);
+    for (const elapsedMs of [1_000, 16_000]) useStore.getState().applyEvent({ type: "workspace.creating", workspaceId: "ws_beta", name: "beta", stage: "fork-requested", message: wait, elapsedMs, waiting: true });
+    const view = await mount(useStore.getState().creations[0]!);
+    const rows = steps(view);
+    expect(rows.map(row => words(row))).toEqual([`W${wait.slice(1)}`]);
+    expect(rows.map(row => row.getAttribute("data-state"))).toEqual(["working"]);
+    // The step keeps the moment it began, so its time climbs from there; the wait is that step, not a later one.
+    expect(useStore.getState().creations[0]!.lines.map(l => l.elapsedMs)).toEqual([400]);
+  });
+
   it("says it is asking before the runtime reports a step", async () => {
     const view = await mount(making([], { workspaceId: null }));
     expect(steps(view).map(row => words(row))).toEqual([CREATE_ASKED]);

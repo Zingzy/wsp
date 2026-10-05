@@ -1920,6 +1920,9 @@ export const WorkspaceCreatingEvent = z.object({
   /** What the machine answered this step with, for the line's title: a guest's refusal is evidence a person may
    * need and never a sentence written at them, so no surface draws it as one. */
   detail: z.string().optional(),
+  /** Set on a line saying what the step the create is on waits for, in the message's words. It comes once per ask,
+   * so a surface showing the step draws the newest in the step's place and never as a step of its own. */
+  waiting: z.literal(true).optional(),
   /** The thread this fork was asked for by, from the first stage: a create streams stages before the workspace has
    * a record, so the stream's tree rule reads who asked off the event rather than off a record that is not there
    * yet. Absent where a person asked for the machine. */
@@ -3686,13 +3689,15 @@ export const PlacePresentEvent = z.object({ type: z.literal("place.present"), pl
 /** `said` is the runtime's own reason where it has one, as for a box whose kernel can no longer boot the image. */
 export const PlaceAbsentEvent = z.object({ type: z.literal("place.absent"), placeId: z.string(), said: z.string().optional() });
 export const PlaceRemovedEvent = z.object({ type: z.literal("place.removed"), placeId: z.string() });
+/** A setting of a computer changed, from any window or the command line: the row as it now reads. */
+export const PlaceChangedEvent = z.object({ type: z.literal("place.changed"), place: PlaceView });
 /** An add that has not reached Set up moved, or went: `pending` as it now stands, absent once it became a computer
  * or was taken away. */
 export const PlacePendingEvent = z.object({ type: z.literal("place.pending"), id: z.string(), pending: PendingComputer.optional() });
 export type PlacePendingEvent = z.infer<typeof PlacePendingEvent>;
 
-/** The four as one type, so the host's door and the app's fold read one shape. */
-export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent>;
+/** The five as one type, so the host's door and the app's fold read one shape. */
+export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent> | z.infer<typeof PlaceChangedEvent>;
 
 /** A project was recorded, so every client's list follows without a refetch. */
 export const ProjectAddedEvent = z.object({ type: z.literal("project.added"), project: ProjectView });
@@ -3776,6 +3781,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   PlacePresentEvent.extend(sequenced),
   PlaceAbsentEvent.extend(sequenced),
   PlaceRemovedEvent.extend(sequenced),
+  PlaceChangedEvent.extend(sequenced),
   AgentsChangedEvent.extend(sequenced),
   UsageAlertEvent.extend(sequenced),
   HostNoticeEvent.extend(sequenced),

@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { createServer as createHttpServer } from "node:http";
 import { createServer, type AddressInfo, type Socket } from "node:net";
 import { homedir, hostname, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NapRefusedError, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
@@ -129,7 +129,7 @@ describe("wsp verbs over the host", () => {
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
     daemon = fakeGitDaemon();
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), daemonChannel: daemon.open, agentsReader: AGENTS_HERE });
+    rt = createRuntime({ statePath, backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, statePath, copier), placeLinks: placeWiring(statePath), daemonChannel: daemon.open, agentsReader: AGENTS_HERE });
     handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt });
     // A workspace is one project's copy, so every line that makes one needs a project first; one project here, so
     // wsp new takes the work alone.
@@ -235,7 +235,7 @@ describe("wsp verbs over the host", () => {
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store, places?: PlaceBackends, wired: MachineBackend = backend, restart?: RestartRoad): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), daemonChannel: daemon.open, ...(places !== undefined ? { places } : {}) });
+    rt = createRuntime({ statePath, backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, statePath, copier), placeLinks: placeWiring(statePath), daemonChannel: daemon.open, ...(places !== undefined ? { places } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
     handle = await serve(captured(), { port: 0, statePath, webDir: join(dir, "web"), runtime: rt, ...(restart !== undefined ? { restart } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -1973,7 +1973,7 @@ describe("wsp verbs over the host", () => {
     const branched = await run("run", "spoo", "--branch", "feat/x", "hello on a branch");
     expect(branched.code, branched.io.errors.join("\n")).toBe(0);
     expect(copier.worktrees.map(w => ({ from: w.from, project: w.project, branch: w.branch }))).toEqual([{ from: folder, project: project.id, branch: "feat/x" }]);
-    const tree = join(dir, "user", ".wsp", "worktrees", project.id, "feat-x");
+    const tree = join(dirname(statePath), "worktrees", project.id, "feat-x");
     expect(claude.starts.at(-1)!.cwd).toBe(tree);
     // The threads table names the folder and the branch each thread works in.
     const rows = await threadRows(await dialHost(statePath));
@@ -3938,7 +3938,7 @@ describe("wsp verbs over the host", () => {
     it("sets the nap after on a computer that forks in minutes or off, and refuses it on this one and past three hours", async () => {
       // The host again with its provider wired as a place, which is a row whose workspaces nap.
       await handle?.close();
-      rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: { ...placeWiring(statePath), provider: () => ({ id: "default", rateUsdPerHour: 0.1 }) }, daemonChannel: daemon.open });
+      rt = createRuntime({ statePath, backend, store, adapters: { claude: claude.adapter }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, statePath, copier), placeLinks: { ...placeWiring(statePath), provider: () => ({ id: "default", rateUsdPerHour: 0.1 }) }, daemonChannel: daemon.open });
       handle = await serve(captured(), { port: 0, statePath, webDir: join(dir, "web"), runtime: rt });
       const forks = (await rt.places!.rows()).find(p => p.takesForks === true)!;
       const set = await run("computers", "set", forks.id, "--nap", "5");

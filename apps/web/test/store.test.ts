@@ -393,6 +393,15 @@ describe("store creations", () => {
     expect(useStore.getState().goldenFrames).toEqual({});
   });
 
+  it("takes a computer's row as a set from anywhere left it, and adds no row the list does not hold", () => {
+    useStore.setState({ places: [HERE_PLACE, HETZNER_PLACE] });
+    const apply = useStore.getState().applyEvent;
+    const napped = { ...HETZNER_PLACE, napMs: 5 * 60_000 };
+    apply({ type: "place.changed", place: napped });
+    apply({ type: "place.changed", place: { ...HETZNER_PLACE, id: "p_gone" } });
+    expect(useStore.getState().places).toEqual([HERE_PLACE, napped]);
+  });
+
   it("stamps an image line's elapsed from the moment the create was asked, so the log's right column grows", () => {
     vi.useFakeTimers();
     try {

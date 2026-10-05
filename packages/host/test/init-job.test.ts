@@ -176,7 +176,7 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
     });
   // The provider the runtime forks on: the stub, or one a case hands over to stand for a host set up for none.
   const places = over.places?.(backend);
-  const rt = createRuntime({ backend: over.provider ?? backend, store, adapters: { claude: claude.adapter, ...over.adapters }, local: localWiring(dir, undefined, fakeDaemonStart, undefined, copyingFake()), hostId: "box:h1", ...(places !== undefined ? { places } : {}), ...(over.placeLinks === true ? { placeLinks: placeWiring(statePath) } : {}) });
+  const rt = createRuntime({ backend: over.provider ?? backend, store, adapters: { claude: claude.adapter, ...over.adapters }, local: localWiring(dir, undefined, fakeDaemonStart, join(dir, ".wsp", "state.json"), copyingFake()), hostId: "box:h1", ...(places !== undefined ? { places } : {}), ...(over.placeLinks === true ? { placeLinks: placeWiring(statePath) } : {}) });
   runtimes.push(rt);
   let link = scriptedLink({ signedIn: true, hold: false, missing: false });
   const relay: Fake["relay"] = { hooks: [], closed: 0 };

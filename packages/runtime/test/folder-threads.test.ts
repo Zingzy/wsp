@@ -116,7 +116,7 @@ function fakeDaemon() {
   return { frames, answers, open };
 }
 
-function here(wire: Partial<LocalWiring> = {}) {
+function here(wire: Partial<LocalWiring> = {}, served = true) {
   const root = scratch();
   const state = join(root, "state");
   mkdirSync(state);
@@ -140,7 +140,7 @@ function here(wire: Partial<LocalWiring> = {}) {
     store: memoryStore(),
     adapters: { claude: harness(starts), codex: harness(starts) },
     local,
-    statePath: join(state, "state.json"),
+    ...(served ? { statePath: join(state, "state.json") } : {}),
     daemonChannel: daemon.open,
   });
   return { rt, copier, starts, daemon, home: state, worktrees: join(state, "worktrees"), roots: join(root, "roots") };
@@ -346,6 +346,15 @@ describe("a thread whose worktree is gone", () => {
     ]);
     expect(moved[0]).not.toHaveProperty("fresh");
     expect((await rt.workspaces.get(at.workspace.id)).worktree).toMatchObject({ gone: true });
+  });
+});
+
+describe("a worktree's folder", () => {
+  it("is the state's own: a runtime handed no state file makes none, so nothing lands under the home it was given", async () => {
+    const { rt, copier } = here({}, false);
+    const project = await rt.projects.add({ source: repo() });
+    await expect(rt.workspaces.worktree({ project: project.id, branch: "feat/w" })).rejects.toMatchObject({ message: expect.stringContaining("this runtime was given no state file"), kind: "invalid" });
+    expect(copier.asks).toEqual([]);
   });
 });
 

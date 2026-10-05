@@ -875,7 +875,7 @@ interface LiveWorkspace {
 
 /** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. A notice is a second
  * line written for a person; a detail is what the machine answered, which rides the line's title. */
-type StageReport = (stage: WorkspaceCreateStage, message: string, said?: { notice?: string; detail?: string }) => void;
+type StageReport = (stage: WorkspaceCreateStage, message: string, said?: { notice?: string; detail?: string; waiting?: true }) => void;
 
 export interface SessionHandle {
   readonly id: string;
@@ -2747,8 +2747,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return read.exitCode === 0 && branch !== "" ? branch : undefined;
   };
   /** The folder beside the state this host serves, where its worktrees and its own files about them live, so two
-   * hosts never share one. */
-  const stateFolder = (): string => (opts.statePath !== undefined ? dirname(resolvePathOn(opts.statePath)) : join(local?.homeDir ?? homedir(), ".wsp"));
+   * hosts never share one. Never a home's default: a host serving another home would write into the person's. */
+  const stateFolder = (): string => {
+    if (opts.statePath === undefined) throw Object.assign(new Error("this runtime was given no state file, so it keeps no worktrees or copies"), { kind: "invalid" });
+    return dirname(resolvePathOn(opts.statePath));
+  };
   /** A repo cloned on this computer into the folder the person named, which must hold nothing yet: the source's own
    * clone line, argv quoted so neither the url nor the folder is read by the shell, `--` before the url so git
    * reads no option out of it, and no prompt, since nobody is at a terminal to answer one. Git's own last line is
@@ -5392,7 +5395,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * first try booted. An answer of any kind ends the attempt and a changed request starts one, so the key after a kill
    * or a refusal is always fresh. A replay naming a dead machine is dropped and the create made anew (measured
    * 2026-09-04: the provider replays a killed machine's id). Another live process's attempt is never joined. */
-  const keyedCreate = async (at: MachineBackend, purpose: string, spec: MachineSpec, afterCorpse = false): Promise<Machine> => {
+  const keyedCreate = async (at: MachineBackend, purpose: string, spec: MachineSpec, waiting?: (line: string) => void, afterCorpse = false): Promise<Machine> => {
     const body = fingerprint(spec);
     const held = (await store.get(CREATES, purpose)) as PendingCreate | undefined;
     const theirs = held !== undefined && (held.host !== hostId || (held.pid !== process.pid && pidAlive(held.pid)));
@@ -5407,7 +5410,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...spec,
         idempotencyKey: attempt.key,
         ...(spec.labels?.[CREATED_AT_LABEL] !== undefined ? { labels: { ...spec.labels, [CREATED_AT_LABEL]: attempt.createdAt } } : {}),
-      });
+      }, waiting);
     } catch (e) {
       if (typeof (e as WspError).status === "number") await store.delete(CREATES, purpose);
       throw e;
@@ -5417,7 +5420,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if ((await machine.state()) === "gone") {
         if (afterCorpse) throw new Error(`create for ${purpose}: the provider replayed ${machine.id}, which is gone, under a key it had never seen (${attempt.key})`);
         console.warn(`create for ${purpose}: the replay under ${attempt.key} named ${machine.id}, which is gone; creating anew`);
-        return keyedCreate(at, purpose, spec, true);
+        return keyedCreate(at, purpose, spec, waiting, true);
       }
       console.warn(`create for ${purpose}: ${machine.id} replayed from an earlier attempt under ${attempt.key}`);
     }
@@ -5443,8 +5446,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Every call a backend may or may not carry, in one place: a module keeps its methods on its prototype, so
       // this handle cannot be a spread of the backend, and a call left out is one the roads inside here lose.
       ...forwardedCalls(at),
-      create: async spec => {
-        const m = await keyedCreate(at, purpose, spec);
+      create: async (spec, waiting) => {
+        const m = await keyedCreate(at, purpose, spec, waiting);
         inflight.add(m.id);
         mine.push(m.id);
         return m;
@@ -5537,7 +5540,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const spec = forkSpec(record, golden?.kind ?? "sandbox", image === undefined ? undefined : goldenImage(image.projects === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, record.spec.engine === true || (golden !== undefined && (await recipeAsksEngine(golden))), override);
         // A place that has never held this image says missing about a reference no registry has: the fork lands
         // nowhere and the sentence says where it would land until that place holds a copy.
-        const machine = await b.create(spec).catch((e: unknown) => {
+        const machine = await b.create(spec, report === undefined ? undefined : line => report("fork-requested", line, { waiting: true })).catch((e: unknown) => {
           if (image === undefined || record.place === undefined || !isMissing(e)) throw e;
           throw Object.assign(new Error(placeHoldsNoImageLine(placeDoorOf().nameOf(record.place), spec.fromSnapshot ?? spec.template ?? record.golden)), { kind: "invalid" });
         });
@@ -6764,6 +6767,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         elapsedMs: clock.now() - began,
         ...(said?.notice !== undefined ? { notice: said.notice } : {}),
         ...(said?.detail !== undefined ? { detail: said.detail } : {}),
+        ...(said?.waiting === true ? { waiting: true as const } : {}),
         ...(askedBy !== undefined ? { askedBy } : {}),
       });
     };

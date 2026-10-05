@@ -44,6 +44,8 @@ export interface CreationLine {
   readonly notice?: string;
   /** What the machine answered this step with, for the line's title; never drawn as a sentence. */
   readonly detail?: string;
+  /** What the step waits for now, in the runtime's words, newest only: drawn in place of the step's own word. */
+  readonly waiting?: string;
 }
 
 /** A workspace being created: the sidebar row and the center view read it until workspace.created replaces it. */
@@ -1204,6 +1206,9 @@ export const useStore = create<State>((set, get) => {
         case "place.joined":
           set(s => ({ places: [...s.places.filter(p => p.id !== e.place.id), e.place] }));
           return;
+        case "place.changed":
+          set(s => ({ places: s.places.map(p => (p.id === e.place.id ? e.place : p)) }));
+          return;
         case "place.stage":
           applyAddStage(get().api, e);
           return;
@@ -1280,6 +1285,7 @@ export const useStore = create<State>((set, get) => {
             elapsedMs: e.elapsedMs,
             ...(e.notice !== undefined ? { notice: e.notice } : {}),
             ...(e.detail !== undefined ? { detail: e.detail } : {}),
+            ...(e.waiting === true ? { waiting: e.message } : {}),
           };
           set(s => {
             // Ours is matched by the id once known, before that by the name it was asked for; another client's create shows up
@@ -1294,8 +1300,12 @@ export const useStore = create<State>((set, get) => {
               return { creations: [...s.creations, { key: `${CREATION_PREFIX}${e.workspaceId}`, name: e.name, askedAt: Date.now() - e.elapsedMs, workspaceId: e.workspaceId, lines: [line], failed }] };
             }
             heard.add(own.key);
-            // The last word the subscribe asks for repeats the frame a replay may have carried just before it.
             const last = own.lines.at(-1);
+            // A wait is said once per ask: it is the step it waits in, told again, and never a step of its own.
+            if (e.waiting === true && last !== undefined && last.stage === e.stage) {
+              return { creations: s.creations.map(c => (c === own ? { ...c, workspaceId: e.workspaceId, lines: [...c.lines.slice(0, -1), { ...last, waiting: e.message }] } : c)) };
+            }
+            // The last word the subscribe asks for repeats the frame a replay may have carried just before it.
             const repeated = last !== undefined && last.stage === line.stage && last.message === line.message && last.elapsedMs === line.elapsedMs;
             return { creations: s.creations.map(c => (c === own ? { ...c, workspaceId: e.workspaceId, lines: repeated ? c.lines : [...c.lines, line], failed: c.failed ?? failed } : c)) };
           });

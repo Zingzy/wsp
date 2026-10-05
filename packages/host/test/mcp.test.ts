@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 // command line uses; a thread it opens is the local agent's.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -100,7 +100,7 @@ describe("the MCP server over the host", () => {
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath), daemonChannel: branchDaemons().open });
+    rt = createRuntime({ statePath, backend, store, adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, statePath, copyingFake()), placeLinks: placeWiring(statePath), daemonChannel: branchDaemons().open });
     handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt });
     // A workspace is one project's copy, so every call that makes one needs a project first; one project here, so
     // new takes the work alone.
@@ -166,7 +166,7 @@ describe("the MCP server over the host", () => {
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"]): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend, store, adapters, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath), daemonChannel: branchDaemons().open });
+    rt = createRuntime({ statePath, backend, store, adapters, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, statePath, copyingFake()), placeLinks: placeWiring(statePath), daemonChannel: branchDaemons().open });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_mcp_key");
     handle = await serve(captured(), { port: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -347,7 +347,7 @@ describe("the MCP server over the host", () => {
     expect(claude.starts.at(-1)!.cwd).toBe(here.path);
     const first = (await rt.sessions.list()).find(t => t.prompt === "say pong")!;
     expect(opened.text).toBe(`${threadOpenedLine(first.threadId!, "mac", here.path)}\nre: say pong`);
-    const tree = join(dir, "user", ".wsp", "worktrees", here.id, "feat-x");
+    const tree = join(dirname(statePath), "worktrees", here.id, "feat-x");
     const made = await call("worktree", { project: "mac", branch: "feat/x" });
     expect(made).toEqual({ text: tree, structured: { path: tree, branch: "feat/x", made: true }, isError: false });
     const branched = await call("run", { project: "mac", branch: "feat/x", message: "on the branch" });

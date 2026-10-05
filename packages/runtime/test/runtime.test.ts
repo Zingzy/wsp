@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { diskFullLine, execFailedLine, machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape } from "@wsp/protocol";
+import { diskFullLine, execFailedLine, imageServedWaitLine, machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape } from "@wsp/protocol";
 import { HOST_TOKEN_ENV, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, DISK_SYNC_CMD, DISK_USE_CMD, ExecFailedError, GuestUnusableError, KILL_ASKS, MachineUnreachableError, TOOLS_PATH, type ExecResult, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
@@ -4729,6 +4729,27 @@ describe("runtime create stages", () => {
       const ready = events.findIndex(e => e.type === "workspace.creating" && e.stage === "ready");
       expect(events.findIndex(e => e.type === "workspace.created")).toBe(ready + 1);
     });
+  });
+
+  it("a provider's wait for the image it forks from is a line of the create, under the step it waits in", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const create = backend.create.bind(backend);
+    backend.create = async (spec, waiting) => {
+      waiting?.(imageServedWaitLine("Solari", 15_000));
+      return create(spec);
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    await createOn(rt, { golden: "snap_g", name: "waits" });
+    const stages = creating(events);
+    expect(stages.slice(0, 2).map(e => [e.stage, e.message])).toEqual([
+      ["fork-requested", "starting waits on default"],
+      ["fork-requested", "waiting for Solari to serve the image; asking again in 15s"],
+    ]);
+    // Marked, so a surface showing the step folds each ask into it rather than drawing a step per ask.
+    expect(stages.map(e => e.waiting)).toEqual([undefined, true, ...stages.slice(2).map(() => undefined)]);
   });
 
   it("a guest that refuses the hostname gets a verdict in the log, its own words on the line alone, and the create goes on", async () => {

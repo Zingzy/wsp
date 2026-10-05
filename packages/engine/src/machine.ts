@@ -201,7 +201,8 @@ export interface MachineBackend {
    * provider has no computer of theirs to run anything on. Nothing of wsp is installed on the computer by it: the
    * commands are its own folders' making and taking. */
   onComputer?(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
-  create(spec: MachineSpec): Promise<Machine>;
+  /** `waiting` hears each wait the provider puts the create through, as a line for the person following it. */
+  create(spec: MachineSpec, waiting?: (line: string) => void): Promise<Machine>;
   /** Optional: only backends the person holds a key for. One cheap authenticated read that boots nothing and touches
    * no machine's idle clock, so a key the provider refuses is known before anything is saved or billed. Rejects with
    * the provider's own WspError; `checkProviderKey` is what reads that answer. */

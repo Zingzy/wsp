@@ -1452,6 +1452,11 @@ export function snapshotListedWaitLine(snapshotId: string, waitMs: number, waite
   return `the provider lists snapshot ${snapshotId} yet answered "Snapshot not found"; asking again in ${fmtDuration(waitMs)} (${fmtDuration(waitedMs)} so far)`;
 }
 
+/** The same wait as a line of the create a person follows, one per ask: the lines' own pace is how long it has been. */
+export function imageServedWaitLine(provider: string, waitMs: number): string {
+  return `waiting for ${provider} to serve the image; asking again in ${fmtDuration(waitMs)}`;
+}
+
 /** The same refusal once the wait for it has run out: the snapshot is listed, so it is not gone. */
 export function snapshotListedRefusedLine(snapshotId: string, waitedMs: number): string {
   return `the provider lists snapshot ${snapshotId} yet answered "Snapshot not found" for ${fmtDuration(waitedMs)}; it is not gone, so ask again in a minute`;

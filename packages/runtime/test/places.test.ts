@@ -852,6 +852,23 @@ describe("a place's cap and what runs there", () => {
     expect(await store.get("caps", HERE_PLACE_ID)).toBeUndefined();
   });
 
+  it("tells every socket the row a set made, so a page another window holds open reads it at once", async () => {
+    const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
+    const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 2, memMb: 7885 } }) });
+    sockets.push(joined.client.ws);
+    const watcher = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect((await watcher.request("events.subscribe")).ok).toBe(true);
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const answered = (await capOf(host, joined.placeId, { threads: 1 })) as { place: PlaceView };
+    await capOf(host, HERE_PLACE_ID, { threads: 2 });
+    await until(() => watcher.events.filter(e => e.type === "place.changed").length === 2);
+    const changed = watcher.events.filter(e => e.type === "place.changed").map(e => e["place"] as PlaceView);
+    expect(changed[0]).toEqual(answered.place);
+    expect(changed[1]).toMatchObject({ id: HERE_PLACE_ID, cap: { threads: 2 } });
+    host.close();
+    watcher.close();
+  });
+
   it("says on every row its kind's default beside the cap and what the person set, and a reset takes a number back to the default", async () => {
     const { hostKey, store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
     const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 4, memMb: 8192 } }) });

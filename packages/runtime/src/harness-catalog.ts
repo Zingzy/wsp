@@ -218,14 +218,21 @@ export function harnessCatalog(harness: string): HarnessCatalog | undefined {
   return HARNESS_CATALOGS.find(c => c.harness === harness);
 }
 
+/** Models an agent newer than its pin runs and the usage ledger meets in its logs: named, never offered at a start. */
+export const NAMED_ONLY: readonly HarnessOption[] = [option("claude-sonnet-5-5", "Sonnet 5.5"), option("gpt-6-astra", "GPT-6-Astra")];
+
 /** A model as a person reads it: its label in any agent's table, found as an agent names it, with a provider in front
- * or a date after it; else its id, and an empty id as no model named. */
+ * or a date after it; else a name built from its words, a version's numbers joined by dots; an empty id is no model. */
 export function modelLabel(model: string): string {
   if (model === "") return "Model not named";
   const bare = model.slice(model.lastIndexOf("/") + 1);
   const undated = (id: string): string => id.replace(/-\d{8}$/, "");
-  const known = HARNESS_CATALOGS.flatMap(everyModel);
-  return (known.find(o => o.value === bare) ?? known.find(o => undated(o.value) === undated(bare)))?.label ?? bare;
+  const known = [...HARNESS_CATALOGS.flatMap(everyModel), ...NAMED_ONLY];
+  const found = known.find(o => o.value === bare) ?? known.find(o => undated(o.value) === undated(bare));
+  if (found !== undefined) return found.label;
+  const words = undated(bare).split("-").filter(w => w !== "");
+  const numeric = (w: string | undefined): boolean => w !== undefined && /^\d+$/.test(w);
+  return words.map((w, i) => (numeric(w) && numeric(words[i - 1]) ? `.${w}` : ` ${w.charAt(0).toUpperCase()}${w.slice(1)}`)).join("").trimStart() || bare;
 }
 
 /** The model a thread's title question runs on: the harness row's own smallest, where the catalog in front of us

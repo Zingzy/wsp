@@ -2954,7 +2954,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         settingsHeld.set(placeId, next);
       });
       if (set.napMs !== undefined || reset.includes("nap")) opts.napChanged?.(placeId);
-      return { place: await withCap(row, await rowIds()) };
+      const place = await withCap(row, await rowIds());
+      emit({ type: "place.changed", place });
+      return { place };
     },
 
     async update(placeId) {
