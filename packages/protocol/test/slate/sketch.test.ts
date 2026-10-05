@@ -90,8 +90,10 @@ describe("the catalog", () => {
     // What ago and until print and what a chart's x takes, after agents guessed both, took it from 1,060 to 1,090;
     // tool= runs on the first page and what a formula holds, after agents missed both, to 1,110; every enum's
     // values and every required mark, after 13 cells guessed them (ruling 8), to 1,310; what turns held off and where
-    // a button goes in a project with no UI (ruling 12), to 1,345.
-    expect(slateTokens(slateCatalog())).toBeLessThan(1345);
+    // a button goes in a project with no UI (ruling 12), to 1,345; never reading a secret's value, to 1,360.
+    expect(slateTokens(slateCatalog())).toBeLessThan(1360);
+    expect(slateCatalog()).toContain("One in a file stays there for the run to read, never you.");
+    expect(slateCatalog("runs")).toContain("one in a file, the command reads itself, never through you.");
     expect(slateCatalog()).toContain("A button asked for where the project has no UI goes here: the slate is its UI, and the reply says so.");
     expect(slateCatalog("chart")).toContain("in this computer's time zone");
     expect(slateCatalog()).toContain(`held is a sentence that disables: bind it to a condition; "" or false enables.`);
@@ -116,8 +118,8 @@ describe("the catalog", () => {
 
   it("answers runs, functions, steps, handlers and examples within their budgets", () => {
     // A line for each run attribute, after small models guessed what always and once did, took it from 590 to 660;
-    // once, stream and when the person is asked, as ruled (6, 7), to 720.
-    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(720);
+    // once, stream and when the person is asked, as ruled (6, 7), to 720; a secret in a file, to 730.
+    expect(slateTokens(slateCatalog("runs"))).toBeLessThan(730);
     expect(slateCatalog("runs")).toContain("once: a start while it still runs is skipped; without once it stops and starts again.");
     expect(slateCatalog("runs")).toContain("at the write for an every= run, at the first press or <when> for the rest. Until then it reads held; allowing it starts it at once.");
     expect(slateCatalog()).toContain("bigger: resend the whole slate with if_version.");

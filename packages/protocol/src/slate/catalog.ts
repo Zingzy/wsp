@@ -33,7 +33,7 @@ export const SLATE_RULES: readonly string[] = [
   "Every live number says its window and unit.",
   "Nothing centered but a lone figure or card.",
   "Use the slate tools, never wsp from a shell.",
-  "A secret the person types goes in a <secret> input, never a file or the chat.",
+  "A secret the person types goes in a <secret> input, never a file or the chat. One in a file stays there for the run to read, never you.",
   "A button asked for where the project has no UI goes here: the slate is its UI, and the reply says so.",
 ];
 
@@ -157,7 +157,7 @@ const RUNS = `runs: a command the slate starts with no turn of yours.
 Each attribute:
 name: the run is read as $name.
 cmd: the literal command, run by bash -c in the thread's folder. Single quotes outside double ones; the block form above takes any text.
-env={{ ID: $id }}: values it reads as $ID. args={[$a]}: as $1. stdin={$x}: on standard input. A secret goes only in env or stdin.
+env={{ ID: $id }}: values it reads as $ID. args={[$a]}: as $1. stdin={$x}: on standard input. A secret goes only in env or stdin; one in a file, the command reads itself, never through you.
 every={60}: starts it again every 60 seconds, at least 10, while the Slate tab is on screen in the app.
 always: with every, ticks while the tab is not on screen too.
 once: a start while it still runs is skipped; without once it stops and starts again.

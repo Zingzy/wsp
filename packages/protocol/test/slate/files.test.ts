@@ -109,6 +109,6 @@ describe("a slate's files", () => {
 
   it("says in the rules to build with the slate tools and to take a secret in a <secret> input", () => {
     expect(SLATE_RULES).toContain("Use the slate tools, never wsp from a shell.");
-    expect(SLATE_RULES).toContain("A secret the person types goes in a <secret> input, never a file or the chat.");
+    expect(SLATE_RULES).toContain("A secret the person types goes in a <secret> input, never a file or the chat. One in a file stays there for the run to read, never you.");
   });
 });
