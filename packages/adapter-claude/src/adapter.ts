@@ -75,7 +75,7 @@ export interface ClaudeSession {
    * call it blocks runs or is refused as the option says. The caller names the outcome, since only it knows whether
    * this is the person's pick or its own answer for a prompt nobody came to, and denyMessage is what the agent
    * reads as the call's result when the option refuses it. */
-  answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<AnswerOutcome>;
+  answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string; reason?: string }): Promise<AnswerOutcome>;
   /** Puts this running turn into another access mode, from its next tool call on, and puts it to the prompt the turn
    * is stopped on: a mode that asks nobody answers that prompt, and a mode the CLI itself offered on that call
    * answers it as that option. Settles on the CLI's own answer to the request otherwise, so a mode it will not take

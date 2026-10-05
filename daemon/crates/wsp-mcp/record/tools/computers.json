@@ -758,6 +758,18 @@
                       }
                     ]
                   },
+                  "turnLimitMs": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 3600000,
+                        "maximum": 86400000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "spawn": {
                     "type": "object",
                     "properties": {
@@ -790,6 +802,26 @@
               },
               "napDefault": {
                 "type": "integer"
+              },
+              "turnLimitMs": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "turnLimitDefault": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "spawn": {
                 "type": "object",
@@ -1695,6 +1727,18 @@
                       }
                     ]
                   },
+                  "turnLimitMs": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 3600000,
+                        "maximum": 86400000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "spawn": {
                     "type": "object",
                     "properties": {
@@ -1727,6 +1771,26 @@
               },
               "napDefault": {
                 "type": "integer"
+              },
+              "turnLimitMs": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "turnLimitDefault": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "spawn": {
                 "type": "object",
