@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Inputs from the agent or a paired device that once hung or crashed the host, which runs all of this on its event loop.
 import { describe, expect, it } from "vitest";
-import { evaluateSlateExpression, parseSlate, runSlateBatch, setSlateValue, sketchSlate, slateCatalog, slateChartAxis, validateSlate, SLATE_LIMITS } from "../../src/slate/index.js";
+import { compileSlateText, evaluateSlateExpression, parseSlate, runSlateBatch, setSlateValue, sketchSlate, slateCatalog, slateChartAxis, validateSlate, SLATE_LIMITS } from "../../src/slate/index.js";
 
 const codes = (text: string): string[] => { const r = parseSlate(text); return [...r.errors, ...r.warnings].map(p => p.code); };
 
@@ -47,5 +47,20 @@ describe("hostile slate inputs", () => {
 
   it("refuses an env key with RegExp characters instead of throwing", () => {
     expect(codes(`<slate><secret name="tok" /><run name="r" cmd="echo" env={{ "A(": $tok }} /><text>x</text></slate>`)).toContain("K702");
+  });
+
+  it("reads a slate in time linear in its length, and refuses text past the caps before reading it", () => {
+    const pieces = (n: number): string => `<slate>\n<column>\n${Array.from({ length: n }, (_, i) => `<text tone="muted">line ${i}</text>`).join("\n")}\n</column>\n</slate>`;
+    const timed = (work: () => void): number => Math.min(...[1, 2, 3].map(() => { const started = performance.now(); work(); return performance.now() - started; }));
+    const big = pieces(3_500);
+    expect(big.length).toBeLessThan(SLATE_LIMITS.documentBytes + SLATE_LIMITS.filesBytes);
+    // Twenty JSON reads of the same length are linear work timed under the same load; the quadratic reader took about 90 times that.
+    const json = JSON.stringify(big);
+    const linear = timed(() => { for (let i = 0; i < 20; i++) JSON.parse(json); });
+    expect(timed(() => compileSlateText(big)) / linear).toBeLessThan(30);
+    const over = compileSlateText(pieces(20_000));
+    expect(over.errors.map(e => e.code)).toEqual(["D208"]);
+    const deep = `<slate>${"<column>".repeat(3_000)}<text>x</text>${"</column>".repeat(3_000)}</slate>`;
+    expect(compileSlateText(deep).errors.map(e => e.code)).toEqual(["D206"]);
   });
 });

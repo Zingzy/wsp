@@ -5,7 +5,7 @@
 // to the same checks. Lines ride beside the document so each problem names the line of the attribute it is on.
 import { parseSlateExpression, slatePathText } from "./expr.js";
 import { SLATE_ITEM_KINDS, SLATE_PIECES, type SlateItemSpec } from "./kit.js";
-import { SLATE_LIMITS } from "./limits.js";
+import { SLATE_LIMITS, slateBytes } from "./limits.js";
 import { nearest, slateProblem, slateUnknownPiece, type SlateCode } from "./problems.js";
 import { SLATE_STEPS } from "./steps.js";
 import { validateDocument, type SlateLines } from "./validate.js";
@@ -28,10 +28,26 @@ class Fatal extends Error {
 const DECLARATIONS = new Set(["value", "secret", "derived", "run", "when"]);
 const PATCH_TAGS = new Set(["props", "add", "remove", "move", "clear", "undo"]);
 
+const TAG_NAME = /[a-zA-Z][a-zA-Z0-9-]*/y;
+const ATTR_NAME = /[A-Za-z][A-Za-z0-9_-]*/y;
+const CLOSING_TAG = /<\/([a-zA-Z][a-zA-Z0-9-]*)\s*>/y;
+
+/** Nesting the reader follows before it stops; the checker refuses anything past SLATE_LIMITS.depth with its own words. */
+const READ_DEPTH = SLATE_LIMITS.depth + 10;
+
 class Reader {
   private i = 0;
-  constructor(private readonly src: string) {}
-  line(at = this.i): number { let n = 1; for (let j = 0; j < at && j < this.src.length; j++) if (this.src[j] === "\n") n++; return n; }
+  private readonly newlines: number[] = [];
+  constructor(private readonly src: string) {
+    for (let j = src.indexOf("\n"); j >= 0; j = src.indexOf("\n", j + 1)) this.newlines.push(j);
+  }
+  line(at = this.i): number {
+    let lo = 0;
+    let hi = this.newlines.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (this.newlines[mid]! < at) lo = mid + 1; else hi = mid; }
+    return lo + 1;
+  }
+  private match(re: RegExp): RegExpExecArray | null { re.lastIndex = this.i; return re.exec(this.src); }
   private peek(n = 0): string | undefined { return this.src[this.i + n]; }
   private starts(s: string): boolean { return this.src.startsWith(s, this.i); }
   private ws(): void { while (this.i < this.src.length && /\s/.test(this.src[this.i]!)) this.i++; }
@@ -39,6 +55,8 @@ class Reader {
 
   /** Every top-level element: one <slate> for a document, any number for a patch. */
   elements(): El[] {
+    const most = SLATE_LIMITS.documentBytes + SLATE_LIMITS.filesBytes;
+    if (this.src.length > most || slateBytes(this.src) > most) throw new Fatal("D208", `the text is over ${most / 1024} KB, the most a slate and its files hold; write less, or patch it in parts`, 1);
     const out: El[] = [];
     for (;;) {
       this.ws();
@@ -47,7 +65,7 @@ class Reader {
       if (this.i >= this.src.length) break;
       if (this.peek() !== "<" && out.length === 0 && (this.peek() === "{" || this.peek() === "[")) this.fail("this is JSON, and a slate is JSX-like text that starts with <slate>; slate_catalog shows it", `<slate title="Gold"><number label="Spot" value={$spot.json.usd} unit="USD" /></slate>`);
       if (this.peek() !== "<") this.fail(`expected an element at line ${this.line()}, found text`);
-      out.push(this.element());
+      out.push(this.element(1));
     }
     return out;
   }
@@ -58,10 +76,11 @@ class Reader {
       break;
     }
   }
-  private element(): El {
+  private element(depth: number): El {
     const line = this.line();
+    if (depth > READ_DEPTH) throw new Fatal("D206", `elements nest more than ${SLATE_LIMITS.depth} deep at line ${line}; flatten the layout`, line);
     this.i++;
-    const tag = /^[a-zA-Z][a-zA-Z0-9-]*/.exec(this.src.slice(this.i));
+    const tag = this.match(TAG_NAME);
     if (tag === null) this.fail(`cannot read a tag name at line ${line}`);
     const name = tag[0];
     this.i += name.length;
@@ -71,7 +90,7 @@ class Reader {
       if (this.starts("/>")) { this.i += 2; return { tag: name, attrs, children: [], line }; }
       if (this.peek() === ">") { this.i++; break; }
       if (this.i >= this.src.length) this.fail(`<${name}> at line ${line} is not closed; write <${name} ... /> or </${name}>`);
-      const an = /^[A-Za-z][A-Za-z0-9_-]*/.exec(this.src.slice(this.i));
+      const an = this.match(ATTR_NAME);
       if (an === null) this.fail(`cannot read an attribute of <${name}> at line ${this.line()}; write <${name} prop="literal" prop={formula} />`);
       const aline = this.line();
       this.i += an[0].length;
@@ -117,14 +136,14 @@ class Reader {
     for (;;) {
       if (this.i >= this.src.length) this.fail(`<${name}> at line ${line} is not closed; write <${name} ... /> or </${name}>`);
       if (this.starts("</")) {
-        const m = /^<\/([a-zA-Z][a-zA-Z0-9-]*)\s*>/.exec(this.src.slice(this.i));
+        const m = this.match(CLOSING_TAG);
         if (m === null) this.fail(`cannot read the closing tag at line ${this.line()}`);
         if (m[1] !== name) this.fail(`</${m[1]}> at line ${this.line()} closes <${name}> opened at line ${line}; expected </${name}>`, `</${name}>`);
         this.i += m[0].length;
         break;
       }
       if (this.starts("<!--") || this.starts("{/*")) { this.comments(); continue; }
-      if (this.peek() === "<") { children.push(this.element()); continue; }
+      if (this.peek() === "<") { children.push(this.element(depth + 1)); continue; }
       if (this.peek() === "{") {
         const hl = this.line();
         const end = this.balanced(this.i);

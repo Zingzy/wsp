@@ -42,7 +42,7 @@ const FIXTURES: [string, string][] = [
   ["Q424", wrap(`<text>{pr.number | count}</text>`)],
   ["Q425", wrap(`<text>{pr.checks | take(pr.number) | count}</text>`)],
   ["Q426", wrap(`<text>{pr.checks${" | skip(0)".repeat(13)} | count}</text>`)],
-  ["S500", wrap(`<text>x</text>`, `  <value name="big" start="${"x".repeat(262_200)}" />`)],
+  ["D208", wrap(`<text>x</text>`, `  <value name="big" start="${"x".repeat(262_200)}" />`)],
   ["S501", wrap(`<text>{$nope}</text>`)],
   ["S502", wrap(`<checklist items={pr.checks} title={item.name} done={item.state == 'pass'} editable />`)],
   ["S503", wrap(`<text>x</text>`, `  <value name="v" start={pr.word} />`)],

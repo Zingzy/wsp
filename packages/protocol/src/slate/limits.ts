@@ -40,3 +40,6 @@ export const SLATE_LIMITS = {
   catalogIndexTokens: 900,
   catalogEntryTokens: 200,
 } as const;
+
+/** A text's size as the limits count it: UTF-8 bytes, as the host stores and sends it. */
+export const slateBytes = (text: string): number => new TextEncoder().encode(text).length;
