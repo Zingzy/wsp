@@ -44,4 +44,26 @@ describe.skipIf(renderSkipped !== undefined)("the slate's layout in Chromium", (
     expect(heads[1]).toMatchObject({ title: "Sources and how each is read", titleCut: false, noteCut: false });
     await page.close();
   });
+
+  it("opens a chart's hover beside its line inside the plot, never over the legend or past the panel's edge", async () => {
+    const page = await open("rate-chart");
+    const points = page.locator('[data-slate-piece="rate"] [data-k=point]');
+    for (const at of [0, 29]) {
+      await points.nth(at).hover();
+      const popup = page.locator("[data-slot=tooltip-popup]");
+      await popup.waitFor();
+      const box = await page.evaluate(() => {
+        const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+        const pop = r("[data-slot=tooltip-popup]");
+        return { pop: { left: pop.left, right: pop.right, top: pop.top }, legend: r('[data-slate-piece="rate"] figcaption').bottom, panel: r("[data-panel]"), plot: r('[data-slate-piece="rate"] canvas') };
+      });
+      expect(box.pop.top, `point ${at}`).toBeGreaterThanOrEqual(box.legend);
+      expect(box.pop.top, `point ${at}`).toBeGreaterThanOrEqual(box.plot.top - 1);
+      expect(box.pop.left, `point ${at}`).toBeGreaterThanOrEqual(box.panel.left);
+      expect(box.pop.right, `point ${at}`).toBeLessThanOrEqual(box.panel.right);
+      await page.mouse.move(0, 0);
+      await popup.waitFor({ state: "detached" });
+    }
+    await page.close();
+  });
 });

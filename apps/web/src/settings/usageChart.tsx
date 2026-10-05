@@ -232,7 +232,9 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
                 delay={0}
                 render={<span data-k="point" className="h-full flex-1" style={n > 1 && (i === 0 || i === n - 1) ? { flexGrow: 0.5 } : undefined} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(current => (current === i ? null : current))} />}
               />
-              <TooltipPopup side="top" sideOffset={6}>
+              {/* In the panel the hover opens beside its line at the plot's top, flipping at the far edge, so it never
+                  rises over the legend and the section head, nor runs past the panel's left edge. */}
+              <TooltipPopup {...(small ? { side: "right", align: "start", sideOffset: 8 } : { side: "top", sideOffset: 6 })}>
                 <span className="flex flex-col gap-1">
                   <span className="font-mono text-xs text-muted-foreground tabular-nums">{stepWord(t)}</span>
                   {given

@@ -9,4 +9,8 @@ export const RENDER_CASES: Readonly<Record<string, { text: string; values?: Reco
   <section id="folded" title="Sources and how each is read" note="Indicative local jewellery-market rates; making charges and GST can vary" collapsible><status>x</status></section>
 </column></slate>`,
   },
+  "rate-chart": {
+    text: `<slate><value name="hist" start={[]} /><column><section title="Per minute"><chart id="rate" label="Requests" items={$hist} x={item.at} value={item.n} unit="req/min" format="integer" /></section></column></slate>`,
+    values: { hist: Array.from({ length: 30 }, (_, i) => ({ at: `2026-10-05T05:${String(10 + i).padStart(2, "0")}:00Z`, n: 180 + ((i * 37) % 160) })) },
+  },
 };
