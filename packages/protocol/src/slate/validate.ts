@@ -65,7 +65,7 @@ function literalType(v: SlateJson): SlateType {
 
 const isBound = (v: SlatePropValue | undefined): boolean => isSlateBinding(v) || isSlateFormat(v);
 const looksLikePath = (s: string): boolean => { const m = /^([a-z]+)\.[a-zA-Z_.[\]0-9]+$/.exec(s); return m !== null && m[1]! in SLATE_SOURCES; };
-const JOINED = /\S\s*([·•])\s*\S|\S (\|) \S|^\s*([·•])\s*$|^ +(\|) +$/;
+const JOINED = /\S\s*([·\u2022])\s*\S|\S (\|) \S|^\s*([·\u2022])\s*$|^ +(\|) +$/;
 const QUOTED = /"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g;
 const quoted = (expr: string): string[] => [...expr.matchAll(QUOTED)].map(m => (m[1] ?? m[2] ?? m[3] ?? "").replace(/\$\{[^}]*\}/g, "x"));
 /** The mark a prop's words are joined by, read off its literal, its format's runs and the quoted texts in its formulas. */
