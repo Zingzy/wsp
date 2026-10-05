@@ -67,7 +67,7 @@ import { buildBesideHost } from "./init-beside.js";
 import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
 import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, hostInboxDir, hostLogPath, hostReadingsDir, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, heldOrStarted, refuseIfServed, rewriteLock, SERVICE_WAIT_MS, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
+import { addressLines, hostInboxDir, hostLogPath, hostReadingsDir, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, heldOrStarted, programGone, refuseIfServed, releaseLock, rewriteLock, SERVICE_WAIT_MS, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
 import { startOnce } from "./start-once.js";
 import {
@@ -995,22 +995,33 @@ const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 /** What a stop needs of the process it is ending: where signals arrive and how it exits. The default is this
  * process; a test hands in its own, since a real signal would take the test runner with it. */
 export interface StopProcess {
+  /** The program this process runs, read again while it serves on Linux. */
+  execPath: string;
+  platform: string;
   on(signal: (typeof STOP_SIGNALS)[number], listener: () => void): unknown;
   exit(code: number): void;
 }
+
+/** How often a serving host checks that its own program is still there. */
+export const OWN_FILES_POLL_MS = 5_000;
 
 /** Every way a host is told to go ends the same: the lock removed and what this host holds open freed. The turns
  * running on this computer are not among them; each leads a process group of its own, so no signal arriving here
  * reaches one, and the host that comes next re-opens it. A hangup is one of these signals for that reason, and none
  * of them is left to node's default exit, which runs no close at all: a second signal, with a close still in
- * flight, exits at once, so a close that hangs cannot trap the terminal. */
+ * flight, exits at once, so a close that hangs cannot trap the terminal. On Linux a host whose own program has gone
+ * (an AppImage's mount that went with its launch, a copy of the app since removed) stops the same way, since it
+ * serves out of files it can no longer read; the lock reads it as holding nothing by the same fact. A Mac's app never
+ * removes the files a host runs, so there a node upgrade under a host started by hand would be all it ever caught. */
 export function stopOnSignals(handle: HostHandle, io: CliIO, self: StopProcess = process): void {
   let stopping: Promise<void> | undefined;
+  let watch: ReturnType<typeof setInterval> | undefined;
   const stop = (sig: (typeof STOP_SIGNALS)[number]): void => {
     if (stopping !== undefined) {
       self.exit(exitCodeOf(sig));
       return;
     }
+    clearInterval(watch);
     stopping = handle.close().then(
       () => self.exit(0),
       (e: unknown) => {
@@ -1020,6 +1031,13 @@ export function stopOnSignals(handle: HostHandle, io: CliIO, self: StopProcess =
     );
   };
   for (const sig of STOP_SIGNALS) self.on(sig, () => stop(sig));
+  if (self.platform !== "linux") return;
+  watch = setInterval(() => {
+    if (!programGone(self.execPath)) return;
+    io.error(`${self.execPath}, which this host runs, is gone; it stops so the next start runs what the wsp command names now`);
+    stop("SIGTERM");
+  }, OWN_FILES_POLL_MS);
+  watch.unref();
 }
 
 /** Where an error nothing caught arrives. The default is this process; a test hands in its own, since either event
@@ -1591,7 +1609,7 @@ async function hostFor(
         await relay?.close();
         await handle.close();
         await analytics.close();
-        rmSync(lockPath, { force: true });
+        releaseLock(lockPath);
       },
     };
     serving = host;
@@ -1599,7 +1617,7 @@ async function hostFor(
   } catch (e) {
     usage.close();
     await analytics.close();
-    rmSync(lockPath, { force: true });
+    releaseLock(lockPath);
     throw e;
   }
 }

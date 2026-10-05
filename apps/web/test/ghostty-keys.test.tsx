@@ -90,12 +90,18 @@ describe("isTerminalAppShortcut", () => {
     expect(isTerminalAppShortcut(event("n", { metaKey: true }), undefined, MAC)).toBe(true);
   });
 
-  it("leaves unbound Command chords and every Control chord to the terminal", () => {
+  it("leaves unbound Command chords and the shell's Control chords to the terminal", () => {
     expect(isTerminalAppShortcut(event("x", { metaKey: true }), undefined, MAC)).toBe(false);
-    expect(isTerminalAppShortcut(event("k", { ctrlKey: true }), undefined, LINUX)).toBe(false);
     expect(isTerminalAppShortcut(event("c", { ctrlKey: true }), undefined, MAC)).toBe(false);
-    expect(isTerminalAppShortcut(event("j", { ctrlKey: true }), undefined, LINUX)).toBe(false);
-    expect(isTerminalAppShortcut(event("b", { ctrlKey: true }), undefined, LINUX)).toBe(false);
+    expect(isTerminalAppShortcut(event("j", { ctrlKey: true }), undefined, MAC)).toBe(false);
+    for (const letter of ["k", "c", "d", "r", "b", "p", "w", "a"]) {
+      expect(isTerminalAppShortcut(event(letter, { ctrlKey: true }), undefined, LINUX)).toBe(false);
+    }
+  });
+
+  it("hands the terminal toggle and the palette back to the app where mod is Control", () => {
+    expect(isTerminalAppShortcut(event("j", { ctrlKey: true }), undefined, LINUX)).toBe(true);
+    expect(isTerminalAppShortcut(event("P", { code: "KeyP", ctrlKey: true, shiftKey: true }), undefined, LINUX)).toBe(true);
   });
 });
 
@@ -225,6 +231,40 @@ describe("the drawer's viewport under the keybinding dispatcher", () => {
     press({ key: "∫", code: "KeyB", altKey: true });
     await vi.waitFor(() => expect(data).toEqual(["∫"]));
     expect(sidebarOpen()).toBe("true");
+  });
+
+  it("closes the drawer on Ctrl+J from inside it where mod is Control, pty untouched", async () => {
+    const { data, press, drawerOpen } = await mountViewport(LINUX);
+    useTerminalDrawerStore.getState().setOpen("ws_a", true);
+    const event = press({ key: "j", code: "KeyJ", ctrlKey: true });
+    await vi.waitFor(() => expect(drawerOpen()).toBe(false));
+    expect(event.defaultPrevented).toBe(true);
+    expect(data).toEqual([]);
+  });
+
+  it("opens the palette on Ctrl+Shift+P from a focused terminal where mod is Control, pty untouched", async () => {
+    const { data, press } = await mountViewport(LINUX);
+    const toggles: boolean[] = [];
+    const off = onOpenCommandPalette(detail => toggles.push(detail.toggle === true));
+    const event = press({ key: "P", code: "KeyP", ctrlKey: true, shiftKey: true });
+    await vi.waitFor(() => expect(toggles).toEqual([true]));
+    off();
+    expect(event.defaultPrevented).toBe(true);
+    expect(data).toEqual([]);
+  });
+
+  it("leaves the shell its Control chords where mod is Control: interrupt, end of input, history search, kill line", async () => {
+    const { data, press, drawerOpen } = await mountViewport(LINUX);
+    const toggles: boolean[] = [];
+    const off = onOpenCommandPalette(detail => toggles.push(detail.toggle === true));
+    press({ key: "c", code: "KeyC", ctrlKey: true });
+    press({ key: "d", code: "KeyD", ctrlKey: true });
+    press({ key: "r", code: "KeyR", ctrlKey: true });
+    press({ key: "k", code: "KeyK", ctrlKey: true });
+    await vi.waitFor(() => expect(data).toEqual(["\x03", "\x04", "\x12", "\x0b"]));
+    off();
+    expect(toggles).toEqual([]);
+    expect(drawerOpen()).toBe(false);
   });
 
   it("keeps typing Super chords elsewhere, where mod is Control", async () => {
