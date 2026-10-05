@@ -402,6 +402,23 @@ describe("status.watch cost events", () => {
     expect(costs.length).toBe(0); // unwatched = no timers running
   });
 
+  it("sends a folder nobody bills once, and none of the timer's ticks after", async () => {
+    const stub = stubBackend();
+    const backend = Object.assign(stub, { pricing: { ...stub.pricing, rateUsdPerHour: () => 0 } });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goneConfirmMs: 0, status: { costIntervalMs: 10, pollIntervalMs: 60_000 } });
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
+    const folder = await createOn(rt, { golden: "snap_g", name: "folder" });
+    const stop = rt.status.watch();
+    try {
+      await until(() => costs.length >= 1);
+      await new Promise(r => setTimeout(r, 80));
+    } finally {
+      stop();
+    }
+    expect(costs.map(c => [c.workspaceId, c.rateUsdPerHour, c.accruedUsd])).toEqual([[folder.id, 0, 0]]);
+  });
+
   it("emits workspace.status when the enriched status changes, not on every poll", async () => {
     const { rt } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 15 });
     const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
@@ -461,6 +478,54 @@ describe("the status poll and a machine's uptime", () => {
     const stop = tracker.watch({ pollIntervalMs: 5 });
     try {
       await until(() => reads >= 6);
+    } finally {
+      stop();
+    }
+    expect(sent.length).toBe(1);
+  });
+
+  it("does not send a row again after a push that carried no facts and an older read stamp", async () => {
+    let reads = 0;
+    const record: StatusRecord = {
+      id: "ws_push",
+      name: "box",
+      machineId: "m_push",
+      kind: "local",
+      phase: "running",
+      golden: "",
+      project: { id: "pr_1a2b3c4d", name: "box", path: "/home/dev/box", computer: "pl_here" },
+      createdAt: new Date().toISOString(),
+      size: { cpu: 2, memMb: 2048 },
+      rateUsdPerHour: 0,
+      generation: 1,
+      providerState: async () => "running",
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+      facts: async () => ({ os: "macOS", uptimeMs: 1_000 * ++reads, folder: "/home/dev/box" }),
+    };
+    // The runtime's records carry the checkout last read, as the rows it polls do.
+    const box = Object.assign(record, { checkout: { branch: "b1", ahead: 0, behind: 0, changed: 0, readAt: 1 } });
+    const sent: WorkspaceStatus[] = [];
+    const listeners: ((e: EventUnion) => void)[] = [];
+    const tracker = createStatusTracker({
+      records: async () => [box],
+      store: memoryStore(),
+      emit: e => {
+        if (e.type === "workspace.status") sent.push(e.status);
+        for (const l of listeners) l(e);
+      },
+      on: (_type, listener) => {
+        listeners.push(listener);
+        return () => {};
+      },
+    });
+    const stop = tracker.watch({ pollIntervalMs: 5 });
+    try {
+      await until(() => sent.length === 1);
+      // The runtime's own push after a checkout read: no facts, no route, a fresher stamp, and nothing a client draws moved.
+      const { facts: _facts, ...pushed } = sent[0]!;
+      for (const l of listeners) l({ type: "workspace.status", status: { ...pushed, checkout: { ...pushed.checkout!, readAt: 2 } } });
+      const after = reads;
+      await until(() => reads >= after + 4);
     } finally {
       stop();
     }
