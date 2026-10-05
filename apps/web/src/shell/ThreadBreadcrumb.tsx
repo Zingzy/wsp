@@ -16,7 +16,7 @@ import { useCreation, useFirstRun, useOpenThread, useSelectedId, useSelectedWork
 import { ThreadLink } from "../components/ThreadLink.js";
 import { cn } from "../lib/utils.js";
 import { useState } from "react";
-import { PencilIcon } from "lucide-react";
+import { MessageCircleQuestionIcon, PencilIcon } from "lucide-react";
 import type { ProjectRef, ThreadView } from "@wsp/protocol";
 import { openContextMenu } from "../actions/contextMenu.js";
 import { CLIENT_CANNOT_RENAME, THREAD_WORDS } from "../actions/format.js";
@@ -144,9 +144,12 @@ export function ThreadBreadcrumb() {
                   measure and they are what the room is taken from, capped so a long one cannot push the rest off. */}
               <ThreadTitle workspaceId={workspaceId} thread={thread} className={cn((project !== undefined || opener !== undefined) && "max-w-[70%] shrink-0")} />
               {threadState(thread) === "waiting" ? (
-                <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title={waitingLine(thread)}>
-                  {threadWordOf(thread)}
-                </span>
+                <Tooltip>
+                  <TooltipTrigger render={<span data-breadcrumb-waiting role="img" aria-label={threadWordOf(thread)} className="inline-flex shrink-0 items-center text-status-input" />}>
+                    <MessageCircleQuestionIcon aria-hidden className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="bottom">{waitingLine(thread)}</TooltipPopup>
+                </Tooltip>
               ) : null}
             </>
           ) : null}

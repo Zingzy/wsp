@@ -6,7 +6,11 @@ import type { WorkspaceSize } from "./WorkspaceSize.js";
 /**
  * What a place says about itself on every link. agents names the catalog ids found on its login PATH.
  */
-export type PlaceReport = { name: string, platform: Platform, arch: string, os: string, shape: WorkspaceSize, diskFreeBytes?: number, 
+export type PlaceReport = { name: string, platform: Platform, arch: string, os: string, shape: WorkspaceSize, 
+/**
+ * What is free on the volume a setup installs onto: wsp's install folder's, or the nearest folder above it that is there.
+ */
+diskFreeBytes?: number, 
 /**
  * The size of that same disk, off the same read: what a setup keeps free there is a share of it.
  */
