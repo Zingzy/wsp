@@ -296,21 +296,30 @@ export const unsetReferenceRefusal = (name: string): string => `its config reads
 export const noSuchServerRefusal = (name: string, agent: string): string => `no MCP server called ${name} is in ${agent}'s config there; wsp servers lists them`;
 export const noMcpAgentRefusal = (agent: string): string => `${agent} is no agent whose MCP config wsp reads; one of ${MCP_AGENT_IDS}`;
 
-/** One server of an agent's config there with its references read, for a client that keeps it running: a slate's
- * tool and resource runs. `secrets` are the values handed to it, to hide from what it says. */
-export async function resolveServer(host: Host, agentId: string, name: string, o: { project?: string; values?: Readonly<Record<string, string>> }): Promise<{ transport: McpTransport; cwd: string; secrets: string[] }> {
+/** One server of an agent's config there, its references read: the folder it is asked from, and either the
+ * reference with no value or its transport with the values handed to it, which are secrets to hide from what it says. */
+async function readServer(host: Host, agentId: string, name: string, o: { project?: string; values?: Readonly<Record<string, string>> }): Promise<{ agent: McpAgent; found: Found; cwd: string } & ({ missing: string } | { transport: McpTransport; secrets: string[] })> {
   const agent = MCP_AGENTS.find(a => a.id === agentId);
   if (agent === undefined) throw new Error(noMcpAgentRefusal(agentId));
   const found = await findServer(host, agent, name, o.project);
   if (found === undefined) throw new Error(noSuchServerRefusal(name, agent.name));
-  if (found.server.disabled === true) throw new Error(`${name} is switched off in ${agent.name}'s config`);
-  const resolved = agent.mcp.format.resolve(found.server, n => o.values?.[n]);
-  if ("missing" in resolved) throw new Error(unsetReferenceRefusal(resolved.missing));
-  const t = resolved.transport;
-  const given = t.kind === "stdio" ? Object.entries(t.env).flatMap(([k, v]) => (secretNamed(k) ? [v] : [])) : Object.values(t.headers);
-  const secrets = [...new Set([...resolved.values, ...given].flatMap(valueForms))].filter(v => v !== "");
   const cwd = found.project && o.project !== undefined ? o.project : host.home;
-  return { transport: t, cwd: t.kind === "stdio" ? (t.cwd ?? cwd) : cwd, secrets };
+  const resolved = agent.mcp.format.resolve(found.server, n => o.values?.[n]);
+  if ("missing" in resolved) return { agent, found, cwd, missing: resolved.missing };
+  const t = resolved.transport;
+  // Every header is a secret, as a --header argument is in the report's rows; a variable is one by its name.
+  const given = t.kind === "stdio" ? Object.entries(t.env).flatMap(([k, v]) => (secretNamed(k) ? [v] : [])) : Object.values(t.headers);
+  return { agent, found, cwd, transport: t, secrets: [...new Set([...resolved.values, ...given].flatMap(valueForms))].filter(v => v !== "") };
+}
+
+/** One server for a client that keeps it running: a slate's tool and resource runs, which a switched-off server
+ * refuses. Listing its tools does not. */
+export async function resolveServer(host: Host, agentId: string, name: string, o: { project?: string; values?: Readonly<Record<string, string>> }): Promise<{ transport: McpTransport; cwd: string; secrets: string[] }> {
+  const read = await readServer(host, agentId, name, o);
+  if (read.found.server.disabled === true) throw new Error(`${name} is switched off in ${read.agent.name}'s config`);
+  if ("missing" in read) throw new Error(unsetReferenceRefusal(read.missing));
+  const t = read.transport;
+  return { transport: t, cwd: t.kind === "stdio" ? (t.cwd ?? read.cwd) : read.cwd, secrets: read.secrets };
 }
 
 /** Whether the harness asked from `cwd` finds the name in two scopes, where it picks one itself and may start a
@@ -374,18 +383,12 @@ export function serverTools(o: { now: () => number; deadlineMs?: number; log: (l
 
   return {
     async tools(host, ask, at = {}) {
-      const agent = MCP_AGENTS.find(a => a.id === ask.agent);
-      if (agent === undefined) throw new Error(noMcpAgentRefusal(ask.agent));
-      const found = await findServer(host, agent, ask.name, at.project);
-      if (found === undefined) throw new Error(noSuchServerRefusal(ask.name, agent.name));
-      const cwd = found.project && at.project !== undefined ? at.project : host.home;
+      const read = await readServer(host, ask.agent, ask.name, at);
+      const { agent, found, cwd } = read;
       const now = o.now();
-      const resolved = agent.mcp.format.resolve(found.server, n => at.values?.[n]);
-      if ("missing" in resolved) return { auth: "failed", refused: unsetReferenceRefusal(resolved.missing), readAt: new Date(now).toISOString() };
-      const t = resolved.transport;
-      // Every header is a secret, as a --header argument is in the report's rows; a variable is one by its name.
-      const given = t.kind === "stdio" ? Object.entries(t.env).flatMap(([k, v]) => (secretNamed(k) ? [v] : [])) : Object.values(t.headers);
-      const secrets = [...new Set([...resolved.values, ...given].flatMap(valueForms))].filter(v => v !== "").sort((a, b) => b.length - a.length);
+      if ("missing" in read) return { auth: "failed", refused: unsetReferenceRefusal(read.missing), readAt: new Date(now).toISOString() };
+      const t = read.transport;
+      const secrets = [...read.secrets].sort((a, b) => b.length - a.length);
       const hide = (said: string): string => starred(said, secrets);
       for (const [k, v] of connects) if (now - v.at >= TOOLS_KEPT_MS) connects.delete(k);
       for (const [k, v] of words) if (now - v.at >= HARNESS_KEPT_MS) words.delete(k);
