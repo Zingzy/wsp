@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The meaning words a slate may say, drawn in the app's own tokens (05-styling). The agent picks a word; this file
 // is the whole of how each one looks, in every theme, since every class reads a theme token.
-import { fmtBytes, fmtCost, fmtDuration, fmtInr, fmtTokens, type SlateJson, type SlatePropValue } from "@wsp/protocol";
+import { slateFigure, type SlateJson, type SlatePropValue } from "@wsp/protocol";
 import type { SlateEngine } from "../engine.js";
 import { truthy } from "../actions.js";
 import { whenOf } from "../paths.js";
@@ -58,24 +58,7 @@ export const num = (value: SlateJson | undefined): number | undefined => (typeof
 /** A figure through the formatter its word names; a word this build does not know reads plain. */
 export function figure(value: SlateJson | undefined, format: SlateJson | undefined): string | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return str(value);
-  switch (format) {
-    case "tokens":
-      return fmtTokens(value);
-    case "bytes":
-      return fmtBytes(value);
-    case "percent":
-      return `${Math.round(value)}%`;
-    case "usd":
-      return fmtCost(value);
-    case "inr":
-      return fmtInr(value);
-    case "duration":
-      return fmtDuration(value);
-    case "integer":
-      return Math.round(value).toLocaleString("en-US");
-    default:
-      return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  }
+  return slateFigure(value, typeof format === "string" ? format : "plain");
 }
 
 /** A note: a meta line, a count under a list, what a figure was read from. */
