@@ -32,8 +32,7 @@ const ALLOWED: ReadonlyArray<{ file: string; text: string; why: string }> = [
   { file: "packages/protocol/src/slate/kit.ts", text: "${label}: ••••", why: "a set secret's mask, the dots shown in place of its value" },
   { file: "packages/protocol/src/slate/sketch.ts", text: 'SECRET_DOTS = "••••"', why: "a set secret's mask, the dots shown in place of its value" },
   { file: "packages/protocol/src/slate/validate.ts", text: "([·\\u2022])", why: "the slate's own rule refusing a dot between two pieces of text" },
-  { file: "packages/runtime/src/slate-mcp.ts", text: 'DOTS = "••••"', why: "a set secret's mask, the dots shown in place of its value" },
-  { file: "packages/runtime/src/slate-runs.ts", text: 'DOTS = "••••"', why: "a set secret's mask, the dots shown in place of its value" },
+  { file: "packages/runtime/src/slate-runs.ts", text: 'SECRET_DOTS = "••••"', why: "a set secret's mask, the dots shown in place of its value" },
 ];
 
 function sources(dir: string): string[] {

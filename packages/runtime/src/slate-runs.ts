@@ -383,7 +383,7 @@ export function rewoundRecord(record: RunRecord, now: number = Date.now()): RunR
 const DEFAULT_TIMEOUT_S = 60;
 const LINES_KEPT = 500;
 const RUNNING_MAX = 4;
-const STARTS_PER_MINUTE = 12;
+export const STARTS_PER_MINUTE = 12;
 const TIMER_FLOOR_S = 10;
 /** Five failed starts in a row back an `always` timer off to one start every five minutes, until one succeeds (07). */
 const BACKOFF_AFTER = 5;
@@ -393,11 +393,12 @@ export const BACKED_OFF = "five starts in a row failed, so its timer starts it o
  * process that left the group with setsid can hold them open for as long as it lives. */
 const CLOSE_GRACE_MS = 1_000;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const DOTS = "••••";
+/** What a set secret reads as wherever a command or a tool call is shown. */
+export const SECRET_DOTS = "••••";
 
-const HELD_APPROVAL = "needs your approval";
+export const HELD_APPROVAL = "needs your approval";
 const HELD_BUSY = `${RUNNING_MAX} runs are already running`;
-const HELD_BUDGET = `started ${STARTS_PER_MINUTE} times in a minute; press to run it again`;
+export const HELD_BUDGET = `started ${STARTS_PER_MINUTE} times in a minute; press to run it again`;
 const HELD_PRESSED = `pressed ${STARTS_PER_MINUTE} times in a minute; it can start again in a minute`;
 const HELD_ASLEEP = "the box was asleep, so this tick did not wake it; press to run it now";
 const SECRET_IN_ARGS = "a secret reaches a command through env or stdin, never as an argument, which ps can read";
@@ -447,13 +448,21 @@ interface Kept {
 
 const filesUnwritten = (e: unknown): string => `the slate's files were not written: ${e instanceof Error ? e.message : String(e)}`;
 
-function stableJson(value: unknown): string {
+export function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
     return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(",")}}`;
   }
   return JSON.stringify(value) ?? "null";
+}
+
+/** Every string inside a value passed through fn. */
+export function mapStrings(value: SlateJson, fn: (s: string) => string): SlateJson {
+  if (typeof value === "string") return fn(value);
+  if (Array.isArray(value)) return value.map(v => mapStrings(v, fn));
+  if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, mapStrings(v, fn)]));
+  return value;
 }
 
 function asText(value: SlateJson): string {
@@ -643,7 +652,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
   };
 
   const shown = (threadId: string, input: RunInput): string =>
-    "secret" in input ? (secrets.handle(threadId, input.secret).set ? DOTS : `${DOTS} (not filled)`) : input.value === null ? "(unset)" : asText(input.value);
+    "secret" in input ? (secrets.handle(threadId, input.secret).set ? SECRET_DOTS : `${SECRET_DOTS} (not filled)`) : input.value === null ? "(unset)" : asText(input.value);
 
   const ask = (req: RunStart): RunAsk => {
     const inputs = req.inputs();

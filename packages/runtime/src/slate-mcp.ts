@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import type { McpTransport } from "@wsp/catalog";
 import { EXEC_OUTPUT_MAX, fmtBytes, runOutputTail } from "@wsp/protocol";
 import type { SlateAsk, SlateJson, SlateRunDecl } from "@wsp/protocol";
-import type { Reshape, RunApprovals, RunBy, RunRecord, RunStartAnswer } from "./slate-runs.js";
+import { HELD_APPROVAL, HELD_BUDGET, mapStrings, SECRET_DOTS, stableJson, STARTS_PER_MINUTE, type Reshape, type RunApprovals, type RunBy, type RunRecord, type RunStartAnswer } from "./slate-runs.js";
 
 /** `files` is the text of each slate file its then reads, as on a command. */
 export type McpRunDecl = Extract<SlateRunDecl, { kind: "tool" | "resource" }> & { files?: Record<string, string> };
@@ -111,13 +111,9 @@ const CONNECT_MS = 20_000;
 const CALL_MS = 60_000;
 const IDLE_MS = 5 * 60_000;
 const SWEEP_MS = 30_000;
-const STARTS_PER_MINUTE = 12;
 const ERR_KEPT = 4_000;
-const HELD_APPROVAL = "needs your approval";
 /** Why a destructive tool's start waits: its sheet opens on every start. */
 export const HELD_CONFIRM = "asks every time";
-const HELD_BUDGET = `started ${STARTS_PER_MINUTE} times in a minute; press to run it again`;
-const DOTS = "••••";
 /** The most one message from a server may be, on either transport: a command's own cap, eight times what a slate's
  * values hold, so any answer worth keeping fits and a runaway one is cut off before it is parsed. */
 const MESSAGE_MAX_BYTES = EXEC_OUTPUT_MAX;
@@ -175,14 +171,6 @@ async function boundedText(res: Response): Promise<string> {
   return Buffer.concat(parts).toString("utf8");
 }
 
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(",")}}`;
-  }
-  return JSON.stringify(value) ?? "null";
-}
 
 /** A tool run's confirm key: the server, the tool and the argument names, so new values never ask again. */
 export const toolKey = (decl: McpRunDecl): string =>
@@ -199,12 +187,6 @@ export const isDestructive = (tool: McpToolInfo | undefined): boolean => {
   return a.readOnlyHint !== true && a.destructiveHint !== false;
 };
 
-function mapStrings(value: SlateJson, fn: (s: string) => string): SlateJson {
-  if (typeof value === "string") return fn(value);
-  if (Array.isArray(value)) return value.map(v => mapStrings(v, fn));
-  if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, mapStrings(v, fn)]));
-  return value;
-}
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -581,7 +563,7 @@ export function createSlateMcp(deps: SlateMcpDeps): SlateMcp {
     mapStrings(args, s =>
       s.replace(MARKED, (_m, name: string) => {
         const text = deps.secrets.plaintext(threadId, name);
-        return text === undefined ? `${DOTS} (not filled)` : `${DOTS} (${text.length})`;
+        return text === undefined ? `${SECRET_DOTS} (not filled)` : `${SECRET_DOTS} (${text.length})`;
       }),
     ) as Record<string, SlateJson>;
 

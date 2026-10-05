@@ -61,7 +61,7 @@ import { mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, w
 import { isAbsolute, join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import type { Store } from "./store.js";
-import { createSlateRuns, lastResult, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
+import { createSlateRuns, HELD_APPROVAL, lastResult, mapStrings, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
 import { boxLedger, boxRoad, boxSlateDir } from "./slate-box.js";
 import { HELD_CONFIRM, consentKey, createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
 import { HOST_SLATE_SOURCES, resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
@@ -202,7 +202,6 @@ const ERRORS_LISTED = 20;
 const PROBLEMS_KEPT = 20;
 const PIECES_NAMED = 20;
 const SOURCE_NAMES = [...HOST_SLATE_SOURCES.keys()];
-const HELD_APPROVAL = "needs your approval";
 /** Why a command did not start: it starts in its thread's folder, never the host's own, and none is known. */
 const NO_FOLDER = "this host knows no folder for the thread, so the command did not start";
 /** The approval key that lets a slate's reactions message the agent. */
@@ -320,13 +319,6 @@ function defanged(value: SlateJson): SlateJson {
   return value;
 }
 
-/** Every string inside a value passed through fn. */
-function mapStrings(value: SlateJson, fn: (s: string) => string): SlateJson {
-  if (typeof value === "string") return fn(value);
-  if (Array.isArray(value)) return value.map(v => mapStrings(v, fn));
-  if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, mapStrings(v, fn)]));
-  return value;
-}
 
 /** The longest string inside a value, by the path to it, for cutting a message down to its cap. */
 function longest(value: SlateJson, at: (string | number)[] = []): { at: (string | number)[]; length: number } | undefined {
