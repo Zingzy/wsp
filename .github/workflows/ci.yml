@@ -5,8 +5,9 @@ name: ci
 # can reach, which scripts/affected-tests.mjs picks off the change from main, and the test files the change added or
 # modified run five times over. The whole suite runs every night on main and on a run started by hand. A push to main
 # carries a commit a land/** run already tested, so it only checks that such a run passed on the same sha. The
-# install, the build and the type check run on every run that tests, and the slate's Chromium render cases on every run
-# that does not pick tests or whose change touches the slate; the other Chromium cases and the Electron smoke stay
+# install, the build and the type check run on every run that tests: one job builds, and the suite runs in four parts
+# after it on the build's own output. The slate's Chromium render cases run in a job of their own on every run that
+# does not pick tests and on a change that touches the slate; the other Chromium cases and the Electron smoke stay
 # behind their own flags.
 on:
   push:
@@ -56,6 +57,15 @@ jobs:
             echo "::error::$SHA reached main with no passing ci run on a land/** branch"
             exit 1
           fi
+          # A skipped job leaves its run green, so each ci run is held to its four test parts by name.
+          for id in $(jq -r '.[] | select(.path == ".github/workflows/ci.yml") | .id' <<< "$runs"); do
+            passed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?per_page=100" \
+              --jq '[.jobs[] | select((.name | test("^Tests [1-4]/4$")) and .conclusion == "success") | .name] | unique | length')
+            if [ "$passed" -ne 4 ]; then
+              echo "::error::$SHA reached main with $passed of 4 test parts passed in ci run $id"
+              exit 1
+            fi
+          done
 
   sizes:
     name: No source file past 1,500 lines
@@ -69,11 +79,16 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: node scripts/file-size-check.mjs
 
-  gate:
-    name: Install, build, test, types
+  # One job builds what every test job reads: the daemon this runner runs, staged where the host's asset table
+  # finds it, and every package built. It goes up as one tar, which keeps the binary's mode where an artifact's zip
+  # drops it, beside the lists of tests the change can reach.
+  build:
+    name: Install and build
     if: github.event_name != 'push' || github.ref != 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
+    outputs:
+      render: ${{ steps.slate.outputs.render }}
     steps:
       # Every commit and tree and no blob beyond the checkout's, so the change is read against main's history cheaply.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -99,16 +114,22 @@ jobs:
         run: |
           rustup toolchain install
           rustup show
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # The daemon workflow's x86_64 musl build is this one, flags and all, and its cache on main holds that target
+      # alone: about 270 MB, where the daemon gate's holds every profile in 8 GB and took four minutes to restore.
+      # Read only, so the daemon workflow stays the one that writes it.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             daemon/target
-          key: daemon-rust-${{ runner.os }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
+          key: daemon-artifacts-x86_64-unknown-linux-musl-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
           restore-keys: |
-            daemon-rust-${{ runner.os }}-
+            daemon-artifacts-x86_64-unknown-linux-musl-
+      # Cargo rebuilds what is older than its sources, so a cache saved after this checkout never passes for this build.
+      - name: The daemon's sources newer than anything restored
+        run: git ls-files -z daemon | xargs -0 touch
       # ring carries C, which musl-tools compiles for the musl target; libcontainer links libseccomp statically, and
       # the archive has to be one built against musl, so the script builds it from its pinned release first.
       - name: C compiler for the musl target, and libseccomp built against musl
@@ -129,19 +150,98 @@ jobs:
           base=$(git merge-base origin/main HEAD)
           node scripts/affected-tests.mjs "$base" > "$RUNNER_TEMP/affected.txt"
           node scripts/affected-tests.mjs "$base" --changed-tests > "$RUNNER_TEMP/changed-tests.txt"
+      - name: Whether this change touches the slate
+        id: slate
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/land/* ]]; then echo "render=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if git diff --name-only "$(git merge-base origin/main HEAD)" HEAD | grep -qE '^apps/web/(src/slate/|src/components/chat/MermaidBlock|test/slate-|test/render-browser\.ts)'; then echo "render=1" >> "$GITHUB_OUTPUT"; fi
+      # What the build wrote is what git ignores, less the installed packages, which each job installs from the pnpm
+      # cache, and the daemon's cargo target, of which the staged binary is the one file read.
+      - name: Pack the build
+        run: |
+          git ls-files --others --ignored --exclude-standard --directory \
+            | grep -vE '(^|/)node_modules/$|^daemon/' > "$RUNNER_TEMP/built.txt"
+          cat "$RUNNER_TEMP/built.txt"
+          tar -cf "$RUNNER_TEMP/build.tar" -T "$RUNNER_TEMP/built.txt"
+          ls -l "$RUNNER_TEMP/build.tar"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build
+          path: |
+            ${{ runner.temp }}/build.tar
+            ${{ runner.temp }}/affected.txt
+            ${{ runner.temp }}/changed-tests.txt
+          if-no-files-found: error
+          retention-days: 3
+
+  # The suite in four parts, each a quarter of the files the run picked, split the same way on every runner. No list,
+  # as on the nightly and a run by hand, and an empty one, for a change to the root config, are both the whole suite.
+  # A small list can leave a part with no file, and vitest passes that part on its own; a list that names no file at
+  # all still fails every part.
+  tests:
+    name: Tests ${{ matrix.shard }}/4
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      # A case reads this repository's own tags and origin/main, which a shallow checkout lacks and skips without.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: build
+          path: ${{ runner.temp }}
+      - run: tar -xf "$RUNNER_TEMP/build.tar"
       - name: Tests
-        # The Build step staged this runner's daemon binary, so the case that reads its version against the
+        # The build job staged this runner's daemon binary, so the case that reads its version against the
         # protocol's runs here rather than skipping: a checkout with no binary staged is a developer's machine.
-        # No list, as on the nightly and a run by hand, and an empty one, for a change to the root config, are both
-        # the whole suite.
         env:
           WSP_REQUIRE_DAEMON: "1"
         run: |
           affected=()
           if [ -f "$RUNNER_TEMP/affected.txt" ]; then mapfile -t affected < "$RUNNER_TEMP/affected.txt"; fi
-          pnpm exec vitest run --minWorkers=1 --maxWorkers=2 "${affected[@]}"
-      - name: The test files this change added or modified, five times over
-        if: startsWith(github.ref, 'refs/heads/land/')
+          pnpm exec vitest run --minWorkers=1 --maxWorkers=2 --shard=${{ matrix.shard }}/4 "${affected[@]}"
+
+  flake:
+    name: The test files this change added or modified, five times over
+    needs: build
+    if: startsWith(github.ref, 'refs/heads/land/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # A case reads this repository's own tags and origin/main, which a shallow checkout lacks and skips without.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: build
+          path: ${{ runner.temp }}
+      - run: tar -xf "$RUNNER_TEMP/build.tar"
+      - name: Five times over
         env:
           WSP_REQUIRE_DAEMON: "1"
         run: |
@@ -156,21 +256,56 @@ jobs:
               exit 1
             fi
           done
-      - name: Whether this change touches the slate
-        id: slate
-        run: |
-          if [[ "$GITHUB_REF" != refs/heads/land/* ]]; then echo "render=1" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if git diff --name-only "$(git merge-base origin/main HEAD)" HEAD | grep -qE '^apps/web/(src/slate/|src/components/chat/MermaidBlock|test/slate-|test/render-browser\.ts)'; then echo "render=1" >> "$GITHUB_OUTPUT"; fi
-      - name: Chromium for the slate render tests
-        if: steps.slate.outputs.render == '1'
+
+  render:
+    name: Slate render tests
+    needs: build
+    if: needs.build.outputs.render == '1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: build
+          path: ${{ runner.temp }}
+      - run: tar -xf "$RUNNER_TEMP/build.tar"
+      - name: Chromium
         run: pnpm --filter @wsp/web exec playwright install --with-deps chromium
       - name: Slate render tests
-        if: steps.slate.outputs.render == '1'
         env:
           WSP_RENDER: "1"
         run: pnpm exec vitest run --minWorkers=1 --maxWorkers=2 apps/web/test/slate-
-      - name: Types
-        run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' exec tsc --noEmit
+
+  types:
+    name: Types
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: build
+          path: ${{ runner.temp }}
+      - run: tar -xf "$RUNNER_TEMP/build.tar"
+      - run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' exec tsc --noEmit
 
   desktop:
     name: Stage the desktop app

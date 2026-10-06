@@ -8,7 +8,7 @@
 // the same grammar, each opening its item's own page. A task's panel draws
 // the same agent cards and tabs.
 import { BotIcon, CircleArrowUpIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
-import { HERE_PLACE_ID, accessWord, effortsFor, listWords, markedDefault, modelOf, type AccessChoice, type AgentRow, type HarnessCatalog, type PlaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, accessWord, effortsFor, listWords, markedDefault, modelOf, resolveThreadDefaults, type AccessChoice, type AgentRow, type HarnessCatalog, type PlaceView } from "@wsp/protocol";
 import { agentName, catalogEntry } from "@wsp/catalog";
 import { copyText } from "../actions/clipboard.js";
 import { ActButton } from "../components/agents/agentsParts.js";
@@ -58,8 +58,14 @@ export function agentSubPages(ctx: SettingsContext): { at: SettingsAt; name: str
   return ctx.harnesses.map(catalog => ({ at: { kind: "agent", id: catalog.harness }, name: catalog.label }));
 }
 
-/** The agent a new thread starts on where its project names none, as the host marks it. */
-export const defaultAgentOf = (harnesses: ReadonlyArray<HarnessCatalog>): HarnessCatalog | undefined => harnesses.find(c => c.isDefault === true) ?? harnesses[0];
+/** The agent a new thread starts on where its project names none, read by the one rule off the record this window
+ * holds, so a pick shows before the host's lists are read again. */
+export function defaultAgentOf(ctx: Pick<SettingsContext, "harnesses" | "preferences">): HarnessCatalog | undefined {
+  const first = ctx.harnesses[0];
+  if (first === undefined) return undefined;
+  const catalogOf = (id: string): HarnessCatalog | undefined => ctx.harnesses.find(c => c.harness === id);
+  return catalogOf(resolveThreadDefaults({ firstAgent: first.harness, catalogOf, prefs: ctx.preferences }).agent.value) ?? first;
+}
 
 /** What a new thread on an agent starts with, off the marks the host put on its lists: the model, its effort and the
  * access word. */
@@ -170,7 +176,7 @@ export const AgentChoice = ({ id, label }: { id: string; label: string }) => (
 
 /** New threads: the agent one starts on where its project names none, written through the host's preferences. */
 function NewThreadsCard({ ctx }: { ctx: SettingsContext }) {
-  const picked = defaultAgentOf(ctx.harnesses);
+  const picked = defaultAgentOf(ctx);
   if (picked === undefined) return null;
   const labelOf = (id: string): string => ctx.harnesses.find(c => c.harness === id)?.label ?? agentName(id);
   return (

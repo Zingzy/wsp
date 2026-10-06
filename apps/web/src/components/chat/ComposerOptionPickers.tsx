@@ -28,7 +28,7 @@ import { BrainIcon, ChevronDownIcon, CircleSlashIcon, HandIcon, LockIcon, LockOp
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import { ACCESS_REFUSED_LINE, HERE_PLACE_ID, accessReachLine, githubLinkOf, projectForRepo, contextWindowsFor, effortsFor, markedFor, movesRunningAccess, resolveThreadDefaults, type DefaultsAsk, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView } from "@wsp/protocol";
-import { isProjectHomeKey, projectHomeKey, projectOfKey, useHarnessCatalog, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
+import { isProjectHomeKey, projectHomeKey, projectOfKey, useAbsentComputer, useHarnessCatalog, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
 import { useComputerName } from "../../sidebar/workspaceRows";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -105,9 +105,10 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   // A thread whose head or row is known runs on its own agent before a row of its transcript is in view.
   const pinned = own !== undefined && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running || thread.facts !== null);
   const latestRow = pinned ? rows.at(-1) ?? null : null;
-  // The agent the host marks is its own answer with no project read, so the rule here falls back where the host's does.
-  const fallback = catalogs.find(c => c.isDefault === true)?.harness ?? catalogs[0]?.harness ?? DEFAULT_AGENT.id;
-  const harness = pinned ? own : picked.harness ?? resolveThreadDefaults({ firstAgent: fallback, catalogOf: id => catalogs.find(c => c.harness === id), ...ask }).agent.value;
+  // The lists come in the catalog's order, so their first is the host's first agent; the host's own mark on them is
+  // the record it was read under, which a reset in Settings has already moved.
+  const firstAgent = catalogs[0]?.harness ?? DEFAULT_AGENT.id;
+  const harness = pinned ? own : picked.harness ?? resolveThreadDefaults({ firstAgent, catalogOf: id => catalogs.find(c => c.harness === id), ...ask }).agent.value;
   const listed = useHarnessCatalog(harness, workspaceId);
   const catalog = useMemo(() => (listed === null ? null : markedFor(listed, resolveThreadDefaults({ firstAgent: harness, named: harness, catalogOf: () => listed, ...ask }))), [ask, harness, listed]);
   const model = useMemo(() => (catalog === null ? null : resolveModel(catalog, { picked: picked.model, thread: onThread.model })), [catalog, picked.model, onThread.model]);
@@ -116,15 +117,16 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   return { harness, catalog, model, picks, startOptions, pinned, latestRow };
 }
 
-/** Asks the workspace's machine for its catalogs once it runs; the table shows until then and stays when it does not answer. */
-function useMachineCatalogs(workspaceId: string): void {
+/** Asks the workspace's machine for its catalogs once it runs, and again when its computer answers after a silence;
+ * the table shows until then and stays when it does not answer. */
+function useMachineCatalogs(workspaceId: string, answering: boolean): void {
   const workspace = useWorkspace(workspaceId);
   const conn = useStore(s => s.conn);
   const load = useStore(s => s.loadHarnesses);
   const running = workspace?.phase === "running";
   useEffect(() => {
-    if (running && conn === "live") void load(workspaceId);
-  }, [conn, load, running, workspaceId]);
+    if (running && answering && conn === "live") void load(workspaceId);
+  }, [answering, conn, load, running, workspaceId]);
 }
 
 const triggerClass = "h-8 shrink-0 gap-2 px-2 text-[15px] font-normal text-muted-foreground hover:text-foreground sm:h-8 sm:text-[15px] [&_svg]:mx-0";
@@ -374,7 +376,10 @@ export function ComposerOptionPickers({
   thread: ChatThreadHandle;
   fast?: FastPick | null;
 }) {
-  useMachineCatalogs(workspaceId);
+  // A reading that carries a start button is a daemon this host runs, which never carried the agents' lists.
+  const read = useAbsentComputer(workspaceId);
+  const absent = read?.start === undefined ? read : null;
+  useMachineCatalogs(workspaceId, absent === null);
   const pick = useComposerOptionsStore(s => s.pick);
   const catalogs = useHarnessCatalogs(workspaceId);
   const where = useComputerName(workspaceId);
@@ -393,6 +398,7 @@ export function ComposerOptionPickers({
         model={model}
         pinned={pinned}
         where={where}
+        away={absent?.said ?? null}
         onPickHarness={harness => pick(workspaceId, "harness", harness)}
         onPickModel={(harness, value) => {
           if (harness !== catalog.harness) pick(workspaceId, "harness", harness);
