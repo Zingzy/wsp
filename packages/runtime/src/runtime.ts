@@ -349,7 +349,7 @@ import { usageArea } from "./account/usage.js";
 
 import { statusArea } from "./account/status.js";
 
-// import { preferencesArea } from "./account/preferences.js";
+import { preferencesArea } from "./account/preferences.js";
 
 export * from "./types/harness.js";
 export {
@@ -9918,117 +9918,6 @@ function projectsArea(ctx: RuntimeContext): ProjectsArea {
 
 
 
-function preferencesArea(ctx: RuntimeContext): PreferencesArea {
-  const { opts, backend, store, adapters, placeDoor, bus, clock, projectsHeld, setups } = ctx;
-  // Sets run one after another: two clients patching different fields at once would otherwise each read the record
-  // before the other's write and the later write would drop the earlier field.
-  let preferenceWrites: Promise<unknown> = Promise.resolve();
-  // Read once, here, and stamped on every read: a state file that holds an older labs cannot outvote the environment.
-  const labs = labsFromEnv(opts.env ?? process.env);
-  /** The record is kept whether or not the folder goes; a folder that stays is said on the reply. */
-  const iconsForgotten = (): string | undefined => {
-    const icons = opts.serverIcons;
-    if (icons === undefined) return undefined;
-    try {
-      icons.forget();
-      return undefined;
-    } catch (e) {
-      // Node's own words carry the code before and the call and path after: "EACCES: permission denied, rmdir '/x'".
-      const said = e instanceof Error ? e.message.replace(/^[A-Z]+: /, "").replace(/, \w+ '[^']*'$/, "") : String(e);
-      return serverIconsLeftLine(homeShortened(icons.folder, homedir()), said);
-    }
-  };
-  /** Why a change to the defaults cannot stand: an agent this host runs no thread of, a project it does not hold, or
-   * an access word the agent it lands on maps to none of its modes, which is refused here rather than run looser. */
-  const defaultsRefusal = (patch: PreferencesPatch, next: Preferences): void => {
-    const usage = (line: string): Error => Object.assign(new Error(line), { kind: "usage" });
-    const agent = (id: string): void => {
-      if (adapters[id] === undefined) throw usage(noAdapterLine(id, Object.keys(adapters)));
-    };
-    const word = (id: string, access: AccessChoice | null | undefined): void => {
-      const table = harnessCatalog(id);
-      const said = access == null ? null : accessRefusal(table ?? { label: ctx.agentLabel(id), permissionModes: [] }, access);
-      if (said !== null) throw usage(said);
-    };
-    const model = (id: string): void => {
-      const said = modelIdRefusal(id);
-      if (said !== null) throw usage(said);
-    };
-    if (patch.defaultAgent != null) agent(patch.defaultAgent);
-    for (const [id, set] of Object.entries(patch.agentDefaults ?? {})) {
-      if (set === null) continue;
-      agent(id);
-      word(id, set.access);
-      for (const named of [...(set.model == null ? [] : [set.model]), ...(set.models?.custom ?? [])]) model(named);
-    }
-    for (const [projectId, set] of Object.entries(patch.projectDefaults ?? {})) {
-      if (set === null) continue;
-      if (!projectsHeld.has(projectId)) throw usage(bareNoSuchProjectLine(projectId));
-      if (set.agent != null) agent(set.agent);
-      if (set.model != null) model(set.model);
-      const kept = next.projectDefaults[projectId];
-      word(kept?.agent ?? ctx.defaultAgentOf(next, undefined), set.access);
-    }
-  };
-  const preferences: Runtime["preferences"] = {
-    get: async () => (ctx.state.preferencesHeld ??= { ...preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)), labs }),
-    set: patch => {
-      const write = preferenceWrites.then(async () => {
-        await ctx.ready();
-        const next = applyPreferencesPatch(await preferences.get(), patch);
-        defaultsRefusal(patch, next);
-        await store.put(PREFERENCES, PREFERENCES_ID, next);
-        ctx.state.preferencesHeld = next;
-        const notice = patch.serverIcons === false ? iconsForgotten() : undefined;
-        bus.emit({ type: "preferences.changed", preferences: next });
-        return notice === undefined ? { preferences: next } : { preferences: next, notice };
-      });
-      preferenceWrites = write.catch(() => undefined);
-      return write;
-    },
-  };
-
-  const iconsOn = async (): Promise<boolean> => (await preferences.get()).serverIcons;
-  const agentsRead = agentsReads<Caller>({
-    reader: opts.agentsReader,
-    places: () => placeDoor,
-    workspace: async (id, origin) => {
-      const entry = await ctx.entryOf(id, origin);
-      const project = ctx.projectHeld(entry.record.project);
-      return { name: entry.record.name, phase: entry.record.phase, local: isLocalWorkspace(entry.record), machine: entry.machine, project: { id: project.id, name: project.name, path: ctx.checkoutOf(entry.record) } };
-    },
-    // A project's folder on the computer holding it: the checkout the add left there, else where it already sits.
-    projects: async placeId => (await ctx.ready(), [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name, path: p.checkout ?? p.path }))),
-    ...(opts.agentsActs !== undefined ? { acts: opts.agentsActs } : {}),
-    ...(opts.skillsActs !== undefined ? { skills: opts.skillsActs } : {}),
-    ...(opts.serversActs !== undefined ? { servers: opts.serversActs } : {}),
-    latestOn: async () => (await preferences.get()).agentVersions,
-    // The person's switch is read at every ask, so turning it off stops the next one.
-    ...(opts.serverIcons !== undefined ? { icons: { folder: opts.serverIcons.folder, icon: async (host, refresh) => ((await iconsOn()) ? opts.serverIcons!.icon(host, refresh, iconsOn) : null), forget: () => opts.serverIcons!.forget() } satisfies ServerIcons } : {}),
-    // The target's own daemon: this computer's, a joined computer's over the link it holds, or a workspace's by the
-    // road its kind answers, which is the one reading every pane takes.
-    channel: async (target, onEvent, origin) => {
-      if ("workspaceId" in target) return ctx.workspaces.daemonChannel(target.workspaceId, onEvent, origin);
-      if (target.placeId === HERE_PLACE_ID) return ctx.channelOver(await ctx.localRoad(), THIS_COMPUTER, onEvent);
-      const onLink = placeDoor?.channel(target.placeId, onEvent);
-      if (onLink === undefined) throw new Error(absentComputer(placeDoor?.nameOf(target.placeId) ?? target.placeId, null).sentence);
-      return onLink;
-    },
-    changed: target => bus.emit({ type: "agents.changed", ...(target !== undefined ? { target } : {}) }),
-    setupOf: (placeId, agent) => (adapters[agent] === undefined ? undefined : setupView(setups.get(placeId, agent))),
-    setupWrite: async (placeId, agent, change) => {
-      if (adapters[agent] === undefined) throw Object.assign(new Error(noAdapterLine(agent, Object.keys(adapters))), { kind: "usage" });
-      await setups.set(placeId, agent, change, { folder: path => ctx.configFolderOn(placeId, path), agentName: ctx.agentLabel(agent) });
-      ctx.setupRefusals.delete(keyOf(placeId, agent));
-    },
-    relayed: () => backend.capabilities.callbackRelay,
-    now: () => clock.now(),
-  });
-  bus.on("workspace.deleted", e => {
-    if (e.type === "workspace.deleted") agentsRead.forget(e.workspaceId);
-  });
-  return { preferences, agentsRead };
-}
 
 function runtimeOf(ctx: RuntimeContext): Runtime {
   const {
