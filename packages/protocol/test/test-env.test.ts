@@ -116,6 +116,11 @@ describe("the environment every test runs under", () => {
     expect(process.env["CLAUDE_CONFIG_DIR"]).toBeUndefined();
   });
 
+  it("points a shell's history file under the run's own folder, outside every home", () => {
+    expect(process.env["HISTFILE"]).toBe(join(RUN_TMPDIR, "shell-history"));
+    expect(process.env["HISTFILE"]!.startsWith(`${homedir()}/`)).toBe(false);
+  });
+
   it("leaves no launch pair, home, named host, cloud, labs or person's home to a test, since none of them is a gate", () => {
     const aims = [...protocol.LAUNCH_ENV, "WSP_HOME", "WSP_HOST", protocol.CLOUD_ENV, protocol.LABS_ENV, protocol.PERSON_HOME_ENV];
     expect(aims.filter(name => name in GATES)).toEqual([]);
