@@ -84,7 +84,7 @@ function DisabledCommandPaletteResultRow(props: {
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
 }) {
   return (
-    <div className="flex min-h-8 select-none items-center gap-2 rounded-sm px-2 py-1.5 text-base opacity-64 sm:min-h-7 sm:text-sm">
+    <div className="flex min-h-8 items-center gap-2 rounded-sm px-2 py-1.5 text-base opacity-64 sm:min-h-7 sm:text-sm">
       {props.item.icon}
       <ItemText item={props.item} />
       {props.item.titleTrailingContent}

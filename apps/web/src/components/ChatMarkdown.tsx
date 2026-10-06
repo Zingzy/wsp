@@ -1921,7 +1921,7 @@ function ChatMarkdown({
   return (
     <div
       className={cn(
-        "chat-markdown w-full min-w-0 text-[length:var(--font-size-chat,0.875rem)] leading-relaxed text-foreground/80 [overflow-wrap:anywhere] [word-break:break-word]",
+        "chat-markdown w-full min-w-0 select-text text-[length:var(--font-size-chat,0.875rem)] leading-relaxed text-foreground/80 [overflow-wrap:anywhere] [word-break:break-word]",
         className,
       )}
       onCopy={handleCopy}
