@@ -407,6 +407,14 @@ describe("sqliteStore", () => {
     }
   });
 
+  it("makes the state's folder where it is not made yet, the database in it the owner's alone", async () => {
+    const folder = join(home(), "not", "made", "yet");
+    const store = sqliteStore(join(folder, "state.json"), WRITER);
+    await store.put("workspaces", "a", { id: "a" });
+    expect(await store.keys("workspaces")).toEqual(["a"]);
+    expect(statSync(join(folder, "state.db")).mode & 0o777).toBe(0o600);
+  });
+
   it("refuses a state.db that is no database, naming it, and leaves its bytes alone", async () => {
     const h = home();
     writeFileSync(join(h, "state.db"), "not a database at all, just some bytes someone left here");
