@@ -111,9 +111,9 @@ const EMPTY_REWINDABLE: ReadonlySet<MessageId> = new Set();
 const EMPTY_SLATED: ReadonlySet<MessageId> = new Set();
 
 // ---------------------------------------------------------------------------
-// Context — shared state consumed by every row component via Context.
+// Context: shared state consumed by every row component via Context.
 // Propagates through LegendList's memo boundaries for shared callbacks and
-// non-row-scoped state. `nowIso` is intentionally excluded — self-ticking
+// non-row-scoped state. `nowIso` is intentionally excluded: self-ticking
 // components (WorkingTimer, LiveElapsed) handle it.
 // ---------------------------------------------------------------------------
 
@@ -251,7 +251,7 @@ export interface MessagesTimelineProps {
 }
 
 // ---------------------------------------------------------------------------
-// MessagesTimeline — list owner
+// MessagesTimeline: list owner
 // ---------------------------------------------------------------------------
 
 export const MessagesTimeline = memo(function MessagesTimeline({
@@ -635,7 +635,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [isWorking, isPreparingWorktree, machineWait],
   );
 
-  // Stable renderItem — no closure deps. Row components read shared state
+  // Stable renderItem: no closure deps. Row components read shared state
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
@@ -999,7 +999,7 @@ function TimelineMinimap({
 }
 
 // ---------------------------------------------------------------------------
-// TimelineRowContent — the actual row component
+// TimelineRowContent: the actual row component
 // ---------------------------------------------------------------------------
 
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
@@ -1298,7 +1298,7 @@ function ThinkingTimelineRow() {
 }
 
 // ---------------------------------------------------------------------------
-// Self-ticking labels — update their own text nodes so elapsed-time display
+// Self-ticking labels: update their own text nodes so elapsed-time display
 // does not create a React commit every second while a response is streaming.
 // ---------------------------------------------------------------------------
 
@@ -1326,7 +1326,7 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Extracted row sections — own their state / store subscriptions so changes
+// Extracted row sections: own their state / store subscriptions so changes
 // re-render only the affected row, not the entire list.
 // ---------------------------------------------------------------------------
 
@@ -1814,7 +1814,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
 });
 
 // ---------------------------------------------------------------------------
-// Structural sharing — reuse old row references when data hasn't changed
+// Structural sharing: reuse old row references when data hasn't changed
 // so LegendList (and React) can skip re-rendering unchanged items.
 // ---------------------------------------------------------------------------
 
