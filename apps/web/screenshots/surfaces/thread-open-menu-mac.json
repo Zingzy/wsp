@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "steps": [
+    "row-id=thread:redirect",
+    "k=open-choose"
+  ],
+  "wait": "k=open-menu",
+  "mac": true,
+  "widths": [
+    1440
+  ],
+  "reason": "What this shot adds is the Mac window's glass behind the menu; the menu itself is shot in thread-open-menu."
+}

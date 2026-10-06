@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "widths": [
+    1440
+  ],
+  "reason": "The browser pane sits in the right panel, which is 28rem at both 1280 and 1440. Judged against the mockup's 1440 render; the panel at 390 is shot in files-tree.",
+  "steps": [
+    "row-id=thread:redirect",
+    "surface-launch=preview"
+  ],
+  "wait": "right-panel-tabbar",
+  "settleMs": 800
+}

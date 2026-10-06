@@ -6,7 +6,12 @@
 // name the fixture it is served from, since one state file cannot hold both a
 // person whose image is built and one whose image never was.
 
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { threadId } from "./fixture-state.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** The widths every list is shot at when it names none: a desktop window and a phone. */
 const DEFAULT_WIDTHS = [1440, 390];
@@ -155,6 +160,22 @@ export function readSurfaces(raw) {
     seen.add(s.name);
   }
   return { widths, heights, surfaces };
+}
+
+/** The list this repo ships, in the shape `readSurfaces` takes: one file per surface in `surfaces/`, named by its file,
+ * and the widths every surface is shot at from `widths.json`. One file each, so two tickets adding a surface never edit
+ * the same file (one shared list conflicted on nine landings). */
+export function shippedSurfaces(folder = join(HERE, "surfaces")) {
+  const surfaces = readdirSync(folder)
+    .filter(file => file.endsWith(".json"))
+    .map(file => file.slice(0, -".json".length))
+    .sort()
+    .map(name => {
+      const raw = JSON.parse(readFileSync(join(folder, `${name}.json`), "utf8"));
+      if (raw !== null && typeof raw === "object" && "name" in raw) fail(`${name}.json: the file's own name is the surface's name, so it carries no "name"`);
+      return { name, ...raw };
+    });
+  return { ...JSON.parse(readFileSync(join(folder, "..", "widths.json"), "utf8")), surfaces };
 }
 
 export const shotName = (surface, theme, width) => `${surface}-${theme}-${width}.png`;

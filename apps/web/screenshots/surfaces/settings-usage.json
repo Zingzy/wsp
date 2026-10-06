@@ -1,0 +1,18 @@
+{
+  "at": "/",
+  "fixture": "usage",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-usage"
+  ],
+  "wait": "k=used-headline",
+  "settleMs": 700,
+  "height": 1100,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The settings column is 760px at most, so 1280 draws it as 1440 does; 390 is where the table narrows."
+}

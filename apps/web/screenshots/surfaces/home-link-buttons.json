@@ -1,0 +1,15 @@
+{
+  "at": "/#p/pr_spoo",
+  "fixture": "pull-request",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The composer is capped at 48rem, so 1280 draws the home as 1440 does; 390 is where its footer, holding the two buttons, reflows, which is shot here.",
+  "steps": [
+    "testid=composer-editor",
+    "type:https://github.com/you/spoo/pull/42"
+  ],
+  "wait": "k=start-review",
+  "settleMs": 1200
+}

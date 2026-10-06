@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:redirect",
+    "390:key:Escape",
+    "390:key:Escape",
+    "testid=composer-editor",
+    "type:#"
+  ],
+  "wait": "composer-item-id=reference:pull-request:41",
+  "settleMs": 700
+}

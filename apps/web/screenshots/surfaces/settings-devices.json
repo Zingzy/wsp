@@ -1,0 +1,10 @@
+{
+  "at": "/",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-devices"
+  ],
+  "wait": "settings-at=devices"
+}

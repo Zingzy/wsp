@@ -1,0 +1,20 @@
+{
+  "at": "/",
+  "fixture": "rewind",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:rounding",
+    "390:key:Escape",
+    "390:key:Escape",
+    "hover:message-role=assistant",
+    "k=rewind-to-here"
+  ],
+  "wait": "k=rewind-refusal",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "A 440px dialog, the same at every desktop width, so 1280 draws it as 1440 does; 390 is where it reflows, which is shot here.",
+  "settleMs": 700
+}

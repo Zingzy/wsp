@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "fixture": "pull-request",
+  "widths": [
+    1440
+  ],
+  "reason": "The Commits tab of the pull request pane: the rail, one dot per commit and the merge commit's dot hollow, at the same panel width as pr-pane.",
+  "steps": [
+    "row-id=thread:redirect",
+    "surface-launch=pr",
+    "segment=commits"
+  ],
+  "wait": "pr-commit",
+  "settleMs": 1200
+}

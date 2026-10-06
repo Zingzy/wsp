@@ -1,0 +1,17 @@
+{
+  "at": "/",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-keybindings",
+    "chord=sidebar.toggle",
+    "key:ControlOrMeta+j"
+  ],
+  "wait": "k=chord-refused"
+}
