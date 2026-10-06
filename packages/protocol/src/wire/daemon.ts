@@ -464,7 +464,7 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   /** Records the checkout as it stands, new files in and ignored ones out, as one commit on top of HEAD through an
    * index of its own, so the checkout's own index is never written; answers a GitSnapshotReply. No ref names it. */
   z.object({ id: reqId, op: z.literal("git.snapshot"), cwd: z.string(), machineId: z.string().optional() }),
-  /** The diff between two commits, each its full 40 character sha or the frame is refused before git runs; answers
+  /** The diff between two commits, each its full sha (40 or 64 hex digits) or the frame is refused before git runs; answers
    * a GitDiffReply. */
   z.object({ id: reqId, op: z.literal("git.range"), cwd: z.string(), from: z.string(), to: z.string(), path: z.string().optional(), machineId: z.string().optional() }),
   /** What a turn changed between two of its snapshots, the agent's own work alone, each snapshot its full sha; answers

@@ -14,7 +14,8 @@ use wsp_frames::{
     FsSearchReply, FsWriteReply, HostFolder, HostFolderListing,
 };
 
-use crate::git::{run_git, Runs};
+use crate::beneath;
+use crate::git::{run_git, GitLine, Runs};
 use crate::paths::{absolute, is_inside, OpError};
 
 /// Runs blocking work off the runtime thread and folds a lost worker into the op's failure.
@@ -66,13 +67,13 @@ async fn ignored_among<R: Runs>(runner: &R, dir: &Path, names: Vec<&str>) -> Res
     if names.is_empty() {
         return Ok(HashSet::new());
     }
-    let this_dir = run_git(runner, dir, &["check-ignore", "-q", "."], None, None).await?;
+    let this_dir = run_git(runner, dir, &GitLine::new(&["check-ignore", "-q", "."]), None, None).await?;
     if this_dir.code != Some(1) {
         return Ok(HashSet::new());
     }
     let mut input = names.join("\0").into_bytes();
     input.push(0);
-    let res = run_git(runner, dir, &["check-ignore", "-z", "--stdin"], Some(&input), None).await?;
+    let res = run_git(runner, dir, &GitLine::new(&["check-ignore", "-z", "--stdin"]), Some(&input), None).await?;
     if res.code != Some(0) {
         return Ok(HashSet::new());
     }
@@ -271,13 +272,15 @@ pub(crate) async fn read_file_bounded(file: PathBuf, encoding: FsReadEncoding, c
     .await
 }
 
-/// Replaces the contents of `name` in `dir`, an existing regular file, whole: written beside it under a hidden name
-/// and renamed over it, so a reader never sees half a file, with the old mode and owner kept. The folder is the one
-/// the path resolved to inside a root; the leaf is opened without following a link, so a link standing where the
-/// file should be is refused rather than written through. Refusals name the file as `shown`, the path the frame gave,
-/// never where this computer keeps it.
+/// Replaces the contents of `name` in `folder`, an existing regular file, whole: written beside it under a hidden
+/// name and renamed over it, so a reader never sees half a file, with the old mode and owner kept. `folder` is the
+/// one the path resolved to under `open`, the root this daemon opens it from. Every folder below `open` is opened by
+/// descriptor with no link followed, and the leaf, the hidden file and the rename go through that descriptor, so a
+/// folder a writer inside swapped for a link after the resolve is refused rather than written through. Refusals name
+/// the file as `shown`, the path the frame gave, never where this computer keeps it.
 pub(crate) async fn write_file(
-    dir: PathBuf,
+    open: PathBuf,
+    folder: PathBuf,
     name: std::ffi::OsString,
     shown: String,
     contents: String,
@@ -285,21 +288,34 @@ pub(crate) async fn write_file(
 ) -> Result<FsWriteReply, OpError> {
     use std::io::Write;
     use std::os::unix::fs::MetadataExt;
+
+    use nix::errno::Errno;
+    use nix::fcntl::{openat, renameat, OFlag};
+    use nix::sys::stat::Mode;
+    use nix::unistd::{unlinkat, UnlinkatFlags};
     blocking(move || {
-        let target = dir.join(&name);
         if contents.len() as u64 > cap {
             return Err(OpError::coded(DaemonErrorCode::BadRequest, words::too_large_to_write(cap)));
         }
         let not_a_file = || OpError::coded(DaemonErrorCode::NotAFile, format!("{shown} is not a regular file"));
+        let not_found = || OpError::coded(DaemonErrorCode::NotFound, format!("{shown} does not exist"));
+        let name = name.to_str().ok_or_else(|| OpError::coded(DaemonErrorCode::BadRequest, words::name_not_utf8(&shown)))?;
+        // The root is the runtime's own folder, which no workspace can swap; it may sit behind a link of the box's,
+        // and `folder` came back from the resolve with every link read, so both sides of the compare are real paths.
+        let open = std::fs::canonicalize(&open)?;
+        let walk = folder.strip_prefix(&open).map_err(|_| crate::paths::outside_root(&shown))?;
+        let rel = beneath::joined(walk, name).ok_or_else(|| crate::paths::outside_root(&shown))?;
+        let held = nix::fcntl::open(&open, OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC, Mode::empty())
+            .map_err(std::io::Error::from)?;
+        let Some((dir, leaf)) = beneath::parent_of(&held, &rel).map_err(|_| crate::paths::outside_root(&shown))? else {
+            return Err(not_found());
+        };
         // Non-blocking too, so a fifo standing where the file should be answers at once instead of holding the open.
-        let opened = std::fs::OpenOptions::new().read(true).custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK).open(&target);
-        let held = match opened {
-            Ok(held) => held,
-            Err(e) if e.raw_os_error() == Some(nix::libc::ELOOP) => return Err(not_a_file()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(OpError::coded(DaemonErrorCode::NotFound, format!("{shown} does not exist")))
-            }
-            Err(e) => return Err(e.into()),
+        let held = match openat(&dir, leaf, OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC, Mode::empty()) {
+            Ok(fd) => std::fs::File::from(fd),
+            Err(Errno::ELOOP) => return Err(not_a_file()),
+            Err(Errno::ENOENT) => return Err(not_found()),
+            Err(e) => return Err(std::io::Error::from(e).into()),
         };
         let meta = held.metadata()?;
         if !meta.is_file() {
@@ -307,22 +323,22 @@ pub(crate) async fn write_file(
         }
         let mut seed = [0u8; 6];
         getrandom::fill(&mut seed).map_err(|e| OpError::plain(e.to_string()))?;
-        let hidden = format!(".{}.wsp-{}", name.to_string_lossy(), seed.iter().map(|b| format!("{b:02x}")).collect::<String>());
-        let beside = dir.join(hidden);
+        let hidden = format!(".{leaf}.wsp-{}", seed.iter().map(|b| format!("{b:02x}")).collect::<String>());
         let written = (|| -> Result<(), OpError> {
+            let flags = OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
             let mut out =
-                std::fs::OpenOptions::new().write(true).create_new(true).custom_flags(nix::libc::O_NOFOLLOW).mode(0o600).open(&beside)?;
+                std::fs::File::from(openat(&dir, hidden.as_str(), flags, Mode::from_bits_truncate(0o600)).map_err(std::io::Error::from)?);
             out.set_permissions(meta.permissions())?;
             // A daemon writing as root into a workspace gives the file back to whoever owned it; one writing as the
             // person already owns it, and a group it may not take leaves the file in its own.
             let _ = std::os::unix::fs::fchown(&out, Some(meta.uid()), Some(meta.gid()));
             out.write_all(contents.as_bytes())?;
             out.sync_all()?;
-            std::fs::rename(&beside, &target)?;
+            renameat(&dir, hidden.as_str(), &dir, leaf).map_err(std::io::Error::from)?;
             Ok(())
         })();
         if written.is_err() {
-            let _ = std::fs::remove_file(&beside);
+            let _ = unlinkat(&dir, hidden.as_str(), UnlinkatFlags::NoRemoveDir);
         }
         written.map(|()| FsWriteReply { bytes: contents.len() as u64 })
     })
@@ -485,9 +501,16 @@ mod tests {
         let file = dir.path().join("run.sh");
         fs::write(&file, "#!/bin/sh\necho old\n").unwrap();
         fs::set_permissions(&file, fs::Permissions::from_mode(0o751)).unwrap();
-        let wrote = write_file(dir.path().to_path_buf(), "run.sh".into(), "run.sh".to_owned(), "#!/bin/sh\necho new\n".to_owned(), 1024)
-            .await
-            .unwrap();
+        let wrote = write_file(
+            dir.path().to_path_buf(),
+            dir.path().to_path_buf(),
+            "run.sh".into(),
+            "run.sh".to_owned(),
+            "#!/bin/sh\necho new\n".to_owned(),
+            1024,
+        )
+        .await
+        .unwrap();
         assert_eq!(wrote.bytes, 19);
         assert_eq!(fs::read_to_string(&file).unwrap(), "#!/bin/sh\necho new\n");
         assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o7777, 0o751);
@@ -501,6 +524,9 @@ mod tests {
         std::os::unix::fs::symlink(dir.path().join("real.txt"), dir.path().join("link.txt")).unwrap();
         fs::create_dir(dir.path().join("folder")).unwrap();
         let at = || dir.path().to_path_buf();
+        let write_file = |dir: PathBuf, name: std::ffi::OsString, shown: String, contents: String, cap: u64| {
+            write_file(dir.clone(), dir, name, shown, contents, cap)
+        };
         let link = write_file(at(), "link.txt".into(), "link.txt".to_owned(), "x".to_owned(), 1024).await.unwrap_err();
         assert_eq!(link.code, Some(DaemonErrorCode::NotAFile), "{}", link.message);
         let missing = write_file(at(), "none.txt".into(), "none.txt".to_owned(), "x".to_owned(), 1024).await.unwrap_err();
@@ -512,6 +538,64 @@ mod tests {
         assert_eq!((big.code, big.message), (Some(DaemonErrorCode::BadRequest), words::too_large_to_write(2 * 1024 * 1024)));
         assert_eq!(fs::read_to_string(dir.path().join("real.txt")).unwrap(), "real\n");
         assert_eq!(listed(dir.path()), vec!["folder", "link.txt", "real.txt"]);
+    }
+
+    /// The runtime's root may sit behind a link to another disk: the resolve answers the real folder, and the write
+    /// still lands under the root opened through that link.
+    #[tokio::test]
+    async fn a_root_behind_a_link_still_takes_a_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let (real, rootfs) = (dir.path().join("real-rootfs"), dir.path().join("rootfs"));
+        fs::create_dir_all(real.join("project")).unwrap();
+        std::os::unix::fs::symlink(&real, &rootfs).unwrap();
+        fs::write(real.join("project/notes.txt"), "old\n").unwrap();
+        let folder = fs::canonicalize(rootfs.join("project")).unwrap();
+        let wrote = write_file(rootfs, folder, "notes.txt".into(), "/project/notes.txt".to_owned(), "new\n".to_owned(), 1024).await;
+        assert_eq!(wrote.map(|w| w.bytes), Ok(4));
+        assert_eq!(fs::read_to_string(real.join("project/notes.txt")).unwrap(), "new\n");
+    }
+
+    /// A name that is not UTF-8 is refused for what it is, not as a path that left the root.
+    #[tokio::test]
+    async fn a_name_that_is_not_utf8_is_refused_as_such() {
+        use std::os::unix::ffi::OsStringExt;
+        let dir = tempfile::tempdir().unwrap();
+        let name = std::ffi::OsString::from_vec(vec![b'a', 0xff]);
+        let at = dir.path().to_path_buf();
+        let refused = write_file(at.clone(), at, name, "a?".to_owned(), "x".to_owned(), 1024).await.unwrap_err();
+        assert_eq!(refused.code, Some(DaemonErrorCode::BadRequest), "{}", refused.message);
+        assert_eq!(refused.message, words::name_not_utf8("a?"));
+    }
+
+    /// The folder a write resolved to is the workspace's, and a process inside can swap it for a link to the box's
+    /// own folder between the resolve and the write: the write lands in no folder of the box's.
+    #[tokio::test]
+    async fn a_folder_swapped_for_a_link_after_the_resolve_is_never_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let (rootfs, theirs) = (dir.path().join("rootfs"), dir.path().join("box-ssh"));
+        let project = rootfs.join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&theirs).unwrap();
+        fs::write(project.join("authorized_keys"), "agent's key\n").unwrap();
+        fs::write(theirs.join("authorized_keys"), "root's key\n").unwrap();
+        fs::rename(&project, rootfs.join("away")).unwrap();
+        std::os::unix::fs::symlink(&theirs, &project).unwrap();
+        let wrote = write_file(
+            rootfs.clone(),
+            project.clone(),
+            "authorized_keys".into(),
+            "authorized_keys".to_owned(),
+            "agent's key\n".to_owned(),
+            1024,
+        )
+        .await;
+        assert_eq!(
+            fs::read_to_string(theirs.join("authorized_keys")).unwrap(),
+            "root's key\n",
+            "the box's file was written through the link"
+        );
+        assert!(wrote.is_err());
+        assert_eq!(listed(&theirs), vec!["authorized_keys"]);
     }
 
     #[tokio::test]

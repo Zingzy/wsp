@@ -5,6 +5,7 @@
 
 use std::fs::File;
 use std::os::fd::OwnedFd;
+use std::path::{Component, Path};
 
 use nix::errno::Errno;
 use nix::fcntl::{openat, OFlag};
@@ -13,6 +14,20 @@ use nix::sys::stat::Mode;
 /// A folder on the way: read, a folder, no link, and nothing left open across an exec.
 pub(crate) fn dir_flags() -> OFlag {
     OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC
+}
+
+/// The walk's names, then rel's, as one name under the held folder; None where the walk takes a way up.
+pub(crate) fn joined(walk: &Path, rel: &str) -> Option<String> {
+    let mut names = Vec::new();
+    for part in walk.components() {
+        match part {
+            Component::Normal(name) => names.push(name.to_str()?),
+            Component::RootDir | Component::CurDir => {}
+            Component::ParentDir | Component::Prefix(_) => return None,
+        }
+    }
+    names.push(rel);
+    Some(names.join("/"))
 }
 
 /// The folder holding `rel` under `at` and its last name, each folder on the way opened with no link followed.

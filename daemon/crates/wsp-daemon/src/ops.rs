@@ -25,7 +25,9 @@ use crate::paths::OpError;
 use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::tunnel::Tunnels;
+mod runner;
 use crate::{bring_back, frame_text as text, fs, git, hosts, paths, readings, ssh, tunnel, Ctx, Listener, Outbound, Outgoing};
+use runner::Runner;
 
 type Detach = Box<dyn FnOnce() + Send>;
 
@@ -459,47 +461,6 @@ async fn bound_of(ctx: &Ctx, machine: Option<&str>, at: &Path) -> Result<PathBuf
     .await
 }
 
-/// Which way an op runs a program, and so which machine it is answered for: this computer, or one workspace this
-/// computer holds. One enum rather than a generic on every arm, and one module behind each way.
-enum Runner {
-    Here(git::here::Here),
-    #[cfg(target_os = "linux")]
-    Inside(git::inside::Inside),
-}
-
-impl git::Runs for Runner {
-    async fn run(
-        &self,
-        cwd: &Path,
-        program: &str,
-        args: &[&str],
-        input: Option<&[u8]>,
-        max_bytes: Option<usize>,
-    ) -> Result<git::GitResult, OpError> {
-        match self {
-            Runner::Here(here) => here.run(cwd, program, args, input, max_bytes).await,
-            #[cfg(target_os = "linux")]
-            Runner::Inside(inside) => inside.run(cwd, program, args, input, max_bytes).await,
-        }
-    }
-
-    async fn on_path(&self, program: &str) -> Result<bool, OpError> {
-        match self {
-            Runner::Here(here) => here.on_path(program).await,
-            #[cfg(target_os = "linux")]
-            Runner::Inside(inside) => inside.on_path(program).await,
-        }
-    }
-
-    fn on_this_side(&self, folder: &Path) -> Option<git::OnThisSide> {
-        match self {
-            Runner::Here(here) => here.on_this_side(folder),
-            #[cfg(target_os = "linux")]
-            Runner::Inside(inside) => inside.on_this_side(folder),
-        }
-    }
-}
-
 /// The workspace a frame names, on the daemon of the computer holding it: a workspace on a computer somebody owns
 /// runs no daemon of its own, so this daemon answers for it. A daemon that runs no workspace, and one that runs
 /// none by this name, answer the same missing refusal every other op answers for a machine it does not know.
@@ -866,8 +827,12 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                     folder if folder.is_empty() => ".".to_owned(),
                     folder => folder.into_owned(),
                 };
-                let (_, under, _) = road(ctx, machine_id.as_deref(), &parent, Reads).await?;
-                fs::write_file(under, name.to_owned(), path.clone(), contents, numbers::FS_WRITE_CAP_BYTES).await
+                let (runner, under, named) = road(ctx, machine_id.as_deref(), &parent, Reads).await?;
+                // Opened from the root the way of running opens it on this side, every folder below it by descriptor.
+                let open = git::Runs::on_this_side(&runner, &named)
+                    .ok_or_else(|| OpError::plain(format!("{path} cannot be opened on this computer")))?
+                    .open;
+                fs::write_file(open, under, name.to_owned(), path.clone(), contents, numbers::FS_WRITE_CAP_BYTES).await
             };
             answer(id, wrote.await)
         }
@@ -933,7 +898,10 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             let diff = async {
                 // Refused before anything is built from them: a value git would read as an option never reaches it.
                 if !git::is_full_sha(&from) || !git::is_full_sha(&to) {
-                    return Err(OpError::coded(DaemonErrorCode::BadRequest, "from and to are each a commit's full 40 character sha"));
+                    return Err(OpError::coded(
+                        DaemonErrorCode::BadRequest,
+                        "from and to are each a commit's full sha, 40 or 64 hex digits",
+                    ));
                 }
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
                 let bound = bound_of(ctx, machine_id.as_deref(), &at).await?;
@@ -945,7 +913,10 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             let diff = async {
                 // Refused before anything is built from them: a value git would read as an option never reaches it.
                 if !git::is_full_sha(&from) || !git::is_full_sha(&to) {
-                    return Err(OpError::coded(DaemonErrorCode::BadRequest, "from and to are each a commit's full 40 character sha"));
+                    return Err(OpError::coded(
+                        DaemonErrorCode::BadRequest,
+                        "from and to are each a commit's full sha, 40 or 64 hex digits",
+                    ));
                 }
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
                 let bound = bound_of(ctx, machine_id.as_deref(), &at).await?;

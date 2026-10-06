@@ -32,6 +32,19 @@ Review wsp changes against the laws this project has already paid for. Generic c
 - Never print or commit key material; .env stays gitignored; fake keys in tests look fake (sk-ant-x).
 - curl|sh is banned in anything that installs user-chosen software, and no road downloads a script and runs it: every release and vendor row names the artifact it installs and a sha256 per arch from the catalog's pins table (packages/catalog/src/release-pins.ts, the casks' own pins, the harness pin in roads.ts), checked with sha256sum before the unpack; the harness itself is the vendor's binary at a pinned version with the sums the vendor's manifest publishes, GOLDEN_SETUP, run on a first-life builder and recorded in the manifest as setupSha. A row that reads a vendor's current version off the network, a release road with no tag, or a download piped into a shell is a finding. A pin moves by a bump of the table (node packages/catalog/scripts/pin-release.mjs <repo> <tag>), never by a road reading latest.
 
+## Threat model (blockers)
+
+An agent writes everything in a workspace: its files, its links, its `.git`, its branch names. On a computer that holds workspaces the daemon runs as root over them. Code that trusts what is in a workspace is a blocker, and so is a second copy of one of these rules.
+
+- Open a file inside a workspace by descriptor, with no link followed and a regular-file check: `write_file_inside`, `write_file_in` and `open_inside` in `daemon/crates/wsp-runtime/src/bundle.rs`, `fs::write_file`, which opens every folder below its root by descriptor and renames through it, and `git/stored.rs` for a stopped copy. A write by path in the daemon's root paths fails `daemon/crates/wsp-daemon/tests/threat_model.rs` unless its function is named there with the reason.
+- Resolve a path, then use and store the resolved one, never the name asked for: `paths::resolve_inside` answers the realpath it checked.
+- Cap every read of a file an agent wrote: `git/stored.rs` caps each ref, config, list and object, and `ssh_host_key_inside` never reads past the longest key.
+- `--` or `--end-of-options` before every git operand an agent chose: build the line with `GitLine` (`daemon/crates/wsp-runtime/src/git_line.rs`); its own words are `&'static str`, and the threat model test refuses git run any other way.
+- Start a process on an allowlisted environment, never a denylisted one: `env_clear()`, then the names meant, as `exec::run_exec` does.
+- Name tools by full path in anything detached or run as root: `apps/desktop/src/self-update.ts` runs `/usr/bin/ditto`, `/usr/bin/codesign` and `/usr/bin/plutil`.
+- Fence agent text by its length, never a fixed marker: `fenceFor` in `packages/protocol/src/quote.ts`.
+- Never fetch while rendering agent content: `namesAnAddress` in `apps/web/src/components/chat/MermaidBlock.tsx` refuses a diagram that names an address before Mermaid draws it.
+
 ## Test discipline
 
 - TDD for logic (test exists and failed first, or the report says why not); components need render + interaction tests minimum.
