@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, clientWords, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { ALREADY_JOINED_LINE, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_WORKSPACE_PATH, placeDaemonPaths, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceApplied, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_FOUND_END, PLACE_FOUND_MAX_BYTES, PLACE_WORKSPACE_PATH, placeDaemonPaths, TOOL_LINKS_DIR, TOOL_PREFIX, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceApplied, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
@@ -719,22 +719,80 @@ export function apparmorOffStep(profile = WSP_WORKSPACE_APPARMOR_PATH): string[]
   ];
 }
 
-function apparmorStep(place: DaemonPlace, target: DaemonTarget): string[] {
+export function apparmorStep(place: DaemonPlace, target: DaemonTarget, profile = WSP_WORKSPACE_APPARMOR_PATH): string[] {
   const bytes = Buffer.from(apparmorProfile(place, target)).toString("base64");
+  const at = sh(place, profile);
   return [
-    'if command -v apparmor_parser >/dev/null 2>&1 && [ -w /etc/apparmor.d ] && [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" = Y ]; then',
-    `  printf %s '${bytes}' | base64 -d > ${WSP_WORKSPACE_APPARMOR_PATH}`,
+    // A profile of that name standing before a joined add is the computer's own, and its leave leaves it: written
+    // over, the rule it held would be gone while wsp is there and wsp's would be the one left after.
+    ...(place.join === undefined ? [] : [`if ${stoodTest(place, profile)}; then`, `  echo ${shellQuote(apparmorStoodLine(profile))}`]),
+    `${place.join === undefined ? "if" : "elif"} command -v apparmor_parser >/dev/null 2>&1 && [ -w ${sh(place, posix.dirname(profile))} ] && [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" = Y ]; then`,
+    `  printf %s '${bytes}' | base64 -d > ${at}`,
     // An older parser (AppArmor 3, Ubuntu 22.04) does not know the userns rule and refuses the profile; leaving it
     // written and unloaded would say nothing, so it is removed and the refusal is said.
-    `  if apparmor_parser -r -W ${WSP_WORKSPACE_APPARMOR_PATH} 2>/dev/null; then`,
+    `  if apparmor_parser -r -W ${at} 2>/dev/null; then`,
     `    echo "the ${WSP_WORKSPACE_APPARMOR} apparmor profile is loaded, so workspaces isolate here"`,
     "  else",
-    `    rm -f ${WSP_WORKSPACE_APPARMOR_PATH}`,
+    `    rm -f ${at}`,
     `    echo "this computer's apparmor does not take the ${WSP_WORKSPACE_APPARMOR} profile; workspaces here run without it"`,
     "  fi",
     "fi",
   ];
 }
+
+/** What the deploy says where a profile of that name already stood: wsp's is not loaded, and the computer's runs. */
+export const apparmorStoodLine = (profile: string): string =>
+  `an apparmor profile named ${WSP_WORKSPACE_APPARMOR} was already at ${profile}, so wsp leaves it as it is and loads none of its own; workspaces here run under that one`;
+
+/** The test that holds where a path stands, a link that points nowhere included. */
+const stoodTest = (place: DaemonPlace, path: string): string => `{ [ -e ${sh(place, path)} ] || [ -L ${sh(place, path)} ]; }`;
+
+/** What the deploy says where it could not write that record whole: every leave then takes nothing outside the home. */
+export const placeFoundSkippedLine = (prefix: string): string =>
+  `wsp could not write down everything under ${prefix} before it was added (the listing did not finish or passed ${PLACE_FOUND_MAX_BYTES / 1024 / 1024} MB), so a remove will leave ${prefix} and the ${WSP_WORKSPACE_APPARMOR} apparmor profile for you to clear by hand`;
+
+/** Written by a joined add's deploy before anything of wsp's lands outside the home: every path there a leave run
+ * as root would take that stood already, so the leave takes back only what wsp made. The workspace profile, every
+ * path under wsp's install folder, the folder itself first, and every link in the folder commands are linked into,
+ * each NUL-terminated since a name may hold a newline. A prefix that is a link is not named: every leave keeps one.
+ * The listing goes to a file beside the record and is renamed over it only once it ran to its end, under the cap,
+ * with the end entry last, so a record cut short anywhere reads as none and its leave takes nothing. A whole record
+ * already there is the first add's and stays: a second add of a computer already joined runs this before its join is
+ * refused, and a listing then would name what wsp itself put there as having stood before. */
+export function placeFoundStep(place: DaemonPlace, at: { profile: string; prefix: string; links: string } = { profile: WSP_WORKSPACE_APPARMOR_PATH, prefix: TOOL_PREFIX, links: TOOL_LINKS_DIR }): string[] {
+  const prefix = sh(place, at.prefix);
+  const links = sh(place, at.links);
+  const record = sh(place, placeDaemonPaths(place.root).placeFound);
+  const part = sh(place, placeFoundPart(place.root));
+  const listing = [
+    `rm -f ${part}`,
+    "found=1",
+    "{",
+    `  if ${stoodTest(place, at.profile)}; then printf '%s\\0' ${sh(place, at.profile)}; fi`,
+    `  if [ -d ${prefix} ] && [ ! -L ${prefix} ]; then find ${prefix} -print0 2>/dev/null || found=0; fi`,
+    `  if [ -d ${links} ]; then find ${links} -mindepth 1 -maxdepth 1 -type l -print0 2>/dev/null || found=0; fi`,
+    `} > ${part}`,
+    `if [ "$found" = 1 ] && [ "$(wc -c < ${part})" -le ${PLACE_FOUND_MAX_BYTES} ]; then`,
+    `  printf '%s\\0' ${PLACE_FOUND_END} >> ${part}`,
+    `  mv -f ${part} ${record}`,
+    "else",
+    `  rm -f ${part}`,
+    `  echo ${shellQuote(placeFoundSkippedLine(at.prefix))}`,
+    "fi",
+  ];
+  // The record's last bytes with each NUL read as a slash: the end entry after a NUL, or the end entry alone.
+  return [
+    `case "$(tail -c ${PLACE_FOUND_END.length + 2} ${record} 2>/dev/null | tr '\\000' /)" in`,
+    `  "/${PLACE_FOUND_END}/" | "${PLACE_FOUND_END}/") ;;`,
+    "  *)",
+    ...listing.map(line => `    ${line}`),
+    "    ;;",
+    "esac",
+  ];
+}
+
+/** Where that record is written before it is renamed into place. */
+export const placeFoundPart = (home: string): string => `${placeDaemonPaths(home).placeFound}.part`;
 
 /** Stops whatever holds the daemon's place before the new daemon starts: an update lands on a machine whose daemon
  * is running, and a second bind would fail while the port check still read the old one as up. The unit goes first,
@@ -801,6 +859,7 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     ...place.exportEnv,
     ...stepMark(place, "files"),
     `mkdir -p ${place.make.map(dir => sh(place, dir)).join(" ")}`,
+    ...(place.join === undefined ? [] : placeFoundStep(place)),
     ...unpackBundle(place),
     // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and the place's bin folder is first on PATH.
     `install -m 0755 ${sh(place, `${place.dir}/wsp-open`)} ${sh(place, place.openShim)}`,
@@ -850,7 +909,7 @@ const underHome = (home: string, path: string): string[] => (path !== "/" && pat
 export function joinedAddWrites(place: DaemonPlace, unitPath: string): AddWrite[] {
   const home = place.root.replace(/\/+$/, "");
   const at = placeDaemonPaths(home);
-  const own = [...placeOwnedPaths(home).filter(path => path !== at.wsp), `${posix.dirname(place.profileFile)}/wsp-preview.sh`, at.manifestPath, at.putDir, joinOf(place).codeFile];
+  const own = [...placeOwnedPaths(home).filter(path => path !== at.wsp), placeFoundPart(home), `${posix.dirname(place.profileFile)}/wsp-preview.sh`, at.manifestPath, at.putDir, joinOf(place).codeFile];
   const folders = [...new Set([...place.make, workFolderIn(home)].flatMap(path => underHome(home, path)))].filter(path => !own.includes(path)).sort((a, b) => b.split("/").length - a.split("/").length);
   return [
     { path: unitPath, as: "unit" },
