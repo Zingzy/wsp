@@ -4,7 +4,7 @@
 // a tool or says why not, every tool has a skill row, every list a tool takes
 // is a flag the command line reads again, and every wsp line the skill or the
 // instructions show parses against the flag table the command actually reads.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -20,6 +20,12 @@ import { mcpServer } from "../src/mcp.js";
 import { CLOUD_ON } from "../src/cloud.js";
 import { instructions, RULES_HEADING, SHELL_HEADING, VERBS_HEADING, wspSkill } from "../src/skill.js";
 import { ALL_VERBS, CLI_VERBS, COMMON, COMMON_FLAG_WORDS, FLAG_WORDS, HELP_WIDTH, VERBS, flagList, flagSays, hasTool, optionalValues, openingOf, ownFlagsOf, toolName, verbPage, type Flags } from "../src/verbs.js";
+
+/** verbs.ts and the files under verbs/ it re-exports, read as one text, for the greps that ask whether a verb sends an op. */
+const verbsSource = (): string =>
+  [new URL("../src/verbs.ts", import.meta.url), ...readdirSync(new URL("../src/verbs/", import.meta.url)).filter(f => f.endsWith(".ts")).map(f => new URL(`../src/verbs/${f}`, import.meta.url))]
+    .map(u => readFileSync(u, "utf8"))
+    .join("\n");
 
 interface Tool {
   name: string;
@@ -344,7 +350,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
   });
 
   it("every thread op a window sends is sent by a verb too, or is listed here with why it stays with the windows", () => {
-    const verbs = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
+    const verbs = verbsSource();
     const WINDOW_ONLY: Record<string, string> = {
       "sessions.settle": "settling is how one person's sidebar is folded, a view preference the windows keep; wsp threads lists every thread and folds none",
       "sessions.mark": "a pin, a snooze and a section are where one person's sidebar draws a thread; wsp threads lists every thread in one order and hides none",
@@ -362,7 +368,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
   });
 
   it("every slate op no verb sends is the window's own and says why: an agent reaches the slate through the slate verbs", () => {
-    const verbs = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
+    const verbs = verbsSource();
     const WINDOW_ONLY: Record<string, string> = {
       "slates.get": "the window's fetch of the record it draws; an agent reads its slate with slate read, which answers the sketch too",
       "slates.shown": "the window saying it opened the Slate tab on the first write, a fact about one person's window",
@@ -406,7 +412,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
   });
 
   it("every readings op a window sends stays with the windows and says why, so a new one sits nowhere only by failing here", () => {
-    const verbs = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
+    const verbs = verbsSource();
     const tools = readFileSync(new URL("../src/mcp.ts", import.meta.url), "utf8");
     const WINDOW_ONLY: Record<string, string> = {
       "sys.subscribe": "starts the two-second readings a live pane draws while it is open; the command line and the MCP tool have no pane, and wsp computers prints a computer's cores and memory now",
@@ -421,7 +427,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
   });
 
   it("the Changes and Pull request panes' own ops that no verb sends say why they stay with the pane", () => {
-    const verbs = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
+    const verbs = verbsSource();
     const PANE_ONLY: Record<string, string> = {
       "workspaces.checkout": "the branch line and the pull request word a tile reads, and a lead's children with their branches, which the host pushes on every status; an agent reads its own with git and gh in its copy and its children with threads",
       "workspaces.pullRequestView": "the pull request's page the pane shows; an agent reads its pull request with gh in its copy",
