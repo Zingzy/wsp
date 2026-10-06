@@ -414,6 +414,8 @@ export interface SshLogin {
   port?: number;
   /** The host key the person confirmed for a computer this one has never dialled. */
   hostKey?: string;
+  /** The password the login's sudo asks for, typed for this add alone. */
+  sudoPassword?: string;
 }
 
 export interface Api {
@@ -503,7 +505,7 @@ export interface Api {
   stopForward?(workspaceId: string, port: number): Promise<void>;
   /** Takes a computer or a provider back out: the host sweeps wsp off it over its link where it is connected, drops
    * the workspaces standing on it and the record. */
-  removePlace?(placeId: string): Promise<PlaceRemoved>;
+  removePlace?(placeId: string, sudoPassword?: string): Promise<PlaceRemoved>;
   /** Puts this wsp's daemon on the computer where that computer runs an older one; what it was set up with stays.
    * Answers what the daemon half came to where it ran. A client without it holds Update rather than offering one
    * that asks nobody. */
@@ -968,7 +970,7 @@ export function makeApi(c: ProtocolClient): Api {
       EditorId.parse((await c.request<{ editor?: unknown }>("editor.open", { workspaceId, path, ...(line !== undefined ? { line } : {}), ...(editor !== undefined ? { editor } : {}) })).editor),
     sshInclude: async on => (await c.request<{ sshInclude?: unknown }>("ssh.include", on !== undefined ? { on } : {})).sshInclude === true,
     addComputerOverSsh: async (login, addId) =>
-      PlaceView.parse((await c.request<{ place?: unknown }>("places.add", { addId, address: login.address, ...(login.port === undefined ? {} : { sshPort: login.port }), ...(login.hostKey === undefined ? {} : { hostKey: login.hostKey }) })).place),
+      PlaceView.parse((await c.request<{ place?: unknown }>("places.add", { addId, address: login.address, ...(login.port === undefined ? {} : { sshPort: login.port }), ...(login.hostKey === undefined ? {} : { hostKey: login.hostKey }), ...(login.sudoPassword === undefined ? {} : { sudoPassword: login.sudoPassword }) })).place),
     // Parsed, not trusted: the sheet draws only steps and states the wire type vouches for.
     placesList: async () => {
       const read = await c.request<{ places?: unknown; adds?: unknown; pending?: unknown }>("places.list");
@@ -1032,7 +1034,7 @@ export function makeApi(c: ProtocolClient): Api {
     initBuild: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.build", { ...o })).job),
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
-    removePlace: async placeId => await c.request<PlaceRemoved>("places.remove", { placeId }),
+    removePlace: async (placeId, sudoPassword) => await c.request<PlaceRemoved>("places.remove", { placeId, ...(sudoPassword === undefined ? {} : { sudoPassword }) }),
     // Parsed, not trusted: the row the answer lands on is redrawn off it, so only what the wire type vouches for
     // reaches the table.
     dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),

@@ -7,11 +7,12 @@
 // page, and closing mid-setup said as a notice.
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PLACE_HOST_KEY_KIND, RecipeFile, type AgentRow, type AgentsReport, type PlaceAddJob, type PlaceAddStep, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
+import { PLACE_HOST_KEY_KIND, PLACE_SUDO_KIND, RecipeFile, type AgentRow, type AgentsReport, type PlaceAddJob, type PlaceAddStep, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
 import { RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { closeAdd, openAdd, openPending, openSetup, useAddFlow } from "../src/settings/add/addFlow.js";
+import { useAdds } from "../src/settings/adds.js";
 import { stepLogs } from "../src/settings/add/setup.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
@@ -221,6 +222,59 @@ describe("Add a computer, from the address to Set up", () => {
     expect(failed.querySelector("[data-k=step-refusal]")?.textContent).toBe("jumpbox logs in as a user that is not root Add it as root.");
     await press(failed.querySelector("[data-k=try-again]"));
     expect(step()).toBe("where");
+  });
+
+  it("asks on the root row for the password a login's sudo asks for, once, and adds again with it and the trusted key, held nowhere else", async () => {
+    const key = "ssh-ed25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw";
+    const asked: SshLogin[] = [];
+    const kept: PlaceAddJob[] = [];
+    let refuse: (() => void) | undefined;
+    const fake = host({
+      addComputerOverSsh: (login: SshLogin, addId: string) => {
+        asked.push(login);
+        if (login.hostKey === undefined) {
+          kept.push({ addId, address: "jumpbox", startedAt: "x", state: "failed", steps: [{ step: "connect", state: "failed" }], said: "jumpbox has never been reached from this computer", kind: PLACE_HOST_KEY_KIND, hostKey: key });
+          return Promise.reject(new RequestError("jumpbox has never been reached from this computer", PLACE_HOST_KEY_KIND));
+        }
+        if (login.sudoPassword !== undefined) return new Promise<PlaceView>(() => {});
+        return new Promise<PlaceView>((_, no) => (refuse = () => no(new RequestError("jumpbox runs sudo only with ubuntu's password. Type it in Add a computer.", PLACE_SUDO_KIND, "Type it in Add a computer."))));
+      },
+      placesList: async () => ({ places: [here], adds: kept, pending: [] }),
+    } as Partial<Api>);
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => {
+      openAdd();
+      useAddFlow.setState({ address: "jumpbox" });
+    });
+    await settle();
+    await press(primary());
+    expect(step()).toBe("hostkey");
+    await press(primary());
+    const addId = useAddFlow.getState().addId!;
+    stage(addId, "connect", "done", "Ubuntu 24.04");
+    stage(addId, "check", "running");
+    stage(addId, "chip", "done", "Linux x86_64");
+    stage(addId, "root", "running");
+    stage(addId, "root", "failed", "jumpbox runs sudo only with ubuntu's password");
+    await act(async () => refuse!());
+    await settle();
+    const root = dialog()!.querySelector<HTMLElement>("[data-step-row='root']")!;
+    expect(root.dataset["state"]).toBe("failed");
+    // The host's fix names the terminal and the app for a client with no field; here the field below is the fix.
+    expect(root.querySelector("[data-k=step-refusal]")?.textContent).toBe("jumpbox runs sudo only with ubuntu's password. Type it below; it goes to sudo there and is kept nowhere.");
+    const field = root.querySelector<HTMLInputElement>("[data-k=sudo-password] input, input[data-k=sudo-password]")!;
+    expect(field.type).toBe("password");
+    const again = root.querySelector<HTMLButtonElement>("[data-k=try-again]")!;
+    expect(again.hasAttribute("data-held")).toBe(true);
+    fireEvent.change(field, { target: { value: "Tq-not-a-real-pw" } });
+    await press(again);
+    // The add that carries the password carries the key the person trusted, so the host holds the box against it
+    // before the password leaves.
+    expect(asked).toEqual([{ address: "jumpbox" }, { address: "jumpbox", hostKey: key }, { address: "jumpbox", hostKey: key, sudoPassword: "Tq-not-a-real-pw" }]);
+    expect(step()).toBe("checks");
+    // Nothing the window keeps holds it: not the flow, not the adds the host lists.
+    expect(JSON.stringify(useAddFlow.getState())).not.toContain("Tq-not-a-real-pw");
+    expect(JSON.stringify(useAdds.getState())).not.toContain("Tq-not-a-real-pw");
   });
 
   it("starts the picks from everything here, keeps each change on the pending add once, and says it is saved", async () => {

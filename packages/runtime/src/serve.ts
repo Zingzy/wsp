@@ -969,7 +969,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
-              send({ id: msg.id, ok: true, ...(await places().update(msg.placeId)) });
+              send({ id: msg.id, ok: true, ...(await places().update(msg.placeId, msg.sudoPassword === undefined ? {} : { sudoPassword: msg.sudoPassword })) });
               return;
             }
             case "places.remove": {
@@ -977,7 +977,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
-              send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId)) });
+              send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId, msg.sudoPassword === undefined ? {} : { sudoPassword: msg.sudoPassword })) });
               return;
             }
             case "places.dial": {
@@ -1136,6 +1136,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                   ...(msg.sshPort !== undefined ? { sshPort: msg.sshPort } : {}),
                   ...(msg.keyPath !== undefined ? { keyPath: msg.keyPath } : {}),
                   ...(msg.hostKey !== undefined ? { hostKey: msg.hostKey } : {}),
+                  ...(msg.sudoPassword !== undefined ? { sudoPassword: msg.sudoPassword } : {}),
                   hostUrls: [...at.addresses, ...(at.relay === undefined ? [] : [at.relay])],
                   ...(at.backPort !== undefined ? { doorPort: at.backPort } : {}),
                   ...(at.relay !== undefined ? { relay: at.relay } : {}),

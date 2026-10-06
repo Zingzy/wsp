@@ -218,6 +218,9 @@ export interface PlaceRecord {
  * a path on this computer and stays here. */
 export interface PlaceRecordRoad extends PlaceRoad {
   keyPath?: string;
+  /** The key the box's ssh answered the add with: what a later remove or update holds the box against before a sudo
+   * password goes there. Absent on a record made before it was kept, or where the add could read none. */
+  hostKey?: string;
 }
 
 /** The rows of one kind the setup put on that computer itself, by their key in the picks: a row it found already
@@ -275,6 +278,11 @@ export interface PlaceWiring {
    * Absent on a runtime served without the ssh road, where a remove of a computer that is not connected says the
    * agent is still installed and leaves it to the person at that computer. */
   leave?: PlaceLeaver;
+  /** How a login reaches root on a computer, read before a remove or an update over that login does anything there:
+   * answers the road where root is reachable, the password the person typed tried where sudo asks for one, and
+   * throws the add's own refusal where it is not (the sudo kind where a password would do). Absent, the login is
+   * taken to be root, as every login was before sudo was a road. */
+  sudoOver?(login: PlaceLogin, sudoPassword: string | undefined, act: { verb: "remove" | "update"; name: string }): Promise<string>;
   /** How a computer's picks are put on it. Absent, no computer is set up and the join and the update say nothing
    * about it. */
   provision?: PlaceProvisioner;
@@ -286,7 +294,7 @@ export interface PlaceWiring {
   undo?(login: PlaceLogin, script: string): Promise<void>;
   /** Runs one script on a computer over the login the install used, for a remove that finds no link up. Answers
    * what it exited with; throws the road's own sentence where the login would not stand. */
-  runOver?(login: PlaceLogin, script: string, timeoutMs: number): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  runOver?(login: PlaceLogin, script: string, timeoutMs: number, sudoPassword?: string): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** The forwards over ssh this host holds for computers that reach it no other way; the installer holds one before
    * the deploy and the records keep it held. Absent on a runtime served without the ssh road. */
   back?: PlaceBackHolder;
@@ -345,6 +353,8 @@ export interface PlaceUndo {
 export interface PlaceLogin {
   ssh: string;
   keyPath?: string;
+  /** The key the box's ssh answered the add with, off the record, where it was kept. */
+  hostKey?: string;
 }
 
 /** One dial of a computer over the login this host holds for it, with the key file the add was given where there
@@ -369,6 +379,8 @@ export interface PlaceUpdateRequest {
   daemon: boolean;
   link?: DaemonReach;
   ssh?: PlaceLogin;
+  /** The password the login's sudo took for this update, held for it alone. */
+  sudoPassword?: string;
 }
 
 /** What an update answers: which road carried the binary, where it landed on that computer, and where the one it
@@ -391,6 +403,8 @@ export interface PlaceLeaveRequest {
   name: string;
   report: PlaceReport;
   ssh: PlaceLogin;
+  /** The password the login's sudo took for this remove, held for it alone. */
+  sudoPassword?: string;
 }
 
 /** How the agent comes off a computer this host holds no link to: the leave that computer already carries, run
@@ -409,6 +423,8 @@ export interface PlaceInstallRequest {
   /** The host key the person confirmed or pinned; the install compares what answered the first dial against it
    * before anything of wsp's is sent, and refuses a computer nobody confirmed a key for. */
   hostKey?: string;
+  /** The password the login's sudo asks for, held for this install alone and on no record. */
+  sudoPassword?: string;
   /** The whole token the join on that computer spends: the single-use code and the fingerprint of the key this
    * host will prove, as one word, the same one the printed join line carries. */
   code: string;
@@ -618,7 +634,7 @@ export interface PlaceDoor {
   markDefaultIfNone(placeId: string): Promise<void>;
   /** Puts the agent on a computer over ssh and waits for it to dial back as a place. Refused in one sentence on a
    * host that wired no installer. */
-  add(req: { addId?: string; address: string; name?: string; sshPort?: number; keyPath?: string; hostKey?: string; hostUrls: readonly string[]; doorPort?: number; relay?: string; choices?: RecipeFile; recipe?: string }, now: number): Promise<PlaceAdded>;
+  add(req: { addId?: string; address: string; name?: string; sshPort?: number; keyPath?: string; hostKey?: string; sudoPassword?: string; hostUrls: readonly string[]; doorPort?: number; relay?: string; choices?: RecipeFile; recipe?: string }, now: number): Promise<PlaceAdded>;
   /** Sets a computer up from picks: a pending add that joined and waits on its choices, given them here or holding
    * them already, or a computer already set up, run again for whatever is missing, a sign-in that waits or ran out
    * among it. `ref` is a computer's id or name, or a pending add's id or address. Refused in one sentence for an add
@@ -655,8 +671,8 @@ export interface PlaceDoor {
    * the computer was set up with stays: a computer that follows a recipe syncs to it, which runs only what moved.
    * Refuses in one sentence a place this host does not hold, and a computer that is behind on a runtime wired with
    * no updater. */
-  update(placeId: string): Promise<PlaceUpdateReply>;
-  remove(placeId: string): Promise<PlaceRemoved>;
+  update(placeId: string, ask?: { sudoPassword?: string }): Promise<PlaceUpdateReply>;
+  remove(placeId: string, ask?: { sudoPassword?: string }): Promise<PlaceRemoved>;
   /** Every place a word picks, by id or by the name the person gave it: none, one, or the two that share a name,
    * which is a refusal the caller writes with the ids in it. */
   find(ref: string): Promise<PlaceRecord[]>;
@@ -1163,15 +1179,29 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const withRoad = (record: PlaceRecord, install: { login?: PlaceLogin; back?: PlaceBack } | undefined): PlaceRecord =>
     install?.login === undefined
       ? record
-      : { ...record, road: { ...record.road, ssh: install.login.ssh, ...(install.login.keyPath !== undefined ? { keyPath: install.login.keyPath } : {}), ...(install.back !== undefined ? { back: install.back } : {}) } };
+      : {
+          ...record,
+          road: {
+            ...record.road,
+            ssh: install.login.ssh,
+            ...(install.login.keyPath !== undefined ? { keyPath: install.login.keyPath } : {}),
+            ...(install.login.hostKey !== undefined ? { hostKey: install.login.hostKey } : {}),
+            ...(install.back !== undefined ? { back: install.back } : {}),
+          },
+        };
 
   /** The login this host holds for a computer, as every road that logs in to one takes it: the address in the
    * spelling a person would type and the key file the add named beside it, off the record's own road. Nothing
    * where the record carries none, which is a computer that joined by typing a code. */
   const loginOf = (record: PlaceRecord): PlaceLogin | undefined => {
     const ssh = sshRoadOf(record.road);
-    return ssh === undefined ? undefined : { ssh, ...(record.road?.keyPath === undefined ? {} : { keyPath: record.road.keyPath }) };
+    return ssh === undefined ? undefined : { ssh, ...(record.road?.keyPath === undefined ? {} : { keyPath: record.road.keyPath }), ...(record.road?.hostKey === undefined ? {} : { hostKey: record.road.hostKey }) };
   };
+
+  /** The password a remove or an update over a login rides, where that login's sudo asks for one and took the one
+   * the person typed; nothing where the login reaches root without one. Throws the add's own refusal otherwise. */
+  const rootOver = async (login: PlaceLogin, sudoPassword: string | undefined, act: { verb: "remove" | "update"; name: string }): Promise<string | undefined> =>
+    wiring.sudoOver === undefined ? undefined : (await wiring.sudoOver(login, sudoPassword, act)) === "taken" ? sudoPassword : undefined;
 
   /** Whether the login this host holds for a computer answers at all, over the one probe that installs nothing and
    * leaves nothing running, bounded as every other dial of a computer is. Its point is what it saves: the leave
@@ -2037,7 +2067,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * one out: over the link where it is up, else over the login the install used. A plugin the computer had before
    * wsp stays. Answers the lines for the ones that came off and the names of the ones that did not, which the remove
    * says; nothing here fails it. */
-  const pluginsOff = async (placeId: string, held: PlaceRecord, linked: boolean, login: PlaceLogin | undefined): Promise<{ off: string[]; kept: string[] }> => {
+  const pluginsOff = async (placeId: string, held: PlaceRecord, linked: boolean, login: PlaceLogin | undefined, sudoPassword?: string): Promise<{ off: string[]; kept: string[] }> => {
     const home = held.report.login["HOME"];
     const names = madeBySetup(held, "plugins");
     const undo = wiring.provision?.undo;
@@ -2048,7 +2078,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const run = async (cmd: string): Promise<boolean> => {
       if (machine !== undefined) return (await machine.exec(cmd, { timeoutMs: UNDO_MS }).catch(() => undefined))?.exitCode === 0;
       if (login === undefined || runOver === undefined) return false;
-      return (await runOver(login, cmd, UNDO_MS).catch(() => undefined))?.exitCode === 0;
+      return (await runOver(login, cmd, UNDO_MS, sudoPassword).catch(() => undefined))?.exitCode === 0;
     };
     const off: string[] = [];
     const kept = names.filter(name => !planned.some(u => u.key === `plugins/${name}` && u.cmd !== undefined));
@@ -2743,8 +2773,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         return pendingWrites;
       };
       let step: PlaceAddStep = "connect";
+      // The step the installer itself already marked failed, so the end of the add does not say it a second time.
+      let failedSaid: PlaceAddStep | undefined;
       const stage: PlaceStaging = (which, state, note, placeId, ms) => {
         if (state === "running") step = which;
+        if (state === "failed") failedSaid = which;
         if (state === "running" && which === "check") void movePending({ ...pending, step: "check" });
         const said: PlaceStageEvent = { type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}), ...(ms !== undefined ? { ms } : {}) };
         putAdd(addId, job => withPlaceStage(job, said));
@@ -2773,7 +2806,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // The road back to this computer is the host's the moment the install answers, and what the wait comes to
         // does not change it: the computer that most needs a login held here is the one whose agent never dials.
         // A join still to land carries it off this entry; one that already landed has its record written again.
-        waiting.login = installed.ssh === undefined ? undefined : { ssh: installed.ssh, ...(installed.sshKeyPath !== undefined ? { keyPath: installed.sshKeyPath } : {}) };
+        waiting.login = installed.ssh === undefined ? undefined : { ssh: installed.ssh, ...(installed.sshKeyPath !== undefined ? { keyPath: installed.sshKeyPath } : {}), ...(installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {}) };
         if (installed.back !== undefined) waiting.back = installed.back;
         if (waiting.login !== undefined && waiting.placeId !== undefined) await change(waiting.placeId, now => now);
         const joining = Date.now();
@@ -2836,7 +2869,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // The pending add keeps the refusal, so the computer reads Setup failed with what to do until it is added
         // again; an add that joined and then failed is that computer's row to say.
         if (pending.placeId === undefined) await movePending({ ...pending, failed: { said: keptSaid(said), ...(fix === undefined ? {} : { fix }) } });
-        stage(step, "failed", markedCut(message.split("\n")[0]!));
+        if (failedSaid !== step) stage(step, "failed", markedCut(message.split("\n")[0]!));
         // The code went to the box as a file, so an add that failed spends it rather than leave it good for ten minutes.
         await devices.spend(code, at).catch(() => false);
         // The install took its join back off the box, so the record that join made names a computer that no longer
@@ -2969,7 +3002,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       return { place: await withCap(row, await rowIds()) };
     },
 
-    async update(placeId) {
+    async update(placeId, ask = {}) {
       const held = await recordOf(placeId);
       if (held === undefined) throw new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name)));
       // Read before anything: another setup on that computer is refused as the op's own refusal, so whoever asked
@@ -2990,6 +3023,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       } else {
         const link = live.get(placeId)?.reach;
         const ssh = loginOf(held);
+        // The ssh road runs only where there is no link, and runs as root: where the login's sudo asks for a
+        // password, it is asked for before anything goes there, as the add asks it.
+        const sudoPassword = link === undefined && ssh !== undefined ? await rootOver(ssh, ask.sudoPassword, { verb: "update", name: held.name }) : undefined;
         // Asked on every update, behind or not: wsp's login files on that computer are spelled by this host, so a
         // host that moved alone writes them here and a computer joined under an older spelling takes this one.
         const landed = await wiring.update({
@@ -2999,6 +3035,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           daemon: moving,
           ...(link === undefined ? {} : { link }),
           ...(ssh === undefined ? {} : { ssh }),
+          ...(sudoPassword === undefined ? {} : { sudoPassword }),
         });
         if (landed !== undefined) {
           // The row is the answer, not the landing: the computer restarts its agent and dials back, and what it says
@@ -3023,7 +3060,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       return { name: held.name, ...(daemon === undefined ? {} : { daemon }) };
     },
 
-    async remove(placeId) {
+    async remove(placeId, ask = {}) {
       const held = await recordOf(placeId);
       if (held === undefined) return { removed: false, swept: [] };
       // The forks on it are wsp's own machines and the person's to delete: a place taken out from under them would
@@ -3040,9 +3077,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const reach = live.get(placeId)?.reach;
       const leaver = wiring.leave;
       const login = loginOf(held);
+      const answers = leaver !== undefined && login !== undefined && (await loginAnswers(login));
+      // The leave runs as root, and a login whose sudo asks for a password is asked for it before anything here
+      // touches that computer, as the add asks it: a sweep over the link alone leaves the service behind.
+      const sudoPassword = answers ? await rootOver(login!, ask.sudoPassword, { verb: "remove", name: held.name }) : undefined;
       // Before either road sweeps: a plugin comes off by its agent's own command, which may sit in the install folder
       // the sweep takes, and nothing on that computer knows which plugins were wsp's.
-      const plugins = await pluginsOff(placeId, held, reach !== undefined, login);
+      const plugins = await pluginsOff(placeId, held, reach !== undefined, login, sudoPassword);
       let swept: string[] = [];
       let note: string | undefined;
       // What the road that logs in did where it did not finish the job, for the lines about the road that followed.
@@ -3052,12 +3093,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // go, and what answers over the link cannot. Running it there rather than spelling it here is what keeps one
       // copy of the sweep.
       if (leaver !== undefined && login !== undefined) {
-        if (!(await loginAnswers(login))) {
+        if (!answers) {
           // The login did not stand, so nothing ran on that computer at all.
           loginRoad = { at: login.ssh };
         } else {
           try {
-            swept = [...(await leaver({ placeId, name: held.name, report: held.report, ssh: login }))];
+            swept = [...(await leaver({ placeId, name: held.name, report: held.report, ssh: login, ...(sudoPassword === undefined ? {} : { sudoPassword }) }))];
             note = placeSweptOverSshLine(held.name);
           } catch (e) {
             // Two different things, and the line a person reads says which: the login would not stand, or that
