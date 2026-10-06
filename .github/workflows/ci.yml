@@ -3,8 +3,8 @@ name: ci
 # Every pull request and every push to main runs what the merge gate runs on a
 # clean machine: the daemon binary this runner runs, then install, build every
 # package but the landing site and the desktop bundle, the unit suite, and the
-# type check per package. The Chromium cases and the Electron smoke need a
-# screen and stay behind their own flags.
+# type check per package, then the slate's Chromium render cases. The other
+# Chromium cases and the Electron smoke stay behind their own flags.
 on:
   pull_request:
   push:
@@ -73,6 +73,12 @@ jobs:
         env:
           WSP_REQUIRE_DAEMON: "1"
         run: pnpm exec vitest run --minWorkers=1 --maxWorkers=2
+      - name: Chromium for the slate render tests
+        run: pnpm --filter @wsp/web exec playwright install --with-deps chromium
+      - name: Slate render tests
+        env:
+          WSP_RENDER: "1"
+        run: pnpm exec vitest run --minWorkers=1 --maxWorkers=2 apps/web/test/slate-
       - name: Types
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' exec tsc --noEmit
 
