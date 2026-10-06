@@ -29,6 +29,10 @@ export const HOST_TOKEN_ENV = "WSP_HOST_TOKEN";
  * that carries it and finds no pair refuses rather than dialling the host on this computer's own token. */
 export const SCOPED_MCP_ARG = "--scoped";
 
+/** The word beside it on the server of a thread another thread started: such a thread has no slate, so the server's
+ * instructions and the launch say nothing of one, and the slate tools refuse it. */
+export const NO_SLATE_MCP_ARG = "--no-slate";
+
 /** The fingerprint of the key that host proves, beside the two above: the turn pins it before it sends the token,
  * so a relay that carries the bytes or names another host at that address gets nothing. A launch that carries the
  * address and the token without it is refused rather than dialled, since nothing there says which host it is. */

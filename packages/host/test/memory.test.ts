@@ -25,8 +25,9 @@ const HOST_MEMORY_BUDGET_MB = 40;
  * the project's folder and one turn in a worktree read 36.5, and the skill worked out at each ask rather than held
  * whole brought that to 36.4. Since the host has run under --stress-flush-code (2026-10-05) a reading leaves out the
  * bytecode of code no turn ran: the build that kept transcripts as rows collected less and read 37.0 without it and
- * 35.5 with it, as the build before it did both ways, so the cap stayed where it was. */
-const HOST_MEMORY_CAP_MB = 36.5;
+ * 35.5 with it, as the build before it did both ways, so the cap stayed where it was. Slates, their parser, kit,
+ * validator, runs and tools read 36.8 with it on this Mac on 2026-10-06. */
+const HOST_MEMORY_CAP_MB = 37.5;
 
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");

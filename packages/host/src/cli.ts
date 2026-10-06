@@ -2423,11 +2423,12 @@ export const MCP_OPTIONS: Options = {
   remove: { type: "boolean" },
   state: { type: "string" },
   scoped: { type: "boolean" },
+  "no-slate": { type: "boolean" },
   help: { type: "boolean", short: "h" },
 };
 
 const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (${MCP_AGENT_IDS})`;
-const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND} [--host <alias>] [${SCOPED_MCP_ARG}]\n       ${mcpInstallUsage()}`;
+const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND} [--host <alias>] [${SCOPED_MCP_ARG} [--no-slate]]\n       ${mcpInstallUsage()}`;
 
 /** The usage of the command a line stopped short of, whether it is a verb, `mcp` or the word the plumbing folds
  * under; none when no command owns the word. `mcp` needs its own answer here because it is not in the verb table
@@ -2444,7 +2445,7 @@ function commandUsage(word: string): string | undefined {
  * `--json` instead of taking it and printing prose. */
 async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string, run: RunningWsp, env: Readonly<Record<string, string | undefined>>, starts: { start?: HostStarter }): Promise<number> {
   const usage = mcpUsage();
-  let values: { agent?: string[]; host?: string; json?: boolean; remove?: boolean; state?: string; scoped?: boolean; help?: boolean };
+  let values: { agent?: string[]; host?: string; json?: boolean; remove?: boolean; state?: string; scoped?: boolean; "no-slate"?: boolean; help?: boolean };
   let words: string[];
   try {
     ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
@@ -2455,6 +2456,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     io.log(mcpPage(words[0] === "install"));
     return 0;
   }
+  if (values["no-slate"] === true && values.scoped !== true) return failed(io, jsonAsked(argv), usageRefusal(`--no-slate goes with ${SCOPED_MCP_ARG}: it is for a thread another thread started`, usage));
   // Ahead of every reading of the state: a scoped server missing its pair would otherwise dial this computer's host
   // on the host's own token, which is acting as the person.
   if (values.scoped === true && words.length === 0 && hostFromEnv(env) === undefined) return failed(io, jsonAsked(argv), authRefusal(scopedNoPairLine));
@@ -2466,7 +2468,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     // TypeScript server answers there. The agent starts it in its own folder, which is the folder a thread opened with
     // no workspace is placed by.
     const { serveMcp } = await import("./mcp.js");
-    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...starts, ...(values.host !== undefined ? { host: values.host } : {}) });
+    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...starts, ...(values.host !== undefined ? { host: values.host } : {}), ...(values.scoped === true ? { scoped: true } : {}), ...(values["no-slate"] === true ? { noSlate: true } : {}) });
     return 0;
   }
   const json = values.json === true;
@@ -2746,13 +2748,14 @@ const MCP_FLAG_WORDS: Readonly<Record<string, string>> = {
   state: COMMON_FLAG_WORDS.state,
   host: "write the server against a host on your account, by the name wsp hosts lists it under, so the tools drive that host",
   scoped: "what the host puts on a thread's own tools: without the launch pair in the environment the server refuses rather than dial this computer's host on its own token",
+  "no-slate": "what the host puts beside it for a thread another thread started, which has no slate: the server's instructions say nothing of one",
 };
 
 /** The tool server's own two pages, each with the flags it reads. `wsp mcp` alone serves; `wsp mcp install` writes
  * an agent's config. Both were two usage lines and no words until a person asked what --agent took. */
 function mcpPage(install: boolean): string {
   const line = COMMAND_LINES.find(l => l.words === (install ? `${MCP_COMMAND} install` : MCP_COMMAND))!;
-  const flags = install ? ["agent", "remove", "json", "state", "host"] : ["state", "host", "scoped"];
+  const flags = install ? ["agent", "remove", "json", "state", "host"] : ["state", "host", "scoped", "no-slate"];
   return helpPage(line.usage, wrap(`  ${line.about}`, HELP_WIDTH, "  "), flags.map(name => [`--${name}`, MCP_FLAG_WORDS[name]!] as const));
 }
 

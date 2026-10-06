@@ -111,6 +111,10 @@ export const AccountRow = z.object({
 });
 export type AccountRow = z.infer<typeof AccountRow>;
 
+/** An account's row after a turn's limit reading folded into it, so a bound meter moves at once. */
+export const UsageAccountEvent = z.object({ type: z.literal("usage.account"), key: z.string(), row: AccountRow });
+export type UsageAccountEvent = z.infer<typeof UsageAccountEvent>;
+
 export const AccountsAnswer = z.object({ accounts: z.array(AccountRow) });
 export type AccountsAnswer = z.infer<typeof AccountsAnswer>;
 

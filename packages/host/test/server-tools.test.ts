@@ -228,6 +228,28 @@ function heldTimer(f: Fixture): <T>(asked: Promise<T>) => Promise<T> {
 /** Every process of a family still running. */
 const leftOver = (f: Fixture): number[] => (existsSync(join(f.home, "family.pids")) ? readFileSync(join(f.home, "family.pids"), "utf8").trim().split("\n").map(Number) : []).filter(alive);
 
+describe("one MCP server for a slate's tool runs", () => {
+  it("reads the agent's own config then the project's, fills references from the vault, and hands wsp's variables to no server", async () => {
+    const f = fixture();
+    f.config({ fake: { command: "server", args: ["--x"], env: { FAKE_TOKEN: "${FAKE_TOKEN_V}" } } });
+    const project = join(f.root, "project");
+    mkdirSync(project);
+    writeFileSync(join(project, ".mcp.json"), JSON.stringify({ mcpServers: { local: { command: "local-server", args: [] } } }));
+    const reader = agentsReader({ vault: () => ({ FAKE_TOKEN_V: SECRET }), here: () => here(f), loginEnv: async () => ({ PATH: "/usr/bin:/bin", HOME: f.home, WSP_HOST_TOKEN: "host-token" }) });
+    const on = { kind: "here" as const, projects: [{ id: "p", name: "project", path: project }] };
+    const fake = await reader.server!(on, { agent: "claude", name: "fake" });
+    expect(fake.transport).toEqual({ kind: "stdio", command: "server", args: ["--x"], env: { FAKE_TOKEN: SECRET } });
+    expect(fake.cwd).toBe(f.home);
+    expect(fake.secrets).toContain(SECRET);
+    expect(fake.env).toMatchObject({ PATH: "/usr/bin:/bin", HOME: f.home });
+    expect(fake.env["WSP_HOST_TOKEN"]).toBeUndefined();
+    const local = await reader.server!(on, { agent: "claude", name: "local" });
+    expect(local).toMatchObject({ transport: { kind: "stdio", command: "local-server" }, cwd: project });
+    await expect(reader.server!(on, { agent: "claude", name: "zoho-mail" })).rejects.toThrow(noSuchServerRefusal("zoho-mail", "Claude Code"));
+    reader.close();
+  });
+});
+
 describe("one MCP server's tools, on the person's ask", () => {
   it("starts a command server once with its own variables, sends tools/list only after initialize is answered, and keeps the answer three minutes", async () => {
     const f = fixture();
