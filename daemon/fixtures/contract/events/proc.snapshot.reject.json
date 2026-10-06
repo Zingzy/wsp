@@ -3,14 +3,16 @@
     "type": "proc.snapshot",
     "at": 1757000000000,
     "daemon": 42,
-    "total": 3
+    "total": 3,
+    "seq": 1
   },
   {
     "type": "proc.snapshot",
     "at": 1757000000000,
     "daemon": 42.5,
     "total": 3,
-    "procs": []
+    "procs": [],
+    "seq": 1
   },
   {
     "type": "proc.snapshot",
@@ -21,6 +23,7 @@
       {
         "pid": 50
       }
-    ]
+    ],
+    "seq": 1
   }
 ]

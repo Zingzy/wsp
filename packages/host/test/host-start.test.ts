@@ -86,7 +86,7 @@ describe("a verb starts the host when none serves", () => {
         say(startingHostLine(path, hostLogPath(path)));
         // Wired for this computer as well as for the stub provider: wsp add on a folder here records a project on
         // this computer, and a host with no local backend refuses that rather than the dial.
-        rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, local: localWiring(join(dir, "home")) });
+        rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, local: localWiring(join(dir, "home"), undefined, undefined, join(dir, "home", ".wsp", "state.json")) });
         handles.push(await serve(captured(), { port: 0, statePath: path, webDir, runtime: rt }));
         return servingHost(path)!;
       },

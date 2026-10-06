@@ -280,7 +280,9 @@ no words and no computer picker (the menu bar's Hosts menu switches hosts).
 The last row of the list: the section head `Settled (n)` with its chevron. It holds every root whose whole tree a person has read and left
 quiet two hours, or settled by hand: Settle on a root tile's menu or
 mod+shift+E takes the root and every thread under it, and the fold row's own
-menu holds Settle all read. A Done nobody has opened, any Failed and the
+menu holds Settle all read. So does the list's own menu, a right-click
+anywhere in the list that is not a row, which stands while no Settled row is
+drawn. A Done nobody has opened, any Failed and the
 thread open in the centre never fold by time; they wait for a hand. Inside
 the fold every thread is one slim 36px row, as T3's settled rows: the
 project's glyph dimmed, the title muted, the pull request's `#N` in its

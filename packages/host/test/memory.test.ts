@@ -95,6 +95,7 @@ const copier = fakeCopier();
 const daemon = async () => ({ version: DAEMON_VERSION, road: { url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }, sysSamples: async () => () => {}, close: async () => {} });
 const store = sqliteStore(statePath, stateWriterHere());
 const runtime = createRuntime({
+  statePath,
   backend: new NoProviderBackend(),
   local: localWiring(home, undefined, daemon, statePath, copier),
   store,

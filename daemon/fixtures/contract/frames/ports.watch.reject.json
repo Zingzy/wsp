@@ -1,5 +1,25 @@
 [
   {
     "op": "ports.watch"
+  },
+  {
+    "id": 4,
+    "op": "ports.watch",
+    "roots": [
+      -1
+    ]
+  },
+  {
+    "id": 5,
+    "op": "ports.watch",
+    "roots": "200"
+  },
+  {
+    "id": 7,
+    "op": "ports.watch",
+    "roots": [
+      200
+    ],
+    "folder": 7
   }
 ]

@@ -89,7 +89,7 @@ export function CopyRow({ label, value, k, children }: { label?: string; value: 
         ref={scroll.ref}
         data-k={k}
         onScroll={scroll.measure}
-        className={cn("min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-xs tabular-nums text-foreground [scrollbar-color:color-mix(in_srgb,var(--border)_78%,transparent)_transparent] [scrollbar-width:thin]", scroll.more && MORE_TO_SCROLL)}
+        className={cn("min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-xs tabular-nums text-foreground select-text [scrollbar-color:color-mix(in_srgb,var(--border)_78%,transparent)_transparent] [scrollbar-width:thin]", scroll.more && MORE_TO_SCROLL)}
         title={value}
       >
         {value}

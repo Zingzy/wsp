@@ -8,7 +8,7 @@ import { cssFontFamilies } from "../../appearanceFonts";
 // The platform's own monospace faces; concrete names only, because an
 // unknown keyword (like ui-monospace) makes canvas font shorthand parsing
 // reject the whole string.
-export const DEFAULT_TERMINAL_TEXT_FACES = '"SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono"';
+export const DEFAULT_TERMINAL_TEXT_FACES = '"SF Mono", "SFMono-Regular", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono"';
 
 /** The bundled symbols-only Nerd Font: it carries no letters, so it changes no metrics wherever it sits. */
 export const TERMINAL_SYMBOLS_FACE = "Symbols Nerd Font Mono";

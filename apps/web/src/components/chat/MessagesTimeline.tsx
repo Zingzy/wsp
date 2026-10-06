@@ -547,6 +547,39 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [timelineViewportElement, rows.length]);
 
+  // Chromium leaves select-all's range empty when the composer is the last selectable thing; select-all starts at
+  // body with no button held, which a drag from the chrome does not, so it takes the text last pressed in instead.
+  useEffect(() => {
+    if (!timelineViewportElement) return;
+    let pressed = false;
+    let pressedOn: Element | null = null;
+    const press = (event: PointerEvent) => {
+      pressed = event.type === "pointerdown";
+      if (pressed) pressedOn = event.target instanceof Element ? event.target : null;
+    };
+    /** The outermost selectable text around the last press, outside the transcript: a PR body, a file, a diff. */
+    const paneText = (): Element | null => {
+      if (pressedOn === null || timelineViewportElement.contains(pressedOn)) return null;
+      let text: Element | null = null;
+      for (let node: Element | null = pressedOn; node !== null && node !== document.body; node = node.parentElement) {
+        if (getComputedStyle(node).userSelect === "text") text = node;
+      }
+      return text;
+    };
+    const onSelectStart = (event: Event) => {
+      if (pressed || event.target !== document.body) return;
+      event.preventDefault();
+      window.getSelection()?.selectAllChildren(paneText() ?? timelineViewportElement);
+    };
+    const presses = ["pointerdown", "pointerup", "pointercancel"] as const;
+    for (const type of presses) document.addEventListener(type, press, true);
+    document.addEventListener("selectstart", onSelectStart);
+    return () => {
+      for (const type of presses) document.removeEventListener(type, press, true);
+      document.removeEventListener("selectstart", onSelectStart);
+    };
+  }, [timelineViewportElement]);
+
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       timestampFormat,
@@ -606,7 +639,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip select-text" data-timeline-root="true">
         <TimelineRowContent row={item} />
       </div>
     ),
@@ -842,7 +875,7 @@ function TimelineMinimap({
       data-testid="timeline-minimap"
       data-persistent-gutter={hasPersistentGutter ? "true" : "false"}
     >
-      <div className="relative h-full w-full select-none">
+      <div className="relative h-full w-full">
         <button
           aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
           className={cn(

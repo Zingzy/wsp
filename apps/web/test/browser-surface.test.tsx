@@ -279,6 +279,17 @@ describe("framing a port", () => {
     expect(frame(8412)).toBe(first);
   });
 
+  it("a port whose holder is no longer the workspace's says it left the workspace, not that it stopped", async () => {
+    const { emit } = await setup();
+    emit(open(WS, 8000, 4202, "python3"));
+    fireEvent.click(serverCard(8000));
+    await screen.findByTitle(":8000");
+    const at = "2026-09-05T12:04:00.000Z";
+    emit(close(WS, 8000, { pid: 4202, process: "python3", command: "python3 -m http.server", exited: false, left: true, at } as never));
+    const slot = screen.getByText(/^:8000 /);
+    expect(slot.textContent).toBe(`:8000 is no longer this workspace's at ${clock(at)}, held by python3 -m http.server (pid 4202), which still listens`);
+  });
+
   it("a long argv is cut to one line in the slot, the full sentence in its title, and the frame stays put", async () => {
     const { emit } = await setup();
     emit(open(WS, 8412, 53479, "node"));

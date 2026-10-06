@@ -482,6 +482,9 @@ export interface Api {
   updateImage?(id: string): Promise<UpgradeResult>;
   /** Replaces a zombie's machine with a fresh golden fork carrying the vault; id and name stay. Optional so fixtures without a zombie need not fake it. */
   rebuild?(id: string): Promise<WorkspaceView>;
+  /** The record of a project's folder on this computer, made where no thread has made it yet. Optional so a fixture
+   * whose projects have all run need not fake it; without it a project never run offers no folder acts. */
+  projectFolder?(projectId: string): Promise<WorkspaceView>;
   /** Pushes the branch the agent made and opens its pull request through the git host's own command line, and
    * answers what both did. Optional so a fixture with no remote need not fake it. */
   bringBack?(id: string): Promise<BringBackResult>;
@@ -927,6 +930,7 @@ export function makeApi(c: ProtocolClient): Api {
     restartDaemon: async id => void (await c.request("workspaces.restartDaemon", { workspaceId: id })),
     updateImage: async id => await c.request<UpgradeResult>("workspaces.updateImage", { workspaceId: id }),
     rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
+    projectFolder: async project => (await c.request<{ workspace: WorkspaceView }>("folder.make", { project })).workspace,
     forget: async id => void (await c.request("workspaces.forget", { workspaceId: id })),
     deleteWorkspace: async id => void (await c.request("workspaces.delete", { workspaceId: id })),
     // Parsed, not trusted: the row's line is built from these fields and a reply short of them must not become one.

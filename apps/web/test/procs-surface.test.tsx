@@ -6,7 +6,7 @@
 // on this computer's own panel the whole list.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { forkProcsUnreadLine, type ProcEntry, type ProcSnapshot, type SessionView } from "@wsp/protocol";
+import { DaemonEvent, forkProcsUnreadLine, type ProcChanges, type ProcEntry, type ProcSnapshot, type SessionView } from "@wsp/protocol";
 import { ProcessesSurface, ROW_PX } from "../src/components/procs/ProcessesSurface.js";
 import { provideDaemonWire } from "../src/files/wire.js";
 import { getProcs, resetProcs } from "../src/machine/procs.js";
@@ -38,7 +38,7 @@ const PROCS: ProcEntry[] = [
   proc(51, 1, "kworker/0:1", { cmdline: "" }),
 ];
 
-const snapshot = (procs: ProcEntry[], at = 1_000): ProcSnapshot => ({ type: "proc.snapshot", at, daemon: DAEMON, total: procs.length, procs });
+const snapshot = (procs: ProcEntry[], at = 1_000): ProcSnapshot => ({ type: "proc.snapshot", at, daemon: DAEMON, total: procs.length, procs, seq: 1 });
 
 // This computer, with two threads of this workspace running under the host: each turn's shell, its agent and what
 // the agent started.
@@ -93,7 +93,7 @@ const row = (pid: number): HTMLElement => {
   return el;
 };
 const calls = (op: string) => wire.calls.filter(([o]) => o === op).map(([, p]) => p);
-const feed = (procs: ProcEntry[], at?: number) => act(() => getProcs(WS).feedSnapshot(snapshot(procs, at)));
+const feed = (procs: ProcEntry[], at?: number) => act(() => getProcs(WS).feed(snapshot(procs, at)));
 const flush = () => act(async () => {});
 
 describe("processes surface", () => {
@@ -123,6 +123,66 @@ describe("processes surface", () => {
     expect(document.querySelectorAll("[data-selected]")).toHaveLength(0);
     unmount();
     expect(calls("proc.unwatch")).toHaveLength(1);
+  });
+
+  it("applies the changes after the first snapshot: a changed row, a new one and one gone, and waits for a snapshot first", async () => {
+    render(<ProcessesSurface workspaceId={WS} />);
+    const changes = (procs: ProcEntry[], gone: number[], total: number): ProcChanges => ({ type: "proc.changes", at: 2_000, daemon: DAEMON, total, procs, gone, seq: 2, base: 1 });
+    await act(() => getProcs(WS).feed(changes([proc(60, 1, "early")], [], 1)));
+    expect(getProcs(WS).snapshot().snapshot).toBeNull();
+    await feed(PROCS);
+    await act(() => getProcs(WS).feed(changes([proc(42, DAEMON, "claude", { cpu: 1, rss: 1024 ** 2 }), proc(60, 1, "vite")], [51], 6)));
+    expect(pids()).toEqual([1, DAEMON, 42, 41, 50, 60]);
+    expect(row(42).querySelector("[data-col='cpu']")!.textContent).toBe("1.0");
+    expect(row(60).textContent).toContain("vite");
+    expect(getProcs(WS).snapshot().snapshot).toMatchObject({ type: "proc.snapshot", at: 2_000, total: 6 });
+  });
+
+  it("a changes frame applies only on the frame it names; a gap holds the rows and asks for a whole snapshot once", async () => {
+    render(<ProcessesSurface workspaceId={WS} />);
+    expect(calls("proc.watch")).toHaveLength(1);
+    const frame = (seq: number, base: number, procs: ProcEntry[]): ProcChanges => ({ type: "proc.changes", at: seq, daemon: DAEMON, total: 6, procs, gone: [], seq, base });
+    await act(() => getProcs(WS).feed(snapshot(PROCS)));
+    await act(() => getProcs(WS).feed(frame(2, 1, [proc(50, 1, "nginx", { cmdline: "nginx: reloaded" })])));
+    expect(row(50).textContent).toContain("nginx: reloaded");
+    // Frame 3 never arrived: 4 names it as its base, so it is not applied and the daemon is asked for a whole list.
+    await act(() => getProcs(WS).feed(frame(4, 3, [proc(50, 1, "nginx", { cmdline: "nginx: skewed" })])));
+    await act(() => getProcs(WS).feed(frame(5, 4, [proc(50, 1, "nginx", { cmdline: "nginx: skewed again" })])));
+    expect(row(50).textContent).toContain("nginx: reloaded");
+    expect(calls("proc.watch")).toHaveLength(2);
+    await act(() => getProcs(WS).feed({ ...snapshot([...PROCS.filter(p => p.pid !== 50), proc(50, 1, "nginx", { cmdline: "nginx: whole" })]), seq: 6 }));
+    await act(() => getProcs(WS).feed(frame(7, 6, [proc(50, 1, "nginx", { cmdline: "nginx: caught up" })])));
+    expect(row(50).textContent).toContain("nginx: caught up");
+    expect(calls("proc.watch")).toHaveLength(2);
+  });
+
+  it("an older daemon's snapshot, which names no seq, still reads as the whole list, and the next one replaces it without a re-watch", async () => {
+    render(<ProcessesSurface workspaceId={WS} />);
+    // The frame as a daemon a version behind sends it, read the way the link reads every frame.
+    const older = (procs: ProcEntry[], at: number) => {
+      const parsed = DaemonEvent.parse({ type: "proc.snapshot", at, daemon: DAEMON, total: procs.length, procs });
+      if (parsed.type !== "proc.snapshot") throw new Error(parsed.type);
+      return parsed;
+    };
+    await act(() => getProcs(WS).feed(older(PROCS, 1_000)));
+    expect(pids()).toEqual([1, DAEMON, 42, 41, 50, 51]);
+    await act(() => getProcs(WS).feed(older(PROCS.filter(p => p.pid !== 51), 3_000)));
+    expect(pids()).toEqual([1, DAEMON, 42, 41, 50]);
+    expect(calls("proc.watch")).toHaveLength(1);
+  });
+
+  it("a refused re-watch after a gap leaves the pane free to ask again at the next gap", async () => {
+    render(<ProcessesSurface workspaceId={WS} />);
+    const frame = (seq: number, base: number): ProcChanges => ({ type: "proc.changes", at: seq, daemon: DAEMON, total: 6, procs: [], gone: [], seq, base });
+    await act(() => getProcs(WS).feed(snapshot(PROCS)));
+    const watch = wire.replies["proc.watch"]!;
+    delete wire.replies["proc.watch"];
+    await act(() => getProcs(WS).feed(frame(4, 3)));
+    await flush();
+    expect(calls("proc.watch")).toHaveLength(2);
+    wire.replies["proc.watch"] = watch;
+    await act(() => getProcs(WS).feed(frame(5, 4)));
+    expect(calls("proc.watch")).toHaveLength(3);
   });
 
   it("a daemon that refuses proc.watch: the count reads unavailable, never pending, and one line carries the reason", async () => {
@@ -371,7 +431,7 @@ describe("processes surface", () => {
     act(() => getProcs(HERE_KEY).feedStatus("live"));
     render(<ProcessesSurface workspaceId={HERE_KEY} />);
     expect(here.calls.map(([op]) => op)).toEqual(["proc.watch"]);
-    await act(async () => getProcs(HERE_KEY).feedSnapshot(snapshot(OWN)));
+    await act(async () => getProcs(HERE_KEY).feed(snapshot(OWN)));
     expect(document.querySelector("[data-procs-thread]")).toBeNull();
     expect(document.querySelector("[data-procs-rest]")).toBeNull();
     expect(document.querySelector("[data-procs-count]")!.textContent).toBe("11 processes");
