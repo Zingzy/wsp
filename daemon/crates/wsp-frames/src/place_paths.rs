@@ -26,6 +26,8 @@ pub struct PlaceDaemonPaths {
     pub place_file: PathBuf,
     pub place_key: PathBuf,
     pub place_log: PathBuf,
+    /// What stood before the add at the paths outside the home it or its setup writes, each path NUL-terminated.
+    pub place_found: PathBuf,
 }
 
 /// The home with its trailing slashes gone, as the protocol strips them before it joins.
@@ -55,6 +57,7 @@ pub fn place_daemon_paths(home: &Path) -> PlaceDaemonPaths {
         place_file: wsp.join("place.json"),
         place_key: wsp.join("place-key.pem"),
         place_log: wsp.join("place.log"),
+        place_found: wsp.join("place-found"),
         wsp,
     }
 }
@@ -100,6 +103,7 @@ pub fn place_owned_paths(home: &Path) -> Vec<PathBuf> {
         at.place_file,
         at.place_key,
         at.place_log,
+        at.place_found,
         at.dir,
         place_provision_paths(home).dir,
         at.bundle,

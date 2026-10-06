@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings > Appearance: the side, then the themes of the side drawn, each as
-// the window it makes; whether the glass shows what is behind the window; and
+// the window it makes; whether the glass shows what is behind the window, where
+// a window draws glass at all; and
 // the app and code faces and the sizes they are read at, under a sample drawn
 // by the conversation's own renderer. The terminal draws with the person's
 // Ghostty font and takes neither face nor size.
@@ -8,6 +9,7 @@ import { CODE_SIZES, DEFAULT_PREFERENCES, TEXT_SIZES, type Preferences, type Pre
 import { Suspense, lazy } from "react";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
+import { isSolidWindow } from "../lib/desktopShell.js";
 import { cn } from "../lib/utils.js";
 import { FontPicker } from "./FontPicker.js";
 import { hereName } from "./places.js";
@@ -33,7 +35,7 @@ export const APPEARANCE_DEFAULTS: PreferencesPatch = {
   transparency: DEFAULT_PREFERENCES.transparency,
 };
 
-/** Whether any of those is off its default, which is when Restore defaults stands. */
+/** Whether any of those Appearance draws is off its default, which is when Restore defaults stands. */
 export const appearanceOffDefaults = (p: Preferences): boolean =>
   p.theme !== DEFAULT_PREFERENCES.theme ||
   p.lightTheme !== DEFAULT_PREFERENCES.lightTheme ||
@@ -42,7 +44,7 @@ export const appearanceOffDefaults = (p: Preferences): boolean =>
   p.codeFont !== DEFAULT_PREFERENCES.codeFont ||
   p.textSize !== undefined ||
   p.codeSize !== undefined ||
-  p.transparency !== DEFAULT_PREFERENCES.transparency;
+  (p.transparency !== DEFAULT_PREFERENCES.transparency && !isSolidWindow());
 
 /** A size row's control: Default, which leaves every surface its own size, then each size the table offers. */
 function SizePicker({ id, label, sizes, value, onChange }: { id: string; label: string; sizes: readonly number[]; value: number | undefined; onChange: (size: number | null) => void }) {
@@ -79,6 +81,21 @@ function TypeSample() {
 export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
   const { preferences, setPreferences } = ctx;
   const themes = SETTINGS_WORDS.themesOf(THEME_WORDS[shownSide(preferences, window.matchMedia(SYSTEM_DARK_QUERY).matches)]);
+  const glass: SettingsCardData = {
+    id: "glass",
+    head: GLASS_WORDS.head,
+    lede: GLASS_WORDS.lede,
+    items: [
+      {
+        kind: "row",
+        id: "transparency",
+        title: TRANSPARENCY_WORDS.title,
+        description: TRANSPARENCY_WORDS.description,
+        control: <Switch data-k="transparency" aria-label={TRANSPARENCY_WORDS.title} checked={preferences.transparency} onCheckedChange={transparency => setPreferences({ transparency })} />,
+        ...(preferences.transparency === DEFAULT_PREFERENCES.transparency ? {} : { reset: () => setPreferences({ transparency: DEFAULT_PREFERENCES.transparency }) }),
+      },
+    ],
+  };
   return [
     {
       id: "mode",
@@ -96,21 +113,7 @@ export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
       search: [{ kind: "row", id: "theme", title: SETTINGS_WORDS.theme, description: THEME_SECTION_WORDS.lede }],
       body: <ThemePicker picks={preferences} onChange={setPreferences} />,
     },
-    {
-      id: "glass",
-      head: GLASS_WORDS.head,
-      lede: GLASS_WORDS.lede,
-      items: [
-        {
-          kind: "row",
-          id: "transparency",
-          title: TRANSPARENCY_WORDS.title,
-          description: TRANSPARENCY_WORDS.description,
-          control: <Switch data-k="transparency" aria-label={TRANSPARENCY_WORDS.title} checked={preferences.transparency} onCheckedChange={transparency => setPreferences({ transparency })} />,
-          ...(preferences.transparency === DEFAULT_PREFERENCES.transparency ? {} : { reset: () => setPreferences({ transparency: DEFAULT_PREFERENCES.transparency }) }),
-        },
-      ],
-    },
+    ...(isSolidWindow() ? [] : [glass]),
     {
       id: "fonts",
       head: FONT_WORDS.head,

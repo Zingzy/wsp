@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "v
 import { DEFAULT_KEYBINDINGS, parseKeybindingShortcut } from "../src/keybindingDefaults.js";
 import { KEYBINDING_COMMANDS, type KeybindingCommand } from "../src/keybindingTypes.js";
 import type { BootPayload, BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, ReleaseView, WorkspaceView } from "@wsp/protocol";
-import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RESTART_LINE, UP_RESTART_LINE, fmtBytes } from "@wsp/protocol";
+import { DAEMON_VERSION, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, DEVICES_TICKET_REFUSAL, HOST_NO_RESTART_LINE, UP_RESTART_LINE, fmtBytes } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { EDITOR_SSH_WORDS } from "../src/files/EditorConsent.js";
@@ -453,6 +453,32 @@ describe("Transparency", () => {
   });
 });
 
+describe("Transparency on the Linux app", () => {
+  it("is not drawn, since the window draws no glass there, and Restore defaults does not stand for it alone", async () => {
+    window.wsp = {};
+    const record = { ...DEFAULT_PREFERENCES, transparency: false };
+    act(() => useStore.setState({ preferences: record }));
+    mountSettings({ api: settingsApi({}, record).api, at: { kind: "group", group: "appearance" } });
+    await settle();
+    expect(document.querySelector("[data-settings-card=glass]")).toBeNull();
+    expect(document.querySelector("[data-k=transparency]")).toBeNull();
+    expect(rowTitles()).toEqual([FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize]);
+    expect(document.querySelector("[data-k=restore-defaults]")).toBeNull();
+  });
+
+  it("stays on the Mac app, whose window draws the glass", async () => {
+    window.wsp = {};
+    document.documentElement.classList.add(DESKTOP_MAC_CLASS);
+    try {
+      mountSettings({ api: settingsApi().api, at: { kind: "group", group: "appearance" } });
+      await settle();
+      expect(document.querySelector("[data-settings-card=glass] [data-k=transparency]")).not.toBeNull();
+    } finally {
+      document.documentElement.classList.remove(DESKTOP_MAC_CLASS);
+    }
+  });
+});
+
 describe("Keeping the computer awake", () => {
   it("is one switch on General, on by default, that writes the record", async () => {
     const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>);
@@ -697,7 +723,7 @@ describe("Keybindings", () => {
   });
 
   it("offers Reset on a changed line alone and Restore defaults while any is changed, each putting the defaults back", async () => {
-    const record = { ...DEFAULT_PREFERENCES, labs: false, keybindings: { "sidebar.toggle": "mod+shift+b", "terminal.toggle": "mod+shift+y" } };
+    const record = { ...DEFAULT_PREFERENCES, labs: false, keybindings: { "sidebar.toggle": "mod+alt+s", "terminal.toggle": "mod+shift+y" } };
     const { api, sets } = settingsApi({}, record);
     act(() => useStore.setState({ preferences: record }));
     mountSettings({ api, at: { kind: "group", group: "keybindings" } });
@@ -708,7 +734,7 @@ describe("Keybindings", () => {
     await settle();
     expect(sets).toEqual([{ keybindings: { "sidebar.toggle": null } }]);
     expect(resets()).toEqual(["terminal.toggle"]);
-    expect(keysOf("sidebar.toggle")).toBe(formatShortcutLabel(parseKeybindingShortcut("mod+b")!, navigator.platform));
+    expect(keysOf("sidebar.toggle")).toBe(["mod+shift+b", "mod+b"].map(key => formatShortcutLabel(parseKeybindingShortcut(key)!, navigator.platform)).join(""));
     fireEvent.click(document.querySelector("[data-k=restore-defaults]")!);
     await settle();
     expect(Object.values(sets.at(-1)!.keybindings!).every(value => value === null)).toBe(true);

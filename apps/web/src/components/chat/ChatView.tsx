@@ -224,9 +224,9 @@ export function ChatView({
     },
     [workspaceId],
   );
-  // A turn that completed says so by its reply standing; any other ending keeps its own line, since the state word
-  // is the news.
-  const settledOnReply = view.settled?.state === "completed";
+  // A turn that completed says so by its reply standing, and one that failed in words by the row those words stand
+  // in; any other ending keeps its own line, since the state word is the news.
+  const settledOnReply = view.settled?.state === "completed" || (view.settled?.state === "error" && view.settled.error !== null);
   // What the machine needs from the person, said here on the thread they are reading and nowhere else.
   const machine = useMachineLine(workspaceId);
   const footer = thread.hydrated ? (

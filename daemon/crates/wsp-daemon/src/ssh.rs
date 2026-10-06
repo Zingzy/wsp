@@ -47,6 +47,11 @@ impl Default for Programs {
 const CGROUP: &str = "wsp-ssh";
 /// How long a server gets to start listening.
 const START_WAIT: Duration = Duration::from_secs(5);
+/// How many ports a start tries: sshd binds no port 0, so the port is picked free and handed over, and another
+/// process can take it before the server binds it.
+const START_PORTS: usize = 3;
+/// How long a dial waits for the server's banner, which is what tells it from whatever else listens there.
+const BANNER_WAIT: Duration = Duration::from_secs(1);
 
 /// The config, written whole since sshd takes the first occurrence of a keyword. `UsePAM yes` because sshd reads
 /// root as locked without it wherever root has no password (the Boat image) or no shadow entry at all (every fork
@@ -195,7 +200,7 @@ impl Servers {
         let authorized = format!("{key_line}\n");
         let held = self.lock().get(&machine.key()).map(|held| (held.port, held.host_key.clone()));
         if let Some((port, host_key)) = held {
-            if dial(&machine, port).await.is_ok() {
+            if answers(&machine, port).await {
                 self.put_files(&machine, &at, authorized.as_bytes()).await?;
                 return Ok(SshStartReply { port, host_key });
             }
@@ -217,38 +222,51 @@ impl Servers {
         self.prepare(&machine, &at).await?;
         let host_key =
             self.host_key(&machine, &at).await?.ok_or_else(|| OpError::plain("reading the ssh server's host key: none was made"))?;
-        let port = free_port(&machine).await?;
         let inside = |name: &str| at.dir.join(name).to_string_lossy().into_owned();
-        let argv = vec![
-            self.program(&machine, &self.programs.sshd, "/usr/sbin/sshd"),
-            "-D".to_owned(),
-            "-e".to_owned(),
-            "-f".to_owned(),
-            inside("sshd_config"),
-            "-h".to_owned(),
-            inside("host_ed25519"),
-            "-o".to_owned(),
-            format!("AuthorizedKeysFile={}", inside("authorized_keys")),
-            "-o".to_owned(),
-            format!("ListenAddress=127.0.0.1:{port}"),
-        ];
-        let (pid, said) = spawn(&machine, &argv).await?;
-        let stop = self.contain(&machine, pid);
-        let deadline = Instant::now() + START_WAIT;
-        loop {
-            if dial(&machine, port).await.is_ok() {
-                break;
+        let mut tried = 0;
+        let (port, stop) = loop {
+            tried += 1;
+            let port = free_port(&machine).await?;
+            let argv = vec![
+                self.program(&machine, &self.programs.sshd, "/usr/sbin/sshd"),
+                "-D".to_owned(),
+                "-e".to_owned(),
+                "-f".to_owned(),
+                inside("sshd_config"),
+                "-h".to_owned(),
+                inside("host_ed25519"),
+                "-o".to_owned(),
+                format!("AuthorizedKeysFile={}", inside("authorized_keys")),
+                "-o".to_owned(),
+                format!("ListenAddress=127.0.0.1:{port}"),
+            ];
+            let (pid, said) = spawn(&machine, &argv).await?;
+            let stop = self.contain(&machine, pid);
+            let deadline = Instant::now() + START_WAIT;
+            let ended = loop {
+                if answers(&machine, port).await {
+                    break None;
+                }
+                let ended = !alive_on(&machine, pid);
+                if ended || Instant::now() >= deadline {
+                    break Some(ended);
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            };
+            let Some(ended) = ended else { break (port, stop) };
+            end(stop).await;
+            // A server that ended before it answered most often lost its port to another process: a fresh one.
+            if ended && tried < START_PORTS {
+                continue;
             }
-            if Instant::now() >= deadline || !alive_on(&machine, pid) {
-                end(stop).await;
-                let last = said.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                return Err(OpError::plain(format!(
-                    "the ssh server did not start: {}",
-                    if last.is_empty() { "it said nothing" } else { &last }
-                )));
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+            let last = said.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let last = if last.is_empty() { "it said nothing" } else { &last };
+            return Err(OpError::plain(if tried > 1 {
+                format!("the ssh server did not start on any of {tried} ports: {last}")
+            } else {
+                format!("the ssh server did not start: {last}")
+            }));
+        };
         self.lock().insert(machine.key(), Running { port, host_key: host_key.clone(), stop, sessions: 0, turn: 0 });
         // Started and nobody in yet: an editor that never connects leaves nothing running past the idle window.
         let servers = Arc::clone(self);
@@ -474,6 +492,14 @@ async fn free_port(machine: &Machine<'_>) -> Result<u16, OpError> {
         #[cfg(not(target_os = "linux"))]
         Machine::Never(_) => Err(OpError::plain(words::NO_SSHD)),
     }
+}
+
+/// Whether the server answers on that port: an ssh banner, and not only a connection, which any process that
+/// took the port would also accept.
+async fn answers(machine: &Machine<'_>, port: u16) -> bool {
+    let Ok(mut dialled) = dial(machine, port).await else { return false };
+    let mut banner = [0u8; 4];
+    matches!(tokio::time::timeout(BANNER_WAIT, dialled.read_exact(&mut banner)).await, Ok(Ok(_)) if &banner == b"SSH-")
 }
 
 async fn dial(machine: &Machine<'_>, port: u16) -> io::Result<TcpStream> {
@@ -751,6 +777,78 @@ pub(crate) mod tests {
         assert!(gone(&mut old), "the old server still runs beside the new one");
         assert!(TcpStream::connect(("127.0.0.1", started.port)).await.is_ok());
         end_all(&s).await;
+    }
+
+    /// The stand-ins, but on the first start another process takes the port before the server binds it: that
+    /// process listens and answers nothing, and the server fails its bind and ends.
+    fn servers_losing_the_first_port(dir: &Path) -> Arc<Servers> {
+        use std::os::unix::fs::PermissionsExt;
+        let programs = stand_ins(dir);
+        let real = dir.join("sshd-real");
+        std::fs::rename(&programs.sshd, &real).unwrap();
+        std::fs::write(
+            &programs.sshd,
+            format!(
+                "#!/bin/sh\nfor a in \"$@\"; do case \"$a\" in ListenAddress=*) port=${{a##*:}};; esac; done\nif [ ! -e '{d}/taken' ]; then\n  python3 -c 'import socket,sys,time\ns=socket.socket(); s.bind((\"127.0.0.1\", int(sys.argv[1]))); s.listen(8); time.sleep(60)' \"$port\" < /dev/null > /dev/null 2>&1 &\n  echo \"$! $port\" > '{d}/taken'\n  sleep 0.3\nfi\nexec '{r}' \"$@\"\n",
+                d = dir.display(),
+                r = real.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&programs.sshd, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Arc::new(Servers::new(programs, Duration::from_secs(60), &dir.join("token")))
+    }
+
+    struct Taken {
+        pid: i32,
+        port: u16,
+    }
+
+    impl Drop for Taken {
+        fn drop(&mut self) {
+            let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(self.pid), nix::sys::signal::Signal::SIGKILL);
+        }
+    }
+
+    async fn banner(port: u16) -> String {
+        let mut dialled = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let mut buf = [0u8; 64];
+        match tokio::time::timeout(Duration::from_secs(2), dialled.read(&mut buf)).await {
+            Ok(Ok(n)) => String::from_utf8_lossy(&buf[..n]).into_owned(),
+            _ => String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_port_another_process_takes_before_the_server_binds_it_is_given_up_for_a_fresh_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = servers_losing_the_first_port(dir.path());
+        let started = s.start(Machine::Here, KEY).await;
+        let taken = std::fs::read_to_string(dir.path().join("taken")).unwrap();
+        let (pid, port) = taken.trim().split_once(' ').unwrap();
+        let taken = Taken { pid: pid.parse().unwrap(), port: port.parse().unwrap() };
+        let started = started.unwrap();
+        assert_ne!(started.port, taken.port, "answered with the port another process took");
+        assert!(banner(started.port).await.starts_with("SSH-2.0-"), "what answers on {} is not the server", started.port);
+        end_all(&s).await;
+    }
+
+    #[tokio::test]
+    async fn a_server_that_never_binds_is_tried_on_three_ports_and_the_refusal_says_so() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let programs = stand_ins(dir.path());
+        std::fs::write(
+            &programs.sshd,
+            format!("#!/bin/sh\necho \"$@\" >> '{}/tries'\necho 'Cannot bind any address.' >&2\nexit 255\n", dir.path().display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&programs.sshd, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let s = Arc::new(Servers::new(programs, Duration::from_secs(60), &dir.path().join("token")));
+        let refused = s.start(Machine::Here, KEY).await.unwrap_err();
+        assert_eq!(refused.message, "the ssh server did not start on any of 3 ports: Cannot bind any address.");
+        assert_eq!(std::fs::read_to_string(dir.path().join("tries")).unwrap().lines().count(), 3);
+        assert!(s.lock().is_empty());
     }
 
     #[tokio::test]

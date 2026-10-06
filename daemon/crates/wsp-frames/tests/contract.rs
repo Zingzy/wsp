@@ -401,6 +401,8 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("hostClosed", words::HOST_CLOSED.to_owned());
     m.insert("placeKeptForLink", words::place_kept_for_link("{path}"));
     m.insert("placeOutsideLeft", words::place_outside_left("{prefix}"));
+    m.insert("placeStoodBefore", words::place_stood_before("{path}"));
+    m.insert("placeOwnersUnknown", words::place_owners_unknown(&["{paths}"]));
     m.insert("onBase", words::on_base_refusal("{base}"));
     m.insert("notOnABranch", words::NOT_ON_A_BRANCH.to_owned());
     m.insert("nothingAhead", words::nothing_ahead("{branch}", "{base}"));
@@ -491,6 +493,8 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("workspaceApparmorPath", Value::from(numbers::WORKSPACE_APPARMOR_PATH));
     m.insert("toolPrefix", Value::from(numbers::TOOL_PREFIX));
     m.insert("toolLinksDir", Value::from(numbers::TOOL_LINKS_DIR));
+    m.insert("placeFoundEnd", Value::from(numbers::PLACE_FOUND_END));
+    m.insert("placeFoundMaxBytes", Value::from(numbers::PLACE_FOUND_MAX_BYTES));
     m.insert("openSocketPath", Value::from(numbers::OPEN_SOCKET_PATH));
     m.insert("guestDaemonSocketPath", Value::from(numbers::GUEST_DAEMON_SOCKET_PATH));
     m.insert("guestDaemonDir", Value::from(numbers::GUEST_DAEMON_DIR));

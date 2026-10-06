@@ -2,6 +2,7 @@
   "/h/.wsp/place.json",
   "/h/.wsp/place-key.pem",
   "/h/.wsp/place.log",
+  "/h/.wsp/place-found",
   "/h/.wsp/daemon",
   "/h/.wsp/provision",
   "/h/.wsp/daemon.tgz",
