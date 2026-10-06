@@ -25,7 +25,9 @@ use crate::paths::OpError;
 use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::tunnel::Tunnels;
+mod runner;
 use crate::{bring_back, frame_text as text, fs, git, hosts, paths, readings, ssh, tunnel, Ctx, Listener, Outbound, Outgoing};
+use runner::Runner;
 
 type Detach = Box<dyn FnOnce() + Send>;
 
@@ -457,47 +459,6 @@ async fn bound_of(ctx: &Ctx, machine: Option<&str>, at: &Path) -> Result<PathBuf
         Ok(real.min_by_key(|r| r.as_os_str().len()).unwrap_or(at))
     })
     .await
-}
-
-/// Which way an op runs a program, and so which machine it is answered for: this computer, or one workspace this
-/// computer holds. One enum rather than a generic on every arm, and one module behind each way.
-enum Runner {
-    Here(git::here::Here),
-    #[cfg(target_os = "linux")]
-    Inside(git::inside::Inside),
-}
-
-impl git::Runs for Runner {
-    async fn run(
-        &self,
-        cwd: &Path,
-        program: &str,
-        args: &[&str],
-        input: Option<&[u8]>,
-        max_bytes: Option<usize>,
-    ) -> Result<git::GitResult, OpError> {
-        match self {
-            Runner::Here(here) => here.run(cwd, program, args, input, max_bytes).await,
-            #[cfg(target_os = "linux")]
-            Runner::Inside(inside) => inside.run(cwd, program, args, input, max_bytes).await,
-        }
-    }
-
-    async fn on_path(&self, program: &str) -> Result<bool, OpError> {
-        match self {
-            Runner::Here(here) => here.on_path(program).await,
-            #[cfg(target_os = "linux")]
-            Runner::Inside(inside) => inside.on_path(program).await,
-        }
-    }
-
-    fn on_this_side(&self, folder: &Path) -> Option<git::OnThisSide> {
-        match self {
-            Runner::Here(here) => here.on_this_side(folder),
-            #[cfg(target_os = "linux")]
-            Runner::Inside(inside) => inside.on_this_side(folder),
-        }
-    }
 }
 
 /// The workspace a frame names, on the daemon of the computer holding it: a workspace on a computer somebody owns

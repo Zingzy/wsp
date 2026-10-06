@@ -1,10 +1,10 @@
 {
-  "daemon/crates/wsp-daemon/src/git.rs": 2096,
+  "daemon/crates/wsp-daemon/src/git.rs": 2020,
   "daemon/crates/wsp-daemon/src/hosts/github.rs": 1922,
-  "daemon/crates/wsp-daemon/src/ops.rs": 2263,
+  "daemon/crates/wsp-daemon/src/ops.rs": 2234,
   "daemon/crates/wsp-daemon/src/place.rs": 1842,
   "daemon/crates/wsp-daemon/src/ports.rs": 1635,
-  "daemon/crates/wsp-runtime/src/bundle.rs": 2585,
+  "daemon/crates/wsp-runtime/src/bundle.rs": 2555,
   "daemon/crates/wsp-runtime/src/engine.rs": 2083,
   "daemon/crates/wsp-runtime/src/net.rs": 1629,
   "daemon/crates/wsp-runtime/src/ops.rs": 2980,
