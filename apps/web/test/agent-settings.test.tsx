@@ -87,6 +87,20 @@ describe("the Agents page", () => {
     expect(sets.at(-1)).toEqual({ defaultAgent: null });
   });
 
+  it("shows the default agent picked and reset at once, off the record and not the host's mark on lists not read again yet", async () => {
+    const held: Array<() => void> = [];
+    const { api } = agentsApi({ setPreferences: async patch => new Promise(answer => held.push(() => answer(applyPreferencesPatch(RECORD, patch)))) } as Partial<Api>);
+    await mount(api, { kind: "group", group: "agents" });
+    await pickOption(control("default-agent"), "Codex");
+    await settle();
+    expect(useStore.getState().harnesses.find(c => c.isDefault === true)?.harness).not.toBe("codex");
+    expect(control("default-agent").textContent).toBe("Codex");
+    fireEvent.click(rowOf("default-agent")!.querySelector("[data-k=row-reset]")!);
+    await settle();
+    expect(control("default-agent").textContent).toBe("Claude Code");
+    await act(async () => held.forEach(answer => answer()));
+  });
+
   it("reads the agent lists again once the host answers a record whose agent defaults moved", async () => {
     const made = agentsApi();
     await mount(made.api, { kind: "group", group: "agents" });
