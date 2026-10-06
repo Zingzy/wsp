@@ -5,7 +5,7 @@ The host's core: workspaces, threads, turns, transcripts and joined computers. P
 ## How it works
 
 A turn is a process on the workspace's computer, not the host's: it writes a log there, and a new host re-opens it.
-Find code by function name: `src/runtime.ts` is the hub and its parts live in folders under `src/`. No code compares the kind string: ask `moduleOf()` or `isLocalWorkspace()`.
+Find code by name: `src/runtime.ts` is the hub; its parts live in folders under `src/`. No code compares the kind string: ask `moduleOf()` or `isLocalWorkspace()`.
 An agent writes everything in its copy, the gh on its PATH included, and the daemon there may run as root.
 
 ## Invariants
@@ -39,8 +39,8 @@ An agent writes everything in its copy, the gh on its PATH included, and the dae
 
 | Rule | File | Function |
 |---|---|---|
-| what a caller may see and drive | `src/runtime.ts` | `refusalFor()` |
-| the folder a turn or a command starts in | `src/runtime.ts` | `threadFolder()` |
-| a git host read for a workspace | `src/runtime.ts` | `readHost()` |
+| what a caller may see and drive | `src/account/rules.ts` | `refusalFor()` |
+| the folder a turn or a command starts in | `src/machines/kinds.ts` | `threadFolder()` |
+| a git host read for a workspace | `src/account/pull-requests.ts` | `readHost()` |
 | a git host named from a remote | `packages/catalog/src/git-hosts.ts` | `gitHostOf()` |
 | a computer busy with a setup | `src/places/setup.ts` | `settingNow()` |
