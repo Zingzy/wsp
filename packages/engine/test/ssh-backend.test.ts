@@ -50,8 +50,11 @@ describe("ssh backend", () => {
     expect(args.slice(args.indexOf("-p"), args.indexOf("-p") + 2)).toEqual(["-p", "2222"]);
     expect(args.slice(args.indexOf("-i"), args.indexOf("-i") + 2)).toEqual(["-i", "/tmp/k/id_ed25519"]);
     expect(args).not.toContain("-lc");
-    // The script is one quoted word after the address, so a quote inside it reaches the machine as written.
-    expect(args.slice(-4)).toEqual(["dev@10.0.0.5", "bash", "-c", `'echo '\\''it works'\\'''`]);
+    // The script is one quoted word at the end, the outer bash's $1, so a quote inside it reaches the machine as
+    // written; the word before it is the road to root, which the login's own uid picks at the far end.
+    expect(args.slice(-6, -2)).toEqual(["dev@10.0.0.5", "bash", "-c", args.at(-3)]);
+    expect(args.at(-3)).toContain("exec sudo -n bash -c");
+    expect(args.slice(-2)).toEqual(["wsp", `'echo '\\''it works'\\'''`]);
     expect(sshArgs({ user: "dev", host: "box", port: 22 }, "true")).not.toContain("-i");
   });
 

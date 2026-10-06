@@ -3242,6 +3242,14 @@ export const PLACE_LOGIN_REFUSED_KIND = "login";
  * the person to trust and adds again with it. */
 export const PLACE_HOST_KEY_KIND = "host-key";
 
+/** The password a login's sudo asks for, typed by the person for one add, remove or update: fed to sudo over the
+ * ssh connection's input, never written down, never logged and gone when the act ends. One line, as sudo reads it. */
+export const SudoPassword = z.string().max(1024).regex(/^[^\n\r\0]*$/);
+
+/** The kind an add is refused with where the login's sudo asks for a password: none was given, or sudo did not take
+ * the one that was. A client asks the person for it once and adds again with it. */
+export const PLACE_SUDO_KIND = "sudo";
+
 /** How far the install on one computer has got, keyed by the id the request was answered with, so two installs at
  * once are two lists. A step that is running is the one with a spinner; one that is done carries its note. */
 export const PlaceStageEvent = z.object({
@@ -6727,10 +6735,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Puts the daemon this host deploys on one place where it is behind, over the link it holds or over the ssh road
    * the install used, and waits for that computer to dial back running it. The workspaces on it and what it was set
    * up with are kept. Answers a PlaceUpdateReply. */
-  z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string() }),
+  z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string(), sudoPassword: SudoPassword.optional() }),
   /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
    * the place record. Answers `{ removed, swept, note? }`. */
-  z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string() }),
+  z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string(), sudoPassword: SudoPassword.optional() }),
   /** Runs the doctor's computer road here, for a computer this host holds the link to: the six steps against that
    * link, and every line of them pushed as a doctor.line event under `doctorId` to the sockets subscribed to
    * events. The id is the caller's own, minted before the request, since the first line is said before the reply
@@ -6794,6 +6802,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
      * before a byte of wsp's leaves this computer where it is absent and the client holds no key of its own, so a
      * caller that sends none meets the same wall as one that sends a wrong one. */
     hostKey: z.string().max(200).optional(),
+    /** The password the login's sudo asks for, typed by the person for this add alone: fed to sudo over the ssh
+     * connection's input, never written down, never logged and gone when the add ends. One line, as sudo reads it. */
+    sudoPassword: SudoPassword.optional(),
     /** The saved recipe the computer is set up from once it joins, by its name or slug. Absent, it joins and waits
      * as a pending add for the person's picks, with the base tools going on meanwhile. */
     recipe: z.string().max(200).optional(),
@@ -7512,7 +7523,7 @@ export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape
 
 /** The request fields above that carry a secret: a key, a token, a code, a passphrase, or a record of logins or
  * environment values a person puts keys into. A new field that carries one is added here, beside its schema. */
-export const SECRET_REQUEST_FIELDS: readonly string[] = ["token", "key", "rows", "code", "passphrase", "env", "envs", "headers"];
+export const SECRET_REQUEST_FIELDS: readonly string[] = ["token", "key", "rows", "code", "passphrase", "env", "envs", "headers", "sudoPassword"];
 
 /** The secret values a request frame carries, read one level into a record and no deeper: a record of logins is as
  * deep as a secret field goes, and the frame may be a stranger's. */

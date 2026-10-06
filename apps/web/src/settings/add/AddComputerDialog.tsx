@@ -34,7 +34,7 @@ import { placeName } from "../places.js";
 import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
 import { CopyRow, DeviceCode, RefusalSlot } from "../sheetParts.js";
-import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
+import { STEP_TITLES, askedHostKey, askedSudo, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
 import { everything, folderKey, githubPick, noPicks, tickUsedClis } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
@@ -71,11 +71,34 @@ function WhereStep({ address, hostKey, hosts, hostsRefused, onPick }: { address:
   );
 }
 
-function ChecksStep({ rows, onAgain }: { rows: readonly StepLine[]; onAgain: () => void }) {
+/** The checks as rows. Where the login's sudo asks for a password, the root row asks for it: a field held in this
+ * step alone, sent with the next add and cleared as it goes. */
+function ChecksStep({ rows, asksSudo, onAgain }: { rows: readonly StepLine[]; asksSudo: boolean; onAgain: (sudoPassword?: string) => void }) {
+  const [password, setPassword] = useState("");
+  const again = (): void => {
+    const typed = password;
+    setPassword("");
+    onAgain(asksSudo ? typed : undefined);
+  };
   return (
     <Grid id="checks">
       {rows.map(row => (
-        <StepRow key={row.id} row={row} {...(row.state === "failed" ? { acts: <Button size="xs" variant="outline" data-k="try-again" onClick={onAgain}>Try again</Button> } : {})} />
+        <StepRow
+          key={row.id}
+          row={row}
+          {...(row.state === "failed"
+            ? {
+                acts: (
+                  <>
+                    {asksSudo ? <Input data-k="sudo-password" aria-label="Password for sudo" type="password" autoFocus autoComplete="off" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && password !== "" && again()} className={cn(ROW_FIELD, "w-44 max-sm:w-36")} /> : null}
+                    <Button size="xs" variant="outline" data-k="try-again" held={asksSudo && password === ""} onClick={again}>
+                      Try again
+                    </Button>
+                  </>
+                ),
+              }
+            : {})}
+        />
       ))}
     </Grid>
   );
@@ -498,9 +521,9 @@ export function AddComputerDialog() {
   const back = (): void => {
     if (canBack) go(backTo);
   };
-  const doConnect = (key?: string): void => {
+  const doConnect = (key?: string, sudoPassword?: string): void => {
     if (api === null || flow.address.trim() === "") return;
-    connect(api, flow.address, key);
+    connect(api, flow.address, key, sudoPassword);
   };
   const startTask = (): void => {
     const project = projects.find(p => p.computer === flow.placeId);
@@ -530,7 +553,7 @@ export function AddComputerDialog() {
       case "hostkey":
         return <WhereStep address={flow.address} hostKey={keyAsked} hosts={[]} hostsRefused={null} onPick={() => {}} />;
       case "checks":
-        return <ChecksStep rows={checkRows(job)} onAgain={() => go("where")} />;
+        return <ChecksStep rows={checkRows(job)} asksSudo={askedSudo(job)} onAgain={sudoPassword => (sudoPassword === undefined ? go("where") : doConnect(undefined, sudoPassword))} />;
       case "startfrom":
         return optionsBody(o => <StartFromStep here={here} picks={picks} options={o} from={flow.from} onPick={(from, next) => setPicks(api, next, from)} />);
       case "agents":

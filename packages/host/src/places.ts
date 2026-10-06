@@ -79,6 +79,8 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   hostKeyMismatchRefusal,
   hostKeyUnconfirmedRefusal,
   PLACE_HOST_KEY_KIND,
+  PLACE_SUDO_KIND,
+  refusal,
   hostKeyUnscannableRefusal,
   KNOWN_HOSTS,
   PLACE_ROOT_SHELLS,
@@ -97,7 +99,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   macKindOf,
   TOOL_PREFIX,
 } from "@wsp/protocol";
-import { GITHUB_TOKEN_ENV, MissingKnownHostsError, PlaceMachine, prefixVolume, runChild, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
+import { GITHUB_TOKEN_ENV, MissingKnownHostsError, PlaceMachine, prefixVolume, runChild, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, readSshSudo, trySshSudo, knownHostsWritten, type KeyCheck, type MachineBackend, type SshReach, type SshSudo, type SshTransport } from "@wsp/engine";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceStaging, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
 import { BackCutError, heldPlaceScript, placeBackHolder } from "./place-back.js";
 import { writeOwn } from "@wsp/own-file";
@@ -201,6 +203,7 @@ export function placeWiring(statePath: string, advertise?: string): PlaceWiring 
     log: placeLogReader(),
     update: placeUpdater(),
     leave: placeLeaver(),
+    sudoOver: placeSudoReader(),
     runOver: placeRunner(),
     undo: placeUndoer(),
     githubToken: () => vaultGitHubToken(statePath),
@@ -685,11 +688,7 @@ export function placeCheckRows(address: string, check: PlaceCheck, needBytes: nu
   const at = address.slice(0, 64);
   const row = (step: PlaceCheckStep, state: "done" | "failed", note?: string) => ({ step, state, ...(note === undefined || note === "" ? {} : { note }), ...(check.ms?.[step] === undefined ? {} : { ms: check.ms[step] }) });
   const rows: ReturnType<typeof row>[] = [];
-  if (check.uid !== undefined && check.uid !== 0) {
-    const reached = host ?? at.slice(at.indexOf("@") + 1);
-    const alias = at.includes("@") ? "" : `, or put User root under Host ${at} in your ssh config and add it again`;
-    return [row("root", "failed", `${at} logs in as a user that is not root, and wsp needs root there to keep itself running as a system service. Let root log in over ssh there and add root@${reached} instead${alias}`)];
-  }
+  if (check.uid !== undefined && check.uid !== 0) return [row("root", "failed", placeNoRootLine(address, undefined, host))];
   rows.push(row("root", "done"));
   if (check.systemd === false) return [...rows, row("system", "failed", `${at} runs no systemd, which is what keeps wsp running there; wsp takes a Linux box that boots with systemd`)];
   if (check.cgroup2 === false) return [...rows, row("system", "failed", `${at} has no cgroup v2 (/sys/fs/cgroup/cgroup.controllers), which every workspace there is held in; boot it with the unified hierarchy`)];
@@ -697,6 +696,46 @@ export function placeCheckRows(address: string, check: PlaceCheck, needBytes: nu
   if (check.freeBytes !== undefined && check.freeBytes < needBytes) return [...rows, row("disk", "failed", `${at} has ${fmtBytes(check.freeBytes)} free on the disk wsp installs onto (${TOOL_PREFIX}), and the base tools with a gigabyte to work in take ${fmtBytes(needBytes)}; free some room there and add it again`)];
   rows.push(row("disk", "done", check.freeBytes === undefined ? undefined : `${fmtBytes(check.freeBytes)} free`));
   return rows;
+}
+
+/** What an add says of a login that cannot reach root there: no sudo, or a sudo that will not run anything as root
+ * for it. Both fixes in the one sentence. `host` is the hostname the address reached, which an alias stands for. */
+export function placeNoRootLine(address: string, user: string | undefined, host?: string): string {
+  const at = address.slice(0, 64);
+  const reached = host ?? at.slice(at.indexOf("@") + 1);
+  const who = user === undefined ? "a user that is not root" : user.slice(0, 32);
+  const alias = at.includes("@") ? "" : `, put User root under Host ${at} in your ssh config,`;
+  return `${at} logs in as ${who}, who cannot run commands as root with sudo there, and wsp needs root to keep itself running as a system service; add root@${reached} instead${alias} or give ${user === undefined ? "that user" : who} passwordless sudo`;
+}
+
+/** What an add says where the login's sudo wants a terminal (Defaults requiretty): no command over ssh has one, so
+ * neither a password nor passwordless sudo gets past it, and the sentence names the two fixes that do. */
+export const placeSudoTtyLine = (address: string, user: string, host: string): string =>
+  `${address.slice(0, 64)}: sudo there runs only from a terminal (Defaults requiretty), and wsp's commands over ssh have none; turn it off for ${user.slice(0, 32)} with Defaults:${user.slice(0, 32)} !requiretty, or add root@${host} instead`;
+
+/** Which act asked for root over a login, for the fix that names where its password is typed: the add, or a remove
+ * or an update of a computer already in, by its name here. */
+export type SudoAct = { verb: "add" } | { verb: "remove" | "update"; name: string };
+
+/** The fix under a sudo that asks for a password: where it can be typed for this act, and for an add the two roads
+ * that need none. */
+function sudoAskFix(user: string, host: string, act: SudoAct): string {
+  const keeps = "which hand it to sudo there and keep it nowhere";
+  if (act.verb === "remove") return `Type it in the app's Remove confirm, or at wsp remove ${act.name} in a terminal, ${keeps}.`;
+  if (act.verb === "update") return `Type it at wsp add ${act.name} --update in a terminal, which hands it to sudo there and keeps it nowhere.`;
+  return `Type it in Add a computer in the app, or at wsp add in a terminal, ${keeps}; or add root@${host} instead, or give ${user} passwordless sudo.`;
+}
+
+/** What an add, a remove or an update says where the login's sudo asks for a password and none came with it, or sudo
+ * did not take the one that did: stamped for the client to ask the person for it. Anything else that keeps root out
+ * of reach is one sentence of its own. */
+export function placeSudoRefusal(address: string, user: string, host: string, sudo: SshSudo, act: SudoAct = { verb: "add" }): Error | undefined {
+  const at = address.slice(0, 64);
+  const who = user.slice(0, 32);
+  if (sudo === "asks") return refusal(`sudo on ${at} asks for ${who}'s password`, sudoAskFix(who, host, act), PLACE_SUDO_KIND);
+  if (sudo === "wrong") return refusal(`sudo on ${at} did not take that password`, sudoAskFix(who, host, act), PLACE_SUDO_KIND);
+  if (sudo === "tty") return new Error(placeSudoTtyLine(address, who, host));
+  return sudo === "none" ? new Error(placeNoRootLine(address, user, host)) : undefined;
 }
 
 /** What the check step says it found where it passed. */
@@ -768,15 +807,19 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     };
     // Every refusal from the dial on says the key it wrote here; only a login that did not stand is the login's own.
     const stood = async () => {
-      const adopted = await backend.adopt(reach).catch((e: unknown) => {
+      const loginRefused = (e: unknown): never => {
         throw new PlaceLoginRefusedError(e instanceof Error ? e.message : String(e));
-      });
-      const { machine, login, system, arch, shell, hostKey } = adopted;
-      // What answered is held against what the person pinned before anything else is asked of it. The read that has
-      // already run sent nothing of the person's beyond the ssh identity every dial offers and printed the machine's
-      // own facts; accept-new wrote its key here on the way in, so the refusal names that key, the file it went into
-      // and the line that takes it out again. Nothing of wsp's has left this computer yet.
-      if (req.hostKey !== undefined && !hostKeyMatches(req.hostKey, hostKey ?? "")) {
+      };
+      // How this login reaches root, read as the login with nothing of the person's in it: the first dial, which
+      // writes the box's key here the way accept-new does.
+      const road = await backend.sudoFor(reach).catch(loginRefused);
+      // What answered is held against what the person pinned before anything else is asked of it: before their sudo
+      // password is tried and before any session runs as root there. The read that has just run sent nothing of the
+      // person's beyond the ssh identity every dial offers, and its sudo only listed a command, which runs nothing as
+      // root; accept-new wrote the box's key here on the way in, so the refusal names that key, the file it went into
+      // and the line that takes it out again.
+      const answered = await backend.keyFor(reach).catch(() => undefined);
+      if (req.hostKey !== undefined && !hostKeyMatches(req.hostKey, answered ?? "")) {
         // The file and the name the entry was written under come off the client's own one reading of the dial, never
         // off the word that was typed: a config naming a HostName or a HostKeyAlias writes the entry somewhere else,
         // and a line built here from the address would tell the person to remove an entry that is not there.
@@ -785,18 +828,39 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
           hostKeyMismatchRefusal({
             address: req.address,
             pinned: req.hostKey,
-            ...(hostKey !== undefined ? { wrote: hostKey } : {}),
+            ...(answered !== undefined ? { wrote: answered } : {}),
             target: entry.target ?? reach.host,
             file: entry.file ?? KNOWN_HOSTS,
           }),
         );
       }
+      // Only now the road to root: a root login, a sudo that asks for nothing, or a sudo that took the password the
+      // person typed for this add. Every script after this rides that road, the password held by this one backend
+      // and gone with it. A login with none of the three is read as itself, for the connect and chip rows, and
+      // stopped at the root row.
+      const rootBy = async (sudo: SshSudo) => {
+        const noRoot = placeSudoRefusal(req.address, reach.user, reach.host, sudo);
+        const rooted = noRoot !== undefined ? backend.riding({ asLogin: true }) : sudo === "taken" ? backend.riding({ sudoPassword: req.sudoPassword! }) : backend;
+        return { noRoot, adopted: await rooted.adopt(reach).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e)))) };
+      };
+      const tried = async (): Promise<SshSudo> => (req.sudoPassword !== undefined ? await backend.sudoTry(reach, req.sudoPassword).catch(loginRefused) : "asks");
+      let { noRoot, adopted: read } = await rootBy(road === "asks" ? await tried() : road);
+      // The read said root asks for nothing and the first script under sudo -n was refused for a password: a sudoers
+      // the read could not see through. It is the ask, never the login's refusal, and the password where one came.
+      if (read instanceof Error && road === "free" && read.message.includes("a password is required")) ({ noRoot, adopted: read } = await rootBy(await tried()));
+      if (read instanceof Error) loginRefused(read);
+      const adopted = read as Exclude<typeof read, Error>;
+      const { machine, login, system, arch, shell, hostKey } = adopted;
+      const chip = [system, arch].filter(w => w !== undefined).join(" ");
+      if (noRoot !== undefined) return { root: false as const, machine, login, hostKey, chip, noRoot };
       // Which shell root runs, read off the box's own passwd entry with nothing of root's run to read it. sshd hands
       // every command the host sends to that shell with -c before wsp's own bash -c inside it, so a root running zsh
       // or fish reads a file under the /root every workspace on that box writes, as root, on every dial wsp makes.
       // The read that has just run already went through it once; what this stops is the deploy and every dial after.
-      // A box that named no shell at all is one this rule says nothing about, and is taken as it always was.
-      if (shell !== undefined && !PLACE_ROOT_SHELLS.includes(shell)) throw new Error(placeRootShellRefusal(req.address, shell));
+      // A box that named no shell at all is one this rule says nothing about, and is taken as it always was. Over
+      // sudo root's shell never runs: sshd hands the command to the login's own shell, as the login, and sudo runs
+      // bash itself.
+      if (road === "root" && shell !== undefined && !PLACE_ROOT_SHELLS.includes(shell)) throw new Error(placeRootShellRefusal(req.address, shell));
       if (login.HOME === "/") throw new Error(placeRootHomeRefusal(req.address));
       // The binary that lands is picked off the word the box just said about its own chip, never off this computer's:
       // the two are different computers as often as they are alike, and a binary for the wrong one starts and dies.
@@ -806,12 +870,13 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
       // by the same rule here so a box in another wsp is refused with nothing of this one's sent.
       const held = parsePlaceFile((await machine.run(heldPlaceScript(login.HOME), { deadlineMs: SSH_DIAL_MS })).stdout);
       if (held !== undefined) throw new Error(placeHeldRefusal(req.address, held, readJoinToken(req.code).hostKey));
-      return { machine, login, hostKey, target, chip: [system, arch].filter(w => w !== undefined).join(" ") };
+      return { root: true as const, machine, login, hostKey, target, chip };
     };
-    const { machine, login, hostKey, target, chip } = await stood().catch(async (e: unknown) => {
+    const standing = await stood().catch(async (e: unknown) => {
       await sayKey(await backend.keyFor(reach).catch(() => undefined));
       throw e;
     });
+    const { machine, login, hostKey, chip } = standing;
     const name = req.name?.trim() !== undefined && req.name.trim() !== "" ? req.name.trim() : sshMachineName(reach);
     stage("connect", "done", await osSaid(machine));
     await sayKey(hostKey);
@@ -821,6 +886,12 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     // Each check is a row of its own inside the one check step: the chip and system were read with the login.
     stage("check", "running");
     stage("chip", "done", chip === "" ? undefined : chip);
+    if (!standing.root) {
+      said("root", "running");
+      said("root", "failed", standing.noRoot.message);
+      throw standing.noRoot;
+    }
+    const { target } = standing;
     // The three are read in one run, so each row moves once that run is back; a row after one that failed never ran.
     const checked = parsePlaceCheck((await machine.run(PLACE_CHECK_SCRIPT, { deadlineMs: SSH_DIAL_MS }).catch(() => undefined))?.stdout ?? "");
     const rows = placeCheckRows(req.address, checked, floorBytes(false) + PLACE_CHECK_SPARE_BYTES, reach.host);
@@ -1035,7 +1106,8 @@ export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } 
     }
     if (req.ssh === undefined) throw new Error(placeNoUpdateRoadLine(req.name));
     const reach = parseSshAddress(req.ssh.ssh, req.ssh.keyPath === undefined ? {} : { keyPath: req.ssh.keyPath });
-    const { machine, login, system, arch } = await (deps.backend ?? new SshBackend()).adopt(reach);
+    const backend = deps.backend ?? new SshBackend();
+    const { machine, login, system, arch } = await (req.sudoPassword === undefined ? backend : backend.riding({ sudoPassword: req.sudoPassword })).adopt(reach);
     // The login this road just read rather than the one the record kept, as the join builds its place from: a box
     // whose login moved takes wsp's files where it now is.
     const files = loginFiles({ home: login.HOME, path: login.PATH });
@@ -1102,7 +1174,7 @@ export function placeLeaver(deps: { transport?: SshTransport } = {}): PlaceLeave
   return async req => {
     const reach = parseSshAddress(req.ssh.ssh, req.ssh.keyPath === undefined ? {} : { keyPath: req.ssh.keyPath });
     const line = shellLine([...req.report.wsp, PLACE_LEAVE_VERB]);
-    const said = await (deps.transport ?? sshClient)(reach, line, { timeoutMs: PLACE_LEAVE_MS });
+    const said = await (deps.transport ?? sshClient)(reach, line, { timeoutMs: PLACE_LEAVE_MS, ...(req.sudoPassword === undefined ? {} : { sudoPassword: req.sudoPassword }) });
     // ssh's own line where the login would not stand, which is what a person would have read in their own
     // terminal; a leave that ran and stopped carries that computer's own words instead.
     if (said.exitCode === SSH_REFUSED_EXIT) throw new PlaceLoginRefusedError(sshRefusalLine(said, reach));
@@ -1114,13 +1186,54 @@ export function placeLeaver(deps: { transport?: SshTransport } = {}): PlaceLeave
 /** How one script runs on a computer this host holds no link to, for the host that wires the runtime: over the login
  * the install used, as bash. Answers what it exited with; throws ssh's own line where the login would not stand. */
 export function placeRunner(deps: { transport?: SshTransport } = {}): NonNullable<PlaceWiring["runOver"]> {
-  return async (login, script, timeoutMs) => {
+  return async (login, script, timeoutMs, sudoPassword) => {
     const reach = parseSshAddress(login.ssh, login.keyPath === undefined ? {} : { keyPath: login.keyPath });
-    const said = await (deps.transport ?? sshClient)(reach, shellLine(["bash", "-c", script]), { timeoutMs });
+    const said = await (deps.transport ?? sshClient)(reach, shellLine(["bash", "-c", script]), { timeoutMs, ...(sudoPassword === undefined ? {} : { sudoPassword }) });
     if (said.exitCode === SSH_REFUSED_EXIT) throw new PlaceLoginRefusedError(sshRefusalLine(said, reach));
     return said;
   };
 }
+
+/** What a remove or an update says where the login's sudo asks for a password and the record keeps no key the box's
+ * ssh answered the add with: nothing here can tell that box from another, so no password goes to it. */
+export const placeNoKeyForSudoLine = (ssh: string, host: string): string =>
+  `${ssh.slice(0, 64)} runs sudo with a password, and this wsp kept no key its ssh answered the add with, so it sends that password to no box it cannot check; remove it as root@${host}, or run sudo ${PLACE_LEAVE_LINE} on that computer`;
+
+/** How a remove or an update reads the road to root over the login the install used, before it does anything
+ * there: the same read and the same one try of the person's password the add makes, and the add's own refusals.
+ * Where sudo asks for a password, the key the box answers with now is held against the one the add kept before the
+ * person is asked for it or it is tried: ssh's accept-new takes any key once the old entry is gone, which the add's
+ * own mismatch line tells a person to do. */
+export function placeSudoReader(
+  deps: { transport?: SshTransport; hostKey?: (reach: SshReach) => Promise<string | undefined>; knownHosts?: (reach: SshReach) => Promise<{ file?: string; target?: string }> } = {},
+): NonNullable<PlaceWiring["sudoOver"]> {
+  return async (login, sudoPassword, act) => {
+    const reach = parseSshAddress(login.ssh, login.keyPath === undefined ? {} : { keyPath: login.keyPath });
+    const transport = deps.transport ?? sshClient;
+    const road = await readSshSudo(reach, transport).catch((e: unknown) => {
+      throw new PlaceLoginRefusedError(e instanceof Error ? e.message : String(e));
+    });
+    // Only the password road is held to the record's key: on a root login or a passwordless sudo nothing of the
+    // person's goes there, and the leave rides ssh's own known_hosts as the root road always did.
+    if (road === "asks") {
+      if (login.hostKey === undefined) throw new Error(placeNoKeyForSudoLine(login.ssh, reach.host));
+      const answered = await (deps.hostKey ?? knownHostKey)(reach).catch(() => undefined);
+      if (!hostKeyMatches(login.hostKey, answered ?? "")) {
+        const entry = await (deps.knownHosts ?? knownHostsWritten)(reach).catch((): { file?: string; target?: string } => ({}));
+        throw new Error(hostKeyMismatchRefusal({ address: login.ssh, pinned: login.hostKey, ...(answered !== undefined ? { wrote: answered } : {}), target: entry.target ?? reach.host, file: entry.file ?? KNOWN_HOSTS }));
+      }
+    }
+    const sudo = road === "asks" && sudoPassword !== undefined ? await trySshSudo(reach, sudoPassword, transport) : road;
+    const refused = placeSudoRefusal(login.ssh, reach.user, reach.host, sudo, act);
+    if (refused !== undefined) throw refused;
+    return sudo;
+  };
+}
+
+/** What a failed undo says where the login's sudo asks for a password: the undo runs at a host's start with nobody at
+ * it to type one, so what the add put there stays until somebody takes it off at that computer. */
+export const placeUndoNeedsSudoLine = (ssh: string): string =>
+  `${ssh.slice(0, 64)} runs sudo only with a password, which an undo with nobody at it cannot give, so what the add put there stays; log in there and run ${PLACE_LEAVE_LINE}`;
 
 /** How long taking back an add the host stopped in the middle of gets: systemd's own stop, then the files. */
 const PLACE_UNDO_MS = 120_000;
@@ -1133,6 +1246,7 @@ export function placeUndoer(deps: { transport?: SshTransport } = {}): NonNullabl
     const reach = parseSshAddress(login.ssh, login.keyPath === undefined ? {} : { keyPath: login.keyPath });
     const said = await (deps.transport ?? sshClient)(reach, shellLine(["bash", "-c", script]), { timeoutMs: PLACE_UNDO_MS });
     if (said.exitCode === SSH_REFUSED_EXIT) throw new PlaceLoginRefusedError(sshRefusalLine(said, reach));
+    if (said.stderr.includes("a password is required")) throw new Error(placeUndoNeedsSudoLine(login.ssh));
     if (said.exitCode !== 0 || !said.stdout.includes(DAEMON_GONE_LINE)) throw new Error(lastLine(said.stderr) ?? lastLine(said.stdout) ?? `exit ${said.exitCode}`);
   };
 }
@@ -1425,7 +1539,10 @@ async function updatePlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string
       return 1;
     }
     try {
-      const answer = PlaceUpdateReply.parse(await client.request<Record<string, unknown>>("places.update", { placeId: picked.place.id }));
+      const place = picked.place;
+      const answer = PlaceUpdateReply.parse(
+        await withSudoAsk(io, place.road?.ssh ?? place.name, sudoPassword => client.request<Record<string, unknown>>("places.update", { placeId: place.id, ...(sudoPassword !== undefined ? { sudoPassword } : {}) })),
+      );
       for (const line of updatedLines(answer)) io.log(line);
       return 0;
     } catch (e) {
@@ -1557,15 +1674,18 @@ async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: str
     const watch = watchSetup(client, addId, setupSay(io, flags, deps));
     await client.events();
     try {
-      const added = await client.request<{ place: PlaceView; hostKey?: string; said?: string; pending?: PendingComputer }>("places.add", {
-        addId,
-        address,
-        ...(flags.name !== undefined ? { name: flags.name } : {}),
-        ...(flags.sshPort !== undefined ? { sshPort: flags.sshPort } : {}),
-        ...(flags.keyPath !== undefined ? { keyPath: flags.keyPath } : {}),
-        ...(flags.recipe !== undefined ? { recipe: flags.recipe } : {}),
-        ...confirmed,
-      });
+      const added = await withSudoAsk(io, address, sudoPassword =>
+        client.request<{ place: PlaceView; hostKey?: string; said?: string; pending?: PendingComputer }>("places.add", {
+          addId,
+          address,
+          ...(flags.name !== undefined ? { name: flags.name } : {}),
+          ...(flags.sshPort !== undefined ? { sshPort: flags.sshPort } : {}),
+          ...(flags.keyPath !== undefined ? { keyPath: flags.keyPath } : {}),
+          ...(flags.recipe !== undefined ? { recipe: flags.recipe } : {}),
+          ...(sudoPassword !== undefined ? { sudoPassword } : {}),
+          ...confirmed,
+        }),
+      );
       if (flags.json !== true) for (const line of addedLines(added.place, added.hostKey)) io.log(line);
       return await followAdded(io, client, flags, added.place, watch, added.said, added.pending);
     } finally {
@@ -1575,6 +1695,28 @@ async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: str
     client.close();
   }
 }
+
+/** How many times a line at a terminal asks for a sudo password before it says sudo's refusal: sudo's own default. */
+const SUDO_ASKS = 3;
+
+/** One request that may need the password a login's sudo asks for: an add, a remove, an update. The password is
+ * asked here, without echo, only once the host has said sudo wants one, and rides the one request that carries it
+ * to the host; it is held in nothing that outlives the act. Off a terminal the host's own sentence stands. */
+async function withSudoAsk<T>(io: CliIO, address: string, request: (sudoPassword: string | undefined) => Promise<T>): Promise<T> {
+  let sudoPassword: string | undefined;
+  for (let asked = 0; ; asked++) {
+    try {
+      return await request(sudoPassword);
+    } catch (e) {
+      if ((e as { kind?: unknown }).kind !== PLACE_SUDO_KIND || io.isTTY !== true || asked === SUDO_ASKS) throw e;
+      sudoPassword = await io.askSecret(sudoPasswordAsk(address, asked > 0));
+    }
+  }
+}
+
+/** The question an add at a terminal puts for a sudo password, the first time and after sudo refused one. */
+export const sudoPasswordAsk = (address: string, again: boolean): string =>
+  `${again ? "sudo did not take that password; the password" : "The password"} sudo asks for on ${address.slice(0, 64)}, handed to sudo there and kept nowhere`;
 
 /** A computer set up from its picks: a pending add that joined and waits on its choices, given a recipe here or
  * holding its choices already, or a computer already set up, run again for whatever is missing. The work is the
@@ -1747,7 +1889,9 @@ export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly s
       return 1;
     }
     const place = picked.place;
-    const answer = await client.request<{ removed: boolean; swept: string[]; note?: string }>("places.remove", { placeId: place.id });
+    const answer = await withSudoAsk(io, place.road?.ssh ?? place.name, sudoPassword =>
+      client.request<{ removed: boolean; swept: string[]; note?: string }>("places.remove", { placeId: place.id, ...(sudoPassword !== undefined ? { sudoPassword } : {}) }),
+    );
     if (!answer.removed) {
       // The list this place was picked out of, so a host that holds others still names them: the record went
       // between the listing and the remove, which is the one way this is answered false.
