@@ -66,6 +66,7 @@ Review wsp changes against the laws this project has already paid for. Generic c
 - Rulings live on the ticket. A ruling the coordinator gives in a private message or a pre-review is posted as its own ticket comment before the builder acts on it; a report may quote it but cannot be its only home.
 - Coordinator pre-review. The coordinator runs a cold reviewer on the branch before handing it to the user's reviewer; that reviewer posts nothing and returns findings to the builder. The user sees a branch only after it survived one full review.
 - Deviations from plan/ticket are fine when reality wins, but MUST be reported in the ticket comment: an unreported deviation is a should-fix even when the code is right.
+- A fix round for a finding caused by an unknown rule, a regression or knowledge only the code held adds one line to that area's AGENTS.md (packages/runtime, packages/host, packages/protocol, apps/web, daemon) in the same commit; check the line is there and true, and its absence is a should-fix.
 - Comments in code state constraints code can't show, with the source (a law, a measured finding): no narration, no TODO/FIXME/HACK.
 
 ## Verdict format
