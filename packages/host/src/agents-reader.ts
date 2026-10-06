@@ -41,11 +41,16 @@ function installedAt(matches: readonly string[]): { found: boolean; path?: strin
   return { found: matches.length > 0, ...(real !== undefined ? { path: real } : {}), ...(via !== undefined ? { via } : {}) };
 }
 /** Each command run side by side under its own bound, then each one's exit code and output in the order asked. */
-const EACH = [
+export const eachScript = (seconds: number): string => [
   'd=$(mktemp -d) || exit 1',
-  `T=; command -v timeout >/dev/null 2>&1 && T="timeout ${COMMAND_S}"`,
+  // macOS has no timeout command, and a probe that hung there outlived every batch until hundreds piled up
+  // (2026-10-06). perl stands in: it runs the probe in a process group of its own and kills that group at the bound,
+  // so the kill can only reach the probe and its children, and a probe that ends leaves nothing waiting.
+  `if command -v timeout >/dev/null 2>&1; then bound() { timeout ${seconds} "$@"; }`,
+  `elif command -v perl >/dev/null 2>&1; then bound() { perl -e '$t = shift; $p = fork; defined $p or exit 126; if (!$p) { setpgrp(0, 0); exec @ARGV or exit 127 } setpgrp($p, $p); $SIG{ALRM} = sub { kill 9, -$p; exit 137 }; alarm $t; waitpid($p, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' ${seconds} "$@"; }`,
+  'else bound() { "$@"; }; fi',
   "i=0",
-  'for c; do ( $T sh -c "$c" > "$d/$i" 2>&1 < /dev/null; echo $? > "$d/$i.x" ) & i=$((i+1)); done',
+  'for c; do ( bound sh -c "$c" > "$d/$i" 2>&1 < /dev/null; echo $? > "$d/$i.x" ) & i=$((i+1)); done',
   "wait",
   "i=0",
   "for c; do printf '\\036%s\\037' \"$(cat \"$d/$i.x\" 2>/dev/null)\"; head -c 16384 \"$d/$i\" 2>/dev/null; i=$((i+1)); done",
@@ -61,7 +66,7 @@ interface Said {
 /** Each command's exit code and output, run on the target side by side; nothing for any where the run failed. */
 async function each(host: Host, commands: readonly string[]): Promise<(Said | undefined)[]> {
   if (commands.length === 0) return [];
-  const out = await host.exec.run("sh", ["-c", EACH, "sh", ...commands], { timeoutMs: READ_MS + 5_000 });
+  const out = await host.exec.run("sh", ["-c", eachScript(COMMAND_S), "sh", ...commands], { timeoutMs: READ_MS + 5_000 });
   if (out === undefined) return commands.map(() => undefined);
   const records = out.split("\x1e").slice(1, commands.length + 1);
   return commands.map((_, i) => {
