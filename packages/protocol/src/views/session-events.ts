@@ -107,6 +107,10 @@ export const SessionStartEvent = z.object({
    * row so a resume past the session index cap still reads what the thread was opened at rather than falling back
    * to the adapter's unnamed default. Absent on a turn from before it was recorded. */
   permissionMode: z.string().optional(),
+  /** The effort this turn ran at, as the runtime asked for it, since the CLI never echoes it: kept for the same cap, so
+   * a send naming none into a thread whose rows fell off the index runs at the thread's own. Absent on a turn that ran
+   * at none and on one from before it was recorded. */
+  effort: z.string().optional(),
   /** The agent this turn ran on, by the id SessionView.harness carries: the thread's own record stamped on its
    * transcript, beside the access and for the same cap, so a thread whose rows fell off the index still says which
    * agent it runs on. Absent on a turn from before it was recorded. */

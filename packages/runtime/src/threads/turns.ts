@@ -271,6 +271,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
             ...(event.model !== undefined ? { model: event.model } : {}),
             ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
             ...(view.permissionMode !== undefined ? { permissionMode: view.permissionMode } : {}),
+            ...(view.effort !== undefined ? { effort: view.effort } : {}),
             agent: view.harness,
             ...(event.tools !== undefined ? { tools: event.tools } : {}),
             ...(event.harness !== undefined ? { harness: event.harness } : {}),

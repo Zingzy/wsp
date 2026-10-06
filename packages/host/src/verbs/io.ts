@@ -328,7 +328,7 @@ export const ACCESS_IN_WORDS =
 /** The same three words the app's composer uses; the runtime refuses a value the agent's catalog does not list, naming the list. */
 export const PICK_INPUTS = {
   model: z.string().optional().describe("the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the project's, else the one set for that agent, else the catalog's default, on send the thread's own"),
-  effort: z.string().optional().describe("the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"),
+  effort: z.string().optional().describe("the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent on a new thread means the agent's default, high for claude; on send, the thread's own"),
   access: z.string().optional().describe(ACCESS_IN_WORDS),
 };
 /** The same two on send, for the reason SEND_FLAGS gives. */

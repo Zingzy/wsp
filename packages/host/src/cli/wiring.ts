@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { collect, expand, fileUsageCache, nodeHost, readLogUsage, seedMenu, type Manifest, type Rung } from "@wsp/collect";
 import { HARNESS_ADAPTERS, createRuntime, hostIdentity, localExecStream, type GoldenRecipe, type GoldenVersion, type HarnessAdapterFactory, type LocalWiring, type Machine, type PlaceWiring, type Runtime, type SeedWiring, type Store } from "@wsp/runtime";
 import { CATALOG_AGENTS, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
@@ -31,7 +31,7 @@ import { keptTools, recipeShelf } from "../recipes.js";
 import { recipeWatch, type WatchFn } from "../recipe-watch.js";
 import { serversActs } from "../servers-acts.js";
 import { hostActs } from "../agents-signin.js";
-import { writeThreadWsp } from "../shim.js";
+import { threadShellEnv, writeThreadWsp } from "../shim.js";
 import { mcpServerSpec, runningWsp, wspCommand, type RunningWsp } from "../mcp-install.js";
 import { hostPlatform } from "../verbs.js";
 import { VERSION } from "../version.js";
@@ -132,7 +132,7 @@ export function localWiring(
     env: () => ({
       ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)),
       HOME: person,
-      ...(threadBin !== undefined ? { PATH: env["PATH"] === undefined || env["PATH"] === "" ? threadBin : `${threadBin}${delimiter}${env["PATH"]}` } : {}),
+      ...(threadBin !== undefined ? threadShellEnv(threadBin, env) : {}),
     }),
     sysSamples: async fn => (await daemon.get()).sysSamples(fn),
     daemonRoad: async () => {
@@ -247,7 +247,7 @@ export function servingWiring(
   home: string = homedir(),
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): LocalWiring {
-  const threadBin = agents?.here === undefined ? undefined : writeThreadWsp(statePath, wspCommand(agents.run ?? runningWsp()));
+  const threadBin = agents?.here === undefined ? undefined : writeThreadWsp(statePath, wspCommand(agents.run ?? runningWsp()), env);
   return localWiring(home, env, undefined, statePath, undefined, undefined, threadBin);
 }
 
