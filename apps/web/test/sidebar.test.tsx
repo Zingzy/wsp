@@ -221,15 +221,15 @@ describe("tiles from the fixture wire", () => {
       "fix the port list",
     );
     // The failure waits on the person, so it heads the list over the working thread, and the read one rests last.
-    expect(rowIds()).toEqual(["thread:s3", "thread:s1", "thread:s2", "settled"]);
+    expect(rowIds()).toEqual(["thread:s3", "thread:s1", "thread:s2"]);
     expect(rowOf("fix the port list").querySelector("[data-tile-where]")!.textContent).toBe(`the-project @ ${BOX_NAME}`);
     // The one slot at row one's right edge: the state word while a thread is one a person acts on, the age once it rests.
     expect(threadState(rowOf("fix the port list"))).toBe("Working");
     expect(threadTime(rowOf("upgrade node"))).toBe("50m");
     // A session without a prompt falls back to the harness session id.
     expect(threadState(rowOf("59094224-bb3d"))).toBe("Failed");
-    // Nothing has been quiet long enough to fold, but the read thread can be settled, so the fold's row is there at 0.
-    expect(screen.getByRole("button", { name: "Settled 0" })).toBeDefined();
+    // Nothing has been quiet long enough to fold, so there is no Settled row, though the read thread could settle.
+    expect(screen.queryByRole("button", { name: /^Settled/ })).toBeNull();
     expect(document.querySelector("[data-sidebar-tree]")!.textContent).not.toMatch(/[·•]/);
   });
 

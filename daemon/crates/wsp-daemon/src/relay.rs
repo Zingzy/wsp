@@ -25,8 +25,8 @@ const READ_DEADLINE: Duration = Duration::from_secs(5);
 
 /// Pairs a browser.open that names no port with the loopback listener the port watcher reports after it, within
 /// the window. A listener already there when the open came is not the flow's: a dev server on 3000 must never have
-/// the laptop's 3000 bound. Tools bind and open milliseconds apart and the watcher polls every second, so the
-/// flow's own listener still lands after.
+/// the laptop's 3000 bound. Tools bind and open milliseconds apart, and the open hurries the watcher to a read a
+/// second through the window, so the flow's own listener still lands after.
 pub(crate) struct CallbackSpotter {
     now: Box<dyn Fn() -> u64 + Send + Sync>,
     after_ms: u64,
@@ -71,8 +71,23 @@ pub(crate) fn open(ctx: &Ctx, url: &str) {
     }
     match local {
         Some(port) => ctx.broadcast(&DaemonEvent::LocalhostUrl { port }),
-        None if port.is_none() => ctx.spotter.lock().unwrap_or_else(|e| e.into_inner()).spot(),
+        None if port.is_none() => {
+            ctx.spotter.lock().unwrap_or_else(|e| e.into_inner()).spot();
+            ctx.ports.hurry(Duration::from_millis(SPOT_WINDOW_MS));
+        }
         None => {}
+    }
+}
+
+/// An open a browser.open with no port is waiting for becomes the callback.port every authed socket hears.
+pub(crate) fn note_opens(ctx: &Ctx, events: &[DaemonEvent]) {
+    for event in events {
+        if let DaemonEvent::PortOpen { port, loopback, .. } = event {
+            let spotted = ctx.spotter.lock().unwrap_or_else(|e| e.into_inner()).note_open(*port, *loopback == Some(true));
+            if let Some(port) = spotted.and_then(RelayPort::new) {
+                ctx.broadcast(&DaemonEvent::CallbackPort { port });
+            }
+        }
     }
 }
 

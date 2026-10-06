@@ -187,20 +187,22 @@ describe("the first launch", () => {
     expect(named.text("#agents .sentence")).toBe(`Each ticked agent gets the wsp tools and skill, so it can open threads and tasks on ${HERE}.`);
     const unnamed = await open(AGENTS.map(a => ({ ...a, found: false })), { unnamed: true });
     expect(unnamed.text("#agents .sentence")).toBe("Each ticked agent gets the wsp tools and skill, so it can open threads and tasks.");
-    expect(unnamed.text("#line")).toBe("No agent found. Install Claude Code or Codex, then press Check again.");
+    expect(unnamed.text("#line")).toBe("No agent found. Threads start once you install one. Settings then gives it the tools.");
     expect(`${unnamed.text("#welcome")} ${unnamed.text("#agents")}`).not.toMatch(/this Mac|this computer/);
   });
 
-  it("on a computer with no agent holds every row and reads Check again, which reads the agents again and opens nothing", async () => {
+  it("on a computer with no agent holds every row and still lets the person in: Open wsp stays live, the line says threads wait for an agent, and the press installs nothing and opens the app", async () => {
     const screen = await open(AGENTS.map(a => ({ ...a, found: false })));
     expect(rows(screen).every(r => !r.checked && r.disabled)).toBe(true);
-    expect(screen.text("#line")).toBe(`No agent found on ${HERE}. Install Claude Code or Codex, then press Check again.`);
-    expect(keycap(screen)).toBe("Check again");
+    expect(screen.text("#line")).toBe(`No agent found on ${HERE}. Threads start once you install one. Settings then gives it the tools.`);
+    // The list offers every catalog agent, so the line names none of them in particular.
+    for (const a of AGENTS) expect(screen.text("#line")).not.toContain(a.name);
+    expect(keycap(screen)).toBe("Open wsp");
     expect((screen.at("#open") as HTMLButtonElement).disabled).toBe(false);
     await screen.press("#open");
-    expect(screen.asks.scans).toBe(2);
     expect(screen.asks.install).toEqual([]);
-    expect(screen.asks.finish).toBe(0);
+    expect(screen.asks.finish).toBe(1);
+    expect(screen.asks.scans).toBe(1);
   });
 
   it("draws a refusal as two halves, what happened then what to do, and keeps the keycap live after one", async () => {

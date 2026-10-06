@@ -107,7 +107,7 @@ describe("WorkspacePorts.stopped", () => {
     d.onChange(() => notified++);
     expect(d.stopped(8412)).toBeUndefined();
     d.feedEvent({ type: "port.close", workspaceId: WS, port: 8412, pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, at: AT });
-    expect(d.stopped(8412)).toEqual({ port: 8412, pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, at: AT, seenAt: 1_000, movedTo: null });
+    expect(d.stopped(8412)).toEqual({ port: 8412, pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, left: false, at: AT, seenAt: 1_000, movedTo: null });
     expect(notified).toBe(1);
 
     now = 31_000;

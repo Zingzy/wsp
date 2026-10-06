@@ -83,7 +83,7 @@ export function ComposerQueue({
   const head = rows[0];
   if (head === undefined) return null;
   const word = (
-    <span data-queued-word title={waiting ?? undefined} className="shrink-0 select-none text-foreground">
+    <span data-queued-word title={waiting ?? undefined} className="shrink-0 text-foreground">
       {head.id === next ? QUEUE_WORDS.sending : QUEUE_WORDS.waiting(rows.length)}
     </span>
   );

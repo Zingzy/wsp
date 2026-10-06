@@ -70,7 +70,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
         wasLive: here.wt.everLive(),
         onEvent: e => {
           if (e.type === "sys.sample") getLive(HERE_KEY).feedSample(e);
-          else if (e.type === "proc.snapshot") getProcs(HERE_KEY).feedSnapshot(e);
+          else if (e.type === "proc.snapshot" || e.type === "proc.changes") getProcs(HERE_KEY).feed(e);
           else here.wt.feedEvent(e);
         },
         onStatus: (s, refusal) => {
@@ -151,7 +151,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
             } else if (e.type === "browser.open") useSignInStore.getState().announce(w.id, e.url, e.port);
             else if (e.type === "daemon.hello") provideDaemonHello(w.id, { root: e.root, version: e.version });
             else if (e.type === "sys.sample") getLive(w.id).feedSample(e);
-            else if (e.type === "proc.snapshot") getProcs(w.id).feedSnapshot(e);
+            else if (e.type === "proc.snapshot" || e.type === "proc.changes") getProcs(w.id).feed(e);
             else wt.feedEvent(e);
           },
           // "dead" is the link we closed on purpose; the model keeps the word it had instead.

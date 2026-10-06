@@ -146,6 +146,7 @@ fn every_event_frame_reads_as_the_protocol_does() {
         "localhost.url",
         "port.close",
         "port.open",
+        "proc.changes",
         "proc.snapshot",
         "pty.data",
         "pty.exit",
