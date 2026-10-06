@@ -561,6 +561,23 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
+  it("deleting a workspace on a machine forgets the slate of every thread it drops, its always timer with it", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory });
+    const box = await createOn(rt, { golden: "snap_g", name: "box", agents: AGENTS_ON });
+    const lead = await rt.sessions.start(box.id, { prompt: "lead" });
+    const threadId = lead.view().threadId!;
+    await rt.slates.write({ text: `<slate title="Box"><run name="tick" cmd="true" every={10} always /><column><output run={$tick} /></column></slate>` }, asThread({ kind: "thread", threadId, workspaceId: box.id, rootThreadId: threadId }));
+    expect(await rt.slates.get(threadId)).not.toBeNull();
+    expect(await store.get("slates", threadId)).toBeDefined();
+    held.end(0);
+    await lead.finished;
+    await rt.workspaces.delete(box.id);
+    expect(await rt.slates.get(threadId)).toBeNull();
+    expect(await store.get("slates", threadId)).toBeUndefined();
+    await rt.close();
+  });
+
   it("a turn on this computer under a host that listens on no loopback address is handed no token", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory }, { here: {} });

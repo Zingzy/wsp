@@ -7,7 +7,7 @@
 // that adds another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_WORDS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
@@ -313,20 +313,12 @@ describe("the Computers list", () => {
     expect([...document.querySelectorAll("[data-settings-page] [data-place-row]")].map(r => r.getAttribute("data-place-row"))).toEqual(["p_2"]);
   });
 
-  it("asks the host once for the month and follows the meter, and says no money on the list", async () => {
-    let asks = 0;
-    const fake = computersApi({
-      spend: async () => {
-        asks += 1;
-        return Promise.reject(new Error(PLACES_TICKET_REFUSAL));
-      },
-    } as Partial<Api>);
+  it("says no money on the list, a cost tick included", async () => {
+    const fake = computersApi();
     useStore.setState({ places: [here, ascii], workspaces: [fork("ws_x")] });
     await mountComputers(fake.api);
-    await waitFor(() => expect(asks).toBe(1));
     act(() => fake.push({ type: "workspace.cost", workspaceId: "ws_x", phase: "running", rateUsdPerHour: 0.16, awakeMs: 60_000, accruedUsd: 0.41, at: AT, seq: 1 } as EventUnion));
     await settle();
-    expect(asks).toBe(1);
     expect(listRow("box").textContent).not.toContain("$");
   });
 
@@ -829,7 +821,7 @@ describe("the cloud's page", () => {
 
   it("lists the image's agents and your image as one row with the tools on one line and no recipe list, while the key is held", async () => {
     const api = computersApi(
-      { image: async () => ({ image: IMAGE, copies: [copy], projects: [] }), spend: async () => [{ place: "solari", todayUsd: 0.38, monthUsd: 4.12, rateUsdPerHour: 0.16 }], initStart: async () => ({}) as InitJob } as Partial<Api>,
+      { image: async () => ({ image: IMAGE, copies: [copy], projects: [] }), initStart: async () => ({}) as InitJob } as Partial<Api>,
       setupOf({ keys: { solari: true } }),
     ).api;
     useStore.setState({ places: [here, { ...solari, buildsImages: true }], workspaces: [atSolari("ws_y")] });

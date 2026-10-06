@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The renderer: a refreshing run keeps what it drew and says so quietly, and the layout defaults that
 // make a good slate without the agent asking.
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseSlate, slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
@@ -320,6 +320,28 @@ describe("what the kit adds", () => {
     render(<ConsentSheet ask={{ key: "k", run: "kill", kind: "cmd", cmd: 'kill "$PID"', env: { PID: "19271" }, args: [], computer: "this Mac", folder: "/tmp", timeoutS: 10, why: "asks every time", confirm: "Kill node (PID 19271)?" }} cadence="Runs when you press it" answer={async () => {}} onClose={() => {}} />);
     expect(document.body.textContent).toContain("Kill node (PID 19271)?");
     expect(document.body.querySelector("[data-slate-consent-cmd]")!.textContent).toBe('kill "$PID"');
+  });
+
+  it("refuses a confirm's start on Don't, as a tool's confirm does", async () => {
+    const answered: string[] = [];
+    render(<ConsentSheet ask={{ key: "k", run: "kill", kind: "cmd", cmd: "kill 1", env: {}, args: [], computer: "this Mac", folder: "/tmp", timeoutS: 10, why: "asks every time", confirm: "Kill it?" }} cadence="Runs when you press it" answer={async scope => void answered.push(scope)} onClose={() => {}} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Don't" })));
+    expect(answered).toEqual(["refuse"]);
+  });
+
+  it("says a copy did not happen where the window has no clipboard, never Copied", async () => {
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+    try {
+      const doc = slate({ root: "root", pieces: { root: { type: "column", children: ["c"] }, c: { type: "button", props: { label: "Copy" }, on: { press: [{ do: "copy", text: "abc" }] } } } });
+      const engine = new SlateEngine("t1", () => undefined, manualScheduler());
+      engine.setRecord(doc, {}, 1, 1);
+      const result = await new ActionRunner(engine, () => fakeLink()).raise("c", "press");
+      expect(result).toEqual({ refused: "This window cannot copy." });
+    } finally {
+      if (clipboard !== undefined) Object.defineProperty(navigator, "clipboard", clipboard);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
   });
 });
 
