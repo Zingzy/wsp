@@ -11,7 +11,7 @@ import { z } from "zod";
 import { writeOwn } from "@wsp/own-file";
 import { HOST_NO_RESTART_LINE, RELEASE_API_ENV, ReleaseLatest, UPDATE_CHECK_ENV, releaseAbove, releaseWord, type HostShape, type ReleaseChangedEvent, type ReleaseView } from "@wsp/protocol";
 import type { ReleaseDoor } from "@wsp/runtime";
-import { RELEASES, REPO, RELEASE_TAG } from "../../wspx/scripts/bundles.mjs";
+import { RELEASES, REPO, RELEASE_TAG } from "../../protocol/src/bundles.mjs";
 import { keyIn, savedEnv } from "./env-keys.js";
 
 export const RELEASE_API = "https://api.github.com";

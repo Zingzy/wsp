@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // The version order lives with the app that also reads it; this job runs before any install, so the file is
 // imported where it sits rather than through the package it belongs to.
 import { compareVersions } from "../../protocol/src/semver.mjs";
-import { bundleNames } from "./bundles.mjs";
+import { bundleNames } from "../../protocol/src/bundles.mjs";
 import { isReleaseTag, versionFromTag } from "./tag-version.mjs";
 
 // The README owns this text so the page a stranger reads and the notes they get

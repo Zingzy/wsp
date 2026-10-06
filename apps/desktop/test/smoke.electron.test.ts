@@ -24,6 +24,7 @@ import { menuShapeOf, workspaceMenuShape } from "./workspace-menu.js";
 import { notForThisPage } from "../src/origin.js";
 import { QUIT_WORD } from "../src/quit.js";
 import { TRAY_WORDS, type TrayAct, type TrayModel } from "../src/tray.js";
+import { windowOptions } from "../src/window.js";
 import { writeStub } from "../../../packages/protocol/test/stub-script.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
@@ -198,15 +199,16 @@ function deadPid(): number {
   return child.pid;
 }
 
-/** This launch's login shell: a script printing the fixture's own bin folder in front of the four folders launchd
- * gives an app, which is what a person's shell prints on their Mac. A launch handed launchd's set reads it, so this
- * is what decides which agents the app finds; a launch handed a fuller PATH never runs it. Without one the app
- * would read the shell of the Mac running the suite and find its agents instead of the fixture's. */
-function loginShellIn(home: string): string {
+/** This launch's login shell: a script printing the PATH the case gave, or else the fixture's own bin folder in front
+ * of the four folders launchd gives an app, which is what a person's shell prints on their Mac. A launch handed
+ * launchd's set reads it, and so does the service's host, which starts with that set; so this is what decides which
+ * agents the app finds. Without one the app would read the shell of the Mac running the suite and find its agents
+ * instead of the fixture's. */
+function loginShellIn(home: string, path: string | undefined): string {
   const bin = join(home, "bin");
   mkdirSync(bin, { recursive: true });
   const shell = join(home, "login-shell");
-  writeStub(shell, `#!/bin/sh\nprintf %s ${JSON.stringify(`${bin}:${LAUNCHD_PATH.join(":")}`)}\n`);
+  writeStub(shell, `#!/bin/sh\nprintf %s ${JSON.stringify(path ?? `${bin}:${LAUNCHD_PATH.join(":")}`)}\n`);
   return shell;
 }
 
@@ -228,7 +230,7 @@ async function launchIn(home: string, env: Record<string, string | undefined>): 
   delete inherited["ANTHROPIC_API_KEY"];
   // The app reads WSP_DESKTOP_SMOKE to know it is driven: the bundle runs out of dist, and the move to Applications
   // it would otherwise offer has nobody to press a button.
-  const merged = { ...inherited, HOME: home, WSP_HOME: home, WSP_DESKTOP_SMOKE: "1", SHELL: loginShellIn(home), ...env };
+  const merged = { ...inherited, HOME: home, WSP_HOME: home, WSP_DESKTOP_SMOKE: "1", SHELL: loginShellIn(home, env["PATH"]), ...env };
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(merged)) if (v !== undefined) clean[k] = v;
   const user = clean["HOME"]!;
@@ -776,7 +778,17 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const page = await windowAt(app, ONBOARDING_URL);
     await page.waitForLoadState("domcontentloaded");
     expect(await page.title()).toBe("wsp");
-    // Nothing scrolls, on any screen.
+    // Nothing scrolls, on any screen, at the size the app opens its windows at; a shorter window scrolls by design. The
+    // runner's screen can be smaller than that size, and the window then opens clamped to it, so the size is set here
+    // and read back.
+    const opened = windowOptions(process.platform, VERSION);
+    const size = { width: opened.width!, height: opened.height! };
+    const pageWindow = await app.browserWindow(page);
+    await pageWindow.evaluate((win, want) => win.setSize(want.width, want.height), size);
+    const got = await pageWindow.evaluate(win => win.getSize());
+    const area = await app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    console.info(`onboarding window: ${got.join("x")} for ${size.width}x${size.height}, screen work area ${area.width}x${area.height}`);
+    expect(got).toEqual([size.width, size.height]);
     const fits = (): Promise<boolean> => page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight && document.body.scrollHeight <= window.innerHeight);
     // The page draws with the app's stylesheet: its tokens resolve here, and the dark class is the app's own switch.
     const tokens = await page.evaluate(() => {
