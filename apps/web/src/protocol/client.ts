@@ -640,7 +640,7 @@ export interface Api {
    * Optional so fixtures without a steering harness need not fake it; the composer keeps the stop road without it. */
   steerSession?(sessionId: string, prompt: string, requestId: string): Promise<SessionSteerOutcome>;
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
-   * options; takes the runtime's session id, as interruptSession does. answered means the tool call it blocks ran or
+   * options; takes the session id the prompt's row carries. answered means the tool call it blocks ran or
    * was refused and the closing event is on the wire; every other outcome closed nothing here. Optional so fixtures
    * whose harness raises no prompt need not fake it; without it a prompt row's options do nothing. A deny may carry the
    * person's reason, what the agent should do instead. */

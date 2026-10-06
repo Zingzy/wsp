@@ -558,7 +558,10 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
 
     async answer(sessionId, o, origin) {
       await ctx.ready();
-      const s = sessions.get(sessionId);
+      // A prompt's row carries the agent's own session id, as every row of a turn does, while a turn is keyed by the id
+      // its launch was given: Codex's app-server and a Claude CLI that re-keys a resume name a session of their own.
+      const keyed = sessions.get(sessionId);
+      const s = keyed?.view.status === "running" ? keyed : ([...sessions.values()].find(row => row.view.claudeSessionId === sessionId && row.view.status === "running") ?? keyed);
       if (!s) return { outcome: "not-found" };
       const entry = await ctx.entryOfRow(s.view, origin);
       if (entry === undefined) return { outcome: "not-found" };

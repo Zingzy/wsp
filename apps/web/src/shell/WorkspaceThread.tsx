@@ -8,9 +8,10 @@
 // subagent's, keeps its buttons in the timeline. Write a message instead, Esc,
 // or a letter typed outside the dock's own keys folds the prompt to one line
 // over the composer until the person opens it again.
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { ChatView } from "../components/chat/ChatView.js";
+import { answerPrompt, type AnswerPrompt } from "../components/chat/answerPrompt.js";
 import { PromptDock, PromptStrip } from "../components/chat/PromptDock.js";
 import { useTypeToWrite } from "../components/chat/composerTypeToFocus.js";
 import type { ChatThreadHandle } from "../components/chat/useChatThread.js";
@@ -34,11 +35,12 @@ const dockedPrompt = (thread: ChatThreadHandle, writing: string | null): Permiss
 export function WorkspaceThread({ workspaceId, threadId = null }: { workspaceId: string; threadId?: string | null }) {
   const api = useStore(s => s.api);
   const [writing, setWriting] = useState<string | null>(null);
+  const answer = useMemo(() => answerPrompt(api), [api]);
   // The thread's own prompt is the dock's whether the dock is up or folded to its strip: its row keeps the record
   // alone either way.
   return (
     <ChatView workspaceId={workspaceId} threadId={threadId} docked={thread => openPrompt(thread)?.askId ?? null}>
-      {thread => <Slot workspaceId={workspaceId} thread={thread} writing={writing} setWriting={setWriting} answer={(sessionId, askId, optionId, reason) => void api?.answerPermission?.(sessionId, askId, optionId, reason)} />}
+      {thread => <Slot workspaceId={workspaceId} thread={thread} writing={writing} setWriting={setWriting} answer={answer} />}
     </ChatView>
   );
 }
@@ -56,7 +58,7 @@ function Slot({
   thread: ChatThreadHandle;
   writing: string | null;
   setWriting: (askId: string | null) => void;
-  answer: (sessionId: string, askId: string, optionId: string, reason?: string) => void;
+  answer: AnswerPrompt;
 }) {
   const prompt = openPrompt(thread);
   const catalog = useHarnessCatalog(thread.view.agent, workspaceId);

@@ -411,8 +411,9 @@ export interface Runtime {
     steer(sessionId: string, opts: { prompt: string; requestId?: string }, origin?: Caller): Promise<SessionSteerResult>;
     /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's own id and one
      * of the options it carried; the tool call it blocks then runs or is refused, and a session.permission.closed
-     * event records which option did it. A prompt already answered, one the harness withdrew and an unknown id
-     * answer rather than throw, since two clients may reach one prompt. */
+     * event records which option did it. The session is the one the prompt's row names, by the agent's own id or the
+     * runtime's. A prompt already answered, one the harness withdrew and an unknown id answer rather than throw, since
+     * two clients may reach one prompt. */
     answer(sessionId: string, opts: { askId: string; optionId: string; reason?: string }, origin?: Caller): Promise<SessionAnswerResult>;
     /** Puts the session's thread at another access mode: the one road that changes a thread's access, since a send
      * into a thread names none. The thread's record takes the mode and its next turn runs at it; where a turn is

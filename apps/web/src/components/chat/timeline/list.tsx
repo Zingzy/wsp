@@ -14,10 +14,11 @@ import { AssistantSelectionToolbar, type QuotedSelection } from "../AssistantSel
 import { type TimelineRowSharedState, type ReplyRuns, type MachineWait, type TimelineRowActivityState, TimelineRowCtx, TimelineRowActivityCtx, type WorkGroupViewState } from "./context";
 import { deriveTimelineMinimapItems, resolveTimelineRowTop, resolveTimelineRowHeight, TimelineMinimap } from "./minimap";
 import { TimelineRowContent } from "./rows";
+import type { AnswerPrompt } from "../answerPrompt";
 
 const NOOP_OPEN_TURN_DIFF = (_turnId: TurnId, _filePath?: string) => {};
 const NOOP_REWIND = (_messageId: MessageId) => {};
-const NOOP_ANSWER_PERMISSION = (_sessionId: string, _askId: string, _optionId: string) => {};
+const NOOP_ANSWER_PERMISSION: AnswerPrompt = () => {};
 const NOOP_ANCHOR_READY = (_messageId: MessageId, _anchorIndex: number) => {};
 const NOOP_IS_AT_END_CHANGE = (_isAtEnd: boolean) => {};
 const NOOP_MANUAL_NAVIGATION = () => {};
@@ -64,7 +65,7 @@ export interface MessagesTimelineProps {
   slatedMessageIds?: ReadonlySet<MessageId>;
   onRewind?: (messageId: MessageId) => void;
   /** Answers a relayed permission prompt; the turn it blocks runs or is refused as the option says. */
-  onAnswerPermission?: (sessionId: string, askId: string, optionId: string) => void;
+  onAnswerPermission?: AnswerPrompt;
   /** The prompt answered where the composer stands, by its ask id: its row here keeps the record and offers
    * nothing, while every other open prompt (another thread's, a subagent's) keeps its own buttons. */
   dockedAskId?: string | null;
