@@ -52,6 +52,8 @@ export interface StoppedPort {
   readonly process: string | null;
   readonly command: string | null;
   readonly exited: boolean | null;
+  /** It still listens, held by a process that is no longer this workspace's. */
+  readonly left: boolean;
   /** The daemon's clock at the close, for the sentence. */
   readonly at: string | null;
   /** This computer's clock when the close arrived; the moved window is measured on it, not the guest's. */
@@ -73,6 +75,7 @@ export function applyStoppedEvent(stopped: ReadonlyMap<number, StoppedPort>, eve
         process: event.process ?? null,
         command: event.command ?? null,
         exited: event.exited ?? null,
+        left: event.left === true,
         at: event.at ?? null,
         seenAt: nowMs,
         movedTo: null,
@@ -96,9 +99,10 @@ export function applyStoppedEvent(stopped: ReadonlyMap<number, StoppedPort>, eve
   }
 }
 
-/** The line above a frame whose port stopped listening; clock renders the daemon's timestamp in the person's zone. */
+/** The line above a frame whose port stopped listening, or whose holder is no longer this workspace's; clock renders
+ * the daemon's timestamp in the person's zone. */
 export function stoppedSentence(port: number, stopped: StoppedPort | undefined, clock: (iso: string) => string): string {
-  let out = `:${port} stopped listening`;
+  let out = stopped?.left === true ? `:${port} is no longer this workspace's` : `:${port} stopped listening`;
   if (stopped === undefined) return out;
   if (stopped.at !== null) out += ` at ${clock(stopped.at)}`;
   const holder = stopped.command ?? stopped.process;
@@ -106,7 +110,8 @@ export function stoppedSentence(port: number, stopped: StoppedPort | undefined, 
   const who = holder !== null ? (pid !== null ? `${holder} (${pid})` : holder) : pid;
   if (who !== null) {
     out += `, held by ${who}`;
-    if (stopped.exited === true) out += ", which exited";
+    if (stopped.left) out += ", which still listens";
+    else if (stopped.exited === true) out += ", which exited";
     else if (stopped.exited === false) out += ", which is still running";
   }
   if (stopped.movedTo !== null) out += `, now on :${stopped.movedTo}`;

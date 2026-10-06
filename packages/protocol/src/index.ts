@@ -2029,6 +2029,8 @@ const portCloseDetail = {
   command: z.string().optional(),
   /** Whether the holder's pid was gone when the close was seen; absent without a pid. */
   exited: z.boolean().optional(),
+  /** The port still listens, held by a process no longer the watching workspace's: it left the view, not stopped. */
+  left: z.boolean().optional(),
   at: z.string().optional(),
 };
 export const PortCloseEvent = z.object({ type: z.literal("port.close"), workspaceId: z.string(), port: z.number(), ...portCloseDetail });
@@ -4239,7 +4241,10 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("pty.kill"), ptyId: z.string(), machineId: z.string().optional() }),
   /** With a workspace named, that workspace's ptys alone; without one, this daemon's own alone. */
   z.object({ id: reqId, op: z.literal("pty.list"), machineId: z.string().optional() }),
-  z.object({ id: reqId, op: z.literal("ports.watch") }),
+  /** With roots, the listeners of the processes they hold: each root's process group and every process under it,
+   * and with a folder, every process running in it. A watch that names no roots sees every listener on the machine,
+   * which is what the host's own watchers ask for. A second watch on the socket names its roots again. */
+  z.object({ id: reqId, op: z.literal("ports.watch"), roots: z.array(z.number().int().nonnegative()).optional(), folder: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("manifest.get") }),
   z.object({
     id: reqId,
@@ -4257,10 +4262,12 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("sys.watch") }),
   // The computer's readings the daemon kept a minute apart, between two instants, folded into steps of stepMs.
   z.object({ id: reqId, op: z.literal("sys.history"), from: z.number().int(), to: z.number().int(), stepMs: z.number().int().nonnegative() }),
-  /** Streams proc.snapshot events to this socket every two seconds until
-   * proc.unwatch or the socket closes. The daemon reads /proc only while some
-   * socket watches; the first snapshot lands one interval after the reply,
-   * since cpu is a delta. */
+  /** Streams the processes to this socket until proc.unwatch or the socket
+   * closes: one whole proc.snapshot first, two seconds after the reply since
+   * cpu is a delta (at once where the sampler is already running), then a
+   * proc.changes every five seconds naming the frame it follows. A socket
+   * already watching that watches again is sent a whole snapshot next. The
+   * daemon reads /proc only while some socket watches. */
   z.object({ id: reqId, op: z.literal("proc.watch") }),
   z.object({ id: reqId, op: z.literal("proc.unwatch") }),
   /** One process in depth, replied as a ProcInspectReply; this is the only op
@@ -5085,8 +5092,34 @@ export const ProcSnapshot = z.object({
   daemon: z.number().int(),
   total: z.number().int(),
   procs: z.array(ProcEntry),
+  /** Counts the daemon's process frames, so the changes after this one name it as their base. A daemon a version
+   * behind names none and sends no changes, so its snapshot is a whole list held with no gap to track. */
+  seq: z.number().int().optional(),
 });
 export type ProcSnapshot = z.infer<typeof ProcSnapshot>;
+
+/** What moved since frame `base`: the rows that are new or differ, whole, and the pids no longer listed. */
+export const ProcChanges = z.object({
+  type: z.literal("proc.changes"),
+  at: z.number(),
+  daemon: z.number().int(),
+  total: z.number().int(),
+  procs: z.array(ProcEntry),
+  gone: z.array(z.number().int()),
+  seq: z.number().int(),
+  base: z.number().int(),
+});
+export type ProcChanges = z.infer<typeof ProcChanges>;
+
+/** The snapshot a proc.changes frame leaves, rows by pid as the daemon lists them; undefined where the frame does not
+ * follow the snapshot held, which a client answers by watching again for a whole one. */
+export function applyProcChanges(snapshot: ProcSnapshot, changes: ProcChanges): ProcSnapshot | undefined {
+  if (changes.base !== snapshot.seq) return undefined;
+  const rows = new Map(snapshot.procs.map(p => [p.pid, p]));
+  for (const pid of changes.gone) rows.delete(pid);
+  for (const p of changes.procs) rows.set(p.pid, p);
+  return { type: "proc.snapshot", at: changes.at, daemon: changes.daemon, total: changes.total, procs: [...rows.values()].sort((a, b) => a.pid - b.pid), seq: changes.seq };
+}
 
 /** The content of every daemon this project has deployed, oldest first, one entry per version: the last one is
  * what a deploy installs today. No branch writes it: the landing runs scripts/cut-daemon-version.mjs, which appends
@@ -5219,6 +5252,7 @@ const DAEMON_CONTENTS = [
   "a89600e669b83780c19582d096ed9c9a274446a75da14d185bc0afee9d299ba9",
   "9dc9610fb0581804589fcf952e0f5df34b029bbae2034ea135f420867b5b4c5c",
   "089d2b84fb314ca0fb7361046e327978a243aee796789f72cd5e2e8f8a71c191",
+  "f9b9aedecc0b89b12571cea110ff89f317df4472af13de32ef2f5681334f46a7",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5565,7 +5599,15 @@ const DAEMON_CONTENTS = [
  * "Merged origin/main into fix/x", a reset "Reset fix/x to origin/main", a pull "Pulled into fix/x" and a rebase
  * "Rebased fix/x onto main", one that was detached says "a detached HEAD", and a pull that rebases is one line.
  * Version 123: an agent-owned live panel per thread.
- * Version 124: restore three landings a later squash took back out. */
+ * Version 124: restore three landings a later squash took back out.
+ * Version 125: ports.watch takes roots and a folder and reads every five seconds, only while a socket watches. A socket
+ * that names roots sees the listeners of their process groups, every process under them and every process running in
+ * the folder; a watch that names none, the host's own, sees the whole machine. Each socket is told what moved against
+ * what it was last sent, a port another holder took as a close and an open, a port that left the view while it still
+ * listens as a close marked left, and a second watch names its roots again. A browser.open with no port hurries the
+ * watch to a read a second through the spotter's window. proc.watch sends one whole proc.snapshot two seconds after the
+ * watch and then a proc.changes every five seconds; every frame carries a seq and each proc.changes the base it applies
+ * to, and a socket that watches again is sent a whole snapshot next. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5925,6 +5967,7 @@ export const DaemonEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("localhost.url"), port: RelayPort }),
   SysSample,
   ProcSnapshot,
+  ProcChanges,
   /** A process inside the machine opened a guest session. Pushed to the socket that sent guest.watch alone, never
    * broadcast: the host is the only reader of the token it carries. */
   z.object({

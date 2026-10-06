@@ -11,5 +11,11 @@
     "type": "port.close",
     "port": 8080,
     "at": 1
+  },
+  {
+    "type": "port.close",
+    "port": 8000,
+    "pid": 4202,
+    "left": "yes"
   }
 ]

@@ -207,7 +207,7 @@ function writeOwned(path: string, text: string): void {
 
 /** Whether a process group with this id exists at all: signal 0 asks the kernel and sends nothing, and a group
  * whose last member is gone answers ESRCH. EPERM is a group under another login, which exists. */
-function groupExists(pid: number): boolean {
+export function groupExists(pid: number): boolean {
   try {
     process.kill(-pid, 0);
     return true;
