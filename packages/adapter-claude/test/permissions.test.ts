@@ -19,7 +19,7 @@ const askLine = (overrides: Record<string, unknown> = {}): Record<string, unknow
     input: { file_path: "/tmp/probe/out.txt", content: "hi" },
     description: "out.txt",
     permission_suggestions: [{ type: "setMode", mode: "acceptEdits", destination: "session" }],
-    tool_use_id: "toolu_014vmSNR2cP3TRB1tF86Nftp",
+    tool_use_id: "toolu_01WspFixAsk1",
     ...overrides,
   },
 });
@@ -35,7 +35,7 @@ describe("controlLine", () => {
     expect(ask()).toEqual({
       askId: REQUEST_ID,
       toolName: "Write",
-      toolUseId: "toolu_014vmSNR2cP3TRB1tF86Nftp",
+      toolUseId: "toolu_01WspFixAsk1",
       input: JSON.stringify({ file_path: "/tmp/probe/out.txt", content: "hi" }),
       detail: "out.txt",
       options: [

@@ -12,6 +12,7 @@ import { provideDaemonWire } from "../files/wire.js";
 import { useStore } from "../protocol/store.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../terminal/link.js";
 import { WorkspaceSidebar } from "./WorkspaceSidebar.js";
+import { askCheckout } from "./tileCheckout.js";
 import { PROJECT_WORDS } from "./words.js";
 import { EDITOR_SSH_WORDS } from "../files/EditorConsent.js";
 
@@ -312,6 +313,66 @@ describe("the sidebar's list of thread tiles", () => {
       await waitFor(() => expect(asked.sort()).toEqual(["ws_a", "ws_f"]));
       act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, fact) } } as never));
       expect(asked).toHaveLength(2);
+    });
+
+    it("asks only for a workspace whose tile is in view, and nothing when the sidebar is drawn again", async () => {
+      const inView = new Set(["ws_f"]);
+      const watching = new Set<{ fn: IntersectionObserverCallback; targets: Set<Element> }>();
+      class SomeInView {
+        private readonly me: { fn: IntersectionObserverCallback; targets: Set<Element> };
+        constructor(fn: IntersectionObserverCallback) {
+          this.me = { fn, targets: new Set() };
+          watching.add(this.me);
+        }
+        observe(target: Element): void {
+          this.me.targets.add(target);
+          const id = target.closest("[data-workspace-id]")?.getAttribute("data-workspace-id") ?? "";
+          queueMicrotask(() => this.me.fn([{ target, isIntersecting: inView.has(id) } as IntersectionObserverEntry], this as unknown as IntersectionObserver));
+        }
+        unobserve(target: Element): void {
+          this.me.targets.delete(target);
+        }
+        disconnect(): void {
+          watching.delete(this.me);
+        }
+      }
+      Object.assign(globalThis, { IntersectionObserver: SomeInView });
+      try {
+        const asked: string[] = [];
+        const both = { projects: [project("pr_1", "spoo")], workspaces: [fork, workspace("ws_a", "pricing page", "pr_1")] };
+        mount(both, { workspaceCheckout: async (id: string) => (asked.push(id), { checkout: fact }) });
+        await waitFor(() => expect(rowIds().sort()).toEqual(["ws:ws_a", "ws:ws_f"]));
+        await waitFor(() => expect(asked).toEqual(["ws_f"]));
+        const api = useStore.getState().api;
+        cleanup();
+        render(
+          <SidebarProvider defaultOpen>
+            <WorkspaceSidebar />
+          </SidebarProvider>,
+        );
+        await waitFor(() => expect(rowIds().sort()).toEqual(["ws:ws_a", "ws:ws_f"]));
+        await act(async () => await new Promise(r => setTimeout(r, 20)));
+        expect(useStore.getState().api).toBe(api);
+        expect(asked).toEqual(["ws_f"]);
+        inView.add("ws_a");
+        for (const { fn, targets } of watching) for (const target of targets) act(() => fn([{ target, isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
+        await waitFor(() => expect(asked).toEqual(["ws_f", "ws_a"]));
+      } finally {
+        Reflect.deleteProperty(globalThis, "IntersectionObserver");
+      }
+    });
+
+    it("asks again for a workspace whose reply held no checkout, and never again for one whose reply held one", async () => {
+      const asked: string[] = [];
+      const api = { workspaceCheckout: async (id: string) => (asked.push(id), id === "ws_stopped" ? {} : { checkout: fact }) } as unknown as Api;
+      const settle = () => act(async () => await new Promise(r => setTimeout(r, 0)));
+      askCheckout(api, "ws_stopped");
+      askCheckout(api, "ws_read");
+      await settle();
+      askCheckout(api, "ws_stopped");
+      askCheckout(api, "ws_read");
+      await settle();
+      expect(asked).toEqual(["ws_stopped", "ws_read", "ws_stopped"]);
     });
 
     it("says a copy's branch off its record on the card until the host has read one, and every tile keeps its height", async () => {
