@@ -151,14 +151,18 @@ async fn pump(
 }
 
 #[cfg(test)]
+#[path = "../tests/held_port/mod.rs"]
+mod held_port;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
     async fn a_refused_dial_is_named_as_node_names_it() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
+        let held = super::held_port::refused_port().await;
+        let port = held.port;
+        assert!(!held.addrs().into_iter().any(super::held_port::squatter_binds), "another test's listener could take the refused port");
         let err = connect_loopback(port).await.expect_err("nothing listens there");
         assert_eq!(err, format!("connect ECONNREFUSED ::1:{port}"));
     }

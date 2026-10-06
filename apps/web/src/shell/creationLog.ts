@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words a workspace being made says for its steps, on its page and on its
-// tile: one plain word per stage of a create, from the table below, and the
-// runtime's own sentence for the step only on the row's hover. The other half
+// tile: one plain word per stage of a create, from the table below, or what
+// the step waits for in the runtime's words while it waits. The other half
 // is the image being built at the computer or provider the workspace is going
 // to the first time that one needs a copy, worded off the protocol's
 // GOLDEN_STAGE_WORDS, the table the init screens and the terminal read too, so
@@ -25,10 +25,12 @@ export const CREATE_ASKED = "Asking wsp to start it";
 /** Why a kept row the host neither listed nor spoke of when the window connected reads as refused. */
 export const CREATE_UNHEARD = "wsp is no longer making it, and it never came up: the host may have restarted while it was being made.";
 
-/** A step's words: the table's for a create's stage, and an image build's own line, which already carries the
- * protocol's stage words, capitalised. */
-export const stepWords = (line: Pick<CreationLine, "stage" | "message">): string =>
-  line.stage === "image" ? line.message.charAt(0).toUpperCase() + line.message.slice(1) : CREATE_STEP_WORDS[line.stage];
+const capitalised = (words: string): string => words.charAt(0).toUpperCase() + words.slice(1);
+
+/** A step's words: the table's for a create's stage, or what it waits for while it waits, and an image build's own
+ * line, which already carries the protocol's stage words, capitalised. */
+export const stepWords = (line: Pick<CreationLine, "stage" | "message" | "waiting">): string =>
+  line.stage === "image" ? capitalised(line.message) : line.waiting !== undefined ? capitalised(line.waiting) : CREATE_STEP_WORDS[line.stage];
 
 /** The folder a thread being started runs in: the project's own. */
 export function creationFolder(project: Pick<ProjectView, "computer" | "path">, _name: string): string {

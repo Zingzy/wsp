@@ -73,6 +73,7 @@ const copier = fakeCopier(ask => {
 const daemon = async () => ({ version: DAEMON_VERSION, road: { url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }, sysSamples: async () => () => {}, close: async () => {} });
 const serve = async () => {
   const runtime = createRuntime({
+    statePath,
     backend: new NoProviderBackend(),
     local: localWiring(home, undefined, daemon, statePath, copier),
     store: jsonFileStore(statePath, stateWriterHere()),
@@ -176,6 +177,7 @@ const statePath = join(home, "state", "state.json");
 mkdirSync(join(home, "state"), { recursive: true });
 const daemon = async () => ({ version: DAEMON_VERSION, road: { url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }, sysSamples: async () => () => {}, close: async () => {} });
 const runtime = createRuntime({
+  statePath,
   backend: new NoProviderBackend(),
   local: localWiring(home, undefined, daemon, statePath, verbCopier(${JSON.stringify(verb)})),
   store: jsonFileStore(statePath, stateWriterHere()),
@@ -195,7 +197,7 @@ const started = performance.now();
 for (let i = 0; i < 2; i++) await runtime.workspaces.worktree({ project: project.id, branch: "b" + i });
 const copyMs = performance.now() - started;
 clearInterval(probe);
-const made = join(home, ".wsp", "worktrees", project.id);
+const made = join(home, "state", "worktrees", project.id);
 const copies = readdirSync(made).map(name => readdirSync(join(made, name, "src")).length);
 await host.close();
 console.log("measured " + JSON.stringify({ maxLagMs: Math.round(maxLagMs), copyMs: Math.round(copyMs), copies }));

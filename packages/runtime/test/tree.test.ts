@@ -176,7 +176,7 @@ async function withLead(daemons: ReturnType<typeof fakeDaemons>, o: { clock?: Re
     adapters: { claude: agent.factory },
     daemonToken: DAEMON_TOKEN,
     daemonChannel: daemons.open,
-    local: localOn(),
+    local: localOn(), statePath: join(root, ".wsp", "state.json"),
     ...(o.clock !== undefined ? { clock: o.clock } : {}),
   });
   const project = await projectOn(rt, undefined, undefined, { base: "main" });
@@ -294,7 +294,7 @@ describe("a child's project", () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     answeringAtOnce(backend);
-    rt = createRuntime({ backend, store, adapters: {}, daemonToken: DAEMON_TOKEN, daemonChannel: daemons.open, local: localOn() });
+    rt = createRuntime({ backend, store, adapters: {}, daemonToken: DAEMON_TOKEN, daemonChannel: daemons.open, local: localOn(), statePath: join(root, ".wsp", "state.json") });
     const folder = tempRepo();
     execFileSync("git", ["-C", folder, "remote", "add", "origin", "git@github.com:wsp/tree-lab.git"]);
     const here = await projectOn(rt, HERE_PLACE_ID, folder, { name: "lab" });
@@ -483,7 +483,7 @@ describe("merge into lead with no remote", () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     answeringAtOnce(backend);
-    rt = createRuntime({ backend, store, adapters: {}, daemonToken: DAEMON_TOKEN, daemonChannel: daemons.open, local: localOn() });
+    rt = createRuntime({ backend, store, adapters: {}, daemonToken: DAEMON_TOKEN, daemonChannel: daemons.open, local: localOn(), statePath: join(root, ".wsp", "state.json") });
     const here = await projectOn(rt, HERE_PLACE_ID, undefined, { name: "lab" });
     const lead = await rt.workspaces.create({ project: here.id, name: "lead" });
     // A thread in the project folder starts its child on a branch: the child runs in a worktree, a child of the folder.
@@ -507,7 +507,7 @@ describe("merge into lead with no remote", () => {
     backend.execImpl = tokenGuest;
     answeringAtOnce(backend);
     const agent = heldAgent();
-    rt = createRuntime({ backend, store, adapters: { claude: agent.factory }, daemonToken: DAEMON_TOKEN, daemonChannel: daemons.open, local: localOn() });
+    rt = createRuntime({ backend, store, adapters: { claude: agent.factory }, daemonToken: DAEMON_TOKEN, daemonChannel: daemons.open, local: localOn(), statePath: join(root, ".wsp", "state.json") });
     const here = await projectOn(rt, HERE_PLACE_ID, undefined, { name: "lab" });
     const lead = await rt.workspaces.create({ project: here.id, name: "lead", agents: AGENTS_ON });
     const child = (await rt.workspaces.folderFor({ project: here.id, branch: "child/one" }, { origin: "here", by: { kind: "thread", threadId: "lead-thread", workspaceId: lead.id, rootThreadId: "lead-thread" } })).workspace;
@@ -522,7 +522,7 @@ describe("merge into lead with no remote", () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     answeringAtOnce(backend);
-    rt = createRuntime({ backend, store, adapters: {}, daemonToken: DAEMON_TOKEN, daemonChannel: daemons.open, local: localOn() });
+    rt = createRuntime({ backend, store, adapters: {}, daemonToken: DAEMON_TOKEN, daemonChannel: daemons.open, local: localOn(), statePath: join(root, ".wsp", "state.json") });
     const there = await projectOn(rt, undefined, "file:///srv/lab.git", { name: "lab-box", base: "main" });
     const lead = await rt.workspaces.create({ project: there.id, golden: "snap_g", name: "lead" });
     const child = await rt.workspaces.create({ project: there.id, golden: "snap_g", name: "child", parent: lead.id });
