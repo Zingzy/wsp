@@ -292,2531 +292,535 @@ import { HEAD_BYTES, HISTORY_PAGE_BYTES, HISTORY_PAGE_EVENTS, type HistoryPage, 
 import type { EventSize, TranscriptRows } from "./sqlite-transcripts.js";
 import { eventBytes, headShape, numbered, pickNewest, readThread, type TranscriptReader } from "./transcript-reader.js";
 import { usageResets, type ResetPlace } from "./usage-reset.js";
+import { loginEnvOn, type HarnessSession, type HarnessAdapter, type StartPicksAsked } from "./types/harness.js";
+import { SLATE_PR_POLL_MS, CATALOG_TTL_MS, CATALOG_PROBE_TIMEOUT_MS, SESSION_TITLE_TTL_MS, CHECKOUT_TTL_MS, PR_PAGE_HOLD_MS, RATE_LIMIT_HOLD_MS, SESSION_TITLE_TIMEOUT_MS, SESSION_TITLE_REFRESH_MAX, TITLE_MAKE_TIMEOUT_MS, eventBus } from "./types/events.js";
+import { type WorkspaceSpec, type CreatedWorkspace, type CreateWorkspaceOptions, type PackedState, type LandRequest, type ProjectImportOptions, type WorkspaceRecord, type LiveWorkspace, type StageReport, type SessionHandle, type PlaceBackends, wiredPlace, type GoldenRecipe, type GoldenExec, type SeedWiring, type RuntimeOptions, PROVIDER_READ_MS, GONE_CONFIRM_MS, type GoneOutcome, type FoundMachine, settled, WAKE_LATE_READ_MS, DAEMON_HELLO_TIMEOUT_MS, PORT_PROBE_TIMEOUT_MS, CLONE_MS, ADD_IS_A_COMPUTER_LINE, folderNamed, sameSource, NO_COPIER_HERE, lastLineOf, outcomeWords, LISTING_DEADLINE_MS, mergeOnMachine, homeOutcome, PORT_PROBE_BODY_CAP, VAULT_CAP_BYTES, VAULTS, until, shapeFault, VAULT_SKIP, setHostname, type GoldenPromotion, GRACE_MS, DAEMON_REVIVE_AGAIN_MS, DAEMON_LACKS_AGAIN_MS, type AdoptedMachine, type SweepResult, LOG_READ_EVERY_MS, RESET_EXEC_MS, type UsageDoor } from "./types/wiring.js";
+import type { Runtime, OrphansDeleted } from "./types/api.js";
+import { WORKSPACES, PROJECTS, SEED_CHOICES, GOLDENS, GOLDEN_RECIPES, PROJECT_GOLDENS, IMAGES, NO_COPY_RECIPE, NO_SEED_WIRING, IMAGE_VAULTS, copyKey, copyKeyParts, recipeKey, vaultKey, TRANSCRIPTS, TRANSCRIPT_HEADS, TRANSCRIPT_INDEX, ATTACHMENTS, ATTACHMENT_KEYS, SESSIONS, WORKSPACE_NAMES, DROPPED, DROPPED_WATCH_MS, PREFERENCES, PREFERENCES_ID, READS, READS_ID, PAUSED_REASON, DELETED_REASON, RESTARTED_REASON, GONE_REASON, goneLogLine, sweptRunsLogLine, noTitleLogLine, noMadeTitleLogLine, noCheckpointLogLine, noNameWriteLogLine, restartCutLine, DAEMON_TOKEN_MISS_TTL_MS, TRANSCRIPT_CAP, TRANSCRIPT_BYTES, TOOL_RESULT_KEPT, TRANSCRIPTS_HELD, PENDING_FLUSH_BYTES, MAX_TIMER_MS, type TranscriptIndex, type Taken, transcriptUnreadLine, emptyIndex, forgetChild, foldEvent, indexOf, type TurnWritten, turnWritten, indexBytes, indexRead, snippetAround, SESSION_INDEX_CAP, TRANSCRIPT_FLUSH_MS, type NamedWorkspace, type DroppedMachine, type TranscriptRecord, type TurnLive, type TurnAsked, KEPT_CLOSE_WAIT_MS, type KeptProcess, type KeptLaunch, launchesAs, stampSessionFile, sameSessionFile, readAsked, readScope, readRoad, type ThreadRecord, type SessionIndexRecord, BUILDERS, OWNER, CREATES, KEY_PURPOSE_MAX, type PendingCreate, fingerprint, HELD_TTL_MS, HEARTBEAT_MS, isCapRefusal, pidAlive, type BuilderRecord, type LiveBuilder, PrepareStoppedError, deadMachine, isAbsentMachine, absentMachine, readBodyUpTo, forwardedCalls, DaemonRefusal, isNoHostCli, isNoGitCredential, type KindModule, type ImportReport, type ImportLanded, type WorkspaceLike, type StageFrame, type KeptImages, type ChildStart, type MachineMoment, type StoredBuilder, type LiveSession, type Reopened, type SessionEntry } from "./types/internal.js";
+import type { RuntimeContext, RuntimeCore, KindsArea, RulesArea, TranscriptsArea, SlatesArea, ChannelsArea, RecordsArea, ReachArea, PullRequestsArea, DaemonArea, MachinesArea, BootArea, CreateArea, FoldersArea, StartFromArea, WorkspacesArea, AgentsArea, ThreadsArea, TurnsArea, SessionsArea, BuildersArea, GoldenArea, ImageArea, ProjectsArea, UsageArea, StatusArea, PreferencesArea } from "./context.js";
 
-// --- adapter port -------------------------------------------------------------
+// import { kindsArea } from "./machines/kinds.js";
 
-export interface HarnessAdapterContext {
-  machine: Machine;
-  workspaceId: string;
-  /** How a turn's process is launched on this machine: the guest's detached-and-polled road on a cloud fork, a real
-   * child process on the local computer. The one concern that varies by machine kind and reaches the adapter here. */
-  execStream: ExecStreamFactory;
-  /** Where the harness keeps its sessions on this machine, by agent id: the folder the golden's sign-in wrote into on
-   * a cloud fork, the person's own store on the local computer. */
-  home: (agentId: string) => string;
-  /** The machine's login environment, exported under the harness's own on every launch: the golden's PATH, so a
-   * launch served by a process with a bare one still finds the binary, and on a guest the variable that points this
-   * harness at its store there. On the person's own computer it is their shell's, so a store variable is set only
-   * where their shell sets it, and their login is the turn's login. */
-  env: Readonly<Record<string, string>>;
-  /** What this agent keys its sessions and its auto memory to on this workspace, where the kind has an answer: on
-   * a computer whose workspaces are copies of a project folder, the original folder's own key, so every copy and
-   * the person's own agent in that folder share one memory. Absent leaves the agent keying off the folder each
-   * turn runs in, which is every machine wsp makes. */
-  projectKey?: string;
-  /** wsp's half of a turn this workspace's agent refuses for want of a sign-in, from the one rule every door reads
-   * for how it is signed in: it differs between the person's own computer and a machine, which the adapter cannot
-   * know, so it is told the road from here rather than guessing one. */
-  signInRefusal: string;
-  /** The tokens and API keys the vault holds, by variable. Its own field rather than part of `env`: the Claude
-   * adapter strips every inherited CLAUDE_CODE_* off the base environment as a nesting mark, so a token merged
-   * into the environment would be stripped and never reach the CLI. Empty where the host wired no vault. */
-  vault: Readonly<Record<string, string>>;
-  /** Whether a login of one agent's own already stands where this workspace runs, which is what decides whether
-   * the vault's key for it is handed to the turn: a harness reads a key in its environment ahead of the login on
-   * its disk, so handing one where a person signed in would bill the key and leave that sign-in unused. Where a
-   * login lives differs by machine kind, which the adapter cannot know, so it is told from here. */
-  loginStands: (agentId: string) => boolean;
-  /** The program the person runs in place of this agent on the workspace's computer, and the words each turn's launch
-   * adds; absent runs the agent's own command as it is. */
-  launch?: AgentLaunch;
-}
-
-/** What every machine wsp runs agents on tells them, cloud fork and ssh machine alike, and this computer never does:
- * IS_SANDBOX=1 is what lets Claude Code take --dangerously-skip-permissions as root there (solari-poc P1).
- * DISABLE_AUTOUPDATER=1 holds the agent at the version the image pinned, inside a fork or a box, at run time too. */
-export const MACHINE_SANDBOX_ENV: Readonly<Record<string, string>> = { IS_SANDBOX: "1", DISABLE_AUTOUPDATER: "1" };
-
-/** The guest's login environment: who it runs as, the PATH the golden's login shells get, and the sandbox flag every
- * machine carries. Every fork carries it in its envs at create and every adapter exports it under the harness's own. */
-export const GUEST_LOGIN_ENV: Readonly<Record<string, string>> = { ...GUEST_USER_ENV, PATH: TOOLS_PATH, ...MACHINE_SANDBOX_ENV };
-
-/** The same for a workspace on a computer somebody joined: the order that reads the folders no process inside can
- * write before the home every workspace there shares, and beside it the knobs the recipe's job installed under,
- * off the catalog's one table. A thread, a command and the workspace's own boot carry this, so a tool the recipe
- * put under wsp's prefix is the one that answers inside wherever it is asked for. A fork keeps GUEST_LOGIN_ENV:
- * its home is root's alone, and its image was sealed on that order with each manager's own folders. */
-export const PLACE_LOGIN_ENV: Readonly<Record<string, string>> = {
-  ...GUEST_USER_ENV,
-  PATH: PLACE_WORKSPACE_PATH,
-  ...MACHINE_SANDBOX_ENV,
-  ...installEnv(installHomes(TOOL_PREFIX)),
-};
-
-/** Which of the two a workspace runs on: where it stands, and nothing else. */
-export const loginEnvOn = (place: string | undefined): Readonly<Record<string, string>> => (place === undefined ? GUEST_LOGIN_ENV : PLACE_LOGIN_ENV);
-
-export interface HarnessStartOptions {
-  prompt: string;
-  resume?: string;
-  cwd?: string;
-  /** Catalog slugs the adapter maps to its CLI's flags; absent leaves the CLI's default. */
-  model?: string;
-  effort?: string;
-  permissionMode?: string;
-  contextWindow?: string;
-  /** The model's faster output for this turn, where the catalog marks the model as having one. */
-  fast?: boolean;
-  /** The name the thread is opened under, for a CLI that takes one at launch; every harness is told it again through
-   * renameSession once its session is announced, so an adapter whose CLI cannot take it here need not. */
-  title?: string;
-  /** The turn's images, each already on the road its adapter declared: bytes for an inline adapter, a path on the
-   * machine for a file one. Empty on a turn that carries none. */
-  images?: readonly TurnImage[];
-  /** On the first resume after a rewind, on a harness that cuts there: the anchor of the turn the rewind kept. */
-  resumeAt?: string;
-  /** MCP servers this turn gets besides the ones the harness's own config on the machine names, by the name each
-   * takes in a config; the adapter hands them to its CLI the way that CLI takes one. Absent on a turn that carries
-   * none, which is every turn a person sends. */
-  mcpServers?: Readonly<Record<string, McpServerSpec>>;
-  /** On a resume: the thread so far as text, for an adapter whose CLI holds no session under `resume` to open a new one
-   * with. Asked for only then. */
-  seed?: () => Promise<string>;
-  /** On an agent whose plan banks resets: the turn reads each in full, since the account's last full read is missing
-   * or a day old. Absent, it reads their count alone, which costs the agent's backend nothing more. */
-  limitDetails?: true;
-  /** On an adapter that waits for its prompt: its CLI starts at once and is handed the prompt when this settles. */
-  promptAfter?: Promise<void>;
-  /** The version the agent's binary on this machine answered the catalog probe with; absent where the probe got no
-   * answer and wsp's own table stood in. */
-  version?: string;
-  /** The agent's process stays up once the turn is over, for the thread's next send; kept() hands it over. */
-  keep?: true;
-  onEvent: (event: AdapterEvent) => void;
-}
-
-export interface HarnessSession {
-  readonly localId: string;
-  readonly finished: Promise<TurnResult>;
-  /** What a later host process attaches to this turn by, on a harness whose run outlives the host that started it;
-   * absent where it does not, and the row is settled as cut when this process goes. */
-  readonly run?: string;
-  /** The process this turn leads on the computer the host runs on, where it runs there; absent on a turn running on
-   * another machine, whose pids are not this computer's. */
-  readonly pid?: number;
-  /** Where this turn starts in its run's log, on a process that served the thread's earlier turns: what a later host
-   * re-opens the turn from. */
-  readonly from?: number;
-  /** Stops the turn; finished settles after it, once session.end has been emitted. On a process kept between turns
-   * the process stays up where the agent took the stop. */
-  interrupt(): Promise<void>;
-  /** Once the turn is over, its agent's process still up for the thread's next turn; absent on an adapter that keeps
-   * none, and nothing where this turn's process went with it. */
-  kept?(): KeptAgent<HarnessSession> | undefined;
-  /** Present on a harness that takes a message mid-turn; absent means it cannot. not-running when the turn had not
-   * started or had ended when the message was offered. */
-  steer?(prompt: string): Promise<"accepted" | "not-running">;
-  /** Answers a permission prompt this turn raised; absent on a harness that raises none this host can answer. The
-   * caller names the outcome, since only it knows whether the answer is the person's or its own for a prompt nobody
-   * came to, and the adapter emits the permission.close that carries it. `gone` when no such prompt is open. */
-  answer?(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string; reason?: string }): Promise<"answered" | "gone">;
-  /** Puts this running turn into another access mode from its next tool call on, and to the prompt it is stopped on
-   * where the mode answers one; absent on a harness whose CLI takes no such change once a turn is under way, and the
-   * person's pick then waits for their next message. `refused` is the CLI's own no to that mode with no road left to
-   * stand in for it, `gone` a turn whose channel takes nothing any more. */
-  setAccess?(mode: string): Promise<"set" | "refused" | "gone">;
-  /** Stops one of this turn's own subagents by the agent's id for it, the turn and its other subagents running on;
-   * absent on a harness that stops none by itself. */
-  stopTask?(task: string): Promise<TaskStop>;
-}
-
-export interface HarnessAdapter {
-  start(options: HarnessStartOptions): HarnessSession;
-  /** Re-opens a turn this harness is still running on the machine, by the run handle a session of an earlier host
-   * process reported. The run's whole output is read again, so the events the host missed reach this one. `gone` is
-   * the machine's own answer that it no longer holds the run, and no event is emitted for one. A machine that
-   * answers nothing rejects, and the turn is left where it is. Absent on an adapter whose runs die with the host. */
-  attach?(options: AdapterAttachOptions): Promise<HarnessSession | "gone">;
-  /** Whether this adapter's sessions carry steer; the catalog tells the composer before a turn runs. */
-  readonly steers: boolean;
-  /** Whether a rewind of this harness's thread is cut on its next resume, at the anchor the kept turn named; the
-   * runtime holds that anchor on the thread and hands it to that start as resumeAt. */
-  readonly resumesAt?: true;
-  /** Cuts this harness's own history before a turn at once, running no turn; absent where it cuts on its next resume
-   * or keeps its history. */
-  revert?: SessionReverter;
-  /** How this harness takes an image with a turn, and that it takes one at all: absent, a turn carrying an image is
-   * refused in this agent's name before the machine is asked for anything. */
-  readonly attachments?: AttachmentRoad;
-  /** Whether this adapter renders the MCP servers a start names into the launch its CLI takes. Absent means it does
-   * not, and a start naming servers is refused in this agent's name before the machine is asked for anything: a
-   * launch that dropped them would open a thread whose tools are missing and whose agent looks like it ignored them. */
-  readonly mcpServers?: true;
-  /** The commands this CLI runs only in its own terminal, which a headless turn answers are not available; the catalog
-   * carries them so the composer lists none and sends nothing for one. Absent means none. */
-  readonly screenCommands?: ReadonlyArray<ScreenCommand>;
-  /** Whether an access picked while a turn runs reaches that turn, so the picker says what a pick does before it is
-   * made. Absent means it does not, and a pick waits for the person's next message. */
-  readonly movesAccess?: true;
-  /** A start takes promptAfter, so the launch's snapshot is taken while the CLI starts up and the agent, which touches
-   * no file before it has its prompt, gets it once the snapshot is in; absent, the snapshot is in before the launch. */
-  readonly waitsForPrompt?: true;
-  /** Asks the binary on the workspace's machine what it takes: its lists, its own words for why it has none, or null
-   * when it does not answer at all; absent, the table alone answers and nothing runs. */
-  probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
-  /** Reads the harness's own title for a session out of its store on the machine; absent on a harness that keeps none. */
-  sessionTitle?: SessionTitleReader;
-  /** Writes a person's name for a session into that same store; absent on a harness that keeps no name of a person's. */
-  renameSession?: SessionRenamer;
-  /** Asks the harness itself for a name for a thread it has just replied in; absent on a harness that cannot answer a
-   * question of its own. */
-  titleFor?: SessionTitleMaker;
-  /** Asks the harness itself for a commit message with no thread and no tool; absent on a harness that cannot answer
-   * a question of its own, and the commit box opens empty with the line saying so. */
-  draftFor?: CommitDrafter;
-  /** Answers a question beside a thread on a copy of its session that nothing keeps; absent on a harness that cannot
-   * copy a session, and the composer offers no side question for it. */
-  aside?: SessionAsker;
-  /** Whether that copy loads the MCP servers a turn of the thread is handed. Only then is it handed them and the
-   * thread's host pair; a copy that loads none would carry a token nothing dials with. */
-  readonly asideServers?: true;
-  /** The message that runs this harness's own compaction of the thread's context as a turn; absent where it has none. */
-  readonly compacts?: string;
-  /** What a turn's command is exported with on the machine; a plain exec on the workspace runs with the same. Absent
-   * means nothing is exported and both run with the machine's own environment only. */
-  readonly env?: Readonly<Record<string, string>>;
-}
-
-/** Called per session start with the workspace's CURRENT machine (it can change on wake/upgrade). */
-export type HarnessAdapterFactory = (ctx: HarnessAdapterContext) => HarnessAdapter;
-/** What a start names of its agent and picks, read against that agent's lists before a folder is made for it. */
-export type StartPicksAsked = { harness?: string; model?: string; effort?: string; access?: AccessChoice; permissionMode?: string; fast?: boolean };
-
-// --- events -------------------------------------------------------------------
-
-export type EventListener = (event: EventUnion) => void;
-
-export interface EventBus {
-  on(type: EventUnion["type"] | "*", listener: EventListener): () => void;
-  /** The retained events after sequence `after`, oldest first, with head, the newest sequence issued (0 before any),
-   * and stream, the id minted for this process's sequences. gap: `after` is not a cursor into this stream, because it
-   * came with another stream id, is older than what is retained, or is past head, so nothing is replayed and the
-   * caller must refetch. */
-  since(after: number | undefined, stream: string | undefined): { stream: string; head: number; events: EventUnion[]; gap: boolean };
-}
-
-/** Events kept for a socket that comes back: one ring shared by every workspace, holding the status and cost ticks
- * that no transcript keeps. 5000 bounds it at one transcript's worth of memory (TRANSCRIPT_CAP); a cursor that fell
- * off it gets a gap, and the client refetches the list, the statuses and sessions.history and converges from those. */
-const EVENT_RING_CAP = 5000;
-/** How often a pull request with a pending check is read while a slate watches its checks. */
-const SLATE_PR_POLL_MS = 30_000;
-
-/** How long a machine's catalog answer stands before the binary is asked again; t3code's provider health cadence. */
-export const CATALOG_TTL_MS = 5 * 60_000;
-/** The probe measured 1 to 3 s on a Mac; a guest that takes longer than this is answered from the table. Under the
- * provider's 26 s exec cap, so the probe is one call and not a detached run on every fork. */
-const CATALOG_PROBE_TIMEOUT_MS = 25_000;
-
-/** How long a harness's title for a session stands before its store is read again on a refresh. Clients reload the
- * index on every session event, and a person renaming a session in the harness waits at most this long to see it. */
-export const SESSION_TITLE_TTL_MS = 10_000;
-
-/** How long a copy's checkout, once read, answers a tile or a pane asking again without asking git: every tile reads
- * it as it mounts, and a sidebar of twenty is one read, not twenty. */
-export const CHECKOUT_TTL_MS = 10_000;
-
-/** How long a pull request's page read stands for another open of it. */
-export const PR_PAGE_HOLD_MS = 60_000;
-
-/** How long a git host's rate limit refusal answers every read on the road that met it. */
-export const RATE_LIMIT_HOLD_MS = 60_000;
-/** A grep of one session file or a row out of one sqlite; a guest slower than this keeps the title it last gave. */
-const SESSION_TITLE_TIMEOUT_MS = 15_000;
-/** How many of a workspace's harness sessions one refresh asks about, newest first: a store read is an exec on the
- * machine, and an index at SESSION_INDEX_CAP must not cost one per row. */
-export const SESSION_TITLE_REFRESH_MAX = 20;
-/** How long the harness has to answer the one title question a thread costs. A claude-sonnet-5 answer measured 1.4 s
- * of model time on 2026-09-07; this is the wedged case, and a thread that hits it keeps its opening words. Under the
- * provider's 26 s exec cap, so the question is one call on every thread. */
-export const TITLE_MAKE_TIMEOUT_MS = 25_000;
-
-function eventBus(): EventBus & { emit(event: EventUnion): void } {
-  const listeners = new Map<string, Set<EventListener>>();
-  const ring: EventUnion[] = [];
-  const stream = randomUUID();
-  let head = 0;
-  return {
-    on(type, listener) {
-      let set = listeners.get(type);
-      if (!set) {
-        set = new Set();
-        listeners.set(type, set);
-      }
-      set.add(listener);
-      return () => set.delete(listener);
-    },
-    since(after, from) {
-      if (after === undefined) return { stream, head, events: [], gap: false };
-      const oldest = head - ring.length + 1;
-      const foreign = from !== undefined && from !== stream;
-      if (foreign || after > head || after < oldest - 1) return { stream, head, events: [], gap: true };
-      return { stream, head, events: ring.slice(after - oldest + 1), gap: false };
-    },
-    emit(event) {
-      const stamped: EventUnion = { ...event, seq: ++head };
-      ring.push(stamped);
-      if (ring.length > EVENT_RING_CAP) ring.splice(0, ring.length - EVENT_RING_CAP);
-      for (const type of [event.type, "*"] as const) {
-        for (const l of listeners.get(type) ?? []) l(stamped);
-      }
-    },
-  };
-}
-
-// --- runtime ------------------------------------------------------------------
-
-export interface WorkspaceSpec {
-  cpu?: number;
-  memMb?: number;
-  envs?: Record<string, string>;
-  labels?: Record<string, string>;
-  /** The workspace gets the place's container engine through the fenced socket; absent takes the image's recipe. */
-  engine?: boolean;
-  /** The folders of the computer's own this workspace mounts: its project's memory folder, where that computer
-   * holds one. Written by the create off the project's landing road and read again by every wake. */
-  binds?: MachineBind[];
-  /** The checkout on that computer this workspace holds its own copy of, and where that copy is mounted inside.
-   * Written by the create off the project's record, so a wake mounts the copy the create was made with. */
-  copy?: WorkspaceCopy;
-}
-
-/** What a create answers: the view, and a notice when a builder kept after a save was stopped to make room. */
-export interface CreatedWorkspace extends WorkspaceView {
-  notice?: string;
-}
-
-export interface CreateWorkspaceOptions extends WorkspaceSpec {
-  /** The project this workspace is made for, by id or by name. Its computer is where the workspace lands, so
-   * nothing else says where. */
-  project: string;
-  /** Snapshot id of a project image to fork; absent takes the head of this host's own image. */
-  golden?: string;
-  name: string;
-  /** What the agents on the new workspace may ask of this host; absent takes the default, and on a fork a thread asked for it
-   * is the forking workspace's own switch, so a tree of machines carries one rule rather than needing it set again.
-   * A key left out takes the default. */
-  agents?: Partial<WorkspaceAgents>;
-  /** Auto-nap window; undefined takes the runtime default, null turns auto-nap off. */
-  idleWindowMs?: number | null;
-  /** The workspace this one is forked out of, by id: a child of it, holding the same project and starting on the
-   * branch that workspace is on right now. A create a thread asked for is a child of the thread's own workspace
-   * whether or not this names one. */
-  parent?: string;
-}
-
-/** A folder's archive as the host packs it: the bytes, what went in, the secret-shaped paths left out, and the ones
- * that went in rewritten as the plan offered. */
-export interface PackedProject {
-  tar: Buffer;
-  files: number;
-  bytes: number;
-  cut: string[];
-  rewritten: string[];
-}
-
-/** The agents whose state for the folder travels: each with its home on the machine and whether the agent is there
- * to read the state once it is keyed to `dest`. */
-export interface StateRequest {
-  dest: string;
-  agents: readonly { agent: string; home: string; present: boolean }[];
-}
-
-/** The agents' state as the host packs it: an archive of each agent's files at its machine home, for the guest's
- * root, what became of each agent, and the merge scripts in the archive by agent, each at its path on the guest, for
- * the runtime to run once the archive has landed. */
-export interface PackedState {
-  tar: Buffer;
-  agents: ProjectAgentResult[];
-  merges: { agent: string; script: string }[];
-}
-
-/** A folder on this computer as the host reads it; the runtime never touches the disk itself. `plan` reads names
- * and sizes, `pack` reads the bytes once consent is known: a secret-shaped file travels only when `carry` names it,
- * or rewritten when `rewrite` names a path the plan offered a rewrite for. `packState` reads the named agents'
- * homes for their state for the folder, re-keyed to the destination for the agents on the machine. */
-export interface ProjectBundler {
-  plan(): Promise<ProjectPlan>;
-  pack(carry: ReadonlySet<string>, rewrite: ReadonlySet<string>): Promise<PackedProject>;
-  packState(req: StateRequest): Promise<PackedState>;
-}
-
-/** The folder's archive as it came off the machine, rooted at the folder, and the agents' state that came with it. */
-export interface LandRequest {
-  /** The folder's path on the machine: the key its agent state on the machine is stored under. */
-  source: string;
-  /** Where the folder lands on this computer, absolute. */
-  dest: string;
-  /** Remove what is at dest first; without it an existing dest is refused with kind "exists". */
-  replace: boolean;
-  /** The archive as a file on this computer, streamed off the machine rather than held in memory; whoever asked for
-   * the landing removes it afterwards. */
-  archive: string;
-  /** The agents' state under the guest's root as an archive on this computer, each agent's home on the guest by
-   * catalog id, and the agents whose state comes home (every one with sessions for the folder when absent). */
-  state?: { archive: string; homes: Readonly<Record<string, string>>; agents?: readonly string[] };
-  /** The stores an agent keeps for every project that the listing on the machine could not read: nothing of theirs is
-   * in the archive, so the landing report carries a row for each one saying which store and why. */
-  unread?: readonly UnreadStore[];
-}
-
-/** This computer's own folders as a browser tab's picker walks them, one level at a time; the runtime never touches
- * the disk itself, the host that owns it does. The desktop shell has the system dialog and never asks for this. */
-export interface HostFolders {
-  /** `wide` is this computer's own window, which is not held to the home root; `repos` asks for every repo under the roots. */
-  list(req: { dir?: string; hidden?: boolean; repos?: boolean; wide?: boolean }): Promise<HostFolderListing>;
-}
-
-/** The person's terminal config on the computer running the host, read again on every ask; the runtime never reads
- * the disk itself, the host that owns it does. */
-export interface HostTerminalConfig {
-  read(scheme?: TerminalScheme): Promise<TerminalConfig>;
-}
-
-/** The editors on the computer running the host and how a path opens in one; the runtime never starts a program on
- * this computer itself, the host that owns it does. */
-export interface HostEditor {
-  list(): Promise<EditorChoice[]>;
-  /** Opens the path in the editor named, else the first installed, and answers which one; refused where the path
-   * does not resolve inside one of the folders given. */
-  open(req: { path: string; line?: number; inside: readonly string[]; editor?: EditorId; remote?: EditorRemote }): Promise<EditorId>;
-  /** The line open would refuse a workspace on another computer with, in the editor named or else the first
-   * installed; nothing where that editor can open one. Asked before anything reaches that computer, and `name` is the
-   * workspace's. */
-  remoteRefusal(req: { editor?: EditorId; name: string }): Promise<string | undefined>;
-}
-
-/** Where a workspace on another computer opens from: its ssh alias on this computer and its folder there. */
-export interface EditorRemote {
-  alias: string;
-  folder: string;
-  /** The workspace's name, for the sentence an editor with no remote road answers with. */
-  name: string;
-}
-
-/** An editor's ssh into a workspace on another computer, as the host on this computer carries it. */
-export interface HostSsh {
-  /** A port on this computer's loopback that carries to the workspace's own ssh server, started there with this
-   * computer's key allowed, its host key pinned under the workspace's alias before this answers. */
-  port(workspace: { id: string; name: string }): Promise<number>;
-  /** Whether the person's ~/.ssh/config reads wsp's own ssh config. */
-  include(): Promise<boolean>;
-  /** Puts that one line in or takes it out, and answers whether it stands. */
-  setInclude(on: boolean): Promise<boolean>;
-}
-
-/** The init job on the computer running the host: wsp init's run, read and driven from the app over the wire. The
- * host owns it (this computer's files, its Keychain, the sign-ins' terminal link are all the host's); the runtime
- * serves its ops and relays its events beside its own, as it does the host's forwards. */
-export interface InitDoor {
-  /** The setup as the modal opens on it, priced at the place `on` names, else the default build place. */
-  get(o?: { on?: string }): Promise<InitSetup>;
-  keys(keys: { provider?: string; key?: string; rows?: Record<string, string> }): Promise<InitSetup>;
-  start(o: { road: InitRoad; harness?: string; on?: string }): Promise<InitJob>;
-  answer(o: { screen: InitScreenId; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
-  step(o: { at: number }): Promise<InitJob>;
-  /** Keeps a step's unsent ticks, picks and typed text on the job, so a sheet shut mid-step reopens on them. */
-  draft(o: { at: string; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
-  retry(o: { tool: string }): Promise<InitJob>;
-  /** Starts the build at the place `on` names, else the default build place. `rebuild` seals the next version from
-   * a fresh machine rather than from the image plus the changes, which is the question a run at a terminal is asked;
-   * absent takes whichever road the changes call for. */
-  build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean; on?: string; rebuild?: boolean }): Promise<InitJob>;
-  /** Types the code a sign-in's page handed back into the tool waiting for it on the machine; refused when none is. */
-  signInCode(o: { tool: string; code: string }): Promise<InitJob>;
-  cancel(): Promise<InitJob>;
-  /** Every change to the job, and beside it the arrival of a wait on the person, which a client that speaks once per
-   * need rides rather than diffing views. */
-  on(fn: (e: InitJobEvent | InitNeedsYouEvent) => void): () => void;
-}
-
-/** The recipes a host keeps, as the runtime serves them: the files beside the state are the host's, and which
- * computers follow each is the place records', which the runtime folds in. */
-export interface RecipeShelf {
-  list(): Promise<{ slug: string; file: RecipeFile }[]>;
-  /** One recipe by its name or slug, as saved; refused naming the ones there are. */
-  read(word: string): Promise<{ slug: string; file: RecipeFile }>;
-  /** One recipe by its name or slug, with the hash it resolves to on this computer now. */
-  get(word: string): Promise<{ slug: string; file: RecipeFile; hash: string }>;
-  /** Writes the recipe whole; refused for a name that makes no file name and for anything shaped like a secret. */
-  save(file: unknown): Promise<{ slug: string; file: RecipeFile }>;
-  remove(word: string): Promise<{ slug: string; file: RecipeFile }>;
-  /** What a recipe can pick from on this computer, `folders` this computer's own projects to offer with their facts. */
-  options(folders?: readonly { name: string; path: string }[]): Promise<RecipeOptions>;
-  /** One recipe by its slug as this computer has it now: what it holds for each row, and the hash a computer that
-   * follows it is held against. */
-  resolve(slug: string): Promise<{ file: RecipeFile; items: Record<string, string>; hash: string }>;
-  /** Picks saved under no name, resolved the same way, so a computer set up from them is held row by row too. */
-  resolveFile(file: RecipeFile): Promise<{ file: RecipeFile; items: Record<string, string>; hash: string }>;
-}
-
-/** One agent's result with its catalog name, for the sentence the runtime says about it. */
-export type LandedAgent = ProjectAgentResult & { name: string };
-
-/** What landed on this computer: the folder's files and bytes, and each agent found on the machine with sessions for
- * the folder and what became of its state here. */
-export interface LandedProject {
-  files: number;
-  bytes: number;
-  agents: LandedAgent[];
-}
-
-/** This computer's side of an export, as the host does it; the runtime never touches the disk itself. `probe` looks at
- * the destination before anything is read from the machine, `land` extracts the folder beside its destination and
- * moves it into place, then keys the agents' state to it in their homes here as an overlay. */
-export interface ProjectLander {
-  /** What the machine's archive leaves behind: the bundle's own cache rule, so the trip home drops what the trip out dropped. */
-  caches: CacheRule;
-  /** How many files sit at dest on this computer now, or nothing when the path is free. */
-  probe(dest: string): Promise<{ files: number } | undefined>;
-  land(req: LandRequest): Promise<LandedProject>;
-}
-
-export interface ProjectExportOptions {
-  workspaceId: string;
-  /** The folder on the machine, absolute. */
-  source: string;
-  /** Where it lands on this computer, absolute. */
-  dest: string;
-  /** Remove what is at dest first; without it an existing dest is refused with kind "exists" before anything is read. */
-  replace?: boolean;
-  /** The agents whose state comes home, by catalog id; absent, every agent with sessions for the folder on the machine. */
-  agents?: readonly string[];
-  lander: ProjectLander;
-}
-
-export interface ProjectImportOptions {
-  workspaceId: string;
-  /** The folder on this computer, absolute; named in the events. */
-  source: string;
-  /** Where the folder lands on the machine, absolute; its parents are made. */
-  dest: string;
-  /** Remove what is at dest first; without it an existing dest is refused with kind "exists". */
-  replace?: boolean;
-  /** The secret-shaped paths from the plan that may travel as they are; every other one is cut and named. */
-  carry?: readonly string[];
-  /** The paths the plan offered a rewrite for that land rewritten; wins over carry for the same path. */
-  rewrite?: readonly string[];
-  /** The plan's agents whose state for the folder travels, by catalog id; nothing of any other agent is read. */
-  agents?: readonly string[];
-  bundler: ProjectBundler;
-}
-
-interface WorkspaceRecord extends Omit<WorkspaceView, "project"> {
-  /** cloud or local; a record stored before local existed has none and reads cloud. */
-  kind: WorkspaceKind;
-  /** The project this workspace was made for, by its id. The view joins the record's name, path and computer off
-   * the projects map, so one fact has one stored home. */
-  project: string;
-  spec: Pick<WorkspaceSpec, "envs" | "labels" | "engine" | "binds" | "copy">;
-  idleWindowMs?: number | null;
-  /** What the provider built, read back after every create (it may clamp the
-   * request); the rail and the rate use this, never what was asked for. */
-  size: WorkspaceSize;
-  firstLife: boolean;
-  /** The provider's view of the current machine when it was created; a wake compares against it. */
-  shape?: MachineShape;
-  /** The branch this workspace's copy started from: the branch its parent was on at the fork for a child, and the
-   * branch the project starts from for every other workspace. A fact of the fork and not a reading of the parent,
-   * since it is the code this copy was cut from, which is where its work goes back however the parent moves on;
-   * absent on a record written before it, which reads the project's own base as it always did. */
-  base?: string;
-  /** With phase gone: the provider's words when the machine was found missing; cleared when a fresh machine lands. */
-  gone?: string;
-  /** That this host put a daemon on the machine, and which one. Only a kind whose machine wsp did not make carries
-   * it: a fork's daemon comes with the golden and its preview route says whether one answers, while a machine the
-   * person owns had none until a deploy landed, and nothing may dial one to find out. */
-  daemon?: { deployedAt: string; version: number };
-  /** What the host keeps of the workspace's pull request: enough that a merged one reads merged after a restart and is
-   * never read again, and nothing more of it is written under the host's folder. */
-  pr?: PullRequestRecord;
-  /** The checkout git last gave, so a machine nothing can ask after a restart still shows its branch and counts. */
-  checkout?: Checkout;
-  /** What a child keeps of the tree it is in: its merge into its lead, the files a merge stopped on, and why its last
-   * push was refused. Absent on a workspace that is nobody's child and on one nothing has happened to yet. */
-  tree?: TreeRecord;
-  /** Where the work came from: an issue or a pull request started on, or a pull request under review. */
-  from?: WorkspaceFrom;
-  /** A review workspace's review as the person shapes it before Post. */
-  review?: ReviewDraft;
-  /** The items of its pull request's page sent to its agent, with when. */
-  prSent?: PullRequestSent[];
-}
-
-interface LiveWorkspace {
-  record: WorkspaceRecord;
-  ws: Workspace;
-  machine: Machine;
-  /** Moves with every write of the record; the status poll drops a row it built under an older one. */
-  generation: number;
-  /** The wake in flight, so a second caller joins it instead of resuming twice. */
-  waking?: Promise<WorkspaceView>;
-  /** The nap in flight: a second nap joins it, a wake waits for it. */
-  napping?: Promise<WorkspaceView>;
-  /** The record following a machine the provider runs under a napping word: a second verb that read the same fact joins it. */
-  adopting?: Promise<void>;
-  /** The delete in flight: a second delete joins it, and the name stays held until the record is dropped. */
-  deleting?: Promise<void>;
-  /** Cancels the one read armed after a wake gave up. */
-  lateRead?: () => void;
-  /** Stops the wake in flight, whether it is on a call or waiting to ask again: what the row's stop pulls. Aborting
-   * it ends the provider call under it, so nothing is left running behind a wake that is over. Absent when no wake
-   * is running. */
-  wakeStop?: AbortController;
-  /** What the row says about the wake in flight, for as long as it is in flight: every status the poll builds carries
-   * it, since a line pushed once would be wiped by the next tick and the row would fall silent between two asks. */
-  wakeSaid?: string;
-  /** What the last delete said when the provider kept the machine, read while the record's phase is still the one it
-   * was said under, until the next delete or wake starts: held here, not on the record, so a restart forgets it. */
-  deleteSaid?: { phase: WorkspacePhase; line: string };
-  /** Which ask the host is on and how many it will make, while it is asking again on its own; the surfaces read it
-   * at the length each has room for rather than being handed a sentence built for one of them. */
-  wakeAsk?: { ask: number; of: number };
-  /** Set from the fork until the create is ready: the sweep knows the machine, nothing else can reach it yet. */
-  creating?: true;
-  /** The copy's checkout as git last answered it, carried on every status built for the workspace. */
-  checkout?: Checkout;
-  /** The checkout read in flight, which a second asker joins. */
-  checkoutReading?: Promise<Checkout | undefined>;
-  /** A lead's children as last read, and the read in flight so a second caller joins it. */
-  tree?: TreeFact;
-  treeReading?: Promise<TreeFact | undefined>;
-  /** The pull request as the git host last answered it, what the record kept of a settled one, or why it could not be
-   * read, carried on every status built for the workspace. */
-  pr?: PullRequestSeen;
-  /** The pull request read in flight, which a second asker joins. */
-  prReading?: Promise<PullRequestSeen | undefined>;
-  /** Cancels the next timed read of an open pull request with a check still running. */
-  prPoll?: () => void;
-  /** The interval that timed read was armed at. */
-  prPollMs?: number;
-  /** The head commit a read by branch last found no pull request at: the branch is not read again until it moves. */
-  prNoneAt?: string;
-}
-
-/** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. A notice is a second
- * line written for a person; a detail is what the machine answered, which rides the line's title. */
-type StageReport = (stage: WorkspaceCreateStage, message: string, said?: { notice?: string; detail?: string; waiting?: true }) => void;
-
-export interface SessionHandle {
-  readonly id: string;
-  readonly workspaceId: string;
-  readonly finished: Promise<TurnResult>;
-  /** The runtime's id for the turn, as its events carry it. */
-  readonly turnId: string;
-  /** How the start that handed this out went: steered means the handle is the thread's running turn, not a new one. */
-  readonly outcome: SessionStartOutcome;
-  view(): SessionView;
-  interrupt(): Promise<void>;
-  steer?(prompt: string): Promise<"accepted" | "not-running">;
-  /** Answers a permission prompt this turn raised, by the prompt's id and one of its options. Only a person answers
-   * one: the prompt stands for as long as the turn does. Absent on a harness that raises none. */
-  answer?(askId: string, opts: { optionId: string; reason?: string }): Promise<SessionAnswerResult["outcome"]>;
-  /** Moves this running turn to another access mode, the prompt it is stopped on included; absent on a harness that
-   * takes none mid-turn. */
-  setAccess?(mode: string): Promise<"set" | "refused" | "gone">;
-  /** Stops one of this turn's own subagents; absent on a harness that stops none by itself. */
-  stopTask?(task: string): Promise<TaskStop>;
-}
-
-/** Which backend a place name resolves to. One row today, the provider this host is wired with; a row per joined
- * computer comes with the place link. The runtime reads only this interface, so nothing above it compares a place
- * by name. */
-export interface PlaceBackends {
-  /** The place every road that names none means: the provider this host forks on now. Read at each call, since a
-   * host that starts with no key swaps its provider module in when one is saved. */
-  readonly wired: string;
-  backend(place: string): MachineBackend | undefined;
-  list(): readonly string[];
-}
-
-/** The one-row table over the runtime's own backend; `id` is read at each call for the same reason `wired` is. */
-export function wiredPlace(id: string | (() => string), backend: MachineBackend): PlaceBackends {
-  const at = (): string => (typeof id === "string" ? id : id());
-  return {
-    get wired() {
-      return at();
-    },
-    backend: place => (place === at() ? backend : undefined),
-    list: () => [at()],
-  };
-}
-
-/** What every golden built by this runtime gets; the host wires it (the daemon
- * bundle and the harness install script live there, not in the runtime). */
-export interface GoldenRecipe {
-  setup: string;
-  /** Must exit 0 on a fork of the snapshot before a version is sealed. */
-  smoke: string;
-  baseTemplate?: string;
-  cpu?: number;
-  memMb?: number;
-  envs?: Record<string, string>;
-  labels?: Record<string, string>;
-  /** A returned string rides the deploying-daemon stage as its detail (the guest's Node version). */
-  deployDaemon?: (machine: Machine) => Promise<void | string>;
-  /** The person's files, tools and agents from the saved recipe; applied after the daemon, before the harness. */
-  import?: GoldenImport;
-  /** Every exec on a builder or its smoke fork, once it has returned or failed; the host's run log. */
-  onExec?: (exec: GoldenExec) => void;
-  /** Absolute guest paths the seal archives as the image vault: the sign-in state the ticked rows name and the
-   * secrets files. Absent on a copy's own build, whose vault is the record's already. */
-  vaultPaths?: readonly string[];
-  /** The small recipe this build was planned from, kept on the record so another place builds from what was sealed. */
-  source?: Recipe;
-}
-
-/** One exec on a golden machine as the run log records it: the command, what came back, and how long it took. */
-export interface GoldenExec {
-  machineId: string;
-  cmd: string;
-  ms: number;
-  exitCode?: number;
-  stdout?: string;
-  stderr?: string;
-  /** The exec itself failed (the machine gone, the request refused); no exit code exists. */
-  error?: string;
-}
-
-/** `ranIn` absent means the workspace's kind named no folder, so the machine's own home is where its shell landed. */
-export interface RunningExec extends ExecStream {
-  readonly ranIn?: string;
-}
-
-/** What a host wires for the one local workspace this computer can be: the backend that answers with this computer,
- * how a turn's process is launched on it (a real child, not the guest's polled road), where each harness keeps its
- * own sessions here, and the environment a turn runs under. Absent, the runtime serves cloud workspaces alone and
- * `createLocal` is refused. The one place the local variant is registered beside the cloud default. */
-export interface LocalWiring {
-  /** This computer's backend, which publishes the folder its commands run in: the folder a turn and a command start
-   * in when the caller names none is that one and not the person's home, which is one `cd` away and holds the
-   * checkouts they work in themselves. One fact, so the roads that go through the runtime and the ones that reach
-   * the machine directly cannot land in two different folders. */
-  backend: MachineBackend & { readonly folder: string };
-  /** The launch factory for a turn on this computer, under the limits the registry hands every turn (the turn's own
-   * by default, none for the exec verb), so a local turn is cut the way a cloud turn is. `waiting` rides beside them
-   * and is not one: it says the run is stopped on a question only a person can answer, which holds the idle clock. */
-  execStream: (opts?: MachineExecOptions, waiting?: TurnWaiting) => ExecStreamFactory;
-  home: (agentId: string) => string;
-  /** The person's own home: where this computer's daemon browses from, and what a path under it is shortened
-   * against. */
-  homeDir: string;
-  /** Where the folders that daemon may browse as projects are written down. The host that started it names the
-   * file, beside the state it serves, so one host's roots are never another's. */
-  rootsPath: string;
-  /** The environment a turn on this computer runs under, asked every time rather than copied: this process's own
-   * environment moves after a host is built, the login shell PATH among them, and a copy would outlive the change. */
-  env: () => Readonly<Record<string, string>>;
-  /** Where this computer's daemon listens and the token that opens it, in the shape a cloud fork's preview route
-   * arrives in, so the panes and the status probe read one view. The host starts that daemon on the first call and
-   * closes it in close(); a host that wires none leaves the local workspace's panes with nothing to dial. */
-  daemonRoad?: () => Promise<DaemonReachView>;
-  /** The daemon staged beside this host, which is what a workspace here runs and what the copy road spawns: the
-   * version its binary answers as and the line that stages the right one. Both or neither, since a version with no
-   * fix line cannot word the refusal. A wiring that answers none refuses no copy over it, which is a test harness
-   * that wired no daemon. */
-  hereDaemon?: HereDaemon;
-  /** Starts another daemon for this computer's workspace, in place of the one this host is holding: the daemon is
-   * a child of this process, so nothing else can put it back. The old one is let go of and closed, and the call
-   * answers once the new one has listened. */
-  restartDaemon?: () => Promise<void>;
-  /** This computer's own cpu, memory and disk, pushed to the listener every sample until the returned detach runs.
-   * Read off this computer's daemon, the one reader of a machine's load wsp has, so the Live rows of the workspace
-   * that is this computer start it if nothing else has. One watch however many listeners there are; it opens with
-   * the first and closes with the last. */
-  sysSamples?: (fn: (s: SysSample) => void) => Promise<() => void>;
-  /** How a copy of a project folder is made and taken away on this computer: the daemon binary's own copy verb,
-   * run as a child. Every workspace here is a copy, so a wiring with none refuses every create here in one
-   * sentence naming the road it lacks. */
-  copier?: Copier;
-  /** Which computer this is, for the one line a row says about ports being shared: the word is a Mac's or a plain
-   * computer's and nothing here can know which. */
-  platform: "darwin" | "linux";
-  /** Frees whatever the wiring holds open on this computer when the runtime closes. */
-  close?: () => Promise<void>;
-}
-
-/** The daemon beside a host on the computer it runs on: which version the binary answers as in its hello, read by
- * starting it where nothing has, and the line that stages the right one where it is behind. The host owns both
- * facts, since the binary is staged beside the command it installed and only the install road knows how to
- * replace it; the runtime reads them before it runs that binary and says nothing else about it. */
-export interface HereDaemon {
-  version(): Promise<number>;
-  /** The version of the daemon running here now, read without starting one; nothing while none runs. */
-  held?(): number | undefined;
-  fix: string;
-}
-
-/** What the host wires for the seed half of an add: the menu for a folder on this computer, and the archive of
- * whichever rows the person ticked. Both read that folder, which is why neither is the runtime's own. */
-export interface SeedWiring {
-  /** `homes` is each agent's folder on this computer as `agents.homesHere` answers it. */
-  plan(folder: string, homes: Readonly<Record<string, string>>): Promise<SeedPlan>;
-  pack(o: { plan: SeedPlan; choice: SeedChoice; homes: Readonly<Record<string, string>> }): Promise<{ tar: Buffer; files: number; bytes: number; commits: number; left: readonly string[] }>;
-}
-
-export interface RuntimeOptions {
-  backend: MachineBackend;
-  /** The file this runtime's store is kept in, for the one refusal that asks a person to move it aside: a record
-   * written before projects were records of their own is not read, so the sentence has to name what to move. */
-  statePath?: string;
-  /** The local computer as a workspace, when a host wires it; the cloud backend serves every other workspace. */
-  local?: LocalWiring;
-  /** The computers joined to this host as places, when a host wires the keys and the provider row for them:
-   * absent, the runtime holds no place and every place op is refused. Named for the links it wires rather than
-   * `places`, which is the row below: that one is where this host can build a copy of its image, and one option
-   * cannot be two things. `rt.places`, the `places.*` ops and `wsp places` are this one's. */
-  placeLinks?: PlaceWiring;
-  /** How long a computer has to dial back after its own join before an install gives up on it; the door's own wait
-   * unless a test shortens it. */
-  placeJoinWaitMs?: number;
-  /** How long a computer that took an update has to dial back running it before the answer says what it still
-   * reads; the door's own wait unless a test shortens it. */
-  placeUpdateWaitMs?: number;
-  /** The same for one dial of a computer, which the door bounds itself rather than leaving to whatever road the
-   * dial takes. */
-  placeDialWaitMs?: number;
-  /** The same for one machine frame on a place link with no bound of its own. */
-  placeFrameWaitMs?: number;
-  /** The same for how long a frame that may be asked again waits on a computer's link to come back. */
-  placeRelinkWaitMs?: number;
-  store: Store;
-  adapters: Record<string, HarnessAdapterFactory>;
-  /** The variables the vault hands a turn, read at each launch off the wsp home's .env, never copied: a token
-   * minted after the host started reaches the next turn. Absent, turns get none. */
-  vault?: () => Readonly<Record<string, string>>;
-  /** The recipes the host keeps beside its state, which the computers that follow one sync to. */
-  recipes?: RecipeShelf;
-  /** Reads LiteLLM's price file, the one outbound read the usage ledger makes, once a day; absent, nothing is read and
-   * no row is priced off a table. The host wires GitHub's copy of it. */
-  pricesFetch?: () => Promise<unknown>;
-  /** Reads this computer's agent logs for what was used outside wsp, the collector's own reader; absent, no row of
-   * the ledger is read from a log. Read on this computer only, and never while the person has turned it off. */
-  logUsage?: () => Promise<readonly LogUsageRow[]>;
-  /** How a folder on this computer is read and packed to seed a project on another computer. The runtime reads no
-   * folder of the person's itself: the host wires the collector's menu and its own pack, and without them a folder
-   * can only be a project on this computer. */
-  seed?: SeedWiring;
-  /** Required for golden.prepare / golden.seal; the scripted golden.build carries its own. */
-  goldenRecipe?: GoldenRecipe;
-  /** How a copy of the image is planned off the record, every login set to skip. The runtime writes no recipe of
-   * its own, so without it no copy is built anywhere: the build op, the build behind a place being added or a
-   * version cut, and a create that waits on one all stop at the one sentence. Asked for only once a build is going
-   * to run, since it reads this computer. */
-  copyRecipe?: (image: SealedImage) => Promise<GoldenRecipe> | GoldenRecipe;
-  /** Where this host can build a copy of its image. Absent, one place named "default" over `backend`; the host
-   * passes a row per provider module this computer is set up for, the wired one first. */
-  places?: PlaceBackends;
-  /**
-   * Explicit guest paths carried across an upgrade. Default: everything under
-   * /root except golden-provided dirs (VAULT_SKIP), enumerated at export time.
-   */
-  vaultPaths?: string[];
-  /** What a vault export leaves behind, at those paths and under them: the project bundle's cache rule, so a
-   * checkout's installs, build output and nested worktrees never travel and never count against the nap-time cap. */
-  vaultCaches?: CacheRule;
-  /** Defaults for the status poller / cost ticker (tests shrink the intervals). */
-  status?: StatusWatchOptions;
-  /** Defaults for a turn's stream on a machine: the poll pace and the clock its launch retry and its polls wait on
-   * (tests hand in one they move by hand). Each road's own options win over these. */
-  machineExec?: MachineExecOptions;
-  idle?: { defaultWindowMs?: number };
-  /** Drives the idle window and the transcript debounce; tests inject one they advance by hand. */
-  clock?: Clock;
-  /** Where the reads off a git host keep their bodies and ETags; held in memory where none is given. */
-  githubCache?: GitHubCache;
-  /** How long a seal waits for a killed machine to read gone (tests shrink it). */
-  killConfirm?: KillConfirm;
-  /** How long a seal waits between snapshot attempts the provider refused (tests shrink it). */
-  snapshotRetryMs?: number;
-  /** Names this machine and install on the holds it writes, so two machines over one state file never mistake
-   * each other's. The entry points pass hostIdentity(); the bare hostname when absent, which touches no disk. */
-  hostId?: string;
-  wake?: WakeOptions;
-  /** How long one read of the provider gets before a wake asks again (tests shrink it). */
-  providerReadMs?: number;
-  /** How long a gone verdict waits before it reads the machine's state once more (tests shrink it; 0 reads at once). */
-  goneConfirmMs?: number;
-  /** How a turn on this computer reaches back into this host: the loopback it dials, filled once the host's socket
-   * binds and read at each turn, and the wsp command it runs. A fork needs neither, since its wsp rides the link
-   * this host holds to its daemon. */
-  agents?: { here?: { url?: string }; wspMcp?: McpServerSpec };
-  /** The seed each machine's own daemon token is derived from, so a test that pins one reads a machine's token off
-   * its reach view rather than naming it. Absent, every machine's token is minted at random. */
-  daemonToken?: string;
-  /** How this host dials a workspace's own daemon: for the frames the runtime sends itself, and for the channel a
-   * client of this host drives one frame at a time; the real dial unless a test hands in its own. */
-  daemonChannel?: (o: DaemonChannelOptions) => Promise<DaemonChannel>;
-  /** How long a turn's launch waits on the snapshot of its folder before it runs without one (tests shrink it). */
-  turnSnapshotMs?: number;
-  /** How long a daemon gets to announce itself when an update reads the version either side of its deploy; the
-   * hello lands on connect, so a daemon that is there answers in one round trip (tests shrink it). */
-  daemonHelloTimeoutMs?: number;
-  /** How the agents, skills and MCP servers are read off a computer or a workspace; the host wires the catalog's
-   * readers. Absent, every agents.read is refused. */
-  agentsReader?: AgentsReader;
-  /** How the host signs agents in on a target, keeps their keys and writes the wsp tools into their configs; the host
-   * wires the catalog's roads. Absent, every one of those acts is refused. */
-  agentsActs?: AgentsActs;
-  /** How the host searches skills.sh and previews, installs, turns off and on and removes a skill on a target; the
-   * host wires skills.sh and the catalog's skill folders. Absent, every one of those is refused. */
-  skillsActs?: SkillsActs;
-  /** How the host adds, removes and turns off and on one MCP server in an agent's config on a target; the host wires
-   * the catalog's format modules. Absent, every one of those is refused. */
-  serversActs?: ServersActs;
-  /** How the host asks Google for a remote MCP server's icon. Absent, every server draws its glyph. */
-  serverIcons?: ServerIcons;
-  /** The environment labs is read from; this process's when unset, which the entry points mean and a test does not:
-   * a test says the environment it means here rather than inheriting the shell that started it. */
-  env?: Readonly<Record<string, string | undefined>>;
-  /** What a road that needs a machine says where nothing here starts one; the host names it from what it registered.
-   * NO_PROVIDER_LINE when unset. */
-  noMachinesLine?: string;
-}
-
-export interface WakeOptions {
-  /** How long after a wake gave up the provider is read once more for a resume that landed late (tests shrink it). */
-  lateReadMs?: number;
-  /** A nap-time vault archive over this is not stored (a warning names the size). */
-  vaultCapBytes?: number;
-}
-
-/** One read of the provider before a wake asks again; the client sets no request timeout of its own. */
-const PROVIDER_READ_MS = 30_000;
-/** The pause a gone verdict takes before it reads the state once more. A verdict ends every turn on the machine and
- * their unpushed work with them, and the provider answered one call 404 over a machine a direct read found running
- * two minutes later (2026-09-08), so the verdict is worth a second read. */
-const GONE_CONFIRM_MS = 5_000;
-/** What a gone sighting came to: the record settled gone, the state read found the machine there after all, the
- * reads that were to confirm it failed, or the record moved out from under the read (a rebuild, or another road
- * settled it first) and the sighting is stale. */
-type GoneOutcome = "settled" | "not-gone" | "unchecked" | "moot";
-/** A read that found the machine, handed to the load in place of its own get. */
-type FoundMachine = Sighting & { machine: Machine };
-/** Whether the record is gone after the sighting, by this one or by the road that settled it first. */
-const settled = (o: GoneOutcome): boolean => o === "settled" || o === "moot";
-/** A resume the runtime stopped waiting on can still land: one read this long after a wake gave up finds it. */
-const WAKE_LATE_READ_MS = 3 * 60_000;
-/** A daemon that is up answers the hello on connect; a machine whose daemon is gone costs this once on each side of an update. */
-const DAEMON_HELLO_TIMEOUT_MS = 5_000;
-/** The probe's fetch bound; the frame keeps loading meanwhile, so silence costs nothing but the sentence. */
-const PORT_PROBE_TIMEOUT_MS = 10_000;
-
-/** How long a project's clone inside a fresh copy may take before the create gives up on it. A repo of the size
- * wsp is dogfooded on lands in seconds; the budget is for a cold cache on a small machine. */
-const CLONE_MS = 300_000;
-
-/** Why a login is no project: `wsp add user@host` joins a computer, which is the other thing this verb does, and
- * a person who typed one meant that. */
-export const ADD_IS_A_COMPUTER_LINE = "that is a computer, not a project; wsp add user@host joins it, and a project is a folder here or a repo's url with --on <computer>";
-
-/** The folder a person named as this computer sees it: `~` is their home and a relative word is under the folder
- * the host runs in, which is where a caller that resolved nothing typed it. */
-const folderNamed = (path: string): string => {
-  const named = path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : isAbsolute(path) ? path : resolvePathOn(path);
-  // Through the links: a folder under /tmp on a Mac is reached by two names, and git answers with the real one, so
-  // a record written under the other would never match the repo it names.
-  try {
-    return realpathSync(named);
-  } catch {
-    return named;
-  }
-};
-
-/** Whether two sources are the same place: one source on one computer is one project, and the url or the path is
- * the whole of what says so. */
-const sameSource = (a: ProjectSource, b: ProjectSource): boolean => (a.kind === "git" && b.kind === "git" ? a.url === b.url : a.kind === "folder" && b.kind === "folder" ? a.path === b.path : false);
-
-/** What a branch on a project here is refused with when the host wired no daemon binary: the binary makes worktrees. */
-export const NO_COPIER_HERE = "this host has no daemon binary beside it to make a worktree with; stage this wsp's daemon binary and try again";
-
-
-/** The last line a command said, which is what git puts its reason on. */
-const lastLineOf = (said: string): string => said.trimEnd().split("\n").at(-1)?.trim() ?? "";
-/** How the import's done line reads each agent's outcome, after the agent's name. */
-const OUTCOME_WORDS: Record<Exclude<ProjectAgentOutcome, "failed">, string> = {
-  moved: "moved",
-  "transcript-only": "transcripts landed but not yet in its session list",
-  carried: "carried unchanged since it is not on the machine",
-  nothing: "had nothing to carry",
-};
-function outcomeWords(a: ProjectAgentResult): string {
-  if (a.outcome === "failed") return `failed: ${a.error ?? "no reason given"}`;
-  const word = OUTCOME_WORDS[a.outcome];
-  const note = a.note !== undefined ? ` (${a.note})` : "";
-  if (a.outcome === "moved" && a.rows !== undefined) return `${word}, ${a.rows > 0 ? `${plural(a.rows, "row")} merged` : "its rows already there"}${note}`;
-  if (a.outcome === "transcript-only") return `${word}${note}`;
-  return word;
-}
-/** Bounds a merge that hangs; one project's rows take python3 well under it. */
-const MERGE_DEADLINE_MS = 120_000;
-/** Bounds a listing that hangs; walking the agents' homes takes python3 well under it, and past what one inline exec is allowed to run. */
-const LISTING_DEADLINE_MS = 120_000;
-
-/** Runs one agent's merge script on the machine and folds what it printed into the agent's result: rows merged is
- * moved, a store not there yet leaves the rows waiting with the reason, a failure carries the last line of stderr.
- * The script is removed by its own exec once the run ended, so a run the deadline killed leaves nothing behind. */
-async function mergeOnMachine(machine: Machine, script: string, agent: ProjectAgentResult): Promise<ProjectAgentResult> {
-  const dir = script.slice(0, script.lastIndexOf("/"));
-  let run: ExecResult;
-  try {
-    run = await machine.run(`python3 ${shellQuote(script)}`, { deadlineMs: MERGE_DEADLINE_MS });
-  } finally {
-    await machine.exec(`rm -f ${shellQuote(script)}; rmdir ${shellQuote(dir)} 2>/dev/null`).catch(() => undefined);
-  }
-  if (run.exitCode !== 0) {
-    const why = run.stderr.trimEnd().split("\n").at(-1) || "no output";
-    return { ...agent, outcome: "failed", error: `the merge on the machine failed (exit ${run.exitCode}): ${why}` };
-  }
-  try {
-    const out = parseMergeOutput(run.stdout);
-    if ("waiting" in out) return { ...agent, note: out.waiting };
-    return { ...agent, outcome: "moved", rows: out.merged, ...(out.note !== undefined ? { note: out.note } : {}) };
-  } catch (e) {
-    return { ...agent, outcome: "failed", error: e instanceof Error ? e.message : String(e) };
-  }
-}
-
-/** The same for the export's done line, where the state lands on this computer; `carried` cannot happen here. */
-const HOME_WORDS: Record<Exclude<ProjectAgentOutcome, "failed">, string> = {
-  moved: "moved",
-  "transcript-only": "transcripts landed but not yet in its session list here",
-  carried: "carried unchanged",
-  nothing: "had nothing to bring",
-};
-
-/** One agent's export outcome in words: the name, the sessions counted, what became of them, the rollouts skipped. */
-function homeOutcome(a: LandedAgent): string {
-  const counted = a.sessions === undefined ? "" : ` (${plural(a.sessions, "session")})`;
-  const skipped = a.skipped === undefined || a.skipped === 0 ? "" : `, ${plural(a.skipped, "indexed rollout")} not under sessions/ skipped`;
-  return `${a.name}${counted} ${a.outcome === "failed" ? `failed: ${a.error ?? "no reason given"}` : HOME_WORDS[a.outcome]}${skipped}`;
-}
-
-/** Vite's and Next's refusals fit in a few hundred bytes; a page that loaded fine is not carried back whole. */
-export const PORT_PROBE_BODY_CAP = 2048;
-const VAULT_CAP_BYTES = 200 * 1024 * 1024;
-/** Blob collection: the latest nap-time vault per workspace id. */
-const VAULTS = "vaults";
-
-/** What `until` rejects with when the deadline passed and not the promise, so a caller that retries can tell the
- * two apart. */
-class DeadlineError extends Error {}
-
-/** Rejects once the deadline passes; the underlying promise is left to settle on its own. The deadline is read on
- * the clock given, so a move budget measured on an injected clock times out on that clock. */
-function until<T>(p: Promise<T>, deadline: number, what: string, clock: Clock = realClock): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const ms = Math.max(0, deadline - clock.now());
-    const cancel = clock.schedule(() => reject(new DeadlineError(`${what} timed out after ${ms} ms`)), ms);
-    p.then(
-      v => { cancel(); resolve(v); },
-      e => { cancel(); reject(e); },
-    );
-  });
-}
-
-/** Size fields the provider reports that differ from what was created, as
- * "field got != expected". createdAt is left out on purpose: Solari moves it
- * to the resume time on every resume, healthy ones included (measured 3/3
- * with exec answering right after), so it only rides along in the reason. */
-function shapeFault(expected: MachineShape, actual: MachineShape): string | undefined {
-  const diffs: string[] = [];
-  for (const key of ["cpu", "memMb"] as const) {
-    const want = expected[key];
-    const got = actual[key];
-    if (want !== undefined && got !== undefined && want !== got) diffs.push(`${key} ${got} != ${want}`);
-  }
-  return diffs.length === 0 ? undefined : diffs.join(", ");
-}
-
-/** Dirs the golden image already provides on every fresh fork; re-vaulting
- * them is dead weight, and extracting them with --recursive-unlink would
- * delete the fork's own copies first (the image's uv, pipx and pnpm installs live in .local). */
-const VAULT_SKIP = new Set([".local", ".cache", ".npm"]);
-
-/** One RFC 1123 label: lowercase alphanumerics and hyphens, at most 63 chars, hyphen-free at both ends. */
-function hostnameFor(name: string): string {
-  const label = name
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 63)
-    .replace(/-+$/, "");
-  return label === "" ? "wsp" : label;
-}
-
-/** A fresh fork boots as "localhost"; naming it is cosmetic, so a guest that refuses is only logged. Hands back the
- * name set, or the refusal. */
-async function setHostname(machine: Machine, name: string): Promise<{ host: string; refused?: string }> {
-  const host = hostnameFor(name);
-  const res = await machine
-    .exec(`hostname ${host} && echo ${host} > /etc/hostname`)
-    .catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
-  if (res.exitCode === 0) return { host };
-  const refused = `hostname ${host} on ${machine.id} failed: ${res.stderr.trim()}`;
-  console.warn(refused);
-  return { host, refused };
-}
-
-export interface GoldenBuildRequest extends Omit<BuildGoldenOptions, "backend" | "manifest" | "hostId"> {
-  /** Store key; several goldens can coexist. */
-  name?: string;
-}
-
-/** One version the promote road visited: recorded with the template promoted for it, with how many templates
- * already carried the name when the listing was given, or left as it was with the reason, a lost snapshot in the
- * row's own words. */
-export type GoldenPromotion = { golden: string; version: number } & ({ templateId: string; sharing?: number } | { error: string });
-
-export interface GoldenUpgradeResult {
-  manifest: GoldenManifest;
-  version: GoldenVersion;
-  /** builder: the delta went onto the builder kept since the save; fork: onto a fresh fork of the previous head. */
-  road: "builder" | "fork";
-  /** The previous version's snapshot was deleted and the version dropped from the manifest. */
-  previousDropped: boolean;
-  /** The builder is still running for its window; false when the cap fallback or a drop ended it. */
-  builderKept: boolean;
-}
-
-/** How long a builder built from a recipe stays running after its seal, so one more change re-snapshots it (about
- * 11 s, measured) instead of forking. Our clock on the record, since every read of the machine resets the provider's. */
-export const GRACE_MS = 10 * 60_000;
-
-/** How long after one attempt to put a daemon back on a machine before another. A deploy that failed fails the
- * same way fifteen seconds later and the row has already said so, so the retry is slow enough to be worth
- * watching and quick enough that a machine whose npm registry blinked is not left dark for an hour. */
-export const DAEMON_REVIVE_AGAIN_MS = 5 * 60_000;
-
-/** How long a machine that answered with what it lacks is left alone before a daemon is offered to it again. Far
- * wider than the revive window because nothing this host does moves it: a compiler or a lingering login is a
- * person's to put on their own machine, and until they do, every attempt spends a round trip to be told the same
- * sentence. Read across host starts, since the refusal is on the record. */
-export const DAEMON_LACKS_AGAIN_MS = 60 * 60_000;
-
-/** A machine of this setup's the sweep found with no record and recorded again, under the id and name its fork stamped. */
-export interface AdoptedMachine {
-  id: string;
-  workspaceId: string;
-  name: string;
-  phase: WorkspacePhase;
-}
-
-/** What one sweep did: the engine's kills and sparings, plus the machines it recorded rather than killed. */
-export interface SweepResult extends ReapResult {
-  adopted?: AdoptedMachine[];
-}
-
-/** The status tracker as the runtime serves it: the tracker's own surface, with the caller's origin last on the two
- * reads that answer for workspaces, so the snapshot leaves out what that caller may not drive. */
-export interface OriginStatusApi extends Omit<StatusApi, "list" | "history"> {
-  list(opts?: StatusListOptions, origin?: Caller): Promise<WorkspaceStatus[]>;
-  history(workspaceId: string, origin?: Caller): Promise<WorkspaceCostEvent[]>;
-}
-
-/** One session's use as an agent's own log on this computer counted it, which the ledger files as outside wsp. */
-export interface LogUsageRow {
-  agent: string;
-  session: string;
-  at: number;
-  model: string;
-  folder?: string;
-  tokens: { input: number; output: number; cached: number; cacheWrite: number; reasoning: number };
-  cost?: number;
-}
-
-/** How often a read of the Usage page may read the logs again: once a minute, so a turn run outside wsp shows soon. */
-const LOG_READ_EVERY_MS = 60_000;
-
-/** How long one reset script may run on a computer: each of its reads waits ten seconds at most for a line. */
-const RESET_EXEC_MS = 30_000;
-
-export interface UsageDoor {
-  /** outside: count the rows read from this computer's agent logs, where the person has not turned that off. */
-  used(q: { range: UsageRange; split: UsageSplit; outside?: boolean }): Promise<UsedAnswer>;
-  accounts(): Promise<AccountsAnswer>;
-  /** A computer's readings over a range, off the daemon that kept them: this computer, a joined one, or a workspace's
-   * own machine. A daemon that keeps none, or none yet, answers no points. */
-  readings(target: { placeId: string } | { workspaceId: string }, range: UsageRange, origin?: Caller): Promise<ReadingsAnswer>;
-  /** Spends one of an account's banked resets on a computer of the person's that holds its login, `on` naming one by
-   * a word a person types. Refused before anything runs for a key, an away computer and a provider's machines. */
-  reset(ask: { account: string; creditId?: string; on?: string }): Promise<ResetAnswer>;
-}
-
-export interface Runtime {
-  readonly events: EventBus;
-  readonly backend: MachineBackend;
-  /** The places this host holds, when one wired them: the handshake a joining computer takes, the links it keeps
-   * and what a remove sweeps. Absent on a runtime wired without them. */
-  readonly places?: PlaceDoor;
-  /** The recipes the host wired, which the ops serve and the computers that follow one sync to. */
-  readonly recipes?: RecipeShelf;
-  /** One channel to the daemon of the computer this host runs on, the one its local workspace dials, for a terminal
-   * that belongs to this computer rather than to a workspace on it. */
-  hereChannel(onEvent: (event: Record<string, unknown>) => void): Promise<DaemonChannel>;
-  /** The agents, skills and MCP servers on one computer or workspace, read as that computer's login. A napping
-   * workspace answers the last report read while it ran and is never woken for this. */
-  readonly agents: {
-    read(target: AgentsTarget, origin?: Caller): Promise<AgentsReport>;
-    /** One MCP server there, started or asked once for its tools on the person's ask; a napping workspace is refused. */
-    tools(target: AgentsTarget, ask: { agent: string; name: string; refresh?: boolean }, origin?: Caller): Promise<ServerToolsAnswer>;
-    /** Runs an agent's sign-in, or one server's, in a watched pty there, or joins the one already running for that
-     * agent or server there; each step goes to `emit` and to nobody outside the sign-in, and `leave` stops following
-     * it, which ends it once nobody follows it. A napping workspace is refused. */
-    signIn(target: AgentsTarget, ask: SignInAsk, emit: (event: AgentsSignInEvent) => void, origin?: Caller): Promise<{ signInId: string; leave(): void }>;
-    /** Types what a page handed back into that sign-in's pty. */
-    signInCode(signInId: string, code: string): Promise<void>;
-    /** Ends that sign-in and kills its pty, for everyone following it. */
-    signInStop(signInId: string): void;
-    /** The sign-in as the line the person's own terminal runs there. */
-    signInLine(target: AgentsTarget, ask: SignInAsk, origin?: Caller): Promise<SignInLine>;
-    /** Writes an agent's token or key into this host's vault. */
-    key(agent: string, key: string): Promise<void>;
-    /** Writes the wsp server into that agent's own config on this computer. */
-    addTools(target: AgentsTarget, agent: string, origin?: Caller): Promise<{ file: string }>;
-    /** Hands every sign-in from here on the host relay's callback forward to its target; the return takes it back. */
-    forwards(relay: CallbackForwards): () => void;
-    /** skills.sh searched by this host, the only caller of it. */
-    skillsSearch(q: string, limit?: number): Promise<SkillHit[]>;
-    /** A skill's SKILL.md off skills.sh, nothing installed. */
-    skillsGet(skill: string): Promise<SkillPreview>;
-    /** One skill's SKILL.md there, its first part and its size. */
-    skillsPreview(target: AgentsTarget, ask: SkillAsk, origin?: Caller): Promise<SkillPreview>;
-    /** A skill off skills.sh put there, checked whole before it lands and run never. */
-    skillsAdd(target: AgentsTarget, ask: { skill: string; agents?: readonly string[]; project?: boolean }, origin?: Caller): Promise<SkillAdded>;
-    /** Every folder of a skill there and every link to it, gone. */
-    skillsRemove(target: AgentsTarget, ask: SkillAsk, origin?: Caller): Promise<{ removed: string[] }>;
-    /** A skill turned off or on there, by the rename of its SKILL.md. */
-    skillsToggle(target: AgentsTarget, ask: SkillAsk & { on: boolean }, origin?: Caller): Promise<{ paths: string[] }>;
-    /** One MCP server written into an agent's config there: its values into that file on this computer, and on any
-     * other the file names a variable for each and the value goes to the vault. */
-    serversAdd(target: AgentsTarget, ask: ServerAdd, origin?: Caller): Promise<{ file: string }>;
-    /** One server's entry taken out of an agent's config there, every other line as it was. */
-    serversRemove(target: AgentsTarget, ask: ServerAsk, origin?: Caller): Promise<{ file: string }>;
-    /** One server turned off or on there by the switch its agent reads. */
-    serversToggle(target: AgentsTarget, ask: ServerAsk & { on: boolean }, origin?: Caller): Promise<{ file: string }>;
-    /** A remote server's icon as a data url, asked of Google by this host only while the person's switch is on. */
-    serversIcon(host: string, refresh?: boolean): Promise<string | null>;
-    /** Changes how one agent runs on one computer, checked first, and answers its row there, names only. */
-    setup(placeId: string, agent: string, change: AgentSetupSet, origin?: Caller): Promise<AgentRow>;
-    /** Every catalog agent's config folder on this computer by id, where a launch here finds it: the one the person
-     * kept, refused in a launch's words once it leads out of the home, else the agent's own. */
-    homesHere(): Promise<Record<string, string>>;
-  };
-  /** Every verb takes where the request reached the host from as its last argument: here, this computer's own app,
-   * CLI or MCP, or relayed from a machine. Absent reads here. A workspace whose kind takes no relayed request
-   * refuses one with the one sentence, and the lists that serve workspaces leave it out for that caller. */
-  readonly workspaces: {
-    create(opts: CreateWorkspaceOptions, origin?: Caller): Promise<CreatedWorkspace>;
-    /** Where a workspace of this project would land and what that computer offers, gated as a create is; `place` is
-     * absent where the landing is this computer or the provider this host forks on. Read ahead of a create so the
-     * refusal for a computer that forks nothing comes in one sentence before any stage is streamed. */
-    landing(o: { project: string }, origin?: Caller): Promise<{ place?: string; name: string; capabilities: Capabilities }>;
-    get(id: string, origin?: Caller): Promise<WorkspaceView>;
-    /** Every workspace this host holds, less the ones the caller's origin may not drive. */
-    list(origin?: Caller): Promise<WorkspaceView[]>;
-    /** The workspace a name or an id names, off the reading list() serves: every verb that takes a workspace from a
-     * person or an agent comes through here, so what the listing shows and what a verb accepts are one thing. A name
-     * nothing here carries is refused as absent, and one the caller may not drive with the sentence of the rule that
-     * hides it rather than as missing. */
-    resolve(ref: string, origin?: Caller): Promise<WorkspaceView>;
-    nap(id: string, origin?: Caller): Promise<WorkspaceView>;
-    wake(id: string, origin?: Caller): Promise<WorkspaceView>;
-    /** Stops a wake that is asking the provider again on its own, and answers with the record it leaves behind. The
-     * wake itself ends with WAKE_STOPPED; a workspace with no wake in flight is answered with as it stands. */
-    stopWake(id: string, origin?: Caller): Promise<WorkspaceView>;
-    /** Replaces the workspace's machine with a fresh fork of the image behind it, its vaulted files carried over. */
-    upgrade(id: string, origin?: Caller): Promise<WorkspaceView>;
-    /** Moves the workspace onto its golden's head version, carrying its files across. Refused in one sentence when
-     * the machine is not running, the image is a project golden, or no golden knows the image; a workspace past
-     * those and already on the head is returned untouched. */
-    updateImage(id: string, origin?: Caller): Promise<UpgradeResult>;
-    /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
-    rebuild(id: string, origin?: Caller): Promise<WorkspaceView>;
-    /** Starts another daemon for a workspace whose daemon this host holds the process of, in place of one that is
-     * not running. Refused in one sentence for every kind whose daemon lives on a machine instead. */
-    restartDaemon(id: string, origin?: Caller): Promise<void>;
-    /** Names the workspace, under the rules a fork's name takes: the space around the name is dropped, and a name
-     * another workspace holds, one a fork is landing under and a blank one are refused (kind conflict) naming the
-     * holder. A name the workspace already carries answers with the record untouched. The record alone changes, so
-     * this goes out as workspace.renamed and never as workspace.created, which the awake meter and the auto-nap
-     * window read as the machine coming up. Threads on the machine are addressed by id and run on through it. The
-     * machine's own metadata keeps the name it was forked under, since the provider takes metadata at create and
-     * its API offers no update; the next fork or rebuild stamps the new one, and the name is kept here beside the
-     * records so a sweep that records this machine after the store lost its workspace document restores it under
-     * the name a person gave rather than the fork's. */
-    rename(id: string, name: string, origin?: Caller): Promise<WorkspaceView>;
-    /** The theme and the glyph a person gave this workspace. A key left out keeps that fact as it is and null
-     * clears it, so the colour picker and the icon picker each send their own without reading the other's. The record
-     * alone changes and the machine is untouched, so this goes out as workspace.look. */
-    look(id: string, look: WorkspaceLook, origin?: Caller): Promise<WorkspaceView>;
-    /** Snapshots the running machine as a project golden: the golden it stands on plus the project as it is now, so a
-     * fork of the snapshot starts a task with the project in place. Refused in one sentence when the workspace is not
-     * running or holds no project; a machine that was ever resumed is refused by the engine (kind notFirstLife). The
-     * guest freezes for about three seconds and stays first-life. */
-    snapshot(id: string, origin?: Caller): Promise<ProjectGolden>;
-    /** The recipe's daemon deploy on the running machine, replacing the daemon there, then this runtime's token
-     * written again so the next reach opens it. The runtime runs it by itself when a machine's daemon is older than
-     * this wsp. Throws on a workspace that is not running or a runtime without the deploy. */
-    updateDaemon(id: string, origin?: Caller): Promise<void>;
-    /** Turns the workspace's agents switch on or off and names its caps; a key left out keeps what the record holds.
-     * Never a thread's own act: what agents may do is the person's to decide. */
-    agents(id: string, patch: Partial<WorkspaceAgents>, origin?: Caller): Promise<WorkspaceView>;
-    delete(id: string, origin?: Caller): Promise<void>;
-    /** Drops a workspace whose machine the provider no longer has: its record, transcripts and sessions go and nothing
-     * is asked of the provider. Refused with the reason (kind conflict) while the machine still exists. */
-    forget(id: string, origin?: Caller): Promise<void>;
-    /** A person acted in the workspace; its idle window starts over. */
-    touch(id: string, origin?: Caller): Promise<void>;
-    /** One-shot command on the workspace's machine (plumbing for clients; sessions are the main road). */
-    exec(id: string, cmd: string, opts?: { timeoutMs?: number }, origin?: Caller): Promise<ExecResult>;
-    /** The command, word by word, launched the way a harness turn is: detached on the machine, each word quoted for
-     * its shell, exported with what the default harness's turns get, its output streamed by line, its exit code at
-     * the end; in cwd when given, else the folder the workspace's kind names, as a harness turn does. The stream
-     * carries that folder back as `ranIn`, so a client says where the command ran rather than restating the rule.
-     * Rejects when the workspace or that harness's adapter is unknown; a launch that fails ends the stream. */
-    execStream(id: string, argv: ReadonlyArray<string>, cwd?: string, origin?: Caller): Promise<RunningExec>;
-    /** Pushes the branch this workspace's copy is on and opens or finds its pull request against the base. The
-     * base is the branch its parent was on at the fork for a child, read off the child's own record and never off
-     * the parent again, and the project's own base otherwise; the base branch itself is refused: work leaves a
-     * workspace as a branch of its own. A machine with no signed-in command line for the git host still pushes,
-     * and says why the pull request waits as the result's note. */
-    bringBack(o: { workspaceId: string; title?: string; body?: string }, origin?: Caller): Promise<BringBackResult>;
-    /** The record of the folder a thread on this computer runs in, made at its first thread: the project folder, the
-     * caller's own folder when a thread asks naming nothing, the worktree holding a branch, or the folder a cwd
-     * names inside the project or a worktree of its repo. cwd is the folder the start runs in where it named one.
-     * picks, where given, are read against the agent's lists on this computer before any folder is made or found. */
-    folderFor(o: { project?: string; branch?: string; cwd?: string; picks?: StartPicksAsked }, origin?: Caller): Promise<{ workspace: WorkspaceView; cwd?: string }>;
-    /** The record of a project's folder on this computer, made where no thread has made it yet: what the folder's
-     * own acts name before its first thread. */
-    folder(o: { project: string }, origin?: Caller): Promise<WorkspaceView>;
-    /** The worktree holding a branch of a project's repo on this computer, made under the host's folder where none
-     * holds it. */
-    worktree(o: { project: string; branch: string }, origin?: Caller): Promise<WorktreeMade>;
-    /** Takes a worktree wsp made away with git: refused while a turn runs in it, and without force while it holds
-     * files no commit has. Its threads go on in the project folder. */
-    worktreeRemove(o: { project: string; branch: string; force?: boolean }, origin?: Caller): Promise<void>;
-    /** The copy's checkout as the host holds it, read again through the copy's daemon unless it was read within
-     * CHECKOUT_TTL_MS; a machine that is not running and whose computer does not answer for it keeps its last fact. */
-    checkout(id: string, origin?: Caller): Promise<CheckoutReply>;
-    /** Puts one changed file of the copy back as HEAD has it, then reads the checkout again. */
-    discard(o: { workspaceId: string; path: string }, origin?: Caller): Promise<GitDiscardReply>;
-    /** Commits the files named in the copy with the message given, then reads the checkout again; no paths is every
-     * changed file. A thread commits under the same guard a bring back passes. */
-    commit(o: { workspaceId: string; message: string; paths?: string[] }, origin?: Caller): Promise<GitCommitReply>;
-    /** A commit message for the files named, or every changed file, from their diff against HEAD and the task the
-     * workspace's newest thread was opened with, drafted by that thread's agent with no thread and no tool; none with
-     * the line saying why. */
-    commitDraft(o: { workspaceId: string; paths?: string[] }, origin?: Caller): Promise<CommitDraft>;
-    /** The workspace's viewed marks; with a path, the mark on that file set against the blob or taken off at null. */
-    viewed(o: { workspaceId: string; path?: string; blob?: string | null }, origin?: Caller): Promise<ViewedMarks>;
-    /** The workspace's pull request page, read through the git host's command line on this computer, or the running
-     * copy's where this computer has none; held PR_PAGE_HOLD_MS unless asked fresh. */
-    pullRequestView(o: { workspaceId: string; fresh?: boolean }, origin?: Caller): Promise<PullRequestPage>;
-    /** The workspace's pull request's diff against its base, read as the page is and cut at GIT_DIFF_CAP_BYTES. */
-    pullRequestDiff(o: { workspaceId: string }, origin?: Caller): Promise<GitPrDiffReply>;
-    /** Sends items of the page to the workspace's agent as one message, read off the page anew, into the thread a fix
-     * goes to; keeps each item sent with when. Answers once the message is on its way. */
-    pullRequestSend(o: { workspaceId: string; items: readonly PullRequestItem[] }, origin?: Caller): Promise<PullRequestSendResult>;
-    /** Posts a reply as the person through this computer's signed-in command line alone: under the comment on a line
-     * replyTo names, in the thread threadId names, or a new comment in the conversation. */
-    pullRequestReply(o: { workspaceId: string; replyTo?: number; threadId?: string; body: string }, origin?: Caller): Promise<GitPrReplyReply>;
-    /** Resolves or unresolves a review thread by its node id as the person. */
-    pullRequestResolve(o: { workspaceId: string; threadId: string; resolved: boolean }, origin?: Caller): Promise<GitPrResolveReply>;
-    /** Adds a reaction to the item a node id names, or takes it off, as the person. */
-    pullRequestReact(o: { workspaceId: string; subject: string; content: ReactionContent; on: boolean }, origin?: Caller): Promise<GitPrReactReply>;
-    /** Asks the workspace's agent to fix a failed check, named, with the failed steps of its log; with none, updates the
-     * copy from its base and asks it to fix the conflicts where the merge had any, sending nothing when it merged
-     * clean. Answers once the message is on its way, the turn going on without the caller. */
-    fix(o: { workspaceId: string; check?: string; child?: string }, origin?: Caller): Promise<FixResult>;
-    /** Merges the workspace's pull request by the method named, or the repository's default, only while its head is
-     * the commit named, which is the one the window drew, else the one the host holds; or arms it to merge once its
-     * checks pass; then reads it again. A person's act: a thread's own token is refused. */
-    merge(o: { workspaceId: string; method?: MergeMethod; whenChecksPass?: boolean; head?: string }, origin?: Caller): Promise<MergeResult>;
-    /** Merges the base's latest commits into the copy's branch, or answers the files that conflict with the copy left
-     * as it was; then reads the branch line and the pull request again. */
-    update(o: { workspaceId: string }, origin?: Caller): Promise<GitUpdateReply>;
-    /** Merges a child's branch into the lead's copy with a merge commit through the lead's own daemon, from the remote,
-     * or from the child's folder where the project has none and both copies sit on this computer; keeps what it came
-     * to on the child's record, then reads the lead's branch line and its tree again. Refused for a workspace that is
-     * not the lead's child, while a turn runs on the lead, and for a thread merging into any workspace but its own. */
-    mergeIn(o: { workspaceId: string; child: string }, origin?: Caller): Promise<MergeInResult>;
-    /** A workspace started off a GitHub issue or pull request link: the project whose remote names the link's
-     * repository, the text read on this computer, the copy made and, for a pull request, put on its head branch, and
-     * a thread opened with the composed task. A person's act: a thread's own token is refused. */
-    start(o: { url: string; project?: string; agent?: string; model?: string; effort?: string; access?: AccessChoice }, origin?: Caller): Promise<StartResult>;
-    /** A reviewer thread on a pull request, off its link or a workspace's own pull request: a fresh copy at its head,
-     * the agent at its harness's read-only word, Codex where none is named, the diff in its task. A person's act. */
-    review(o: { url?: string; workspaceId?: string; agent?: string; model?: string; effort?: string }, origin?: Caller): Promise<StartResult>;
-    /** A review workspace's draft, edited first where asked: its summary, its verdict and which comments stay ticked. */
-    reviewDraft(o: { workspaceId: string; summary?: string; verdict?: ReviewVerdict; on?: readonly { id: string; on: boolean }[] }, origin?: Caller): Promise<{ review?: ReviewDraft }>;
-    /** Posts the draft on its pull request in one call as the person, the ticked comments alone, pinned to the head the
-     * review was written against. A person's act. */
-    reviewPost(o: { workspaceId: string }, origin?: Caller): Promise<ReviewPostResult>;
-    /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
-    daemonReach(id: string, origin?: Caller): Promise<DaemonReachView>;
-    /** One channel to the daemon answering for this workspace, frame by frame, with every event that daemon
-     * pushes for it: the dial of its own daemon where it runs one, and the link of the computer holding it where
-     * that computer answers for it. The one reading of how a workspace's daemon is reached, so the pane's road
-     * and the runtime's own cannot disagree about which road a workspace is on. */
-    daemonChannel(id: string, onEvent: (event: Record<string, unknown>) => void, origin?: Caller): Promise<DaemonChannel>;
-    /** The same channel for the host's own guest road, which also answers the guest sessions that daemon relays. A
-     * client of this host is never handed one. */
-    guestChannel(id: string, onEvent: (event: Record<string, unknown>) => void): Promise<DaemonChannel>;
-    /** Whether the computer holding this workspace answers its daemon frames, which is what a road that would
-     * otherwise dial reads first: a workspace on a computer somebody owns runs no daemon of its own. */
-    servedByItsComputer(id: string, origin?: Caller): Promise<boolean>;
-    /** This workspace's own utilisation, pushed to the listener every poll tick until the returned detach runs.
-     * Refused for a kind whose Live rows are read off its machine's daemon, which a pane asks over its own link:
-     * the kind table says which is which, so neither side decides it for itself. */
-    watchSys(id: string, fn: (s: SysSample) => void, origin?: Caller): Promise<() => void>;
-    /** The public route to one guest port, for a browser to frame; same caching and refusal as daemonReach. */
-    portReach(id: string, port: number, origin?: Caller): Promise<PortReachView>;
-    /** One fetch of that route from here, as the frame would see it, redirects unfollowed; rejects when nothing answers at
-     * all. A 401 is the edge refusing the token, so the port's route is reminted before the reply and the next portReach
-     * carries the fresh one. */
-    portProbe(id: string, port: number, origin?: Caller): Promise<PortProbeView>;
-    /** The same rule every verb above reads, as a sentence, for the rows and the roads the runtime does not own
-     * itself: the host's port forwards, which it lists and stops by the id of their target. Answers the sentence to
-     * refuse this request with, or nothing when it may drive that workspace; a target no record here names, as a
-     * builder whose ports the host forwards is, is nobody's to hide or refuse for. */
-    originRefusal(id: string, origin?: Caller): Promise<string | undefined>;
-    /** Whether one event off the bus is this caller's to see: the same rule read without asking anything, for the
-     * one road that cannot await, where a per event promise would sit in the path every delta of every turn takes.
-     * A workspace this host does not hold is nobody's to refuse for, as the sentence has it, unless the caller is a
-     * thread: a thread sees its own tree, and an id no record answers for is not in it, which is what a fork still
-     * landing under somebody else is. An event naming the thread it was asked for by is that thread's and its
-     * tree's whatever the records say, which is what a fork's own stages are before its record exists. */
-    seenBy(event: unknown, origin?: Caller): boolean;
-    /** The last stage of every create this host is making and of every refused one it still holds, oldest first:
-     * a window that connects after a create began hears nothing else of it. */
-    creating(): WorkspaceCreatingEvent[];
-  };
-  readonly projects: {
-    /** Records a project: the word a person typed, which is a folder on this computer, a repo cloned into an empty
-     * folder here, or a repo a computer clones, and the computer it lives on. Refused when the word is neither, when the computer's kind takes no source of
-     * that shape, and when that source is already a project on that computer. */
-    add(opts: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice }, origin?: Caller): Promise<ProjectView & { notice?: string }>;
-    /** What a seed of a folder on this computer would carry, with the ticks a remembered choice for that folder
-     * leaves on it. Nothing of the folder is read whole and nothing leaves this computer. */
-    seedPlan(source: string): Promise<SeedPlan>;
-    /** Every project this host holds, oldest first. */
-    list(origin?: Caller): Promise<ProjectView[]>;
-    /** What a new thread on each of those projects starts on, by project id, off the runtime's table. */
-    defaults(origin?: Caller): Promise<Record<string, ThreadDefaults>>;
-    /** The computers a project can live on, by the id and the name each carries in the places table: what `add`
-     * resolves `on` against, read here so a caller names one rather than guessing at the refusal. */
-    computers(): Promise<{ id: string; name: string }[]>;
-    /** The project a word names, by id or by name; refused naming the ones there are. */
-    resolve(ref: string, origin?: Caller): Promise<ProjectView>;
-    /** Drops a project's record and whatever the add made for it on the computer holding it, with the one
-     * sentence the person reads for that computer; refused while a workspace of it stands, naming them. */
-    remove(id: string, origin?: Caller): Promise<{ said: string }>;
-    /** Lands the host's bundle of a folder on the workspace's machine; progress rides project.import events. */
-    import(opts: ProjectImportOptions, origin?: Caller): Promise<ProjectImportResult>;
-    /** Brings a folder and the agent state keyed to it home from the workspace's machine; progress rides project.export events. */
-    export(opts: ProjectExportOptions, origin?: Caller): Promise<ProjectExportResult>;
-  };
-  readonly sessions: {
-    /** Starts a turn; never a second one on a session whose turn is running. A start on a thread whose turn runs
-     * steers the message into it when the harness steers (the handle is the running turn's, outcome steered), else
-     * waits for the turn to end and then starts (outcome queued), several such starts one after another in order. */
-    start(
-      workspaceId: string,
-      opts: {
-        prompt: string;
-        harness?: string;
-        /** The thread the message goes to, by its runtime id: its latest turn is resumed, and a thread whose harness
-         * never announced a session (a launch that never reached the machine) takes the message as a first turn on
-         * that same thread. Rejects when no thread on the workspace has that id. */
-        thread?: string;
-        /** The folder the thread starts in, absolute; it wins over project and the default folder rule. */
-        cwd?: string;
-        model?: string;
-        effort?: string;
-        permissionMode?: string;
-        /** The access in wsp's own word, which the harness's row turns into its mode; a permissionMode beside it wins. */
-        access?: AccessChoice;
-        contextWindow?: string;
-        /** The model's faster output; refused naming the model where its catalog row offers none. */
-        fast?: boolean;
-        /** Absent means a person asked. */
-        startedBy?: SessionOrigin;
-        /** The client's id for this send, stamped on the turn's session.start as sent. */
-        requestId?: string;
-        /** Set where a press in the thread's slate sent this message; stamped on the turn's start or steer. */
-        via?: "slate";
-        /** The id a send to several models opens each of its threads under, stamped on the row as sent. */
-        attempt?: string;
-        /** Who the end of every turn on the thread this start opens is told, each a thread id or NOTIFY_ME: the line
-         * (notifyLine) goes into each named thread through this same start, and for me it is recorded for the person.
-         * A start that resumes a thread keeps what the thread had. Rejects when a target names no thread, and rejects
-         * when one names the thread this start opens. */
-        notify?: readonly string[];
-        /** The TURN_TOKEN_ENV of the turn this request came out of, when it came out of one, off the client's own
-         * environment: what NOTIFY_ME is read against, so a thread names itself without knowing its own id. Rejects
-         * when no turn here carries it. */
-        turnToken?: string;
-        /** The name the thread takes as a person's: it stands from the first second, the harness is told it too, and
-         * no generated title ever replaces it. Rejects on a blank one. */
-        title?: string;
-        /** The images the message carries. Rejects over the caps, and rejects naming the agent when that agent's
-         * adapter reads no image, both before the machine is asked for anything. */
-        attachments?: readonly Attachment[];
-        /** MCP servers the thread this start opens gets besides the ones the harness's own config names, by the name
-         * each takes in a config: what a caller that needs a tool loaded whatever the person's config says hands
-         * over (the cloud setup's own thread, which calls the wsp recipe tools). */
-        mcpServers?: Readonly<Record<string, McpServerSpec>>;
-        /** The line a thread opened on a pull request is told first: the worktree holding the branch was left behind it. */
-        behind?: string;
-      },
-      origin?: Caller,
-    ): Promise<SessionHandle>;
-    /** Every turn this state file knows, the ones before a restart as they were last written. One that was still
-     * running then reads running while its machine still holds its run, since the run is re-opened at load and goes
-     * on to its reply; one whose run no machine has left reads failed. */
-    list(workspaceId?: string, origin?: Caller): Promise<SessionView[]>;
-    /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
-    history(workspaceId: string, origin?: Caller): Promise<SessionEvent[]>;
-    /** One thread's newest events under `before`, as sessions.history answers a page; nothing for a thread the caller
-     * does not reach, as history leaves its events out. */
-    page(workspaceId: string, window: { threadId: string; before?: number; limit?: number }, origin?: Caller): Promise<HistoryPage>;
-    /** The thread's head, by its fold key; refused as not found where the caller reaches no row of it. */
-    head(threadId: string, origin?: Caller): Promise<ThreadHead>;
-    /** One image a person's message carried on that workspace's thread, by the request id its start carries and its
-     * place in the message; refused as not found where the host keeps none. */
-    attachment(workspaceId: string, threadId: string, requestId: string, index: number, origin?: Caller): Promise<KeptAttachment>;
-    /** Stops the session's running turn through its harness, or with task the one subagent of it the agent calls by that
-     * id; a turn already over or an unknown id answers, never throws. */
-    interrupt(sessionId: string, origin?: Caller, task?: string): Promise<SessionInterruptResult>;
-    /** Sends a message into the session's running turn through its harness and records it as session.steer once the
-     * harness took it; a turn already over, a harness without steer or an unknown id answers. Refuses like start
-     * while the workspace is pausing or paused. */
-    steer(sessionId: string, opts: { prompt: string; requestId?: string }, origin?: Caller): Promise<SessionSteerResult>;
-    /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's own id and one
-     * of the options it carried; the tool call it blocks then runs or is refused, and a session.permission.closed
-     * event records which option did it. A prompt already answered, one the harness withdrew and an unknown id
-     * answer rather than throw, since two clients may reach one prompt. */
-    answer(sessionId: string, opts: { askId: string; optionId: string; reason?: string }, origin?: Caller): Promise<SessionAnswerResult>;
-    /** Puts the session's thread at another access mode: the one road that changes a thread's access, since a send
-     * into a thread names none. The thread's record takes the mode and its next turn runs at it; where a turn is
-     * running and its harness takes such a change, the turn in front of the person follows it from its next tool
-     * call on. unsupported is a running turn that takes none mid-turn and keeps its mode, the next turn taking the
-     * pick. The session named is any row of the thread; a thread between turns answers set. */
-    access(sessionId: string, permissionMode: string, origin?: Caller): Promise<SessionAccessResult>;
-    /** Names the session's harness session in the harness's own store, in the field the harness itself writes, and
-     * keeps the name on every row of the thread; a harness that keeps no name of a person's, a store without that
-     * session and an unknown id answer. Refuses while the workspace cannot be reached, as a listing's read needs it. */
-    rename(sessionId: string, title: string, origin?: Caller): Promise<SessionRenameResult>;
-    /** Stamps a thread as shown by a window now, by its fold key, and tells every window with thread.marked. Reads
-     * the absence a name nothing holds reads for a thread the caller cannot reach. */
-    read(threadId: string, origin?: Caller): Promise<void>;
-    /** Stamps each thread as settled by the person and as read, now, and tells every window as read does. */
-    settle(threadIds: readonly string[], origin?: Caller): Promise<void>;
-    /** Pins, snoozes or places each thread, or takes one of those back, and tells every window as read does; a snooze
-     * stamps the thread read too, and every window is told again the moment it ends. */
-    mark(threadIds: readonly string[], marks: ThreadMarks, origin?: Caller): Promise<void>;
-    /** Takes each thread's settled stamp away and stamps it read now, and tells every window as read does. */
-    restore(threadIds: readonly string[], origin?: Caller): Promise<void>;
-    /** The threads the caller reaches whose messages or replies hold the query, case aside, one hit each with the
-     * words around it, off the transcripts this host holds. */
-    search(query: string, origin?: Caller): Promise<SessionSearchResult>;
-    /** Asks the thread's harness a question beside the thread, off the thread's latest row, and records nothing. Takes
-     * any of the thread's session ids. Refused where the harness never announced a session or takes no side question. */
-    aside(sessionId: string, question: string, origin?: Caller): Promise<SessionAsideResult>;
-    /** Rewinds a thread to the end of one of its turns, or with undo puts back the files its last rewind replaced.
-     * Refused whole, before anything is written, on a working thread, one whose threads under it run, the latest
-     * turn, files a turn kept no checkpoint of, and a workspace that is the person's own folder. */
-    rewind(threadId: string, opts: { turnId?: string; files?: boolean; undo?: boolean }, origin?: Caller): Promise<SessionRewindResult>;
-    /** Records one step of a reply's block run on its thread and answers the step the thread now holds: the one asked
-     * for, or the ending the run already had, since two windows may both report one run's end. The output is cut to
-     * its tail. The person's act alone: a thread's own token is refused. */
-    run(step: RunStep, origin?: Caller): Promise<SessionRunEvent>;
-    /** Drops a thread no turn ever ran on, the row a launch that never got going leaves: its rows and its
-     * transcript rows go and nothing is asked of the machine. Takes the runtime's thread id, not a session id.
-     * Refused (kind conflict) with threadForgetRefusal's sentence once a turn of it did work, which threadRan
-     * decides: a turn the agent refused did none, however far its launch got. A thread of another tree reads the
-     * absence a name nothing holds reads, before any of that. */
-    forget(threadId: string, origin?: Caller): Promise<void>;
-    /** Takes a thread on this computer away with its turns and checkpoints, and a worktree wsp made with the thread
-     * when the thread ran in one, every thread in it going too. Never the project folder. */
-    delete(threadId: string, origin?: Caller): Promise<{ workspaceId: string; worktree?: string; threads: number }>;
-  };
-  readonly harnesses: {
-    /** What each harness with an adapter takes at launch; the composer's pickers render from this. With a running
-     * workspace each adapter that probes is asked on its machine, at a session start too, and its answer, or the table
-     * when it gives none, is kept per machine and harness for CATALOG_TTL_MS; without one, or on a workspace that is not
-     * running, the table answers. */
-    list(workspaceId?: string, origin?: Caller): Promise<HarnessCatalog[]>;
-  };
-  readonly golden: {
-    build(opts: GoldenBuildRequest): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
-    /** The manifest at the place the image's own seal stands: the versions wsp init built and updates there. */
-    get(name?: string): Promise<GoldenManifest | undefined>;
-    /** Where an image build goes: the image's own place once a record stands, whatever `word` says; before that,
-     * the place `word` names, by the name or id wsp places lists, else the default place, else the one other place
-     * that runs workspaces. Answers the id its copies are filed under, the name a person
-     * reads and the backend a builder there is made on. Refused with the place's own reason where it runs none, with
-     * NO_BUILD_PLACE_LINE where no place here does, and with buildPlaceAskLine where more than one does and none is the
-     * default. */
-    buildPlace(word?: string): Promise<{ place: string; name: string; backend: MachineBackend }>;
-    /** Boots a first-life builder from the recipe; a person sets it up on its live screen, then seals it.
-     * Once `signal` aborts the call rejects with PrepareStoppedError: a machine this prepare made is killed by its
-     * recorded id and its record dropped (a create still in flight is killed as it lands); a builder it attached to
-     * keeps the seal in it, its hold is released and its record stays reusable. `place` is where the builder is
-     * made, a joined computer or a provider by name or id; absent is the provider this host forks on. `copy` marks a
-     * copy's build, whose frames name the place; the image's own build names none, wherever it runs, which is how
-     * the app tells the two apart. */
-    prepare(opts?: { name?: string; kind?: MachineKind; signal?: AbortSignal; recipe?: GoldenRecipe; place?: string; copy?: boolean }): Promise<GoldenBuilderView>;
-    /** Snapshot, smoke-fork, append a version. A builder built from a recipe is kept running for GRACE_MS after a
-     * successful seal so one more change re-snapshots it; any other builder, and every failed or refused seal, consumes
-     * it, except a snapshot the provider refused: that builder is left as it was and stays recorded for the next init
-     * to attach to while the provider still has it (SnapshotFailedError says which). keepBuilder false ends it with
-     * the seal instead: a caller with no process left to end the window would otherwise leave it billing until the
-     * next host sweeps it. logins: what each sign-in asked of the builder came to, stamped on the version. */
-    seal(builderId: string, opts?: { logins?: GoldenLogin[]; keepBuilder?: boolean }): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
-    /** The recipe the golden's head was built from, or nothing when it was not built from one. */
-    recipe(name?: string): Promise<RecipeDigest | undefined>;
-    /** The next version from the recipe delta: on the builder kept since the save when there is one, else on a
-     * fresh fork of the head. Seals it, repoints the head, and drops the previous version's snapshot when asked. */
-    upgrade(opts: { name?: string; delta: GoldenDelta; keepPrevious?: boolean; logins?: GoldenLogin[]; recipe?: GoldenRecipe }): Promise<GoldenUpgradeResult>;
-    /** How a browser dials the builder's daemon; the builder is not a workspace, so it has its own road. */
-    builderReach(builderId: string): Promise<DaemonReachView>;
-    builders(): Promise<GoldenBuilderView[]>;
-    /** Stops a builder of this setup by its recorded id and drops the record; one another live process holds or another setup owns is refused. */
-    kill(builderId: string): Promise<void>;
-    /** Moves the golden's head; new forks follow it, workspaces already forked keep their image. */
-    rollback(version: number, name?: string): Promise<GoldenManifest>;
-    /** Makes every version of the golden durable: one with no template gets a fresh promotion of its snapshot and
-     * forks boot from it from then on; one whose snapshot the provider has lost is a row saying so and nothing is
-     * written. Undefined on a backend without templates; empty when every version already has one. */
-    promote(name?: string): Promise<GoldenPromotion[] | undefined>;
-    /** Every project golden this runtime took, oldest first. */
-    projects(): Promise<ProjectGolden[]>;
-    /** Deletes a project golden's snapshot at the provider of its place and drops the record once the listing reads
-     * it gone, or at once where the provider already lost it. Refused while any workspace stands on it; a refusal
-     * of the provider's, or a listing that holds the id through the read-back window, keeps the record. */
-    removeProject(snapshotId: string): Promise<ProjectGoldenRemoved>;
-    /** Every snapshot on the account by count, size and monthly cost past the free GB, sized from the provider's
-     * listing and split by who made each one; undefined on a backend that cannot list snapshots. */
-    storage(): Promise<SnapshotStorage | undefined>;
-    /** The snapshots and templates this host made that nothing here records, and the rows left alone beside them;
-     * undefined on a backend that cannot list snapshots. */
-    orphans(): Promise<AccountOrphans | undefined>;
-    /** Deletes what orphans() names, each orphan template before the snapshots (the provider refuses to delete a
-     * snapshot a template stands on). The split is read again first, so nothing recorded since is touched, and
-     * nothing without this host's mark is ever passed to a delete. */
-    deleteOrphans(): Promise<OrphansDeleted | undefined>;
-    /** The golden's ancestors older than its head and the head's parent, with what deleting them frees, minus every
-     * version a workspace of this runtime was forked from; undefined with no golden or no snapshot listing. */
-    retention(name?: string): Promise<RetentionPlan | undefined>;
-    /** Deletes the snapshots retention offers and drops those versions and their recipes from the manifest. The plan
-     * is read again first, so a workspace forked since the offer keeps its version; a delete the provider refuses
-     * keeps the version and is reported by version. */
-    prune(name?: string): Promise<{ dropped: GoldenVersion[]; failed: { version: number; message: string }[] }>;
-  };
-  /** The image this host owns, as against the copy each place holds of it. */
-  readonly image: {
-    get(name?: string): Promise<SealedImageView>;
-    /** The vault bytes and the record, for the host to seal and write; refused when the record holds no vault. */
-    vault(name?: string): Promise<{ image: SealedImage; tar: Buffer }>;
-    /** Prepares a builder at `place` from the recipe `copyRecipe` composes off the record (every login set to skip),
-     * lands the record's vault on it and seals; the copy is recorded under that place at the record's hash. The
-     * recipe is asked for only once every refusal has passed, so the host composes nothing for a build that cannot
-     * run. A place already holding a copy of this record is answered with that copy and builds nothing; a place
-     * whose copy is building is answered with that build, joined, never a second one. Any place wsp places lists
-     * takes it, a joined computer by name or id included. Refused when the place builds no copy at all, when the
-     * record has no small recipe to build from, and, without `force`, when it holds no vault. Progress rides
-     * golden.stage frames carrying the place's id, and the place's row reads them. */
-    build(o: { place: string; name?: string; force?: boolean; signal?: AbortSignal; starting?: () => void }): Promise<SealedImageBuilt>;
-    /** Brings a joined computer's copy up to the record at the end of its setup: nothing where this host holds no
-     * image, where the place runs no workspaces or is not connected, or where its copy already stands on the
-     * record; else the build, joined where one is running there, and built again where the record moved while it
-     * ran. Never rejects: a build that stopped leaves its reason on the place's row until the next build there
-     * takes the row over, which wsp image build or a fork there starts. Resolves once the copy stands or the build
-     * stopped. */
-    keepCurrent(place: string, name?: string): Promise<void>;
-  };
-  /** Enriched status (machine state, daemon reach, size, rate) + cost ticker; its list leaves out the workspaces the
-   * caller's origin may not drive, as workspaces.list does. */
-  readonly status: OriginStatusApi;
-  /** The two usage records, never added together: what was used, split four ways over a range, and what each account
-   * signed in anywhere may still use. */
-  readonly usage: UsageDoor;
-  /** Each thread's slate: its record, the ops a window and the slate verbs send, and a press into the thread. */
-  readonly slates: Slates;
-  /** The computers paired with this host and the one time codes that pair them, one collection each on this state
-   * file, so a restart neither locks a paired computer out nor keeps a revoked one in. */
-  readonly devices: DeviceDoor;
-  /** The person's view preferences, one record on this state file, so the desktop app and a browser tab agree. */
-  readonly preferences: {
-    get(): Promise<Preferences>;
-    /** The patch over the record; the record kept and pushed as preferences.changed to every socket. */
-    set(patch: PreferencesPatch): Promise<{ preferences: Preferences; notice?: string }>;
-  };
-  /** This state file's owner id, stamped on every machine it creates: a machine wearing another one was made by
-   * another host standing on the same account. Minted on the first read when the state file has none. */
-  owner(): Promise<string>;
-  /** Records this state file's workspace machines that no record claims, kills its builders and smoke forks that none
-   * claims plus orphans past their backstop, and lists the running machines it left alone. `say` is where every
-   * later line about a machine still being asked to stop goes, from this sweep on. */
-  reap(olderThanMs?: number, say?: (line: string) => void): Promise<SweepResult>;
-  /** Writes every transcript still waiting on its debounce; the store is complete once this resolves. */
-  close(): Promise<void>;
-}
-
-/** What this host left on the account that nothing here records, and what it deliberately leaves alone beside it.
- * A snapshot carries no provider metadata, so a row is this host's only by the mark in its name; anything without
- * that mark is another host's or a person's and is named, never deleted. */
-export interface AccountOrphans {
-  snapshots: SnapshotRow[];
-  templates: TemplateRow[];
-  /** What the orphan snapshots hold, and what deleting them takes off the monthly bill once storage is billed. */
-  freedBytes: number;
-  savesUsdPerMonth: number;
-  /** No mark of this host, so nothing here may touch them. */
-  others: { snapshots: SnapshotRow[]; templates: TemplateRow[] };
-}
-
-export interface OrphansDeleted {
-  snapshots: SnapshotRow[];
-  templates: TemplateRow[];
-  /** One per delete the provider refused; the row stays on the account. */
-  failed: { id: string; name?: string; message: string }[];
-}
-
-const WORKSPACES = "workspaces";
-/** The projects this host holds, by id: a computer, a source that computer can see and the branch a workspace of
- * it starts on. A workspace's record names one of these and nothing else about it. */
-const PROJECTS = "projects";
-/** The seed choice a person asked to be remembered, keyed by the folder on this computer it was made for: the next
- * add of that folder starts with those ticks rather than the catalog's own. */
-const SEED_CHOICES = "seed-choices";
-/** One manifest per place and golden name: a place's own built copy of the image, keyed `<place>/<name>`. A state
- * file written before places carries it under the bare name and the boot moves it under the wired place. */
-const GOLDENS = "goldens";
-/** The recipe each sealed version was built from, keyed `<place>/<name>@v<version>`; the next update diffs against the head's. */
-const GOLDEN_RECIPES = "golden-recipes";
-/** One document per project golden, keyed by its snapshot id. */
-const PROJECT_GOLDENS = "project-goldens";
-/** The image record the host owns, one per golden name; every copy is built from it. */
-const IMAGES = "images";
-/** The one refusal for a copy build on a runtime wired without a composer for its recipe. */
-export const NO_COPY_RECIPE = "this runtime cannot compose the recipe a copy builds from; the host that serves the app wires one";
-/** The one refusal for a seed on a runtime the host wired no folder reader into: nothing of the person's folder is
- * read or sent by a runtime that cannot show them the menu first. */
-export const NO_SEED_WIRING = "this runtime cannot read a folder on this computer, so a folder cannot seed a project elsewhere; the host that serves the app wires the reader";
-
-/** One blob per sealed version, `<name>@v<version>`: the vault as it was taken off that version's builder. */
-const IMAGE_VAULTS = "image-vaults";
-/** The one key rule for a place's copy of a golden, and for the recipe that copy was built from. */
-export const copyKey = (place: string, name: string): string => `${place}/${name}`;
-/** The same rule read back: the place and the golden a stored key names. A key from before places names no place,
- * and its copy is the wired one's, which only the caller knows the name of. */
-const copyKeyParts = (key: string): { place?: string; name: string } => {
-  const at = key.indexOf("/");
-  return at === -1 ? { name: key } : { place: key.slice(0, at), name: key.slice(at + 1) };
-};
-const recipeKey = (name: string, version: number): string => `${name}@v${version}`;
-const vaultKey = recipeKey;
-const TRANSCRIPTS = "transcripts";
-/** The events of a transcript an older build kept inside the state file that fell outside the byte cap as it moved to
- * a file of its own: written at the move and never trimmed, so no event the person had is lost. */
-const TRANSCRIPT_HEADS = "transcript-heads";
-/** Each transcript's index, beside it: what the host keeps of a transcript it does not hold. */
-const TRANSCRIPT_INDEX = "transcript-index";
-/** The images a person's messages carried, one blob each under its attachmentKey: the transcript keeps their records
- * alone, and a client that did not send one, or sent it before a restart, draws it from here. */
-const ATTACHMENTS = "attachments";
-/** One document per workspace naming the images it keeps, by thread, so a thread or a workspace takes exactly its
- * own with it whatever its transcript has since trimmed. */
-const ATTACHMENT_KEYS = "attachment-keys";
-/** One document per workspace: the turns sessions.list serves, read back at boot so the rows outlive the process. */
-const SESSIONS = "sessions";
-/** The name a person gave a workspace, keyed by its id, which its machines carry as a label across every rebuild:
- * the sweep reads it when it records a machine whose workspace document this store lost, so a restored record keeps
- * that name rather than the one the fork stamped, which the provider takes at create and never updates. */
-const WORKSPACE_NAMES = "workspace-names";
-/** The machine of every workspace deleted here, by machine id: one listed running again is the sweep's to kill, not a
- * lost record to report and leave billing. */
-const DROPPED = "dropped-machines";
-/** One Solari sandbox read gone after its delete listed running again 73 minutes later (measured 2026-09-26), and a
- * durable record the provider reloads has no bound; a live record claims its machine before this set is read, so a
- * wide window costs nothing. */
-export const DROPPED_WATCH_MS = 7 * 24 * 60 * 60_000;
-/** One record under one id: the person's view preferences. */
-const PREFERENCES = "preferences";
-const PREFERENCES_ID = "default";
-/** One record under one id: when this state file began keeping a read stamp per thread. A thread whose turn ended
- * before it reads as seen, so the stamps arriving do not mark every old thread unread at once. */
-const READS = "reads";
-const READS_ID = "since";
-
-/** What the timeline shows as the last row of a turn the runtime ended, not the harness. */
-const PAUSED_REASON = "machine paused while the agent was working";
-const DELETED_REASON = "machine deleted while the agent was working";
-const RESTARTED_REASON = "host restarted while the agent was working";
-const GONE_REASON = "machine gone at the provider while the agent was working";
-/** The host log's one line for a workspace found gone, from the road and from the record load alike. */
-const goneLogLine = (workspaceId: string, words: string): string => `workspace ${workspaceId} is gone: ${words}`;
-/** The host log's one line for the runs a connecting host ended on a machine because no row of its own held them. */
-const sweptRunsLogLine = (workspaceId: string, runs: readonly string[]): string =>
-  `ended ${runs.length === 1 ? "1 harness run" : `${runs.length} harness runs`} on ${workspaceId} that no thread here holds: ${runs.join(", ")}`;
-/** The host log's one line for a harness store that would not give a title, said once per session until a read
- * answers. */
-const noTitleLogLine = (sessionId: string, workspaceId: string, words: string): string =>
-  `no title for session ${sessionId.slice(0, 8)} on ${workspaceId}: ${words}`;
-/** The host log's one line for a thread its harness would not name; the thread keeps its opening turn's words and
- * nothing asks again, so this is said once per thread. */
-const noMadeTitleLogLine = (threadId: string, workspaceId: string, words: string): string =>
-  `thread ${threadId.slice(0, 8)} on ${workspaceId} keeps its opening words: ${words}`;
-/** The log line for a turn's end whose checkout kept no checkpoint: the turn stands, and only its files cannot be rewound. */
-const noCheckpointLogLine = (threadId: string, workspaceId: string, words: string): string =>
-  `no checkpoint of the files at thread ${threadId.slice(0, 8)}'s turn end on workspace ${workspaceId}: ${words}`;
-/** The host log's one line for a name the harness's own store would not take: the thread carries the name here
- * whatever its harness did with it, so only the harness's own UI is out of step. */
-const noNameWriteLogLine = (sessionId: string, workspaceId: string, words: string): string =>
-  `the harness did not take the name for session ${sessionId.slice(0, 8)} on ${workspaceId}: ${words}`;
-/** What a cut turn's parent hears: the row's own span, since no harness result reports one. */
-const restartCutLine = (elapsedMs: number): string => `cut by a host restart after ${fmtDuration(elapsedMs, "clock")}`;
-/** A guest with no daemon is asked again after this long (one may be deployed later). */
-const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
-/** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
-const TRANSCRIPT_CAP = 5000;
-/** The bytes of JSON one workspace's transcript keeps, past which its oldest events fall off too: every transcript
- * is held in memory whole, and a turn's tool calls carry whole files, so the count alone let one workspace hold a
- * hundred megabytes. */
-export const TRANSCRIPT_BYTES = 4 * 1024 * 1024;
-/** The characters of one tool result a transcript keeps. Every reader of a kept result reads its first line (the
- * app's row, the terminal's line, a subagent's answer), and the live stream still carries it whole. */
-export const TOOL_RESULT_KEPT = 16 * 1024;
-/** The transcripts held whole after they were opened, the newest kept: reopening one of them reads no file. Every
- * other transcript is its index and the events written since its last flush. */
-export const TRANSCRIPTS_HELD = 4;
-/** The bytes of events written since a transcript's last flush past which it flushes without waiting for a turn
- * boundary, so a turn that streams for an hour holds no more of itself than a flushed transcript would. */
-const PENDING_FLUSH_BYTES = 1024 * 1024;
-/** setTimeout's longest wait; a longer one fires at once. */
-const MAX_TIMER_MS = 2 ** 31 - 1;
-
-/** One thread's words as search reads them: its messages, the message still open, and when it last said anything. */
-interface ThreadWords {
-  lines: string[];
-  open: string | undefined;
-  last: number;
-}
-
-/** What the host keeps of a transcript it does not hold: each thread's words for search, and the facts a send reads
- * off the transcript. Folded one event at a time in the order they were written, so it answers what a walk of the
- * whole transcript would. */
-interface TranscriptIndex {
-  words: Map<string, ThreadWords>;
-  /** The harness session each thread's newest start announced. */
-  starts: Map<string, string>;
-  /** Whether each thread's newest end came with no exit code and no result. */
-  cut: Map<string, boolean>;
-  /** The folder, access and model each session's newest start that named one named. */
-  facts: Map<string, SessionFacts>;
-  /** The turn each start the transcript holds by its request id opened or joined: a start sent again under that id
-   * after the host stopped under it is answered with this turn, never a second one. */
-  taken: Map<string, Taken>;
-  /** Each thread's subagents by the agent's id for them, in the order they started, with the turn each ran under. */
-  children: Map<string, Map<string, Child>>;
-  /** The newest position the transcript has issued. It never moves back, so the position of an event a delete or a
-   * rewind took away is never issued again. */
-  pos: number;
-}
-
-/** A subagent as the index holds it: what a listing answers, the turn whose end stops it if it is still running, and
- * when its newest start row was written, which a resumed child is held by while that row is in the ring. */
-type Child = SubagentView & { turnId?: string; startRow?: number };
-
-interface Taken {
-  sessionId: string;
-  threadId: string;
-  turnId: string;
-  outcome: "started" | "steered";
-}
-
-/** A transcript file that is there and did not read. Nothing is written over it, since what it holds is still in it. */
-const transcriptUnreadLine = (workspaceId: string, why: string): string => `the transcript of ${workspaceId} does not read (${why})`;
-
-/** What a resumed session's turns carry, read off its newest start that named each. */
-const SESSION_FACTS = ["cwd", "permissionMode", "model"] as const;
-type SessionFacts = Partial<Record<(typeof SESSION_FACTS)[number], string>>;
-
-const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map(), taken: new Map(), children: new Map(), pos: 0 });
-
-/** One session.subagent row into a thread's children: a start makes the child, or runs a resumed one again, and an end
- * moves one the index holds. An end whose start has left the ring finds none, so the child stays gone with it. */
-function foldChild(index: TranscriptIndex, e: Extract<SessionEvent, { type: "session.subagent" }>): void {
-  if (e.threadId === undefined) return;
-  const held = index.children.get(e.threadId) ?? new Map<string, Child>();
-  const child = held.get(e.task);
-  if (e.state === "running") {
-    held.set(e.task, {
-      id: e.task,
-      title: e.title ?? child?.title ?? e.task,
-      state: "running",
-      ...((e.parentToolUseId ?? child?.parentToolUseId) !== undefined ? { parentToolUseId: e.parentToolUseId ?? child?.parentToolUseId } : {}),
-      ...((e.depth ?? child?.depth) !== undefined ? { depth: e.depth ?? child?.depth } : {}),
-      startedAt: child?.startedAt ?? e.at ?? 0,
-      ...(e.turnId !== undefined ? { turnId: e.turnId } : {}),
-      ...(e.at !== undefined ? { startRow: e.at } : {}),
-    });
-    index.children.set(e.threadId, held);
-  } else if (child !== undefined) {
-    child.state = e.state;
-    child.endedAt = e.at ?? child.startedAt;
-  }
-}
-
-/** A turn's end stops every child of it still running: whatever ended the turn ended them with it. */
-function endChildren(index: TranscriptIndex, threadId: string, turnId: string | undefined, at: number | undefined): void {
-  for (const child of index.children.get(threadId)?.values() ?? []) {
-    if (child.state !== "running" || child.turnId !== turnId) continue;
-    child.state = "stopped";
-    child.endedAt = at ?? child.startedAt;
-  }
-}
-
-/** A row the ring dropped: a child whose start it was leaves the index with it. */
-function forgetChild(index: TranscriptIndex, e: SessionEvent): void {
-  if (e.type !== "session.subagent" || e.state !== "running" || e.threadId === undefined) return;
-  const held = index.children.get(e.threadId);
-  if (held === undefined || held.get(e.task)?.startRow !== e.at) return;
-  held.delete(e.task);
-  if (held.size === 0) index.children.delete(e.threadId);
-}
-
-/** One event into an index: the person's messages and its own agent's replies by thread, a reply's pieces joined back
- * into the one message they are, and the newest start and end of each thread and session. A subagent's lines are the
- * subagent's, and a row stamped no thread names none a hit could open. */
-function foldEvent(index: TranscriptIndex, e: SessionEvent): void {
-  if (e.pos !== undefined && e.pos > index.pos) index.pos = e.pos;
-  if ((e.type === "session.start" || e.type === "session.steer") && e.requestId !== undefined && e.threadId !== undefined && e.turnId !== undefined) {
-    index.taken.set(e.requestId, { sessionId: e.sessionId, threadId: e.threadId, turnId: e.turnId, outcome: e.type === "session.start" ? "started" : "steered" });
-  }
-  if (e.type === "session.start") {
-    if (e.threadId !== undefined) index.starts.set(e.threadId, e.sessionId);
-    const facts = index.facts.get(e.sessionId) ?? {};
-    for (const fact of SESSION_FACTS) if (e[fact] !== undefined) facts[fact] = e[fact];
-    index.facts.set(e.sessionId, facts);
-  } else if (e.type === "session.end" && e.threadId !== undefined) {
-    index.cut.set(e.threadId, e.exitCode === null && !e.sawResult);
-    endChildren(index, e.threadId, e.turnId, e.at);
-  } else if (e.type === "session.subagent") foldChild(index, e);
-  if (e.threadId === undefined) return;
-  const held = index.words.get(e.threadId) ?? { lines: [], open: undefined, last: 0 };
-  index.words.set(e.threadId, held);
-  held.last = Math.max(held.last, e.at ?? 0);
-  if ((e.type === "session.start" && e.prompt !== undefined) || e.type === "session.steer") {
-    held.lines.push(e.prompt!);
-    held.open = undefined;
-  } else if (e.type === "session.delta" && e.kind === "text" && e.parentToolUseId === undefined) {
-    const message = `${e.turnId ?? e.sessionId}:${e.messageId ?? ""}`;
-    if (held.open === message) held.lines[held.lines.length - 1] += e.text;
-    else held.lines.push(e.text);
-    held.open = message;
-  }
-}
-
-const indexOf = (events: readonly SessionEvent[]): TranscriptIndex => {
-  const index = emptyIndex();
-  for (const e of events) foldEvent(index, e);
-  return index;
-};
-/** How much of itself a turn has written, read off its workspace's transcript, where a live turn's rows are at the
- * tail. Only these are kept, since a turn holding the transcript would hold it whole for as long as it runs. */
-interface TurnWritten {
-  lines: number;
-  /** The subagent rows it wrote, counted apart from the deltas: a host from before they were written counted only
-   * deltas, and a run it left is re-read with every one of its subagent lines still to write. */
-  subagents: number;
-  reply?: TurnResult["status"];
-  started: boolean;
-  /** Its card is written, so a host that re-opens it writes no second one, as a reply already written stands. */
-  changes: boolean;
-}
-const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritten => {
-  const lastOf = <T extends SessionEvent["type"]>(type: T): Extract<SessionEvent, { type: T }> | undefined => {
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i]!;
-      if (e.type === type && e.turnId === turnId) return e as Extract<SessionEvent, { type: T }>;
-    }
-    return undefined;
-  };
-  // From the stamp the last surviving line carries rather than from how many survive: the transcript is capped per
-  // workspace and drops its oldest rows, so counting them would read a turn whose head has been evicted as shorter
-  // than it was and write its tail a second time.
-  const lines = lastOf("session.delta")?.line ?? 0;
-  const subagents = lastOf("session.subagent")?.line ?? 0;
-  const reply = lastOf("session.done")?.result.status;
-  // A turn with a line or a reply already written had its start written too, whether or not the cap still holds it:
-  // a second start row at the tail of the transcript would sit after the work it opened.
-  return { lines, subagents, ...(reply !== undefined ? { reply } : {}), started: lines > 0 || subagents > 0 || reply !== undefined || lastOf("session.start") !== undefined, changes: lastOf("session.changes") !== undefined };
-};
-
-/** An index as its file holds it, with the mark of the transcript file it was read off: an index whose transcript
- * has been written since (a crash between the two writes, a failed index write) is one boot reads again, and so is
- * one that does not parse, and one written before it held the starts by request id, since the restart that brings
- * this host up is the one a send may be waiting across. */
-const indexBytes = (index: TranscriptIndex, of: BlobMark | undefined): Buffer =>
-  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts], taken: [...index.taken], children: [...index.children].map(([thread, held]) => [thread, [...held]]), pos: index.pos }));
-const indexRead = (bytes: Buffer): { index: TranscriptIndex; of?: BlobMark } | undefined => {
-  try {
-    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][]; taken?: [string, Taken][]; children?: [string, [string, Child][]][]; pos?: number };
-    if (held.taken === undefined || held.children === undefined || held.pos === undefined) return undefined;
-    const children = new Map(held.children.map(([thread, kids]) => [thread, new Map(kids)]));
-    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts), taken: new Map(held.taken), children, pos: held.pos }, ...(held.of !== undefined ? { of: held.of } : {}) };
-  } catch {
-    return undefined;
-  }
-};
-
-/** The words around a hit, on one line: a little before it and more after, an ellipsis where the text goes on. */
-function snippetAround(text: string, at: number, length: number): string {
-  const from = Math.max(0, at - 40);
-  const to = Math.min(text.length, at + length + 80);
-  return `${from > 0 ? "…" : ""}${text.slice(from, to).replace(/\s+/g, " ").trim()}${to < text.length ? "…" : ""}`;
-}
-/** Index rows kept per workspace; the oldest finished rows fall off, a running one never does. A row that falls off
- * still holding its launch's commit takes its unread card with it. */
-const SESSION_INDEX_CAP = 200;
-/** A turn boundary waits this long for more before the transcript is written; measured at one put per
- * event, 5000 events cost 4 s of memory-store clones and 6.6 s of file rewrites after the last turn. */
-export const TRANSCRIPT_FLUSH_MS = 250;
-
-/** What a restore needs about a workspace that no label on its machine carries: the name as a person set it here,
- * and the project the workspace was made for. Kept beside the workspace records, so a sweep that finds a machine
- * whose record this store lost can put the record back under the same name and the same project. */
-interface NamedWorkspace {
-  workspaceId: string;
-  name: string;
-  project?: string;
-}
-
-interface DroppedMachine {
-  machineId: string;
-  at: string;
-}
-
-interface TranscriptRecord {
-  workspaceId: string;
-  events: SessionEvent[];
-}
-
-/** What a live turn knows beyond its row: the status of a reply that landed while its process still ran, absent
- * until the harness's result arrives and read by every road that ends the row before the process exits. */
-interface TurnLive {
-  reply?: TurnStatus;
-}
-
-/** The message a turn's agent was handed and the effort it ran at, kept beside its run while it runs: the row's own
- * prompt is the thread's opening once a later turn takes the row over, and an agent that takes its message after its
- * process starts is handed this one by a host that re-opens the run before it went. */
-interface TurnAsked {
-  prompt: string;
-  effort?: string;
-  /** The message as the person typed it, where the agent was handed more (the paths of the files it carried): what
-   * the turn's own start row shows, written by a host that re-opens a turn before its first row went. */
-  typed?: string;
-}
-
-/** How long a closing host waits for the agents it kept to exit on their EOF before it lets go of reading them. */
-const KEPT_CLOSE_WAIT_MS = 2_000;
-
-/** A thread's agent process kept up between its turns: what its launch fixed, the session it holds, the turn token and
- * device its environment carries, the box its stream reads for a turn stopped on a person, how its session file stood
- * when its last turn ended, when that was, and the cancel of the keep's own clock. */
-interface KeptProcess {
-  workspaceId: string;
-  agent: KeptAgent<HarnessSession>;
-  launch: KeptLaunch;
-  session: string;
-  turnToken: string;
-  scopeDeviceId?: string;
-  waiting: { on: boolean };
-  file?: SessionFileStamp;
-  usedAt: number;
-  cancel: () => void;
-}
-
-/** A launch as a kept process is matched against: what is fixed for the life of the process (the agent, the folder, the
- * MCP servers named, the binary's version and the person's setup for it), and the picks a send made. */
-interface KeptLaunch {
-  fixed: string;
-  picks: Readonly<Record<string, unknown>>;
-}
-
-/** Whether a send's launch is the kept one's: the same fixed part, and every pick the send names the one the process
- * runs at. A send into a thread that names no model or effort leaves the session at its own, which is the process's. */
-function launchesAs(kept: KeptLaunch, send: KeptLaunch): boolean {
-  return kept.fixed === send.fixed && Object.entries(send.picks).every(([pick, value]) => kept.picks[pick] === value);
-}
-
-/** How a kept agent's session file stood when its turn ended: the path it was found at and its size, or no path where
- * the agent had written none yet. */
-interface SessionFileStamp {
-  path?: string;
-  size: number;
-}
-
-/** The one file under `folder` whose name ends in `name`, `depth` folders down, newest folders first. */
-function findSessionFile(folder: string, name: string, depth: number): string | undefined {
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(folder, { withFileTypes: true });
-  } catch {
-    return undefined;
-  }
-  if (depth === 0) {
-    const file = entries.find(e => e.isFile() && e.name.endsWith(name));
-    return file === undefined ? undefined : join(folder, file.name);
-  }
-  for (const dir of entries.filter(e => e.isDirectory()).sort((a, b) => b.name.localeCompare(a.name))) {
-    const found = findSessionFile(join(folder, dir.name), name, depth - 1);
-    if (found !== undefined) return found;
-  }
-  return undefined;
-}
-
-function sizeOf(path: string): number {
-  try {
-    return statSync(path).size;
-  } catch {
-    return -1;
-  }
-}
-
-function stampSessionFile(at: KeptAgent<unknown>["sessionFile"], known?: string): SessionFileStamp | undefined {
-  if (at === undefined) return undefined;
-  const path = known ?? findSessionFile(at.folder, at.name, at.depth);
-  return path === undefined ? { size: -1 } : { path, size: sizeOf(path) };
-}
-
-/** Whether the session file stands as the stamp found it: the same size where one was found, still none where none
- * was. An agent that names no file is taken at its word. */
-function sameSessionFile(at: KeptAgent<unknown>["sessionFile"], stamp: SessionFileStamp | undefined): boolean {
-  if (at === undefined || stamp === undefined) return true;
-  const now = stampSessionFile(at, stamp.path);
-  return now !== undefined && now.path === stamp.path && now.size === stamp.size;
-}
-
-/** A turn's message read back off the host's own session index, nothing where the document holds anything else. */
-function readAsked(raw: unknown): TurnAsked | undefined {
-  if (typeof raw !== "object" || raw === null) return undefined;
-  const { prompt, effort, typed } = raw as Record<string, unknown>;
-  return typeof prompt === "string" ? { prompt, ...(typeof effort === "string" ? { effort } : {}), ...(typeof typed === "string" ? { typed } : {}) } : undefined;
-}
-
-/** A thread scope read back off the host's own session index: the shape the runtime minted, and nothing where the
- * document holds anything else, so a line delivered after a restart is never started under a caller nobody proved. */
-function readScope(raw: unknown): ThreadScope | undefined {
-  if (raw === undefined) return undefined;
-  const read = ThreadScope.safeParse(raw);
-  return read.success ? read.data : undefined;
-}
-
-/** The road those targets were registered from, read back the same way and for the same reason: a document
- * written before the road rode beside them carries none, and one carrying a word this protocol does not know
- * carries nothing, so a line delivered after a restart starts under no road nobody wrote. */
-function readRoad(raw: unknown): WorkspaceOrigin | undefined {
-  if (raw === undefined) return undefined;
-  const read = WorkspaceOrigin.safeParse(raw);
-  return read.success ? read.data : undefined;
-}
-
-/** A thread's own record: the agent it runs on and the access it is at, written at its first turn and moved by the
- * access verb alone. The rows are capped at SESSION_INDEX_CAP per workspace and the transcript at TRANSCRIPT_CAP
- * events, while a thread keeps its agent and its access for its whole life, so both are read here first and off
- * the rows only for a thread from before the record existed. */
-interface ThreadRecord {
-  harness: string;
-  permissionMode?: string;
-  /** When a window last showed the thread and when the person settled it, ms epoch; kept here rather than on a row,
-   * since every row of the thread shares them and a row falls off the cap while the thread lives on. */
-  readAt?: number;
-  settledAt?: number;
-  /** The person's marks on the thread, kept here for the same reason; snoozedUntil is kept after it passes, since
-   * the thread reads Done off it until a window shows it. */
-  pinnedAt?: number;
-  snoozedUntil?: number;
-  section?: ThreadPlacement;
-  /** The anchor a rewind kept, held until the next turn of a harness that cuts on its next resume has taken it. */
-  resumeAt?: string;
-  /** The checkpoint of the files as they stood before the last rewind that moved them, which Undo rewind restores,
-   * held until the thread's next turn ends. */
-  rewound?: { before: string; at: number };
-  /** The folders this thread's attached files landed in, which a forget of the thread or a delete of its workspace
-   * takes them off. */
-  filesIn?: string[];
-}
-
-interface SessionIndexRecord {
-  workspaceId: string;
-  /** The files a person marked viewed, by path, against the blob id each had then. */
-  viewed?: Record<string, string>;
-  /** reply is the held status of a turn whose result landed while its process still ran, on a row still running;
-   * run is where that turn is on its machine, so a host that comes back re-opens it rather than failing it, and
-   * turnToken is what that surviving process still has in its environment, so the host that re-opens it can answer
-   * for it; from is where the turn starts in that run's log, on a process that served the thread's earlier turns. All
-   * of these are written for a running row alone. snapshot is the commit the turn's launch took of its
-   * folder, which the turn's changes are read against wherever it ends; written while the turn runs and until that
-   * read is in. */
-  sessions: (SessionView & { turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; reply?: TurnStatus; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string })[];
-  /** Every thread of the workspace by its runtime id; absent on a document from before threads had a record. */
-  threads?: Record<string, ThreadRecord>;
-}
-
-/** Builders live apart from workspaces: never in the rail, and a record left
- * by a crashed wizard is exactly what reap() sweeps. */
-const BUILDERS = "builders";
-/** One id per state file, stamped on every machine it creates so another host's sweep can tell them apart from its own. */
-const OWNER = "owner";
-/** The create attempt in flight for a record, written before the provider hears of it. */
-const CREATES = "creates";
-/** The provider caps a key at 255 characters (measured 2026-09-04); the purpose is hashed past what a 16-hex nonce leaves. */
-const KEY_PURPOSE_MAX = 255 - 17;
-interface PendingCreate {
-  key: string;
-  createdAt: string;
-  /** The request's fingerprint: a changed request is a new attempt, never a replay of the old one. */
-  body: string;
-  host: string;
-  pid: number;
-}
-
-/** The spec minus what is minted per attempt, so the same request from two attempts reads the same. */
-function fingerprint(spec: MachineSpec): string {
-  const { idempotencyKey, labels, ...rest } = spec;
-  const { [CREATED_AT_LABEL]: stamp, ...stamped } = labels ?? {};
-  void idempotencyKey;
-  void stamp;
-  return createHash("sha256").update(JSON.stringify({ ...rest, labels: stamped })).digest("hex");
-}
-/** A holder's heartbeat older than this, or a holder whose pid is gone, no longer keeps a builder from another process. */
-const HELD_TTL_MS = 15 * 60_000;
-/** Own builders beat this often on their own timer, so a sweep stuck on a slow listing cannot starve the hold. */
-const HEARTBEAT_MS = 5 * 60_000;
-
-const isCapRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind === "concurrency";
-
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as { code?: string }).code === "EPERM";
-  }
-}
-
-interface BuilderRecord {
-  id: string;
-  name: string;
-  kind: MachineKind;
-  baseTemplate: string;
-  setupSha: string;
-  createdAt: string;
-  size: WorkspaceSize;
-  streamUrl?: string;
-  /** True from creation until the machine is ever paused, resumed or restored. Whether a builder that lost it can
-   * still be sealed is the place's own rule, read off its backend (`snapshotsAnyLife`), never assumed here. */
-  firstLife: boolean;
-  /** The process using this builder: written at creation and attach, refreshed every sweep, cleared on close.
-   * Another process over the same store leaves the record alone while the holder is alive and the heartbeat fresh. */
-  heldBy?: { host: string; pid: number; heartbeat: string };
-  /** Written the moment the machine exists, before any stage runs, and dropped when prepare finishes; a
-   * record still marked by a dead holder never completed its setup and can never seal. */
-  building?: true;
-  /** What of the recipe this builder carries; a prepare with the same recipe hash reuses it. */
-  import?: ImportLedger;
-  /** The base tools read on this builder, or on the golden it was forked from; the version it seals records them. */
-  base?: GoldenBaseTool[];
-  /** Saved as this version and kept running since; an update of that version lands on it, the sweep stops it at GRACE_MS. */
-  sealed?: { at: string; version: number };
-  /** The place this builder was made at, so a provider swapped in mid-build never becomes where it seals. Absent,
-   * on a record from before places, reads as the wired place. */
-  place?: string;
-}
-
-interface LiveBuilder {
-  record: BuilderRecord;
-  builder: Builder;
-  /** Whether a seal can still be taken from it: its machine's first life, or a place whose copy of a disk is the
-   * disk as it stands. What `life` is derived from and what the builder's view carries. */
-  sealable: boolean;
-  /** own: made or attached to by this process. reusable: an earlier process's record, marked and running,
-   * wearing this owner's label or none; the sweep ages it out at six hours. stale: an earlier record that
-   * can never seal; the sweep stops it. foreign: wears another state file's label; never touched.
-   * held: another live process is using it; never touched while its heartbeat is fresh. Read once at load: a
-   * host that runs on keeps what it read, and host.lock keeps a second init from starting beside it. */
-  life: "own" | "reusable" | "stale" | "foreign" | "held";
-  reach?: PreviewReach;
-  /** The recipe the prepare that made or attached to it carried, when it named one; the seal reads it back. */
-  recipe?: GoldenRecipe;
-}
-
-/** What prepare rejects with once its signal aborted. `builderId` is the machine it had, when one existed: killed
- * by its recorded id and its record dropped, unless `kept` (attached to, a seal still in it, hold released,
- * record left reusable) or `left` (the kill failed for this reason and the record stays for the sweep). */
-export class PrepareStoppedError extends Error {
-  readonly builderId?: string;
-  readonly kept: boolean;
-  readonly left?: string;
-  constructor(builderId?: string, outcome?: { kept: true } | { left: string }) {
-    const kept = outcome !== undefined && "kept" in outcome;
-    const left = outcome !== undefined && "left" in outcome ? outcome.left : undefined;
-    super(
-      builderId === undefined
-        ? "prepare stopped before a machine existed"
-        : kept
-          ? `prepare stopped; builder ${builderId} left running with a seal still in it`
-          : left === undefined
-            ? `prepare stopped; builder ${builderId} killed`
-            : `prepare stopped; builder ${builderId} did not stop: ${left}`,
-    );
-    this.name = "PrepareStoppedError";
-    if (builderId !== undefined) this.builderId = builderId;
-    this.kept = kept;
-    if (left !== undefined) this.left = left;
-  }
-}
-
-/** Stand-in for a machine that vanished while we were away; resume() failing with
- * kind "missing" is what a wake settles gone on. */
-function deadMachine(id: string): Machine {
-  const gone = () => Object.assign(new Error(`machine ${id} is gone`), { kind: "missing", status: 404 });
-  return {
-    id,
-    kind: "sandbox",
-    streamUrl: undefined,
-    exec: async () => {
-      throw gone();
-    },
-    run: async () => {
-      throw gone();
-    },
-    snapshot: async () => {
-      throw gone();
-    },
-    pause: async () => {
-      throw gone();
-    },
-    resume: async () => {
-      throw gone();
-    },
-    kill: async () => {},
-    state: async () => "gone",
-    downloadUrl: async () => {
-      throw gone();
-    },
-    uploadUrl: async () => {
-      throw gone();
-    },
-  };
-}
-
-/** The mark a stand-in for an absent place's machine carries, so the one reading of "nothing about this machine is
- * known yet" is a fact of the handle rather than a guess from the record's phase. */
-const ABSENT = Symbol("absent machine");
-
-/** Whether this handle is that stand-in. */
-const isAbsentMachine = (m: Machine): boolean => (m as { [ABSENT]?: boolean })[ABSENT] === true;
-
-/** The machine a record nothing can be asked about is held by until whatever is missing comes back: the place it
- * stands on dialling in again, or the provider key this host was started without. Nothing about it is known right
- * now and nothing is asked, so the row reads unreachable with the sentence of whatever is away and the provider is
- * asked nothing. The refusal is the caller's, since the two are not the same sentence and neither is a guess. */
-function absentMachine(id: string, kind: MachineKind, away: () => never): Machine {
-  const machine: Machine = {
-    id,
-    kind,
-    streamUrl: undefined,
-    exec: async () => away(),
-    run: async () => away(),
-    snapshot: async () => away(),
-    pause: async () => away(),
-    resume: async () => away(),
-    kill: async () => away(),
-    state: async () => away(),
-    downloadUrl: async () => away(),
-    uploadUrl: async () => away(),
-  };
-  return Object.assign(machine, { [ABSENT]: true });
-}
-
-/** Reads at most `cap` bytes of the body and cancels the rest; a body that dies mid-read still leaves the status to report. */
-async function readBodyUpTo(res: Response, cap: number): Promise<string> {
-  const reader = res.body?.getReader();
-  if (!reader) return "";
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (size < cap) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      size += value.byteLength;
-    }
-  } catch {
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-  return Buffer.concat(chunks, Math.min(size, cap)).toString("utf8");
-}
-
-/** The calls a backend carries only when its provider has them. One list, so a handle built out of a backend
- * forwards every one of them rather than naming the few a road happened to need. */
-const OPTIONAL_BACKEND_CALLS = ["checkKey", "listSnapshots", "promoteSnapshot", "getTemplate", "listTemplates", "deleteTemplate"] as const;
-
-/** Those calls bound to the backend, for a handle that stands in front of it. A backend is a module with its
- * methods on its prototype, so a spread of it carries none of them; each one is taken by name here. */
-function forwardedCalls(backend: MachineBackend): Partial<MachineBackend> {
-  const out: Record<string, unknown> = {};
-  for (const name of OPTIONAL_BACKEND_CALLS) {
-    const call = backend[name];
-    if (typeof call === "function") out[name] = call.bind(backend);
-  }
-  return out as Partial<MachineBackend>;
-}
-
-/** What a daemon refused a frame with, the code beside the sentence: a caller branches on the reason rather than
- * on the words, which is what the code is for. */
-class DaemonRefusal extends Error {
-  constructor(
-    readonly code: string | undefined,
-    message: string,
-  ) {
-    super(message);
-    this.name = "DaemonRefusal";
-  }
-}
-
-/** Whether a refusal is the one a bring back carries as a note: the push landed and the machine has no signed-in
- * command line for the git host, so there is a branch on the remote and no pull request. */
-const isNoHostCli = (e: unknown): boolean => e instanceof DaemonRefusal && e.code === "no-host-cli";
-const isNoGitCredential = (e: unknown): boolean => e instanceof DaemonRefusal && e.code === "no-git-credential";
+// import { rulesArea } from "./account/rules.js";
+
+// import { transcriptsArea } from "./threads/transcripts.js";
+
+// import { slatesArea } from "./account/slates.js";
+
+// import { channelsArea } from "./account/channels.js";
+
+// import { recordsArea } from "./images/records.js";
+
+// import { reachArea } from "./machines/reach.js";
+
+// import { pullRequestsArea } from "./account/pull-requests.js";
+
+// import { daemonArea } from "./machines/daemon.js";
+
+// import { machinesArea } from "./machines/machines.js";
+
+// import { bootArea } from "./machines/boot.js";
+
+// import { createArea } from "./machines/create.js";
+
+// import { foldersArea } from "./projects/folders.js";
+
+// import { startFromArea } from "./projects/start-from.js";
+
+// import { workspacesArea } from "./projects/workspaces.js";
+
+// import { agentsArea } from "./threads/agents.js";
+
+// import { threadsArea } from "./threads/threads.js";
+
+// import { turnsArea } from "./threads/turns.js";
+
+// import { sessionsArea } from "./threads/sessions.js";
+
+// import { buildersArea } from "./images/builders.js";
+
+// import { goldenArea } from "./images/golden.js";
+
+// import { imageArea } from "./images/image.js";
+
+// import { projectsArea } from "./projects/projects.js";
+
+// import { usageArea } from "./account/usage.js";
+
+// import { statusArea } from "./account/status.js";
+
+// import { preferencesArea } from "./account/preferences.js";
+
+export * from "./types/harness.js";
+export {
+  type EventListener,
+  type EventBus,
+  CATALOG_TTL_MS,
+  SESSION_TITLE_TTL_MS,
+  CHECKOUT_TTL_MS,
+  PR_PAGE_HOLD_MS,
+  RATE_LIMIT_HOLD_MS,
+  SESSION_TITLE_REFRESH_MAX,
+  TITLE_MAKE_TIMEOUT_MS,
+} from "./types/events.js";
+export {
+  type WorkspaceSpec,
+  type CreatedWorkspace,
+  type CreateWorkspaceOptions,
+  type PackedProject,
+  type StateRequest,
+  type PackedState,
+  type ProjectBundler,
+  type LandRequest,
+  type HostFolders,
+  type HostTerminalConfig,
+  type HostEditor,
+  type EditorRemote,
+  type HostSsh,
+  type InitDoor,
+  type RecipeShelf,
+  type LandedAgent,
+  type LandedProject,
+  type ProjectLander,
+  type ProjectExportOptions,
+  type ProjectImportOptions,
+  type SessionHandle,
+  type PlaceBackends,
+  wiredPlace,
+  type GoldenRecipe,
+  type GoldenExec,
+  type RunningExec,
+  type LocalWiring,
+  type HereDaemon,
+  type SeedWiring,
+  type RuntimeOptions,
+  type WakeOptions,
+  ADD_IS_A_COMPUTER_LINE,
+  NO_COPIER_HERE,
+  PORT_PROBE_BODY_CAP,
+  type GoldenBuildRequest,
+  type GoldenPromotion,
+  type GoldenUpgradeResult,
+  GRACE_MS,
+  DAEMON_REVIVE_AGAIN_MS,
+  DAEMON_LACKS_AGAIN_MS,
+  type AdoptedMachine,
+  type SweepResult,
+  type OriginStatusApi,
+  type LogUsageRow,
+  type UsageDoor,
+} from "./types/wiring.js";
+export * from "./types/api.js";
+export {
+  NO_COPY_RECIPE,
+  NO_SEED_WIRING,
+  copyKey,
+  DROPPED_WATCH_MS,
+  TRANSCRIPT_BYTES,
+  TOOL_RESULT_KEPT,
+  TRANSCRIPTS_HELD,
+  TRANSCRIPT_FLUSH_MS,
+  PrepareStoppedError,
+} from "./types/internal.js";
 
 export function createRuntime(opts: RuntimeOptions): Runtime {
+  const ctx = {} as RuntimeContext;
+  Object.assign(ctx, runtimeCore(ctx, opts));
+  Object.assign(ctx, kindsArea(ctx));
+
+  Object.assign(ctx, rulesArea(ctx));
+
+  Object.assign(ctx, transcriptsArea(ctx));
+
+  Object.assign(ctx, slatesArea(ctx));
+
+  Object.assign(ctx, channelsArea(ctx));
+
+  Object.assign(ctx, recordsArea(ctx));
+
+  Object.assign(ctx, reachArea(ctx));
+
+  Object.assign(ctx, pullRequestsArea(ctx));
+
+  Object.assign(ctx, daemonArea(ctx));
+
+  Object.assign(ctx, machinesArea(ctx));
+
+  Object.assign(ctx, bootArea(ctx));
+
+  Object.assign(ctx, createArea(ctx));
+
+  Object.assign(ctx, foldersArea(ctx));
+
+  Object.assign(ctx, startFromArea(ctx));
+
+  Object.assign(ctx, workspacesArea(ctx));
+
+  Object.assign(ctx, agentsArea(ctx));
+
+  Object.assign(ctx, threadsArea(ctx));
+
+  Object.assign(ctx, turnsArea(ctx));
+
+  Object.assign(ctx, sessionsArea(ctx));
+
+  Object.assign(ctx, buildersArea(ctx));
+
+  Object.assign(ctx, goldenArea(ctx));
+
+  Object.assign(ctx, imageArea(ctx));
+
+  Object.assign(ctx, projectsArea(ctx));
+
+  Object.assign(ctx, usageArea(ctx));
+
+  Object.assign(ctx, statusArea(ctx));
+
+  Object.assign(ctx, preferencesArea(ctx));
+  return runtimeOf(ctx);
+}
+
+function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
   const { backend, store, adapters } = opts;
   const local = opts.local;
+  /** The place door once the host wired one; the kind's refusal when it did not, which is what every road on a kind
+   * this host does not serve answers. */
+  let placeDoor: PlaceDoor | undefined;
+  const bus = eventBus();
+  const providerReadMs = opts.providerReadMs ?? PROVIDER_READ_MS;
+  const goneConfirmMs = opts.goneConfirmMs ?? GONE_CONFIRM_MS;
+  const lateReadMs = opts.wake?.lateReadMs ?? WAKE_LATE_READ_MS;
+  const clock = opts.clock ?? realClock;
+  const githubCache = opts.githubCache ?? memoryGitHubCache();
+  /** What the provider says the machine is, bounded by its own read; undefined where the read could not be had. */
+  const readsState = (machine: Machine): Promise<MachineState | undefined> =>
+    until(machine.state(), clock.now() + providerReadMs, `state of ${machine.id}`, clock).catch(() => undefined);
+  /** What a read of the machine before a wake asks again comes to: a resume the backend gave up on went through
+   * after all, or as far as anything here can tell it did not. A read that could not be had leaves the resume
+   * unsent, and a machine the read calls gone meets its 404 on the next ask and settles gone. */
+  const tookTheResume = (reads: MachineState | undefined): boolean => reads === "running" || reads === "starting";
+  /** Resolves after ms on the runtime's clock. Unref'd: a host asked to exit while a wake waits to ask again exits. */
+  const sleeps = (ms: number): Promise<void> => new Promise<void>(resolve => clock.schedule(() => resolve(), ms, { unref: true }));
+  const daemonHelloTimeoutMs = opts.daemonHelloTimeoutMs ?? DAEMON_HELLO_TIMEOUT_MS;
+  const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
+  const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? NAP_AFTER_MS;
+  const hostId = opts.hostId ?? hostname();
 
-  /** The one place a workspace's kind means anything: the module that answers for machines of that kind. The backend
-   * that holds the machine, how a turn's process is launched on it, where each harness keeps its sessions there, the
-   * environment a turn runs under, and whether a request relayed from a machine may drive it. Every other road asks
-   * the module for a capability or a fact; nothing else compares the kind. Adding a kind is a row here and its
-   * wiring, nothing more. */
-  interface KindModule {
-    /** The backend the machine of one record lives on. A function of the record because a fork can stand at this
-     * host's own provider or on a computer somebody joined, and which one is a fact of that record rather than of
-     * its kind: everything else a fork meets is the same either way, since the two are the same interface. */
-    backend: (record: WorkspaceRecord) => MachineBackend;
-    /** How a turn's process is launched on this workspace's machine, under the limits the registry hands every turn. */
-    execStream: (entry: LiveWorkspace, opts?: MachineExecOptions, waiting?: TurnWaiting) => ExecStreamFactory;
-    /** The folder a turn and a command start in on this kind when the caller names none; undefined leaves it to the
-     * machine's own road, which for a guest is the home the login shell lands in. A reading of the record, since a
-     * workspace on this computer is the copy its record names. */
-    folder: (record: WorkspaceRecord) => string | undefined;
-    /** Where the harness keeps its sessions on this workspace's machine: a fixed folder on a kind whose machines
-     * wsp makes alike, the record's own on a machine that already existed and answered with its home. */
-    home: (entry: LiveWorkspace, agentId: string) => string;
-    /** The machine's own home, published on the view so a client shortens a folder under it to ~; undefined where
-     * the kind has not read one. */
-    homeDir: (record: WorkspaceRecord) => string | undefined;
-    /** The login environment a turn of one harness runs under there, read the same way. */
-    env: (entry: LiveWorkspace, agentId: string) => Readonly<Record<string, string>>;
-    /** Whether a login of this agent's own stands where this workspace runs, which decides whether the vault's key
-     * is handed to a turn at all: a harness reads a key in its environment ahead of the login on its disk, so
-     * handing one where a person signed in would bill the key and leave that login unused. Where a login lives is
-     * the kind's own: a computer somebody joined listed what it holds, this computer is read on its own disk, and
-     * an image never carries one. */
-    loginStands: (entry: LiveWorkspace, agentId: string) => boolean;
-    /** How a folder on this computer gets onto a machine of this kind: packed and landed on a fork, its path recorded
-     * with nothing copied on this computer, refused where no road exists yet. Answers what landed, which carries the
-     * project the record gains, and the done line; the caller keeps the record and the roots file, which every road
-     * shares. */
-    import: (entry: LiveWorkspace, o: ProjectImportOptions, report: ImportReport) => Promise<ImportLanded>;
-    /** Names the project folders the machine's daemon may browse beside its home, where the kind has a daemon. */
-    roots: (entry: LiveWorkspace, dests: readonly string[]) => Promise<void>;
-    /** Puts this workspace's project inside it, the step between the machine answering and the workspace being
-     * ready: a kind that forks clones the repo into the fork. A throw ends the create as any failed stage does. */
-    landProject: (entry: LiveWorkspace, project: ProjectView, report: StageReport) => Promise<void>;
-    /** What one agent on this workspace keys its sessions and its memory to, where the kind has an answer: on a
-     * computer whose workspaces are copies of a folder, the original folder's own key, so every copy and the
-     * person's own terminal in that folder share one memory. Nothing where the folder a turn runs in is the key,
-     * which is every machine wsp makes. */
-    memoryKey: (entry: LiveWorkspace, agentId: string) => string | undefined;
-    /** Whether a request relayed from a machine may drive this workspace; a local one answers only this computer,
-     * and so does a machine of another kind whose dial names this computer. The machine id is absent on the one
-     * road that asks before a machine exists, a fork's create, where only the kind can answer. */
-    relayed: (machineId: string | undefined) => boolean;
-    /** How wsp itself is run on this kind's machine, for the tools a turn's own agent is given: a fork runs the
-     * binary the daemon deploy lands, this computer runs the command the host itself was started as, and a kind wsp
-     * puts nothing on answers none, which leaves that kind's turns without the tools. Neither line names a host:
-     * the tools read the pair the launch left in the agent's environment, as the wsp a turn's shell runs does. */
-    wspMcp: (entry: LiveWorkspace) => McpServerSpec | undefined;
-    /** How a turn on this workspace's machine reaches this host, which the kind answers because it is a fact about
-     * its machines: a fork's wsp is its daemon's and rides the link this host already holds, so it dials no address,
-     * and a turn beside the host dials its loopback. None leaves that turn without a token, since one with nowhere
-     * to go opens nothing. */
-    turnReach: (entry: LiveWorkspace) => { url?: string } | undefined;
-    /** The road a turn on this kind's machine reaches this host by, written on the token minted into it and
-     * stamped on every request that token makes: a machine's is relayed, and this computer's is here. */
-    turnRoad: ScopedRoad;
-    /** Whether a thread's agent process is kept up between its turns here, for the next send to skip its boot: on the
-     * computer the host runs on, and on no machine, where a 4 GB box holds two threads' agents already. */
-    keepsAgents: boolean;
-    /** Whether this machine's daemon can be dialled at all, asked before a road is opened so nothing mints a preview
-     * route to find out: a cloud fork needs one, this computer's daemon is on it. Read as truthy, the way the reach
-     * word and the status poller read it before this seam existed. */
-    hasDaemon: (entry: LiveWorkspace) => boolean;
-    /** Whether every workspace of this kind dials the one daemon of the computer the host runs on, which cannot tell
-     * one workspace's processes from another's: a channel's ports.watch then names the workspace's own. A cloud
-     * fork's daemon is its workspace's alone. */
-    sharedDaemon: boolean;
-    /** The road to this machine's daemon: where it listens, when the route expires and the token that opens it. A
-     * cloud fork's preview route with the token this runtime wrote on the guest; this computer's loopback daemon
-     * with the token it holds in memory. Throws with the backend's own words when the machine has no road, which
-     * is every time on a kind whose daemon this host cannot prove it is the one dialled. */
-    daemonRoad: (entry: LiveWorkspace) => Promise<DaemonReachView>;
-    /** The folder on the machine wsp writes its own working files in: a run's script and log, an import's parts.
-     * A machine wsp made is wsp's whole, so its shared temporary folder is fine; on a machine somebody owns that
-     * folder belongs to every account on it, and one of them could sit on a name wsp is about to write. */
-    scratch: (entry: LiveWorkspace) => string;
-    /** What comes off the machine when a workspace of this kind is dropped: on a machine the person owns, the
-     * daemon and everything wsp kept beside it; nothing on a kind whose machine goes with the delete. The machine
-     * itself is the delete's own business; this is only what wsp put on it. */
-    dropped: (entry: LiveWorkspace) => Promise<void>;
-    /** Which daemon this machine is running, or null where nothing can say: a fork announces it in its hello, a
-     * machine the person owns carries what this host put there on its record, and this computer runs its daemon
-     * in this process. What the sync compares against the version this wsp would deploy. */
-    daemonVersion: (entry: LiveWorkspace) => Promise<number | null>;
-    /** Starts another daemon in place of one that is not running, where this host holds the process itself. Only
-     * the workspace that is this computer has such a daemon; every other kind's runs on a machine this host can
-     * reach but does not hold, and the sentence a caller gets there says so. */
-    restartDaemon?: (entry: LiveWorkspace) => Promise<void>;
-    /** Puts this runtime's daemon on the machine, replacing one already there. Absent where nothing can: this
-     * computer runs its daemon in this process, a host that wired no bundle has none, and a backend that neither
-     * mints a signed URL nor carries bytes itself has no road for one. Every road that offers to deploy reads
-     * whether this is here, so none offers where another would refuse. */
-    deployDaemon?: (entry: LiveWorkspace) => Promise<void | string>;
+  const vaultPathsOf = async (m: Machine): Promise<string[]> => {
+    if (opts.vaultPaths) return opts.vaultPaths;
+    // Breadcrumb doubles as the guarantee that the export list is never empty.
+    await m.exec("date -u +%FT%TZ >> /root/.wsp-upgraded");
+    const ls = await m.exec("ls -A /root");
+    if (ls.exitCode !== 0) throw new Error(`vault enumeration failed: ${ls.stderr.slice(-200)}`);
+    return ls.stdout
+      .split("\n")
+      .map(s => s.trim())
+      .filter(s => s.length > 0 && !VAULT_SKIP.has(s))
+      .map(s => `/root/${s}`);
+  };
+  const vaultExport = async (m: Machine, o: Pick<VaultOptions, "maxBytes" | "drop"> = {}): Promise<Buffer> =>
+    exportPaths(m, await vaultPathsOf(m), { ...o, ...(opts.vaultCaches !== undefined ? { exclude: opts.vaultCaches } : {}) });
+  /** What the fork's home owes a newer image, read while the machine still runs: the files the image it stands on
+   * wrote and it never touched, which the archive leaves behind so the new image's copies stand, and the ones it
+   * changed, which travel and are named on the result. A version that recorded none falls back to the old rule,
+   * where the whole home lands over the new image. */
+  const imageMovePlan = async (m: Machine, from: GoldenVersion | undefined, to: GoldenVersion): Promise<UpgradePlan> => {
+    if (from?.owned === undefined) return upgradePlan(undefined, to.owned, []);
+    const was = new Set(from.owned.map(f => f.path));
+    // What the comparison actually judges by the fork's bytes: the version's own rows, less the volatile ones, whose
+    // bytes never stand for an edit; and the volatile rows only the new image writes, where the comparison asks
+    // whether the fork holds a live copy of its own to leave alone.
+    const read = [
+      ...from.owned.filter(f => f.volatile !== true).map(f => f.path),
+      ...(to.owned ?? []).filter(f => f.volatile === true && !was.has(f.path)).map(f => f.path),
+    ];
+    return upgradePlan(from.owned, to.owned, await readOwnedFiles(m, read));
+  };
+  // One device door for this host: the ops the protocol server answers and the token every turn is launched with
+  // come out of the same table, so a scoped token is listed, matched and revoked by the rules a paired computer's
+  // token already lives under.
+  const deviceDoor = makeDevices(store);
+  /**
+   * The token a launch of a thread's agent drives this host with, the address it dials and the wsp server it runs: a
+   * device of this host's, scoped to the thread, which the caller takes back once the launch's process exits, so a
+   * token read out of a machine after it opens nothing. Minted whatever the switch says, since a launch with none
+   * reaches this host through the person's own wsp server and acts as them; the guard refuses what the switch
+   * refuses. Only where the workspace has a road to this host, since a token with nowhere to go is one more secret
+   * for nothing.
+   */
+  const threadLaunch = async (entry: LiveWorkspace, threadId: string, rootThreadId: string, o: { aside?: true } = {}): Promise<{ scoped?: Awaited<ReturnType<typeof deviceDoor.mint>>; env: Record<string, string>; wsp?: McpServerSpec }> => {
+    const reach = ctx.agentsReach(entry);
+    if (reach === undefined) return { env: {} };
+    const scoped = await deviceDoor.mint(`thread ${threadWord(threadId)}`, { kind: "thread", threadId, workspaceId: entry.record.id, rootThreadId }, Date.now(), { road: ctx.moduleOf(entry.record.kind).turnRoad, ...o });
+    return {
+      scoped,
+      env: {
+        [HOST_TOKEN_ENV]: scoped.deviceToken,
+        // The address and the key beside it only for a launch that dials one: its wsp pins the key before it sends
+        // the token, so a directory answer naming another host is refused.
+        ...(reach.url !== undefined ? { [HOST_URL_ENV]: reach.url, ...(placeDoor === undefined ? {} : { [HOST_KEY_ENV]: placeDoor.hostKey() }) } : {}),
+      },
+      ...(reach.wsp !== undefined ? { wsp: reach.wsp } : {}),
+    };
+  };
+  // The places joined to this host, over the one code store every code is spent from: the door holds the records
+  // and the links, and the two roads into the runtime it needs are the ordinary record and delete roads below.
+  if (opts.placeLinks !== undefined) {
+    const wiring = opts.placeLinks;
+    placeDoor = makePlaceDoor({
+      store,
+      devices: deviceDoor,
+      wiring,
+      // A thunk: the provider table is built below this, and the door reads it only when a line asks where a fork
+      // can land.
+      providers: () => places,
+      now: () => clock.now(),
+      onStage: event => bus.emit(event),
+      onSetup: event => bus.emit(event),
+      copyBuild: placeId => copyRows.get(placeId),
+      napMs: defaultIdleWindowMs,
+      ...(opts.local?.hereDaemon !== undefined ? { hereDaemon: opts.local.hereDaemon } : {}),
+      // Armed from now under the new window, on every workspace there whose window is its place's.
+      napChanged: placeId => {
+        for (const e of live.values()) if (e.record.phase === "running" && e.record.idleWindowMs === undefined && ctx.placeIdOf(e.record) === placeId) ctx.idle.touch(e.record.id);
+      },
+      // The same vault a turn is launched with: the word a computer's row says about an agent's sign-in and the
+      // secrets that turn actually gets are one reading, so a row cannot say a key stands that no turn would use.
+      ...(opts.vault !== undefined ? { vault: opts.vault } : {}),
+      ...(opts.recipes !== undefined ? { recipes: () => opts.recipes } : {}),
+      ...(opts.placeJoinWaitMs !== undefined ? { joinWaitMs: opts.placeJoinWaitMs } : {}),
+      ...(opts.placeUpdateWaitMs !== undefined ? { updateWaitMs: opts.placeUpdateWaitMs } : {}),
+      ...(opts.placeDialWaitMs !== undefined ? { dialWaitMs: opts.placeDialWaitMs } : {}),
+      ...(opts.placeFrameWaitMs !== undefined ? { frameWaitMs: opts.placeFrameWaitMs } : {}),
+      ...(opts.placeRelinkWaitMs !== undefined ? { relinkWaitMs: opts.placeRelinkWaitMs } : {}),
+      recording: {
+        // Reads the live records, so it waits on the one hydration every other road waits on: a place that dials a
+        // host nothing has asked a verb of yet would otherwise find no records at all.
+        forksOn: async placeId => {
+          await ctx.ready();
+          return [...live.values()].filter(e => e.record.place === placeId).map(e => e.record.name);
+        },
+        projectsOn: async placeId => {
+          await ctx.ready();
+          return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => p.name);
+        },
+        runningOn: async (placeId, rows) => {
+          await ctx.ready();
+          const standing = [...live.values()].map(e => ({ ...e.record, provider: ctx.providerOf(e.record) }));
+          return runningOnPlace(placeId, rows, standing, foldThreads([...sessions.values()].map(s => s.view)));
+        },
+        signInLine: (placeId, agent) => ctx.agentsRead.signInLine({ placeId }, { agent }),
+        // The app's own sign-in road on that computer, read as a setup's row waiting on the person.
+        signIn: async (placeId, agent, emit) => {
+          const handle = await ctx.agentsRead.signIn({ placeId }, { agent }, emit);
+          return {
+            leave: () => handle.leave(),
+            stop: () => {
+              // A sign-in that already ended has nothing left to stop.
+              try {
+                ctx.agentsRead.signInStop(handle.signInId);
+              } catch {
+                return;
+              }
+            },
+          };
+        },
+        // The add's own road for a folder seeding a project on that computer, with what the pick keeps.
+        addFolder: async (placeId, key, folder) => {
+          const source = folder.from.replace(/^~(?=\/|$)/, homedir());
+          const plan = await ctx.projectsDoor.seedPlan(source);
+          const seed = seedChoiceFrom(plan, folder.keep, []);
+          const project = await ctx.projectsDoor.add({ source, on: placeId, ...(folder.name !== undefined ? { name: folder.name } : {}), seed });
+          if (folder.icon !== undefined || folder.hue !== undefined) {
+            await ctx.preferences.set({ projectLook: { [project.id]: { ...(folder.icon !== undefined ? { icon: folder.icon } : {}), ...(folder.hue !== undefined ? { hue: folder.hue } : {}) } } });
+          }
+          return { id: `folders/${key}`, label: project.name, outcome: "installed", ...(project.notice !== undefined ? { note: project.notice } : {}) };
+        },
+        folderRemote: async folder => (await ctx.remoteHere(folder.from.replace(/^~(?=\/|$)/, homedir()))).remote || undefined,
+        // A folder the recipe took out leaves this host's list; its checkout there is the person's and stays.
+        removeFolder: async (placeId, key, folder) => {
+          const name = folder.name ?? key;
+          const project = (await ctx.projectsDoor.list()).find(p => p.computer === placeId && p.name === name);
+          if (project === undefined) return;
+          const standing = [...live.values()].filter(e => e.record.project === project.id).map(e => e.record.name);
+          if (standing.length > 0) throw new Error(projectInUseRefusal(project.name, standing));
+          projectsHeld.delete(project.id);
+          await store.delete(PROJECTS, project.id);
+          bus.emit({ type: "project.removed", projectId: project.id });
+        },
+      },
+    });
+    // The door's four events ride the one stream every other event rides, so the app follows a computer joining
+    // over the socket it already holds and no road subscribes to the door itself.
+    placeDoor.on(e => bus.emit(e));
+    placeDoor.on(e => {
+      if (e.type === "place.removed") copyRows.delete(e.placeId);
+    });
+    // A copy is built only when somebody asks for one, and a computer's setup was asked for: its end is when the
+    // image there can be read at all, which is the moment the tally beside it is written. A link builds nothing.
+    bus.on("place.setup", e => {
+      if (e.type !== "place.setup" || e.end === undefined) return;
+      void ctx.image.keepCurrent(e.placeId);
+    });
+    // A build on that computer is making its requests over the link that just went: the ones that may be asked
+    // again are waiting on it, so the stage they are in says what it is waiting for and says its own line again
+    // once the computer opens a socket.
+    placeDoor.on(e => {
+      if (e.type !== "place.absent" && e.type !== "place.present") return;
+      const gone = e.type === "place.absent";
+      for (const at of stageAt.values()) {
+        if (at.place !== e.placeId) continue;
+        // The whole frame the stage last sent, with the wait standing in for its line while the gap lasts: the step
+        // a reader clocks and the machines a failure left behind are facts of that stage and outlive a socket.
+        const detail = gone ? placeDialBackLine(placeDoor!.nameOf(e.placeId)) : at.frame.detail;
+        bus.emit({ ...at.frame, type: "golden.stage", ...(detail !== undefined ? { detail } : {}), ...(at.named ? { place: at.place } : {}) });
+      }
+    });
+    // A computer that dials back in is the moment a record nothing could be asked about can be read at last: only
+    // the ones this host is holding by a stand-in go through the hydration they would have had at host start, and
+    // a fork that was live through the blip is left exactly as it is. A laptop that slept and dialled again is the
+    // common case, so a wake, a nap or a delete in flight must not be thrown away by a presence beat.
+    placeDoor.on(e => {
+      if (e.type !== "place.present") return;
+      void (async () => {
+        await ctx.ready();
+        for (const raw of await store.list(WORKSPACES)) {
+          const stored = raw as WorkspaceRecord;
+          if (stored.place !== e.placeId || !ctx.isHeldAway(stored.id)) continue;
+          // This road runs after ready, so every session row is already in and the sync can wait out a running turn.
+          const entry = await ctx.hydrateWorkspace(raw);
+          if (entry !== undefined) void ctx.syncDaemon(entry);
+          else await ctx.rereadHeld(stored.id, "record load");
+        }
+      })().catch((err: unknown) => console.warn(`the records on ${placeDoor!.nameOf(e.placeId)} were not read again: ${err instanceof Error ? err.message : String(err)}`));
+    });
   }
-  type ImportReport = (stage: ProjectImportStage, message: string, progress?: { bytes: number; total: number }) => void;
-  interface ImportLanded {
-    result: ProjectImportResult;
-    done: string;
-  }
+  /** The machines a root thread's forks are landing but have no record for yet, by root: a slot is taken before
+   * the first await of a fork and handed back when it lands or fails, so the cap counts what is on its way too. */
+  const landing = new Map<string, number>();
+  const live = new Map<string, LiveWorkspace>();
+  /** Every project this host holds, by id, read from the store once at hydration and kept here: a workspace's view
+   * joins its project off this map on every read, and the map is the one place a project's name, path and computer
+   * are known without a store read. */
+  const projectsHeld = new Map<string, ProjectView>();
+  const setups = agentSetups(store);
+  const builders = new Map<string, LiveBuilder>();
+  /** Every machine a sweep, a landing or a replacement stops, read back behind the sweep and asked again while it stays. */
+  const gone = new GoneWatch({ ...(opts.killConfirm !== undefined ? { confirm: opts.killConfirm } : {}), warn: line => (ctx.state.sayStops ?? console.warn)(line) });
+  /** The prepare in flight per place and golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
+  const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
+  /** The copy build in flight per place and image name. A create landing there, a version cut and a person typing
+   * the line all ask for the same copy: the second and every later ask joins the first and takes the copy it seals,
+   * so one builder runs and this computer is read once. */
+  const copyBuilds = new Map<string, Promise<SealedImageBuilt>>();
+  /** The stage each build on a joined computer is in, by that computer and the image's name. A build there makes
+   * its requests over that computer's link, and a gap in it holds every one of them: the stage says so while it
+   * lasts and reads what it last read once the computer is back, rather than standing still under a line that is
+   * no longer true. */
+  const stageAt = new Map<string, { place: string; name: string; named: boolean; frame: StageFrame }>();
+  /** What each place's row says about its copy: the stage while a build runs there, the reason after one stopped,
+   * nothing once the copy stands. Written off the golden.stage frames naming the place, so a build reads the same on
+   * the row whoever started it. */
+  const copyRows = new Map<string, CopyBuild>();
+  bus.on("golden.stage", e => {
+    if (e.type !== "golden.stage" || e.place === undefined) return;
+    const build = copyBuildOf(e);
+    if (build === undefined) copyRows.delete(e.place);
+    else copyRows.set(e.place, build);
+  });
+  /** Whether a refusal before any build at a place is that place's row to say. A place that runs no workspaces has no
+   * copy to keep, a link that went is not a build to show, and a computer whose recipe is running is no build either:
+   * nothing was asked of its image and the job's own end asks again. */
+  const rowSaysFailure = (place: string, e: unknown): boolean =>
+    !(e instanceof PlaceForksNowhereError || e instanceof PlaceProvisioningError || isPlaceAbsent(e) || placeAway(place));
+  /** A computer this host holds no link to now: a laptop asleep, or one that went mid-ask. */
+  const placeAway = (place: string): boolean => placeDoor !== undefined && places.backend(place) === undefined && placeDoor.link(place) === undefined;
+  /** A failure said on the bus as the build's own failed frame, so the row, the app's store and the image card read
+   * the same stop. */
+  const frameStopped = (place: string, name: string, e: unknown): void => ctx.stageOf(name, place, true)("failed", e instanceof Error ? e.message : String(e));
+  /** A row read back from the store has no handle: its process died with the runtime that started it. */
+  /** The record of every thread this host holds, by thread id, persisted beside the workspace's rows. */
+  const threadRecords = new Map<string, ThreadRecord & { workspaceId: string }>();
+  /** The wake of each snooze still standing, by fold key, so every window re-reads the thread the moment it ends. */
+  const snoozeTimers = new Map<string, () => void>();
+  /** Arms the wake of a thread's snooze, over any it had; a moment past already has nothing to wake. A timer longer
+   * than setTimeout holds is re-armed on the way, and a wake finding the snooze moved or gone says nothing. */
+  const wakeAt = (threadId: string, until: number): void => {
+    snoozeTimers.get(threadId)?.();
+    snoozeTimers.delete(threadId);
+    const wait = until - clock.now();
+    if (wait <= 0) return;
+    const cancel = clock.schedule(
+      () => {
+        snoozeTimers.delete(threadId);
+        const record = threadRecords.get(threadId);
+        if (record?.snoozedUntil !== until) return;
+        if (clock.now() < until) wakeAt(threadId, until);
+        else bus.emit({ type: "thread.marked", workspaceId: record.workspaceId, threadIds: [threadId] });
+      },
+      Math.min(wait, MAX_TIMER_MS),
+      { unref: true },
+    );
+    snoozeTimers.set(threadId, cancel);
+  };
+  /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
+   * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
+   * takes the row, since a restart could re-open nothing from it. */
+  const sessions = new Map<string, SessionEntry>();
+  /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
+  const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
+  const indexFlushes = new Map<string, Promise<void>>();
+  /** The transcripts held whole, the one opened last at the end: at most TRANSCRIPTS_HELD, read again from their files
+   * once they fall out. A store that keeps them as rows holds none. */
+  const transcripts = new Map<string, SessionEvent[]>();
+  /** The state database's transcript rows. Where the store has none (the memory store, and the JSON store kept for one
+   * release by WSP_STATE_STORE) each transcript is a blob, and every switch on `rows` is that road: they go with it. */
+  const rows = store.transcripts;
+  /** Workspaces whose index did not read off their rows at boot: their flushes write events and leave the kept index
+   * alone, so the next boot reads it again. */
+  const unreadIndexes = new Set<string>();
+  /** Each workspace's events written since its transcript's last flush, which its file does not have yet. */
+  const pendingEvents = new Map<string, SessionEvent[]>();
+  const pendingBytes = new Map<string, number>();
+  /** Every transcript's index, held whether or not the transcript is. */
+  const transcriptIndex = new Map<string, TranscriptIndex>();
+  const indexFor = (workspaceId: string): TranscriptIndex => {
+    const held = transcriptIndex.get(workspaceId) ?? emptyIndex();
+    transcriptIndex.set(workspaceId, held);
+    return held;
+  };
+  /** The bytes each held transcript's events come to as JSON, kept beside it so a new event is not a walk of all of them. */
+  const transcriptBytes = new Map<string, number>();
+  /** Each event's size, measured once, for a transcript over its byte cap: one is walked whole at every event that
+   * lands. Only those, so a transcript inside it holds nothing more. */
+  const sizes = new WeakMap<SessionEvent, number>();
+  const sizeOf = (e: SessionEvent): number => {
+    const known = sizes.get(e);
+    if (known !== undefined) return known;
+    const size = eventBytes(e);
+    sizes.set(e, size);
+    return size;
+  };
+
+  /** Where this host can build a copy of its image, and which of them every road that names none means. */
+  const places: PlaceBackends = opts.places ?? wiredPlace("default", backend);
+  return {
+    opts, backend, store, adapters, local, placeDoor, bus, goneConfirmMs, lateReadMs, clock, githubCache, readsState,
+    tookTheResume, sleeps, daemonHelloTimeoutMs, vaultCapBytes, defaultIdleWindowMs, hostId, vaultExport, imageMovePlan,
+    deviceDoor, threadLaunch, landing, live, projectsHeld, setups, builders, gone, preparing, copyBuilds, stageAt,
+    copyRows, rowSaysFailure, placeAway, frameStopped, threadRecords, snoozeTimers, wakeAt, sessions, execs,
+    indexFlushes, transcripts, rows, unreadIndexes, pendingEvents, pendingBytes, transcriptIndex, indexFor,
+    transcriptBytes, sizeOf, places,
+    state: {
+      sayStops: undefined, readsSince: 0, rootsRecheck: undefined, owner: "", copiesMoving: undefined,
+      sweepTimer: undefined, sweeping: undefined, sweepStopped: false, beat: undefined, closed: false, closing: false,
+      ticking: undefined, preferencesHeld: undefined,
+    },
+  };
+}
+
+function kindsArea(ctx: RuntimeContext): KindsArea {
+  const { opts, backend, local, placeDoor, clock, places } = ctx;
   const projectOf = (dest: string, size: number): WorkspaceProject => ({ name: folderName(dest), dest, importedAt: new Date(clock.now()).toISOString(), size });
   /** The command that puts a project's repo inside a copy of an image, word for word, so the test that reads the
    * machine's log and the machine that runs it read one line. No --branch where the record names no base: the
@@ -2838,9 +842,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // And neither has a fork of a project image that carried this checkout: the snapshot is the whole disk, so the
     // project stands at its path with its dependencies installed, and a clone over it is what git refuses. The
     // image the machine was forked from is what says so, read off this workspace's own record.
-    if (imageCarriesCheckout((await imageOf(entry.record.golden)).projects, project.path)) return;
+    if (imageCarriesCheckout((await ctx.imageOf(entry.record.golden)).projects, project.path)) return;
     report("project-cloned", `Cloning ${project.remote} into ${project.path}.`);
-    const cloned = await entry.machine.exec(cloneOnMachine(project, placeName(entry.record.place ?? places.wired)), { timeoutMs: CLONE_MS });
+    const cloned = await entry.machine.exec(cloneOnMachine(project, ctx.placeName(entry.record.place ?? places.wired)), { timeoutMs: CLONE_MS });
     if (cloned.exitCode !== 0) throw new Error(lastLineOf(cloned.stderr) || lastLineOf(cloned.stdout) || `git clone exited ${cloned.exitCode}`);
     // Fresh dependencies on the machine holding the checkout: the catalog's row for whichever lockfile the repo's
     // own root carries, run once, its output in wsp's own folder and never inside the project. A repo no row names
@@ -2946,7 +950,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   const cloudRoad = async (entry: LiveWorkspace): Promise<DaemonReachView> => {
     const reach = await entry.ws.daemonReach();
-    const token = await daemonTokenOf(entry.machine, DAEMON_TOKEN_PATH);
+    const token = await ctx.daemonTokenOf(entry.machine, DAEMON_TOKEN_PATH);
     return { url: reach.url, expiresAt: reach.expiresAt, ...(token !== undefined ? { daemonToken: token } : {}) };
   };
   const localRoad = async (): Promise<DaemonReachView> => {
@@ -2957,8 +961,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * so the guest's file is replaced the moment the deploy is done rather than at the next dial. */
   const cloudDeploy = async (entry: LiveWorkspace): Promise<void> => {
     await opts.goldenRecipe!.deployDaemon!(entry.machine);
-    daemonTokens.delete(entry.machine.id);
-    await daemonTokenOf(entry.machine, DAEMON_TOKEN_PATH);
+    ctx.daemonTokens.delete(entry.machine.id);
+    await ctx.daemonTokenOf(entry.machine, DAEMON_TOKEN_PATH);
   };
   /** Whether the file one agent's shared login lives in stands under the home that agent reads on this computer.
    * The catalog names both the home and the file, and an agent with no shared login has no file to stand. Only a
@@ -2967,9 +971,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const shared = sharedOn(agentId);
     return shared !== undefined && existsSync(join(home, shared.file));
   };
-  /** The place door once the host wired one; the kind's refusal when it did not, which is what every road on a kind
-   * this host does not serve answers. */
-  let placeDoor: PlaceDoor | undefined;
   const placeDoorOf = (): PlaceDoor => {
     if (placeDoor === undefined) throw new Error(noKindLine("place"));
     return placeDoor;
@@ -3009,25 +1010,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       keepsAgents: false,
       // A workspace whose computer answers its daemon frames has no daemon of its own to dial and no route worth
       // minting: nothing listens inside it, and the road to its files and its git is the link this host holds.
-      hasDaemon: entry => servedByItsComputer(entry) === undefined && Boolean(entry.machine.previewUrl),
+      hasDaemon: entry => ctx.servedByItsComputer(entry) === undefined && Boolean(entry.machine.previewUrl),
       sharedDaemon: false,
       daemonRoad: entry =>
-        servedByItsComputer(entry) === undefined
+        ctx.servedByItsComputer(entry) === undefined
           ? cloudRoad(entry)
-          : Promise.reject(new Error(placeServesDaemonLine(entry.record.name, computerOf(entry)))),
+          : Promise.reject(new Error(placeServesDaemonLine(entry.record.name, ctx.computerOf(entry)))),
       scratch: () => GUEST_TMP,
-      daemonVersion: entry => helloVersion(entry),
+      daemonVersion: entry => ctx.helloVersion(entry),
       dropped: async () => {},
       // The bundle is the host's to wire; whether it can reach a given machine is canDeployDaemon's reading, since
       // one kind's machines can differ about it (a container a box's runtime boots mints no signed URL).
       ...(opts.goldenRecipe?.deployDaemon !== undefined ? { deployDaemon: async (entry: LiveWorkspace) => cloudDeploy(entry) } : {}),
-      import: (entry, o, report) => copyImport(entry, o, report),
+      import: (entry, o, report) => ctx.copyImport(entry, o, report),
       roots: (entry, dests) => writeRoots(entry, dests),
       landProject: (entry, project, report) => cloneProject(entry, project, report),
       // The key the project was recorded with, which is the folder's own on the computer it was seeded from: a
       // fork holds the checkout at a path of the machine's, and keying off that path would give one project as
       // many memories as it has computers.
-      memoryKey: (entry, agentId) => projectMemoryKey(agentId, projectHeld(entry.record.project)),
+      memoryKey: (entry, agentId) => projectMemoryKey(agentId, ctx.projectHeld(entry.record.project)),
     },
     local:
       local === undefined
@@ -3037,7 +1038,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             execStream: (_entry, o, waiting) => local.execStream(o, waiting),
             // A record here is a folder: the project's own or a worktree of its repo, the word its view carries and
             // where a thread on it starts; the same reading threadFolder takes.
-            folder: record => checkoutOf(record),
+            folder: record => ctx.checkoutOf(record),
             home: (_entry, id) => local.home(id),
             homeDir: () => local.homeDir,
             // The person's own login on the computer they are sitting at, read where that agent keeps it.
@@ -3080,7 +1081,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // The original folder's key, which is the one the person's own terminal already writes under: every
             // copy of that folder and their own agent in it share one memory directory and one sessions list,
             // with nothing seeded and nothing moved.
-            memoryKey: (entry, agentId) => projectMemoryKey(agentId, projectHeld(entry.record.project)),
+            memoryKey: (entry, agentId) => projectMemoryKey(agentId, ctx.projectHeld(entry.record.project)),
           },
   };
   const moduleOf = (kind: WorkspaceKind): KindModule => {
@@ -3131,8 +1132,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * turn opens in and the one a command runs in cannot differ, and the app, the command line and the tool need
    * not restate it. */
   const threadFolder = async (entry: LiveWorkspace, o: { cwd?: string | undefined }): Promise<string> => {
-    return o.cwd ?? moduleOf(entry.record.kind).folder(entry.record) ?? projectHeld(entry.record.project).path;
+    return o.cwd ?? moduleOf(entry.record.kind).folder(entry.record) ?? ctx.projectHeld(entry.record.project).path;
   };
+  return {
+    projectOf, remoteHere, gitHere, gitTopOf, branchAt, stateFolder, cloneHere, localRoad, placeDoorOf, machineReading,
+    moduleOf, backendFor, openChannel, backendOfKind, keepsImages, pauseKeepsDisk, namesWorkspace, lifecycleOf,
+    execFactoryFor, threadFolder,
+  };
+}
+
+function rulesArea(ctx: RuntimeContext): RulesArea {
+  const { opts, store, placeDoor, landing, live, projectsHeld, sessions } = ctx;
   /** What a start that opened a thread leaves on the preferences record: the project the thread landed in, by
    * workspace, the second branch of threadFolder for the next thread there, and the target, the workspace and project
    * a thread or an import asked for from nowhere goes to. Written only when it moves the record, so a second thread
@@ -3145,10 +1155,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   const rememberTarget = async (record: WorkspaceRecord): Promise<void> => {
-    const current = await preferences.get();
+    const current = await ctx.preferences.get();
     if (current.target?.workspace === record.id) return;
     const patch: PreferencesPatch = { target: { workspace: record.id } };
-    await preferences.set(patch);
+    await ctx.preferences.set(patch);
   };
   /** Why a verb this workspace's machine cannot take is refused, in the three sentences the three reasons have: a
    * machine wsp does not run has no meaning for a verb that moves a fork, a host with no provider forks nothing at
@@ -3157,7 +1167,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const cannotLine = (record: WorkspaceRecord, action: string): string => {
     const kind = record.kind;
     if (!kindWords(kind).driven) return undrivenRefusal(record.name, machineWord(kind), action);
-    if (forksNoMachines(backendFor(record).capabilities)) return opts.noMachinesLine ?? NO_PROVIDER_LINE;
+    if (forksNoMachines(ctx.backendFor(record).capabilities)) return opts.noMachinesLine ?? NO_PROVIDER_LINE;
     return providerCannotRefusal(record.name, machineWord(kind), action);
   };
   /** The one throw every gate below goes through, so every capability a verb reads refuses in the same sentence. */
@@ -3168,11 +1178,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * names the capability its own move needs and never a neighbour's: a provider that copies a machine's disk but
    * whose forks boot cold takes a snapshot all the same. */
   const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes" | "pauseMode">, action: string): void => {
-    refuseUnless(entry, backendFor(entry.record).capabilities[can] === true, action);
+    refuseUnless(entry, ctx.backendFor(entry.record).capabilities[can] === true, action);
   };
   /** Whether a kind's machines pause at all, which is all the runtime asks of the pause mode: the nap and the wake
    * refuse where no mode is declared, with the same sentence, and never read which mode it is. */
-  const pauses = (record: WorkspaceRecord): boolean => backendFor(record).capabilities.pauseMode !== undefined;
+  const pauses = (record: WorkspaceRecord): boolean => ctx.backendFor(record).capabilities.pauseMode !== undefined;
   const refusePauseless = (entry: LiveWorkspace, action: string): void => {
     refuseUnless(entry, pauses(entry.record), action);
   };
@@ -3185,10 +1195,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * request relayed from a machine drives and sees only the kinds whose module takes one, so this computer's own
    * workspace answers nothing relayed. Today no machine has a road into the host, so nothing relays yet; the rule
    * holds when one appears. */
-  const drives = (record: { kind: WorkspaceKind; machineId?: string }, caller: Caller | undefined): boolean => roadOf(caller) !== "relayed" || moduleOf(record.kind).relayed(record.machineId);
-  /** What the two rules a request is read against need of a workspace: what a record holds, and what a create is
-   * checked with before there is a record. */
-  type WorkspaceLike = { id?: string; kind: WorkspaceKind; name: string; machineId?: string; rootThreadId?: string; project?: string; worktree?: WorktreeFolder };
+  const drives = (record: { kind: WorkspaceKind; machineId?: string }, caller: Caller | undefined): boolean => roadOf(caller) !== "relayed" || ctx.moduleOf(record.kind).relayed(record.machineId);
   /** Which workspaces a thread's own token reaches: the one its turn runs on, and the ones its root thread forked.
    * A thread never sees or drives a workspace outside its own tree, whatever the verb, so this sits beside the
    * kind rule rather than in any one of them. A caller that is no thread reaches everything the kind rule allows. */
@@ -3219,7 +1226,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (scope === undefined) return undefined;
     const mine = projectOfScope(scope);
     if (mine !== undefined && record.project !== undefined && record.project !== mine) {
-      return spawnProjectRefusal(scope.threadId, projectHeld(mine).name, projectHeld(record.project).name);
+      return spawnProjectRefusal(scope.threadId, ctx.projectHeld(mine).name, ctx.projectHeld(record.project).name);
     }
     return !inTree(record, scope) ? spawnReachRefusal(scope.threadId, record.name) : undefined;
   };
@@ -3260,23 +1267,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * nobody set on the workspace reads as its place's, and one set on neither as the default. */
   const agentsRecordOf = (record: WorkspaceRecord): WorkspaceRecord | undefined => {
     if (record.rootThreadId === undefined) return record;
-    const at = rowsOn(record.rootThreadId)[0]?.workspaceId;
+    const at = ctx.rowsOn(record.rootThreadId)[0]?.workspaceId;
     return at === undefined ? undefined : live.get(at)?.record;
   };
   const agentsOf = (record: WorkspaceRecord): WorkspaceAgents | undefined => {
     const held = agentsRecordOf(record);
-    return held === undefined ? undefined : agentsHeld(held);
+    return held === undefined ? undefined : ctx.agentsHeld(held);
   };
   /** Where the switch a record runs under is held, as the depth refusal names the setting to raise. */
   const agentsHeldAt = (record: WorkspaceRecord): { computer: string } | { workspace: string } => {
     const held = agentsRecordOf(record) ?? record;
     if (held.agents !== undefined) return { workspace: held.name };
-    const placeId = placeIdOf(held) ?? HERE_PLACE_ID;
+    const placeId = ctx.placeIdOf(held) ?? HERE_PLACE_ID;
     return { computer: placeDoor?.nameOf(placeId) ?? placeId };
   };
   /** The tree a thread sits in, read off the rows: its parent, then its parent's, up to the thread a person opened.
    * The walk is bounded by the rows there are, since a chain that somehow looped would otherwise never end. */
-  const parentOf = (threadId: string): string | undefined => rowsOn(threadId).find(v => v.parentThreadId !== undefined)?.parentThreadId;
+  const parentOf = (threadId: string): string | undefined => ctx.rowsOn(threadId).find(v => v.parentThreadId !== undefined)?.parentThreadId;
   const depthUnderRoot = (threadId: string): number => {
     let depth = 0;
     let at = threadId;
@@ -3289,13 +1296,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return depth;
   };
   /** The top of the tree a thread is in: the root its own rows carry, and itself when nothing spawned it. */
-  const rootOf = (threadId: string): string => rowsOn(threadId).find(v => v.rootThreadId !== undefined)?.rootThreadId ?? threadId;
+  const rootOf = (threadId: string): string => ctx.rowsOn(threadId).find(v => v.rootThreadId !== undefined)?.rootThreadId ?? threadId;
   /** How a turn on this workspace's machine reaches this host, and the wsp command it runs there: the kind's own
    * answer for its machines, and nothing where that kind reaches this host nowhere. */
   const agentsReach = (entry: LiveWorkspace): { url?: string; wsp?: McpServerSpec } | undefined => {
-    const reach = moduleOf(entry.record.kind).turnReach(entry);
+    const reach = ctx.moduleOf(entry.record.kind).turnReach(entry);
     if (reach === undefined) return undefined;
-    const wsp = moduleOf(entry.record.kind).wspMcp(entry);
+    const wsp = ctx.moduleOf(entry.record.kind).wspMcp(entry);
     return { ...reach, ...(wsp !== undefined ? { wsp } : {}) };
   };
   /** The one door every act a thread's own token asks for goes through: the switch on the workspace that thread
@@ -3339,334 +1346,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * tree nests by and what the machine cap counts; nothing for a caller that is no thread. */
   const treeOf = (scope: ThreadScope | undefined): { parentThreadId?: string; rootThreadId?: string } =>
     scope === undefined ? {} : { parentThreadId: scope.threadId, rootThreadId: scope.rootThreadId };
-  const bus = eventBus();
-  const providerReadMs = opts.providerReadMs ?? PROVIDER_READ_MS;
-  const goneConfirmMs = opts.goneConfirmMs ?? GONE_CONFIRM_MS;
-  const lateReadMs = opts.wake?.lateReadMs ?? WAKE_LATE_READ_MS;
-  const clock = opts.clock ?? realClock;
-  const githubCache = opts.githubCache ?? memoryGitHubCache();
-  /** What the provider says the machine is, bounded by its own read; undefined where the read could not be had. */
-  const readsState = (machine: Machine): Promise<MachineState | undefined> =>
-    until(machine.state(), clock.now() + providerReadMs, `state of ${machine.id}`, clock).catch(() => undefined);
-  /** What a read of the machine before a wake asks again comes to: a resume the backend gave up on went through
-   * after all, or as far as anything here can tell it did not. A read that could not be had leaves the resume
-   * unsent, and a machine the read calls gone meets its 404 on the next ask and settles gone. */
-  const tookTheResume = (reads: MachineState | undefined): boolean => reads === "running" || reads === "starting";
-  /** Resolves after ms on the runtime's clock. Unref'd: a host asked to exit while a wake waits to ask again exits. */
-  const sleeps = (ms: number): Promise<void> => new Promise<void>(resolve => clock.schedule(() => resolve(), ms, { unref: true }));
-  const daemonHelloTimeoutMs = opts.daemonHelloTimeoutMs ?? DAEMON_HELLO_TIMEOUT_MS;
-  const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
-  const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? NAP_AFTER_MS;
-  const hostId = opts.hostId ?? hostname();
+  return {
+    rememberProject, rememberTarget, refuseCannot, pauses, refusePauseless, holdsSlot, drives, opensIn, projectOfScope,
+    refusalFor, refuseRelayed, refuseNamed, held, listedFor, refuseRecording, agentsOf, parentOf, rootOf, agentsReach,
+    spawnGuard, treeOf,
+  };
+}
 
-  const vaultPathsOf = async (m: Machine): Promise<string[]> => {
-    if (opts.vaultPaths) return opts.vaultPaths;
-    // Breadcrumb doubles as the guarantee that the export list is never empty.
-    await m.exec("date -u +%FT%TZ >> /root/.wsp-upgraded");
-    const ls = await m.exec("ls -A /root");
-    if (ls.exitCode !== 0) throw new Error(`vault enumeration failed: ${ls.stderr.slice(-200)}`);
-    return ls.stdout
-      .split("\n")
-      .map(s => s.trim())
-      .filter(s => s.length > 0 && !VAULT_SKIP.has(s))
-      .map(s => `/root/${s}`);
-  };
-  const vaultExport = async (m: Machine, o: Pick<VaultOptions, "maxBytes" | "drop"> = {}): Promise<Buffer> =>
-    exportPaths(m, await vaultPathsOf(m), { ...o, ...(opts.vaultCaches !== undefined ? { exclude: opts.vaultCaches } : {}) });
-  /** What the fork's home owes a newer image, read while the machine still runs: the files the image it stands on
-   * wrote and it never touched, which the archive leaves behind so the new image's copies stand, and the ones it
-   * changed, which travel and are named on the result. A version that recorded none falls back to the old rule,
-   * where the whole home lands over the new image. */
-  const imageMovePlan = async (m: Machine, from: GoldenVersion | undefined, to: GoldenVersion): Promise<UpgradePlan> => {
-    if (from?.owned === undefined) return upgradePlan(undefined, to.owned, []);
-    const was = new Set(from.owned.map(f => f.path));
-    // What the comparison actually judges by the fork's bytes: the version's own rows, less the volatile ones, whose
-    // bytes never stand for an edit; and the volatile rows only the new image writes, where the comparison asks
-    // whether the fork holds a live copy of its own to leave alone.
-    const read = [
-      ...from.owned.filter(f => f.volatile !== true).map(f => f.path),
-      ...(to.owned ?? []).filter(f => f.volatile === true && !was.has(f.path)).map(f => f.path),
-    ];
-    return upgradePlan(from.owned, to.owned, await readOwnedFiles(m, read));
-  };
-  // One device door for this host: the ops the protocol server answers and the token every turn is launched with
-  // come out of the same table, so a scoped token is listed, matched and revoked by the rules a paired computer's
-  // token already lives under.
-  const deviceDoor = makeDevices(store);
-  /**
-   * The token a launch of a thread's agent drives this host with, the address it dials and the wsp server it runs: a
-   * device of this host's, scoped to the thread, which the caller takes back once the launch's process exits, so a
-   * token read out of a machine after it opens nothing. Minted whatever the switch says, since a launch with none
-   * reaches this host through the person's own wsp server and acts as them; the guard refuses what the switch
-   * refuses. Only where the workspace has a road to this host, since a token with nowhere to go is one more secret
-   * for nothing.
-   */
-  const threadLaunch = async (entry: LiveWorkspace, threadId: string, rootThreadId: string, o: { aside?: true } = {}): Promise<{ scoped?: Awaited<ReturnType<typeof deviceDoor.mint>>; env: Record<string, string>; wsp?: McpServerSpec }> => {
-    const reach = agentsReach(entry);
-    if (reach === undefined) return { env: {} };
-    const scoped = await deviceDoor.mint(`thread ${threadWord(threadId)}`, { kind: "thread", threadId, workspaceId: entry.record.id, rootThreadId }, Date.now(), { road: moduleOf(entry.record.kind).turnRoad, ...o });
-    return {
-      scoped,
-      env: {
-        [HOST_TOKEN_ENV]: scoped.deviceToken,
-        // The address and the key beside it only for a launch that dials one: its wsp pins the key before it sends
-        // the token, so a directory answer naming another host is refused.
-        ...(reach.url !== undefined ? { [HOST_URL_ENV]: reach.url, ...(placeDoor === undefined ? {} : { [HOST_KEY_ENV]: placeDoor.hostKey() }) } : {}),
-      },
-      ...(reach.wsp !== undefined ? { wsp: reach.wsp } : {}),
-    };
-  };
-  // The places joined to this host, over the one code store every code is spent from: the door holds the records
-  // and the links, and the two roads into the runtime it needs are the ordinary record and delete roads below.
-  if (opts.placeLinks !== undefined) {
-    const wiring = opts.placeLinks;
-    placeDoor = makePlaceDoor({
-      store,
-      devices: deviceDoor,
-      wiring,
-      // A thunk: the provider table is built below this, and the door reads it only when a line asks where a fork
-      // can land.
-      providers: () => places,
-      now: () => clock.now(),
-      onStage: event => bus.emit(event),
-      onSetup: event => bus.emit(event),
-      copyBuild: placeId => copyRows.get(placeId),
-      napMs: defaultIdleWindowMs,
-      ...(opts.local?.hereDaemon !== undefined ? { hereDaemon: opts.local.hereDaemon } : {}),
-      // Armed from now under the new window, on every workspace there whose window is its place's.
-      napChanged: placeId => {
-        for (const e of live.values()) if (e.record.phase === "running" && e.record.idleWindowMs === undefined && placeIdOf(e.record) === placeId) idle.touch(e.record.id);
-      },
-      // The same vault a turn is launched with: the word a computer's row says about an agent's sign-in and the
-      // secrets that turn actually gets are one reading, so a row cannot say a key stands that no turn would use.
-      ...(opts.vault !== undefined ? { vault: opts.vault } : {}),
-      ...(opts.recipes !== undefined ? { recipes: () => opts.recipes } : {}),
-      ...(opts.placeJoinWaitMs !== undefined ? { joinWaitMs: opts.placeJoinWaitMs } : {}),
-      ...(opts.placeUpdateWaitMs !== undefined ? { updateWaitMs: opts.placeUpdateWaitMs } : {}),
-      ...(opts.placeDialWaitMs !== undefined ? { dialWaitMs: opts.placeDialWaitMs } : {}),
-      ...(opts.placeFrameWaitMs !== undefined ? { frameWaitMs: opts.placeFrameWaitMs } : {}),
-      ...(opts.placeRelinkWaitMs !== undefined ? { relinkWaitMs: opts.placeRelinkWaitMs } : {}),
-      recording: {
-        // Reads the live records, so it waits on the one hydration every other road waits on: a place that dials a
-        // host nothing has asked a verb of yet would otherwise find no records at all.
-        forksOn: async placeId => {
-          await ready();
-          return [...live.values()].filter(e => e.record.place === placeId).map(e => e.record.name);
-        },
-        projectsOn: async placeId => {
-          await ready();
-          return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => p.name);
-        },
-        runningOn: async (placeId, rows) => {
-          await ready();
-          const standing = [...live.values()].map(e => ({ ...e.record, provider: providerOf(e.record) }));
-          return runningOnPlace(placeId, rows, standing, foldThreads([...sessions.values()].map(s => s.view)));
-        },
-        signInLine: (placeId, agent) => agentsRead.signInLine({ placeId }, { agent }),
-        // The app's own sign-in road on that computer, read as a setup's row waiting on the person.
-        signIn: async (placeId, agent, emit) => {
-          const handle = await agentsRead.signIn({ placeId }, { agent }, emit);
-          return {
-            leave: () => handle.leave(),
-            stop: () => {
-              // A sign-in that already ended has nothing left to stop.
-              try {
-                agentsRead.signInStop(handle.signInId);
-              } catch {
-                return;
-              }
-            },
-          };
-        },
-        // The add's own road for a folder seeding a project on that computer, with what the pick keeps.
-        addFolder: async (placeId, key, folder) => {
-          const source = folder.from.replace(/^~(?=\/|$)/, homedir());
-          const plan = await projectsDoor.seedPlan(source);
-          const seed = seedChoiceFrom(plan, folder.keep, []);
-          const project = await projectsDoor.add({ source, on: placeId, ...(folder.name !== undefined ? { name: folder.name } : {}), seed });
-          if (folder.icon !== undefined || folder.hue !== undefined) {
-            await preferences.set({ projectLook: { [project.id]: { ...(folder.icon !== undefined ? { icon: folder.icon } : {}), ...(folder.hue !== undefined ? { hue: folder.hue } : {}) } } });
-          }
-          return { id: `folders/${key}`, label: project.name, outcome: "installed", ...(project.notice !== undefined ? { note: project.notice } : {}) };
-        },
-        folderRemote: async folder => (await remoteHere(folder.from.replace(/^~(?=\/|$)/, homedir()))).remote || undefined,
-        // A folder the recipe took out leaves this host's list; its checkout there is the person's and stays.
-        removeFolder: async (placeId, key, folder) => {
-          const name = folder.name ?? key;
-          const project = (await projectsDoor.list()).find(p => p.computer === placeId && p.name === name);
-          if (project === undefined) return;
-          const standing = [...live.values()].filter(e => e.record.project === project.id).map(e => e.record.name);
-          if (standing.length > 0) throw new Error(projectInUseRefusal(project.name, standing));
-          projectsHeld.delete(project.id);
-          await store.delete(PROJECTS, project.id);
-          bus.emit({ type: "project.removed", projectId: project.id });
-        },
-      },
-    });
-    // The door's four events ride the one stream every other event rides, so the app follows a computer joining
-    // over the socket it already holds and no road subscribes to the door itself.
-    placeDoor.on(e => bus.emit(e));
-    placeDoor.on(e => {
-      if (e.type === "place.removed") copyRows.delete(e.placeId);
-    });
-    // A copy is built only when somebody asks for one, and a computer's setup was asked for: its end is when the
-    // image there can be read at all, which is the moment the tally beside it is written. A link builds nothing.
-    bus.on("place.setup", e => {
-      if (e.type !== "place.setup" || e.end === undefined) return;
-      void image.keepCurrent(e.placeId);
-    });
-    // A build on that computer is making its requests over the link that just went: the ones that may be asked
-    // again are waiting on it, so the stage they are in says what it is waiting for and says its own line again
-    // once the computer opens a socket.
-    placeDoor.on(e => {
-      if (e.type !== "place.absent" && e.type !== "place.present") return;
-      const gone = e.type === "place.absent";
-      for (const at of stageAt.values()) {
-        if (at.place !== e.placeId) continue;
-        // The whole frame the stage last sent, with the wait standing in for its line while the gap lasts: the step
-        // a reader clocks and the machines a failure left behind are facts of that stage and outlive a socket.
-        const detail = gone ? placeDialBackLine(placeDoor!.nameOf(e.placeId)) : at.frame.detail;
-        bus.emit({ ...at.frame, type: "golden.stage", ...(detail !== undefined ? { detail } : {}), ...(at.named ? { place: at.place } : {}) });
-      }
-    });
-    // A computer that dials back in is the moment a record nothing could be asked about can be read at last: only
-    // the ones this host is holding by a stand-in go through the hydration they would have had at host start, and
-    // a fork that was live through the blip is left exactly as it is. A laptop that slept and dialled again is the
-    // common case, so a wake, a nap or a delete in flight must not be thrown away by a presence beat.
-    placeDoor.on(e => {
-      if (e.type !== "place.present") return;
-      void (async () => {
-        await ready();
-        for (const raw of await store.list(WORKSPACES)) {
-          const stored = raw as WorkspaceRecord;
-          if (stored.place !== e.placeId || !isHeldAway(stored.id)) continue;
-          // This road runs after ready, so every session row is already in and the sync can wait out a running turn.
-          const entry = await hydrateWorkspace(raw);
-          if (entry !== undefined) void syncDaemon(entry);
-          else await rereadHeld(stored.id, "record load");
-        }
-      })().catch((err: unknown) => console.warn(`the records on ${placeDoor!.nameOf(e.placeId)} were not read again: ${err instanceof Error ? err.message : String(err)}`));
-    });
-  }
-  /** The machines a root thread's forks are landing but have no record for yet, by root: a slot is taken before
-   * the first await of a fork and handed back when it lands or fails, so the cap counts what is on its way too. */
-  const landing = new Map<string, number>();
-  const live = new Map<string, LiveWorkspace>();
-  /** Every project this host holds, by id, read from the store once at hydration and kept here: a workspace's view
-   * joins its project off this map on every read, and the map is the one place a project's name, path and computer
-   * are known without a store read. */
-  const projectsHeld = new Map<string, ProjectView>();
-  const setups = agentSetups(store);
-  const builders = new Map<string, LiveBuilder>();
-  /** Every machine a sweep, a landing or a replacement stops, read back behind the sweep and asked again while it stays. */
-  let sayStops: ((line: string) => void) | undefined;
-  const gone = new GoneWatch({ ...(opts.killConfirm !== undefined ? { confirm: opts.killConfirm } : {}), warn: line => (sayStops ?? console.warn)(line) });
-  /** The prepare in flight per place and golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
-  const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
-  /** The copy build in flight per place and image name. A create landing there, a version cut and a person typing
-   * the line all ask for the same copy: the second and every later ask joins the first and takes the copy it seals,
-   * so one builder runs and this computer is read once. */
-  const copyBuilds = new Map<string, Promise<SealedImageBuilt>>();
-  /** One build stage as its frame carries it, with nothing of the stream around it: what a gap in a link replays. */
-  interface StageFrame {
-    name: string;
-    stage: GoldenStage;
-    detail?: string;
-    step?: GoldenStep;
-    left?: string[];
-  }
-  /** The stage each build on a joined computer is in, by that computer and the image's name. A build there makes
-   * its requests over that computer's link, and a gap in it holds every one of them: the stage says so while it
-   * lasts and reads what it last read once the computer is back, rather than standing still under a line that is
-   * no longer true. */
-  const stageAt = new Map<string, { place: string; name: string; named: boolean; frame: StageFrame }>();
-  /** What each place's row says about its copy: the stage while a build runs there, the reason after one stopped,
-   * nothing once the copy stands. Written off the golden.stage frames naming the place, so a build reads the same on
-   * the row whoever started it. */
-  const copyRows = new Map<string, CopyBuild>();
-  bus.on("golden.stage", e => {
-    if (e.type !== "golden.stage" || e.place === undefined) return;
-    const build = copyBuildOf(e);
-    if (build === undefined) copyRows.delete(e.place);
-    else copyRows.set(e.place, build);
-  });
-  /** Whether a refusal before any build at a place is that place's row to say. A place that runs no workspaces has no
-   * copy to keep, a link that went is not a build to show, and a computer whose recipe is running is no build either:
-   * nothing was asked of its image and the job's own end asks again. */
-  const rowSaysFailure = (place: string, e: unknown): boolean =>
-    !(e instanceof PlaceForksNowhereError || e instanceof PlaceProvisioningError || isPlaceAbsent(e) || placeAway(place));
-  /** A computer this host holds no link to now: a laptop asleep, or one that went mid-ask. */
-  const placeAway = (place: string): boolean => placeDoor !== undefined && places.backend(place) === undefined && placeDoor.link(place) === undefined;
-  /** A failure said on the bus as the build's own failed frame, so the row, the app's store and the image card read
-   * the same stop. */
-  const frameStopped = (place: string, name: string, e: unknown): void => stageOf(name, place, true)("failed", e instanceof Error ? e.message : String(e));
-  /** A row read back from the store has no handle: its process died with the runtime that started it. */
-  /** The record of every thread this host holds, by thread id, persisted beside the workspace's rows. */
-  const threadRecords = new Map<string, ThreadRecord & { workspaceId: string }>();
-  /** When this state file began keeping read stamps: what a thread no window has shown since reads as its stamp. */
-  let readsSince = 0;
-  /** The wake of each snooze still standing, by fold key, so every window re-reads the thread the moment it ends. */
-  const snoozeTimers = new Map<string, () => void>();
-  /** Arms the wake of a thread's snooze, over any it had; a moment past already has nothing to wake. A timer longer
-   * than setTimeout holds is re-armed on the way, and a wake finding the snooze moved or gone says nothing. */
-  const wakeAt = (threadId: string, until: number): void => {
-    snoozeTimers.get(threadId)?.();
-    snoozeTimers.delete(threadId);
-    const wait = until - clock.now();
-    if (wait <= 0) return;
-    const cancel = clock.schedule(
-      () => {
-        snoozeTimers.delete(threadId);
-        const record = threadRecords.get(threadId);
-        if (record?.snoozedUntil !== until) return;
-        if (clock.now() < until) wakeAt(threadId, until);
-        else bus.emit({ type: "thread.marked", workspaceId: record.workspaceId, threadIds: [threadId] });
-      },
-      Math.min(wait, MAX_TIMER_MS),
-      { unref: true },
-    );
-    snoozeTimers.set(threadId, cancel);
-  };
-  /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
-   * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
-   * takes the row, since a restart could re-open nothing from it. */
-  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> }>();
-  /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
-  const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
-  const indexFlushes = new Map<string, Promise<void>>();
-  /** The transcripts held whole, the one opened last at the end: at most TRANSCRIPTS_HELD, read again from their files
-   * once they fall out. A store that keeps them as rows holds none. */
-  const transcripts = new Map<string, SessionEvent[]>();
-  /** The state database's transcript rows. Where the store has none (the memory store, and the JSON store kept for one
-   * release by WSP_STATE_STORE) each transcript is a blob, and every switch on `rows` is that road: they go with it. */
-  const rows = store.transcripts;
-  /** Workspaces whose index did not read off their rows at boot: their flushes write events and leave the kept index
-   * alone, so the next boot reads it again. */
-  const unreadIndexes = new Set<string>();
-  /** Each workspace's events written since its transcript's last flush, which its file does not have yet. */
-  const pendingEvents = new Map<string, SessionEvent[]>();
-  const pendingBytes = new Map<string, number>();
-  /** Every transcript's index, held whether or not the transcript is. */
-  const transcriptIndex = new Map<string, TranscriptIndex>();
-  const indexFor = (workspaceId: string): TranscriptIndex => {
-    const held = transcriptIndex.get(workspaceId) ?? emptyIndex();
-    transcriptIndex.set(workspaceId, held);
-    return held;
-  };
-  /** The bytes each held transcript's events come to as JSON, kept beside it so a new event is not a walk of all of them. */
-  const transcriptBytes = new Map<string, number>();
-  /** Each event's size, measured once, for a transcript over its byte cap: one is walked whole at every event that
-   * lands. Only those, so a transcript inside it holds nothing more. */
-  const sizes = new WeakMap<SessionEvent, number>();
-  const sizeOf = (e: SessionEvent): number => {
-    const known = sizes.get(e);
-    if (known !== undefined) return known;
-    const size = eventBytes(e);
-    sizes.set(e, size);
-    return size;
-  };
-  /** One workspace's kept images, by thread: the key each one's bytes are a blob under, and its type. */
-  type KeptImages = { threads: Record<string, { key: string; mediaType: string }[]> };
+function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
+  const {
+    opts, store, bus, clock, live, threadRecords, sessions, indexFlushes, transcripts, rows, unreadIndexes,
+    pendingEvents, pendingBytes, transcriptIndex, indexFor, transcriptBytes, sizeOf,
+  } = ctx;
   const keptWrites = new Map<string, Promise<void>>();
   /** One chain per workspace, so two sends writing at once cannot lose each other's keys. */
   const onKept = (workspaceId: string, step: (held: KeptImages) => Promise<KeptImages | undefined>): Promise<void> => {
@@ -4204,7 +1895,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       transcriptTimers.set(event.workspaceId, clock.schedule(() => void flushTranscript(event.workspaceId), TRANSCRIPT_FLUSH_MS));
     }
     bus.emit(event);
-    if ((event.type === "session.start" || event.type === "session.end") && event.threadId !== undefined) pushHead(event.threadId);
+    if ((event.type === "session.start" || event.type === "session.end") && event.threadId !== undefined) ctx.pushHead(event.threadId);
   };
 
   /** The newest accrued cost each workspace's meter pushed, for a slate's cost source. */
@@ -4215,106 +1906,115 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The model, effort and window a thread's own turns ran with, read off its rows as the composer reads them: for
    * each, the last turn that named one, the window split back off the model the CLI announced. */
   const ownPicks = (workspaceId: string, threadId: string): { model?: string; effort?: string; contextWindow?: string } => {
-    const rows = rowsOn(threadId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+    const rows = ctx.rowsOn(threadId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
     const ran = rows.filter(r => r.model !== undefined).at(-1);
-    const session = startedAs(workspaceId, threadId);
-    const model = ran?.model ?? (session === undefined ? undefined : resumedFact(workspaceId, session, "model"));
+    const session = ctx.startedAs(workspaceId, threadId);
+    const model = ran?.model ?? (session === undefined ? undefined : ctx.resumedFact(workspaceId, session, "model"));
     const effort = rows.filter(r => r.effort !== undefined).at(-1)?.effort;
     const window = ran?.contextWindow ?? /\[([^\]]+)\]$/.exec(model ?? "")?.[1];
     return { ...(model !== undefined ? { model: baseModel(model) } : {}), ...(effort !== undefined ? { effort } : {}), ...(window !== undefined ? { contextWindow: window } : {}) };
   };
   /** The workspace a thread runs on where that is a machine of its own, not this computer. */
   const boxOf = (threadId: string): LiveWorkspace | undefined => {
-    const workspaceId = latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
+    const workspaceId = ctx.latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
     const entry = workspaceId === undefined ? undefined : live.get(workspaceId);
     return entry === undefined || isLocalWorkspace(entry.record) ? undefined : entry;
   };
+  return {
+    keptWrites, keepSentImages, dropSentImages, moveTranscript, loadIndex, moveBlobs, transcriptQueue, openTranscript,
+    transcriptReader, dropFromTranscript, transcriptTimers, daemonTokens, daemonTokenOf, cancelFlush, flushTranscript,
+    viewedMarks, persistSessions, record, accrued, ownPicks, boxOf,
+  };
+}
+
+function slatesArea(ctx: RuntimeContext): SlatesArea {
+  const { opts, store, local, bus, clock, live, threadRecords, sessions, transcripts } = ctx;
   const slates: Slates = createSlates({
     store,
     now: () => clock.now(),
-    record: e => record(e),
+    record: e => ctx.record(e),
     emit: e => bus.emit(e),
     thread: threadId => {
-      const latest = latestOn(threadId);
+      const latest = ctx.latestOn(threadId);
       const workspaceId = latest?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
       if (workspaceId === undefined) return undefined;
       const running = [...sessions.values()].find(s => s.view.threadId === threadId && s.view.status === "running");
       const entry = live.get(workspaceId);
       // A run starts where the thread's next turn would: the folder its session ran in, a --cwd or a worktree, else
       // the folder the workspace's kind holds its project in, on that kind's computer.
-      const ranIn = latest?.cwd ?? (latest?.claudeSessionId === undefined ? undefined : folderOf(workspaceId, latest.claudeSessionId));
-      if (entry === undefined) return { workspaceId, rootThreadId: rootOf(threadId), sessionId: latest?.claudeSessionId ?? latest?.id ?? threadId, ...(running !== undefined ? { turnId: running.turnId } : {}) };
-      const folder = runsIn(entry, ranIn, moduleOf(entry.record.kind).folder(entry.record) ?? checkoutOf(entry.record));
+      const ranIn = latest?.cwd ?? (latest?.claudeSessionId === undefined ? undefined : ctx.folderOf(workspaceId, latest.claudeSessionId));
+      if (entry === undefined) return { workspaceId, rootThreadId: ctx.rootOf(threadId), sessionId: latest?.claudeSessionId ?? latest?.id ?? threadId, ...(running !== undefined ? { turnId: running.turnId } : {}) };
+      const folder = ctx.runsIn(entry, ranIn, ctx.moduleOf(entry.record.kind).folder(entry.record) ?? ctx.checkoutOf(entry.record));
       // A run on the host from a thread on a box starts in the project's folder here, where the project is also here.
-      const here = isLocalWorkspace(entry.record) ? folder : existsSync(checkoutOf(entry.record)) ? checkoutOf(entry.record) : homedir();
+      const here = isLocalWorkspace(entry.record) ? folder : existsSync(ctx.checkoutOf(entry.record)) ? ctx.checkoutOf(entry.record) : homedir();
       return {
         workspaceId,
-        rootThreadId: rootOf(threadId),
+        rootThreadId: ctx.rootOf(threadId),
         sessionId: latest?.claudeSessionId ?? latest?.id ?? threadId,
         ...(running !== undefined ? { turnId: running.turnId } : {}),
         folder,
         hostFolder: here,
-        computer: computerOf(entry),
+        computer: ctx.computerOf(entry),
       };
     },
     machineOf: threadId => {
-      const entry = boxOf(threadId);
+      const entry = ctx.boxOf(threadId);
       return entry?.machine;
     },
     asleep: threadId => {
-      const entry = boxOf(threadId);
+      const entry = ctx.boxOf(threadId);
       return entry !== undefined && entry.record.phase !== "running";
     },
     wake: async threadId => {
-      const entry = boxOf(threadId);
-      if (entry !== undefined) await workspaces.wake(entry.record.id);
+      const entry = ctx.boxOf(threadId);
+      if (entry !== undefined) await ctx.workspaces.wake(entry.record.id);
     },
-    loaded: () => ready(),
+    loaded: () => ctx.ready(),
     settled: async threadId => {
-      const latest = latestOn(threadId);
+      const latest = ctx.latestOn(threadId);
       if (latest === undefined) return false;
       const own = threadRecords.get(threadId);
-      const prefs = await preferences.get();
+      const prefs = await ctx.preferences.get();
       const facts = { working: latest.status === "running", asking: latest.waitingOn !== undefined, failed: latest.status === "failed", startedAt: latest.startedAt ?? null, endedAt: latest.endedAt ?? null, readAt: own?.readAt ?? null, settledAt: own?.settledAt ?? null };
       return threadSettled(facts, clock.now(), SETTLE_MS[prefs.settleAfter]);
     },
-    under: lead => treeUnder(lead),
-    threadOfToken: token => threadOfToken(token),
+    under: lead => ctx.treeUnder(lead),
+    threadOfToken: token => ctx.threadOfToken(token),
     mcpServer: async (threadId, name) => {
-      const workspaceId = latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
-      const harness = latestOn(threadId)?.harness ?? threadRecords.get(threadId)?.harness;
+      const workspaceId = ctx.latestOn(threadId)?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
+      const harness = ctx.latestOn(threadId)?.harness ?? threadRecords.get(threadId)?.harness;
       const entry = workspaceId === undefined ? undefined : live.get(workspaceId);
       if (entry === undefined || harness === undefined) throw new Error(`thread ${threadId} has no workspace this host holds`);
       if (!isLocalWorkspace(entry.record)) throw new Error("a slate's tool runs start their server on this computer, and this thread runs on another");
       const reader = opts.agentsReader;
       if (reader?.server === undefined) throw new Error("this host reads no agent's MCP config");
-      return reader.server({ kind: "here", projects: [{ id: workspaceId!, name: "thread", path: checkoutOf(entry.record) }] }, { agent: harness, name });
+      return reader.server({ kind: "here", projects: [{ id: workspaceId!, name: "thread", path: ctx.checkoutOf(entry.record) }] }, { agent: harness, name });
     },
     sources: (threadId, workspaceId) => ({
       threadId,
       workspaceId,
       now: clock.now(),
-      rows: () => rowsOn(threadId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0)),
+      rows: () => ctx.rowsOn(threadId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0)),
       results: () => (transcripts.get(workspaceId) ?? []).flatMap(e => (e.type === "session.done" && e.threadId === threadId ? [e.result] : [])),
       account: async () => {
         const entry = live.get(workspaceId);
-        const harness = latestOn(threadId)?.harness ?? threadRecords.get(threadId)?.harness;
+        const harness = ctx.latestOn(threadId)?.harness ?? threadRecords.get(threadId)?.harness;
         if (entry === undefined || harness === undefined) return undefined;
-        const key = usageAccountOf(entry, harness).key;
-        return (await usageAccounts()).accounts.find(a => a.key === key);
+        const key = ctx.usageAccountOf(entry, harness).key;
+        return (await ctx.usageAccounts()).accounts.find(a => a.key === key);
       },
       workspace: () => {
         const entry = live.get(workspaceId);
         if (entry === undefined) return undefined;
         const project = entry.record.project;
         return {
-          computer: computerOf(entry),
-          ...(project !== undefined ? { project: projectHeld(project).name } : {}),
-          folder: checkoutOf(entry.record),
+          computer: ctx.computerOf(entry),
+          ...(project !== undefined ? { project: ctx.projectHeld(project).name } : {}),
+          folder: ctx.checkoutOf(entry.record),
           ...(entry.checkout !== undefined ? { checkout: entry.checkout } : {}),
           ...(entry.pr !== undefined ? { pr: entry.pr } : {}),
-          rateUsdPerHour: entry.record.size === undefined ? 0 : backendFor(entry.record).pricing.rateUsdPerHour(entry.record.size),
-          accruedUsd: accrued.get(workspaceId) ?? 0,
+          rateUsdPerHour: entry.record.size === undefined ? 0 : ctx.backendFor(entry.record).pricing.rateUsdPerHour(entry.record.size),
+          accruedUsd: ctx.accrued.get(workspaceId) ?? 0,
         };
       },
     }),
@@ -4327,7 +2027,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (e.type === "session.queued" && e.requestId === requestId) queuedNow?.();
       });
       try {
-        const started = sessionsApi.start(workspaceId, { prompt, thread: threadId, requestId, startedBy: "person", via: "slate" });
+        const started = ctx.sessionsApi.start(workspaceId, { prompt, thread: threadId, requestId, startedBy: "person", via: "slate" });
         const first = await Promise.race([started, queued]);
         if ("outcome" in first && !("turnId" in first)) {
           started.catch((e: unknown) => console.warn(`a press waiting in thread ${threadWord(threadId)} was not sent: ${e instanceof Error ? e.message : String(e)}`));
@@ -4340,12 +2040,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     watchPr: workspaceId => {
       const entry = live.get(workspaceId);
-      if (entry !== undefined) pollPullRequest(entry);
+      if (entry !== undefined) ctx.pollPullRequest(entry);
     },
     runEnv: () => local?.env() ?? (process.env as Record<string, string>),
-    ...(opts.statePath !== undefined ? { secretsFile: join(stateFolder(), "slates.secrets.json"), slatesDir: join(stateFolder(), "slates") } : {}),
+    ...(opts.statePath !== undefined ? { secretsFile: join(ctx.stateFolder(), "slates.secrets.json"), slatesDir: join(ctx.stateFolder(), "slates") } : {}),
   });
+  return { slates };
+}
 
+function channelsArea(ctx: RuntimeContext): ChannelsArea {
+  const { local, placeDoor, clock, projectsHeld, threadRecords, sessions, transcriptIndex, places } = ctx;
   /** The harness session a thread's newest start in the transcript announced: what a send resumes once the thread's
    * rows have fallen off the index cap. */
   const startedAs = (workspaceId: string, threadId: string): string | undefined => transcriptIndex.get(workspaceId)?.starts.get(threadId);
@@ -4386,7 +2090,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The machine's home for the view, where the kind knows it. */
   const homeOf = (r: WorkspaceRecord): { home?: string } => {
-    const home = moduleOf(r.kind).homeDir(r);
+    const home = ctx.moduleOf(r.kind).homeDir(r);
     return home !== undefined ? { home } : {};
   };
 
@@ -4450,10 +2154,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * driving that daemon one frame at a time: the road its kind answers, and the one sentence for a machine with no
    * daemon answering on it yet. The caller closes what it opened. */
   const ownDaemonChannel = async (entry: LiveWorkspace, onEvent: (event: Record<string, unknown>) => void): Promise<DaemonChannel> =>
-    channelOver(await moduleOf(entry.record.kind).daemonRoad(entry), entry.record.name, onEvent);
+    channelOver(await ctx.moduleOf(entry.record.kind).daemonRoad(entry), entry.record.name, onEvent);
   const channelOver = (reach: DaemonReachView, name: string, onEvent: (event: Record<string, unknown>) => void): Promise<DaemonChannel> => {
     if (reach.daemonToken === undefined) throw new Error(`${name} is not answering yet`);
-    return openChannel({ url: reach.url, token: reach.daemonToken, onEvent });
+    return ctx.openChannel({ url: reach.url, token: reach.daemonToken, onEvent });
   };
 
   /** The frames this host sends a workspace's daemon itself, on a channel closed however the work ends: the road
@@ -4488,7 +2192,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const onThisComputer = async <T>(work: (ask: (frame: DaemonFrame) => Promise<Record<string, unknown>>, home: string) => Promise<T>): Promise<T> => {
     if (local?.daemonRoad === undefined) throw new DaemonRefusal("no-host-cli", "this host runs no daemon on this computer");
     const home = local.homeDir;
-    return overChannel(await channelOver(await localRoad(), THIS_COMPUTER, () => {}), ask => work(ask, home));
+    return overChannel(await channelOver(await ctx.localRoad(), THIS_COMPUTER, () => {}), ask => work(ask, home));
   };
 
   /** Refuses a new machine on a place whose spend today has reached its spend per day. Only a cloud has one, so a copy
@@ -4499,7 +2203,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const row = rows.find(r => r.id === placeId);
     const limit = row === undefined ? undefined : placeSpendLimit(row);
     if (row === undefined || limit === undefined) return;
-    const todayUsd = (await status.spend(rows, clock.now())).find(s => s.place === placeId)?.todayUsd;
+    const todayUsd = (await ctx.status.spend(rows, clock.now())).find(s => s.place === placeId)?.todayUsd;
     if (todayUsd !== undefined && placeAtLimitLine(row, todayUsd) !== undefined) throw new Error(spendCapRefusal(row.name, todayUsd, limit));
   };
 
@@ -4551,16 +2255,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** How often the turns' groups are read again while any workspace holds one, so a group that emptied stops being a
    * root before the kernel can hand its number to a stranger's group, whether or not a channel watches. */
   const PORT_ROOTS_RECHECK_MS = 5_000;
-  let rootsRecheck: ReturnType<typeof setInterval> | undefined;
   const armRootsRecheck = (): void => {
-    if (rootsRecheck !== undefined) return;
-    rootsRecheck = setInterval(() => {
+    if (ctx.state.rootsRecheck !== undefined) return;
+    ctx.state.rootsRecheck = setInterval(() => {
       for (const id of [...turnGroups.keys()]) portRootsMoved(id);
       if (turnGroups.size > 0) return;
-      clearInterval(rootsRecheck);
-      rootsRecheck = undefined;
+      clearInterval(ctx.state.rootsRecheck);
+      ctx.state.rootsRecheck = undefined;
     }, PORT_ROOTS_RECHECK_MS);
-    rootsRecheck.unref();
+    ctx.state.rootsRecheck.unref();
   };
   /** The processes whose listeners are a local workspace's: each of its turns' groups that still has members, and
    * each terminal its channels opened. Never the host, which every workspace here runs under. */
@@ -4732,13 +2435,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
   };
 
-  /** A child's start as its lead's copy answered it: the branch the child's work goes back into, whether its copy has
-   * to be put on that branch after it is made, and the lines the fork says. */
-  interface ChildStart {
-    base: string | undefined;
-    onLeads: boolean;
-    lines: string[];
-  }
 
   /** Where a child starts: its lead's own work branch, read off the lead's copy now and pushed first where it holds
    * commits the remote lacks, so the child's copy can start on it wherever that copy is made. Never the branch the
@@ -4771,7 +2467,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       throw new Error(forkNeedsPushLine(lead.record.name, e instanceof Error ? e.message : String(e)));
     });
     const push = GitPushReply.parse(pushed);
-    void readCheckout(lead, true);
+    void ctx.readCheckout(lead, true);
     return { base: push.branch, onLeads: true, lines: [pushedForChildLine(push.branch, child), ...stayed] };
   };
 
@@ -4782,12 +2478,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     try {
       const put = GitStartOnReply.parse(await withDaemon(child, ask => ask({ op: "git.startOn", cwd: checkoutOf(child.record), branch })));
       if (child.record.worktree !== undefined) child.record.worktree = { ...child.record.worktree, branch: put.branch };
-      await persist(child.record);
-      void readCheckout(child, true);
+      await ctx.persist(child.record);
+      void ctx.readCheckout(child, true);
       return childStartedLine(child.record.name, put.branch);
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
-      await workspaces.delete(child.record.id).catch((d: unknown) => console.warn(`${child.record.name} was not put on ${branch} and was not deleted: ${d instanceof Error ? d.message : String(d)}`));
+      await ctx.workspaces.delete(child.record.id).catch((d: unknown) => console.warn(`${child.record.name} was not put on ${branch} and was not deleted: ${d instanceof Error ? d.message : String(d)}`));
       throw new Error(forkNeedsPushLine(lead, why));
     }
   };
@@ -4799,13 +2495,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const repo = ownerRepoOf(a.remote)?.toLowerCase();
     return host !== undefined && repo !== undefined && host === remoteHost(b.remote) && repo === ownerRepoOf(b.remote)?.toLowerCase();
   };
+  return {
+    startedAs, cutBefore, resumedFact, folderOf, accessOf, daemonNotes, homeOf, providerOf, placeIdOf, settingsAt,
+    turnLimitOf, agentsHeld, spawnAt, projectHeld, refOf, checkoutOf, computerOf, servedByItsComputer, channelOver,
+    withDaemon, overChannel, onThisComputer, placeGuard, placeRefuses, copyBlocked, WORKSPACE_FRAMES, GUEST_ROAD_FRAMES,
+    ownPtys, turnGroups, armRootsRecheck, portRootsMoved, rootedPorts, copyChannel, leadStart, startChildOn,
+    sameRepository,
+  };
+}
 
+function recordsArea(ctx: RuntimeContext): RecordsArea {
+  const { backend, store, hostId, live, places } = ctx;
   const view = (r: WorkspaceRecord): WorkspaceView => ({
     ...((): { folder?: string } => {
-      const folder = moduleOf(r.kind).folder(r);
+      const folder = ctx.moduleOf(r.kind).folder(r);
       return folder !== undefined ? { folder } : {};
     })(),
-    ...homeOf(r),
+    ...ctx.homeOf(r),
     id: r.id,
     name: r.name,
     machineId: r.machineId,
@@ -4813,7 +2519,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     kind: r.kind,
     golden: r.golden,
     createdAt: r.createdAt,
-    project: refOf(projectHeld(r.project)),
+    project: ctx.refOf(ctx.projectHeld(r.project)),
     ...(r.worktree !== undefined ? { worktree: r.worktree } : {}),
     ...(r.from !== undefined ? { from: r.from } : {}),
     ...(r.review !== undefined ? { review: r.review } : {}),
@@ -4822,17 +2528,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(r.gone !== undefined ? { gone: r.gone } : {}),
     ...(r.theme !== undefined ? { theme: r.theme } : {}),
     ...(r.glyph !== undefined ? { glyph: r.glyph } : {}),
-    ...(daemonNotes.has(r.id) ? { daemonNote: daemonNotes.get(r.id)! } : {}),
+    ...(ctx.daemonNotes.has(r.id) ? { daemonNote: ctx.daemonNotes.get(r.id)! } : {}),
     ...(r.daemonRefusedAt !== undefined ? { daemonRefusedAt: r.daemonRefusedAt } : {}),
     ...(r.vaultedAt !== undefined ? { vaultedAt: r.vaultedAt } : {}),
     ...(r.vaultRefused !== undefined ? { vaultRefused: r.vaultRefused } : {}),
     ...(r.wakeRefused !== undefined ? { wakeRefused: r.wakeRefused } : {}),
-    ...(agentsOf(r) !== undefined ? { agents: agentsOf(r)! } : {}),
+    ...(ctx.agentsOf(r) !== undefined ? { agents: ctx.agentsOf(r)! } : {}),
     ...(r.parentThreadId !== undefined ? { parentThreadId: r.parentThreadId } : {}),
     ...(r.rootThreadId !== undefined ? { rootThreadId: r.rootThreadId } : {}),
     ...(r.parentWorkspaceId !== undefined ? { parentWorkspaceId: r.parentWorkspaceId } : {}),
     ...(r.place !== undefined ? { place: r.place } : {}),
-    ...(providerOf(r) !== undefined ? { provider: providerOf(r)! } : {}),
+    ...(ctx.providerOf(r) !== undefined ? { provider: ctx.providerOf(r)! } : {}),
   });
 
   /** One fact of a workspace's look: a value sets it, null clears it back to none, and undefined leaves what the
@@ -4882,9 +2588,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The workspaces forked from this snapshot, whatever their phase: the lineage retention must not cut. */
   const forkedFrom = (snapshotId: string): string[] => [...live.values()].filter(e => e.record.golden === snapshotId).map(e => e.record.name);
-
-  /** Where this host can build a copy of its image, and which of them every road that names none means. */
-  const places: PlaceBackends = opts.places ?? wiredPlace("default", backend);
   /** A place's copy of a golden. A state file the boot has not migrated yet carries the wired place's copy under
    * the bare name, so that key is read as a fallback for the wired place and for no other: a copy under the bare
    * key was built where this host forks, and reading it as another place's would say a place holds an image it has
@@ -5010,7 +2713,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const { project: single, ...rest } = raw as Omit<ProjectGolden, "projects"> & { projects?: WorkspaceProject[]; project?: WorkspaceProject };
     return { ...rest, projects: rest.projects ?? (single !== undefined ? [single] : []) };
   };
+  return {
+    view, putLook, persist, shapeOf, sizeBuilt, readMemory, forkedFrom, copyOf, putCopy, copyRecipeOf, putCopyRecipe,
+    dropCopyRecipe, migrateCopies, recordOf, recordedImages, goldenManifestOf, recipeAsksEngine, imageOf,
+    projectGoldenOf,
+  };
+}
 
+function reachArea(ctx: RuntimeContext): ReachArea {
+  const { bus, clock, daemonHelloTimeoutMs, live, sessions } = ctx;
   /** A status pushed outside the poll, for a phase change the poller would show
    * late. Machine state is what the phase implies: asking the provider here
    * would reset its idle timer for a fact the runtime already knows. The nap
@@ -5050,14 +2761,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Reads the disk at a turn's end, where the stop snapshots it: what a turn wrote is what fills it, and the nap that
    * may fail on a full one comes a window after. A row crossing the line either way is pushed at once. */
   const readDisk = async (entry: LiveWorkspace): Promise<void> => {
-    if (!pauseKeepsDisk(backendFor(entry.record)) || entry.record.phase !== "running") return;
+    if (!ctx.pauseKeepsDisk(ctx.backendFor(entry.record)) || entry.record.phase !== "running") return;
     const res = await entry.machine.exec(DISK_USE_CMD, { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
     const pct = res?.exitCode === 0 ? diskUsePct(res.stdout) : undefined;
     if (pct === undefined) return;
     const was = diskReason(entry);
     disks.set(entry.record.id, { machineId: entry.machine.id, pct });
     const now = diskReason(entry);
-    if (now !== was && entry.record.phase === "running") await emitStatus(entry, reachOf(entry), rowReason(entry));
+    if (now !== was && entry.record.phase === "running") await emitStatus(entry, reachOf(entry), ctx.rowReason(entry));
   };
 
   /** The reach a status pushed for a running machine carries: what the poll last measured, and where it has
@@ -5065,23 +2776,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * carry a line about the daemon happen exactly when the daemon is dead: claiming reachable there paints the row
    * as answering, and leaves the poll's own no-daemon looking like a repeat of the claim, which the bus drops. */
   const reachOf = (entry: LiveWorkspace): ReachState => {
-    if (unreachedOf(entry) !== undefined) return "unreachable";
+    if (ctx.unreachedOf(entry) !== undefined) return "unreachable";
     const seen = polledReach.get(entry.record.id);
     if (seen !== undefined && seen.machineId === entry.machine.id) return seen.reach;
     // The same reading the status poll makes: a machine wsp can ask at all, by a route or by its own answer.
-    return moduleOf(entry.record.kind).hasDaemon(entry) || entry.machine.daemonAnswers !== undefined ? "reachable" : "unsupported";
+    return ctx.moduleOf(entry.record.kind).hasDaemon(entry) || entry.machine.daemonAnswers !== undefined ? "reachable" : "unsupported";
   };
   const emitStatus = async (entry: LiveWorkspace, reach: ReachState, reason?: string): Promise<void> => {
     const size = entry.record.size;
-    const idleAt = entry.record.phase === "running" ? idle.idleAt(entry.record.id) : undefined;
+    const idleAt = entry.record.phase === "running" ? ctx.idle.idleAt(entry.record.id) : undefined;
     bus.emit({
       type: "workspace.status",
       status: {
-        ...view(entry.record),
+        ...ctx.view(entry.record),
         machineState: machineStateOf(entry.record.phase),
         reach: { state: reach },
         size,
-        rateUsdPerHour: backendFor(entry.record).pricing.rateUsdPerHour(size),
+        rateUsdPerHour: ctx.backendFor(entry.record).pricing.rateUsdPerHour(size),
         ...(reason !== undefined ? { reason } : {}),
         ...(entry.wakeAsk !== undefined ? { wakeAsk: entry.wakeAsk } : {}),
         ...(idleAt !== undefined ? { idleAt } : {}),
@@ -5104,7 +2815,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * what a backend without preview routes means for it. */
   const dialDaemon = async (entry: LiveWorkspace, deadline: number, o: { onEvent?: (e: DaemonEvent) => void; heartbeatMs?: number } = {}): Promise<DaemonReach | null> => {
     const reach = await until(entry.ws.daemonReach(), deadline, "preview route");
-    const token = await until(daemonTokenOf(entry.machine), deadline, "daemon token");
+    const token = await until(ctx.daemonTokenOf(entry.machine), deadline, "daemon token");
     if (token === undefined) return null;
     return connectDaemon({ previewUrl: reach.url, token, onEvent: o.onEvent ?? (() => {}), ...(o.heartbeatMs !== undefined ? { heartbeatMs: o.heartbeatMs } : {}) });
   };
@@ -5123,7 +2834,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * check falls back to the shape comparison. */
   const daemonAnswer = async (entry: LiveWorkspace): Promise<string | undefined> => {
     const machine = entry.machine;
-    const answersMs = lifecycleOf(entry).budgets.daemonAnswersMs;
+    const answersMs = ctx.lifecycleOf(entry).budgets.daemonAnswersMs;
     // The person's stop on a wake ends the wait here too: the budget runs to minutes, and the row's toggle waits for
     // the wake to let go.
     const stop = entry.wakeStop?.signal;
@@ -5249,11 +2960,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const readCheckout = (entry: LiveWorkspace, force: boolean): Promise<Checkout | undefined> => {
     const held = entry.checkout;
     if (!force && held !== undefined && clock.now() - held.readAt < CHECKOUT_TTL_MS) return Promise.resolve(held);
-    if (entry.record.phase !== "running" && servedByItsComputer(entry) === undefined) return Promise.resolve(held);
+    if (entry.record.phase !== "running" && ctx.servedByItsComputer(entry) === undefined) return Promise.resolve(held);
     if (entry.checkoutReading !== undefined) return entry.checkoutReading;
     const reading = (async (): Promise<Checkout | undefined> => {
       try {
-        const said = GitStatusReply.parse(await withDaemon(entry, ask => ask({ op: "git.status", cwd: checkoutOf(entry.record) })));
+        const said = GitStatusReply.parse(await ctx.withDaemon(entry, ask => ask({ op: "git.status", cwd: ctx.checkoutOf(entry.record) })));
         entry.checkout = {
           branch: said.branch.head,
           ahead: said.branch.ahead,
@@ -5269,7 +2980,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const { readAt: _now, ...read } = entry.checkout;
         if (JSON.stringify(kept) !== JSON.stringify(read)) {
           entry.record.checkout = entry.checkout;
-          await persist(entry.record);
+          await ctx.persist(entry.record);
         }
         await statusNow(entry);
       } catch {
@@ -5299,7 +3010,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
         return undefined;
       }
-      const project = projectHeld(lead.record.project);
+      const project = ctx.projectHeld(lead.record.project);
       const leadBranch = (await readCheckout(lead, false))?.branch ?? lead.record.base ?? project.base ?? project.defaultBranch;
       const rows = await Promise.all(children.map(child => treeChildOf(child, leadBranch)));
       lead.tree = { leadBranch, children: rows, readAt: clock.now() };
@@ -5319,11 +3030,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const treeChildOf = async (child: LiveWorkspace, leadBranch: string): Promise<TreeChild> => {
     const branch = (await readCheckout(child, false))?.branch ?? child.record.worktree?.branch ?? child.record.base ?? "";
     const thread = [...sessions.values()].map(v => v.view).find(v => v.workspaceId === child.record.id && v.threadId !== undefined)?.threadId;
-    const remote = projectHeld(child.record.project).remote;
+    const remote = ctx.projectHeld(child.record.project).remote;
     const asked =
       branch === "" || branch === DETACHED_HEAD || remoteHost(remote) === undefined
         ? undefined
-        : await onThisComputer((ask, home) => ask({ op: "git.branchCompare", cwd: home, remote, base: child.record.tree?.merged?.head ?? leadBranch, head: branch }))
+        : await ctx.onThisComputer((ask, home) => ask({ op: "git.branchCompare", cwd: home, remote, base: child.record.tree?.merged?.head ?? leadBranch, head: branch }))
             .then(r => GitBranchCompareReply.parse(r))
             .catch(() => undefined);
     const counted = asked === undefined ? {} : asked.pushed ? { pushed: true, ...(asked.aheadBy !== undefined ? { aheadOfLead: asked.aheadBy } : {}), ...(asked.behindBy !== undefined ? { behindLead: asked.behindBy } : {}) } : { pushed: false };
@@ -5338,7 +3049,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** A workspace's status pushed now, with the reach its phase implies, for a fact read outside the poll. */
   const statusNow = (entry: LiveWorkspace): Promise<void> => emitStatus(entry, entry.record.phase === "running" ? reachOf(entry) : "napping");
+  return {
+    polledReach, napRefusals, napRefusedOf, napRefusedReason, stopRefusals, stopRefusedReason, diskReason, readDisk,
+    reachOf, emitStatus, saysWaking, pingDaemon, helloVersion, pushStatus, readCheckout, readTree, readLeadOf,
+    statusNow,
+  };
+}
 
+function pullRequestsArea(ctx: RuntimeContext): PullRequestsArea {
+  const { clock, githubCache, live, sessions } = ctx;
   /** Whether a workspace's copy can read the git host itself where this computer cannot: one on a machine of its own,
    * running. A copy on this computer runs this computer's command line, and a stopped one is never woken for a read. */
   const copyReadsHost = (entry: LiveWorkspace): boolean => !isLocalWorkspace(entry.record) && entry.record.phase === "running";
@@ -5355,11 +3074,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * by remote and number alone, since this computer's command line answers it wherever one is signed in here. */
   const readHostOn = async <T>(entry: LiveWorkspace, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<{ read: T; here: boolean }> => {
     try {
-      return { read: await heldOff("here", () => onThisComputer(async (ask, home) => parse(await ask(frame(home))))), here: true };
+      return { read: await heldOff("here", () => ctx.onThisComputer(async (ask, home) => parse(await ask(frame(home))))), here: true };
     } catch (e) {
       if (!isNoHostCli(e) || !copyReadsHost(entry)) throw e;
     }
-    return { read: await heldOff(entry.record.id, () => withDaemon(entry, async ask => parse(await ask(frame(checkoutOf(entry.record)))))), here: false };
+    return { read: await heldOff(entry.record.id, () => ctx.withDaemon(entry, async ask => parse(await ask(frame(ctx.checkoutOf(entry.record)))))), here: false };
   };
 
   /** The git host's rate limit refusal, by the road whose command line met it: this computer's, or a copy's. A road
@@ -5379,10 +3098,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The workspace with the pull request it has, by number, and its project's remote; refused where it has none. */
   const pullRequestOn = async (workspaceId: string, origin: Caller | undefined): Promise<{ entry: LiveWorkspace; remote: string; number: number }> => {
-    const entry = await entryOf(workspaceId, origin);
+    const entry = await ctx.entryOf(workspaceId, origin);
     const number = entry.record.pr?.number;
     if (number === undefined) throw new Error(noPullRequestRefusal(entry.record.name));
-    return { entry, remote: projectHeld(entry.record.project).remote, number };
+    return { entry, remote: ctx.projectHeld(entry.record.project).remote, number };
   };
 
   const pageKey = (remote: string, number: number): string => `page:${remote}#${number}`;
@@ -5405,7 +3124,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const postAsPerson = async <T>(remote: string, number: number, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<T> => {
     githubCache.delete(pageKey(remote, number));
     try {
-      return await onThisComputer(async (ask, home) => parse(await ask(frame(home))));
+      return await ctx.onThisComputer(async (ask, home) => parse(await ask(frame(home))));
     } catch (e) {
       if (isNoHostCli(e)) throw new Error(pullRequestPostLine(hostOfRemote(remote)));
       throw e;
@@ -5416,7 +3135,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const hostOfRemote = (remote: string): string => gitHostOf(remote)?.sshHosts[0] ?? remoteHost(remote) ?? remote;
 
   /** How often an open pull request is read again: PR_POLL_MS while a window is open, PR_POLL_IDLE_MS while none is. */
-  const prPollMs = (): number => (status.watched() ? PR_POLL_MS : PR_POLL_IDLE_MS);
+  const prPollMs = (): number => (ctx.status.watched() ? PR_POLL_MS : PR_POLL_IDLE_MS);
 
   const prKey = (remote: string, number: number): string => `pr:${remote}#${number}`;
 
@@ -5440,9 +3159,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (!force && kept === undefined && entry.prNoneAt !== undefined && entry.prNoneAt === entry.checkout?.head) return Promise.resolve(held);
     if (entry.prReading !== undefined && !whole) return entry.prReading;
     const reading = (async (): Promise<PullRequestSeen | undefined> => {
-      const project = projectHeld(entry.record.project);
+      const project = ctx.projectHeld(entry.record.project);
       if (project.remote === "") return entry.pr;
-      const checkout = kept === undefined ? (entry.checkout ?? (await readCheckout(entry, false))) : undefined;
+      const checkout = kept === undefined ? (entry.checkout ?? (await ctx.readCheckout(entry, false))) : undefined;
       const branch = checkout?.branch;
       const base = entry.record.base ?? project.base;
       if (kept === undefined && (branch === undefined || branch === base || branch.startsWith("("))) return entry.pr;
@@ -5494,10 +3213,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // A settled one is never read again, so the checks the read that saw it settle found are the ones it keeps.
         const checks = seen.state !== "open" ? { checks: seen.checks } : {};
         entry.record.pr = { number: seen.number, url: seen.url, state: seen.state, base: seen.base, ...settledAt, ...checks };
-        await persist(entry.record);
+        await ctx.persist(entry.record);
       }
     }
-    await statusNow(entry);
+    await ctx.statusNow(entry);
     pollPullRequest(entry);
     if (entry.record.pr !== undefined && entry.record.pr.state !== "open") await settleTree(entry);
   };
@@ -5510,7 +3229,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const fact = entry.pr;
     if (!isPullRequestFact(fact) || fact.state !== "open" || live.get(entry.record.id) !== entry) return;
     // A slate bound to the checks reads a pending one every 30 s rather than at the idle or watched pace (06-sources).
-    const pending = fact.checks.some(c => c.state === "pending") && slates.watchesPr(entry.record.id);
+    const pending = fact.checks.some(c => c.state === "pending") && ctx.slates.watchesPr(entry.record.id);
     const ms = pending ? SLATE_PR_POLL_MS : prPollMs();
     entry.prPollMs = ms;
     entry.prPoll = clock.schedule(
@@ -5527,8 +3246,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const keepTree = async (child: LiveWorkspace, kept: TreeRecord): Promise<void> => {
     if (Object.keys(kept).length === 0) delete child.record.tree;
     else child.record.tree = kept;
-    await persist(child.record);
-    readLeadOf(child);
+    await ctx.persist(child.record);
+    ctx.readLeadOf(child);
   };
 
   /** A root workspace's tree once its pull request merged or closed: every thread of it, across every workspace it
@@ -5543,11 +3262,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const tree = rows.filter(v => roots.has(threadKeyOf(v)) || (v.rootThreadId !== undefined && roots.has(v.rootThreadId)));
     if (tree.some(v => v.status === "running")) return;
     const at = clock.now();
-    await mark([...new Set(tree.map(v => threadKeyOf(v)))], { readAt: at, settledAt: at }, undefined).catch((e: unknown) =>
+    await ctx.mark([...new Set(tree.map(v => threadKeyOf(v)))], { readAt: at, settledAt: at }, undefined).catch((e: unknown) =>
       console.warn(`the tree of ${entry.record.name} was not settled: ${e instanceof Error ? e.message : String(e)}`),
     );
-    if (pauses(entry.record) && entry.record.phase === "running") {
-      void napWith(entry.record.id).catch((e: unknown) => console.warn(`${entry.record.name} was not napped once its pull request settled: ${e instanceof Error ? e.message : String(e)}`));
+    if (ctx.pauses(entry.record) && entry.record.phase === "running") {
+      void ctx.napWith(entry.record.id).catch((e: unknown) => console.warn(`${entry.record.name} was not napped once its pull request settled: ${e instanceof Error ? e.message : String(e)}`));
     }
   };
 
@@ -5558,7 +3277,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const mergeSettings = async (remote: string): Promise<GitRepoReadReply> => {
     const cached = repoSettings.get(remote);
     if (cached !== undefined && clock.now() - cached.at < REPO_SETTINGS_MS) return cached.read;
-    const read = GitRepoReadReply.parse(await heldOff("here", () => onThisComputer((ask, home) => ask({ op: "git.repoRead", cwd: home, remote }))));
+    const read = GitRepoReadReply.parse(await heldOff("here", () => ctx.onThisComputer((ask, home) => ask({ op: "git.repoRead", cwd: home, remote }))));
     repoSettings.set(remote, { at: clock.now(), read });
     return read;
   };
@@ -5566,13 +3285,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The base's latest commits merged into the copy's branch through the copy's own daemon, the base read as a bring
    * back reads it; then the branch line read again, and the pull request, whose word a conflict or a count may move. */
   const updateCopy = async (entry: LiveWorkspace): Promise<GitUpdateReply> => {
-    const base = entry.record.base ?? projectHeld(entry.record.project).base;
-    const done = GitUpdateReply.parse(await queued(entry.record.id, () => withDaemon(entry, ask => ask({ op: "git.update", cwd: checkoutOf(entry.record), ...(base !== undefined ? { base } : {}) }))));
-    await readCheckout(entry, true);
+    const base = entry.record.base ?? ctx.projectHeld(entry.record.project).base;
+    const done = GitUpdateReply.parse(await ctx.queued(entry.record.id, () => ctx.withDaemon(entry, ask => ask({ op: "git.update", cwd: ctx.checkoutOf(entry.record), ...(base !== undefined ? { base } : {}) }))));
+    await ctx.readCheckout(entry, true);
     void readPullRequest(entry, true);
     return done;
   };
+  return {
+    readHost, pullRequestOn, pageKey, readPage, postAsPerson, readPullRequest, takePullRequest, pollPullRequest,
+    keepTree, settleTree, mergeSettings, updateCopy,
+  };
+}
 
+function daemonArea(ctx: RuntimeContext): DaemonArea {
+  const { bus, clock, daemonHelloTimeoutMs, live, sessions } = ctx;
   /** A message into a thread, or a thread opened with it, answered as soon as it is on its way, as `wsp send --detach`
    * does: joined into the running turn, waiting behind it, or started. The turn goes on without the caller. */
   const sendDetached = async (
@@ -5589,7 +3315,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (e.type === "session.queued" && e.requestId === requestId) queuedNow?.(e.harness);
     });
     try {
-      const started = sessionsApi.start(workspaceId, { ...o, requestId }, origin);
+      const started = ctx.sessionsApi.start(workspaceId, { ...o, requestId }, origin);
       const first = await Promise.race([started, queued]);
       if ("queuedOn" in first) {
         started.catch((e: unknown) => console.warn(`a message waiting in thread ${threadWord(o.thread ?? "")} was not sent: ${e instanceof Error ? e.message : String(e)}`));
@@ -5610,18 +3336,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The line the machine's row carries while the runtime is doing something to its daemon; undefined clears it. */
   const noteDaemon = async (entry: LiveWorkspace, note: string | undefined): Promise<void> => {
-    if (note === undefined) daemonNotes.delete(entry.record.id);
-    else daemonNotes.set(entry.record.id, note);
-    await pushStatus(entry);
+    if (note === undefined) ctx.daemonNotes.delete(entry.record.id);
+    else ctx.daemonNotes.set(entry.record.id, note);
+    await ctx.pushStatus(entry);
   };
 
   /** A line for the machine's row that rides one status and no more, so the next poll shows the row's own facts
    * again. What the row is for is the machine's rate and its nap countdown; a failure nobody here can act on must
    * not sit on top of them for the life of the host. */
   const flashDaemon = async (entry: LiveWorkspace, note: string): Promise<void> => {
-    daemonNotes.set(entry.record.id, note);
-    await pushStatus(entry);
-    daemonNotes.delete(entry.record.id);
+    ctx.daemonNotes.set(entry.record.id, note);
+    await ctx.pushStatus(entry);
+    ctx.daemonNotes.delete(entry.record.id);
   };
 
   /** The writes of each machine's roots file, one at a time: each writes the whole file, so two at once can land in
@@ -5646,19 +3372,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A host that has closed writes nothing more on a machine: the boot fires this at every running workspace
       // without waiting for it, and a write that landed after the close would be this process touching a computer
       // it has let go of.
-      if (closed) return;
+      if (ctx.state.closed) return;
       // And nothing is written inside a workspace whose computer serves its daemon: that daemon reads the path off
       // the frame and browses the workspace's own rootfs, so a list of folders inside it says nothing to anybody.
-      if (servedByItsComputer(entry) !== undefined) return;
+      if (ctx.servedByItsComputer(entry) !== undefined) return;
       // Every checkout the daemon serving this machine has to browse, not this workspace's alone: the file is that
       // daemon's one list and is written whole, and on the computer the host runs on one daemon serves every
       // workspace here, each in a copy of the project folder at a path of its own. Read once the write before has
       // landed, so a write never puts back a list older than the one already there.
       const sharing = [...live.values()].filter(e => e.record.machineId === entry.record.machineId);
-      const dests = [...new Set(sharing.flatMap(e => [projectHeld(e.record.project).path, checkoutOf(e.record)]))];
+      const dests = [...new Set(sharing.flatMap(e => [ctx.projectHeld(e.record.project).path, ctx.checkoutOf(e.record)]))];
       // Through the kind, which is what knows where that machine's daemon looks; the import road writes the same
       // file through the same call, so a folder is browsable at the same path whichever of the two got there first.
-      await moduleOf(entry.record.kind)
+      await ctx.moduleOf(entry.record.kind)
         .roots(entry, dests)
         .catch((e: unknown) => console.warn(`browsable folders for ${entry.record.id} not written on ${entry.machine.id}: ${(e instanceof Error ? e.message : String(e)).slice(-200)}`));
     });
@@ -5690,9 +3416,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // Nothing is put inside a workspace whose computer serves its daemon: the daemon answering for it is that
     // computer's own, moved as a computer and never as a workspace. Read here, so neither the sync nor the revive
     // offers a deploy the update would refuse.
-    servedByItsComputer(entry) === undefined &&
-    moduleOf(entry.record.kind).deployDaemon !== undefined &&
-    landsBytes(backendFor(entry.record).capabilities, entry.machine);
+    ctx.servedByItsComputer(entry) === undefined &&
+    ctx.moduleOf(entry.record.kind).deployDaemon !== undefined &&
+    landsBytes(ctx.backendFor(entry.record).capabilities, entry.machine);
 
   /** Every road that puts a daemon on a machine runs the kind's deploy through here, and this is the one place
    * that writes down how it went: a machine that answered with what it lacks keeps its own sentence and the
@@ -5702,7 +3428,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const forget = async (): Promise<void> => {
       if (entry.record.daemonRefusedAt === undefined) return;
       delete entry.record.daemonRefusedAt;
-      await persist(entry.record);
+      await ctx.persist(entry.record);
     };
     try {
       const detail = await deploy(entry);
@@ -5716,7 +3442,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const lacks = machineLacksLine(e);
       if (lacks !== undefined) {
         entry.record.daemonRefusedAt = { machineId: entry.machine.id, at: new Date(clock.now()).toISOString(), why: lacks };
-        await persist(entry.record);
+        await ctx.persist(entry.record);
       } else if (!machineNeverAnswered(e)) await forget();
       throw e;
     }
@@ -5730,7 +3456,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (refused === undefined) return undefined;
     if (refused.machineId === entry.machine.id) return refused;
     delete entry.record.daemonRefusedAt;
-    await persist(entry.record);
+    await ctx.persist(entry.record);
     return undefined;
   };
 
@@ -5746,11 +3472,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const held = daemonSyncs.get(key);
     if (held !== undefined) return held;
     const work = (async () => {
-      const module = moduleOf(entry.record.kind);
+      const module = ctx.moduleOf(entry.record.kind);
       // Nothing is deployed into a workspace whose computer serves its daemon, and no roots file is written in it:
       // the daemon answering for it is that computer's own, which the update road moves as a computer and not as a
       // workspace.
-      if (servedByItsComputer(entry) !== undefined) return;
+      if (ctx.servedByItsComputer(entry) !== undefined) return;
       // A machine that answered with what it lacks is left alone until its window is out, whether it is being
       // given a first daemon or having one replaced: the thing it has not got stops both roads, and only a person
       // can change that answer. Read off the record above every round trip below, so a tick that finds the window
@@ -5806,8 +3532,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return work;
   };
 
-  /** Keyed by the workspace and holding the machine it was about, so a machine replaced under the record inherits nothing. */
-  type MachineMoment = { machineId: string; at: number };
   /** Every attempt to put a daemon back on a workspace's current machine, and when the last one was. */
   const revivedAt = new Map<string, MachineMoment>();
   /** Every workspace whose last sync could not read its daemon's version, and when that read gave up. */
@@ -5842,7 +3566,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const last = revivedAt.get(entry.record.id);
     if (last !== undefined && last.machineId === key && clock.now() - last.at < DAEMON_REVIVE_AGAIN_MS) return;
     revivedAt.set(entry.record.id, { machineId: key, at: clock.now() });
-    const deploy = moduleOf(entry.record.kind).deployDaemon!;
+    const deploy = ctx.moduleOf(entry.record.kind).deployDaemon!;
     const work = (async () => {
       await noteDaemon(entry, DAEMON_RESTARTING);
       // The last read before the deploy: a machine that napped under the note is handed no exec on a paused sandbox.
@@ -5900,7 +3624,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (polled.phase !== "running" || polled.reach.state !== "reachable" || clock.now() - unread.at < DAEMON_REVIVE_AGAIN_MS) return;
     void syncDaemon(entry);
   };
+  return {
+    sendDetached, toFirstThread, rootsWrite, writeDaemonRoots, turnRuns, deployDaemonOn, daemonSyncs, syncDaemon,
+    revivedAt, unreadAt, unreached, unreachedOf, reviveDaemon, offerDaemonAgain, readVersionAgain,
+  };
+}
 
+function machinesArea(ctx: RuntimeContext): MachinesArea {
+  const {
+    opts, backend, store, bus, goneConfirmMs, lateReadMs, clock, vaultCapBytes, defaultIdleWindowMs, hostId,
+    vaultExport, live, gone, threadRecords, sessions, execs, indexFlushes, transcripts, rows, unreadIndexes,
+    pendingEvents, pendingBytes, transcriptIndex, transcriptBytes,
+  } = ctx;
   /** Size is always explicit: a create that names none gets the provider's own
    * default (2048 MB on Solari), not the size the record and the rate assume. */
   const forkSpec = (r: WorkspaceRecord, kind: MachineKind, image: ReturnType<typeof goldenImage>["spec"] | undefined, engine: boolean, override?: WorkspaceSpec): MachineSpec & WorkspaceSize => ({
@@ -5915,16 +3650,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     cpu: override?.cpu ?? r.shape?.cpu ?? r.size.cpu,
     memMb: override?.memMb ?? r.shape?.memMb ?? r.size.memMb,
     envs: { ...loginEnvOn(r.place), ...r.spec.envs, ...override?.envs },
-    labels: { ...r.spec.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: owner, [WORKSPACE_LABEL]: r.id, [NAME_LABEL]: r.name, [GOLDEN_LABEL]: r.golden, [CREATED_AT_LABEL]: new Date().toISOString() },
+    labels: { ...r.spec.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: ctx.state.owner, [WORKSPACE_LABEL]: r.id, [NAME_LABEL]: r.name, [GOLDEN_LABEL]: r.golden, [CREATED_AT_LABEL]: new Date().toISOString() },
     onIdle: "pause",
     idleTimeoutMs: backstopMs(idleWindowOf(r)),
   });
-
-  let owner = "";
   /** The mark on every image this state makes: the host's id and this state file's owner, each in the class the
    * provider's name field has taken. Two state files on one computer read one host id, and on Box a snapshot's name
    * is its id, so the owner is what keeps one state's image from being the other's. */
-  const imageMark = (): string => templateHost(hostId) + templateHost(owner);
+  const imageMark = (): string => templateHost(hostId) + templateHost(ctx.state.owner);
 
   /** The store holds the attempt's key and stamp before the provider hears of it: a retry the provider never answered
    * (the connection dropped, the process died) sends the same body under the same key and gets back the machine the
@@ -6041,13 +3774,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         res = await call();
       } catch (e) {
         if (e instanceof MachineUnreachableError && entry.machine.id === machine.id) {
-          const standing = unreached.get(entry.record.id)?.machineId === machine.id;
-          unreached.set(entry.record.id, { machineId: machine.id, line: e.message });
-          if (!standing && entry.record.phase === "running") await emitStatus(entry, "unreachable", e.message);
+          const standing = ctx.unreached.get(entry.record.id)?.machineId === machine.id;
+          ctx.unreached.set(entry.record.id, { machineId: machine.id, line: e.message });
+          if (!standing && entry.record.phase === "running") await ctx.emitStatus(entry, "unreachable", e.message);
         }
         throw e;
       }
-      if (unreached.get(entry.record.id)?.machineId === machine.id) unreached.delete(entry.record.id);
+      if (ctx.unreached.get(entry.record.id)?.machineId === machine.id) ctx.unreached.delete(entry.record.id);
       return res;
     };
     const exec = (cmd: string, o?: { timeoutMs?: number }): Promise<ExecResult> => heard(() => machine.exec(cmd, o));
@@ -6070,15 +3803,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     claiming(
       `workspace/${record.id}`,
       async b => {
-        const image = keepsImages(b) ? await imageOf(record.golden) : undefined;
+        const image = ctx.keepsImages(b) ? await ctx.imageOf(record.golden) : undefined;
         const golden = image?.version;
         // A project golden's snapshot is the image; only a version's own snapshot may stand behind a template.
-        const spec = forkSpec(record, golden?.kind ?? "sandbox", image === undefined ? undefined : goldenImage(image.projects === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, record.spec.engine === true || (golden !== undefined && (await recipeAsksEngine(golden))), override);
+        const spec = forkSpec(record, golden?.kind ?? "sandbox", image === undefined ? undefined : goldenImage(image.projects === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, record.spec.engine === true || (golden !== undefined && (await ctx.recipeAsksEngine(golden))), override);
         // A place that has never held this image says missing about a reference no registry has: the fork lands
         // nowhere and the sentence says where it would land until that place holds a copy.
         const machine = await b.create(spec, report === undefined ? undefined : line => report("fork-requested", line, { waiting: true })).catch((e: unknown) => {
           if (image === undefined || record.place === undefined || !isMissing(e)) throw e;
-          throw Object.assign(new Error(placeHoldsNoImageLine(placeDoorOf().nameOf(record.place), spec.fromSnapshot ?? spec.template ?? record.golden)), { kind: "invalid" });
+          throw Object.assign(new Error(placeHoldsNoImageLine(ctx.placeDoorOf().nameOf(record.place), spec.fromSnapshot ?? spec.template ?? record.golden)), { kind: "invalid" });
         });
         // Named by its record before the claim is released, so no sweep sees it unclaimed.
         bind(machine);
@@ -6087,7 +3820,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // A machine that boots under the workspace's name is not named again: the name is on the specification the
         // computer booted it from, and the command here runs inside the workspace, where it has no right to change
         // the host name and says so on every create.
-        if (!namesWorkspace(b)) {
+        if (!ctx.namesWorkspace(b)) {
           const named = await setHostname(machine, record.name);
           if (named.refused === undefined) report?.("hostname-set", hostnameSetLine(named.host));
           else report?.("hostname-set", HOSTNAME_KEPT, { detail: named.refused });
@@ -6095,17 +3828,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // The fork carries the golden's copy; this one names the workspace and reads the disk and secrets as they are now.
         const context = await applyMachineContext(machine, { workspace: { name: record.name }, ...(golden !== undefined ? { golden } : {}) });
         if (context.failure !== undefined) console.warn(`machine context for ${record.id} on ${machine.id} ${context.summary}`);
-        const shape = await shapeOf(machine);
+        const shape = await ctx.shapeOf(machine);
         if (shape !== undefined) record.shape = shape;
         else delete record.shape;
-        record.size = sizeBuilt(shape, spec);
-        if (readsMemory && record.place === undefined) await readMemory(record, machine, b.capabilities.sizes);
+        record.size = ctx.sizeBuilt(shape, spec);
+        if (readsMemory && record.place === undefined) await ctx.readMemory(record, machine, b.capabilities.sizes);
         if (machine.streamUrl !== undefined) record.screen = { streamUrl: machine.streamUrl };
         else delete record.screen;
         return machine;
       },
       // The record says where its machine lives: this host's own provider, or the computer it was forked on.
-      backendFor(record),
+      ctx.backendFor(record),
     );
 
   /** The machine a fork made, taken away and proven gone at the provider rather than at the delete's answer: a
@@ -6114,7 +3847,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * lists running again is the sweep's to kill; a mark the store refuses is said, and the machine is still gone. */
   const unfork = async (entry: LiveWorkspace): Promise<void> => {
     const id = entry.machine.id;
-    await killUntilGone(backendFor(entry.record), entry.machine, opts.killConfirm);
+    await killUntilGone(ctx.backendFor(entry.record), entry.machine, opts.killConfirm);
     await store.put(DROPPED, id, { machineId: id, at: new Date(clock.now()).toISOString() } satisfies DroppedMachine).catch((e: unknown) => {
       console.warn(`machine ${id} is gone but its mark was not stored (${e instanceof Error ? e.message : String(e)}); should the provider list it running again, the sweep reports it rather than killing it`);
     });
@@ -6144,7 +3877,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     entry.record.machineId = entry.ws.machineId;
     entry.record.firstLife = entry.ws.isFirstLife;
     delete entry.record.gone;
-    void syncDaemon(entry);
+    void ctx.syncDaemon(entry);
   };
 
   const attach = (record: WorkspaceRecord, machine: Machine): LiveWorkspace => {
@@ -6154,13 +3887,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const kept = record.pr;
     if (kept !== undefined && kept.state !== "open") entry.pr = { ...kept, readAt: kept.mergedAt ?? kept.closedAt ?? 0 };
     if (record.checkout !== undefined) entry.checkout = record.checkout;
-    const at = backendFor(record);
+    const at = ctx.backendFor(record);
     /** A vault carries a workspace's own home onto a fresh fork of an image. A computer that keeps no image forks
      * none: such a workspace is a copy of that computer, its files stand on that computer's own disk, and its
      * pause is the stop of its machine there. So it gets none of the four hooks, a nap reads nothing off it and
      * stores nothing, a wake puts nothing back, and a stamp or a refusal an earlier nap wrote on its record is
      * about a vault it never had and goes. */
-    const vaulted = keepsImages(at);
+    const vaulted = ctx.keepsImages(at);
     if (!vaulted) {
       delete record.vaultedAt;
       delete record.vaultRefused;
@@ -6196,7 +3929,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               },
               stashVault: async m => {
                 // The vault the last landed nap stored stands until the provider pauses this machine at all.
-                if (napRefusedOf(entry) !== undefined) return;
+                if (ctx.napRefusedOf(entry) !== undefined) return;
                 // The disk is synced before the pause whatever the backend, so a stop that snapshots it holds a whole
                 // one; a machine that cannot be asked still pauses.
                 await syncDisk(entry.machine).catch((e: unknown) => {
@@ -6204,7 +3937,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                 });
                 // A pause that keeps the disk resumes the same machine with the home on it, so the nap reads none of
                 // it; the vault is taken off the running machine at a rebuild instead.
-                if (pauseKeepsDisk(at)) return;
+                if (ctx.pauseKeepsDisk(at)) return;
                 try {
                   await store.putBlob(VAULTS, record.id, await vaultExport(m, { maxBytes: vaultCapBytes }));
                   record.vaultedAt = new Date(clock.now()).toISOString();
@@ -6228,7 +3961,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         move: (m, move) =>
           move === "resume"
             ? m.resume(entry.wakeStop?.signal).catch(async (e: unknown) => {
-                if (e instanceof ResumeUnansweredError) await saysWaking(entry, RESUME_UNANSWERED);
+                if (e instanceof ResumeUnansweredError) await ctx.saysWaking(entry, RESUME_UNANSWERED);
                 throw e;
               })
             : m.pause(),
@@ -6249,7 +3982,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               return `${fault} on ${m.id} (${both})`;
             }
           }
-          const fault = await pingDaemon(entry);
+          const fault = await ctx.pingDaemon(entry);
           return fault === undefined || both === "" ? fault : `${fault} (${both})`;
         },
       },
@@ -6259,7 +3992,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return entry;
   };
 
-  const idleWindowOf = (r: WorkspaceRecord): number | null => settingFor(r.idleWindowMs, settingsAt(placeIdOf(r))?.napMs, defaultIdleWindowMs);
+  const idleWindowOf = (r: WorkspaceRecord): number | null => settingFor(r.idleWindowMs, ctx.settingsAt(ctx.placeIdOf(r))?.napMs, defaultIdleWindowMs);
 
   /** Every live session and exec of a workspace ends here when its machine goes away under it; the harness's own end, if it ever comes, is dropped. */
   const endSessions = (workspaceId: string, reason: string): void => {
@@ -6274,39 +4007,39 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // Whatever this host was holding open about the machine goes with the record that named it: the child
     // carrying the road to a machine over ssh would otherwise hold a port for a workspace nobody can name.
     if (going !== undefined) {
-      await moduleOf(going.record.kind)
+      await ctx.moduleOf(going.record.kind)
         .dropped(going)
         .catch((e: unknown) => console.warn(`${going.record.name}'s machine ${going.machine.id} kept something of this host's: ${e instanceof Error ? e.message : String(e)}`));
     }
     live.delete(id);
     // A folder on this computer goes from its daemon's roots file with its record, since the computer and the
     // folder both stay; a fork's machine goes with its record and takes its file along.
-    if (going !== undefined && copiesFolder(going.record.kind)) await writeDaemonRoots(going);
-    revivedAt.delete(id);
-    unreadAt.delete(id);
-    unreached.delete(id);
-    polledReach.delete(id);
-    napRefusals.delete(id);
+    if (going !== undefined && copiesFolder(going.record.kind)) await ctx.writeDaemonRoots(going);
+    ctx.revivedAt.delete(id);
+    ctx.unreadAt.delete(id);
+    ctx.unreached.delete(id);
+    ctx.polledReach.delete(id);
+    ctx.napRefusals.delete(id);
     transcripts.delete(id);
     transcriptBytes.delete(id);
     pendingEvents.delete(id);
     pendingBytes.delete(id);
     transcriptIndex.delete(id);
-    daemonNotes.delete(id);
+    ctx.daemonNotes.delete(id);
     // Every thread this workspace drops takes its slate with it, as a thread's own delete does: its record, its
     // timers (an always one would tick on for a thread nobody can reach) and its folder.
     const dropped = new Set<string>();
     for (const [threadId, held] of threadRecords) if (held.workspaceId === id) dropped.add(threadId);
     for (const s of sessions.values()) if (s.view.workspaceId === id && s.view.threadId !== undefined) dropped.add(s.view.threadId);
     for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
-    for (const [threadId, kept] of keptAgents) if (kept.workspaceId === id) reapKept(threadId);
+    for (const [threadId, kept] of ctx.keptAgents) if (kept.workspaceId === id) ctx.reapKept(threadId);
     for (const [threadId, held] of threadRecords) if (held.workspaceId === id) threadRecords.delete(threadId);
-    for (const threadId of dropped) await slates.forget(threadId);
-    viewedMarks.delete(id);
+    for (const threadId of dropped) await ctx.slates.forget(threadId);
+    ctx.viewedMarks.delete(id);
     live.get(id)?.prPoll?.();
-    cancelFlush(id);
-    await transcriptQueue.get(id);
-    transcriptQueue.delete(id);
+    ctx.cancelFlush(id);
+    await ctx.transcriptQueue.get(id);
+    ctx.transcriptQueue.delete(id);
     await indexFlushes.get(id);
     indexFlushes.delete(id);
     await store.delete(WORKSPACES, id);
@@ -6315,8 +4048,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     unreadIndexes.delete(id);
     await store.deleteBlob(TRANSCRIPT_HEADS, id);
     await store.deleteBlob(TRANSCRIPT_INDEX, id);
-    await dropSentImages(id, "all");
-    keptWrites.delete(id);
+    await ctx.dropSentImages(id, "all");
+    ctx.keptWrites.delete(id);
     await store.delete(WORKSPACE_NAMES, id);
     await store.delete(SESSIONS, id);
     await store.delete(CREATES, `workspace/${id}`);
@@ -6328,15 +4061,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // fetched mid-pause never says running, and the sessions end while the
   // machine can still be told to stop them.
   const napWith = async (id: string, reason?: string): Promise<WorkspaceView> => {
-    const entry = await entryOf(id);
+    const entry = await ctx.entryOf(id);
     if (await runsUnderNapping(entry)) await adoptRunning(entry);
     if (entry.napping) return entry.napping;
-    if (entry.record.phase !== "running") return view(entry.record);
+    if (entry.record.phase !== "running") return ctx.view(entry.record);
     entry.napping = (async () => {
       try {
         entry.record.phase = "pausing";
-        await persist(entry.record);
-        await emitStatus(entry, "napping");
+        await ctx.persist(entry.record);
+        await ctx.emitStatus(entry, "napping");
         try {
           await entry.ws.nap();
         } catch (e) {
@@ -6344,24 +4077,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // and a machine still running takes the road any other refused pause takes.
           if (isMissing(e) && settled(await settleGone(entry, goneWords(entry.record.machineId, { by: "pause", at: clock.now(), answer: providerSaid(e) })))) throw e;
           entry.record.phase = entry.ws.currentPhase;
-          await persist(entry.record);
+          await ctx.persist(entry.record);
           if (e instanceof NapRefusedError) {
-            if (napRefusedOf(entry) === undefined) console.warn(`the provider does not pause ${entry.machine.id} of ${id} (${e.said}); an idle nap waits for the backstop and exports no vault until a pause lands`);
-            napRefusals.set(id, { machineId: entry.machine.id, said: e.said });
+            if (ctx.napRefusedOf(entry) === undefined) console.warn(`the provider does not pause ${entry.machine.id} of ${id} (${e.said}); an idle nap waits for the backstop and exports no vault until a pause lands`);
+            ctx.napRefusals.set(id, { machineId: entry.machine.id, said: e.said });
           }
-          if (e instanceof StopRefusedError) stopRefusals.set(id, { machineId: entry.machine.id, said: e.said });
-          await emitStatus(entry, reachOf(entry), e instanceof Error ? e.message : String(e));
+          if (e instanceof StopRefusedError) ctx.stopRefusals.set(id, { machineId: entry.machine.id, said: e.said });
+          await ctx.emitStatus(entry, ctx.reachOf(entry), e instanceof Error ? e.message : String(e));
           throw e;
         }
         // The reason says the machine paused, so it is written once the provider has confirmed that.
         endSessions(id, PAUSED_REASON);
-        napRefusals.delete(id);
-        stopRefusals.delete(id);
+        ctx.napRefusals.delete(id);
+        ctx.stopRefusals.delete(id);
         entry.record.phase = "napping";
-        await persist(entry.record);
+        await ctx.persist(entry.record);
         bus.emit({ type: "workspace.napped", workspaceId: id });
-        await emitStatus(entry, "napping", reason);
-        return view(entry.record);
+        await ctx.emitStatus(entry, "napping", reason);
+        return ctx.view(entry.record);
       } finally {
         delete entry.napping;
       }
@@ -6386,12 +4119,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const adoptPause = async (entry: LiveWorkspace): Promise<void> => {
     if (entry.record.phase !== "running" || entry.napping || entry.waking) return;
     entry.ws.notePaused();
-    napRefusals.delete(entry.record.id);
+    ctx.napRefusals.delete(entry.record.id);
     entry.record.phase = "napping";
-    await persist(entry.record);
+    await ctx.persist(entry.record);
     endSessions(entry.record.id, PAUSED_REASON);
     bus.emit({ type: "workspace.napped", workspaceId: entry.record.id, found: true });
-    await emitStatus(entry, "napping", "paused outside wsp");
+    await ctx.emitStatus(entry, "napping", "paused outside wsp");
   };
   /** One read of the provider for a record that says napping: true when the machine runs there, so the pause never
    * took or nobody wrote the resume. A read the provider refuses answers false; the record's word stands until a
@@ -6407,9 +4140,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       try {
         entry.ws.noteRunning();
         followMachine(entry);
-        await persist(entry.record);
+        await ctx.persist(entry.record);
         bus.emit({ type: "workspace.woken", workspaceId: entry.record.id, machineId: entry.record.machineId });
-        await emitStatus(entry, reachOf(entry), ALREADY_RUNNING);
+        await ctx.emitStatus(entry, ctx.reachOf(entry), ALREADY_RUNNING);
       } finally {
         delete entry.adopting;
       }
@@ -6430,7 +4163,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * window and ends the sessions; the row and the one log line carry the words; rebuild and delete are the roads out. */
   const settleGone = async (entry: LiveWorkspace, reason: string): Promise<GoneOutcome> => {
     const machineId = entry.record.machineId;
-    const read = await goneConfirmed(backendFor(entry.record), machineId);
+    const read = await goneConfirmed(ctx.backendFor(entry.record), machineId);
     if (read !== "gone") {
       const followed = read instanceof Error ? `the reads that followed failed: ${read.message}` : `the state read that followed said ${read}`;
       console.warn(`workspace ${entry.record.id} is not gone: ${reason}, and ${followed}`);
@@ -6443,11 +4176,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (entry.record.phase === "gone" || entry.record.machineId !== machineId) return "moot";
     entry.record.phase = "gone";
     entry.record.gone = reason;
-    await persist(entry.record);
+    await ctx.persist(entry.record);
     endSessions(entry.record.id, GONE_REASON);
     console.warn(goneLogLine(entry.record.id, reason));
     bus.emit({ type: "workspace.gone", workspaceId: entry.record.id, machineId: entry.record.machineId, reason });
-    await emitStatus(entry, "gone", reason);
+    await ctx.emitStatus(entry, "gone", reason);
     return "settled";
   };
   /** Records whose gone verdict is being read again: the poll sees the same 404 every tick while the reads run. */
@@ -6460,7 +4193,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (entry.record.phase === "gone" || entry.napping || entry.waking || rereading.has(id)) return;
     rereading.add(id);
     try {
-      if ((await settleGone(entry, reason)) === "unchecked") await emitStatus(entry, reachOf(entry), GONE_UNCHECKED);
+      if ((await settleGone(entry, reason)) === "unchecked") await ctx.emitStatus(entry, ctx.reachOf(entry), GONE_UNCHECKED);
     } finally {
       rereading.delete(id);
     }
@@ -6481,10 +4214,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       entry.record.phase = phase;
       delete entry.record.gone;
     }
-    await persist(entry.record);
+    await ctx.persist(entry.record);
     if (phase === "running") bus.emit({ type: "workspace.woken", workspaceId: entry.record.id, machineId: entry.record.machineId });
     else bus.emit({ type: "workspace.napped", workspaceId: entry.record.id, found: true });
-    await emitStatus(entry, phase === "running" ? reachOf(entry) : "napping", NOT_GONE);
+    await ctx.emitStatus(entry, phase === "running" ? ctx.reachOf(entry) : "napping", NOT_GONE);
     return phase;
   };
   bus.on("workspace.status", e => {
@@ -6505,7 +4238,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // Called on the lifecycle itself, as the backstop below is, rather than pulled off it and called detached:
     // one interface, and an implementer is free to write this as a method, which keeps its own object only if
     // the call goes through it.
-    return backendFor(entry.record).lifecycle?.quietForMs?.(entry.machine).catch((e: unknown) => {
+    return ctx.backendFor(entry.record).lifecycle?.quietForMs?.(entry.machine).catch((e: unknown) => {
       console.warn(`quiet figure of ${id} not read: ${e instanceof Error ? e.message : String(e)}`);
       return undefined;
     });
@@ -6517,7 +4250,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (entry === undefined) return null;
       const windowMs = idleWindowOf(entry.record);
       // A refusal that stands is asked again only at the backstop; a window that is off stays off.
-      return windowMs !== null && napRefusedOf(entry) !== undefined ? backstopMs(windowMs) : windowMs;
+      return windowMs !== null && ctx.napRefusedOf(entry) !== undefined ? backstopMs(windowMs) : windowMs;
     },
     onIdle: async (id, windowMs) => {
       // What the computer running it can see of the workspace working, asked once here rather than counted by
@@ -6540,7 +4273,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // that window, the words unchanged. A refusal that stands was logged once, where the pause met it.
         idle.touch(id);
         const entry = live.get(id);
-        if (entry !== undefined) await emitStatus(entry, reachOf(entry), napRefusedReason(entry) ?? stopRefusedReason(entry) ?? (e instanceof Error ? e.message : String(e)));
+        if (entry !== undefined) await ctx.emitStatus(entry, ctx.reachOf(entry), ctx.napRefusedReason(entry) ?? ctx.stopRefusedReason(entry) ?? (e instanceof Error ? e.message : String(e)));
         if (!(e instanceof NapRefusedError)) console.warn(`idle nap of ${id} was answered with ${providerSaid(e)}; a full ${Math.round(windowMs / 60_000)} min window starts over`);
       }
     },
@@ -6552,7 +4285,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     onBackstop: (id, until) => {
       const entry = live.get(id);
       if (entry === undefined || entry.record.phase !== "running") return;
-      void backendFor(entry.record)
+      void ctx.backendFor(entry.record)
         .lifecycle?.backstop?.(entry.machine, until)
         .catch((e: unknown) => console.warn(`backstop of ${id} on ${entry.machine.id} not set: ${e instanceof Error ? e.message : String(e)}`));
     },
@@ -6566,8 +4299,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   for (const type of ["workspace.napped", "workspace.gone", "workspace.deleted"] as const) {
     bus.on(type, e => idle.forget((e as { workspaceId: string }).workspaceId));
   }
+  return {
+    imageMark, inflight, claiming, observed, observing, fork, unfork, followMachine, attach, endSessions, drop, napWith,
+    armLateRead, adoptPause, runsUnderNapping, adoptRunning, settleGone, markGone, rereading, adoptGone, recoverGone,
+    idle,
+  };
+}
 
-  type StoredBuilder = Omit<BuilderRecord, "size" | "firstLife"> & { size?: WorkspaceSize; firstLife?: boolean };
+function bootArea(ctx: RuntimeContext): BootArea {
+  const {
+    store, local, placeDoor, bus, clock, hostId, deviceDoor, live, projectsHeld, setups, builders, threadRecords,
+    wakeAt, sessions, rows, transcriptIndex, places,
+  } = ctx;
   /** Whether a seal can still be taken from a builder at this place: the machine's own first life, or a provider
    * whose copy of a disk is the disk as it stands. The one place the golden road asks it; every reader above the
    * runtime takes the answer on the builder's view. A place nothing here can reach yet answers on first life
@@ -6588,7 +4331,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const fresh = Number.isNaN(beatAge) || beatAge < HELD_TTL_MS;
     const held = holder !== undefined && !mine && fresh && (holder.host !== hostId || pidAlive(holder.pid));
     // A placeholder its dead holder left mid-setup never finished its stages: stale, whatever the marker says.
-    return label !== undefined && label !== owner ? "foreign" : held ? "held" : !sealable || stored.building === true ? "stale" : "reusable";
+    return label !== undefined && label !== ctx.state.owner ? "foreign" : held ? "held" : !sealable || stored.building === true ? "stale" : "reusable";
   };
   const liveOf = (record: BuilderRecord, machine: Machine): LiveBuilder => {
     const sealable = sealableAt(record.place, record.firstLife);
@@ -6614,7 +4357,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (at === undefined) return;
     let machine: Machine;
     try {
-      machine = observed(await at.get(stored.id));
+      machine = ctx.observed(await at.get(stored.id));
     } catch (e) {
       if (isPlaceAbsent(e) || isNoProvider(e)) return;
       if (!isMissing(e)) throw e;
@@ -6628,10 +4371,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // provider's createdAt: on a running machine never paused, resumed or exec'd it read +6.4 s at two minutes
     // and +306 s at ten (canary, 2026-09-04 UTC), so it moves with no lifecycle event and decides nothing.
     const firstLife = stored.firstLife === true && state === "running";
-    const record: BuilderRecord = { ...stored, firstLife, size: stored.size ?? sizeBuilt(await shapeOf(machine), at.pricing.defaultSize) };
+    const record: BuilderRecord = { ...stored, firstLife, size: stored.size ?? ctx.sizeBuilt(await ctx.shapeOf(machine), at.pricing.defaultSize) };
     if (stored.firstLife === true && !firstLife) await store.put(BUILDERS, record.id, record);
     builders.set(record.id, liveOf(record, machine));
-    if (stored.sealed !== undefined) armGrace(record.id, stored.sealed.at);
+    if (stored.sealed !== undefined) ctx.armGrace(record.id, stored.sealed.at);
   };
   /** The store is the truth across processes, and another wsp (an init beside this host, a second host) writes it
    * after this one hydrated: every decision that kills or reuses a builder reads it first. A row this process has
@@ -6674,26 +4417,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * read that fails leaves the record held for the next sweep. */
   const rereadHeld = async (id: string, by: GoneSeenBy): Promise<void> => {
     const entry = live.get(id);
-    if (entry === undefined || !isAbsentMachine(entry.machine) || rereading.has(id)) return;
-    rereading.add(id);
+    if (entry === undefined || !isAbsentMachine(entry.machine) || ctx.rereading.has(id)) return;
+    ctx.rereading.add(id);
     try {
       const machineId = entry.record.machineId;
       const seen = await Promise.resolve()
-        .then(() => sightMachine(backendFor(entry.record), machineId))
+        .then(() => sightMachine(ctx.backendFor(entry.record), machineId))
         .catch(() => undefined);
-      if (seen === undefined || closed || live.get(id) !== entry) return;
+      if (seen === undefined || ctx.state.closed || live.get(id) !== entry) return;
       if (seen.machine !== undefined) {
         const raw = await store.get(WORKSPACES, id);
         const again = raw === undefined ? undefined : await hydrateWorkspace(raw, seen as FoundMachine);
-        if (again !== undefined) void syncDaemon(again);
+        if (again !== undefined) void ctx.syncDaemon(again);
         return;
       }
       const answer = heldAnswers.get(id);
       // The stand-in refuses every call with the held line; a gone record stands on the machine every gone load gets.
-      await markGone(attach(entry.record, deadMachine(machineId)), machineId, goneWords(machineId, { by, at: clock.now(), ...(answer !== undefined ? { answer } : {}) }));
+      await ctx.markGone(ctx.attach(entry.record, deadMachine(machineId)), machineId, goneWords(machineId, { by, at: clock.now(), ...(answer !== undefined ? { answer } : {}) }));
     } finally {
       if (!isHeldAway(id)) heldAnswers.delete(id);
-      rereading.delete(id);
+      ctx.rereading.delete(id);
     }
   };
 
@@ -6708,7 +4451,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // was: only the host that owns that machine can serve it.
     let at: MachineBackend;
     try {
-      at = moduleOf(kind).backend(stored as WorkspaceRecord);
+      at = ctx.moduleOf(kind).backend(stored as WorkspaceRecord);
     } catch (e) {
       console.warn(`workspace ${stored.id} is left as it was: ${e instanceof Error ? e.message : String(e)}`);
       return;
@@ -6718,7 +4461,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // before anything lists it or meters it. A machine nothing can be asked about is neither: a place that is not
     // connected, a host started without its provider key and a provider read that failed all leave the record on
     // the word it was left with, and the host serves the rest rather than failing on the first record it cannot read.
-    const goldenKind = (await imageOf(stored.golden).catch(() => undefined))?.version?.kind ?? "sandbox";
+    const goldenKind = (await ctx.imageOf(stored.golden).catch(() => undefined))?.version?.kind ?? "sandbox";
     let missing: string | undefined;
     let absent = false;
     // The kind is the golden's, which the record names: a desktop fork on a computer that is away is a desktop
@@ -6773,14 +4516,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     if (phase === "gone") record.gone = stored.gone ?? goneWords(stored.machineId, { by: "record load", at: clock.now(), ...(missing !== undefined ? { answer: missing } : {}) });
     else delete record.gone;
-    attach(record, machine);
+    ctx.attach(record, machine);
     if (phase !== stored.phase) {
       if (phase === "gone") console.warn(goneLogLine(stored.id, record.gone!));
       else console.warn(`workspace ${stored.id} was left ${stored.phase} and its machine is ${String(atProvider)} at the provider; the record hydrates ${phase}`);
-      await persist(record);
+      await ctx.persist(record);
     }
     if (phase !== "running" || absent) return undefined;
-    idle.touch(stored.id);
+    ctx.idle.touch(stored.id);
     return live.get(stored.id)!;
   };
 
@@ -6788,18 +4531,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const ready = (): Promise<void> => {
     hydrated ??= (async () => {
       const stored = (await store.get(OWNER, "id")) as { id?: unknown } | undefined;
-      if (typeof stored?.id === "string" && stored.id !== "") owner = stored.id;
+      if (typeof stored?.id === "string" && stored.id !== "") ctx.state.owner = stored.id;
       else {
-        owner = `h_${randomBytes(4).toString("hex")}`;
-        await store.put(OWNER, "id", { id: owner });
+        ctx.state.owner = `h_${randomBytes(4).toString("hex")}`;
+        await store.put(OWNER, "id", { id: ctx.state.owner });
       }
       const since = (await store.get(READS, READS_ID)) as { at?: unknown } | undefined;
-      if (typeof since?.at === "number") readsSince = since.at;
+      if (typeof since?.at === "number") ctx.state.readsSince = since.at;
       else {
-        readsSince = clock.now();
-        await store.put(READS, READS_ID, { at: readsSince });
+        ctx.state.readsSince = clock.now();
+        await store.put(READS, READS_ID, { at: ctx.state.readsSince });
       }
-      await migrateCopies();
+      await ctx.migrateCopies();
       // The places are read before the workspaces: a fork standing on one asks which backend it lives on, and that
       // answer comes off what the place last said about itself rather than off a socket that may not be open.
       await placeDoor?.load();
@@ -6816,8 +4559,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           [...projectsHeld.values()]
             .filter(p => p.git === undefined && p.source.kind === "folder" && copiesFolder(kindForComputer(p.computer)))
             .map(async p => {
-              const top = await gitTopOf(p.path).catch(() => undefined);
-              if (top !== undefined) await rememberProject({ ...p, git: { top } });
+              const top = await ctx.gitTopOf(p.path).catch(() => undefined);
+              if (top !== undefined) await ctx.rememberProject({ ...p, git: { top } });
             }),
         );
       }
@@ -6834,15 +4577,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const moved: string[] = [];
       for (const t of inside) {
         try {
-          await moveTranscript(t);
+          await ctx.moveTranscript(t);
           moved.push(t.workspaceId);
         } catch (e) {
           console.warn(`${e instanceof Error ? e.message : String(e)}, so it stays in the state file for the next boot to move`);
         }
       }
       await Promise.all(moved.map(id => store.delete(TRANSCRIPTS, id)));
-      if (rows !== undefined) moveBlobs(rows);
-      for (const id of await store.keys(WORKSPACES)) if (!transcriptIndex.has(id)) await loadIndex(id);
+      if (rows !== undefined) ctx.moveBlobs(rows);
+      for (const id of await store.keys(WORKSPACES)) if (!transcriptIndex.has(id)) await ctx.loadIndex(id);
       const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; turnToken?: string; scopeDeviceId?: string; snapshot?: string }[] = [];
       /** Turns that ended while their card was still being read: the commit stayed on the row for this host to read. */
       const unread: { view: SessionView; turnId: string; snapshot?: string }[] = [];
@@ -6850,7 +4593,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
         const marks = Object.entries(index.viewed ?? {}).filter((pair): pair is [string, string] => typeof pair[1] === "string");
-        if (marks.length > 0) viewedMarks.set(index.workspaceId, Object.fromEntries(marks));
+        if (marks.length > 0) ctx.viewedMarks.set(index.workspaceId, Object.fromEntries(marks));
         for (const [threadId, held] of Object.entries(index.threads ?? {})) {
           if (typeof held?.harness !== "string") continue;
           const placed = ThreadPlacement.safeParse(held.section);
@@ -6912,8 +4655,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // that finds its machine gone must still be able to settle it.
           row.end = reason => {
             if (row.view.status !== "running") return;
-            settleCut(row, reason, () => reason);
-            void persistSessions(row.view.workspaceId);
+            ctx.settleCut(row, reason, () => reason);
+            void ctx.persistSessions(row.view.workspaceId);
           };
           if (view.status === "running") left.push(row);
           else if (row.snapshot !== undefined) unread.push(row);
@@ -6925,12 +4668,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // that a run is gone ends that turn, and a machine that answered nothing leaves its turn running. The ends are
       // told once every workspace's rows are in: the parent a settled turn tells may sit in a workspace read after
       // its own, and a re-opened turn's own end tells it later, when it ends.
-      const answers = await Promise.all(left.map(async s => ({ row: s, answer: await reattach(s) })));
+      const answers = await Promise.all(left.map(async s => ({ row: s, answer: await ctx.reattach(s) })));
       for (const { row, answer } of answers) {
-        if (answer === "cannot") settleCut(row, RESTARTED_REASON, endedAt => restartCutLine(endedAt - (row.view.startedAt ?? endedAt)));
-        else if (answer === "gone") settleCut(row, RUN_GONE_LINE, () => RUN_GONE_LINE);
+        if (answer === "cannot") ctx.settleCut(row, RESTARTED_REASON, endedAt => restartCutLine(endedAt - (row.view.startedAt ?? endedAt)));
+        else if (answer === "gone") ctx.settleCut(row, RUN_GONE_LINE, () => RUN_GONE_LINE);
       }
-      for (const workspaceId of new Set(left.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
+      for (const workspaceId of new Set(left.map(s => s.view.workspaceId))) void ctx.persistSessions(workspaceId);
       for (const row of unread) {
         const { workspaceId, threadId, cwd, claudeSessionId, id, startedAt } = row.view;
         const entry = live.get(workspaceId)!;
@@ -6939,35 +4682,34 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const read =
             threadId === undefined ||
             cwd === undefined ||
-            turnWritten(await openTranscript(workspaceId), row.turnId).changes ||
-            (await readTurnChanges(entry, { sessionId: claudeSessionId ?? id, turnId: row.turnId, threadId, cwd, from, startedAt: startedAt ?? Date.now() }));
+            turnWritten(await ctx.openTranscript(workspaceId), row.turnId).changes ||
+            (await ctx.readTurnChanges(entry, { sessionId: claudeSessionId ?? id, turnId: row.turnId, threadId, cwd, from, startedAt: startedAt ?? Date.now() }));
           delete row.snapshot;
-          if (read || !closing) await persistSessions(workspaceId);
+          if (read || !ctx.state.closing) await ctx.persistSessions(workspaceId);
         })().catch((e: unknown) => console.warn(`what ${row.turnId} changed was not read: ${e instanceof Error ? e.message : String(e)}`));
       }
       // The re-attach above has settled the rows the machines no longer hold, so a sync waiting out a running turn reads rows that are in.
-      for (const entry of toSync) void syncDaemon(entry);
+      for (const entry of toSync) void ctx.syncDaemon(entry);
       void Promise.all([...live.keys()].map(id => rereadHeld(id, "record load").catch((e: unknown) => console.warn(`workspace ${id} was not read again: ${e instanceof Error ? e.message : String(e)}`))));
       // Every run left over from a host that never came back to read it, now that this host knows which ones it does
       // hold: a harness whose reader is gone answers nobody and holds the machine's memory for its life.
-      await Promise.all([...live.values()].map(entry => sweepRuns(entry)));
+      await Promise.all([...live.values()].map(entry => ctx.sweepRuns(entry)));
       // A turn's token dies with the turn, and a host that went down under one never reached that exit: every scoped
       // device whose thread is not running now is taken away here, so a restart is not how a token outlives its turn.
       for (const device of await deviceDoor.list()) {
         const thread = device.scope?.threadId;
-        if (thread !== undefined && !threadRuns(thread)) await deviceDoor.revoke(device.id);
+        if (thread !== undefined && !ctx.threadRuns(thread)) await deviceDoor.revoke(device.id);
       }
       await deviceDoor.revokeAsides();
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
       // Not waited on: a fetch of a big copy's branches takes seconds, and the records it drops leave as they go.
-      copiesMoving = moveOldCopies().catch((e: unknown) => console.warn(`the move off old copies stopped: ${e instanceof Error ? e.message : String(e)}`));
-      armSweep();
+      ctx.state.copiesMoving = ctx.moveOldCopies().catch((e: unknown) => console.warn(`the move off old copies stopped: ${e instanceof Error ? e.message : String(e)}`));
+      ctx.armSweep();
       // A run that was running when the host stopped is failed and its done fires once, at start (02, "Host restart").
-      void slates.ready().catch((e: unknown) => console.warn(`the slates were not loaded: ${e instanceof Error ? e.message : String(e)}`));
+      void ctx.slates.ready().catch((e: unknown) => console.warn(`the slates were not loaded: ${e instanceof Error ? e.message : String(e)}`));
     })();
     return hydrated;
   };
-  let copiesMoving: Promise<void> | undefined;
 
   /** Every verb that names a workspace comes through here, so the origin rule is read once for all of them. */
   const entryOf = async (id: string, origin?: Caller): Promise<LiveWorkspace> => {
@@ -6976,12 +4718,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A workspace this host does not hold and one outside the caller's tree read alike to a thread: telling the two
     // apart is how a thread walks what else stands here.
     if (!entry || entry.creating) throw notFoundRefusal(scopeOf(origin) !== undefined ? noWorkspaceRefusal() : `${noWorkspaceRefusal()}: ${id}`);
-    refuseRelayed(entry.record, origin);
+    ctx.refuseRelayed(entry.record, origin);
     return entry;
   };
   /** A lead's child named by id or by name, refused for a workspace that is not that lead's child. */
   const childOf = async (lead: LiveWorkspace, ref: string, origin?: Caller): Promise<LiveWorkspace> => {
-    const named = await workspaces.resolve(ref, origin);
+    const named = await ctx.workspaces.resolve(ref, origin);
     const kid = await entryOf(named.id, origin);
     if (kid.record.parentWorkspaceId !== lead.record.id) throw Object.assign(new Error(notTheLeadsChildRefusal(kid.record.name, lead.record.name)), { kind: "invalid" });
     return kid;
@@ -6991,9 +4733,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * one. Neither the project rule nor the workspace tree is read here: a child on a fresh copy reaches its lead on
    * the workspace the person made, which the workspace rule alone would hide from it. */
   const reachesRow = (row: { threadId?: string; workspaceId: string }, caller: Caller | undefined): boolean => {
-    if (!drivesThread(row.threadId, caller)) return false;
+    if (!ctx.drivesThread(row.threadId, caller)) return false;
     const record = live.get(row.workspaceId)?.record;
-    return record === undefined || drives(record, caller);
+    return record === undefined || ctx.drives(record, caller);
   };
   /** Every session verb that names a thread comes through here, as the verbs naming a workspace come through
    * entryOf: the entry the row stands on, or nothing when the caller is a thread the row is out of reach for, so
@@ -7015,7 +4757,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // this host's to know while the turn runs, and a pid written down outlives the process it named while a wait
     // written down outlives the question it was on.
     return held.map(s => {
-      const behind = s.view.status === "running" ? stoppedBehind(s) : undefined;
+      const behind = s.view.status === "running" ? ctx.stoppedBehind(s) : undefined;
       const marks = threadRecords.get(threadKeyOf(s.view));
       const children = latest.get(threadKeyOf(s.view)) === s && s.view.threadId !== undefined ? transcriptIndex.get(s.view.workspaceId)?.children.get(s.view.threadId) : undefined;
       return {
@@ -7025,13 +4767,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(children !== undefined && children.size > 0 ? { subagents: [...children.values()].map(({ turnId: _turn, startRow: _row, ...child }) => child) } : {}),
         ...((): { setupRefusal?: string } => {
           const entry = live.get(s.view.workspaceId);
-          const place = entry === undefined ? undefined : setupPlace(entry);
-          const refused = place === undefined ? undefined : setupRefusals.get(keyOf(place, s.view.harness));
+          const place = entry === undefined ? undefined : ctx.setupPlace(entry);
+          const refused = place === undefined ? undefined : ctx.setupRefusals.get(keyOf(place, s.view.harness));
           return refused !== undefined ? { setupRefusal: refused } : {};
         })(),
         // A turn that ended before the stamps began reads as seen the moment it ended, not at the upgrade, so the quiet
         // the sidebar folds a thread by still counts from its end.
-        readAt: marks?.readAt ?? (s.view.endedAt !== undefined && s.view.endedAt < readsSince ? s.view.endedAt : readsSince),
+        readAt: marks?.readAt ?? (s.view.endedAt !== undefined && s.view.endedAt < ctx.state.readsSince ? s.view.endedAt : ctx.state.readsSince),
         ...(marks?.settledAt !== undefined ? { settledAt: marks.settledAt } : {}),
         ...(marks?.pinnedAt !== undefined ? { pinnedAt: marks.pinnedAt } : {}),
         ...(marks?.snoozedUntil === undefined ? {} : marks.snoozedUntil > clock.now() ? { snoozedUntil: marks.snoozedUntil } : { wokeAt: marks.snoozedUntil }),
@@ -7083,12 +4825,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const key of Object.keys(stamps) as (keyof typeof stamps)[]) if (stamps[key] === undefined) delete next[key];
       threadRecords.set(threadId, next);
       // A thread the person settled is done with: its kept agent goes now rather than at the end of the keep.
-      if (next.settledAt !== undefined) reapKept(threadId);
+      if (next.settledAt !== undefined) ctx.reapKept(threadId);
       if (next.snoozedUntil !== undefined) wakeAt(threadId, next.snoozedUntil);
       touched.set(workspaceId, [...(touched.get(workspaceId) ?? []), threadId]);
     }
     for (const [workspaceId, ids] of touched) {
-      await persistSessions(workspaceId);
+      await ctx.persistSessions(workspaceId);
       bus.emit({ type: "thread.marked", workspaceId, threadIds: ids });
     }
   };
@@ -7125,7 +4867,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The image a workspace forks when nobody named a project image: the head of this host's own, or nothing where
    * this host has sealed none yet. */
-  const imageHeadOrNone = async (): Promise<string | undefined> => goldenHead(await copyOf(await imagePlace("default"), "default"))?.snapshotId;
+  const imageHeadOrNone = async (): Promise<string | undefined> => goldenHead(await ctx.copyOf(await ctx.imagePlace("default"), "default"))?.snapshotId;
 
   /** The same, for every road that cannot go on without one. */
   const imageHead = async (): Promise<string> => {
@@ -7138,9 +4880,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * place id, and every other computer is the place it is. */
   const landingPlace = async (computer: string): Promise<{ placeId?: string }> => {
     const lands = workspaceLands(computer, places.wired);
-    return lands.at === "place" ? placeDoorOf().placeFor(lands.place) : {};
+    return lands.at === "place" ? ctx.placeDoorOf().placeFor(lands.place) : {};
   };
+  return {
+    refreshBuilders, isHeldAway, rereadHeld, hydrateWorkspace, ready, entryOf, childOf, reachesRow, entryOfRow,
+    listedRows, threadFacts, pushHead, mark, endSnoozeFor, treeStandsOn, computerRows, nameOfComputer, imageHeadOrNone,
+    imageHead, landingPlace,
+  };
+}
 
+function createArea(ctx: RuntimeContext): CreateArea {
+  const { opts, backend, placeDoor, bus, clock, live, builders, places } = ctx;
   const createStaged = async (
     o: CreateWorkspaceOptions,
     project: ProjectView,
@@ -7152,24 +4902,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   ): Promise<CreatedWorkspace> => {
     // Where this fork lands is the project's computer and nothing else: one workspace is one project's copy, so
     // no flag and no default place has a say in it.
-    const { placeId } = await landingPlace(project.computer);
-    await placeRefuses(placeId);
-    const at = await landingBackend(placeId);
+    const { placeId } = await ctx.landingPlace(project.computer);
+    await ctx.placeRefuses(placeId);
+    const at = await ctx.landingBackend(placeId);
     // What this project's computer mounts into every workspace of it, off the road that landed the project there.
     // Where this project's computer keeps its memory, off that computer's own road, read again here because the
     // road can answer it now: a record filled at boot while that computer had said nothing about itself carries
     // whatever could be worked out then, and the folder a workspace mounts has to be the one the computer holds.
     // The record is put right the first time a workspace of it is made, so the two can never disagree again.
-    const road = projectLanding(landingKind(project.computer, at));
-    const landingOn = (await landingDeps(project.computer)).deps;
+    const road = projectLanding(ctx.landingKind(project.computer, at));
+    const landingOn = (await ctx.landingDeps(project.computer)).deps;
     // Why no workspace of this project can be made on that computer at all, before a machine is asked for or a
     // record written: a create that read the refusal later left a workspace record behind for a fork that never
     // happened.
     const refused = road.refusal(project, landingOn);
     if (refused !== undefined) throw Object.assign(new Error(refused), { kind: "invalid" });
     const said = road.places({ project, memoryKey: project.memoryKey, deps: landingOn });
-    if (said.memoryDir !== project.memoryDir) await rememberProject({ ...project, memoryDir: said.memoryDir });
-    const binds = road.workspaceBinds(projectHeld(project.id));
+    if (said.memoryDir !== project.memoryDir) await ctx.rememberProject({ ...project, memoryDir: said.memoryDir });
+    const binds = road.workspaceBinds(ctx.projectHeld(project.id));
     // A project whose checkout the add left on that computer: this workspace takes its own copy of it, mounted at
     // the path the project has inside, so the seed and the install the add paid for are there and nothing is
     // cloned again. A project the computer keeps in an image carries it in the image instead. On a computer that
@@ -7179,12 +4929,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A computer that keeps no image is forked from none: the workspace is a copy of that computer itself, so no
     // image is read, no copy of one is built there ahead of the fork, and the record names none the way a copy of
     // a folder here does.
-    const fromImage = keepsImages(at);
+    const fromImage = ctx.keepsImages(at);
     // What this workspace forks: the image the add built for this project where it built one, since that image
     // already holds the clone and its dependencies; else, at a place that is not the image's own, that place's
     // current copy of the image, built there first when it holds none, and everywhere else the snapshot asked for.
-    const golden = fromImage ? await copyForFork(o.golden ?? project.image?.snapshotId ?? (await imageHead()), placeId, (where, rate) => report("fork-requested", copyFirstLine(where, o.name, rate))) : "";
-    const inherited = fromImage ? (await imageOf(golden)).version?.size : undefined;
+    const golden = fromImage ? await ctx.copyForFork(o.golden ?? project.image?.snapshotId ?? (await ctx.imageHead()), placeId, (where, rate) => report("fork-requested", copyFirstLine(where, o.name, rate))) : "";
+    const inherited = fromImage ? (await ctx.imageOf(golden)).version?.size : undefined;
     const record: WorkspaceRecord = {
       id,
       name: o.name,
@@ -7213,14 +4963,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       firstLife: true,
       // Written before the machine is asked for: the cap counts machines under a root off these two fields, so a
       // fork that is still landing already holds its place and two forks at once cannot both pass the count.
-      ...treeOf(spawned),
+      ...ctx.treeOf(spawned),
       ...(o.parent !== undefined ? { parentWorkspaceId: o.parent } : {}),
       // The branch this copy starts from, kept because a bring back measures against it long after the parent may
       // have moved on or gone to sleep; nothing reads the parent's machine for it again.
       ...((childBase ?? project.base) !== undefined ? { base: childBase ?? project.base } : {}),
       // A fork a thread asked for stores no switch of its own: it carries the tree it belongs to, and the switch is
       // read off that tree's root wherever it is asked for, so one workspace holds the answer for the whole tree.
-      ...(spawned === undefined && o.agents !== undefined ? { agents: agentsFrom(spawnAt(placeId ?? places.wired), o.agents) } : {}),
+      ...(spawned === undefined && o.agents !== undefined ? { agents: agentsFrom(ctx.spawnAt(placeId ?? places.wired), o.agents) } : {}),
     };
     // Only an asked size is checked: the golden's own is what it was built at, whatever the provider offers today.
     if (namesSize(o) && !offeredSize(at.capabilities.sizes, record.size)) {
@@ -7228,7 +4978,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     const bind = (m: Machine): void => {
       record.machineId = m.id;
-      attach(record, m).creating = true;
+      ctx.attach(record, m).creating = true;
       // The record is in the live map from here, so the place the guard took for it is handed back in the same
       // step: one fork counts as one from the reservation through to the machine being ready, never as two while
       // it boots. A create that never binds hands its place back in the caller's finally instead.
@@ -7238,10 +4988,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const asked = record.size;
     // The computer the fork lands on, by the name its own row carries: the place a person picked, else the
     // provider word this host's machines wear, which is what every other surface names a fork's home by.
-    const where = placeId === undefined ? places.wired : placeDoorOf().nameOf(placeId);
+    const where = placeId === undefined ? places.wired : ctx.placeDoorOf().nameOf(placeId);
     report("fork-requested", startingLine(record.name, where));
     try {
-      await fork(record, bind, undefined, report, false);
+      await ctx.fork(record, bind, undefined, report, false);
     } catch (e) {
       // A slot for work beats a builder kept for one more change: at the cap one kept builder of this setup is
       // stopped and the fork tried again, the next one only on the next refusal. A held or foreign builder is
@@ -7249,18 +4999,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!isCapRefusal(e)) throw e;
       let refusal: unknown = e;
       let made = false;
-      await refreshBuilders();
+      await ctx.refreshBuilders();
       for (const x of [...builders.values()].filter(x => (x.life === "own" || x.life === "reusable") && x.record.sealed !== undefined)) {
         const stopped = `Stopped the builder kept from image v${x.record.sealed!.version} to make room at the machine cap.`;
-        graceTimers.get(x.record.id)?.();
-        graceTimers.delete(x.record.id);
+        ctx.graceTimers.get(x.record.id)?.();
+        ctx.graceTimers.delete(x.record.id);
         await killUntilGone(backend, x.builder.machine, opts.killConfirm);
-        await forgetBuilder(x.record.id);
+        await ctx.forgetBuilder(x.record.id);
         notices.push(stopped);
         console.warn(`workspace ${record.id}: ${stopped.charAt(0).toLowerCase()}${stopped.slice(1, -1)} (${x.record.id})`);
         report("fork-requested", `${startingLine(record.name, where)} again`, { notice: stopped });
         try {
-          await fork(record, bind, undefined, report, false);
+          await ctx.fork(record, bind, undefined, report, false);
           made = true;
           break;
         } catch (again) {
@@ -7270,7 +5020,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       if (!made) {
         // A create still in flight holds its slot; the one being refused never bound a machine, so it cannot name itself.
-        const holding = [...live.values()].filter(w => holdsSlot(w.record)).map(w => w.record.name);
+        const holding = [...live.values()].filter(w => ctx.holdsSlot(w.record)).map(w => w.record.name);
         const line = machineCapRefusal(holding, [...builders.values()].map(x => x.record.name));
         throw Object.assign(new Error(line, { cause: refusal }), { kind: "concurrency", ...(typeof (refusal as WspError).status === "number" ? { status: (refusal as WspError).status } : {}) });
       }
@@ -7283,12 +5033,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // inside to answer, so the create says nothing about either rather than printing a note about a port nothing
     // listens on.
     let fault: string | undefined;
-    if (servedByItsComputer(entry) === undefined && (entry.machine.previewUrl !== undefined || entry.machine.daemonAnswers !== undefined)) {
+    if (ctx.servedByItsComputer(entry) === undefined && (entry.machine.previewUrl !== undefined || entry.machine.daemonAnswers !== undefined)) {
       // The route and the daemon are two questions, and the create asks them apart: minting is what the app and
       // the first client will dial, and a mint that fails is its own line rather than a verdict on the guest.
       if (entry.machine.previewUrl !== undefined) {
         try {
-          await until(entry.ws.daemonReach(), Date.now() + lifecycleOf(entry).budgets.daemonAnswersMs, "preview route");
+          await until(entry.ws.daemonReach(), Date.now() + ctx.lifecycleOf(entry).budgets.daemonAnswersMs, "preview route");
           report("preview-route", "Preview route to the daemon minted.");
         } catch (e) {
           report("preview-route", "No preview route to the daemon.", { notice: `preview route for ${entry.machine.id} not minted (${e instanceof Error ? e.message : String(e)})` });
@@ -7297,14 +5047,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A daemon that does not answer is reported, not fatal: the workspace exists either way, and the status check
       // keeps asking and names a zombie. Asked the way the wake and the poll ask, so a machine reached without a
       // route is asked here too rather than left with no word at all.
-      fault = await pingDaemon(entry);
+      fault = await ctx.pingDaemon(entry);
       report("daemon-answering", fault === undefined ? "Daemon answered." : "Daemon did not answer.", { notice: fault });
-      void syncDaemon(entry);
+      void ctx.syncDaemon(entry);
     }
     if (placeId === undefined) {
       // A guest whose daemon is silent may not serve exec yet either, and would spend the exec budget on top of the daemon's.
       if (fault !== undefined) console.warn(`workspace ${record.id}: memory not read: the daemon did not answer`);
-      else if ((await readMemory(record, entry.machine, at.capabilities.sizes)) && (record.size.cpu !== asked.cpu || record.size.memMb !== asked.memMb)) {
+      else if ((await ctx.readMemory(record, entry.machine, at.capabilities.sizes)) && (record.size.cpu !== asked.cpu || record.size.memMb !== asked.memMb)) {
         const line = sizeGotLine(asked, record.size, namesSize(o));
         notices.push(line);
         console.warn(`workspace ${record.id}: ${line}`);
@@ -7312,14 +5062,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     // The project goes in before the workspace is ready: a copy without the work in it is not a workspace of that
     // project, so a clone that fails ends the create and the machine goes with it.
-    await moduleOf(record.kind).landProject(entry, project, report);
-    await writeDaemonRoots(entry);
-    await persist(record);
+    await ctx.moduleOf(record.kind).landProject(entry, project, report);
+    await ctx.writeDaemonRoots(entry);
+    await ctx.persist(record);
     // The place a fork landed on is where the next one lands when nobody says.
     await placeDoor?.markUsed(placeId);
     delete entry.creating;
     report("ready", CREATE_READY);
-    const v = view(record);
+    const v = ctx.view(record);
     bus.emit({ type: "workspace.created", workspace: v });
     return notices.length > 0 ? { ...v, notice: notices.join(" ") } : v;
   };
@@ -7349,7 +5099,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     kind,
     golden,
     createdAt: new Date(began).toISOString(),
-    project: refOf(project),
+    project: ctx.refOf(project),
     gone: said,
   });
   /** A create asked again under a name supersedes the one that failed under it, and every client's row of it. */
@@ -7402,11 +5152,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     folderMaking.set(key, making);
     return making;
   };
+  return {
+    createStaged, nameGiven, forking, failedCreates, createStages, failedView, supersedeFailed, stageReporter,
+    nameRefusal, foldersOf, oneFolder,
+  };
+}
+
+function foldersArea(ctx: RuntimeContext): FoldersArea {
+  const { local, bus, clock, live, projectsHeld, threadRecords, sessions } = ctx;
   /** A folder's record, written once: the machine is this computer, running, with auto-nap off, since a machine wsp
    * does not run neither naps nor wakes. Its name is the project's, or the project's with the branch for a worktree,
    * and nothing shows it to a person. */
   const recordFolder = async (project: ProjectView, worktree?: WorktreeFolder, parent?: string): Promise<LiveWorkspace> => {
-    const mine = backendOfKind("local");
+    const mine = ctx.backendOfKind("local");
     const machine = await mine.get(LOCAL_MACHINE_ID);
     const id = `ws_${randomBytes(4).toString("hex")}`;
     const taken = new Set([...live.values()].map(e => e.record.name));
@@ -7426,26 +5184,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       firstLife: false,
       idleWindowMs: null,
     };
-    attach(record, machine);
-    await persist(record);
+    ctx.attach(record, machine);
+    await ctx.persist(record);
     // A project folder outside the person's home, or a worktree under the host's own folder, is outside the daemon's
     // home root, and the host's start lists only the records it found, so the file is written before a turn's snapshot.
-    await writeDaemonRoots(live.get(id)!);
+    await ctx.writeDaemonRoots(live.get(id)!);
     if (worktree?.made === true) armSweep();
-    bus.emit({ type: "workspace.created", workspace: view(record) });
+    bus.emit({ type: "workspace.created", workspace: ctx.view(record) });
     return live.get(id)!;
   };
   /** The project folder's record, made at its first thread. */
   const projectFolder = (project: ProjectView): Promise<LiveWorkspace> => {
-    const held = foldersOf(project.id).find(e => e.record.worktree === undefined);
+    const held = ctx.foldersOf(project.id).find(e => e.record.worktree === undefined);
     if (held !== undefined) return Promise.resolve(held);
-    return oneFolder(`${project.id}\0`, () => recordFolder(project));
+    return ctx.oneFolder(`${project.id}\0`, () => recordFolder(project));
   };
   /** The record of the worktree holding a branch of the project's repo: the one git already has the branch checked
    * out in, wherever it is, or one the daemon binary makes under this host's folder. The project folder itself
    * answers when it is the one holding the branch. */
   const worktreeFolder = (project: ProjectView, top: string, branch: string, parent?: string, madeFor?: string): Promise<LiveWorkspace> =>
-    oneFolder(`${project.id}\0${branch}`, async () => {
+    ctx.oneFolder(`${project.id}\0${branch}`, async () => {
       const copier = local?.copier;
       if (copier === undefined) throw Object.assign(new Error(NO_COPIER_HERE), { kind: "invalid" });
       // Before the binary is run at all: one older than this wsp answers a verb it never heard of with its usage text.
@@ -7454,7 +5212,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const version = await here.version();
         if (version < DAEMON_VERSION) throw new Error(hereDaemonBehindLine(version, DAEMON_VERSION, here.fix));
       }
-      const made = await copier.worktree({ from: top, home: stateFolder(), project: project.id, branch, carry: [...CARRIED_DIR_NAMES] });
+      const made = await copier.worktree({ from: top, home: ctx.stateFolder(), project: project.id, branch, carry: [...CARRIED_DIR_NAMES] });
       if (made.path === top) return projectFolder(project);
       return worktreeRecordAt(project, { path: made.path, branch: made.branch, made: made.made, ...(madeFor !== undefined ? { madeFor } : {}) }, parent);
     });
@@ -7462,12 +5220,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * made again comes back to its threads, and to the tree it was made for), else a new one, a child of the folder
    * whose thread asked for it so its branch merges back there. */
   const worktreeRecordAt = async (project: ProjectView, tree: WorktreeFolder, parent?: string): Promise<LiveWorkspace> => {
-    const held = foldersOf(project.id).find(e => e.record.worktree?.path === tree.path);
+    const held = ctx.foldersOf(project.id).find(e => e.record.worktree?.path === tree.path);
     if (held === undefined) return recordFolder(project, tree, parent);
     const was = held.record.worktree!;
     const madeFor = was.madeFor;
     held.record.worktree = { path: tree.path, made: was.made || tree.made, ...(tree.branch !== undefined ? { branch: tree.branch } : {}), ...(madeFor !== undefined ? { madeFor } : {}) };
-    await persist(held.record);
+    await ctx.persist(held.record);
     armSweep();
     return held;
   };
@@ -7478,10 +5236,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const folderFor = async (o: { project?: string; branch?: string; cwd?: string; picks?: StartPicksAsked }, origin: Caller | undefined): Promise<{ entry: LiveWorkspace; cwd?: string }> => {
     const scope = scopeOf(origin);
     const asking = scope === undefined ? undefined : live.get(scope.workspaceId);
-    const project = o.project !== undefined ? await projectsDoor.resolve(o.project, origin) : asking !== undefined ? projectHeld(asking.record.project) : undefined;
+    const project = o.project !== undefined ? await ctx.projectsDoor.resolve(o.project, origin) : asking !== undefined ? ctx.projectHeld(asking.record.project) : undefined;
     if (project === undefined) throw Object.assign(new Error(NAME_A_PROJECT_LINE), { kind: "usage" });
     if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
-    if (o.picks !== undefined) await picksHold(project, o.picks);
+    if (o.picks !== undefined) await ctx.picksHold(project, o.picks);
     const beside = asking !== undefined && copiesFolder(asking.record.kind) && asking.record.project === project.id ? asking : undefined;
     if (o.branch !== undefined && o.cwd !== undefined) throw Object.assign(new Error(BRANCH_OR_CWD_LINE), { kind: "usage" });
     const top = project.git?.top;
@@ -7496,7 +5254,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     if (o.branch === undefined) return { entry: beside ?? (await projectFolder(project)) };
     if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
-    if ((await branchAt(beside !== undefined ? checkoutOf(beside.record) : project.path)) === o.branch) return { entry: beside ?? (await projectFolder(project)) };
+    if ((await ctx.branchAt(beside !== undefined ? ctx.checkoutOf(beside.record) : project.path)) === o.branch) return { entry: beside ?? (await projectFolder(project)) };
     return { entry: await worktreeFolder(project, top, o.branch, beside?.record.id, scope?.rootThreadId) };
   };
   /** The host's own git writes on one folder, one at a time: two threads' commits, a discard and a removal never
@@ -7517,21 +5275,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const removeWorktree = (entry: LiveWorkspace, force: boolean, o: { ending?: boolean } = {}): Promise<void> =>
     queued(entry.record.id, async () => {
       const tree = entry.record.worktree;
-      const project = projectHeld(entry.record.project);
+      const project = ctx.projectHeld(entry.record.project);
       const top = project.git?.top;
       if (tree === undefined || tree.made !== true || top === undefined) throw new Error(notMadeWorktreeLine(tree?.branch ?? ""));
       const copier = local?.copier;
       if (copier === undefined) throw Object.assign(new Error(NO_COPIER_HERE), { kind: "invalid" });
-      if (o.ending !== true && turnRuns(entry.record.id)) throw Object.assign(new Error(WORKTREE_BUSY_LINE), { kind: "conflict" });
+      if (o.ending !== true && ctx.turnRuns(entry.record.id)) throw Object.assign(new Error(WORKTREE_BUSY_LINE), { kind: "conflict" });
       if (existsSync(tree.path)) {
         if (!force) await refuseChanged(tree.path);
-        await copier.worktreeRemove({ from: top, home: stateFolder(), path: tree.path, force });
+        await copier.worktreeRemove({ from: top, home: ctx.stateFolder(), path: tree.path, force });
       }
       if (o.ending !== true) await worktreeGone(entry, "removed");
     });
   /** Refuses over files no commit holds in a folder, naming how many: they would go with a removal. */
   const refuseChanged = async (path: string): Promise<void> => {
-    const read = await gitHere(path, ["status", "--porcelain"]);
+    const read = await ctx.gitHere(path, ["status", "--porcelain"]);
     if (read.exitCode !== 0) throw new Error(read.stderr.trim() || read.stdout.trim());
     const changed = read.stdout.split("\n").filter(l => l.trim() !== "").length;
     if (changed > 0) throw Object.assign(new Error(worktreeChangedLine(changed)), { kind: "conflict" });
@@ -7539,9 +5297,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Drops the checkpoint refs one thread holds in its folder's repo, best effort: a ref left behind pins files and
    * nothing else, and a delete is not refused for it. */
   const dropCheckpoints = async (entry: LiveWorkspace, threadId: string): Promise<void> => {
-    await checkpointsLanding.get(threadId)?.catch(() => {});
-    if (notARepo(entry.record)) return;
-    await withDaemon(entry, ask => ask({ op: "git.checkpointDrop", cwd: checkoutOf(entry.record), scope: entry.record.id, thread: threadId })).catch((e: unknown) =>
+    await ctx.checkpointsLanding.get(threadId)?.catch(() => {});
+    if (ctx.notARepo(entry.record)) return;
+    await ctx.withDaemon(entry, ask => ask({ op: "git.checkpointDrop", cwd: ctx.checkoutOf(entry.record), scope: entry.record.id, thread: threadId })).catch((e: unknown) =>
       console.warn(`the checkpoints of thread ${threadWord(threadId)} were not dropped: ${e instanceof Error ? e.message : String(e)}`),
     );
   };
@@ -7555,11 +5313,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (tree === undefined) return;
     // A start found it gone, and its thread is about to name the record.
     if (o.starting !== true && !holdsThread(entry.record.id)) {
-      await drop(entry.record.id);
+      await ctx.drop(entry.record.id);
       return;
     }
     entry.record.worktree = { path: tree.path, made: tree.made, ...(tree.branch !== undefined ? { branch: tree.branch } : {}), ...(tree.madeFor !== undefined ? { madeFor: tree.madeFor } : {}), settled: tree.settled ?? { at: clock.now(), why }, gone: true };
-    await persist(entry.record);
+    await ctx.persist(entry.record);
   };
   /** The folder a thread's next turn runs in: where its session last ran, unless that was a worktree that is gone,
    * whose threads go on in the folder the record answers now. */
@@ -7573,22 +5331,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const SWEEP_MS = 10 * 60_000;
   const SETTLED_STANDS_MS = 6 * 3_600_000;
   const KEPT_FOR_MS = 7 * 24 * 3_600_000;
-  let sweepTimer: (() => void) | undefined;
-  let sweeping: Promise<void> | undefined;
-  let sweepStopped = false;
   /** Whether any worktree wsp made still stands, which is all the sweep has to look at. */
   const sweepHasWork = (): boolean => [...live.values()].some(e => e.record.worktree?.made === true && e.record.worktree.gone !== true);
   /** Armed only while a worktree wsp made stands: a host with none holds no timer for it. */
   const armSweep = (): void => {
-    if (sweepTimer !== undefined || sweeping !== undefined) return;
-    if (sweepStopped || !sweepHasWork()) return;
-    sweepTimer = clock.schedule(
+    if (ctx.state.sweepTimer !== undefined || ctx.state.sweeping !== undefined) return;
+    if (ctx.state.sweepStopped || !sweepHasWork()) return;
+    ctx.state.sweepTimer = clock.schedule(
       () => {
-        sweepTimer = undefined;
-        sweeping = sweepWorktrees()
+        ctx.state.sweepTimer = undefined;
+        ctx.state.sweeping = sweepWorktrees()
           .catch((e: unknown) => console.warn(`the sweep of worktrees stopped: ${e instanceof Error ? e.message : String(e)}`))
           .finally(() => {
-            sweeping = undefined;
+            ctx.state.sweeping = undefined;
             armSweep();
           });
       },
@@ -7619,11 +5374,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const next: WorktreeFolder = { ...now, ...said, ...(age >= KEPT_FOR_MS ? { kept: KEPT_ABANDONED_LINE } : {}) };
       if (JSON.stringify(next) === JSON.stringify(now)) return;
       entry.record.worktree = next;
-      await persist(entry.record);
-      await statusNow(entry);
+      await ctx.persist(entry.record);
+      await ctx.statusNow(entry);
     };
-    if (turnRuns(entry.record.id)) return keep({ kept: KEPT_RUNNING_LINE });
-    const status = await gitHere(tree.path, ["status", "--porcelain"]);
+    if (ctx.turnRuns(entry.record.id)) return keep({ kept: KEPT_RUNNING_LINE });
+    const status = await ctx.gitHere(tree.path, ["status", "--porcelain"]);
     const changed = status.stdout.split("\n").filter(l => l.trim() !== "").length;
     if (status.exitCode === 0 && changed > 0) return keep({ kept: keptChangedLine(changed) });
     try {
@@ -7637,24 +5392,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * or a remote that could not be read is no answer, so a branch never pushed keeps its worktree. */
   const settledNow = async (entry: LiveWorkspace): Promise<WorktreeSettled | undefined> => {
     const tree = entry.record.worktree!;
-    if (projectHeld(entry.record.project).remote === "") return undefined;
-    await readPullRequest(entry, true);
+    if (ctx.projectHeld(entry.record.project).remote === "") return undefined;
+    await ctx.readPullRequest(entry, true);
     const pr = entry.record.pr;
     let settled: WorktreeSettled | undefined =
       pr?.state === "merged" ? { at: pr.mergedAt ?? clock.now(), why: "merged" } : pr?.state === "closed" ? { at: pr.closedAt ?? clock.now(), why: "closed" } : undefined;
     if (settled === undefined && tree.branch !== undefined && (await branchGoneAtRemote(tree.path, tree.branch))) settled = { at: clock.now(), why: "deleted" };
     if (settled === undefined) return undefined;
     entry.record.worktree = { ...entry.record.worktree!, settled };
-    await persist(entry.record);
-    await statusNow(entry);
+    await ctx.persist(entry.record);
+    await ctx.statusNow(entry);
     return settled;
   };
   /** True only where the branch has an upstream and its remote answers that it holds no such branch (exit 2). */
   const branchGoneAtRemote = async (path: string, branch: string): Promise<boolean> => {
-    const remote = (await gitHere(path, ["config", "--get", `branch.${branch}.remote`])).stdout.trim();
-    const merge = (await gitHere(path, ["config", "--get", `branch.${branch}.merge`])).stdout.trim();
+    const remote = (await ctx.gitHere(path, ["config", "--get", `branch.${branch}.remote`])).stdout.trim();
+    const merge = (await ctx.gitHere(path, ["config", "--get", `branch.${branch}.merge`])).stdout.trim();
     if (remote === "" || merge === "" || remote === ".") return false;
-    const machine = await moduleOf("local").backend({ kind: "local" } as WorkspaceRecord).get(LOCAL_MACHINE_ID);
+    const machine = await ctx.moduleOf("local").backend({ kind: "local" } as WorkspaceRecord).get(LOCAL_MACHINE_ID);
     const asked = await machine.exec(`GIT_TERMINAL_PROMPT=0 ${shellLine(["git", "-C", path, "ls-remote", "--exit-code", "--heads", remote, merge])}`, { timeoutMs: INLINE_EXEC_MS });
     return asked.exitCode === 2;
   };
@@ -7670,16 +5425,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const kept: string[] = [];
     for (const entry of old) {
       const copy = ProjectCopy.safeParse((entry.record as { copy?: unknown }).copy);
-      endSessions(entry.record.id, OLD_COPY_WORDS.ended);
+      ctx.endSessions(entry.record.id, OLD_COPY_WORDS.ended);
       const why = copy.success ? await moveOldCopy(entry, copy.data).catch((e: unknown) => OLD_COPY_WORDS.notRemoved(e instanceof Error ? e.message : String(e))) : undefined;
       if (why !== undefined && copy.success) {
         kept.push(`${copy.data.path}\t${why}`);
         console.warn(`old copy ${copy.data.path} kept: ${why}`);
       }
-      await drop(entry.record.id);
+      await ctx.drop(entry.record.id);
     }
     if (kept.length === 0) return;
-    const file = join(stateFolder(), COPIES_KEPT_FILE);
+    const file = join(ctx.stateFolder(), COPIES_KEPT_FILE);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `${kept.join("\n")}\n`);
     bus.emit({ type: "host.notice", message: OLD_COPY_WORDS.kept(kept.length, homeShortened(file, homedir())) });
@@ -7692,20 +5447,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const top = project.git?.top ?? project.path;
     const overlaps = (a: string, b: string): boolean => under(a, b) || under(b, a);
     if (overlaps(copy.path, project.path) || overlaps(copy.path, top) || overlaps(copy.path, copy.source)) return OLD_COPY_WORDS.isProject;
-    const status = await gitHere(copy.path, ["status", "--porcelain"]);
+    const status = await ctx.gitHere(copy.path, ["status", "--porcelain"]);
     if (status.exitCode !== 0) return OLD_COPY_WORDS.unread(gitSaid(status));
     if (status.stdout.trim() !== "") return OLD_COPY_WORDS.changed;
     const name = refPart(folderName(copy.path));
     if (copy.road === "clonefile") {
       // A stash lives in the copy's own repo and rides no fetch of its branches; a worktree's is the project's own.
-      const stash = await gitHere(copy.path, ["rev-parse", "--verify", "--quiet", "refs/stash"]);
+      const stash = await ctx.gitHere(copy.path, ["rev-parse", "--verify", "--quiet", "refs/stash"]);
       if (stash.exitCode === 0 && stash.stdout.trim() !== "") return OLD_COPY_WORDS.stashed;
       const failed = await rescueTips(top, copy.path, name);
       if (failed !== undefined) return OLD_COPY_WORDS.fetchFailed(failed);
     } else {
-      const head = await gitHere(copy.path, ["rev-parse", "--verify", "--quiet", "HEAD"]);
+      const head = await ctx.gitHere(copy.path, ["rev-parse", "--verify", "--quiet", "HEAD"]);
       if (head.stdout.trim() !== "") {
-        const put = await gitHere(top, ["update-ref", `refs/rescue/${name}/HEAD`, head.stdout.trim()]);
+        const put = await ctx.gitHere(top, ["update-ref", `refs/rescue/${name}/HEAD`, head.stdout.trim()]);
         if (put.exitCode !== 0) return OLD_COPY_WORDS.fetchFailed(gitSaid(put));
       }
     }
@@ -7722,13 +5477,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const incoming = `refs/rescue-incoming/${name}`;
     try {
       // HEAD rides the same fetch, so a commit on no branch is carried too.
-      const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", from, `+refs/heads/*:${incoming}/heads/*`, `+HEAD:${incoming}/HEAD`], CLONE_MS);
+      const fetched = await ctx.gitHere(top, ["fetch", "--quiet", "--no-tags", from, `+refs/heads/*:${incoming}/heads/*`, `+HEAD:${incoming}/HEAD`], CLONE_MS);
       if (fetched.exitCode !== 0) return gitSaid(fetched);
-      const unreached = await gitHere(top, ["rev-list", `--glob=${incoming}`, "--not", "--branches", "--remotes", "--tags", "--glob=refs/rescue"], CLONE_MS);
+      const unreached = await ctx.gitHere(top, ["rev-list", `--glob=${incoming}`, "--not", "--branches", "--remotes", "--tags", "--glob=refs/rescue"], CLONE_MS);
       if (unreached.exitCode !== 0) return gitSaid(unreached);
       const lacking = new Set(unreached.stdout.split("\n").filter(Boolean));
       if (lacking.size === 0) return undefined;
-      const listed = await gitHere(top, ["for-each-ref", "--format=%(objectname) %(refname)", incoming]);
+      const listed = await ctx.gitHere(top, ["for-each-ref", "--format=%(objectname) %(refname)", incoming]);
       if (listed.exitCode !== 0) return gitSaid(listed);
       const refs = listed.stdout.split("\n").filter(Boolean).map(line => ({ tip: line.slice(0, line.indexOf(" ")), ref: line.slice(line.indexOf(" ") + 1) }));
       const ordered = [...refs.filter(r => r.ref !== `${incoming}/HEAD`), ...refs.filter(r => r.ref === `${incoming}/HEAD`)];
@@ -7740,11 +5495,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const rest = ref === `${incoming}/HEAD` ? "HEAD" : ref.slice(`${incoming}/heads/`.length);
         lines.push(`update refs/rescue/${name}/${rest} ${tip}`);
       }
-      const put = await gitHere(top, ["update-ref", "--stdin"], INLINE_EXEC_MS, `${lines.join("\n")}\n`);
+      const put = await ctx.gitHere(top, ["update-ref", "--stdin"], INLINE_EXEC_MS, `${lines.join("\n")}\n`);
       return put.exitCode === 0 ? undefined : gitSaid(put);
     } finally {
-      const left = await gitHere(top, ["for-each-ref", "--format=delete %(refname)", incoming]);
-      if (left.stdout.trim() !== "") await gitHere(top, ["update-ref", "--stdin"], INLINE_EXEC_MS, left.stdout);
+      const left = await ctx.gitHere(top, ["for-each-ref", "--format=delete %(refname)", incoming]);
+      if (left.stdout.trim() !== "") await ctx.gitHere(top, ["update-ref", "--stdin"], INLINE_EXEC_MS, left.stdout);
     }
   };
   /** A folder's name as one part of a ref: what git refuses in a ref name turned to a dash. */
@@ -7758,7 +5513,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Every worktree of a repo as git lists it now, read each time: the person and their agents add and remove their
    * own, so nothing here is kept. */
   const worktreesOf = async (top: string): Promise<{ path: string; branch?: string }[]> => {
-    const read = await gitHere(top, ["worktree", "list", "--porcelain"]);
+    const read = await ctx.gitHere(top, ["worktree", "list", "--porcelain"]);
     if (read.exitCode !== 0) return [];
     const trees: { path: string; branch?: string }[] = [];
     for (const line of read.stdout.split("\n")) {
@@ -7767,7 +5522,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return trees;
   };
+  return {
+    projectFolder, worktreeFolder, folderFor, queued, removeWorktree, refuseChanged, dropCheckpoints, holdsThread,
+    worktreeGone, runsIn, armSweep, moveOldCopies, gitSaid, worktreesOf,
+  };
+}
 
+function startFromArea(ctx: RuntimeContext): StartFromArea {
+  const { bus, clock, live, projectsHeld } = ctx;
   /** The project a GitHub repository names: the one whose remote is that repository, this computer's where two
    * computers hold it, or the one named by name or id among them. A link is only ever matched to a project the
    * person added, and every later call names the repository off that project's record. */
@@ -7780,11 +5542,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** An issue, or a pull request read as the issue it also is, on this computer's own git host command line. */
   const issueOf = async (remote: string, number: number): Promise<IssueRead> =>
-    GitIssueReadReply.parse(await onThisComputer((ask, home) => ask({ op: "git.issueRead", cwd: home, remote, number }))).issue;
+    GitIssueReadReply.parse(await ctx.onThisComputer((ask, home) => ask({ op: "git.issueRead", cwd: home, remote, number }))).issue;
 
   /** A pull request by number, read in full on this computer. */
   const pullRequestOf = async (remote: string, number: number): Promise<PullRequest> => {
-    const read = GitPrReadReply.parse(await onThisComputer((ask, home) => ask({ op: "git.prRead", cwd: home, remote, number }))).pr;
+    const read = GitPrReadReply.parse(await ctx.onThisComputer((ask, home) => ask({ op: "git.prRead", cwd: home, remote, number }))).pr;
     if (read === undefined) throw new Error(`#${number} is not a pull request`);
     return read;
   };
@@ -7808,7 +5570,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (copiesFolder(kindForComputer(project.computer))) return folderFrom(project, from, fact);
     const taken = new Set([...live.values()].map(e => e.record.name));
     const name = takenNameAfter(startName(kind, from.number, from.title), taken);
-    const made = await workspaces.create({ project: project.id, name }, origin);
+    const made = await ctx.workspaces.create({ project: project.id, name }, origin);
     const entry = live.get(made.id);
     if (entry === undefined) throw new Error(`${name} was made and then not found`);
     entry.record.from = from;
@@ -7817,12 +5579,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       entry.record.pr = { number: fact.number, url: fact.url, state: fact.state, base: fact.base };
       entry.pr = { ...fact, readAt: clock.now() };
     }
-    await persist(entry.record);
+    await ctx.persist(entry.record);
     if (fact !== undefined) {
       try {
-        await withDaemon(entry, ask => ask({ op: "git.prCheckout", cwd: checkoutOf(entry.record), number: fact.number }));
+        await ctx.withDaemon(entry, ask => ask({ op: "git.prCheckout", cwd: ctx.checkoutOf(entry.record), number: fact.number }));
       } catch (e) {
-        await workspaces.delete(entry.record.id, origin).catch((d: unknown) => console.warn(`${name} was not taken back after its checkout failed: ${d instanceof Error ? d.message : String(d)}`));
+        await ctx.workspaces.delete(entry.record.id, origin).catch((d: unknown) => console.warn(`${name} was not taken back after its checkout failed: ${d instanceof Error ? d.message : String(d)}`));
         throw e;
       }
     }
@@ -7833,15 +5595,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * its head, fetched into the project's repo first as a branch of its own where none of that name stands, so
    * nothing moves the project folder's checkout. The pull request's facts go on the worktree's record alone. */
   const folderFrom = async (project: ProjectView, from: WorkspaceFrom, fact: PullRequest | undefined): Promise<LiveWorkspace> => {
-    if (fact === undefined) return projectFolder(project);
+    if (fact === undefined) return ctx.projectFolder(project);
     const top = project.git?.top;
     if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
     const branch = fact.fork === undefined ? fact.branch : `${fact.fork.owner}/${fact.branch}`;
     // A branch some worktree already holds runs there and is caught up below; any other is fetched first, made where
     // it is not here and only moved forward where it is, never forced.
-    const holds = (await worktreesOf(top)).some(w => w.branch === branch);
+    const holds = (await ctx.worktreesOf(top)).some(w => w.branch === branch);
     if (!holds) await fetchHead(project, top, fact, branch);
-    const entry = await worktreeFolder(project, top, branch);
+    const entry = await ctx.worktreeFolder(project, top, branch);
     if (holds) {
       const behind = await catchUp(entry, project, top, fact);
       if (behind !== undefined) behindOn.set(entry.record.id, behind);
@@ -7851,7 +5613,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     entry.record.base = fact.base;
     entry.record.pr = { number: fact.number, url: fact.url, state: fact.state, base: fact.base };
     entry.pr = { ...fact, readAt: clock.now() };
-    await persist(entry.record);
+    await ctx.persist(entry.record);
     return entry;
   };
 
@@ -7859,17 +5621,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * itself refuses them with, so a pick the agent does not take costs no git work. */
   const picksHold = async (project: ProjectView, o: StartPicksAsked): Promise<void> => {
     if (!copiesFolder(kindForComputer(project.computer))) return;
-    const home = await projectFolder(project);
-    const prefs = preferencesHeld ?? (await preferences.get());
-    const harness = o.harness ?? defaultAgentOf(prefs, home);
+    const home = await ctx.projectFolder(project);
+    const prefs = ctx.state.preferencesHeld ?? (await ctx.preferences.get());
+    const harness = o.harness ?? ctx.defaultAgentOf(prefs, home);
     const table = harnessCatalog(harness);
     if (table === undefined) return;
-    const { adapter } = await launchAdapterFor(home, harness);
-    const resolved = defaultsOn(await catalogOn(table, home, adapter), prefs, prefs.projectDefaults[home.record.project]);
+    const { adapter } = await ctx.launchAdapterFor(home, harness);
+    const resolved = ctx.defaultsOn(await ctx.catalogOn(table, home, adapter), prefs, prefs.projectDefaults[home.record.project]);
     // This road is the command line's and the tools', so it names the flag to drop; namedMode speaks for the app too.
     const refused = o.access === undefined ? null : accessWordRefusal(resolved.catalog, o.access);
     if (refused !== null) throw refused;
-    const named = o.permissionMode ?? (o.access === undefined ? undefined : namedMode(resolved.catalog, harness, o.access));
+    const named = o.permissionMode ?? (o.access === undefined ? undefined : ctx.namedMode(resolved.catalog, harness, o.access));
     const model = o.model ?? resolved.open.model;
     const effort = o.effort ?? resolved.open.effort;
     try {
@@ -7884,7 +5646,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The project folder's record with this computer's daemon told the folder is its to work in, so an ask naming a
    * project anywhere a project may live resolves. */
   const askingIn = async (entry: LiveWorkspace): Promise<LiveWorkspace> => {
-    await writeDaemonRoots(entry);
+    await ctx.writeDaemonRoots(entry);
     return entry;
   };
   /** A pull request's head into its local branch through the daemon: the branch by name where the remote still holds
@@ -7892,20 +5654,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * on the base repository as pull/<n>/head, so no fork's URL is dialled. */
   const fetchHead = async (project: ProjectView, top: string, fact: PullRequest, branch: string): Promise<void> => {
     if (fact.fork === undefined) {
-      const home = await askingIn(await projectFolder(project));
+      const home = await askingIn(await ctx.projectFolder(project));
       try {
-        GitStartOnReply.parse(await withDaemon(home, ask => ask({ op: "git.fetchBranch", cwd: project.path, remote: project.remote, branch: fact.branch, into: branch })));
+        GitStartOnReply.parse(await ctx.withDaemon(home, ask => ask({ op: "git.fetchBranch", cwd: project.path, remote: project.remote, branch: fact.branch, into: branch })));
         return;
       } catch (e) {
         if (await remoteHolds(top, project.remote, `refs/heads/${fact.branch}`)) throw e;
       }
     }
-    const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", project.remote, `pull/${fact.number}/head:refs/heads/${branch}`], CLONE_MS);
-    if (fetched.exitCode !== 0) throw new Error(gitSaid(fetched));
+    const fetched = await ctx.gitHere(top, ["fetch", "--quiet", "--no-tags", project.remote, `pull/${fact.number}/head:refs/heads/${branch}`], CLONE_MS);
+    if (fetched.exitCode !== 0) throw new Error(ctx.gitSaid(fetched));
   };
   /** Whether the remote holds a ref; exit 2 alone is its answer that it does not. */
   const remoteHolds = async (top: string, remote: string, ref: string): Promise<boolean> =>
-    (await gitHere(top, ["ls-remote", "--exit-code", remote, ref], CLONE_MS)).exitCode !== 2;
+    (await ctx.gitHere(top, ["ls-remote", "--exit-code", remote, ref], CLONE_MS)).exitCode !== 2;
   /** The folder holding a pull request's branch, caught up where it may be: a worktree wsp made that is clean and
    * only behind moves forward through the daemon; the project folder never moves, and any folder left as it stands
    * gets the line its thread is told. */
@@ -7913,18 +5675,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const path = entry.record.worktree?.path ?? top;
     const byName = fact.fork === undefined && (await remoteHolds(top, project.remote, `refs/heads/${fact.branch}`));
     const spec = byName ? `refs/heads/${fact.branch}` : `pull/${fact.number}/head`;
-    const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", project.remote, spec], CLONE_MS);
-    if (fetched.exitCode !== 0) return PR_BEHIND_WORDS.unread(fact.number, gitSaid(fetched));
-    const head = (await gitHere(top, ["rev-parse", "FETCH_HEAD"])).stdout.trim();
-    const at = (await gitHere(path, ["rev-parse", "HEAD"])).stdout.trim();
-    if (head === at || (await gitHere(path, ["merge-base", "--is-ancestor", head, at])).exitCode === 0) return undefined;
-    if ((await gitHere(path, ["merge-base", "--is-ancestor", at, head])).exitCode !== 0) return PR_BEHIND_WORDS.diverged(fact.number, path);
-    if ((await gitHere(path, ["status", "--porcelain"])).stdout.trim() !== "") return PR_BEHIND_WORDS.changed(fact.number, path);
+    const fetched = await ctx.gitHere(top, ["fetch", "--quiet", "--no-tags", project.remote, spec], CLONE_MS);
+    if (fetched.exitCode !== 0) return PR_BEHIND_WORDS.unread(fact.number, ctx.gitSaid(fetched));
+    const head = (await ctx.gitHere(top, ["rev-parse", "FETCH_HEAD"])).stdout.trim();
+    const at = (await ctx.gitHere(path, ["rev-parse", "HEAD"])).stdout.trim();
+    if (head === at || (await ctx.gitHere(path, ["merge-base", "--is-ancestor", head, at])).exitCode === 0) return undefined;
+    if ((await ctx.gitHere(path, ["merge-base", "--is-ancestor", at, head])).exitCode !== 0) return PR_BEHIND_WORDS.diverged(fact.number, path);
+    if ((await ctx.gitHere(path, ["status", "--porcelain"])).stdout.trim() !== "") return PR_BEHIND_WORDS.changed(fact.number, path);
     if (entry.record.worktree === undefined) return PR_BEHIND_WORDS.folder(fact.number, path);
     if (entry.record.worktree.made !== true) return PR_BEHIND_WORDS.notMade(fact.number, path);
     if (!byName) return PR_BEHIND_WORDS.byHead(fact.number, path, project.remote);
     try {
-      GitUpdateReply.parse(await withDaemon(await askingIn(entry), ask => ask({ op: "git.update", cwd: checkoutOf(entry.record), base: fact.branch })));
+      GitUpdateReply.parse(await ctx.withDaemon(await askingIn(entry), ask => ask({ op: "git.update", cwd: ctx.checkoutOf(entry.record), base: fact.branch })));
       return undefined;
     } catch (e) {
       return PR_BEHIND_WORDS.unread(fact.number, e instanceof Error ? e.message : String(e));
@@ -7935,7 +5697,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const openWith = async (entry: LiveWorkspace, o: { prompt: string; harness?: string; model?: string; effort?: string; permissionMode?: string; access?: AccessChoice }, origin: Caller | undefined): Promise<StartResult> => {
     const behind = behindOn.get(entry.record.id);
     behindOn.delete(entry.record.id);
-    const handle = await sessionsApi.start(
+    const handle = await ctx.sessionsApi.start(
       entry.record.id,
       {
         ...(behind !== undefined ? { behind } : {}),
@@ -7949,7 +5711,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       origin,
     );
     const v = handle.view();
-    return { workspace: view(entry.record), threadId: v.threadId ?? v.id, sessionId: v.id };
+    return { workspace: ctx.view(entry.record), threadId: v.threadId ?? v.id, sessionId: v.id };
   };
 
   /** The harnesses whose table names a mode that changes nothing, which are the ones that can review. */
@@ -7974,13 +5736,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (isReviewRead(prior)) return;
       const reasked = prior !== undefined && "note" in prior && prior.reasked === true;
       entry.record.review = { note: read.why, at, reasked: true };
-      await persist(entry.record);
+      await ctx.persist(entry.record);
       bus.emit({ type: "workspace.review", workspaceId: entry.record.id });
-      if (!reasked) void sendDetached(entry.record.id, { prompt: reviewReaskPrompt(read.why), thread: threadId }, undefined).catch((e: unknown) => console.warn(`the reviewer of ${entry.record.name} was not asked again: ${e instanceof Error ? e.message : String(e)}`));
+      if (!reasked) void ctx.sendDetached(entry.record.id, { prompt: reviewReaskPrompt(read.why), thread: threadId }, undefined).catch((e: unknown) => console.warn(`the reviewer of ${entry.record.name} was not asked again: ${e instanceof Error ? e.message : String(e)}`));
       return;
     }
-    const remote = projectHeld(entry.record.project).remote;
-    const diff = await onThisComputer((ask, home) => ask({ op: "git.prDiff", cwd: home, remote, number: from.number })).then(
+    const remote = ctx.projectHeld(entry.record.project).remote;
+    const diff = await ctx.onThisComputer((ask, home) => ask({ op: "git.prDiff", cwd: home, remote, number: from.number })).then(
       r => GitPrDiffReply.parse(r).diff,
       () => undefined,
     );
@@ -7992,24 +5754,34 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }));
     const headOid = (isPullRequestFact(entry.pr) ? entry.pr.headOid : undefined) ?? from.head?.oid ?? "";
     entry.record.review = { verdict: read.review.verdict, summary: read.review.summary, comments, headOid, threadId, at };
-    await persist(entry.record);
+    await ctx.persist(entry.record);
     bus.emit({ type: "workspace.review", workspaceId: entry.record.id });
   };
+  return {
+    projectByRepo, issueOf, pullRequestOf, fromOf, workspaceFrom, picksHold, openWith, readOnlyOf, reviewers,
+    takeReview,
+  };
+}
 
+function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
+  const {
+    store, adapters, local, placeDoor, bus, clock, githubCache, readsState, tookTheResume, sleeps, imageMovePlan, live,
+    threadRecords, sessions, execs, places,
+  } = ctx;
   const workspaces: Runtime["workspaces"] = {
     async landing(o, origin) {
-      await ready();
-      const project = await projectsDoor.resolve(o.project, origin);
+      await ctx.ready();
+      const project = await ctx.projectsDoor.resolve(o.project, origin);
       const computer = project.computer;
       const kind = kindForComputer(computer);
-      if (copiesFolder(kind)) return { name: placeName(HERE_PLACE_ID), capabilities: backendOfKind(kind).capabilities };
-      const { placeId } = await landingPlace(computer);
-      const at = await landingBackend(placeId);
-      return { ...(placeId !== undefined ? { place: placeId } : {}), name: placeName(placeId ?? places.wired), capabilities: at.capabilities };
+      if (copiesFolder(kind)) return { name: ctx.placeName(HERE_PLACE_ID), capabilities: ctx.backendOfKind(kind).capabilities };
+      const { placeId } = await ctx.landingPlace(computer);
+      const at = await ctx.landingBackend(placeId);
+      return { ...(placeId !== undefined ? { place: placeId } : {}), name: ctx.placeName(placeId ?? places.wired), capabilities: at.capabilities };
     },
 
     async create(opts, origin) {
-      await ready();
+      await ctx.ready();
       const asked = scopeOf(origin);
       // A thread forks the image its own workspace's project runs and names none.
       if (asked !== undefined && opts.golden !== undefined) throw Object.assign(new Error(spawnGoldenRefusal(asked.threadId)), { kind: "invalid" });
@@ -8017,8 +5789,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // a thread's workspaces are its own tree, nothing it makes stands beside it as a sibling of the person's, and
       // a workspace it names is one whose branch it may not read.
       const bornOf = asked === undefined ? opts.parent : asked.workspaceId;
-      const o = { ...opts, name: nameGiven(opts.name), ...(bornOf !== undefined ? { parent: bornOf } : {}) };
-      const project = await projectsDoor.resolve(o.project, origin);
+      const o = { ...opts, name: ctx.nameGiven(opts.name), ...(bornOf !== undefined ? { parent: bornOf } : {}) };
+      const project = await ctx.projectsDoor.resolve(o.project, origin);
       // The project's computer decides which road this create takes, off the one table that says whether a kind
       // copies a folder on this computer or forks an image; the origin rule is then read on that kind.
       const kind = kindForComputer(project.computer);
@@ -8032,19 +5804,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A project on this computer is its folder: a create there names the folder's record, the one every thread in
       // that folder shares, and makes nothing.
       if (copies) {
-        refuseRecording(o.name, origin);
+        ctx.refuseRecording(o.name, origin);
         // The folder is not forked, so the words a fork takes have nothing to act on: refused rather than ignored.
         const forkWords = [o.golden !== undefined ? "--from" : "", o.cpu !== undefined || o.memMb !== undefined ? "--size" : "", o.engine === true ? "--engine" : ""].filter(w => w !== "");
         if (forkWords.length > 0) throw Object.assign(new Error(copyTakesNone(project.name, forkWords)), { kind: "invalid" });
         if (asked !== undefined && o.agents !== undefined) throw new Error(spawnActRefusal(asked.threadId, "agents"));
-        const folder = await projectFolder(project);
+        const folder = await ctx.projectFolder(project);
         if (o.agents !== undefined) {
-          folder.record.agents = agentsFrom(spawnAt(HERE_PLACE_ID), o.agents);
-          await persist(folder.record);
+          folder.record.agents = agentsFrom(ctx.spawnAt(HERE_PLACE_ID), o.agents);
+          await ctx.persist(folder.record);
         }
-        return view(folder.record);
+        return ctx.view(folder.record);
       }
-      refuseRelayed({ kind, name: o.name, project: project.id }, origin);
+      ctx.refuseRelayed({ kind, name: o.name, project: project.id }, origin);
       // A child of another workspace starts where that workspace is now, not where the project starts. A parent
       // this host does not hold, and one whose own create has not finished, are refused rather than dropped, since
       // a create that dropped it would land as somebody's root; the branch itself is read off the parent's machine
@@ -8054,14 +5826,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A child is a second checkout of its parent's repository on the branch that parent is on, so a parent holding
       // another repository has no branch this child could start from and land its work back in. The same repository
       // added on another computer is the same code, which is how a lead on this computer starts a child on a box.
-      if (parent !== undefined && parent.record.project !== project.id && !sameRepository(projectHeld(parent.record.project), project)) {
-        throw Object.assign(new Error(parentProjectRefusal(parent.record.name, projectHeld(parent.record.project).name, project.name)), { kind: "invalid" });
+      if (parent !== undefined && parent.record.project !== project.id && !ctx.sameRepository(ctx.projectHeld(parent.record.project), project)) {
+        throw Object.assign(new Error(parentProjectRefusal(parent.record.name, ctx.projectHeld(parent.record.project).name, project.name)), { kind: "invalid" });
       }
-      await placeGuard((await landingPlace(project.computer)).placeId ?? places.wired);
+      await ctx.placeGuard((await ctx.landingPlace(project.computer)).placeId ?? places.wired);
       // The place under the root is taken here, with no await between the count and the taking, and handed back in
       // the finally below however this create ends: the record it becomes is what holds it from then on. A copy on
       // this computer is a child in the tree as a fork is, so it takes the same place.
-      const freePlace = spawnGuard("fork", origin);
+      const freePlace = ctx.spawnGuard("fork", origin);
       const spawned = scopeOf(origin);
       // A thread's fork carries the switch of the workspace it was asked from, and nothing the caller says: the
       // caps are the person's, and a fork naming its own would be the agents act by another road.
@@ -8069,24 +5841,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         freePlace();
         throw new Error(spawnActRefusal(spawned.threadId, "agents"));
       }
-      const refusal = nameRefusal(o.name);
+      const refusal = ctx.nameRefusal(o.name);
       if (refusal !== undefined) {
         freePlace();
         throw Object.assign(new Error(refusal), { kind: "conflict" });
       }
-      forking.add(o.name);
-      supersedeFailed(o.name);
+      ctx.forking.add(o.name);
+      ctx.supersedeFailed(o.name);
       const id = `ws_${randomBytes(4).toString("hex")}`;
       const began = clock.now();
-      const report = stageReporter(id, o.name, began, spawned);
+      const report = ctx.stageReporter(id, o.name, began, spawned);
       try {
         // Read inside the try, so a parent that did not answer gives the name and the slot back the way every
         // other end of this create does, and after the guard, so what a thread may do is decided before anything
         // is asked of a machine.
-        const start = parent === undefined ? undefined : await leadStart(parent, o.name);
-        const made = await createStaged(o, project, id, report, spawned, freePlace, start?.base);
+        const start = parent === undefined ? undefined : await ctx.leadStart(parent, o.name);
+        const made = await ctx.createStaged(o, project, id, report, spawned, freePlace, start?.base);
         if (start === undefined) return made;
-        const lines = [...start.lines, ...(start.onLeads && start.base !== undefined ? [await startChildOn(live.get(id)!, start.base, parent!.record.name)] : [])];
+        const lines = [...start.lines, ...(start.onLeads && start.base !== undefined ? [await ctx.startChildOn(live.get(id)!, start.base, parent!.record.name)] : [])];
         return lines.length === 0 ? made : { ...made, notice: [made.notice, ...lines].filter(l => l !== undefined).join("\n") };
       } catch (e) {
         // A machine already forked goes with the failed create, so the retry forks a fresh one; one the provider
@@ -8094,12 +5866,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const entry = live.get(id);
         let kept: LiveWorkspace | undefined;
         if (entry !== undefined) {
-          const gone = await unfork(entry).then(() => true, (k: unknown) => isMissing(k));
+          const gone = await ctx.unfork(entry).then(() => true, (k: unknown) => isMissing(k));
           if (gone) live.delete(id);
           else {
             kept = entry;
             delete entry.creating;
-            await persist(entry.record).catch((p: unknown) => console.warn(`workspace ${id} not stored: ${p instanceof Error ? p.message : String(p)}`));
+            await ctx.persist(entry.record).catch((p: unknown) => console.warn(`workspace ${id} not stored: ${p instanceof Error ? p.message : String(p)}`));
             console.warn(`workspace ${id} failed to create and its machine ${entry.machine.id} would not stop; the record stays for wsp delete`);
           }
         }
@@ -8107,41 +5879,41 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await store.delete(CREATES, `workspace/${id}`);
         const said = e instanceof Error ? e.message : String(e);
         report("failed", said);
-        if (kept !== undefined) bus.emit({ type: "workspace.created", workspace: view(kept.record) });
-        else failedCreates.set(id, failedView(id, o.name, kind, o.golden ?? "", began, project, said));
+        if (kept !== undefined) bus.emit({ type: "workspace.created", workspace: ctx.view(kept.record) });
+        else ctx.failedCreates.set(id, ctx.failedView(id, o.name, kind, o.golden ?? "", began, project, said));
         throw e;
       } finally {
-        forking.delete(o.name);
+        ctx.forking.delete(o.name);
         freePlace();
       }
     },
 
     async get(id, origin) {
-      return view((await entryOf(id, origin)).record);
+      return ctx.view((await ctx.entryOf(id, origin)).record);
     },
 
     async agents(id, patch, origin) {
-      spawnGuard("agents", origin);
-      const entry = await entryOf(id, origin);
+      ctx.spawnGuard("agents", origin);
+      const entry = await ctx.entryOf(id, origin);
       // The same rule the create that names the switch reads, off the one table of what each kind's machines are:
       // a kind whose agents could not drive this host is refused the switch rather than given one that does nothing.
       if (patch.spawn === true && !agentsMayDrive(entry.record.kind)) throw new Error(agentsKindRefusal(entry.record.kind));
-      const next = agentsFrom(agentsHeld(entry.record), patch);
+      const next = agentsFrom(ctx.agentsHeld(entry.record), patch);
       entry.record.agents = next;
-      await persist(entry.record);
+      await ctx.persist(entry.record);
       bus.emit({ type: "workspace.agents", workspaceId: id, agents: next });
-      return view(entry.record);
+      return ctx.view(entry.record);
     },
 
     async list(origin) {
-      await ready();
-      return listedFor(origin).map(e => view(e.record));
+      await ctx.ready();
+      return ctx.listedFor(origin).map(e => ctx.view(e.record));
     },
 
     async resolve(ref, origin) {
-      await ready();
+      await ctx.ready();
       const scope = scopeOf(origin);
-      const rows = scope === undefined ? held() : listedFor(origin);
+      const rows = scope === undefined ? ctx.held() : ctx.listedFor(origin);
       // The whole of an id, then the whole of a name, as a thread's own reference does: a name names one workspace at
       // most, since the create and the rename both refuse a name another already holds, and a word that is one is
       // that workspace whatever else it starts. Only a word that is neither reaches the prefix, where enough of an
@@ -8152,7 +5924,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = exact ?? started[0];
       if (entry === undefined) {
         if (scope !== undefined) throw notFoundRefusal(noWorkspaceRefusal(ref));
-        const failed = [...failedCreates.values()].find(v => v.id === ref || v.name === ref);
+        const failed = [...ctx.failedCreates.values()].find(v => v.id === ref || v.name === ref);
         if (failed !== undefined) return failed;
         // A computer somebody joined is a place, and a place is no workspace: the word is answered with the road to
         // one there rather than with absence, since the person typed the name of something this host does hold.
@@ -8160,25 +5932,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (place.length > 0) throw notFoundRefusal(refusalLine(placeNotAWorkspaceLine(place[0]!.name), placeNotAWorkspaceFix(place[0]!.name)));
         throw notFoundRefusal(noWorkspaceRefusal(ref));
       }
-      refuseRelayed(entry.record, origin);
-      return view(entry.record);
+      ctx.refuseRelayed(entry.record, origin);
+      return ctx.view(entry.record);
     },
 
     async nap(id, origin) {
-      spawnGuard("pause", origin);
-      refusePauseless(await entryOf(id, origin), "be paused");
-      return napWith(id);
+      ctx.spawnGuard("pause", origin);
+      ctx.refusePauseless(await ctx.entryOf(id, origin), "be paused");
+      return ctx.napWith(id);
     },
 
     async wake(id, origin) {
-      const entry = await entryOf(id, origin);
-      await copyBlocked(entry);
+      const entry = await ctx.entryOf(id, origin);
+      await ctx.copyBlocked(entry);
       if (entry.waking) return entry.waking;
       if (entry.record.phase === "gone") {
-        const left = await recoverGone(entry);
+        const left = await ctx.recoverGone(entry);
         if (left === undefined) throw new Error(goneRefusal(entry.record.name, "wake", entry.record.gone));
         // A record that left gone for napping is a machine the provider holds paused: the wake goes on and resumes it.
-        if (left === "running") return view(entry.record);
+        if (left === "running") return ctx.view(entry.record);
       }
       if (entry.napping) await entry.napping.catch(() => {});
       // A wake nobody should need is the one sign the provider paused the machine on its own, or lost it, and a wake of
@@ -8190,14 +5962,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           answer = providerSaid(e);
           return "gone";
         });
-        if (read === "gone" && settled(await settleGone(entry, goneWords(entry.record.machineId, { by: "wake", at: clock.now(), ...(answer !== undefined ? { answer } : {}) })))) {
+        if (read === "gone" && settled(await ctx.settleGone(entry, goneWords(entry.record.machineId, { by: "wake", at: clock.now(), ...(answer !== undefined ? { answer } : {}) })))) {
           throw new Error(goneRefusal(entry.record.name, "wake", entry.record.gone));
         }
-        if (read === "paused") await adoptPause(entry);
-      } else if (await runsUnderNapping(entry)) await adoptRunning(entry);
+        if (read === "paused") await ctx.adoptPause(entry);
+      } else if (await ctx.runsUnderNapping(entry)) await ctx.adoptRunning(entry);
       // A running workspace has nothing to wake, whatever its kind; only a real resume asks the machine for one.
-      if (entry.record.phase === "running") return view(entry.record);
-      refusePauseless(entry, "be woken");
+      if (entry.record.phase === "running") return ctx.view(entry.record);
+      ctx.refusePauseless(entry, "be woken");
       entry.waking = (async () => {
         // The stop the person pulls from the row. It aborts the provider call the ask is on rather than walking away
         // from one that keeps running: an abandoned resume would go on to run its cap out, write its line back onto
@@ -8213,13 +5985,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             : Promise.race([p, new Promise<"stopped">(resolve => stop.signal.addEventListener("abort", () => resolve("stopped"), { once: true }))]);
         const began = clock.now();
         // How the backend has the host ask again after a resume its provider did not take; none means once.
-        const asks = lifecycleOf(entry).budgets.resumeAsks;
+        const asks = ctx.lifecycleOf(entry).budgets.resumeAsks;
         const wakeAsks = asks === undefined ? 1 : wakeAsksIn(asks.forMs, asks.everyMs);
         try {
           delete entry.deleteSaid;
           entry.record.phase = "waking";
-          await persist(entry.record);
-          await emitStatus(entry, "napping");
+          await ctx.persist(entry.record);
+          await ctx.emitStatus(entry, "napping");
           // Ask 1 is the person's wake; every ask after it is the host's own, once a cadence apart, so a provider
           // that comes back inside its own outage wakes the machine without the person having to try again. The
           // record stays waking between two asks: nothing about the machine changed, only who is asking.
@@ -8230,18 +6002,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             try {
               const result = await entry.ws.wake({ landed });
               if (stopped()) throw new Error(WAKE_STOPPED);
-              followMachine(entry);
+              ctx.followMachine(entry);
               delete entry.record.wakeRefused;
-              await persist(entry.record);
+              await ctx.persist(entry.record);
               bus.emit({ type: "workspace.woken", workspaceId: id, machineId: entry.record.machineId });
               if (result.reason !== undefined) console.warn(`wake of ${id}: ${result.reason}`);
-              await emitStatus(entry, reachOf(entry), result.reason);
-              return view(entry.record);
+              await ctx.emitStatus(entry, ctx.reachOf(entry), result.reason);
+              return ctx.view(entry.record);
             } catch (e) {
               if (!stopped() && e instanceof ResumeUnansweredError && ask < wakeAsks) {
                 entry.wakeAsk = { ask, of: wakeAsks };
                 delete entry.wakeSaid;
-                await emitStatus(entry, "napping");
+                await ctx.emitStatus(entry, "napping");
                 // The cadence is wall time from the wake's start, so the half hour of asking is half an hour: a
                 // resume that sat on its cap for half the minute leaves half a minute to wait, and one that ran
                 // longer than the cadence is asked again at once.
@@ -8254,7 +6026,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               }
               // A resume the provider answered 404 for is a sighting like any other: the record settles gone only
               // where the reads agree, and the refusal says what went with the machine.
-              if (!stopped() && isMissing(e) && settled(await settleGone(entry, goneWords(entry.record.machineId, { by: "wake", at: clock.now(), answer: providerSaid(e) })))) {
+              if (!stopped() && isMissing(e) && settled(await ctx.settleGone(entry, goneWords(entry.record.machineId, { by: "wake", at: clock.now(), answer: providerSaid(e) })))) {
                 throw new Error(goneRefusal(entry.record.name, "wake", entry.record.gone));
               }
               // The provider would not resume it for the whole of the asking: the record carries the road out until
@@ -8264,12 +6036,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               // A stop leaves the machine where the abort found it: paused, until the late read says otherwise.
               if (stopped()) entry.ws.notePaused();
               entry.record.phase = entry.ws.currentPhase;
-              await persist(entry.record);
+              await ctx.persist(entry.record);
               delete entry.wakeAsk;
               const words = stopped() ? WAKE_STOPPED : (gaveUp ?? (e instanceof Error ? e.message : String(e)));
               if (!stopped()) console.warn(`wake of ${id} failed: ${words}`);
-              await emitStatus(entry, "napping", words);
-              armLateRead(entry);
+              await ctx.emitStatus(entry, "napping", words);
+              ctx.armLateRead(entry);
               throw stopped() ? new Error(WAKE_STOPPED) : gaveUp !== undefined ? new Error(gaveUp) : e;
             }
           }
@@ -8284,27 +6056,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async stopWake(id, origin) {
-      const entry = await entryOf(id, origin);
+      const entry = await ctx.entryOf(id, origin);
       const waking = entry.waking;
       entry.wakeStop?.abort();
       await waking?.catch(() => {});
-      return view(entry.record);
+      return ctx.view(entry.record);
     },
 
     async upgrade(id, origin) {
-      const entry = await entryOf(id, origin);
-      refuseCannot(entry, "replacesMachine", "have its machine replaced");
+      const entry = await ctx.entryOf(id, origin);
+      ctx.refuseCannot(entry, "replacesMachine", "have its machine replaced");
       await entry.ws.upgrade();
-      followMachine(entry);
-      await persist(entry.record);
+      ctx.followMachine(entry);
+      await ctx.persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
-      return view(entry.record);
+      return ctx.view(entry.record);
     },
 
     async updateImage(id, origin) {
-      const entry = await entryOf(id, origin);
-      refuseCannot(entry, "replacesMachine", "move to a newer image");
-      const manifest = await goldenManifestOf(entry.record.golden);
+      const entry = await ctx.entryOf(id, origin);
+      ctx.refuseCannot(entry, "replacesMachine", "move to a newer image");
+      const manifest = await ctx.goldenManifestOf(entry.record.golden);
       const head = goldenHead(manifest);
       const project = (await store.get(PROJECT_GOLDENS, entry.record.golden)) as ProjectGolden | undefined;
       const refusal = imageMoveRefusal(entry.record.name, workspaceState({ phase: entry.record.phase }), { knownVersion: head !== undefined, projectImage: project !== undefined });
@@ -8313,7 +6085,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const to = head!;
       const was = entry.record.golden;
       const from = manifest!.versions.find(v => v.snapshotId === was);
-      if (to.snapshotId === was) return { workspace: view(entry.record), moved: false, kept: [] };
+      if (to.snapshotId === was) return { workspace: ctx.view(entry.record), moved: false, kept: [] };
       // The archive is what lands and --recursive-unlink cannot merge, so which of the image's own files the fork
       // keeps is settled here, off the machine that is still running, before anything is replaced.
       const plan = await imageMovePlan(entry.machine, from, to);
@@ -8327,25 +6099,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.record.golden = was;
         throw e;
       }
-      followMachine(entry);
-      await persist(entry.record);
+      ctx.followMachine(entry);
+      await ctx.persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
-      await emitStatus(entry, reachOf(entry), `moved from image v${from?.version ?? "?"} to v${to.version}`);
-      return { workspace: view(entry.record), moved: true, kept: plan.kept, ...(plan.fallback ? { fallback: true } : {}) };
+      await ctx.emitStatus(entry, ctx.reachOf(entry), `moved from image v${from?.version ?? "?"} to v${to.version}`);
+      return { workspace: ctx.view(entry.record), moved: true, kept: plan.kept, ...(plan.fallback ? { fallback: true } : {}) };
     },
 
     async rebuild(id, origin) {
-      const entry = await entryOf(id, origin);
-      refuseCannot(entry, "replacesMachine", "be rebuilt");
+      const entry = await ctx.entryOf(id, origin);
+      ctx.refuseCannot(entry, "replacesMachine", "be rebuilt");
       if (entry.waking) await entry.waking.catch(() => {});
-      if ((await recoverGone(entry)) !== undefined) return view(entry.record);
-      const at = backendFor(entry.record);
+      if ((await ctx.recoverGone(entry)) !== undefined) return ctx.view(entry.record);
+      const at = ctx.backendFor(entry.record);
       // Where the pause keeps the disk no nap stored a vault, so a rebuild takes one off the running machine before
       // the replacement, over the cap or unreadable going on with none. A napped one holds its home on its paused
       // disk, so it is woken first and the vault taken live, not the one a nap stored (this rule stores none); a wake
       // that cannot land refuses the rebuild rather than replacing with no backup. Where the pause does not keep the
       // disk, the rebuild reads the vault the nap stored.
-      if (keepsImages(at) && pauseKeepsDisk(at) && entry.record.phase !== "running") {
+      if (ctx.keepsImages(at) && ctx.pauseKeepsDisk(at) && entry.record.phase !== "running") {
         try {
           await workspaces.wake(id, origin);
         } catch (e) {
@@ -8353,7 +6125,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
       }
       const old = entry.record.machineId;
-      const fromRunning = keepsImages(at) && pauseKeepsDisk(at) && entry.record.phase === "running";
+      const fromRunning = ctx.keepsImages(at) && ctx.pauseKeepsDisk(at) && entry.record.phase === "running";
       const napVault = fromRunning ? undefined : (await store.getBlob(VAULTS, id)) !== undefined;
       if (fromRunning) {
         try {
@@ -8365,60 +6137,60 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       } else {
         await entry.ws.rebuild();
       }
-      followMachine(entry);
+      ctx.followMachine(entry);
       delete entry.record.wakeRefused;
-      await persist(entry.record);
+      await ctx.persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
       const reason = fromRunning
         ? `rebuilt: ${old} replaced by ${entry.record.machineId}`
         : `rebuilt: ${old} replaced by ${entry.record.machineId}, ${napVault ? "nap-time vault imported" : "no vault to import"}`;
       console.warn(`rebuild of ${id}: ${reason}`);
-      await emitStatus(entry, reachOf(entry), reason);
-      return view(entry.record);
+      await ctx.emitStatus(entry, ctx.reachOf(entry), reason);
+      return ctx.view(entry.record);
     },
 
     async rename(id, typed, origin) {
-      const entry = await entryOf(id, origin);
-      const name = nameGiven(typed);
-      if (entry.record.name === name) return view(entry.record);
-      const refusal = nameRefusal(name);
+      const entry = await ctx.entryOf(id, origin);
+      const name = ctx.nameGiven(typed);
+      if (entry.record.name === name) return ctx.view(entry.record);
+      const refusal = ctx.nameRefusal(name);
       if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
       entry.record.name = name;
-      await persist(entry.record);
+      await ctx.persist(entry.record);
       await store.put(WORKSPACE_NAMES, id, { workspaceId: id, name, project: entry.record.project } satisfies NamedWorkspace);
       bus.emit({ type: "workspace.renamed", workspaceId: id, name });
-      return view(entry.record);
+      return ctx.view(entry.record);
     },
 
     async look(id, look, origin) {
-      const entry = await entryOf(id, origin);
-      putLook(entry.record, "theme", look.theme);
-      putLook(entry.record, "glyph", look.glyph);
-      await persist(entry.record);
+      const entry = await ctx.entryOf(id, origin);
+      ctx.putLook(entry.record, "theme", look.theme);
+      ctx.putLook(entry.record, "glyph", look.glyph);
+      await ctx.persist(entry.record);
       bus.emit({ type: "workspace.look", workspaceId: id, theme: entry.record.theme ?? null, glyph: entry.record.glyph ?? null });
-      return view(entry.record);
+      return ctx.view(entry.record);
     },
 
     async snapshot(id, origin) {
-      const entry = await entryOf(id, origin);
-      refuseCannot(entry, "diskSnapshots", "be snapshotted");
+      const entry = await ctx.entryOf(id, origin);
+      ctx.refuseCannot(entry, "diskSnapshots", "be snapshotted");
       const { name } = entry.record;
       // The snapshot is the whole disk and carries the project in it, which is the one the workspace was made for.
-      const held = projectHeld(entry.record.project);
+      const held = ctx.projectHeld(entry.record.project);
       const project: WorkspaceProject = { name: held.name, dest: held.path, importedAt: held.createdAt };
       const projects = [project];
       if (entry.record.phase !== "running") throw new Error(`${name} is ${entry.record.phase}; only a running machine can be snapshotted`);
       await syncDisk(entry.machine);
       const disk = await diskUse(entry.machine);
       const createdAt = new Date(clock.now()).toISOString();
-      const snapshotId = await entry.ws.checkpoint(projectSnapshotName(imageMark(), project.name, createdAt.replace(/[:.]/g, "-"))).catch((e: unknown) => {
+      const snapshotId = await entry.ws.checkpoint(projectSnapshotName(ctx.imageMark(), project.name, createdAt.replace(/[:.]/g, "-"))).catch((e: unknown) => {
         if (e instanceof NotFirstLifeError) throw e;
         const said = snapshotRefusedLine(name, answerOf(e), disk);
         console.warn(said);
         const { kind, status } = e as { kind?: unknown; status?: unknown };
         throw Object.assign(new Error(said), kind !== undefined ? { kind } : {}, status !== undefined ? { status } : {});
       });
-      const image = await imageOf(entry.record.golden);
+      const image = await ctx.imageOf(entry.record.golden);
       const golden: ProjectGolden = {
         snapshotId,
         projects,
@@ -8434,46 +6206,46 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async updateDaemon(id, origin) {
-      const entry = await entryOf(id, origin);
-      if (servedByItsComputer(entry) !== undefined) {
-        throw new Error(placeServesDaemonLine(entry.record.name, computerOf(entry)));
+      const entry = await ctx.entryOf(id, origin);
+      if (ctx.servedByItsComputer(entry) !== undefined) {
+        throw new Error(placeServesDaemonLine(entry.record.name, ctx.computerOf(entry)));
       }
-      const deploy = moduleOf(entry.record.kind).deployDaemon;
+      const deploy = ctx.moduleOf(entry.record.kind).deployDaemon;
       if (deploy === undefined) throw new Error("this runtime cannot deploy a daemon; the host wires the bundle");
       if (entry.record.phase !== "running") throw new Error(`wake ${entry.record.name} before updating its daemon`);
-      await deployDaemonOn(entry, deploy);
+      await ctx.deployDaemonOn(entry, deploy);
     },
 
     async delete(id, origin) {
-      spawnGuard("delete", origin);
-      if (scopeOf(origin) === undefined && !live.has(id) && failedCreates.delete(id)) {
+      ctx.spawnGuard("delete", origin);
+      if (scopeOf(origin) === undefined && !live.has(id) && ctx.failedCreates.delete(id)) {
         bus.emit({ type: "workspace.deleted", workspaceId: id });
         return;
       }
-      const entry = await entryOf(id, origin);
+      const entry = await ctx.entryOf(id, origin);
       if (entry.deleting) return entry.deleting;
       // A worktree wsp made goes with its record, never over files no commit holds; the project folder, and a
       // worktree somebody else made, are never touched.
       const tree = entry.record.worktree;
       const takes = tree?.made === true && tree.gone !== true && existsSync(tree.path);
-      if (takes) await refuseChanged(tree.path);
+      if (takes) await ctx.refuseChanged(tree.path);
       entry.deleting = (async () => {
         try {
           delete entry.deleteSaid;
-          endSessions(id, DELETED_REASON);
+          ctx.endSessions(id, DELETED_REASON);
           const threads = new Set([...threadRecords].flatMap(([threadId, held]) => (held.workspaceId === id ? [threadId] : [])));
           for (const s of sessions.values()) if (s.view.workspaceId === id && s.view.threadId !== undefined) threads.add(s.view.threadId);
-          if (copiesFolder(entry.record.kind)) for (const threadId of threads) await dropCheckpoints(entry, threadId);
-          if (takes) await removeWorktree(entry, false, { ending: true });
+          if (copiesFolder(entry.record.kind)) for (const threadId of threads) await ctx.dropCheckpoints(entry, threadId);
+          if (takes) await ctx.removeWorktree(entry, false, { ending: true });
           // Before the machine goes: on a computer somebody owns the folders the files landed in outlive the workspace.
-          await dropThreadFiles(entry, [...threadRecords].flatMap(([threadId, held]) => (held.workspaceId === id ? [threadId] : [])));
+          await ctx.dropThreadFiles(entry, [...threadRecords].flatMap(([threadId, held]) => (held.workspaceId === id ? [threadId] : [])));
           // A machine wsp never forked reads running whatever is asked of it, so only a forked one is read back.
           if (!kindWords(entry.record.kind).driven) {
             await entry.machine.kill().catch((e: unknown) => {
               if (!isMissing(e)) throw e;
             });
           } else {
-            await unfork(entry).catch((e: unknown) => {
+            await ctx.unfork(entry).catch((e: unknown) => {
               if (!(e instanceof MachineAliveError)) throw e;
               const line = deleteRefusedLine(entry.record.name, e.machineId, e.state);
               entry.deleteSaid = { phase: entry.record.phase, line };
@@ -8481,7 +6253,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               throw Object.assign(new Error(line), { kind: e.kind });
             });
           }
-          await drop(id);
+          await ctx.drop(id);
         } finally {
           delete entry.deleting;
         }
@@ -8490,47 +6262,47 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async forget(id, origin) {
-      const entry = await entryOf(id, origin);
+      const entry = await ctx.entryOf(id, origin);
       const kind = entry.record.kind;
       if (!kindWords(kind).driven) throw Object.assign(new Error(forgetUndrivenRefusal(entry.record.name, machineWord(kind))), { kind: "conflict" });
-      const state = await readGone(backendFor(entry.record), entry.machine.id);
+      const state = await readGone(ctx.backendFor(entry.record), entry.machine.id);
       if (state !== "gone") {
         throw Object.assign(new Error(`${entry.record.name}'s machine ${entry.machine.id} is still ${state}; pause it or delete it at the provider first`), { kind: "conflict" });
       }
-      endSessions(id, DELETED_REASON);
-      await drop(id);
+      ctx.endSessions(id, DELETED_REASON);
+      await ctx.drop(id);
     },
 
     async touch(id, origin) {
-      await entryOf(id, origin);
-      idle.touch(id);
+      await ctx.entryOf(id, origin);
+      ctx.idle.touch(id);
     },
 
     async restartDaemon(id, origin) {
-      const entry = await entryOf(id, origin);
-      const start = moduleOf(entry.record.kind).restartDaemon;
+      const entry = await ctx.entryOf(id, origin);
+      const start = ctx.moduleOf(entry.record.kind).restartDaemon;
       if (start === undefined) throw new Error(`${entry.record.name}'s daemon runs on ${machineWord(entry.record.kind)}, which this host does not hold the process of`);
       await start(entry);
       // The poll's last measurement is of the daemon that is gone, and the next one is a poll away: the row would
       // go on saying no daemon for that long over a daemon this host has just watched start. Dropped rather than
       // replaced with a claim, so the row falls back to what this kind's road says and the next poll measures.
-      polledReach.delete(entry.record.id);
-      await pushStatus(entry);
+      ctx.polledReach.delete(entry.record.id);
+      await ctx.pushStatus(entry);
     },
 
     async exec(id, cmd, o, origin) {
-      const entry = await entryOf(id, origin);
-      await copyBlocked(entry);
+      const entry = await ctx.entryOf(id, origin);
+      await ctx.copyBlocked(entry);
       return entry.machine.exec(cmd, o);
     },
 
     async execStream(id, argv, cwd, origin) {
-      const entry = await entryOf(id, origin);
-      await copyBlocked(entry);
-      const { adapter } = await launchAdapterFor(entry);
+      const entry = await ctx.entryOf(id, origin);
+      await ctx.copyBlocked(entry);
+      const { adapter } = await ctx.launchAdapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
-      const ranIn = await threadFolder(entry, { cwd });
-      const inner = execFactoryFor(entry, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(inFolder(ranIn, argv.map(shellQuote).join(" ")), { env: { ...adapter.env } });
+      const ranIn = await ctx.threadFolder(entry, { cwd });
+      const inner = ctx.execFactoryFor(entry, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(inFolder(ranIn, argv.map(shellQuote).join(" ")), { env: { ...adapter.env } });
       let endWith: (reason: string) => void = () => {};
       const ended = new Promise<{ reason: string }>(resolve => {
         endWith = reason => resolve({ reason });
@@ -8562,15 +6334,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async bringBack({ workspaceId, title, body: given }, origin) {
       let body = given;
-      spawnGuard("bring_back", origin);
-      const entry = await entryOf(workspaceId, origin);
-      await copyBlocked(entry);
-      const cwd = checkoutOf(entry.record);
+      ctx.spawnGuard("bring_back", origin);
+      const entry = await ctx.entryOf(workspaceId, origin);
+      await ctx.copyBlocked(entry);
+      const cwd = ctx.checkoutOf(entry.record);
       // The branch this copy started from, off its own record: for a child that is the branch its parent was on at
       // the fork, which is the code it was cut from and so where its work goes back, and nothing is asked of the
       // parent's machine, so a child whose parent has gone to sleep brings its work back without a wake nobody
       // named. A record written before that fact was kept reads the branch its project starts from, as it did.
-      const base = entry.record.base ?? projectHeld(entry.record.project).base;
+      const base = entry.record.base ?? ctx.projectHeld(entry.record.project).base;
       const against = base === undefined ? {} : { base };
       // A pull request off someone's fork takes a push only where its author allowed maintainers to push; refused
       // before anything is pushed.
@@ -8579,17 +6351,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Work on an issue closes it once its pull request merges: the body says so, once, whoever wrote the rest of it.
       const issue = entry.record.from?.kind === "issue" ? entry.record.from.number : undefined;
       if (issue !== undefined) body = withCloses(body ?? "", issue);
-      const brought = await queued(entry.record.id, () => withDaemon(entry, async (ask): Promise<BringBackResult> => {
+      const brought = await ctx.queued(entry.record.id, () => ctx.withDaemon(entry, async (ask): Promise<BringBackResult> => {
         const push = GitPushReply.parse(
           await ask({ op: "git.push", cwd, ...against }).catch(async (e: unknown) => {
             const said = e instanceof Error ? e.message : String(e);
-            if (entry.record.parentWorkspaceId !== undefined && isNoGitCredential(e)) await keepTree(entry, { ...entry.record.tree, pushRefused: said });
+            if (entry.record.parentWorkspaceId !== undefined && isNoGitCredential(e)) await ctx.keepTree(entry, { ...entry.record.tree, pushRefused: said });
             throw e;
           }),
         );
         if (entry.record.tree?.pushRefused !== undefined) {
           const { pushRefused: _gone, ...rest } = entry.record.tree;
-          await keepTree(entry, rest);
+          await ctx.keepTree(entry, rest);
         }
         // A workspace a thread opened under a lead pushes its branch and opens nothing: the lead's own pull request is
         // where its work lands, which the lead merges its branch into.
@@ -8609,78 +6381,78 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const apart = half.note !== undefined ? { note: half.note } : half.refused !== undefined ? { refused: half.refused } : { pr: GitPrReply.parse(opened).pr };
         return { branch: push.branch, base: push.base, ahead: push.ahead, uncommitted: push.uncommitted, stat: push.stat, ...apart };
       }));
-      if (brought.pr !== undefined) await takePullRequest(entry, { ...brought.pr, readAt: clock.now() });
-      readLeadOf(entry);
+      if (brought.pr !== undefined) await ctx.takePullRequest(entry, { ...brought.pr, readAt: clock.now() });
+      ctx.readLeadOf(entry);
       return brought;
     },
 
     async folderFor(o, origin) {
-      await ready();
-      const at = await folderFor(o, origin);
-      return { workspace: view(at.entry.record), ...(at.cwd !== undefined ? { cwd: at.cwd } : {}) };
+      await ctx.ready();
+      const at = await ctx.folderFor(o, origin);
+      return { workspace: ctx.view(at.entry.record), ...(at.cwd !== undefined ? { cwd: at.cwd } : {}) };
     },
 
     async folder({ project: named }, origin) {
-      await ready();
-      const project = await projectsDoor.resolve(named, origin);
+      await ctx.ready();
+      const project = await ctx.projectsDoor.resolve(named, origin);
       if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
-      refuseRecording(project.name, origin);
-      return view((await projectFolder(project)).record);
+      ctx.refuseRecording(project.name, origin);
+      return ctx.view((await ctx.projectFolder(project)).record);
     },
 
     async worktree({ project: named, branch }, origin) {
-      await ready();
-      const project = await projectsDoor.resolve(named, origin);
+      await ctx.ready();
+      const project = await ctx.projectsDoor.resolve(named, origin);
       const top = project.git?.top;
       if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
       if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
-      const entry = await worktreeFolder(project, top, branch, undefined, scopeOf(origin)?.rootThreadId);
+      const entry = await ctx.worktreeFolder(project, top, branch, undefined, scopeOf(origin)?.rootThreadId);
       const tree = entry.record.worktree;
       return { path: tree?.path ?? top, branch, made: tree?.made === true };
     },
 
     async worktreeRemove({ project: named, branch, force }, origin) {
-      await ready();
-      const project = await projectsDoor.resolve(named, origin);
+      await ctx.ready();
+      const project = await ctx.projectsDoor.resolve(named, origin);
       const top = project.git?.top;
       if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
-      const holding = (await worktreesOf(top)).find(t => t.branch === branch)?.path;
-      const entry = foldersOf(project.id).find(e => {
+      const holding = (await ctx.worktreesOf(top)).find(t => t.branch === branch)?.path;
+      const entry = ctx.foldersOf(project.id).find(e => {
         const tree = e.record.worktree;
         return tree !== undefined && tree.gone !== true && (holding !== undefined ? tree.path === holding : tree.branch === branch);
       });
-      if (entry !== undefined) refuseRelayed(entry.record, origin);
+      if (entry !== undefined) ctx.refuseRelayed(entry.record, origin);
       if (entry?.record.worktree?.made !== true) throw Object.assign(new Error(notMadeWorktreeLine(branch)), { kind: "invalid" });
       if (force === true && scopeOf(origin) !== undefined) throw Object.assign(new Error(WORKTREE_FORCE_LINE), { kind: "usage" });
-      await removeWorktree(entry, force === true);
+      await ctx.removeWorktree(entry, force === true);
     },
 
     async checkout(id, origin) {
-      const entry = await entryOf(id, origin);
-      const checkout = await readCheckout(entry, false);
+      const entry = await ctx.entryOf(id, origin);
+      const checkout = await ctx.readCheckout(entry, false);
       // The tile asks as it mounts, and its word rides the status once the git host answers.
-      void readPullRequest(entry, false);
+      void ctx.readPullRequest(entry, false);
       // A lead's thread opening reads its children again.
-      if ([...live.values()].some(e => e.record.parentWorkspaceId === entry.record.id)) void readTree(entry);
+      if ([...live.values()].some(e => e.record.parentWorkspaceId === entry.record.id)) void ctx.readTree(entry);
       return checkout === undefined ? {} : { checkout };
     },
 
     async discard({ workspaceId, path }, origin) {
-      const entry = await entryOf(workspaceId, origin);
-      await copyBlocked(entry);
-      const put = GitDiscardReply.parse(await queued(entry.record.id, () => withDaemon(entry, ask => ask({ op: "git.discard", cwd: checkoutOf(entry.record), path }))));
-      await readCheckout(entry, true);
+      const entry = await ctx.entryOf(workspaceId, origin);
+      await ctx.copyBlocked(entry);
+      const put = GitDiscardReply.parse(await ctx.queued(entry.record.id, () => ctx.withDaemon(entry, ask => ask({ op: "git.discard", cwd: ctx.checkoutOf(entry.record), path }))));
+      await ctx.readCheckout(entry, true);
       return put;
     },
 
     async commit({ workspaceId, message, paths }, origin) {
-      spawnGuard("commit", origin);
-      const entry = await entryOf(workspaceId, origin);
-      await copyBlocked(entry);
-      const cwd = checkoutOf(entry.record);
+      ctx.spawnGuard("commit", origin);
+      const entry = await ctx.entryOf(workspaceId, origin);
+      await ctx.copyBlocked(entry);
+      const cwd = ctx.checkoutOf(entry.record);
       const made = GitCommitReply.parse(
-        await queued(entry.record.id, () =>
-          withDaemon(entry, async ask => {
+        await ctx.queued(entry.record.id, () =>
+          ctx.withDaemon(entry, async ask => {
             // Every changed file, each untracked one on its own, as the Changes pane lists them.
             const named = paths ?? GitDiffReply.parse(await ask({ op: "git.diff", cwd, scope: "head" })).files.map(f => f.path);
             if (paths === undefined && named.length === 0) throw new Error(cleanCheckoutLine(entry.record.name));
@@ -8688,27 +6460,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }),
         ),
       );
-      await readCheckout(entry, true);
+      await ctx.readCheckout(entry, true);
       return made;
     },
 
     async commitDraft({ workspaceId, paths }, origin) {
-      spawnGuard("commit", origin);
+      ctx.spawnGuard("commit", origin);
       if (paths !== undefined && paths.length === 0) return { message: null, note: DRAFT_NOTES.nothing };
-      const entry = await entryOf(workspaceId, origin);
-      await copyBlocked(entry);
+      const entry = await ctx.entryOf(workspaceId, origin);
+      await ctx.copyBlocked(entry);
       // The workspace's newest thread drafts, on its own agent and from the task it was opened with; a workspace
       // with no thread yet drafts on the default agent from the diff alone.
       const rows = [...sessions.values()].map(s => s.view).filter(v => v.workspaceId === workspaceId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
       const newest = rows.at(-1);
       const opening = newest?.threadId === undefined ? undefined : rows.find(v => v.threadId === newest.threadId)?.prompt;
-      const named = newest?.harness ?? defaultAgentOf(await preferences.get(), entry);
-      if (adapters[named] === undefined || agentOff(entry, named)) return { message: null, note: DRAFT_NOTES.noAgent };
-      const { harness, adapter } = await launchAdapterFor(entry, named);
+      const named = newest?.harness ?? ctx.defaultAgentOf(await ctx.preferences.get(), entry);
+      if (adapters[named] === undefined || ctx.agentOff(entry, named)) return { message: null, note: DRAFT_NOTES.noAgent };
+      const { harness, adapter } = await ctx.launchAdapterFor(entry, named);
       if (adapter.draftFor === undefined) return { message: null, note: DRAFT_NOTES.noAgent };
-      const diff = GitDiffReply.parse(await withDaemon(entry, ask => ask({ op: "git.diff", cwd: checkoutOf(entry.record), scope: "head", ...(paths !== undefined ? { paths } : {}) })));
+      const diff = GitDiffReply.parse(await ctx.withDaemon(entry, ask => ask({ op: "git.diff", cwd: ctx.checkoutOf(entry.record), scope: "head", ...(paths !== undefined ? { paths } : {}) })));
       const table = harnessCatalog(harness);
-      const model = smallestModel(table === undefined ? undefined : await catalogOn(table, entry, adapter));
+      const model = smallestModel(table === undefined ? undefined : await ctx.catalogOn(table, entry, adapter));
       // The question rides a file on the machine, since a diff is longer than one exec may carry, and only the
       // login that wrote it may read it; it goes once the answer is in, whatever the answer was.
       const promptFile = `/tmp/wsp-draft-${randomBytes(6).toString("hex")}.txt`;
@@ -8728,85 +6500,85 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async viewed({ workspaceId, path, blob }, origin) {
-      await entryOf(workspaceId, origin);
-      const marks = { ...(viewedMarks.get(workspaceId) ?? {}) };
+      await ctx.entryOf(workspaceId, origin);
+      const marks = { ...(ctx.viewedMarks.get(workspaceId) ?? {}) };
       if (path === undefined) return { viewed: marks };
       if (typeof blob === "string") marks[path] = blob;
       else delete marks[path];
-      viewedMarks.set(workspaceId, marks);
-      await persistSessions(workspaceId);
+      ctx.viewedMarks.set(workspaceId, marks);
+      await ctx.persistSessions(workspaceId);
       bus.emit({ type: "workspace.viewed", workspaceId, viewed: marks });
       return { viewed: marks };
     },
 
     async pullRequestView({ workspaceId, fresh }, origin) {
-      const { entry, remote, number } = await pullRequestOn(workspaceId, origin);
-      const { page, here } = await readPage(entry, remote, number, fresh === true);
-      const merge = await mergeSettings(remote).catch(() => undefined);
+      const { entry, remote, number } = await ctx.pullRequestOn(workspaceId, origin);
+      const { page, here } = await ctx.readPage(entry, remote, number, fresh === true);
+      const merge = await ctx.mergeSettings(remote).catch(() => undefined);
       return { ...page, ...(merge !== undefined ? { merge } : {}), sent: entry.record.prSent ?? [], postsAsYou: here };
     },
 
     async pullRequestDiff({ workspaceId }, origin) {
-      const { entry, remote, number } = await pullRequestOn(workspaceId, origin);
-      return readHost(entry, cwd => ({ op: "git.prDiff", cwd, remote, number, maxBytes: GIT_DIFF_CAP_BYTES }), r => GitPrDiffReply.parse(r));
+      const { entry, remote, number } = await ctx.pullRequestOn(workspaceId, origin);
+      return ctx.readHost(entry, cwd => ({ op: "git.prDiff", cwd, remote, number, maxBytes: GIT_DIFF_CAP_BYTES }), r => GitPrDiffReply.parse(r));
     },
 
     async pullRequestReply({ workspaceId, replyTo, threadId, body }, origin) {
       if (body.trim() === "") throw Object.assign(new Error(REPLY_EMPTY_LINE), { kind: "invalid" });
-      const { remote, number } = await pullRequestOn(workspaceId, origin);
+      const { remote, number } = await ctx.pullRequestOn(workspaceId, origin);
       const where = { ...(replyTo !== undefined ? { replyTo } : {}), ...(threadId !== undefined ? { threadId } : {}) };
-      return postAsPerson(remote, number, cwd => ({ op: "git.prReply", cwd, remote, number, ...where, body }), r => GitPrReplyReply.parse(r));
+      return ctx.postAsPerson(remote, number, cwd => ({ op: "git.prReply", cwd, remote, number, ...where, body }), r => GitPrReplyReply.parse(r));
     },
 
     async pullRequestResolve({ workspaceId, threadId, resolved }, origin) {
-      const { remote, number } = await pullRequestOn(workspaceId, origin);
-      return postAsPerson(remote, number, cwd => ({ op: "git.prResolve", cwd, remote, number, threadId, resolved }), r => GitPrResolveReply.parse(r));
+      const { remote, number } = await ctx.pullRequestOn(workspaceId, origin);
+      return ctx.postAsPerson(remote, number, cwd => ({ op: "git.prResolve", cwd, remote, number, threadId, resolved }), r => GitPrResolveReply.parse(r));
     },
 
     async pullRequestReact({ workspaceId, subject, content, on }, origin) {
-      const { remote, number } = await pullRequestOn(workspaceId, origin);
-      return postAsPerson(remote, number, cwd => ({ op: "git.prReact", cwd, remote, number, subject, content, on }), r => GitPrReactReply.parse(r));
+      const { remote, number } = await ctx.pullRequestOn(workspaceId, origin);
+      return ctx.postAsPerson(remote, number, cwd => ({ op: "git.prReact", cwd, remote, number, subject, content, on }), r => GitPrReactReply.parse(r));
     },
 
     async pullRequestSend({ workspaceId, items }, origin) {
-      const { entry, remote, number } = await pullRequestOn(workspaceId, origin);
-      await copyBlocked(entry);
-      const { page } = await readPage(entry, remote, number, false);
+      const { entry, remote, number } = await ctx.pullRequestOn(workspaceId, origin);
+      await ctx.copyBlocked(entry);
+      const { page } = await ctx.readPage(entry, remote, number, false);
       const same = (a: PullRequestItem, b: PullRequestItem): boolean => a.kind === b.kind && a.id === b.id;
       const asked = items.filter((item, n) => items.findIndex(other => same(item, other)) === n);
-      const said = await toFirstThread(workspaceId, pullRequestSendPrompt(page, asked, number), origin);
+      const said = await ctx.toFirstThread(workspaceId, pullRequestSendPrompt(page, asked, number), origin);
       const at = clock.now();
       entry.record.prSent = [...(entry.record.prSent ?? []).filter(s => !asked.some(i => same(i, s))), ...asked.map(i => ({ kind: i.kind, id: i.id, at }))];
-      await persist(entry.record);
+      await ctx.persist(entry.record);
       return { outcome: said.outcome, threadId: said.threadId, agent: said.harness, sent: entry.record.prSent };
     },
 
     async fix({ workspaceId, check, child }, origin) {
-      spawnGuard("fix", origin);
+      ctx.spawnGuard("fix", origin);
       if (check !== undefined && child !== undefined) throw Object.assign(new Error(FIX_CHECK_OR_CHILD), { kind: "invalid" });
-      const entry = await entryOf(workspaceId, origin);
-      await copyBlocked(entry);
-      const project = projectHeld(entry.record.project);
+      const entry = await ctx.entryOf(workspaceId, origin);
+      await ctx.copyBlocked(entry);
+      const project = ctx.projectHeld(entry.record.project);
       let prompt: string;
       let base: string;
       if (child !== undefined) {
         // A merge that stopped goes to the lead's agent as a message, and nothing is merged here.
-        const kid = await childOf(entry, child, origin);
-        const leadBranch = (await readCheckout(entry, false))?.branch ?? entry.record.base ?? project.base ?? project.defaultBranch;
-        const childBranch = (await readCheckout(kid, false))?.branch ?? kid.record.worktree?.branch ?? "";
+        const kid = await ctx.childOf(entry, child, origin);
+        const leadBranch = (await ctx.readCheckout(entry, false))?.branch ?? entry.record.base ?? project.base ?? project.defaultBranch;
+        const childBranch = (await ctx.readCheckout(kid, false))?.branch ?? kid.record.worktree?.branch ?? "";
         // With no remote the child's branch is in its folder, which is where the merge took it from.
-        const remote = remoteHost(project.remote) === undefined ? checkoutOf(kid.record) : "origin";
+        const remote = remoteHost(project.remote) === undefined ? ctx.checkoutOf(kid.record) : "origin";
         prompt = mergeChildPrompt({ leadBranch, childBranch, remote, conflicts: kid.record.tree?.conflicts ?? [] });
         base = leadBranch;
       } else if (check === undefined) {
-        const updated = await updateCopy(entry);
+        const updated = await ctx.updateCopy(entry);
         base = updated.base;
         if (updated.merged) return { outcome: "updated", base };
         const branch = entry.checkout?.branch ?? (isPullRequestFact(entry.pr) ? entry.pr.branch : base);
         prompt = conflictsPrompt({ base, branch, files: updated.conflicts });
       } else {
         // Read whole: a check that failed since the last read moves nothing a lighter read compares.
-        const fact = await readPullRequest(entry, true, true);
+        const fact = await ctx.readPullRequest(entry, true, true);
         if (!isPullRequestFact(fact)) throw new Error(noPullRequestRefusal(entry.record.name));
         const failed = fact.checks.find(c => c.name === check);
         if (failed === undefined) throw new Error(noSuchCheckRefusal(check, fact.checks.map(c => c.name)));
@@ -8816,27 +6588,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const log =
           run === undefined
             ? undefined
-            : await readHost(entry, cwd => ({ op: "git.runLog", cwd, remote: project.remote, runId: run.runId, jobId: run.jobId }), r => GitRunLogReply.parse(r)).catch(() => undefined);
+            : await ctx.readHost(entry, cwd => ({ op: "git.runLog", cwd, remote: project.remote, runId: run.runId, jobId: run.jobId }), r => GitRunLogReply.parse(r)).catch(() => undefined);
         prompt = checkFailedPrompt({ check: failed, commit: { oid: fact.headOid, subject: fact.headSubject }, ...(log !== undefined ? { log } : {}) });
         base = fact.base;
       }
-      const said = await toFirstThread(workspaceId, prompt, origin);
+      const said = await ctx.toFirstThread(workspaceId, prompt, origin);
       return { outcome: said.outcome, threadId: said.threadId, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}), base, agent: said.harness };
     },
 
     async merge({ workspaceId, method, whenChecksPass, head }, origin) {
-      spawnGuard("merge", origin);
-      const entry = await entryOf(workspaceId, origin);
+      ctx.spawnGuard("merge", origin);
+      const entry = await ctx.entryOf(workspaceId, origin);
       // The fact the host holds is the one every window drew, however old it is: a fresh read here would hand the
       // guard below whatever the agent pushed since the person looked. Read only where nothing was ever read.
-      const fact = isPullRequestFact(entry.pr) ? entry.pr : await readPullRequest(entry, false);
+      const fact = isPullRequestFact(entry.pr) ? entry.pr : await ctx.readPullRequest(entry, false);
       if (!isPullRequestFact(fact)) {
         const kept = entry.record.pr;
         throw new Error(kept !== undefined && kept.state !== "open" ? notOpenRefusal(kept.number, kept.state) : noPullRequestRefusal(entry.record.name));
       }
       if (fact.state !== "open") throw new Error(notOpenRefusal(fact.number, fact.state));
-      const remote = projectHeld(entry.record.project).remote;
-      const settings = await mergeSettings(remote);
+      const remote = ctx.projectHeld(entry.record.project).remote;
+      const settings = await ctx.mergeSettings(remote);
       const by = method ?? settings.defaultMethod;
       if (!settings.methods.includes(by)) throw new Error(mergeMethodRefusal(by, settings.methods));
       if (whenChecksPass === true && !settings.autoMerge) throw new Error(AUTO_MERGE_OFF_LINE);
@@ -8844,74 +6616,74 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // window that drew it names: a push between the drawing and the press fails the merge in the host's own words
       // rather than landing unseen code.
       const done = GitPrMergeReply.parse(
-        await onThisComputer((ask, home) => ask({ op: "git.prMerge", cwd: home, remote, number: fact.number, method: by, auto: whenChecksPass === true, headOid: head ?? fact.headOid })),
+        await ctx.onThisComputer((ask, home) => ask({ op: "git.prMerge", cwd: home, remote, number: fact.number, method: by, auto: whenChecksPass === true, headOid: head ?? fact.headOid })),
       );
-      githubCache.delete(pageKey(remote, fact.number));
-      await readPullRequest(entry, true);
+      githubCache.delete(ctx.pageKey(remote, fact.number));
+      await ctx.readPullRequest(entry, true);
       return { number: fact.number, method: by, merged: done.merged, autoArmed: done.autoArmed };
     },
 
     async update({ workspaceId }, origin) {
-      spawnGuard("update", origin);
-      const entry = await entryOf(workspaceId, origin);
-      await copyBlocked(entry);
-      return updateCopy(entry);
+      ctx.spawnGuard("update", origin);
+      const entry = await ctx.entryOf(workspaceId, origin);
+      await ctx.copyBlocked(entry);
+      return ctx.updateCopy(entry);
     },
 
     async mergeIn({ workspaceId, child }, origin) {
-      spawnGuard("merge_in", origin);
-      const lead = await entryOf(workspaceId, origin);
+      ctx.spawnGuard("merge_in", origin);
+      const lead = await ctx.entryOf(workspaceId, origin);
       // A thread merges only into the workspace it runs on: a child merging into its lead is a merge nobody there asked.
       const asked = scopeOf(origin);
       if (asked !== undefined && asked.workspaceId !== lead.record.id) throw new Error(mergeIntoOwnRefusal(asked.threadId));
-      const kid = await childOf(lead, child, origin);
+      const kid = await ctx.childOf(lead, child, origin);
       // The lead's copy is its agent's working tree, and a merge under a turn is one that agent was never asked about;
       // the asking thread's own turn is the one a tool call runs inside, so it is the one turn left out.
       const busy = [...sessions.values()]
         .map(s => s.view)
         .filter(v => v.workspaceId === lead.record.id && v.status === "running" && v.threadId !== undefined && v.threadId !== asked?.threadId);
       if (busy.length > 0) throw new Error(leadBusyRefusal(lead.record.name, busy.map(v => v.threadId!)));
-      await copyBlocked(lead);
-      const branch = (await readCheckout(kid, true))?.branch ?? kid.record.worktree?.branch ?? "";
+      await ctx.copyBlocked(lead);
+      const branch = (await ctx.readCheckout(kid, true))?.branch ?? kid.record.worktree?.branch ?? "";
       if (branch === "" || branch === DETACHED_HEAD) throw new Error(childOnNoBranchRefusal(kid.record.name));
-      const project = projectHeld(lead.record.project);
+      const project = ctx.projectHeld(lead.record.project);
       // Through the remote, the one place both copies always reach; with none, from the child's folder only where
       // both copies sit on this computer, since a copy on a box is visible to nothing but its own workspace.
       let from: string | undefined;
       if (remoteHost(project.remote) === undefined) {
         if (!isLocalWorkspace(lead.record) || !isLocalWorkspace(kid.record)) throw new Error(noRemoteForTreeLine(project.name));
-        from = checkoutOf(kid.record);
+        from = ctx.checkoutOf(kid.record);
       }
       const done = GitMergeInReply.parse(
-        await queued(lead.record.id, () => withDaemon(lead, ask => ask({ op: "git.mergeIn", cwd: checkoutOf(lead.record), branch, ...(from !== undefined ? { from } : {}) }))),
+        await ctx.queued(lead.record.id, () => ctx.withDaemon(lead, ask => ask({ op: "git.mergeIn", cwd: ctx.checkoutOf(lead.record), branch, ...(from !== undefined ? { from } : {}) }))),
       );
       const kept: TreeRecord = { ...kid.record.tree };
       if (done.merged) {
         delete kept.conflicts;
         if (done.commits > 0 && done.oid !== undefined) kept.merged = { oid: done.oid, at: clock.now(), ...(done.head !== undefined ? { head: done.head } : {}) };
       } else kept.conflicts = done.conflicts;
-      await readCheckout(lead, true);
-      await keepTree(kid, kept);
+      await ctx.readCheckout(lead, true);
+      await ctx.keepTree(kid, kept);
       return { lead: lead.record.name, child: kid.record.name, branch, merged: done.merged, commits: done.commits, conflicts: done.conflicts };
     },
 
     async start({ url, project: named, agent, model, effort, access }, origin) {
-      spawnGuard("start", origin);
-      await ready();
+      ctx.spawnGuard("start", origin);
+      await ctx.ready();
       const link = githubLinkOf(url);
       if (link === undefined) throw Object.assign(new Error(START_WORDS.notALink(url)), { kind: "invalid" });
-      const project = projectByRepo(link.repo, named);
-      const read = await issueOf(project.remote, link.number);
-      const fact = link.kind === "pull_request" ? await pullRequestOf(project.remote, link.number) : undefined;
-      const from = fromOf(link.kind, link.repo, read, fact);
-      await picksHold(project, { ...(agent !== undefined ? { harness: agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { access } : {}) });
-      const entry = await workspaceFrom(project, from, fact, "start", origin);
-      return openWith(entry, { prompt: fromTaskPrompt(from, read), ...(agent !== undefined ? { harness: agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { access } : {}) }, origin);
+      const project = ctx.projectByRepo(link.repo, named);
+      const read = await ctx.issueOf(project.remote, link.number);
+      const fact = link.kind === "pull_request" ? await ctx.pullRequestOf(project.remote, link.number) : undefined;
+      const from = ctx.fromOf(link.kind, link.repo, read, fact);
+      await ctx.picksHold(project, { ...(agent !== undefined ? { harness: agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { access } : {}) });
+      const entry = await ctx.workspaceFrom(project, from, fact, "start", origin);
+      return ctx.openWith(entry, { prompt: fromTaskPrompt(from, read), ...(agent !== undefined ? { harness: agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { access } : {}) }, origin);
     },
 
     async review({ url, workspaceId, agent, model, effort }, origin) {
-      spawnGuard("review", origin);
-      await ready();
+      ctx.spawnGuard("review", origin);
+      await ctx.ready();
       let repo: string;
       let number: number;
       let project: ProjectView;
@@ -8919,30 +6691,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const link = githubLinkOf(url);
         if (link === undefined) throw Object.assign(new Error(START_WORDS.notALink(url)), { kind: "invalid" });
         if (link.kind !== "pull_request") throw Object.assign(new Error(START_WORDS.notAPullRequest), { kind: "invalid" });
-        project = projectByRepo(link.repo, undefined);
+        project = ctx.projectByRepo(link.repo, undefined);
         ({ repo, number } = link);
       } else {
-        const entry = workspaceId === undefined ? undefined : await entryOf(workspaceId, origin);
+        const entry = workspaceId === undefined ? undefined : await ctx.entryOf(workspaceId, origin);
         const kept = entry?.record.pr ?? (entry?.record.from?.kind !== "issue" ? entry?.record.from : undefined);
         if (entry === undefined || kept === undefined) throw Object.assign(new Error(START_WORDS.notAPullRequest), { kind: "invalid" });
-        project = projectHeld(entry.record.project);
+        project = ctx.projectHeld(entry.record.project);
         repo = ownerRepoOf(project.remote) ?? project.remote;
         number = kept.number;
       }
       const reviewer = agent ?? "codex";
-      const readOnly = readOnlyOf(reviewer);
-      if (readOnly === undefined) throw Object.assign(new Error(START_WORDS.noReadOnly(reviewer, reviewers())), { kind: "invalid" });
-      const fact = await pullRequestOf(project.remote, number);
-      const read = await issueOf(project.remote, number);
-      const diff = GitPrDiffReply.parse(await onThisComputer((ask, home) => ask({ op: "git.prDiff", cwd: home, remote: project.remote, number })));
-      const from = fromOf("review", repo, read, fact);
-      await picksHold(project, { harness: reviewer, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: readOnly });
-      const entry = await workspaceFrom(project, from, fact, "review", origin);
-      return openWith(entry, { prompt: reviewTaskPrompt(from, read, diff), harness: reviewer, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: readOnly }, origin);
+      const readOnly = ctx.readOnlyOf(reviewer);
+      if (readOnly === undefined) throw Object.assign(new Error(START_WORDS.noReadOnly(reviewer, ctx.reviewers())), { kind: "invalid" });
+      const fact = await ctx.pullRequestOf(project.remote, number);
+      const read = await ctx.issueOf(project.remote, number);
+      const diff = GitPrDiffReply.parse(await ctx.onThisComputer((ask, home) => ask({ op: "git.prDiff", cwd: home, remote: project.remote, number })));
+      const from = ctx.fromOf("review", repo, read, fact);
+      await ctx.picksHold(project, { harness: reviewer, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: readOnly });
+      const entry = await ctx.workspaceFrom(project, from, fact, "review", origin);
+      return ctx.openWith(entry, { prompt: reviewTaskPrompt(from, read, diff), harness: reviewer, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: readOnly }, origin);
     },
 
     async reviewDraft({ workspaceId, summary, verdict, on }, origin) {
-      const entry = await entryOf(workspaceId, origin);
+      const entry = await ctx.entryOf(workspaceId, origin);
       const draft = entry.record.review;
       if (isReviewRead(draft) && (summary !== undefined || verdict !== undefined || on !== undefined)) {
         const ticks = new Map((on ?? []).map(t => [t.id, t.on]));
@@ -8952,60 +6724,60 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(verdict !== undefined ? { verdict } : {}),
           comments: draft.comments.map(c => (ticks.has(c.id) ? { ...c, on: ticks.get(c.id)! } : c)),
         };
-        await persist(entry.record);
+        await ctx.persist(entry.record);
         bus.emit({ type: "workspace.review", workspaceId });
       }
       return entry.record.review === undefined ? {} : { review: entry.record.review };
     },
 
     async reviewPost({ workspaceId }, origin) {
-      spawnGuard("review_post", origin);
-      const entry = await entryOf(workspaceId, origin);
+      ctx.spawnGuard("review_post", origin);
+      const entry = await ctx.entryOf(workspaceId, origin);
       const draft = entry.record.review;
       const from = entry.record.from;
       if (!isReviewRead(draft) || from === undefined) throw new Error(START_WORDS.noReviewYet(entry.record.name));
       const ticked = draft.comments.filter(c => c.on).map(({ id, path, line, side, body }) => ({ id, path, line, side, body }));
-      const remote = projectHeld(entry.record.project).remote;
+      const remote = ctx.projectHeld(entry.record.project).remote;
       // One call on this computer as the person, pinned to the head the review was written against, so a push since
       // is GitHub's to say and a half-made review is never seen.
       const done = GitPrReviewReply.parse(
-        await onThisComputer((ask, home) => ask({ op: "git.prReview", cwd: home, remote, number: from.number, headOid: draft.headOid, event: draft.verdict, body: draft.summary, comments: ticked })),
+        await ctx.onThisComputer((ask, home) => ask({ op: "git.prReview", cwd: home, remote, number: from.number, headOid: draft.headOid, event: draft.verdict, body: draft.summary, comments: ticked })),
       );
       entry.record.review = { ...draft, posted: { url: done.url, at: clock.now(), folded: done.folded } };
-      await persist(entry.record);
+      await ctx.persist(entry.record);
       bus.emit({ type: "workspace.review", workspaceId });
-      githubCache.delete(pageKey(remote, from.number));
-      void readPullRequest(entry, true);
+      githubCache.delete(ctx.pageKey(remote, from.number));
+      void ctx.readPullRequest(entry, true);
       return { url: done.url, number: from.number, comments: ticked.length - done.folded.length, folded: done.folded.length };
     },
 
     async daemonReach(id, origin) {
-      const entry = await entryOf(id, origin);
-      return moduleOf(entry.record.kind).daemonRoad(entry);
+      const entry = await ctx.entryOf(id, origin);
+      return ctx.moduleOf(entry.record.kind).daemonRoad(entry);
     },
 
     async daemonChannel(id, onEvent, origin) {
-      const entry = await entryOf(id, origin);
-      if (!moduleOf(entry.record.kind).sharedDaemon) return copyChannel(entry, onEvent, WORKSPACE_FRAMES);
-      const ptys = ownPtys.get(id) ?? new Map<string, number>();
-      ownPtys.set(id, ptys);
+      const entry = await ctx.entryOf(id, origin);
+      if (!ctx.moduleOf(entry.record.kind).sharedDaemon) return ctx.copyChannel(entry, onEvent, ctx.WORKSPACE_FRAMES);
+      const ptys = ctx.ownPtys.get(id) ?? new Map<string, number>();
+      ctx.ownPtys.set(id, ptys);
       const heard = (event: Record<string, unknown>): void => {
-        if (event["type"] === "pty.exit" && ptys.delete(String(event["ptyId"]))) portRootsMoved(id);
+        if (event["type"] === "pty.exit" && ptys.delete(String(event["ptyId"]))) ctx.portRootsMoved(id);
         onEvent(event);
       };
-      return rootedPorts(id, checkoutOf(entry.record), ptys, await copyChannel(entry, heard, WORKSPACE_FRAMES));
+      return ctx.rootedPorts(id, ctx.checkoutOf(entry.record), ptys, await ctx.copyChannel(entry, heard, ctx.WORKSPACE_FRAMES));
     },
 
     async guestChannel(id, onEvent) {
-      return copyChannel(await entryOf(id), onEvent, GUEST_ROAD_FRAMES);
+      return ctx.copyChannel(await ctx.entryOf(id), onEvent, ctx.GUEST_ROAD_FRAMES);
     },
 
     async servedByItsComputer(id, origin) {
-      return servedByItsComputer(await entryOf(id, origin)) !== undefined;
+      return ctx.servedByItsComputer(await ctx.entryOf(id, origin)) !== undefined;
     },
 
     async watchSys(id, fn, origin) {
-      const entry = await entryOf(id, origin);
+      const entry = await ctx.entryOf(id, origin);
       const kind = entry.record.kind;
       if (readingRoad(kind, "metrics") !== "host") throw new Error(`${machineWord(kind)} reads its own load over its daemon link, not from this host`);
       if (local?.sysSamples === undefined) throw new Error("this host reads nothing of the computer it runs on");
@@ -9013,15 +6785,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async portReach(id, port, origin) {
-      const entry = await entryOf(id, origin);
-      await copyBlocked(entry);
+      const entry = await ctx.entryOf(id, origin);
+      await ctx.copyBlocked(entry);
       const reach = await entry.ws.portReach(port);
       return { url: reach.url, expiresAt: reach.expiresAt };
     },
 
     async portProbe(id, port, origin) {
-      const entry = await entryOf(id, origin);
-      await copyBlocked(entry);
+      const entry = await ctx.entryOf(id, origin);
+      await ctx.copyBlocked(entry);
       const reach = await entry.ws.portReach(port);
       // A followed redirect would refetch without the token or the edge's cookies and report the edge's 401 for a page the frame loads fine.
       const res = await fetch(reach.url, { redirect: "manual", signal: AbortSignal.timeout(PORT_PROBE_TIMEOUT_MS) });
@@ -9031,12 +6803,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async originRefusal(id, origin) {
-      await ready();
-      return refusalFor(live.get(id)?.record, origin);
+      await ctx.ready();
+      return ctx.refusalFor(live.get(id)?.record, origin);
     },
 
     creating() {
-      return [...createStages.values()];
+      return [...ctx.createStages.values()];
     },
 
     seenBy(event, origin) {
@@ -9051,11 +6823,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // the listing and the transcript show, a lead's turn to the child on its copy included, and hides the rest,
       // so a row cannot be read going by. An event with no thread is about the workspace and reads its rule.
       const thread = (event as { threadId?: unknown }).threadId;
-      if (typeof thread === "string") return reachesRow({ threadId: thread, workspaceId: record.id }, origin);
-      return refusalFor(record, origin) === undefined;
+      if (typeof thread === "string") return ctx.reachesRow({ threadId: thread, workspaceId: record.id }, origin);
+      return ctx.refusalFor(record, origin) === undefined;
     },
   };
+  return { workspaces };
+}
 
+function agentsArea(ctx: RuntimeContext): AgentsArea {
+  const { opts, adapters, local, clock, live, setups, threadRecords, sessions } = ctx;
   /** One probe per harness per machine per TTL, a failed one included and one in flight shared: a binary that does
    * not answer costs one exec, not one per composer mount. Past the TTL the lists held answer while the binary is
    * asked again, so a send waits on a probe only the first time a machine is asked. */
@@ -9116,7 +6892,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const sessionId = view.claudeSessionId;
     const entry = live.get(view.workspaceId);
     if (sessionId === undefined || entry === undefined) return Promise.resolve();
-    if (workspaceState({ phase: entry.record.phase }) !== "running" || unreachedOf(entry) !== undefined || adapters[view.harness] === undefined) return Promise.resolve();
+    if (workspaceState({ phase: entry.record.phase }) !== "running" || ctx.unreachedOf(entry) !== undefined || adapters[view.harness] === undefined) return Promise.resolve();
     const key = `${entry.machine.id}:${sessionId}`;
     const hit = titleReads.get(key);
     const now = clock.now();
@@ -9156,11 +6932,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             s.view.harnessTitle = title;
             s.view.titleSource = source;
           }
-          await persistSessions(entry.record.id);
+          await ctx.persistSessions(entry.record.id);
           // A name given before codex wrote the thread's index row had nowhere to land; by a turn's end the row is
           // there, so the name the row carries is written again.
           if (force && unnamed?.harnessTitle !== undefined) void nameInHarness(unnamed, unnamed.harnessTitle);
-          for (const threadId of moved) pushHead(threadId);
+          for (const threadId of moved) ctx.pushHead(threadId);
         },
         (e: unknown) => {
           if (!pending.failed) console.warn(noTitleLogLine(sessionId, entry.record.id, providerSaid(e)));
@@ -9209,7 +6985,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // Started inside a promise and never on this stack, as the store read is: an adapter that refuses the id throws
     // where it builds its command, and naming a thread may never cost the turn that asked for it.
     return confineSetup(entry, view.harness)
-      .then(() => writeSession(sessionId, () => write(sessionId, title, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout))))
+      .then(() => ctx.writeSession(sessionId, () => write(sessionId, title, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout))))
       .then(
         wrote => {
           if (wrote.kind === "failed") console.warn(noNameWriteLogLine(sessionId, entry.record.id, wrote.error));
@@ -9253,8 +7029,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         row.view.titleSource = "auto";
       }
     }
-    await persistSessions(entry.record.id);
-    pushHead(threadId);
+    await ctx.persistSessions(entry.record.id);
+    ctx.pushHead(threadId);
     await nameInHarness(view, title);
   };
 
@@ -9285,7 +7061,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const kept = [await realFolderHere(join(home, ".wsp")), ...(opts.statePath !== undefined ? [await realFolderHere(dirname(resolvePathOn(opts.statePath)))] : [])];
       return { folder: await realFolderHere(path), home, kept };
     }
-    const door = placeDoorOf();
+    const door = ctx.placeDoorOf();
     const read = await door.exec(placeId, realFolderScript(path), { timeoutMs: INLINE_EXEC_MS });
     if (read.exitCode === 3) throw Object.assign(new Error(read.stderr.trim()), { kind: "usage" });
     const [folder, home] = read.stdout.trim().split("\n");
@@ -9317,7 +7093,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return refused;
   };
   const homesHere = async (): Promise<Record<string, string>> => {
-    await ready();
+    await ctx.ready();
     const homes: Record<string, string> = {};
     for (const { id } of CATALOG_AGENTS) {
       const kept = setups.get(HERE_PLACE_ID, id)?.configDir;
@@ -9447,7 +7223,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
     if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
-    const kind = moduleOf(entry.record.kind);
+    const kind = ctx.moduleOf(entry.record.kind);
     const vault = opts.vault?.() ?? {};
     const place = setupPlace(entry);
     const setup = place === undefined ? undefined : setups.launchOf(place, harness);
@@ -9456,7 +7232,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       adapter: factory({
         machine: entry.machine,
         workspaceId: entry.record.id,
-        execStream: execFactoryFor(entry, turnLimitOf(entry.record), waiting),
+        execStream: ctx.execFactoryFor(entry, ctx.turnLimitOf(entry.record), waiting),
         home: id => (place === undefined ? undefined : setups.get(place, id)?.configDir) ?? kind.home(entry, id),
         // The person's variables over the computer's own and under the turn's, which only wsp sets.
         env: { ...servers, ...kind.env(entry, harness), ...setup?.env, ...turnEnv },
@@ -9471,7 +7247,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }),
     };
   };
+  return {
+    catalogOn, refreshTitle, sourceOf, rowsOn, carriedTitle, nameInHarness, makeTitle, titleRows, setupPlace, agentOff,
+    agentLabel, configFolderOn, setupRefusals, setupRefusal, homesHere, confineSetup, launchAdapterFor, defaultAgentOf,
+    defaultsOn, namedMode, landImages, landFiles, dropThreadFiles, dropImages, adapterFor,
+  };
+}
 
+function threadsArea(ctx: RuntimeContext): ThreadsArea {
+  const { opts, bus, clock, deviceDoor, live, threadRecords, sessions } = ctx;
   /** Whether any row of the thread is running, the harness holding it or not: a start writes its row before the turn
    * reaches the machine, and that row is one, so this is the test for whether the thread is spoken for. turnRuns is
    * the same test keyed by workspace. */
@@ -9484,7 +7268,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return undefined;
   };
 
-  type LiveSession = { view: SessionView; turnId: string; handle: SessionHandle; turnLive?: TurnLive };
   const runningOn = (threadId: string): LiveSession | undefined => {
     for (const s of sessions.values()) {
       if (s.view.threadId === threadId && s.view.status === "running" && s.handle !== undefined) return s as LiveSession;
@@ -9560,7 +7343,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * runs out, the thread goes, or a seventh would be kept, which ends the one idle longest. Answers whether it was
    * kept, since the turn's token and device stay with the process only then. */
   const holdKept = (threadId: string, o: Omit<KeptProcess, "file" | "usedAt" | "cancel">): boolean => {
-    if (closing || !threadRecords.has(threadId)) {
+    if (ctx.state.closing || !threadRecords.has(threadId)) {
       void o.agent.close().catch(() => {});
       return false;
     }
@@ -9620,7 +7403,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const drivesThread = (threadId: string | undefined, caller: Caller | undefined): boolean => {
     const scope = scopeOf(caller);
     if (scope === undefined) return true;
-    return threadId !== undefined && rootOf(threadId) === scope.rootThreadId;
+    return threadId !== undefined && ctx.rootOf(threadId) === scope.rootThreadId;
   };
   /** What a thread is called, by the one rule every listing reads it by: its own rows folded, so a thread named in
    * another thread's row reads there exactly as it reads in the sidebar. */
@@ -9662,7 +7445,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     for (const child of treeUnder(threadId).reverse()) {
       const row = latestOn(child);
       if (row === undefined || row.status !== "running") continue;
-      const outcome = await sessionsApi.interrupt(row.id, caller).catch((e: unknown) => {
+      const outcome = await ctx.sessionsApi.interrupt(row.id, caller).catch((e: unknown) => {
         console.warn(`thread ${threadWord(child)} was not stopped with its root: ${e instanceof Error ? e.message : String(e)}`);
         return undefined;
       });
@@ -9740,7 +7523,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // registered them from. A line nobody but the person registered carries neither and goes as theirs, which is
     // what every row written before the road rode beside the targets holds.
     const asWho: Caller | undefined = by === undefined ? road : { origin: road ?? "here", by };
-    sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: "agent" }, asWho).catch((e: unknown) => {
+    ctx.sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: "agent" }, asWho).catch((e: unknown) => {
       console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
       fell();
     });
@@ -9770,13 +7553,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const fell = (): void => {
       if (toldThePerson) return;
       toldThePerson = true;
-      record({ type: "session.notify", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId, notify: NOTIFY_ME, text: notifyLine(threadId, result, "tail") });
+      ctx.record({ type: "session.notify", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId, notify: NOTIFY_ME, text: notifyLine(threadId, result, "tail") });
     };
     for (const target of targets) {
       // A thread reads its child's line as a message and acts on it, so it gets the report whole; the person reads
       // it as a row beside every other, so theirs stays one line.
       const text = notifyLine(threadId, result, target === NOTIFY_ME ? "tail" : "whole");
-      record({ type: "session.notify", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId, notify: target, text });
+      ctx.record({ type: "session.notify", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId, notify: target, text });
       if (target !== NOTIFY_ME) deliver({ from: threadId, notify: target, text, ...named, fell });
     }
   };
@@ -9788,18 +7571,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     delete s.snapshot;
     const endedAt = Date.now();
     s.view.status = reply ?? "failed";
-    portRootsMoved(s.view.workspaceId);
+    ctx.portRootsMoved(s.view.workspaceId);
     s.view.endedAt = endedAt;
-    if (s.view.status === "failed") endSnoozeFor(s.view);
+    if (s.view.status === "failed") ctx.endSnoozeFor(s.view);
     // A prompt the turn was stopped on goes with it, on this road as on the harness's own exit: nothing can answer
     // one whose process is gone, and a settled row still carrying it would read as waiting on a person forever.
     delete s.view.asking;
     if (s.view.threadId !== undefined) leadAsks.delete(s.view.threadId);
     if (reply === undefined && s.notify !== undefined) notifyEnd(s, s.notify, tellAs(s), { status: "failed", error: cutLine(endedAt) });
-    record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined, reason });
+    ctx.record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined, reason });
   };
   /** A folder on this computer git holds no repo in: it keeps no checkpoint and no rewind moves its files. */
-  const notARepo = (r: WorkspaceRecord): boolean => copiesFolder(r.kind) && projectHeld(r.project).git === undefined;
+  const notARepo = (r: WorkspaceRecord): boolean => copiesFolder(r.kind) && ctx.projectHeld(r.project).git === undefined;
   /** What a rewind to a turn needs, kept once the turn is over: the checkout's tree through the workspace's own
    * daemon, and the harness's anchor. A checkout the daemon takes none of (not a repo, a daemon too old, a machine
    * gone) leaves the anchor alone; the turn itself is as it ended either way. */
@@ -9810,14 +7593,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (!notARepo(entry.record)) {
       try {
         // Scoped by the record's id, so the refs of two folders of one repo never share a prefix.
-        const taken = await withDaemon(entry, ask => ask({ op: "git.checkpoint", cwd: checkoutOf(entry.record), thread: turn.threadId, turn: turn.turnId, scope: entry.record.id }));
+        const taken = await ctx.withDaemon(entry, ask => ask({ op: "git.checkpoint", cwd: ctx.checkoutOf(entry.record), thread: turn.threadId, turn: turn.turnId, scope: entry.record.id }));
         if (typeof taken["ref"] === "string") ref = taken["ref"];
       } catch (e) {
         console.warn(noCheckpointLogLine(turn.threadId, entry.record.id, e instanceof Error ? e.message : String(e)));
       }
     }
     if (ref === undefined && turn.anchor === undefined && turn.kept === undefined) return;
-    record({ type: "session.checkpoint", workspaceId: entry.record.id, sessionId: turn.sessionId, turnId: turn.turnId, threadId: turn.threadId, ...(ref !== undefined ? { ref } : {}), ...(turn.anchor !== undefined ? { anchor: turn.anchor } : {}), ...(turn.kept !== undefined ? { kept: turn.kept } : {}) });
+    ctx.record({ type: "session.checkpoint", workspaceId: entry.record.id, sessionId: turn.sessionId, turnId: turn.turnId, threadId: turn.threadId, ...(ref !== undefined ? { ref } : {}), ...(turn.anchor !== undefined ? { anchor: turn.anchor } : {}), ...(turn.kept !== undefined ? { kept: turn.kept } : {}) });
   };
   /** Recorded once the harness took the line, so the row sits where the turn could first see it. */
   /** The handle a start already taken answers with: the turn's own while it runs, and while it does not, one whose
@@ -9826,7 +7609,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const held = sessions.get(taken.sessionId);
     if (held === undefined) return undefined;
     if (held.handle !== undefined && held.turnId === taken.turnId) return { ...held.handle, outcome: taken.outcome };
-    const events = await openTranscript(workspaceId);
+    const events = await ctx.openTranscript(workspaceId);
     const done = events.find(e => e.type === "session.done" && e.turnId === taken.turnId);
     const end = events.find(e => e.type === "session.end" && e.turnId === taken.turnId);
     const result: TurnResult = done?.type === "session.done" ? done.result : { status: "failed", error: end?.type === "session.end" && end.reason !== undefined ? end.reason : RESTARTED_REASON };
@@ -9834,7 +7617,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   const recordSteer = (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate" }): void => {
-    record({
+    ctx.record({
       type: "session.steer",
       workspaceId: s.view.workspaceId,
       sessionId: s.view.claudeSessionId ?? handleId,
@@ -9857,10 +7640,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * the folder is no checkout, or the daemon does not answer inside the deadline: the turn runs regardless and its
    * reply lists no changes. */
   const snapshotOf = async (entry: LiveWorkspace, cwd: string): Promise<string | undefined> => {
-    if (notARepo(entry.record) || reachOf(entry) !== "reachable") return undefined;
+    if (notARepo(entry.record) || ctx.reachOf(entry) !== "reachable") return undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<"late">(resolve => (timer = setTimeout(() => resolve("late"), snapshotMs)));
-    const taken = withDaemon(entry, async ask => String((await ask({ op: "git.snapshot", cwd }))["commit"])).catch((e: unknown) => {
+    const taken = ctx.withDaemon(entry, async ask => String((await ask({ op: "git.snapshot", cwd }))["commit"])).catch((e: unknown) => {
       if (!(e instanceof DaemonRefusal && e.code === "not-a-git-repo")) console.warn(`no snapshot of ${cwd} on ${entry.record.name}: ${e instanceof Error ? e.message : String(e)}`);
       return undefined;
     });
@@ -9885,7 +7668,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const workspaceId = entry.record.id;
     const to = await snapshotOf(entry, cwd);
     if (to === undefined) return false;
-    const range = await withDaemon(entry, ask => ask({ op: "git.turn", cwd, from, to })).catch((e: unknown) => {
+    const range = await ctx.withDaemon(entry, ask => ask({ op: "git.turn", cwd, from, to })).catch((e: unknown) => {
       console.warn(`what ${turnId} changed in ${cwd} was not read: ${e instanceof Error ? e.message : String(e)}`);
       return undefined;
     });
@@ -9896,7 +7679,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A turn that only moved HEAD (a checkout or pull with no edit of its own) still records its line.
     if (files.length === 0 && moved.length === 0) return true;
     const shared = sharedFolder(workspaceId, threadId, cwd, startedAt, Date.now());
-    record({ type: "session.changes", workspaceId, sessionId, turnId, threadId, from, to, files, moved, ...(shared ? { shared: true as const } : {}) });
+    ctx.record({ type: "session.changes", workspaceId, sessionId, turnId, threadId, from, to, files, moved, ...(shared ? { shared: true as const } : {}) });
     return true;
   };
 
@@ -9919,8 +7702,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       agent: harness,
       agentName: harnessCatalog(harness)?.label ?? harness,
       ...(named !== undefined ? { named } : {}),
-      vaulted: vaultedFor(harness, moduleOf(entry.record.kind).loginStands(entry, harness)),
-      computer: { id: usageComputerOf(entry.record), name: computerOf(entry) },
+      vaulted: vaultedFor(harness, ctx.moduleOf(entry.record.kind).loginStands(entry, harness)),
+      computer: { id: usageComputerOf(entry.record), name: ctx.computerOf(entry) },
     });
 
   /** Whether a turn of this agent on this workspace reads its account's banked resets in full: an agent whose plan
@@ -9928,15 +7711,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const limitDetailsDue = async (entry: LiveWorkspace, harness: string): Promise<boolean> => {
     if (PLAN_RESETS[harness as ThreadAgent] === undefined) return false;
     try {
-      const limits = await ledger.limits();
-      const vaulted = vaultedFor(harness, moduleOf(entry.record.kind).loginStands(entry, harness));
-      const { key } = accountOnComputer({ agent: harness, agentName: harnessCatalog(harness)?.label ?? harness, computer: { id: usageComputerOf(entry.record), name: computerOf(entry) }, limits, vaulted });
+      const limits = await ctx.ledger.limits();
+      const vaulted = vaultedFor(harness, ctx.moduleOf(entry.record.kind).loginStands(entry, harness));
+      const { key } = accountOnComputer({ agent: harness, agentName: harnessCatalog(harness)?.label ?? harness, computer: { id: usageComputerOf(entry.record), name: ctx.computerOf(entry) }, limits, vaulted });
       return resetDetailsDue(limits.find(l => l.key === key), clock.now());
     } catch {
       return false;
     }
   };
+  return {
+    threadRuns, launchingOn, runningOn, latestOn, keptAgents, reapKept, endKept, hostWrites, writeSession, takeKept,
+    holdKept, threadOfToken, treeUnder, drivesThread, leadAsks, stoppedBehind, stopUnder, notifyOn, notifyReach, tellAs,
+    notifyEnd, settleCut, notARepo, checkpointsLanding, keepCheckpoint, takenTurn, recordSteer, snapshotOf,
+    readTurnChanges, usageComputerOf, vaultedFor, usageAccountOf, limitDetailsDue,
+  };
+}
 
+function turnsArea(ctx: RuntimeContext): TurnsArea {
+  const { bus, clock, deviceDoor, live, threadRecords, sessions } = ctx;
   const runTurn = (t: {
     entry: LiveWorkspace;
     view: SessionView;
@@ -10004,14 +7796,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const startedAt = view.startedAt ?? Date.now();
       void (async () => {
         const from = await taken;
-        return from !== undefined && (await readTurnChanges(entry, { sessionId, turnId, threadId, cwd, from, startedAt }));
+        return from !== undefined && (await ctx.readTurnChanges(entry, { sessionId, turnId, threadId, cwd, from, startedAt }));
       })().then(read => {
         changesOut = false;
         const row = sessions.get(rowId);
         if (!endWritten || row?.turnId !== turnId || row.snapshot === undefined) return;
         delete row.snapshot;
         // A closing host's read fails as its daemon channel shuts, and leaves the commit on disk for the next host.
-        if (read || !closing) void persistSessions(workspaceId);
+        if (read || !ctx.state.closing) void ctx.persistSessions(workspaceId);
       });
     };
     // The reply and its line to the parent go together, so one gate stands for both.
@@ -10042,15 +7834,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         undone.push(id);
       }
       if (undone.length > 0) {
-        void persistSessions(workspaceId);
+        void ctx.persistSessions(workspaceId);
         bus.emit({ type: "thread.marked", workspaceId, threadIds: undone });
       }
       // The slate's snapshot is keyed by the turn and never waits on the machine, so every turn that ends has one.
-      void slates.turnEnded({ threadId, turnId }).catch((e: unknown) => console.warn(`the slate of thread ${threadWord(threadId)} was not kept at the end of turn ${turnId}: ${e instanceof Error ? e.message : String(e)}`));
-      const kept = keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(anchor !== undefined ? { anchor } : {}), ...(keptWhy !== undefined ? { kept: keptWhy } : {}) });
-      checkpointsLanding.set(threadId, kept);
+      void ctx.slates.turnEnded({ threadId, turnId }).catch((e: unknown) => console.warn(`the slate of thread ${threadWord(threadId)} was not kept at the end of turn ${turnId}: ${e instanceof Error ? e.message : String(e)}`));
+      const kept = ctx.keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(anchor !== undefined ? { anchor } : {}), ...(keptWhy !== undefined ? { kept: keptWhy } : {}) });
+      ctx.checkpointsLanding.set(threadId, kept);
       void kept.finally(() => {
-        if (checkpointsLanding.get(threadId) === kept) checkpointsLanding.delete(threadId);
+        if (ctx.checkpointsLanding.get(threadId) === kept) ctx.checkpointsLanding.delete(threadId);
       });
     };
     // The reply's status, held while the process still runs. Shared with this turn's session-map entry so runningOn
@@ -10094,10 +7886,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const lead = leadAsk(open.values());
       if (lead === undefined) {
         delete view.asking;
-        leadAsks.delete(threadId);
+        ctx.leadAsks.delete(threadId);
       } else {
         view.asking = askingLine(lead);
-        leadAsks.set(threadId, lead);
+        ctx.leadAsks.set(threadId, lead);
       }
       readsWaiting();
       if (open.size > 0) waitingSince ??= clock.now();
@@ -10105,7 +7897,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         waited += clock.now() - waitingSince;
         waitingSince = undefined;
       }
-      void persistSessions(workspaceId);
+      void ctx.persistSessions(workspaceId);
     };
 
     /** The ask as clients read it: the harness's slug for a mode option carries no words of its own, and the words
@@ -10124,7 +7916,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!open.has(askId)) return;
       open.delete(askId);
       readsOpen();
-      record({
+      ctx.record({
         type: "session.permission.closed",
         workspaceId,
         sessionId: view.claudeSessionId ?? view.id,
@@ -10168,15 +7960,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           entry.record.claudeSessionId = sessionId;
           // The harness loaded the session up to the rewind's anchor, so the thread no longer holds it for a later start.
           if (t.cutAt !== undefined && threadRecords.get(threadId)?.resumeAt === t.cutAt) delete threadRecords.get(threadId)!.resumeAt;
-          void persist(entry.record);
-          void persistSessions(workspaceId);
+          void ctx.persist(entry.record);
+          void ctx.persistSessions(workspaceId);
           // The harness keys its store by the id it just announced, so a name given at the start is written now;
           // a CLI that already took it at launch is told the same name twice, which is what keeps this one road.
-          if (opening.title !== undefined && !startRecorded) void nameInHarness(view, opening.title);
+          if (opening.title !== undefined && !startRecorded) void ctx.nameInHarness(view, opening.title);
           // One turn is one start row however often the harness announces itself.
           if (startRecorded) return;
           startRecorded = true;
-          record({
+          ctx.record({
             type: "session.start",
             workspaceId,
             sessionId,
@@ -10202,9 +7994,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // and a thread that has one is never asked, and the answer is written back under that same id. This sits
           // under the one start row a turn writes, so a re-opened run, whose row the host that launched it wrote,
           // returns above and asks nothing.
-          if (sourceOf(view) === "seed") {
-            void refreshTitle(view, false)
-              .then(() => makeTitle(view))
+          if (ctx.sourceOf(view) === "seed") {
+            void ctx.refreshTitle(view, false)
+              .then(() => ctx.makeTitle(view))
               .catch((e: unknown) => console.warn(noMadeTitleLogLine(threadId, workspaceId, e instanceof Error ? e.message : String(e))));
           }
           return;
@@ -10216,7 +8008,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             replaying--;
             return;
           }
-          record({
+          ctx.record({
             type: "session.delta",
             workspaceId,
             sessionId,
@@ -10257,19 +8049,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           if (result.costUsd !== undefined) view.costUsd = (view.costUsd ?? 0) + result.costUsd;
           // What the turn used, filed in the ledger under the sign-in it ran on; a turn that counted nothing files nothing.
           if (result.tokens !== undefined || result.costUsd !== undefined) {
-            const account = usageAccountOf(entry, view.harness, turnAccount);
+            const account = ctx.usageAccountOf(entry, view.harness, turnAccount);
             const model = result.model ?? view.model;
             // An agent that names each model a turn used files a row for each; the turn counts once, under its own model.
             const uses = result.models !== undefined && result.models.length > 0 ? result.models : [{ model, tokens: result.tokens, costUsd: result.costUsd }];
             const counted = uses.some(u => u.model === model) ? model : uses[0]!.model;
             for (const use of uses)
-              void ledger
+              void ctx.ledger
                 .add({
                   at: clock.now(),
                   agent: view.harness,
                   account: account.key,
                   accountLabel: account.label,
-                  computer: usageComputerOf(entry.record),
+                  computer: ctx.usageComputerOf(entry.record),
                   project: entry.record.project,
                   turns: use.model === counted ? 1 : 0,
                   ...(use.model !== undefined ? { model: use.model } : {}),
@@ -10280,9 +8072,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                 })
                 .catch((e: unknown) => console.warn(`the use of turn ${turnId} was not filed: ${e instanceof Error ? e.message : String(e)}`));
           }
-          void persistSessions(workspaceId);
-          if (notify !== undefined) notifyEnd({ view, turnId }, notify, tellAs(t), result);
-          record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result });
+          void ctx.persistSessions(workspaceId);
+          if (notify !== undefined) ctx.notifyEnd({ view, turnId }, notify, ctx.tellAs(t), result);
+          ctx.record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result });
           readChanges(sessionId);
           return;
         }
@@ -10297,7 +8089,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             replayingSubagents--;
             return;
           }
-          record({
+          ctx.record({
             type: "session.subagent",
             workspaceId,
             sessionId,
@@ -10314,13 +8106,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           return;
         case "limit": {
           turnAccount = event.limit.account ?? turnAccount;
-          const account = usageAccountOf(entry, view.harness, turnAccount);
-          void ledger
-            .limit({ key: account.key, agent: view.harness, label: account.label, road: account.road, computer: usageComputerOf(entry.record), limit: event.limit })
+          const account = ctx.usageAccountOf(entry, view.harness, turnAccount);
+          void ctx.ledger
+            .limit({ key: account.key, agent: view.harness, label: account.label, road: account.road, computer: ctx.usageComputerOf(entry.record), limit: event.limit })
             .then(async ({ before, after }) => {
-              await alerts.read(before, after);
+              await ctx.alerts.read(before, after);
               // The row as the Usage page reads it now, so a slate's bound meter moves the moment a turn reports.
-              const row = (await usageAccounts()).accounts.find(a => a.key === account.key);
+              const row = (await ctx.usageAccounts()).accounts.find(a => a.key === account.key);
               if (row !== undefined) bus.emit({ type: "usage.account", key: account.key, row });
             })
             .catch((e: unknown) => console.warn(`the limits of ${account.key} were not kept: ${e instanceof Error ? e.message : String(e)}`));
@@ -10328,10 +8120,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
         case "turn.usage":
           // Only a run re-read after a restart reads the agent's stamp, and only against its own other stamps.
-          burn.add({ account: usageAccountOf(entry, view.harness, turnAccount).key, threadId, tokens: event.tokens, ...(t.written !== undefined && event.at !== undefined ? { replayed: { run: turnId, at: event.at } } : {}) });
+          ctx.burn.add({ account: ctx.usageAccountOf(entry, view.harness, turnAccount).key, threadId, tokens: event.tokens, ...(t.written !== undefined && event.at !== undefined ? { replayed: { run: turnId, at: event.at } } : {}) });
           return;
         case "turn.plan":
-          record({ type: "session.plan", workspaceId, sessionId, turnId, threadId, ...(event.steps !== undefined ? { steps: event.steps } : {}), ...(event.text !== undefined ? { text: event.text } : {}) });
+          ctx.record({ type: "session.plan", workspaceId, sessionId, turnId, threadId, ...(event.steps !== undefined ? { steps: event.steps } : {}), ...(event.text !== undefined ? { text: event.text } : {}) });
           return;
         case "turn.tasks":
           // The harness's own word on the work this turn started: while any of it runs the turn is working, whatever
@@ -10346,8 +8138,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // ask for a mode that does not ask.
           open.set(ask.askId, ask);
           readsOpen();
-          record({ type: "session.permission", workspaceId, sessionId, turnId, threadId, ...ask, options: [...ask.options] });
-          endSnoozeFor(view);
+          ctx.record({ type: "session.permission", workspaceId, sessionId, turnId, threadId, ...ask, options: [...ask.options] });
+          ctx.endSnoozeFor(view);
           return;
         }
         case "permission.close":
@@ -10361,7 +8153,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // before the event is recorded, so a waiter woken by it reads the settled row, not the running one).
           if (turnLive.reply !== undefined) view.status = turnLive.reply;
           view.endedAt = Date.now();
-          record({
+          ctx.record({
             type: "session.end",
             workspaceId,
             sessionId,
@@ -10378,20 +8170,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     // A process kept from an earlier turn reads the box that turn left, which may still say it was waiting.
     readsWaiting();
-    idle.hold(workspaceId);
+    ctx.idle.hold(workspaceId);
     let started: HarnessSession;
     try {
       started = t.open(forward);
     } catch (e) {
-      idle.release(workspaceId);
+      ctx.idle.release(workspaceId);
       throw e;
     }
     started.finished.then(
       () => {
-        idle.release(workspaceId);
-        void readDisk(entry).catch((e: unknown) => console.warn(`disk of ${workspaceId} not read after its turn: ${e instanceof Error ? e.message : String(e)}`));
+        ctx.idle.release(workspaceId);
+        void ctx.readDisk(entry).catch((e: unknown) => console.warn(`disk of ${workspaceId} not read after its turn: ${e instanceof Error ? e.message : String(e)}`));
       },
-      () => idle.release(workspaceId),
+      () => ctx.idle.release(workspaceId),
     );
     answerAsk = started.answer?.bind(started);
     const handleId = started.localId;
@@ -10441,22 +8233,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ended = true;
       const row = sessions.get(rowId);
       if (row?.turnId === turnId) delete row.snapshot;
-      settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive }, reason, () => reason);
-      void persistSessions(workspaceId);
+      ctx.settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive }, reason, () => reason);
+      void ctx.persistSessions(workspaceId);
       void started.interrupt().catch(() => {});
       turnOver();
     };
     // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
     if (turnId !== rowId) sessions.delete(turnId);
     sessions.set(rowId, { view, turnId, calls, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(started.from !== undefined ? { from: started.from } : {}), ...(t.asked !== undefined ? { asked: t.asked } : {}), ...(typeof t.snapshot?.from === "string" ? { snapshot: t.snapshot.from } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
-    if (started.pid !== undefined && moduleOf(entry.record.kind).sharedDaemon) {
-      const groups = turnGroups.get(workspaceId) ?? new Set<number>();
-      turnGroups.set(workspaceId, groups);
+    if (started.pid !== undefined && ctx.moduleOf(entry.record.kind).sharedDaemon) {
+      const groups = ctx.turnGroups.get(workspaceId) ?? new Set<number>();
+      ctx.turnGroups.set(workspaceId, groups);
       groups.add(started.pid);
-      armRootsRecheck();
+      ctx.armRootsRecheck();
     }
-    portRootsMoved(workspaceId);
-    void persistSessions(workspaceId);
+    ctx.portRootsMoved(workspaceId);
+    void ctx.persistSessions(workspaceId);
     // A launch that hands its prompt over late resolves its snapshot after the row exists; the row takes it then.
     const taking = t.snapshot?.from;
     if (taking instanceof Promise) {
@@ -10464,7 +8256,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const row = sessions.get(rowId);
         if (commit === undefined || row === undefined || row.turnId !== turnId || row.view.status !== "running") return;
         row.snapshot = commit;
-        void persistSessions(workspaceId);
+        void ctx.persistSessions(workspaceId);
       });
     }
     /** The turn's process is over: its status settles, its token stops naming anything, and the harness's own title
@@ -10481,7 +8273,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         !ended &&
         turnToken !== undefined &&
         view.claudeSessionId !== undefined &&
-        holdKept(threadId, { workspaceId, agent, launch: t.keep!.launch, session: view.claudeSessionId, turnToken, ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), waiting: t.waiting ?? { on: false } });
+        ctx.holdKept(threadId, { workspaceId, agent, launch: t.keep!.launch, session: view.claudeSessionId, turnToken, ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), waiting: t.waiting ?? { on: false } });
       if (agent !== undefined && !keeps) void agent.close().catch(() => {});
       // The process is gone, so the token in its environment names nothing that can be asked for anything: it is
       // taken away here, the one exit both the reply road and the failure road reach.
@@ -10489,38 +8281,38 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         void deviceDoor.revoke(scopeDeviceId).catch((e: unknown) => console.warn(`the token of thread ${threadWord(threadId)} was not taken away: ${e instanceof Error ? e.message : String(e)}`));
       }
       if (!ended) view.status = status;
-      portRootsMoved(workspaceId);
+      ctx.portRootsMoved(workspaceId);
       view.endedAt ??= Date.now();
-      if (view.status === "failed") endSnoozeFor(view);
+      if (view.status === "failed") ctx.endSnoozeFor(view);
       // A pick this turn did not take landed on the thread's record alone; the row says it from here on, since
       // every client folds the thread's access off the row and the next turn runs at the record's.
       const kept = threadRecords.get(threadId)?.permissionMode;
       if (kept !== undefined) view.permissionMode = kept;
       // The turn is over: its own calls follow nobody now, and nobody waiting behind it is waiting any more.
       calls.clear();
-      leadAsks.delete(threadId);
-      void persistSessions(workspaceId);
+      ctx.leadAsks.delete(threadId);
+      void ctx.persistSessions(workspaceId);
       endWritten = true;
       // Only a turn that ended on its own: a turn this host ended is one whose workspace is going away under it,
       // and the harness's own store for it goes with the machine, so the read would reach a machine that is being
       // taken down and say so in the log for every thread on it.
-      if (!ended) void refreshTitle(view, true);
+      if (!ended) void ctx.refreshTitle(view, true);
       // The turn may have moved the branch or the files, so the tile's line is read again now rather than on a timer,
       // and the pull request with it, since the agent may have pushed.
-      if (!ended) void readCheckout(entry, true).then(() => readPullRequest(entry, true)).then(() => readLeadOf(entry));
+      if (!ended) void ctx.readCheckout(entry, true).then(() => ctx.readPullRequest(entry, true)).then(() => ctx.readLeadOf(entry));
       // A tree whose root's pull request has settled settles again as its last turn ends: merged stays merged, and a
       // send into the tree is what took it off the fold.
       if (!ended) {
-        const rootOn = view.rootThreadId === undefined ? entry : live.get(latestOn(view.rootThreadId)?.workspaceId ?? "");
-        if (rootOn !== undefined && rootOn.record.pr !== undefined && rootOn.record.pr.state !== "open") void settleTree(rootOn);
+        const rootOn = view.rootThreadId === undefined ? entry : live.get(ctx.latestOn(view.rootThreadId)?.workspaceId ?? "");
+        if (rootOn !== undefined && rootOn.record.pr !== undefined && rootOn.record.pr.state !== "open") void ctx.settleTree(rootOn);
       }
-      if (t.imagesDir !== undefined) dropImages(entry, t.imagesDir);
+      if (t.imagesDir !== undefined) ctx.dropImages(entry, t.imagesDir);
     };
     // The reload a client runs on session.end shares that read rather than starting a second.
     started.finished.then(
       result => {
         settled(result.status);
-        if (!ended && result.status === "completed") void takeReview(entry, threadId, result.text ?? "").catch((e: unknown) => console.warn(`the review in ${entry.record.name} was not read: ${e instanceof Error ? e.message : String(e)}`));
+        if (!ended && result.status === "completed") void ctx.takeReview(entry, threadId, result.text ?? "").catch((e: unknown) => console.warn(`the review in ${entry.record.name} was not read: ${e instanceof Error ? e.message : String(e)}`));
       },
       () => settled("failed"),
     );
@@ -10536,8 +8328,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (entry.record.phase !== "running") return;
     // Nothing can be asked about a machine held by a stand-in, so nothing is: a computer that is away and a host
     // started without its provider key both leave the runs where they are rather than saying so at every start.
-    if (isHeldAway(entry.record.id)) return;
-    const sweep = execFactoryFor(entry).sweep;
+    if (ctx.isHeldAway(entry.record.id)) return;
+    const sweep = ctx.execFactoryFor(entry).sweep;
     if (sweep === undefined) return;
     // Every running row's run and not this workspace's alone: the workspaces on one computer share its run folder,
     // so a sweep that kept only its own would end the turns of the others.
@@ -10552,12 +8344,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (swept.length > 0) console.warn(sweptRunsLogLine(entry.record.id, swept));
   };
 
-  /** What re-opening a turn the store left running came to. `attached` is a reader on the run again and the thread
-   * goes on; `gone` is the machine's own answer that it no longer holds the run, the one answer that ends the turn;
-   * `unreached` is a machine that said nothing for the whole reach window, which says nothing about the run, so the
-   * row is left running for the poll that watches machines to settle if the machine really is away; `cannot` is a
-   * run this host has no road to at all, and the row reads as a turn the restart cut. */
-  type Reopened = "attached" | "gone" | "unreached" | "cannot";
 
   /** A turn the store left running, re-opened where it runs. The machine still holds the run and its whole output,
    * so the events this host missed reach it as the run's own lines and the thread goes on running to its reply.
@@ -10577,7 +8363,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // As on the start road: the re-opened stream reads this while the turn it attached to is stopped on a question.
     const waiting = { on: false };
     try {
-      adapter = adapterFor(entry, view.harness, undefined, () => waiting.on).adapter;
+      adapter = ctx.adapterFor(entry, view.harness, undefined, () => waiting.on).adapter;
     } catch (e: unknown) {
       return cannot(e instanceof Error ? e.message : String(e));
     }
@@ -10609,7 +8395,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // that did not read says nothing about the run, so the row is left running as it was.
     let written: SessionEvent[];
     try {
-      written = await openTranscript(view.workspaceId);
+      written = await ctx.openTranscript(view.workspaceId);
     } catch (e: unknown) {
       console.warn(`thread ${threadId.slice(0, 8)} on ${view.workspaceId} was left running: ${e instanceof Error ? e.message : String(e)}`);
       return "unreached";
@@ -10649,25 +8435,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return "attached";
   };
+  return { runTurn, sweepRuns, reattach };
+}
 
+function sessionsArea(ctx: RuntimeContext): SessionsArea {
+  const {
+    opts, store, bus, clock, deviceDoor, threadLaunch, live, setups, threadRecords, sessions, transcriptIndex,
+  } = ctx;
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, opened, origin) {
-      await ready();
-      const prefs = preferencesHeld ?? (await preferences.get());
+      await ctx.ready();
+      const prefs = ctx.state.preferencesHeld ?? (await ctx.preferences.get());
       // A start is known by its request id, so one sent again after the host stopped under it is the same message:
       // the host that took it answers with the turn it opened or joined, on a thread the caller reaches, and starts
       // nothing. The one rule every client's road back reads, so a restart neither drops a message nor runs it twice.
       const taken = opened.requestId === undefined ? undefined : transcriptIndex.get(workspaceId)?.taken.get(opened.requestId);
-      if (taken !== undefined && (await entryOfRow({ threadId: taken.threadId, workspaceId }, origin)) !== undefined) {
-        const answered = await takenTurn(workspaceId, taken);
+      if (taken !== undefined && (await ctx.entryOfRow({ threadId: taken.threadId, workspaceId }, origin)) !== undefined) {
+        const answered = await ctx.takenTurn(workspaceId, taken);
         if (answered !== undefined) return answered;
       }
       // The thread this start lands in is read before the workspace is: a send into a thread of the caller's tree
       // reaches it on whatever workspace it runs, and only a start that opens a thread is a workspace act.
       // A thread whose rows fell off the index cap, or whose index is gone, is still the thread its record or its
       // transcript says it is.
-      const named = opened.thread === undefined ? undefined : latestOn(opened.thread);
-      const fromTranscript = opened.thread === undefined ? undefined : startedAs(workspaceId, opened.thread);
+      const named = opened.thread === undefined ? undefined : ctx.latestOn(opened.thread);
+      const fromTranscript = opened.thread === undefined ? undefined : ctx.startedAs(workspaceId, opened.thread);
       const heldOn = opened.thread === undefined ? undefined : (named?.workspaceId ?? threadRecords.get(opened.thread)?.workspaceId ?? (fromTranscript !== undefined ? workspaceId : undefined));
       if (opened.thread !== undefined && heldOn !== workspaceId) throw new Error(`no thread ${opened.thread} on this workspace`);
       // Read again where the thread becomes this send's to run: the id it must resume may not exist yet.
@@ -10676,78 +8468,78 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A message into a thread that already has turns is a send; anything else opens one, and only one of those
       // two is what a thread's own token is capped on. Read before the machine is asked for anything. The thread's
       // record answers before its rows, since the rows are capped and the record is not.
-      const opens = !threadRecords.has(threadId) && rowsOn(threadId).length === 0;
+      const opens = !threadRecords.has(threadId) && ctx.rowsOn(threadId).length === 0;
       // A send goes into a thread the caller drives, read on the thread it lands in.
       const opening = live.get(workspaceId)?.record;
-      const reached = opens ? await entryOf(workspaceId, opening !== undefined && opensIn(opening, scopeOf(origin)) ? undefined : origin) : await entryOfRow({ threadId, workspaceId }, origin);
+      const reached = opens ? await ctx.entryOf(workspaceId, opening !== undefined && ctx.opensIn(opening, scopeOf(origin)) ? undefined : origin) : await ctx.entryOfRow({ threadId, workspaceId }, origin);
       if (reached === undefined) throw new Error(`no thread ${opened.thread} on this workspace`);
       const entry = reached;
       // A worktree somebody removed by hand reads as gone the moment a thread asks for it, so the turn runs in the
       // project folder rather than in a folder that is not there.
       const worktree = entry.record.worktree;
       const goneNow = worktree !== undefined && worktree.gone !== true && !existsSync(worktree.path) ? worktree.path : undefined;
-      if (goneNow !== undefined) await worktreeGone(entry, "removed", { starting: true });
+      if (goneNow !== undefined) await ctx.worktreeGone(entry, "removed", { starting: true });
       // What a thread already carries decides two of this send's picks, and it is read after the reading above, so
       // a caller that cannot drive the thread learns nothing about it. A thread keeps its agent: the turn runs on
       // the harness its record names, and a request naming another is refused rather than resuming that thread's
       // harness session under an agent that never wrote it. Its access is its own the same way, so a mode named on
       // a send is dropped and sessions.access is the one road that changes what a thread may touch; the access the
       // thread runs at is then read off its record below, as a send that named none has always read it.
-      const carried: Pick<ThreadRecord, "harness"> | undefined = opens ? undefined : (threadRecords.get(threadId) ?? latestOn(threadId));
+      const carried: Pick<ThreadRecord, "harness"> | undefined = opens ? undefined : (threadRecords.get(threadId) ?? ctx.latestOn(threadId));
       if (carried !== undefined && opened.harness !== undefined && opened.harness !== carried.harness) throw new Error(threadRunsOnLine(carried.harness, opened.harness));
       // A start that names no agent runs the project's, else the person's default, else the catalog's first, so the
       // command line, the composer and a tool all open the next thread on the same agent.
       const overrides = prefs.projectDefaults[entry.record.project];
       // A send, a notify or a press that names no model, effort or window runs on the thread's own last picks: a
       // resume that names none runs on the CLI's default rather than the thread's.
-      const own = !opens && opened.model === undefined && opened.effort === undefined && opened.contextWindow === undefined ? ownPicks(workspaceId, threadId) : {};
-      const o = { ...opened, ...(own.contextWindow !== undefined ? { contextWindow: own.contextWindow } : {}), harness: carried?.harness ?? opened.harness ?? defaultAgentOf(prefs, entry) };
+      const own = !opens && opened.model === undefined && opened.effort === undefined && opened.contextWindow === undefined ? ctx.ownPicks(workspaceId, threadId) : {};
+      const o = { ...opened, ...(own.contextWindow !== undefined ? { contextWindow: own.contextWindow } : {}), harness: carried?.harness ?? opened.harness ?? ctx.defaultAgentOf(prefs, entry) };
       if (carried !== undefined) {
         delete o.permissionMode;
         delete o.access;
       }
-      if (agentOff(entry, o.harness)) throw Object.assign(new Error(agentOffLine(agentLabel(o.harness), computerOf(entry))), { kind: "usage" });
-      await confineSetup(entry, o.harness);
+      if (ctx.agentOff(entry, o.harness)) throw Object.assign(new Error(agentOffLine(ctx.agentLabel(o.harness), ctx.computerOf(entry))), { kind: "usage" });
+      await ctx.confineSetup(entry, o.harness);
       const refuse = (): void => {
         const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
         if (refusal !== null) throw new Error(refusal);
       };
       refuse();
       // A blocked computer refuses a new turn but never a message joining one still running there, so a busy thread asks once it frees.
-      let cleared = !threadRuns(threadId);
-      if (cleared) await copyBlocked(entry);
+      let cleared = !ctx.threadRuns(threadId);
+      if (cleared) await ctx.copyBlocked(entry);
       const title = o.title === undefined ? undefined : titleLine(o.title);
       if (title === "") throw new Error(EMPTY_TITLE_LINE);
-      spawnGuard(opens ? "thread_new" : "send", origin);
+      ctx.spawnGuard(opens ? "thread_new" : "send", origin);
       // The tree this thread sits in, written on its first row and read off it by every later turn: a thread a
       // person opened is its own root, and one a thread opened hangs under that thread's root.
       const spawnedBy = opens ? scopeOf(origin) : undefined;
       const tree = opens
-        ? treeOf(spawnedBy)
-        : { ...(parentOf(threadId) !== undefined ? { parentThreadId: parentOf(threadId)! } : {}), ...(rootOf(threadId) !== threadId ? { rootThreadId: rootOf(threadId) } : {}) };
+        ? ctx.treeOf(spawnedBy)
+        : { ...(ctx.parentOf(threadId) !== undefined ? { parentThreadId: ctx.parentOf(threadId)! } : {}), ...(ctx.rootOf(threadId) !== threadId ? { rootThreadId: ctx.rootOf(threadId) } : {}) };
       // me is the caller: the thread this request came out of when its token says it came out of one, and the person
       // when there is no token, which is every road that is not a turn. A target named twice is one target, since a
       // list says who is told and not how often.
       const asked =
         o.notify === undefined
           ? undefined
-          : [...new Set(o.notify.map(target => (target === NOTIFY_ME && o.turnToken !== undefined ? threadOfToken(o.turnToken) : target)))];
+          : [...new Set(o.notify.map(target => (target === NOTIFY_ME && o.turnToken !== undefined ? ctx.threadOfToken(o.turnToken) : target)))];
       // The threads a start may name as targets: the ones the caller drives, every thread of its own tree, so a
       // notify reaches no thread a send could not and the line it delivers is one the caller could have sent by
       // hand. A thread of another tree reads as no thread at all, so a guest cannot tell a foreign thread from
       // none. The one crossing this keeps is the shim's own `--notify me`, which is the caller itself.
       for (const target of asked ?? []) {
         if (target === NOTIFY_ME) continue;
-        const on = latestOn(target);
-        if (on === undefined || !reachesRow(on, origin)) throw new Error(`no thread ${target} to notify`);
+        const on = ctx.latestOn(target);
+        if (on === undefined || !ctx.reachesRow(on, origin)) throw new Error(`no thread ${target} to notify`);
         if (target === threadId) throw new Error("a thread cannot notify itself");
         // Each end would start the next turn on the other thread with no one sending anything, so the chain is
         // walked whole; it is a lead and its builders, so it is short.
-        if (notifyReach(notifyOn(target)?.notify ?? []).has(threadId)) {
+        if (ctx.notifyReach(ctx.notifyOn(target)?.notify ?? []).has(threadId)) {
           throw new Error(`thread ${target.slice(0, 8)} already notifies this thread; a cycle would run forever`);
         }
       }
-      const registered = notifyOn(threadId);
+      const registered = ctx.notifyOn(threadId);
       const notify = asked ?? registered?.notify;
       // Who named these targets, kept beside them: a start out of a thread carries that thread's scope, so the line
       // its end delivers starts the target's turn under it; one the person made carries none and goes as theirs. A
@@ -10769,7 +8561,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // it, and the row the turn opens writes it, so a turn stopped on a question is not read as a quiet one.
       const waiting = { on: false };
       try {
-        built = adapterFor(
+        built = ctx.adapterFor(
           entry,
           o.harness,
           { [TURN_TOKEN_ENV]: turnToken, ...launchEnv },
@@ -10821,7 +8613,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(o.attempt !== undefined ? { attempt: o.attempt } : {}),
         prompt: o.prompt,
         startedAt: Date.now(),
-        ...(title !== undefined ? { harnessTitle: title, titleSource: "person" as const } : carriedTitle(threadId)),
+        ...(title !== undefined ? { harnessTitle: title, titleSource: "person" as const } : ctx.carriedTitle(threadId)),
         ...(resume !== undefined ? { claudeSessionId: resume } : {}),
         ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
       };
@@ -10829,11 +8621,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const launch = new Promise<void>(r => (launched = r));
       let held = false;
       const hold = (): void => {
-        if (held || threadRuns(threadId)) return;
+        if (held || ctx.threadRuns(threadId)) return;
         // The thread is this send's to run, and the session it resumes is the one the thread's latest turn ran as:
         // a send that arrived while that turn was still launching read none, since the harness names its session
         // only after it is up.
-        resume = latestOn(threadId)?.claudeSessionId ?? resume;
+        resume = ctx.latestOn(threadId)?.claudeSessionId ?? resume;
         held = true;
         // The row that says the thread is spoken for also says who its turns tell: a send into the thread reads the
         // opener's notify off its rows, and inside the launch window this is the only one.
@@ -10866,26 +8658,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const table = harnessCatalog(harness);
         // Checked against the binary's own lists, the ones the composer shows for this workspace, with the marks on
         // what the person's defaults resolve to here, which startPicks fills in for anything this start leaves out.
-        const resolved = table === undefined ? undefined : defaultsOn(await catalogOn(table, entry, adapter), prefs, overrides);
+        const resolved = table === undefined ? undefined : ctx.defaultsOn(await ctx.catalogOn(table, entry, adapter), prefs, overrides);
         const catalog = resolved?.catalog;
-        const named = o.permissionMode ?? (o.access === undefined ? undefined : namedMode(catalog, harness, o.access));
+        const named = o.permissionMode ?? (o.access === undefined ? undefined : ctx.namedMode(catalog, harness, o.access));
         // The thread's own access, read against the list in front of us: a mode this harness does not take is a pick
         // that does not apply here, not a send to refuse. An access this send NAMED is still refused, by startPicks.
         const picksFor = (session: string | undefined): StartPicks => {
-          const access = named ?? (catalog === undefined ? undefined : listedPick(catalog.permissionModes, accessOf(workspaceId, threadId, session)));
+          const access = named ?? (catalog === undefined ? undefined : listedPick(catalog.permissionModes, ctx.accessOf(workspaceId, threadId, session)));
           const open = session === undefined ? (resolved?.open ?? {}) : {};
           // The thread's own picks, like its access, only where the lists in front of us still carry them.
           const model = o.model ?? (catalog === undefined || catalog.models.length === 0 ? own.model : listedPick(everyModel(catalog), own.model)) ?? open.model;
           const ownEffort = catalog === undefined || catalog.efforts.length === 0 ? own.effort : listedPick(effortsFor(catalog, modelOf(catalog, model)), own.effort);
           const effort = o.effort ?? ownEffort ?? open.effort;
-          return startPicks(catalog, { ...o, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: access }, session === undefined, session === undefined ? undefined : resumedFact(workspaceId, session, "model"));
+          return startPicks(catalog, { ...o, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: access }, session === undefined, session === undefined ? undefined : ctx.resumedFact(workspaceId, session, "model"));
         };
         // A pick the lists do not carry is refused here, before this send waits on anything; the picks themselves
         // are decided below the loop, against the session this send turns out to resume.
         picksFor(resume);
-        const folder = await threadFolder(entry, o);
+        const folder = await ctx.threadFolder(entry, o);
         if (o.cwd !== undefined && isLocalWorkspace(entry.record) && !existsSync(folder)) throw Object.assign(new Error(noCwdLine(homeShortened(folder, homedir()))), { kind: "usage" });
-        const limitDetails = await limitDetailsDue(entry, harness);
+        const limitDetails = await ctx.limitDetailsDue(entry, harness);
         // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time. Nothing
         // below this loop may await: the wait ends the moment no turn is running, and every line from there to
         // runTurn, which registers this one, is one synchronous run. The images land inside it for that reason, once
@@ -10893,11 +8685,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // the machine and the row this send holds keeps every other send behind it meanwhile. Sends are taken as they
         // reach this loop, which is the order their trips finish and not always the order they arrived.
         for (;;) {
-          const running = runningOn(threadId);
+          const running = ctx.runningOn(threadId);
           if (running === undefined) {
             // A turn of this thread another send is still carrying to the machine has no harness to steer or to wait
             // out yet, so this one waits for the moment it has one or is given up, and looks again.
-            const launching = launchingOn(threadId);
+            const launching = ctx.launchingOn(threadId);
             if (launching !== undefined && launching.turnId !== turnId) {
               if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
               outcome = "queued";
@@ -10908,10 +8700,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             }
             if (!cleared) {
               cleared = true;
-              await copyBlocked(entry);
+              await ctx.copyBlocked(entry);
               continue;
             }
-            const writing = resume === undefined ? undefined : hostWrites.get(resume);
+            const writing = resume === undefined ? undefined : ctx.hostWrites.get(resume);
             if (writing !== undefined) {
               await writing;
               refuse();
@@ -10920,11 +8712,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             hold();
             if (landed) break;
             landed = true;
-            const landing = runsIn(entry, resume === undefined ? undefined : folderOf(workspaceId, resume), folder);
-            ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, landing, turnImagesDir(landing, threadId, o.requestId, minted), (o.attachments ?? []).filter(a => isImage(a.mediaType))));
-            filePaths = await landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, minted), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
+            const landing = ctx.runsIn(entry, resume === undefined ? undefined : ctx.folderOf(workspaceId, resume), folder);
+            ({ images, dir: imagesDir } = await ctx.landImages(entry, adapter.attachments, landing, turnImagesDir(landing, threadId, o.requestId, minted), (o.attachments ?? []).filter(a => isImage(a.mediaType))));
+            filePaths = await ctx.landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, minted), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
             if (filePaths.length > 0) filesFolder = landing;
-            const taken = promptsLate ? snapshotOf(entry, landing) : await snapshotOf(entry, landing);
+            const taken = promptsLate ? ctx.snapshotOf(entry, landing) : await ctx.snapshotOf(entry, landing);
             snapshot = taken === undefined ? undefined : { from: taken, cwd: landing };
             refuse();
             continue;
@@ -10934,7 +8726,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // next turn; nothing here is ever refused for being in the way.
           const steer = running.turnLive?.reply === undefined && adapter.steers ? running.handle.steer : undefined;
           if (steer !== undefined && (await steer(o.prompt)) === "accepted") {
-            recordSteer(running, running.handle.id, o);
+            ctx.recordSteer(running, running.handle.id, o);
             return { ...running.handle, outcome: "steered" };
           }
           if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
@@ -10945,20 +8737,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
         // A thread whose worktree went runs on in the project folder and is told so in its transcript. An agent that
         // keys its sessions to the project carries its session across; any other opens a fresh one there.
-        const ranIn = resume === undefined ? undefined : folderOf(workspaceId, resume);
-        const cwd = runsIn(entry, ranIn, folder);
-        if (o.behind !== undefined) record({ type: "session.behind", workspaceId, sessionId: resume ?? turnId, turnId, threadId, text: o.behind });
+        const ranIn = resume === undefined ? undefined : ctx.folderOf(workspaceId, resume);
+        const cwd = ctx.runsIn(entry, ranIn, folder);
+        if (o.behind !== undefined) ctx.record({ type: "session.behind", workspaceId, sessionId: resume ?? turnId, turnId, threadId, text: o.behind });
         const movedFrom = ranIn ?? goneNow;
         if (movedFrom !== undefined && cwd !== movedFrom && entry.record.worktree?.gone === true) {
           const fresh = ranIn !== undefined && CATALOG_AGENTS.find(a => a.id === harness)?.projectKeyEnv === undefined;
-          record({ type: "session.moved", workspaceId, sessionId: resume ?? turnId, turnId, threadId, from: movedFrom, to: cwd, ...(entry.record.worktree.branch !== undefined ? { branch: entry.record.worktree.branch } : {}), ...(fresh ? { fresh: true as const } : {}) });
+          ctx.record({ type: "session.moved", workspaceId, sessionId: resume ?? turnId, turnId, threadId, from: movedFrom, to: cwd, ...(entry.record.worktree.branch !== undefined ? { branch: entry.record.worktree.branch } : {}), ...(fresh ? { fresh: true as const } : {}) });
           if (fresh) {
             resume = undefined;
             delete view.claudeSessionId;
           }
         }
         const picks = picksFor(resume);
-        const afterCut = resume !== undefined && cutBefore(workspaceId, threadId);
+        const afterCut = resume !== undefined && ctx.cutBefore(workspaceId, threadId);
         // What the trips above settled, onto the row the start wrote: the reads that decide them are behind us, so
         // none of them can be answered from the row they are about. Written before adapter.start, so events that
         // fire synchronously inside start() land on the same view.
@@ -10969,9 +8761,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // What a launch fixes for the life of the agent's process: a turn runs on the thread's kept process only where
         // its own launch would be the same, and a rewind's cut is a launch of its own.
         const launchKey: KeptLaunch | undefined =
-          moduleOf(entry.record.kind).keepsAgents && cutAt === undefined
+          ctx.moduleOf(entry.record.kind).keepsAgents && cutAt === undefined
             ? {
-                fixed: JSON.stringify({ harness, cwd, mcpServers: o.mcpServers, version: catalog?.version, setup: setupPlace(entry) === undefined ? undefined : setups.launchOf(setupPlace(entry)!, harness) }),
+                fixed: JSON.stringify({ harness, cwd, mcpServers: o.mcpServers, version: catalog?.version, setup: ctx.setupPlace(entry) === undefined ? undefined : setups.launchOf(ctx.setupPlace(entry)!, harness) }),
                 // A pick filled in from the thread's own last turn is the one its kept process already runs at, so only
                 // what this send named is held against the process; the fill stands for a cold launch.
                 picks: Object.fromEntries(
@@ -10981,12 +8773,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                 ),
               }
             : undefined;
-        const kept = takeKept(threadId, launchKey, resume);
+        const kept = ctx.takeKept(threadId, launchKey, resume);
         // The kept process carries the token and the device its first turn was launched with; this send's go unused.
         if (kept !== undefined) dropScope();
         const promptAfter = promptsLate && snapshot?.from instanceof Promise ? snapshot.from.then(() => {}) : undefined;
         keptTaken = kept;
-        const handle = runTurn({
+        const handle = ctx.runTurn({
           entry,
           view,
           threadId,
@@ -11026,12 +8818,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(launchKey !== undefined ? { keep: true as const } : {}),
               ...(catalog?.source === "harness" && catalog.version !== null ? { version: catalog.version } : {}),
               // The thread's earlier turns as its transcript holds them, this one left out since its message follows.
-              ...(resume !== undefined ? { seed: async () => threadSeed(threadMessages((await openTranscript(workspaceId)).filter(e => e.turnId !== turnId), threadId)) } : {}),
+              ...(resume !== undefined ? { seed: async () => threadSeed(threadMessages((await ctx.openTranscript(workspaceId)).filter(e => e.turnId !== turnId), threadId)) } : {}),
               onEvent,
             }),
         });
         handedOver = true;
-        void keepSentImages(workspaceId, threadId, o.requestId, o.attachments ?? []);
+        void ctx.keepSentImages(workspaceId, threadId, o.requestId, o.attachments ?? []);
         // The thread's record, written at its first turn from what that turn runs at, once the turn is under way so a
         // launch that never opened leaves none; a thread from before the record existed gets one here too, off what
         // its rows said this turn runs at, so it is read the one way from now on. Persisted with the row as the turn
@@ -11041,7 +8833,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (filesFolder !== undefined && !(thread.filesIn ?? []).includes(filesFolder)) threadRecords.set(threadId, { ...thread, filesIn: [...(thread.filesIn ?? []), filesFolder] });
         launched();
         // The turn is running; what the record failed to remember must not read as a start that failed.
-        if (resume === undefined) await rememberTarget(entry.record).catch((e: unknown) => console.warn(`last target for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
+        if (resume === undefined) await ctx.rememberTarget(entry.record).catch((e: unknown) => console.warn(`last target for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
         return handle;
       } catch (e: unknown) {
         failure = e instanceof Error ? e.message : String(e);
@@ -11059,50 +8851,50 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // rows, which is what the reply, the read and the wait itself all come off. Nothing goes out where the
             // road out named no reason, which is the message the thread's running turn took instead, nor where the
             // thread is still working: the turn that is running is the one a wait here is waiting on.
-            if (failure !== undefined && !threadRuns(threadId)) {
+            if (failure !== undefined && !ctx.threadRuns(threadId)) {
               bus.emit({ type: "session.end", workspaceId, sessionId: view.id, turnId, threadId, exitCode: null, sawResult: false, reason: failure, at: Date.now() });
             }
           }
           // After the row is gone and its end is out, so a send that waited on it finds the thread as it now is.
           launched();
         }
-        if (!handedOver && imagesDir !== undefined) dropImages(entry, imagesDir);
+        if (!handedOver && imagesDir !== undefined) ctx.dropImages(entry, imagesDir);
         // A kept process taken for a turn that never opened on it holds the thread's token with nobody to answer for it.
-        if (!handedOver && keptTaken !== undefined) endKept(threadId, keptTaken);
+        if (!handedOver && keptTaken !== undefined) ctx.endKept(threadId, keptTaken);
       }
     },
 
     async list(workspaceId, origin) {
-      await ready();
+      await ctx.ready();
       // A listing that names a workspace refuses like any other verb naming one, unless a thread of the caller's
       // tree stands there; a listing of them all leaves out the rows the caller may not reach, as workspaces.list
       // leaves out the workspaces.
-      if (workspaceId !== undefined && !treeStandsOn(workspaceId, origin)) refuseNamed(workspaceId, origin);
-      const all = [...sessions.values()].filter(s => reachesRow(s.view, origin));
+      if (workspaceId !== undefined && !ctx.treeStandsOn(workspaceId, origin)) ctx.refuseNamed(workspaceId, origin);
+      const all = [...sessions.values()].filter(s => ctx.reachesRow(s.view, origin));
       const held = workspaceId === undefined ? all : all.filter(s => s.view.workspaceId === workspaceId);
       const rows = held.map(s => s.view);
       // A refresh is where a rename made inside the harness reaches us: nothing on this side changed. A row that
       // already carries a title is answered from the index and its read goes out unawaited, so a wedged guest
       // costs the listing nothing and the rename lands on the next refresh, which is the window the TTL promises.
       // A row with none blocks, so a thread is titled on the first listing that sees it.
-      const asked = titleRows(rows).map(view => ({ first: view.harnessTitle === undefined, done: refreshTitle(view, false) }));
+      const asked = ctx.titleRows(rows).map(view => ({ first: view.harnessTitle === undefined, done: ctx.refreshTitle(view, false) }));
       await Promise.all(asked.filter(a => a.first).map(a => a.done));
-      return listedRows(held);
+      return ctx.listedRows(held);
     },
 
     async history(workspaceId, origin) {
-      await ready();
+      await ctx.ready();
       // A thread reads the transcript of a workspace its tree stands on, its lead's included, and of its own tree's
       // workspaces; any other it names reads as every workspace verb reads it, so it learns nothing by asking.
-      if (!treeStandsOn(workspaceId, origin)) await entryOf(workspaceId, origin);
-      return (await openTranscript(workspaceId)).filter(e => drivesThread(e.threadId, origin)).map(e => ({ ...e }));
+      if (!ctx.treeStandsOn(workspaceId, origin)) await ctx.entryOf(workspaceId, origin);
+      return (await ctx.openTranscript(workspaceId)).filter(e => ctx.drivesThread(e.threadId, origin)).map(e => ({ ...e }));
     },
 
     async page(workspaceId, window, origin) {
-      await ready();
-      if (!treeStandsOn(workspaceId, origin)) await entryOf(workspaceId, origin);
-      if (!drivesThread(window.threadId, origin)) return { events: [], pos: transcriptIndex.get(workspaceId)?.pos ?? 0, total: 0 };
-      return transcriptReader.read(workspaceId, window.threadId, {
+      await ctx.ready();
+      if (!ctx.treeStandsOn(workspaceId, origin)) await ctx.entryOf(workspaceId, origin);
+      if (!ctx.drivesThread(window.threadId, origin)) return { events: [], pos: transcriptIndex.get(workspaceId)?.pos ?? 0, total: 0 };
+      return ctx.transcriptReader.read(workspaceId, window.threadId, {
         ...(window.before !== undefined ? { before: window.before } : {}),
         limit: window.limit ?? HISTORY_PAGE_EVENTS,
         bytes: HISTORY_PAGE_BYTES,
@@ -11110,36 +8902,36 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async head(threadId, origin) {
-      await ready();
-      const facts = threadFacts(threadId);
-      if (facts === undefined || (await entryOfRow({ threadId: facts.threadId ?? threadId, workspaceId: facts.workspaceId }, origin)) === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
+      await ctx.ready();
+      const facts = ctx.threadFacts(threadId);
+      if (facts === undefined || (await ctx.entryOfRow({ threadId: facts.threadId ?? threadId, workspaceId: facts.workspaceId }, origin)) === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       // The events take what the facts leave of the head's bytes, less the reply's own keys and numbers.
       const room = HEAD_BYTES - Buffer.byteLength(JSON.stringify(facts)) - 100;
-      return { facts, ...(await transcriptReader.read(facts.workspaceId, facts.threadId ?? threadId, { limit: Infinity, bytes: room, strict: true, shape: headShape })) };
+      return { facts, ...(await ctx.transcriptReader.read(facts.workspaceId, facts.threadId ?? threadId, { limit: Infinity, bytes: room, strict: true, shape: headShape })) };
     },
 
     async attachment(workspaceId, threadId, requestId, index, origin) {
-      await ready();
-      if (!treeStandsOn(workspaceId, origin)) await entryOf(workspaceId, origin);
-      await keptWrites.get(workspaceId);
+      await ctx.ready();
+      if (!ctx.treeStandsOn(workspaceId, origin)) await ctx.entryOf(workspaceId, origin);
+      await ctx.keptWrites.get(workspaceId);
       const key = attachmentKey(threadId, requestId, index);
-      const held = key === undefined || !drivesThread(threadId, origin) ? undefined : ((await store.get(ATTACHMENT_KEYS, workspaceId)) as KeptImages | undefined)?.threads[threadId]?.find(k => k.key === key);
+      const held = key === undefined || !ctx.drivesThread(threadId, origin) ? undefined : ((await store.get(ATTACHMENT_KEYS, workspaceId)) as KeptImages | undefined)?.threads[threadId]?.find(k => k.key === key);
       const bytes = held === undefined ? undefined : await store.getBlob(ATTACHMENTS, held.key);
       if (held === undefined || bytes === undefined) throw notFoundRefusal(`no image ${index + 1} kept on that message`);
       return { mediaType: held.mediaType, bytes: bytes.toString("base64") };
     },
 
     async interrupt(sessionId, origin, task) {
-      await ready();
+      await ctx.ready();
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
       // One absence for every row a thread cannot reach, wherever it stands: a sentence about the workspace would
       // tell a thread which of the two rules hid the row.
-      if ((await entryOfRow(s.view, origin)) === undefined) return { outcome: "not-found" };
+      if ((await ctx.entryOfRow(s.view, origin)) === undefined) return { outcome: "not-found" };
       // One subagent of the turn, and nothing else: the threads under this one and the turn itself run on.
       if (task !== undefined) {
         if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
-        const agent = agentLabel(s.view.harness);
+        const agent = ctx.agentLabel(s.view.harness);
         if (s.handle.stopTask === undefined) return { outcome: "unsupported", error: taskStopUnsupportedLine(agent) };
         const stopped = await s.handle.stopTask(task);
         if (stopped.outcome === "refused") return { outcome: "refused", error: taskStopRefusedLine(agent, stopped.error) };
@@ -11149,7 +8941,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // first, so nothing under a stopped lead is left working for a thread that is no longer reading. The lead
       // itself may already be over, which is an answer and not a reason to leave its builders running. A child
       // that stops its lead stops its siblings and itself with it, and may never read the answer.
-      const under = s.view.threadId === undefined ? [] : await stopUnder(s.view.threadId, origin);
+      const under = s.view.threadId === undefined ? [] : await ctx.stopUnder(s.view.threadId, origin);
       const answered = (outcome: SessionInterruptOutcome): SessionInterruptResult => ({ outcome, ...(under.length > 0 ? { under } : {}) });
       if (s.view.status !== "running" || s.handle === undefined) return answered("not-running");
       await s.handle.interrupt();
@@ -11159,10 +8951,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async steer(sessionId, o, origin) {
-      await ready();
+      await ctx.ready();
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
-      const entry = await entryOfRow(s.view, origin);
+      const entry = await ctx.entryOfRow(s.view, origin);
       if (entry === undefined) return { outcome: "not-found" };
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
@@ -11170,15 +8962,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (s.handle.steer === undefined) return { outcome: "unsupported" };
       const outcome = await s.handle.steer(o.prompt);
       if (outcome !== "accepted") return { outcome };
-      recordSteer(s, sessionId, o);
+      ctx.recordSteer(s, sessionId, o);
       return { outcome: "accepted" };
     },
 
     async answer(sessionId, o, origin) {
-      await ready();
+      await ctx.ready();
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
-      const entry = await entryOfRow(s.view, origin);
+      const entry = await ctx.entryOfRow(s.view, origin);
       if (entry === undefined) return { outcome: "not-found" };
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
@@ -11187,30 +8979,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async access(sessionId, permissionMode, origin) {
-      await ready();
+      await ctx.ready();
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
-      const entry = await entryOfRow(s.view, origin);
+      const entry = await ctx.entryOfRow(s.view, origin);
       if (entry === undefined) return { outcome: "not-found" };
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
-      const { harness, adapter } = await launchAdapterFor(entry, s.view.harness);
+      const { harness, adapter } = await ctx.launchAdapterFor(entry, s.view.harness);
       const table = harnessCatalog(harness);
       // Checked against the list the picker showed, so a mode this CLI does not take is refused in the same words a
       // start refuses it with rather than travelling to the machine as a request it will not answer.
-      if (table !== undefined) startPicks(await catalogOn(table, entry, adapter), { permissionMode }, false);
+      if (table !== undefined) startPicks(await ctx.catalogOn(table, entry, adapter), { permissionMode }, false);
       // The pick lands on the thread's record whatever the turn running now does with it: this is the one road that
       // changes a thread's access, and the thread's next turn runs at it. The thread's latest row says the same, as
       // every client folds the access off that row; a running turn's row moves where the harness took the pick,
       // and otherwise as the turn ends, so no row says a mode the thread's next turn will not run at.
       const threadId = s.view.threadId;
-      const running = threadId === undefined ? (s.view.status === "running" && s.handle !== undefined ? (s as LiveSession) : undefined) : runningOn(threadId);
-      const latest = threadId === undefined ? s.view : (latestOn(threadId) ?? s.view);
+      const running = threadId === undefined ? (s.view.status === "running" && s.handle !== undefined ? (s as LiveSession) : undefined) : ctx.runningOn(threadId);
+      const latest = threadId === undefined ? s.view : (ctx.latestOn(threadId) ?? s.view);
       const landed = (): void => {
         if (threadId !== undefined) threadRecords.set(threadId, { ...(threadRecords.get(threadId) ?? { workspaceId: s.view.workspaceId, harness: s.view.harness }), permissionMode });
         if (latest.status !== "running") latest.permissionMode = permissionMode;
-        void persistSessions(s.view.workspaceId);
-        pushHead(threadKeyOf(s.view));
+        void ctx.persistSessions(s.view.workspaceId);
+        ctx.pushHead(threadKeyOf(s.view));
       };
       if (latest.status !== "running") {
         landed();
@@ -11226,22 +9018,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async rename(sessionId, title, origin) {
-      await ready();
+      await ctx.ready();
       const named = title.trim();
       if (named === "") throw new Error(EMPTY_TITLE_LINE);
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
       const harnessSessionId = s.view.claudeSessionId;
-      const entry = await entryOfRow(s.view, origin);
+      const entry = await ctx.entryOfRow(s.view, origin);
       if (entry === undefined) return { outcome: "not-found" };
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "rename", entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
-      await copyBlocked(entry);
-      const write = (await launchAdapterFor(entry, s.view.harness)).adapter.renameSession;
+      await ctx.copyBlocked(entry);
+      const write = (await ctx.launchAdapterFor(entry, s.view.harness)).adapter.renameSession;
       if (write === undefined) return { outcome: "unsupported" };
       // The store is keyed by the harness's own id, so a thread whose harness never announced one has nothing to name.
       if (harnessSessionId === undefined) return { outcome: "no-session" };
-      const wrote = await writeSession(harnessSessionId, () => write(harnessSessionId, named, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)));
+      const wrote = await ctx.writeSession(harnessSessionId, () => write(harnessSessionId, named, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)));
       // A store that refused the write says nothing about which sessions it has, so its own line travels as the answer.
       if (wrote.kind === "failed") return { outcome: "failed", error: wrote.error };
       if (wrote.kind === "no-session") return { outcome: "no-session" };
@@ -11253,23 +9045,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           row.view.titleSource = "person";
         }
       }
-      await persistSessions(entry.record.id);
-      pushHead(threadKeyOf(s.view));
+      await ctx.persistSessions(entry.record.id);
+      ctx.pushHead(threadKeyOf(s.view));
       return { outcome: "renamed" };
     },
 
     async read(threadId, origin) {
-      await mark([threadId], { readAt: clock.now() }, origin);
+      await ctx.mark([threadId], { readAt: clock.now() }, origin);
     },
 
     async settle(threadIds, origin) {
       const at = clock.now();
-      await mark(threadIds, { readAt: at, settledAt: at }, origin);
+      await ctx.mark(threadIds, { readAt: at, settledAt: at }, origin);
     },
 
     async mark(threadIds, marks, origin) {
       const at = clock.now();
-      await mark(
+      await ctx.mark(
         threadIds,
         {
           ...(marks.pinned !== undefined ? { pinnedAt: marks.pinned ? at : undefined } : {}),
@@ -11281,19 +9073,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async restore(threadIds, origin) {
-      await mark(threadIds, { readAt: clock.now(), settledAt: undefined }, origin);
+      await ctx.mark(threadIds, { readAt: clock.now(), settledAt: undefined }, origin);
     },
 
     async search(query, origin) {
-      await ready();
+      await ctx.ready();
       const words = query.trim().toLowerCase();
       if (words === "") return { hits: [] };
       const found: { hit: SessionSearchResult["hits"][number]; last: number }[] = [];
       for (const [workspaceId, index] of transcriptIndex) {
         // The workspaces a caller reads the transcript of, by the rule history reads them by.
-        if (!treeStandsOn(workspaceId, origin) && !(await entryOf(workspaceId, origin).then(() => true, () => false))) continue;
+        if (!ctx.treeStandsOn(workspaceId, origin) && !(await ctx.entryOf(workspaceId, origin).then(() => true, () => false))) continue;
         for (const [threadId, { lines, last }] of index.words) {
-          if (lines.length === 0 || !drivesThread(threadId, origin)) continue;
+          if (lines.length === 0 || !ctx.drivesThread(threadId, origin)) continue;
           // The snippet stays inside the one message that holds the words, so it never runs one message into the next.
           const text = lines.find(line => line.toLowerCase().includes(words));
           if (text !== undefined) found.push({ hit: { workspaceId, threadId, snippet: snippetAround(text, text.toLowerCase().indexOf(words), words.length) }, last });
@@ -11303,17 +9095,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async aside(sessionId, question, origin) {
-      await ready();
+      await ctx.ready();
       if (question.trim() === "") throw new Error(BLANK_ASIDE_LINE);
       const s = sessions.get(sessionId);
       if (!s) throw notFoundRefusal(`no session ${sessionId}`);
-      const entry = await entryOfRow(s.view, origin);
+      const entry = await ctx.entryOfRow(s.view, origin);
       if (entry === undefined) throw notFoundRefusal(`no session ${sessionId}`);
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
-      const latest = s.view.threadId === undefined ? s.view : (latestOn(s.view.threadId) ?? s.view);
+      const latest = s.view.threadId === undefined ? s.view : (ctx.latestOn(s.view.threadId) ?? s.view);
       const servers = serverValuesOf(opts.vault?.() ?? {});
-      const { harness, adapter: bare } = await launchAdapterFor(entry, latest.harness, undefined, undefined, servers);
+      const { harness, adapter: bare } = await ctx.launchAdapterFor(entry, latest.harness, undefined, undefined, servers);
       if (bare.aside === undefined) throw new Error(asideUnsupportedLine(harness));
       if (latest.claudeSessionId === undefined) throw new Error(ASIDE_NO_SESSION_LINE);
       const ask = { session: latest.claudeSessionId, question, ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}), ...(latest.model !== undefined ? { model: latest.model } : {}) };
@@ -11322,9 +9114,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // with, since a harness resuming a session that announced a server it no longer has tells the model so, and the
       // answer opens on it. The harness keeps every tool off; the token goes back the moment the answer is in.
       const threadId = threadKeyOf(latest);
-      const { scoped, env: launchEnv, wsp } = await threadLaunch(entry, threadId, rootOf(threadId), { aside: true });
+      const { scoped, env: launchEnv, wsp } = await threadLaunch(entry, threadId, ctx.rootOf(threadId), { aside: true });
       try {
-        const { adapter } = adapterFor(entry, harness, launchEnv, undefined, servers);
+        const { adapter } = ctx.adapterFor(entry, harness, launchEnv, undefined, servers);
         if (adapter.aside === undefined) throw new Error(asideUnsupportedLine(harness));
         return { text: (await adapter.aside({ ...ask, ...(wsp !== undefined ? { mcpServers: { [MCP_SERVER_NAME]: wsp } } : {}) })).text };
       } finally {
@@ -11333,18 +9125,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async run(step, origin) {
-      await ready();
+      await ctx.ready();
       if (scopeOf(origin) !== undefined) throw new Error(RUN_PERSONS_LINE);
       const rows = [...sessions.values()].filter(s => s.view.threadId === step.threadId);
       const workspaceId = rows[0]?.view.workspaceId ?? threadRecords.get(step.threadId)?.workspaceId;
       if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(step.threadId)}`);
-      const entry = await entryOfRow({ threadId: step.threadId, workspaceId }, origin);
+      const entry = await ctx.entryOfRow({ threadId: step.threadId, workspaceId }, origin);
       if (entry === undefined) throw notFoundRefusal(`no thread ${threadWord(step.threadId)}`);
       // Read off the transcript rather than kept beside it, so an ending recorded before a restart still holds.
-      for (const e of await openTranscript(workspaceId)) {
+      for (const e of await ctx.openTranscript(workspaceId)) {
         if (e.type === "session.run" && e.runId === step.runId && e.state !== "running") return { ...e };
       }
-      const latest = latestOn(step.threadId);
+      const latest = ctx.latestOn(step.threadId);
       const event: SessionRunEvent = {
         type: "session.run",
         workspaceId,
@@ -11360,24 +9152,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(step.signal !== undefined ? { signal: step.signal } : {}),
         ...(step.output !== undefined ? { output: runOutputTail(step.output) } : {}),
       };
-      record(event);
+      ctx.record(event);
       return { ...event, at: Date.now() };
     },
 
     async rewind(threadId, opts, origin) {
-      await ready();
+      await ctx.ready();
       const rows = [...sessions.values()].filter(s => s.view.threadId === threadId);
       const held = threadRecords.get(threadId);
       const workspaceId = rows[0]?.view.workspaceId ?? held?.workspaceId;
       if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
-      const entry = await entryOfRow({ threadId, workspaceId }, origin);
+      const entry = await ctx.entryOfRow({ threadId, workspaceId }, origin);
       if (entry === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       const conflict = (line: string): Error => Object.assign(new Error(line), { kind: "conflict" });
       // Every refusal comes before anything is written: nothing below this block moves a file or a row.
       if (rows.some(r => r.view.status === "running")) throw conflict(REWIND_WORKING_LINE);
       // A kept agent holds the conversation as it stood before the cut in its own memory.
-      reapKept(threadId);
-      const tree = treeUnder(threadId);
+      ctx.reapKept(threadId);
+      const tree = ctx.treeUnder(threadId);
       const under = foldThreads([...sessions.values()].map(s => s.view).filter(v => v.threadId !== undefined && tree.includes(v.threadId)));
       const running = under.filter(t => t.status === "running");
       if (running.length > 0) throw conflict(rewindChildrenLine(running.map(t => t.title)));
@@ -11386,11 +9178,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const beside = foldThreads([...sessions.values()].map(s => s.view).filter(v => v.workspaceId === workspaceId && v.threadId !== undefined && v.threadId !== threadId)).find(t => t.status === "running");
         if (beside !== undefined) throw conflict(rewindBesideLine(beside.title));
       };
-      const cwd = checkoutOf(entry.record);
-      const restore = (checkpoint: string) => queued(entry.record.id, () => withDaemon(entry, ask => ask({ op: "git.restore", cwd, checkpoint, scope: entry.record.id })));
+      const cwd = ctx.checkoutOf(entry.record);
+      const restore = (checkpoint: string) => ctx.queued(entry.record.id, () => ctx.withDaemon(entry, ask => ask({ op: "git.restore", cwd, checkpoint, scope: entry.record.id })));
       const done = async (): Promise<void> => {
-        await persistSessions(workspaceId);
-        await flushTranscript(workspaceId);
+        await ctx.persistSessions(workspaceId);
+        await ctx.flushTranscript(workspaceId);
         bus.emit({ type: "thread.rewound", workspaceId, threadId });
       };
 
@@ -11406,7 +9198,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
 
       // A copy, read for the turns and their checkpoints alone: the cut below takes its own copy inside the queue.
-      const events = [...(await openTranscript(workspaceId))];
+      const events = [...(await ctx.openTranscript(workspaceId))];
       const order: string[] = [];
       for (const e of events) if (e.threadId === threadId && e.turnId !== undefined && !order.includes(e.turnId)) order.push(e.turnId);
       const at = opts.turnId === undefined ? -1 : order.indexOf(opts.turnId);
@@ -11421,8 +9213,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         return undefined;
       };
       const kept = keptOf(order[at]!);
-      const latest = latestOn(threadId) ?? rows[0]?.view;
-      const { harness, adapter } = await launchAdapterFor(entry, latest?.harness ?? held?.harness);
+      const latest = ctx.latestOn(threadId) ?? rows[0]?.view;
+      const { harness, adapter } = await ctx.launchAdapterFor(entry, latest?.harness ?? held?.harness);
       const agent = harnessCatalog(harness)?.label ?? harness;
       let files = opts.files === true;
       if (files && kept?.ref === undefined) throw conflict(REWIND_NO_CHECKPOINT_LINE);
@@ -11474,69 +9266,73 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await done();
         throw conflict(rewindKeptLine(keptWhy, before !== undefined));
       }
-      if (cutsConversation) await dropFromTranscript(workspaceId, e => e.threadId === threadId && cut.includes(e.turnId ?? ""));
-      await slates.rewound({ threadId, turnId: order[at]!, cut });
+      if (cutsConversation) await ctx.dropFromTranscript(workspaceId, e => e.threadId === threadId && cut.includes(e.turnId ?? ""));
+      await ctx.slates.rewound({ threadId, turnId: order[at]!, cut });
       await done();
       return { turns: cutsConversation ? cut.length : 0, ...(moved !== undefined ? { files: Number(moved["files"] ?? 0) } : {}), ...(shared ? { kept: REWIND_SHARED_LINE } : {}) };
     },
 
     async delete(threadId, origin) {
-      await ready();
-      spawnGuard("delete", origin);
+      await ctx.ready();
+      ctx.spawnGuard("delete", origin);
       const workspaceId = [...sessions.values()].find(s => s.view.threadId === threadId)?.view.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
       if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
-      const entry = await entryOfRow({ threadId, workspaceId }, origin);
+      const entry = await ctx.entryOfRow({ threadId, workspaceId }, origin);
       if (entry === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       if (!copiesFolder(entry.record.kind)) throw Object.assign(new Error(threadOnMachineLine(entry.record.name)), { kind: "usage" });
       const tree = entry.record.worktree;
       if (tree?.made === true && tree.gone !== true) {
         // Every thread in it goes with the worktree, so none may be working, and none can land a checkpoint after
         // its refs were dropped.
-        if (turnRuns(workspaceId)) throw Object.assign(new Error(WORKTREE_BUSY_LINE), { kind: "conflict" });
+        if (ctx.turnRuns(workspaceId)) throw Object.assign(new Error(WORKTREE_BUSY_LINE), { kind: "conflict" });
         const threads = new Set([...sessions.values()].flatMap(s => (s.view.workspaceId === workspaceId && s.view.threadId !== undefined ? [s.view.threadId] : [])));
-        await workspaces.delete(workspaceId, origin);
+        await ctx.workspaces.delete(workspaceId, origin);
         return { workspaceId, worktree: tree.path, threads: threads.size };
       }
-      if (threadRuns(threadId)) throw Object.assign(new Error(THREAD_WORKING_LINE), { kind: "conflict" });
-      reapKept(threadId);
-      await openTranscript(workspaceId);
-      await dropCheckpoints(entry, threadId);
-      await dropThreadFiles(entry, [threadId]);
-      await dropSentImages(workspaceId, [threadId]);
+      if (ctx.threadRuns(threadId)) throw Object.assign(new Error(THREAD_WORKING_LINE), { kind: "conflict" });
+      ctx.reapKept(threadId);
+      await ctx.openTranscript(workspaceId);
+      await ctx.dropCheckpoints(entry, threadId);
+      await ctx.dropThreadFiles(entry, [threadId]);
+      await ctx.dropSentImages(workspaceId, [threadId]);
       for (const [id, s] of [...sessions]) if (s.view.threadId === threadId) sessions.delete(id);
       threadRecords.delete(threadId);
-      await dropFromTranscript(workspaceId, e => e.threadId === threadId);
-      await persistSessions(workspaceId);
-      await slates.forget(threadId);
+      await ctx.dropFromTranscript(workspaceId, e => e.threadId === threadId);
+      await ctx.persistSessions(workspaceId);
+      await ctx.slates.forget(threadId);
       return { workspaceId, threads: 1 };
     },
 
     async forget(threadId, origin) {
-      await ready();
+      await ctx.ready();
       const held = [...sessions].filter(([, s]) => s.view.threadId === threadId);
       const record = threadRecords.get(threadId);
       const workspaceId = held[0]?.[1].view.workspaceId ?? record?.workspaceId;
       if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       // The same absence a name nothing holds gets: a sentence of its own would tell a thread of another tree that
       // the thread it named is there, and the refusal past this gate says its turn ran.
-      const entry = await entryOfRow({ threadId, workspaceId }, origin);
+      const entry = await ctx.entryOfRow({ threadId, workspaceId }, origin);
       if (entry === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       // A record is written once a turn was handed over, so a thread with a record and no row left is one whose
       // turns ran and fell off the index cap; the rows alone would read it as a thread that never ran.
       if (threadRan(held.map(([, s]) => s.view)) || (held.length === 0 && record !== undefined)) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
       // A transcript that does not read refuses here, before anything is changed.
-      await openTranscript(workspaceId);
+      await ctx.openTranscript(workspaceId);
       // A launch that never got going can still have landed the files its send carried.
-      await dropThreadFiles(entry, [threadId]);
-      await dropSentImages(workspaceId, [threadId]);
+      await ctx.dropThreadFiles(entry, [threadId]);
+      await ctx.dropSentImages(workspaceId, [threadId]);
       for (const [id] of held) sessions.delete(id);
       threadRecords.delete(threadId);
-      await slates.forget(threadId);
-      await dropFromTranscript(workspaceId, e => e.threadId === threadId);
-      await persistSessions(workspaceId);
+      await ctx.slates.forget(threadId);
+      await ctx.dropFromTranscript(workspaceId, e => e.threadId === threadId);
+      await ctx.persistSessions(workspaceId);
     },
   };
+  return { sessionsApi };
+}
 
+function buildersArea(ctx: RuntimeContext): BuildersArea {
+  const { opts, backend, store, placeDoor, bus, clock, hostId, builders, gone, stageAt, places } = ctx;
   const builderView = (r: BuilderRecord, b: LiveBuilder): GoldenBuilderView => ({
     id: r.id,
     name: r.name,
@@ -11574,7 +9370,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * timers falling due together, or a timer beside a sweep, must not both kill and forget the same builder. */
   const expireGrace = (): Promise<{ reaped: ReapedMachine[]; failed: ReapFailure[] }> => (expiring ??= expireGraceNow().finally(() => (expiring = undefined)));
   const expireGraceNow = async (): Promise<{ reaped: ReapedMachine[]; failed: ReapFailure[] }> => {
-    await refreshBuilders();
+    await ctx.refreshBuilders();
     const reaped: ReapedMachine[] = [];
     const failed: ReapFailure[] = [];
     for (const b of [...builders.values()]) {
@@ -11592,19 +9388,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return { reaped, failed };
   };
-
-  /** Marks the record as this process's, now; the sweep and the heartbeat timer refresh it and close() clears it. */
-  let beat: (() => void) | undefined;
-  let closed = false;
-  /** Set as close() starts, before it shuts the daemon channels a card read still out goes over. */
-  let closing = false;
-  let ticking: Promise<void> | undefined;
   const arm = (): void => {
-    if (closed || beat !== undefined) return;
-    beat = clock.schedule(
+    if (ctx.state.closed || ctx.state.beat !== undefined) return;
+    ctx.state.beat = clock.schedule(
       () => {
-        beat = undefined;
-        ticking = tick();
+        ctx.state.beat = undefined;
+        ctx.state.ticking = tick();
       },
       HEARTBEAT_MS,
       { unref: true },
@@ -11624,9 +9413,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const hold = async (b: LiveBuilder): Promise<void> => {
     // A record forgotten while a heartbeat was in flight must not come back: the write is skipped for a builder no longer live.
     if (builders.get(b.record.id) !== b) return;
-    if (!closed) b.record.heldBy = { host: hostId, pid: process.pid, heartbeat: new Date().toISOString() };
+    if (!ctx.state.closed) b.record.heldBy = { host: hostId, pid: process.pid, heartbeat: new Date().toISOString() };
     await store.put(BUILDERS, b.record.id, b.record);
-    if (!closed) arm();
+    if (!ctx.state.closed) arm();
   };
 
   /** A record wearing another state file's label, or held by another live process, is listed and nothing else;
@@ -11690,7 +9479,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     } catch (e) {
       throw Object.assign(e instanceof Error ? e : new Error(String(e)), { kind: "missing" });
     }
-    if (placeId === undefined) throw conflict(placeBuildsNoImageLine(word));
+    if (placeId === undefined) throw ctx.conflict(placeBuildsNoImageLine(word));
     return { place: placeId, at: await placeDoor.forkingBackend(placeId) };
   };
   /** The backend a fork lands on, gated before any machine is asked for: a joined computer that forks nowhere refuses
@@ -11700,21 +9489,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const at = await forkingAt(placeId);
     if (at !== undefined) return at;
     const running = (await buildPlaces()).map(r => r.name);
-    throw conflict(running.length === 0 ? (opts.noMachinesLine ?? NO_PROVIDER_LINE) : placeForksNothingPickLine(placeName(placeId ?? places.wired), running));
+    throw ctx.conflict(running.length === 0 ? (opts.noMachinesLine ?? NO_PROVIDER_LINE) : placeForksNothingPickLine(placeName(placeId ?? places.wired), running));
   };
   /** The backend a fork on that place would land on, or nothing where it forks nothing, with no refusal worded: the
    * refusal lists the places, and a list read while the records load waits on that load. */
   const forkingAt = async (placeId: string | undefined): Promise<MachineBackend | undefined> => {
     // The first fork on a joined computer is where this host learns what that computer forks with; every road after
     // it reads the answer off the place's record.
-    if (placeId !== undefined) await placeDoorOf().forkingBackend(placeId);
-    const at = backendOfKind("cloud", placeId);
+    if (placeId !== undefined) await ctx.placeDoorOf().forkingBackend(placeId);
+    const at = ctx.backendOfKind("cloud", placeId);
     return forksNoMachines(at.capabilities) ? undefined : at;
   };
   const placeName = (place: string): string => placeDoor?.nameOf(place) ?? place;
   /** Where the image's own seal stands: the place the record names, or the provider this host forks on for a record
    * sealed before places. The manifest there is the one wsp init built and updates. */
-  const imagePlace = async (name: string): Promise<string> => (await recordOf(name))?.place ?? places.wired;
+  const imagePlace = async (name: string): Promise<string> => (await ctx.recordOf(name))?.place ?? places.wired;
   /** Every place an image can be built at: the provider rows that fork, and the joined computers whose daemon runs
    * workspaces, this computer left out since it is never forked into. */
   const buildPlaces = async (): Promise<{ place: string; name: string; backend: MachineBackend }[]> => {
@@ -11748,7 +9537,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return recipe;
   };
 
-  const builderLabels = (extra: Record<string, string> | undefined): Record<string, string> => ({ ...extra, [WSP_LABEL]: "1", [BUILDER_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString() });
+  const builderLabels = (extra: Record<string, string> | undefined): Record<string, string> => ({ ...extra, [WSP_LABEL]: "1", [BUILDER_LABEL]: "1", [OWNER_LABEL]: ctx.state.owner, [CREATED_AT_LABEL]: new Date().toISOString() });
 
   /** The hold begins the moment the machine exists: a held placeholder is on the store before any stage runs, so
    * another process over it (a second host, wspx) never reads this machine as lost. */
@@ -11765,7 +9554,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (stop?.signal?.aborted) return Promise.reject(new PrepareStoppedError());
       // Handed out before the provider is called, so a stop that lands inside the call waits for the machine it returns.
       const creating = Promise.resolve().then(async () => {
-        const machine = observed(await b.create(spec));
+        const machine = ctx.observed(await b.create(spec));
         const asked = { cpu: spec.cpu ?? backend.pricing.defaultSize.cpu, memMb: spec.memMb ?? backend.pricing.defaultSize.memMb };
         const record: BuilderRecord = {
           id: machine.id,
@@ -11869,17 +9658,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const name = entry.record.name;
     // The place this builder was made at, where its seal is filed.
     const place = entry.record.place ?? places.wired;
-    const prior = await copyOf(place, name);
+    const prior = await ctx.copyOf(place, name);
     const at = backendAt(place);
     try {
-      const result = await claiming(`smoke/${entry.record.id}`, b =>
+      const result = await ctx.claiming(`smoke/${entry.record.id}`, b =>
         sealGolden(entry.builder, {
-          backend: observing(b),
+          backend: ctx.observing(b),
           smoke: recipe.smoke,
           ...(recipe.cpu !== undefined ? { cpu: recipe.cpu } : {}),
           ...(recipe.memMb !== undefined ? { memMb: recipe.memMb } : {}),
           ...(recipe.envs !== undefined ? { envs: recipe.envs } : {}),
-          labels: { ...recipe.labels, [WSP_LABEL]: "1", [SMOKE_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString() },
+          labels: { ...recipe.labels, [WSP_LABEL]: "1", [SMOKE_LABEL]: "1", [OWNER_LABEL]: ctx.state.owner, [CREATED_AT_LABEL]: new Date().toISOString() },
           ...(prior !== undefined ? { manifest: prior } : {}),
           onStage: stageOf(name, place, copy !== undefined),
           ...(opts.killConfirm !== undefined ? { killConfirm: opts.killConfirm } : {}),
@@ -11890,14 +9679,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(copy === undefined && recipe.vaultPaths !== undefined ? { vaultPaths: recipe.vaultPaths } : {}),
           keepBuilder: keep,
           name,
-          hostId: imageMark(),
+          hostId: ctx.imageMark(),
         }),
         at,
       );
       const stamped = await recordSeal(place, name, entry, recipe, result, copy);
-      await putCopy(place, name, stamped.manifest);
+      await ctx.putCopy(place, name, stamped.manifest);
       const snapshot = entry.builder.import?.recipe;
-      if (snapshot !== undefined) await putCopyRecipe(place, name, stamped.version.version, snapshot);
+      if (snapshot !== undefined) await ctx.putCopyRecipe(place, name, stamped.version.version, snapshot);
       // The seal stands whatever the mark does: a default that could not be written is a later fork's to ask about.
       if (copy === undefined && name === "default") await placeDoor?.markDefaultIfNone(place).catch((e: unknown) => console.warn(`the default place was not marked at the seal: ${e instanceof Error ? e.message : String(e)}`));
       if (result.builderKept) {
@@ -11932,72 +9721,80 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     await at.deleteSnapshot(v.snapshotId);
   };
+  return {
+    builderView, graceTimers, armGrace, inWindow, expireGrace, hold, refuseUntouchable, forgetBuilder, forgetIfGone,
+    stageOf, backendAt, placeAt, landingBackend, forkingAt, placeName, imagePlace, buildPlaces, copyRecipeOrThrow,
+    recipeOrThrow, builderLabels, recordingCreates, settleBuilder, sealEntry, dropImage,
+  };
+}
 
+function goldenArea(ctx: RuntimeContext): GoldenArea {
+  const { opts, backend, store, placeDoor, clock, builders, preparing, places } = ctx;
   const golden: Runtime["golden"] = {
     async build(o) {
-      await ready();
+      await ctx.ready();
       const { name, ...build } = o;
       const key = name ?? "default";
-      const prior = await copyOf(places.wired, key);
-      const result = await claiming(`golden/${key}`, b =>
+      const prior = await ctx.copyOf(places.wired, key);
+      const result = await ctx.claiming(`golden/${key}`, b =>
         buildGolden({
           ...build,
           backend: b,
           name: key,
-          hostId: imageMark(),
-          labels: { ...build.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString() },
+          hostId: ctx.imageMark(),
+          labels: { ...build.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: ctx.state.owner, [CREATED_AT_LABEL]: new Date().toISOString() },
           ...(prior !== undefined ? { manifest: prior } : {}),
         }),
       );
-      await putCopy(places.wired, key, result.manifest);
+      await ctx.putCopy(places.wired, key, result.manifest);
       return { manifest: result.manifest, version: result.version };
     },
     async get(name) {
-      await ready();
+      await ctx.ready();
       const key = name ?? "default";
-      return copyOf(await imagePlace(key), key);
+      return ctx.copyOf(await ctx.imagePlace(key), key);
     },
 
     async buildPlace(word) {
-      await ready();
+      await ctx.ready();
       const runs = (place: string, at: MachineBackend): { place: string; name: string; backend: MachineBackend } => {
-        const name = placeName(place);
+        const name = ctx.placeName(place);
         if (forksNoMachines(at.capabilities)) throw Object.assign(new PlaceForksNowhereError(`${name} forks no machines, so your image cannot be built there`), { kind: "conflict" });
         return { place, name, backend: at };
       };
       // A rebuild seals over the record, so building it anywhere else would move the image's home.
-      const target = (await recordOf("default")) !== undefined ? await imagePlace("default") : word;
+      const target = (await ctx.recordOf("default")) !== undefined ? await ctx.imagePlace("default") : word;
       if (target !== undefined) {
-        const { place, at } = await placeAt(target);
+        const { place, at } = await ctx.placeAt(target);
         return runs(place, at);
       }
       // The default place first, since it is where every fork that names none lands; where it runs no workspaces, the
       // one other place that does. None at all and more than one are each their own refusal: the run does not guess.
       const marked = (await placeDoor?.defaultPlace()) ?? {};
       try {
-        return marked.placeId === undefined ? runs(places.wired, backendAt(places.wired)) : runs(marked.placeId, await placeDoor!.forkingBackend(marked.placeId));
+        return marked.placeId === undefined ? runs(places.wired, ctx.backendAt(places.wired)) : runs(marked.placeId, await placeDoor!.forkingBackend(marked.placeId));
       } catch (e) {
         // Only a place that runs no workspaces is passed over. A link down or a frame unanswered on the place the
         // person marked is theirs to read, with that place's name in it, never a build sent somewhere else.
         if (!(e instanceof PlaceForksNowhereError)) throw e;
       }
-      const running = await buildPlaces();
-      if (running.length === 0) throw conflict(NO_BUILD_PLACE_LINE);
-      if (running.length > 1) throw conflict(buildPlaceAskLine(running.map(r => r.name)));
+      const running = await ctx.buildPlaces();
+      if (running.length === 0) throw ctx.conflict(NO_BUILD_PLACE_LINE);
+      if (running.length > 1) throw ctx.conflict(buildPlaceAskLine(running.map(r => r.name)));
       return running[0]!;
     },
 
     async prepare(o) {
-      await ready();
-      const recipe = recipeOrThrow(o?.recipe);
+      await ctx.ready();
+      const recipe = ctx.recipeOrThrow(o?.recipe);
       const name = o?.name ?? "default";
       const signal = o?.signal;
       const { deployDaemon, smoke, import: imp, ...size } = recipe;
       void smoke;
       // A seal over a standing record files it where the builder was made, so the image's own build goes to the
       // record's place whatever was asked, and only a copy is built anywhere else.
-      const asked = o?.copy !== true && (await recordOf(name)) !== undefined ? await imagePlace(name) : o?.place;
-      const { place, at } = asked === undefined ? { place: places.wired, at: backendAt(places.wired) } : await placeAt(asked);
+      const asked = o?.copy !== true && (await ctx.recordOf(name)) !== undefined ? await ctx.imagePlace(name) : o?.place;
+      const { place, at } = asked === undefined ? { place: places.wired, at: ctx.backendAt(places.wired) } : await ctx.placeAt(asked);
       // Per place as well as per name: a copy building at one place and the image building at another are two
       // prepares of one golden, and neither is the other's to join.
       const preparingKey = copyKey(place, name);
@@ -12006,9 +9803,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (active.hash === imp?.recipeHash) return active.promise;
         throw new Error(`a builder named ${name} is still being prepared for a different recipe; wait for it to finish, then run again`);
       }
-      const stage = stageOf(name, place, o?.copy === true);
-      const run = claiming(`builder/${preparingKey}`, async b => {
-        await refreshBuilders();
+      const stage = ctx.stageOf(name, place, o?.copy === true);
+      const run = ctx.claiming(`builder/${preparingKey}`, async b => {
+        await ctx.refreshBuilders();
         // A builder with a seal still in it carrying the same ticks is attached to instead of
         // booting a second one, whichever process made it; the stages skip on its
         // ledger. A stale, foreign or held record is never reused, and a recipe with no
@@ -12039,7 +9836,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           } catch (e) {
             return new PrepareStoppedError(id, { left: e instanceof Error ? e.message : String(e) });
           }
-          await forgetBuilder(id).catch(warn(`record of builder ${id} not dropped; the machine is gone and the next load drops it`));
+          await ctx.forgetBuilder(id).catch(warn(`record of builder ${id} not dropped; the machine is gone and the next load drops it`));
           return new PrepareStoppedError(id);
         };
         let wake: () => void = () => {};
@@ -12072,7 +9869,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             same.record.import = applied.ledger;
             same.life = "own";
             same.recipe = recipe;
-            await hold(same);
+            await ctx.hold(same);
           } catch (e) {
             if (stopping !== undefined) throw e;
             // Same road as a fresh builder that fails its stages: the machine goes, the person starts over.
@@ -12080,35 +9877,35 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             await killUntilGone(at, same.builder.machine, opts.killConfirm).catch((k: unknown) => {
               detail += `; ${k instanceof Error ? k.message : String(k)}`;
             });
-            await forgetIfGone(same, at);
+            await ctx.forgetIfGone(same, at);
             stage("failed", detail);
             throw e;
           }
           stage("ready");
-          return builderView(same.record, same);
+          return ctx.builderView(same.record, same);
         };
         const fresh = async (): Promise<GoldenBuilderView> => {
           let builder: Builder;
           try {
             builder = await prepareBuilder({
-              backend: recordingCreates(b, name, imp, p => (mine = p), { signal, began: c => (creating = c) }, place),
+              backend: ctx.recordingCreates(b, name, imp, p => (mine = p), { signal, began: c => (creating = c) }, place),
               ...size,
               ...(o?.kind !== undefined ? { kind: o.kind } : {}),
               ...(deployDaemon !== undefined ? { deployDaemon } : {}),
               ...(imp !== undefined ? { import: imp } : {}),
-              labels: builderLabels(recipe.labels),
+              labels: ctx.builderLabels(recipe.labels),
               onStage: stage,
             });
           } catch (e) {
             // prepareBuilder tried to kill the machine on its way out; the placeholder goes only where it is gone. After a stop the record is the stop's.
-            if (mine !== undefined && stopping === undefined) await forgetIfGone(mine, at);
+            if (mine !== undefined && stopping === undefined) await ctx.forgetIfGone(mine, at);
             throw e;
           }
           // A last exec that outran the kill must not leave a finished record for a machine the stop is killing.
           if (stopping !== undefined) throw await stopping;
-          const entry = await settleBuilder(name, builder, mine, place);
+          const entry = await ctx.settleBuilder(name, builder, mine, place);
           entry.recipe = recipe;
-          return builderView(entry.record, entry);
+          return ctx.builderView(entry.record, entry);
         };
         try {
           if (same && imp) {
@@ -12125,49 +9922,49 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async seal(builderId, o) {
-      await ready();
+      await ctx.ready();
       const entry = builders.get(builderId);
       if (!entry) throw new Error(`no such builder: ${builderId}`);
-      refuseUntouchable(entry);
+      ctx.refuseUntouchable(entry);
       // A builder built from a recipe is what an update can land on; a bare one has no recipe to diff.
-      return sealEntry(entry, o?.keepBuilder !== false && entry.record.import?.recipe !== undefined, o?.logins);
+      return ctx.sealEntry(entry, o?.keepBuilder !== false && entry.record.import?.recipe !== undefined, o?.logins);
     },
 
     async recipe(name) {
-      await ready();
+      await ctx.ready();
       const key = name ?? "default";
-      const place = await imagePlace(key);
-      const manifest = await copyOf(place, key);
+      const place = await ctx.imagePlace(key);
+      const manifest = await ctx.copyOf(place, key);
       if (manifest === undefined) return undefined;
-      return copyRecipeOf(place, key, manifest.head);
+      return ctx.copyRecipeOf(place, key, manifest.head);
     },
 
     async upgrade(o) {
-      await ready();
-      const recipe = recipeOrThrow(o.recipe);
+      await ctx.ready();
+      const recipe = ctx.recipeOrThrow(o.recipe);
       const name = o.name ?? "default";
       // The update lands where the image's own seal stands, on that place's backend.
-      const place = await imagePlace(name);
-      const prior = await copyOf(place, name);
+      const place = await ctx.imagePlace(name);
+      const prior = await ctx.copyOf(place, name);
       const head = goldenHead(prior);
       if (head === undefined) throw new Error(`no golden named "${name}" to update; wsp init builds one`);
-      const at = backendAt(place);
-      const stage = stageOf(name, place);
+      const at = ctx.backendAt(place);
+      const stage = ctx.stageOf(name, place);
       // The head's digest, whose pins the rows the delta leaves alone keep on the next version's record.
-      const previousRecipe = await copyRecipeOf(place, name, head.version);
+      const previousRecipe = await ctx.copyRecipeOf(place, name, head.version);
       // Past its window a kept builder is never used, running or not: it is stopped here and the update forks; one
       // the pass could not stop is named so the person knows it still bills. Inside the window, it is suspended for
       // the update's length: the record loses `sealed` and gains `building` before the first exec, so neither the
       // timer nor a sweep stops the machine mid-stage, and a process that dies here leaves a record the next one
       // stops as unfinished; the seal re-arms the window.
-      const swept = await expireGrace();
+      const swept = await ctx.expireGrace();
       for (const f of swept.failed) stage("creating", `an earlier kept builder ${f.id}: ${f.message}`);
-      await refreshBuilders();
-      const kept = [...builders.values()].find(x => (x.life === "own" || x.life === "reusable") && x.record.name === name && (x.record.place ?? places.wired) === place && x.record.sealed?.version === head.version && inWindow(x.record.sealed.at));
+      await ctx.refreshBuilders();
+      const kept = [...builders.values()].find(x => (x.life === "own" || x.life === "reusable") && x.record.name === name && (x.record.place ?? places.wired) === place && x.record.sealed?.version === head.version && ctx.inWindow(x.record.sealed.at));
       let entry: LiveBuilder | undefined;
       if (kept !== undefined) {
-        graceTimers.get(kept.record.id)?.();
-        graceTimers.delete(kept.record.id);
+        ctx.graceTimers.get(kept.record.id)?.();
+        ctx.graceTimers.delete(kept.record.id);
         delete kept.record.sealed;
         kept.record.building = true;
         await store.put(BUILDERS, kept.record.id, kept.record);
@@ -12175,7 +9972,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (!alive) {
           // A machine that does not answer may still bill: it is killed until the provider says gone, then forgotten.
           await killUntilGone(at, kept.builder.machine, opts.killConfirm);
-          await forgetBuilder(kept.record.id);
+          await ctx.forgetBuilder(kept.record.id);
         } else {
           stage("creating", `your builder from v${head.version}, kept since the save`);
           try {
@@ -12187,14 +9984,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // The builder was sealed as the head, so the version it seals next descends from the head's snapshot.
             kept.builder = { ...kept.builder, import: applied.ledger, setupSha, parentSnapshotId: head.snapshotId, retired: o.delta.retiredOnImage };
             kept.life = "own";
-            await hold(kept);
+            await ctx.hold(kept);
           } catch (e) {
             // Same road as a fresh builder that fails its stages: the machine goes, the golden stays as it was.
             let detail = e instanceof Error ? e.message : String(e);
             await killUntilGone(at, kept.builder.machine, opts.killConfirm).catch((k: unknown) => {
               detail += `; ${k instanceof Error ? k.message : String(k)}`;
             });
-            await forgetIfGone(kept, at);
+            await ctx.forgetIfGone(kept, at);
             stage("failed", detail);
             throw e;
           }
@@ -12203,14 +10000,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
       }
       const road = entry !== undefined ? "builder" : "fork";
-      entry ??= await claiming(
+      entry ??= await ctx.claiming(
         `builder/${name}`,
         async b => {
           let placeholder: LiveBuilder | undefined;
           let builder: Builder;
           try {
             builder = await upgradeBuilder({
-              backend: recordingCreates(b, name, o.delta.import, p => (placeholder = p), undefined, place),
+              backend: ctx.recordingCreates(b, name, o.delta.import, p => (placeholder = p), undefined, place),
             head,
             delta: o.delta,
               setup: recipe.setup,
@@ -12218,28 +10015,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(recipe.cpu !== undefined ? { cpu: recipe.cpu } : {}),
               ...(recipe.memMb !== undefined ? { memMb: recipe.memMb } : {}),
               ...(recipe.envs !== undefined ? { envs: recipe.envs } : {}),
-              labels: builderLabels(recipe.labels),
+              labels: ctx.builderLabels(recipe.labels),
               onStage: stage,
             });
           } catch (e) {
             // upgradeBuilder tried the kill on its way out; the placeholder goes only where the machine is gone.
-            if (placeholder !== undefined) await forgetIfGone(placeholder, at);
+            if (placeholder !== undefined) await ctx.forgetIfGone(placeholder, at);
             throw e;
           }
-          return settleBuilder(name, builder, placeholder, place);
+          return ctx.settleBuilder(name, builder, placeholder, place);
         },
         at,
       );
       entry.recipe = recipe;
       // The update keeps the golden's disk, so what was signed in stays signed in: the caller passes the previous
       // version's outcomes, with the rows it re-imported as copies rewritten.
-      const sealed = await sealEntry(entry, true, o.logins);
+      const sealed = await ctx.sealEntry(entry, true, o.logins);
       let manifest = sealed.manifest;
       let previousDropped = false;
       let builderKept = sealed.builderKept;
       // A version with workspaces still on it stays for them: a rebuild boots them from its image, which the provider
       // would delete under a template's forks (they hold no dependency on it).
-      const standing = forkedFrom(head.snapshotId);
+      const standing = ctx.forkedFrom(head.snapshotId);
       if (o.keepPrevious === false) {
         if (standing.length > 0) {
           console.warn(`golden ${name} v${head.version} kept: ${standing.join(", ")} still on it`);
@@ -12247,17 +10044,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // A snapshot with live forks under it cannot be deleted (409 on Solari): the builder forked from it goes
           // first, window or not.
           if (road === "fork" && builderKept) {
-            graceTimers.get(entry.record.id)?.();
-            graceTimers.delete(entry.record.id);
+            ctx.graceTimers.get(entry.record.id)?.();
+            ctx.graceTimers.delete(entry.record.id);
             await killUntilGone(at, entry.builder.machine, opts.killConfirm);
-            await forgetBuilder(entry.record.id);
+            await ctx.forgetBuilder(entry.record.id);
             builderKept = false;
           }
           try {
-            await dropImage(head, at);
+            await ctx.dropImage(head, at);
             manifest = { ...manifest, versions: manifest.versions.filter(v => v.version !== head.version) };
-            await putCopy(place, name, manifest);
-            await dropCopyRecipe(place, name, head.version);
+            await ctx.putCopy(place, name, manifest);
+            await ctx.dropCopyRecipe(place, name, head.version);
             previousDropped = true;
           } catch (e) {
             console.warn(`golden ${name} v${head.version} kept: its snapshot was not deleted (${e instanceof Error ? e.message : String(e)})`);
@@ -12269,24 +10066,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
 
     async builderReach(builderId) {
-      await ready();
+      await ctx.ready();
       const entry = builders.get(builderId);
       if (!entry) throw new Error(`no such builder: ${builderId}`);
-      refuseUntouchable(entry);
+      ctx.refuseUntouchable(entry);
       const reach = await refreshPreviewToken(entry.builder.machine, DAEMON_PORT, entry.reach);
       entry.reach = reach;
-      const daemonToken = await daemonTokenOf(entry.builder.machine);
+      const daemonToken = await ctx.daemonTokenOf(entry.builder.machine);
       return { url: reach.url, expiresAt: reach.expiresAt, ...(daemonToken !== undefined ? { daemonToken } : {}) };
     },
 
     async builders() {
-      await ready();
-      return [...builders.values()].map(b => builderView(b.record, b));
+      await ctx.ready();
+      return [...builders.values()].map(b => ctx.builderView(b.record, b));
     },
 
     async kill(builderId) {
-      await ready();
-      await refreshBuilders();
+      await ctx.ready();
+      await ctx.refreshBuilders();
       const entry = builders.get(builderId);
       // A machine of this setup no builder record claims: a seal's smoke fork whose rollback could not reach the
       // provider. Only this state file's own builder or smoke fork is taken, by the labels the create stamped, so
@@ -12298,27 +10095,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           throw e;
         });
         const labels = machine?.labels;
-        const mine = labels?.[OWNER_LABEL] === owner && (labels[BUILDER_LABEL] === "1" || labels[SMOKE_LABEL] === "1");
+        const mine = labels?.[OWNER_LABEL] === ctx.state.owner && (labels[BUILDER_LABEL] === "1" || labels[SMOKE_LABEL] === "1");
         if (!mine || machine === undefined) throw new Error(`no such builder: ${builderId}`);
         await killUntilGone(backend, machine, opts.killConfirm);
         return;
       }
       // A record its dead holder left mid-setup is stopped here as the sweep would stop it; only seal and reach need finished stages.
-      if (entry.life === "foreign" || entry.life === "held") refuseUntouchable(entry);
+      if (entry.life === "foreign" || entry.life === "held") ctx.refuseUntouchable(entry);
       await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
-      await forgetBuilder(builderId);
+      await ctx.forgetBuilder(builderId);
     },
 
     async storage() {
-      await ready();
+      await ctx.ready();
       if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
-      return snapshotStorage(await backend.listSnapshots(), backend.pricing.snapshotStorage, { hostId: imageMark(), recorded: await recordedImages(), now: clock.now() });
+      return snapshotStorage(await backend.listSnapshots(), backend.pricing.snapshotStorage, { hostId: ctx.imageMark(), recorded: await ctx.recordedImages(), now: clock.now() });
     },
 
     async orphans() {
-      await ready();
+      await ctx.ready();
       if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
-      const read = { hostId: imageMark(), recorded: await recordedImages(), now: clock.now() };
+      const read = { hostId: ctx.imageMark(), recorded: await ctx.recordedImages(), now: clock.now() };
       const rows = await backend.listSnapshots();
       const snapshots = splitByOwner(rows, read);
       const templates = templatesOf(backend);
@@ -12371,11 +10168,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async retention(name) {
-      await ready();
+      await ctx.ready();
       if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
-      const manifest = await copyOf(places.wired, name ?? "default");
+      const manifest = await ctx.copyOf(places.wired, name ?? "default");
       if (manifest === undefined) return undefined;
-      return retentionPlan(manifest, await backend.listSnapshots(), forkedFrom, backend.pricing.snapshotStorage);
+      return retentionPlan(manifest, await backend.listSnapshots(), ctx.forkedFrom, backend.pricing.snapshotStorage);
     },
 
     async prune(name) {
@@ -12386,7 +10183,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (plan === undefined) return { dropped, failed };
       for (const v of plan.drop) {
         try {
-          await dropImage(v);
+          await ctx.dropImage(v);
         } catch (e) {
           // A snapshot the provider already lost is gone either way; its version goes with it.
           if (!isMissing(e)) {
@@ -12394,9 +10191,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             continue;
           }
         }
-        const manifest = (await copyOf(places.wired, key))!;
-        await putCopy(places.wired, key, { ...manifest, versions: manifest.versions.filter(x => x.version !== v.version) });
-        await dropCopyRecipe(places.wired, key, v.version);
+        const manifest = (await ctx.copyOf(places.wired, key))!;
+        await ctx.putCopy(places.wired, key, { ...manifest, versions: manifest.versions.filter(x => x.version !== v.version) });
+        await ctx.dropCopyRecipe(places.wired, key, v.version);
         dropped.push(v);
       }
       return { dropped, failed };
@@ -12405,7 +10202,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async rollback(version, name) {
       const key = name ?? "default";
       const missing = (message: string) => Object.assign(new Error(message), { kind: "missing" });
-      const prior = await copyOf(places.wired, key);
+      const prior = await ctx.copyOf(places.wired, key);
       if (!prior) throw missing(`no golden named "${key}"`);
       let next: GoldenManifest;
       try {
@@ -12413,24 +10210,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       } catch (e) {
         throw missing(e instanceof Error ? e.message : String(e));
       }
-      await putCopy(places.wired, key, next);
+      await ctx.putCopy(places.wired, key, next);
       return next;
     },
 
     async promote(name) {
-      await ready();
+      await ctx.ready();
       const templates = templatesOf(backend);
       if (templates === undefined) return undefined;
       const key = name ?? "default";
-      const manifest = await copyOf(places.wired, key);
+      const manifest = await ctx.copyOf(places.wired, key);
       const rows: GoldenPromotion[] = [];
       for (const v of manifest?.versions ?? []) {
         if (v.templateId !== undefined) continue;
         try {
-          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, goldenName(imageMark(), key, v.version));
-          const current = await copyOf(places.wired, key);
+          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, goldenName(ctx.imageMark(), key, v.version));
+          const current = await ctx.copyOf(places.wired, key);
           if (current === undefined) throw new Error(`golden ${key} was dropped while its versions were being promoted`);
-          await putCopy(places.wired, key, { ...current, versions: current.versions.map(x => (x.version === v.version ? { ...x, templateId } : x)) });
+          await ctx.putCopy(places.wired, key, { ...current, versions: current.versions.map(x => (x.version === v.version ? { ...x, templateId } : x)) });
           rows.push({ golden: key, version: v.version, templateId, ...(sharing !== undefined ? { sharing } : {}) });
         } catch (e) {
           rows.push({ golden: key, version: v.version, error: e instanceof Error ? e.message : String(e) });
@@ -12440,18 +10237,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async projects() {
-      await ready();
-      return (await store.list(PROJECT_GOLDENS)).map(projectGoldenOf).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      await ctx.ready();
+      return (await store.list(PROJECT_GOLDENS)).map(ctx.projectGoldenOf).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     },
 
     async removeProject(snapshotId) {
-      await ready();
+      await ctx.ready();
       const stored = await store.get(PROJECT_GOLDENS, snapshotId);
       if (stored === undefined) throw notFoundRefusal(noProjectImageLine(snapshotId));
-      const projectGolden = projectGoldenOf(stored);
-      const standing = forkedFrom(snapshotId);
-      if (standing.length > 0) throw conflict(projectImageInUseRefusal(snapshotId, standing));
-      const at = backendAt(projectGolden.place ?? places.wired);
+      const projectGolden = ctx.projectGoldenOf(stored);
+      const standing = ctx.forkedFrom(snapshotId);
+      if (standing.length > 0) throw ctx.conflict(projectImageInUseRefusal(snapshotId, standing));
+      const at = ctx.backendAt(projectGolden.place ?? places.wired);
       const read = await snapshotUntilGone(at, snapshotId, opts.killConfirm).catch((e: unknown) => {
         const { kind, status } = e as { kind?: unknown; status?: unknown };
         throw Object.assign(new Error(projectImageRefusedLine(snapshotId, answerOf(e))), kind !== undefined ? { kind } : {}, status !== undefined ? { status } : {});
@@ -12462,7 +10259,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
   };
+  return { golden };
+}
 
+function imageArea(ctx: RuntimeContext): ImageArea {
+  const {
+    opts, store, placeDoor, builders, copyBuilds, copyRows, rowSaysFailure, placeAway, frameStopped, places,
+  } = ctx;
   /** The sizes a place's provider reports the snapshots named restore to, keyed by id; empty where it has no listing
    * or would not answer, and none for a snapshot it reports only the stored size of, since a size nobody read is left
    * absent rather than guessed. */
@@ -12503,12 +10306,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Every project golden, oldest first, with its size off the listing of the place each record names: one listing
    * per place, and none for a place this host no longer holds. */
   const projectImagesSized = async (): Promise<SealedProjectImage[]> => {
-    const projects = await golden.projects();
+    const projects = await ctx.golden.projects();
     const sizes = new Map<string, number>();
     for (const place of new Set(projects.map(p => p.place ?? places.wired))) {
       let at: MachineBackend;
       try {
-        at = backendAt(place);
+        at = ctx.backendAt(place);
       } catch {
         continue;
       }
@@ -12519,19 +10322,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const image: Runtime["image"] = {
     async get(name) {
-      await ready();
+      await ctx.ready();
       const key = name ?? "default";
       return {
-        image: (await recordOf(key)) ?? null,
+        image: (await ctx.recordOf(key)) ?? null,
         copies: await copiesOf(key),
         projects: await projectImagesSized(),
       };
     },
 
     async vault(name) {
-      await ready();
+      await ctx.ready();
       const key = name ?? "default";
-      const record = await recordOf(key);
+      const record = await ctx.recordOf(key);
       if (record === undefined) throw conflict(`this host owns no image named ${key} yet; wsp init seals one`);
       if (record.vault === undefined) throw conflict(`${key} v${record.version} was sealed before its sign-ins were held, so there is nothing to export; cut the next version to hold them`);
       const tar = await store.getBlob(IMAGE_VAULTS, vaultKey(key, record.version));
@@ -12540,18 +10343,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async build(o) {
-      await ready();
+      await ctx.ready();
       const name = o.name ?? "default";
-      const { place, at } = await placeAt(o.place);
-      const where = placeName(place);
+      const { place, at } = await ctx.placeAt(o.place);
+      const where = ctx.placeName(place);
       if (!buildsImages(at.capabilities)) throw refusal(placeBuildsNoImageLine(where), COPY_BUILD_FIX.noCopy, "conflict");
-      const record = await recordOf(name);
+      const record = await ctx.recordOf(name);
       if (record === undefined) throw refusal(`this host owns no image named ${name} yet`, COPY_BUILD_FIX.noImage, "conflict");
       if (record.recipe === undefined) throw refusal(`${name} v${record.version} was sealed before the image record kept the recipe it was built from, so no other place can build it`, COPY_BUILD_FIX.noRecipe, "conflict");
       if (copyAsksSignIns(record) && o.force !== true) {
         throw refusal(`${name} v${record.version} holds no sign-ins, so a copy at ${where} would ask for every one of them again`, COPY_BUILD_FIX.noVault, "conflict");
       }
-      const held = goldenHead(await copyOf(place, name));
+      const held = goldenHead(await ctx.copyOf(place, name));
       // The same rule the line under Settings > Image reads, so a copy is never current in one place and stale in
       // the other. A place already standing on the record is answered with what it holds: a fork there asks this
       // before it builds, and a second ask must cost nothing.
@@ -12585,16 +10388,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // the link going mid-ask is a laptop sleeping.
       const before = copyRows.get(place);
       try {
-        await ready();
-        if ((await recordOf(key)) === undefined || placeAway(place)) return;
+        await ctx.ready();
+        if ((await ctx.recordOf(key)) === undefined || placeAway(place)) return;
         // A place that builds no copy at all owes none: a provider that forks nothing, a computer that keeps no disk.
-        const { at } = await placeAt(place);
+        const { at } = await ctx.placeAt(place);
         if (!buildsImages(at.capabilities)) return;
         // A build joined here may have been sealing an older record; the copy it leaves is stamped with the record
         // it was built from, so it reads stale against the record as it stands now and is built once more.
         for (;;) {
           const built = await image.build({ place, name: key });
-          const record = await recordOf(key);
+          const record = await ctx.recordOf(key);
           if (record === undefined || copyIsCurrent(record, built.copy)) return;
         }
       } catch (e) {
@@ -12623,11 +10426,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw conflict(e instanceof Error ? e.message : String(e));
       }
     }
-    const recipe = await copyRecipeOrThrow()(record);
-    const view = await golden.prepare({ name, place, copy: true, recipe, ...(o.signal !== undefined ? { signal: o.signal } : {}) });
+    const recipe = await ctx.copyRecipeOrThrow()(record);
+    const view = await ctx.golden.prepare({ name, place, copy: true, recipe, ...(o.signal !== undefined ? { signal: o.signal } : {}) });
     const entry = builders.get(view.id);
     if (entry === undefined) throw new Error(`the builder ${view.id} prepared at ${where} left no record here; nothing was sealed`);
-    const stage = stageOf(name, place, true);
+    const stage = ctx.stageOf(name, place, true);
     try {
       // The person's sign-ins land before the seal and after everything the recipe installs, so the copy holds
       // what the builder at the wired place held and no sign-in is run here.
@@ -12637,11 +10440,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     } catch (e) {
       await killUntilGone(at, entry.builder.machine, opts.killConfirm).catch(() => {});
-      await forgetIfGone(entry, at);
+      await ctx.forgetIfGone(entry, at);
       stage("failed", e instanceof Error ? e.message : String(e));
       throw e;
     }
-    const sealed = await sealEntry(entry, false, record.logins, record);
+    const sealed = await ctx.sealEntry(entry, false, record.logins, record);
     const copy = (await copiesOf(name)).find(c => c.place === place);
     if (copy === undefined) throw new Error(`${where} sealed ${name} v${sealed.version.version} and no copy of it was recorded there`);
     return { copy, built: true };
@@ -12652,7 +10455,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const imageHeadNamed = async (snapshotId: string): Promise<string | undefined> => {
     for (const raw of await store.list(IMAGES)) {
       const image = raw as SealedImage;
-      if (goldenHead(await copyOf(image.place ?? places.wired, image.name))?.snapshotId === snapshotId) return image.name;
+      if (goldenHead(await ctx.copyOf(image.place ?? places.wired, image.name))?.snapshotId === snapshotId) return image.name;
     }
     return undefined;
   };
@@ -12664,22 +10467,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const copyForFork = async (golden: string, placeId: string | undefined, announce?: (where: string, rateUsdPerHour: number) => void): Promise<string> => {
     const place = placeId ?? places.wired;
     const name = await imageHeadNamed(golden);
-    if (name === undefined || place === (await imagePlace(name))) return golden;
+    if (name === undefined || place === (await ctx.imagePlace(name))) return golden;
     if (announce === undefined) {
       const built = await copyBuilds.get(copyKey(place, name))?.catch(() => undefined);
       if (built !== undefined) return built.copy.snapshotId;
     }
-    const record = await recordOf(name);
+    const record = await ctx.recordOf(name);
     if (record === undefined) return golden;
-    const held = goldenHead(await copyOf(place, name));
+    const held = goldenHead(await ctx.copyOf(place, name));
     if (held !== undefined && copyIsCurrent(record, { hash: held.imageHash })) return held.snapshotId;
     if (announce === undefined) return golden;
-    const { at } = await placeAt(place);
+    const { at } = await ctx.placeAt(place);
     if (!buildsImages(at.capabilities)) return golden;
-    const starting = (): void => announce(placeName(place), at.pricing.rateUsdPerHour(at.pricing.defaultSize));
+    const starting = (): void => announce(ctx.placeName(place), at.pricing.rateUsdPerHour(at.pricing.defaultSize));
     return (await image.build({ place, name, starting })).copy.snapshotId;
   };
+  return { conflict, image, copyForFork };
+}
 
+function projectsArea(ctx: RuntimeContext): ProjectsArea {
+  const { opts, store, adapters, local, bus, clock, live, projectsHeld, gone } = ctx;
   /** The import road onto a fork: the plan, what was consented, the pack, the upload in parts, the landing at the
    * path and the agents' state keyed to it there. */
   const copyImport = async (entry: LiveWorkspace, o: ProjectImportOptions, report: ImportReport): Promise<ImportLanded> => {
@@ -12728,7 +10535,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     report("uploading", `Uploading ${fmtBytes(packed.tar.length)}.`, { bytes: 0, total: packed.tar.length });
     const { parts } = await landBundle(entry.machine, packed.tar, o.dest, {
       ...(o.replace !== undefined ? { replace: o.replace } : {}),
-      tmpDir: moduleOf(entry.record.kind).scratch(entry),
+      tmpDir: ctx.moduleOf(entry.record.kind).scratch(entry),
       timeoutMs: 600_000,
       onPart: p => report("uploading", `Part ${p.part} of ${p.parts}, ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, { bytes: p.bytes, total: p.total }),
       onLanding: () => report("landing", `Landing at ${o.dest}.`),
@@ -12742,7 +10549,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       report("uploading", `Uploading ${what}, ${fmtBytes(state.tar.length)}.`, { bytes: 0, total: state.tar.length });
       await importInto(entry.machine, state.tar, "/", {
         overlay: true,
-        tmpDir: moduleOf(entry.record.kind).scratch(entry),
+        tmpDir: ctx.moduleOf(entry.record.kind).scratch(entry),
         timeoutMs: 600_000,
         onPart: p => report("uploading", `Part ${p.part} of ${p.parts}, ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, { bytes: p.bytes, total: p.total }),
       });
@@ -12756,7 +10563,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       report("landing", `Landing sessions: ${outcomes()}.`);
     }
     return {
-      result: { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten, agents, project: projectOf(o.dest, packed.bytes) },
+      result: { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten, agents, project: ctx.projectOf(o.dest, packed.bytes) },
       done: `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}${agents.length > 0 ? `; sessions: ${outcomes()}` : ""}.`,
     };
   };
@@ -12779,16 +10586,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * to clone, seed and install in, the road that puts the seed archive on it, the snapshot a project image is, and
    * where that computer and this Mac keep what a project needs. */
   const landingDeps = async (computer: string): Promise<{ deps: LandingDeps; at: MachineBackend | undefined; placeId: string | undefined }> => {
-    const { placeId } = await landingPlace(computer);
+    const { placeId } = await ctx.landingPlace(computer);
     // A computer this host cannot read a backend for holds nothing of a project: the record still stands, as it
     // did before this road existed, and the road that would have to fork there says so itself when it is asked.
-    const at = await forkingAt(placeId).catch(() => undefined);
+    const at = await ctx.forkingAt(placeId).catch(() => undefined);
     const deps: LandingDeps = {
       async worker(o) {
-        const forking = await landingBackend(placeId);
+        const forking = await ctx.landingBackend(placeId);
         // A computer that keeps no image is worked in a copy of its own directories, the same machine a workspace
         // there is; only a provider names an image to fork, and the add read which one once.
-        const golden = o.from === "" ? undefined : await copyForFork(o.from, placeId);
+        const golden = o.from === "" ? undefined : await ctx.copyForFork(o.from, placeId);
         const spec: MachineSpec = {
           kind: "sandbox",
           ...(golden !== undefined ? { fromSnapshot: golden } : {}),
@@ -12798,14 +10605,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           envs: { ...loginEnvOn(placeId) },
           // A machine whose disk becomes an image is a builder, which is what keeps the computer's own logins out
           // of it; one that only clones onto the computer is not, since the clone reads those logins.
-          labels: { [WSP_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString(), ...(o.image ? { [BUILDER_LABEL]: "1" } : {}) },
+          labels: { [WSP_LABEL]: "1", [OWNER_LABEL]: ctx.state.owner, [CREATED_AT_LABEL]: new Date().toISOString(), ...(o.image ? { [BUILDER_LABEL]: "1" } : {}) },
           ...(o.binds.length > 0 ? { binds: [...o.binds] } : {}),
           // Nothing waits on a person here: an add that died leaves no machine running for hours.
           onIdle: "kill",
         };
         return forking.create(spec);
       },
-      stop: async machine => gone.stop(await landingBackend(placeId), machine),
+      stop: async machine => gone.stop(await ctx.landingBackend(placeId), machine),
       land: async (machine, path, bytes) => void (await landBytes(machine, path, bytes)),
       // A first-life fork of the image: the one snapshot road, the same the project goldens take.
       checkpoint: async (machine, name) => {
@@ -12818,7 +10625,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // there is taken away again. A provider answers none, and this Mac's own road runs nothing outside a
       // workspace, so both leave it absent and the roads there never ask.
       ...(at?.onComputer === undefined ? {} : { onComputer: at.onComputer.bind(at) }),
-      imageHead: () => imageHeadOrNone(),
+      imageHead: () => ctx.imageHeadOrNone(),
       cloneEnv: (): Record<string, string> => {
         const token = opts.vault?.()[GITHUB_TOKEN_ENV];
         return token === undefined ? {} : { [GITHUB_TOKEN_ENV]: token };
@@ -12827,7 +10634,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // place here; read the way every other road on this computer reads that store.
       macStateHome: local?.home("claude") ?? "",
       // The name this wsp holds for that computer, read the way a fork's own line reads it.
-      computerName: placeName(computer),
+      computerName: ctx.placeName(computer),
       now: () => clock.now(),
     };
     return { deps, at, placeId };
@@ -12838,7 +10645,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * because a computer with no backend at all is what this Mac looks like to a host with no provider key, and a
    * folder here is still a project. */
   const readableComputer = async (at: MachineBackend | undefined, placeId: string | undefined): Promise<void> => {
-    if (at === undefined && placeId !== undefined) await landingBackend(placeId);
+    if (at === undefined && placeId !== undefined) await ctx.landingBackend(placeId);
   };
 
   /** Recording, reading and dropping a project, the four acts that keep the projects map and the store together.
@@ -12849,20 +10656,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * leaves on it. Nothing is read whole and nothing leaves this computer: the menu is git's own listing of what
      * it ignores, one size pass and the agent's memory folder. */
     async seedPlan(source: string): Promise<SeedPlan> {
-      await ready();
+      await ctx.ready();
       const folder = folderNamed(source);
-      const plan = await seedWiring().plan(folder, await homesHere());
+      const plan = await seedWiring().plan(folder, await ctx.homesHere());
       const remembered = (await store.get(SEED_CHOICES, folder)) as SeedChoice | undefined;
       if (remembered === undefined) return plan;
       return { ...plan, remembered: true, files: plan.files.map(f => ({ ...f, ticked: f.kind !== "never" && remembered.files.includes(f.path) })) };
     },
 
     async add(o: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice }, origin?: Caller): Promise<ProjectView & { notice?: string }> {
-      await ready();
+      await ctx.ready();
       // A project is this computer's to record: the folder and the computer named are read here, and a machine
       // that asked would be naming paths on a computer it cannot see.
-      refuseRecording(o.source, origin);
-      const rows = await computerRows();
+      ctx.refuseRecording(o.source, origin);
+      const rows = await ctx.computerRows();
       const clones = rows.filter(r => r.id !== HERE_PLACE_ID && kindWords(kindForComputer(r.id)).projectSources.includes("git")).map(r => r.name);
       const kind = sourceKind(o.source);
       if (kind === "computer") throw new Error(ADD_IS_A_COMPUTER_LINE);
@@ -12875,23 +10682,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (o.on === undefined) throw new Error(noComputerForSourceLine(o.source, clones));
         throw new Error(noSuchPlaceRefusal(o.on, rows.map(r => r.name)));
       }
-      if (o.into !== undefined && computer !== HERE_PLACE_ID) throw new Error(intoIsHereLine(nameOfComputer(HERE_PLACE_ID, rows)));
+      if (o.into !== undefined && computer !== HERE_PLACE_ID) throw new Error(intoIsHereLine(ctx.nameOfComputer(HERE_PLACE_ID, rows)));
       const computerKind = kindForComputer(computer);
       const takes = kindWords(computerKind).projectSources;
-      if (!takes.includes(source.kind)) throw new Error(source.kind === "folder" ? folderOnCopyRefusal(nameOfComputer(computer, rows)) : noComputerForSourceLine(o.source, clones));
+      if (!takes.includes(source.kind)) throw new Error(source.kind === "folder" ? folderOnCopyRefusal(ctx.nameOfComputer(computer, rows)) : noComputerForSourceLine(o.source, clones));
       // A repo here is cloned into the folder the person named, and that folder is then the project: every road
       // after the clone is the one a folder of theirs already takes.
       if (source.kind !== "folder" && copiesFolder(computerKind)) {
         if (o.into === undefined) throw new Error(cloneIntoNeeded(o.source));
-        const into = await cloneHere(o.source, source, o.into);
+        const into = await ctx.cloneHere(o.source, source, o.into);
         const { into: _into, on: _on, ...rest } = o;
         return projectsDoor.add({ ...rest, source: into }, origin);
       }
       const held = [...projectsHeld.values()].find(p => p.computer === computer && sameSource(p.source, source));
-      if (held !== undefined) throw Object.assign(new Error(sameSourceRefusal(held.name, nameOfComputer(computer, rows))), { kind: "conflict" });
+      if (held !== undefined) throw Object.assign(new Error(sameSourceRefusal(held.name, ctx.nameOfComputer(computer, rows))), { kind: "conflict" });
       // A folder here is a project whether or not git holds it; the repo it sits in, its own or one above it, is
       // what its branches and worktrees are read off.
-      const top = source.kind === "folder" && copiesFolder(computerKind) ? await gitTopOf(source.path) : undefined;
+      const top = source.kind === "folder" && copiesFolder(computerKind) ? await ctx.gitTopOf(source.path) : undefined;
       const { deps, at, placeId } = await landingDeps(computer);
       await readableComputer(at, placeId);
       const road = projectLanding(landingKind(computer, at));
@@ -12903,7 +10710,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // itself and reads nothing of it but its own remote.
         seeding: road.kind !== "mac",
         seedPlan: folder => projectsDoor.seedPlan(folder),
-        folderRemote: folder => remoteHere(folder),
+        folderRemote: folder => ctx.remoteHere(folder),
       });
       // Nothing of the person's folder leaves this computer unasked: a seed onto a computer that clones needs the
       // choice they made off the menu, and the road that copies the folder here seeds nothing at all.
@@ -12948,7 +10755,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // once here with the schema's own fields, so it is taken off before anything is stored or emitted.
         const { notice: _said, ...fields } = landed;
         const recorded: ProjectView = { ...project, ...fields };
-        await rememberProject(recorded);
+        await ctx.rememberProject(recorded);
         // Kept under the folder as this host resolved it, which is the word the next menu is looked up by.
         if (o.seed?.remember === true && source.kind === "folder") await store.put(SEED_CHOICES, source.path, o.seed);
         bus.emit({ type: "project.added", project: recorded });
@@ -12958,7 +10765,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!road.landsAtAdd({ seeding: seed !== undefined })) return keep({});
       report("planned", addingProjectLine(project.name, source, seed !== undefined));
       try {
-        const packed = seed === undefined ? undefined : await seedWiring().pack({ ...seed, homes: await homesHere() });
+        const packed = seed === undefined ? undefined : await seedWiring().pack({ ...seed, homes: await ctx.homesHere() });
         // A login inside a folder they ticked stays on this computer: said as the pack finds it, so the terminal
         // watching the add reads it there and the answer's notice is the tool door's copy of the same fact.
         if (packed !== undefined && packed.left.length > 0) report("seeding", leftBehindLine(packed.left));
@@ -12974,7 +10781,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const recorded = await keep(landed);
         // The one sentence about where the project is, which every door reads from here: the terminal prints this
         // stage and says nothing of its own after it, so the fact is said once.
-        report("done", addedProjectOn(recorded, nameOfComputer(computer, rows)));
+        report("done", addedProjectOn(recorded, ctx.nameOfComputer(computer, rows)));
         // What landed and is not what they asked for, each in its own sentence: the commits a computer's git
         // refused, and a login found inside a folder they ticked, which the pack leaves here. Both are theirs to
         // know about on an add that otherwise stands.
@@ -12987,17 +10794,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async list(): Promise<ProjectView[]> {
-      await ready();
+      await ctx.ready();
       return [...projectsHeld.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     },
 
     async computers(): Promise<{ id: string; name: string }[]> {
-      await ready();
-      return computerRows();
+      await ctx.ready();
+      return ctx.computerRows();
     },
 
     async resolve(ref: string, origin?: Caller): Promise<ProjectView> {
-      await ready();
+      await ctx.ready();
       const all = [...projectsHeld.values()];
       const found = all.find(p => p.id === ref) ?? all.find(p => p.name === ref);
       // A thread works on the project its own workspace holds: every other word reads as absent here, so a word
@@ -13005,7 +10812,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A thread whose workspace this host no longer holds works on none, so every word reads the same for it.
       const scope = scopeOf(origin);
       if (scope !== undefined) {
-        const mine = projectOfScope(scope);
+        const mine = ctx.projectOfScope(scope);
         if (found === undefined || mine === undefined || found.id !== mine) throw notFoundRefusal(bareNoSuchProjectLine(ref));
         return found;
       }
@@ -13014,15 +10821,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async remove(id: string, origin?: Caller): Promise<{ said: string }> {
-      await ready();
-      spawnGuard("delete", origin);
+      await ctx.ready();
+      ctx.spawnGuard("delete", origin);
       const project = await projectsDoor.resolve(id);
       const held = [...live.values()].filter(e => e.record.project === project.id);
-      const standing = held.filter(e => !bareFolder(e.record, holdsThread(e.record.id))).map(e => e.record.name);
+      const standing = held.filter(e => !bareFolder(e.record, ctx.holdsThread(e.record.id))).map(e => e.record.name);
       if (standing.length > 0) throw Object.assign(new Error(projectInUseRefusal(project.name, standing)), { kind: "conflict" });
       const { deps, at, placeId } = await landingDeps(project.computer);
       await readableComputer(at, placeId);
-      for (const entry of held) await workspaces.delete(entry.record.id, origin);
+      for (const entry of held) await ctx.workspaces.delete(entry.record.id, origin);
       // What the add made on that computer goes before the record does, so a computer that cannot be reached
       // keeps both and the person can say it again when it is back. The sentence is the road's: it is true
       // differently on a computer of theirs, at a provider and here.
@@ -13039,7 +10846,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     seedPlan: projectsDoor.seedPlan,
     list: projectsDoor.list,
     async defaults() {
-      const prefs = await preferences.get();
+      const prefs = await ctx.preferences.get();
       const runs = (id: string): boolean => adapters[id] !== undefined;
       const catalogOf = (id: string): HarnessCatalog | undefined => {
         const table = runs(id) ? harnessCatalog(id) : undefined;
@@ -13053,21 +10860,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     resolve: projectsDoor.resolve,
     remove: projectsDoor.remove,
     async import(o, origin) {
-      spawnGuard("import", origin);
-      const entry = await entryOf(o.workspaceId, origin);
+      ctx.spawnGuard("import", origin);
+      const entry = await ctx.entryOf(o.workspaceId, origin);
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "import", entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
-      await copyBlocked(entry);
+      await ctx.copyBlocked(entry);
       const began = clock.now();
       const report: ImportReport = (stage, message, progress) => {
         bus.emit({ type: "project.import", workspaceId: o.workspaceId, source: o.source, dest: o.dest, stage, message, elapsedMs: clock.now() - began, ...progress });
       };
       try {
-        const kind = moduleOf(entry.record.kind);
+        const kind = ctx.moduleOf(entry.record.kind);
         const landed = await kind.import(entry, o, report);
         // The workspace's own project is its record's; a folder landed beside it is browsable too, and neither is
         // written onto the record, which names one project and nothing else.
-        await rootsWrite(entry.record.machineId, () => kind.roots(entry, [...new Set([projectHeld(entry.record.project).path, landed.result.dest])]));
+        await ctx.rootsWrite(entry.record.machineId, () => kind.roots(entry, [...new Set([ctx.projectHeld(entry.record.project).path, landed.result.dest])]));
         report("done", landed.done);
         return landed.result;
       } catch (e) {
@@ -13076,11 +10883,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     },
     async export(o, origin) {
-      spawnGuard("export", origin);
-      const entry = await entryOf(o.workspaceId, origin);
+      ctx.spawnGuard("export", origin);
+      const entry = await ctx.entryOf(o.workspaceId, origin);
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "export", entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
-      await copyBlocked(entry);
+      await ctx.copyBlocked(entry);
       const began = clock.now();
       const report = (stage: ProjectExportStage, message: string, progress?: { bytes: number; total: number }): void => {
         bus.emit({ type: "project.export", workspaceId: o.workspaceId, source: o.source, dest: o.dest, stage, message, elapsedMs: clock.now() - began, ...progress });
@@ -13132,7 +10939,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     },
   };
+  return { copyImport, landingKind, landingDeps, projectsDoor, projects };
+}
 
+function usageArea(ctx: RuntimeContext): UsageArea {
+  const { opts, store, local, placeDoor, bus, clock, projectsHeld, setups, placeAway, sessions } = ctx;
   /** Why a machine cannot be asked anything at all this tick: it stands on a computer that is not connected. Every
    * road to it, the provider read included, rides that computer's link, so the row says so rather than reading a
    * silence as a machine that died. */
@@ -13146,7 +10957,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const deleteLine = (e: LiveWorkspace): string | undefined => (e.deleteSaid?.phase === e.record.phase ? e.deleteSaid.line : undefined);
   /** The one sentence a row carries, the most pressing first: a delete the provider sat on, the wake's own line or the
    * words it left, a pause or a stop the provider refused, then a disk past the line a stop fails at. */
-  const rowReason = (e: LiveWorkspace): string | undefined => deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e) ?? stopRefusedReason(e) ?? diskReason(e);
+  const rowReason = (e: LiveWorkspace): string | undefined => deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? ctx.napRefusedReason(e) ?? ctx.stopRefusedReason(e) ?? ctx.diskReason(e);
 
   const prices = createPriceTable({ store, clock, fetch: opts.pricesFetch ?? (async () => ({})) });
   const ledger = createUsageLedger({ store, clock, prices: () => prices.get() });
@@ -13178,18 +10989,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * projects is that project's, the account is this computer's own login of that agent unless a turn here named it. */
   let logsReadAt: number | undefined;
   const readLogs = async (): Promise<void> => {
-    if (opts.logUsage === undefined || !(await preferences.get()).usageLogs) return;
+    if (opts.logUsage === undefined || !(await ctx.preferences.get()).usageLogs) return;
     if (logsReadAt !== undefined && clock.now() - logsReadAt < LOG_READ_EVERY_MS) return;
     logsReadAt = clock.now();
     const here = [...projectsHeld.values()].filter(p => p.computer === HERE_PLACE_ID);
     const limits = await ledger.limits();
     // A thread wsp ran here writes its transcript to the same logs, whether or not its turn filed a row.
-    await ready();
+    await ctx.ready();
     const threads = new Set([...sessions.values()].flatMap(s => (s.view.claudeSessionId !== undefined ? [s.view.claudeSessionId] : [])));
     const rows = (await opts.logUsage()).filter(r => !threads.has(r.session));
     const thisComputer = { id: HERE_PLACE_ID, name: usageComputerName((await placeDoor?.list(clock.now())) ?? [], HERE_PLACE_ID) };
     // Work in a terminal here runs on the account this computer's turns run on.
-    const accountHere = (agent: string): { key: string; label: string } => accountOnComputer({ agent, agentName: harnessCatalog(agent)?.label ?? agent, computer: thisComputer, limits, vaulted: vaultedFor(agent) });
+    const accountHere = (agent: string): { key: string; label: string } => accountOnComputer({ agent, agentName: harnessCatalog(agent)?.label ?? agent, computer: thisComputer, limits, vaulted: ctx.vaultedFor(agent) });
     await ledger.fileLogs(
       rows.map(r => ({
         at: r.at,
@@ -13228,7 +11039,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         nameOf: id => usageComputerName(places, id),
         agentName: agent => harnessCatalog(agent)?.label ?? agent,
         planBrand: agent => CATALOG_AGENTS.find(a => a.id === agent)?.planBrand,
-        vaulted: agent => vaultedFor(agent),
+        vaulted: agent => ctx.vaultedFor(agent),
         printsLimits: agent => CATALOG_AGENTS.find(a => a.id === agent)?.printsLimits === true,
         burn: burn.of,
       }),
@@ -13300,7 +11111,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const usage: UsageDoor = {
     reset,
     used: async q => {
-      const outside = q.outside === true && (await preferences.get()).usageLogs;
+      const outside = q.outside === true && (await ctx.preferences.get()).usageLogs;
       if (outside) await readLogs().catch((e: unknown) => console.warn(`this computer's agent logs were not read for usage: ${e instanceof Error ? e.message : String(e)}`));
       const places = (await placeDoor?.list(clock.now())) ?? [];
       return ledger.used({ range: q.range, split: q.split, label: usageLabel(places, await ledger.accountLabels()), outside, logsOn: usageComputerName(places, HERE_PLACE_ID) });
@@ -13314,44 +11125,48 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const reply = SysHistoryReply.parse(await ask(frame));
         return { points: reply.points, stepMs: reply.stepMs, from, to };
       };
-      if ("workspaceId" in target) return withDaemon(await entryOf(target.workspaceId, origin), read);
-      if (target.placeId === HERE_PLACE_ID) return overChannel(await channelOver(await localRoad(), THIS_COMPUTER, () => {}), read);
+      if ("workspaceId" in target) return ctx.withDaemon(await ctx.entryOf(target.workspaceId, origin), read);
+      if (target.placeId === HERE_PLACE_ID) return ctx.overChannel(await ctx.channelOver(await ctx.localRoad(), THIS_COMPUTER, () => {}), read);
       const onLink = placeDoor?.channel(target.placeId, () => {});
       if (onLink === undefined) throw new Error(absentComputer(placeDoor?.nameOf(target.placeId) ?? target.placeId, null).sentence);
-      return overChannel(onLink, read);
+      return ctx.overChannel(onLink, read);
     },
     accounts: usageAccounts,
   };
+  return { awayLine, rowReason, ledger, alerts, burn, usageAccounts, usage };
+}
 
+function statusArea(ctx: RuntimeContext): StatusArea {
+  const { opts, backend, store, bus, clock, live, projectsHeld } = ctx;
   const status = createStatusTracker({
     store,
     records: async () => {
-      await ready();
-      return held().map(e => ({
-        ...view(e.record),
+      await ctx.ready();
+      return ctx.held().map(e => ({
+        ...ctx.view(e.record),
         size: e.record.size,
         // The rate follows the machine's kind: a local workspace's backend prices it at zero, so no cost line rides its row.
-        rateUsdPerHour: backendFor(e.record).pricing.rateUsdPerHour(e.record.size),
+        rateUsdPerHour: ctx.backendFor(e.record).pricing.rateUsdPerHour(e.record.size),
         generation: e.generation,
         // The wake's own line while one is in flight, and the words it left behind once its asking ran out: the poll
         // builds every status from the record, so a row that carried only what was pushed would fall silent between
         // two asks and forget the rebuild road at the next tick. A delete the provider sat on outranks both.
         // A pause or a stop the provider refused stays on the row as long as it stands, for the same reason, and so
         // does a disk past the line, which is said before a stop can fail on it.
-        ...(rowReason(e) !== undefined ? { reason: rowReason(e)! } : {}),
+        ...(ctx.rowReason(e) !== undefined ? { reason: ctx.rowReason(e)! } : {}),
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
         ...(e.checkout !== undefined ? { checkout: e.checkout } : {}),
         ...(e.pr !== undefined ? { pr: e.pr } : {}),
-        ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
-        ...(awayLine(e.record) !== undefined ? { away: awayLine(e.record)! } : {}),
-        ...(unreachedOf(e) !== undefined ? { unreached: unreachedOf(e)! } : {}),
-        ...(moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => moduleOf(e.record.kind).daemonRoad(e) } : {}),
+        ...(e.record.phase === "running" && ctx.idle.idleAt(e.record.id) !== undefined ? { idleAt: ctx.idle.idleAt(e.record.id)! } : {}),
+        ...(ctx.awayLine(e.record) !== undefined ? { away: ctx.awayLine(e.record)! } : {}),
+        ...(ctx.unreachedOf(e) !== undefined ? { unreached: ctx.unreachedOf(e)! } : {}),
+        ...(ctx.moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => ctx.moduleOf(e.record.kind).daemonRoad(e) } : {}),
         ...(e.machine.daemonAnswers !== undefined ? { daemonAnswers: e.machine.daemonAnswers.bind(e.machine) } : {}),
         providerState: () => e.machine.state(),
         ...(e.machine.metrics !== undefined ? { metrics: e.machine.metrics.bind(e.machine) } : {}),
         // A machine the poll last found unreachable is not asked what it is: over ssh that read is a dial of its
         // own, so a box that is off would pay one every tick beside the dial the reach already makes.
-        ...(e.machine.facts !== undefined && reachOf(e) !== "unreachable" ? { facts: e.machine.facts.bind(e.machine) } : {}),
+        ...(e.machine.facts !== undefined && ctx.reachOf(e) !== "unreachable" ? { facts: e.machine.facts.bind(e.machine) } : {}),
         exec: (cmd, o) => e.machine.exec(cmd, o),
       }));
     },
@@ -13363,17 +11178,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const s of statuses) {
         const entry = live.get(s.id);
         if (entry === undefined || s.machineId !== entry.machine.id) continue;
-        if (s.phase === "running") polledReach.set(s.id, { machineId: s.machineId, reach: s.reach.state });
-        else polledReach.delete(s.id);
-        reviveDaemon(entry, s.reach.state);
-        offerDaemonAgain(entry, s);
-        readVersionAgain(entry, s);
+        if (s.phase === "running") ctx.polledReach.set(s.id, { machineId: s.machineId, reach: s.reach.state });
+        else ctx.polledReach.delete(s.id);
+        ctx.reviveDaemon(entry, s.reach.state);
+        ctx.offerDaemonAgain(entry, s);
+        ctx.readVersionAgain(entry, s);
       }
     },
     onGone: (id, machineId, reason) => {
       const entry = live.get(id);
       // A sighting of a machine since replaced says nothing about the one now under the record.
-      if (entry !== undefined && entry.record.machineId === machineId) void adoptGone(entry, reason).catch((e: unknown) => console.warn(`${entry.record.id}'s gone reading was not confirmed: ${e instanceof Error ? e.message : String(e)}`));
+      if (entry !== undefined && entry.record.machineId === machineId) void ctx.adoptGone(entry, reason).catch((e: unknown) => console.warn(`${entry.record.id}'s gone reading was not confirmed: ${e instanceof Error ? e.message : String(e)}`));
     },
     ...(opts.status !== undefined ? { defaults: opts.status } : {}),
     clock,
@@ -13397,7 +11212,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     for (const row of listing) {
       // The engine kills only a running row, so a paused one stays reported rather than silently left.
-      if (known.has(row.id) || (dropped.has(row.id) && row.state === "running") || !lostWorkspace(row, owner, now)) continue;
+      if (known.has(row.id) || (dropped.has(row.id) && row.state === "running") || !lostWorkspace(row, ctx.state.owner, now)) continue;
       // A stamped id another machine now holds is a body a rebuild or an image move replaced and failed to stop: the engine kills it.
       const stamped = row.labels[WORKSPACE_LABEL];
       if (stamped !== undefined && live.has(stamped)) continue;
@@ -13411,7 +11226,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       let machine: Machine;
       try {
-        machine = observed(await backend.get(row.id));
+        machine = ctx.observed(await backend.get(row.id));
       } catch (e) {
         if (isMissing(e)) continue;
         known.add(row.id);
@@ -13426,28 +11241,32 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const bornAt = row.labels[CREATED_AT_LABEL];
       const record: WorkspaceRecord = {
         id: stamped,
-        name: nameRefusal(kept.name) === undefined ? kept.name : row.id,
+        name: ctx.nameRefusal(kept.name) === undefined ? kept.name : row.id,
         kind: "cloud",
         project: kept.project,
         machineId: row.id,
         phase: state === "paused" ? "napping" : "running",
-        golden: row.labels[GOLDEN_LABEL] ?? goldenHead(await golden.get())?.snapshotId ?? "",
+        golden: row.labels[GOLDEN_LABEL] ?? goldenHead(await ctx.golden.get())?.snapshotId ?? "",
         createdAt: bornAt !== undefined && !Number.isNaN(Date.parse(bornAt)) ? bornAt : new Date().toISOString(),
         spec: { labels: row.labels },
-        size: sizeBuilt(await shapeOf(machine), backend.pricing.defaultSize),
+        size: ctx.sizeBuilt(await ctx.shapeOf(machine), backend.pricing.defaultSize),
         firstLife: false,
         ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
       };
-      const entry = attach(record, machine);
-      await persist(record);
-      if (record.phase === "running") void syncDaemon(entry);
-      bus.emit({ type: "workspace.created", workspace: view(record) });
-      await emitStatus(entry, record.phase === "running" ? reachOf(entry) : "napping", RECORD_RESTORED);
+      const entry = ctx.attach(record, machine);
+      await ctx.persist(record);
+      if (record.phase === "running") void ctx.syncDaemon(entry);
+      bus.emit({ type: "workspace.created", workspace: ctx.view(record) });
+      await ctx.emitStatus(entry, record.phase === "running" ? ctx.reachOf(entry) : "napping", RECORD_RESTORED);
       adopted.push({ id: row.id, workspaceId: stamped, name: record.name, phase: record.phase });
     }
     return adopted;
   };
+  return { status, adoptLost };
+}
 
+function preferencesArea(ctx: RuntimeContext): PreferencesArea {
+  const { opts, backend, store, adapters, placeDoor, bus, clock, projectsHeld, setups } = ctx;
   // Sets run one after another: two clients patching different fields at once would otherwise each read the record
   // before the other's write and the later write would drop the earlier field.
   let preferenceWrites: Promise<unknown> = Promise.resolve();
@@ -13475,7 +11294,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     const word = (id: string, access: AccessChoice | null | undefined): void => {
       const table = harnessCatalog(id);
-      const said = access == null ? null : accessRefusal(table ?? { label: agentLabel(id), permissionModes: [] }, access);
+      const said = access == null ? null : accessRefusal(table ?? { label: ctx.agentLabel(id), permissionModes: [] }, access);
       if (said !== null) throw usage(said);
     };
     const model = (id: string): void => {
@@ -13495,20 +11314,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (set.agent != null) agent(set.agent);
       if (set.model != null) model(set.model);
       const kept = next.projectDefaults[projectId];
-      word(kept?.agent ?? defaultAgentOf(next, undefined), set.access);
+      word(kept?.agent ?? ctx.defaultAgentOf(next, undefined), set.access);
     }
   };
-  /** The record as last read or written, so a start reads the defaults without a trip to the store. */
-  let preferencesHeld: Preferences | undefined;
   const preferences: Runtime["preferences"] = {
-    get: async () => (preferencesHeld ??= { ...preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)), labs }),
+    get: async () => (ctx.state.preferencesHeld ??= { ...preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)), labs }),
     set: patch => {
       const write = preferenceWrites.then(async () => {
-        await ready();
+        await ctx.ready();
         const next = applyPreferencesPatch(await preferences.get(), patch);
         defaultsRefusal(patch, next);
         await store.put(PREFERENCES, PREFERENCES_ID, next);
-        preferencesHeld = next;
+        ctx.state.preferencesHeld = next;
         const notice = patch.serverIcons === false ? iconsForgotten() : undefined;
         bus.emit({ type: "preferences.changed", preferences: next });
         return notice === undefined ? { preferences: next } : { preferences: next, notice };
@@ -13523,12 +11340,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     reader: opts.agentsReader,
     places: () => placeDoor,
     workspace: async (id, origin) => {
-      const entry = await entryOf(id, origin);
-      const project = projectHeld(entry.record.project);
-      return { name: entry.record.name, phase: entry.record.phase, local: isLocalWorkspace(entry.record), machine: entry.machine, project: { id: project.id, name: project.name, path: checkoutOf(entry.record) } };
+      const entry = await ctx.entryOf(id, origin);
+      const project = ctx.projectHeld(entry.record.project);
+      return { name: entry.record.name, phase: entry.record.phase, local: isLocalWorkspace(entry.record), machine: entry.machine, project: { id: project.id, name: project.name, path: ctx.checkoutOf(entry.record) } };
     },
     // A project's folder on the computer holding it: the checkout the add left there, else where it already sits.
-    projects: async placeId => (await ready(), [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name, path: p.checkout ?? p.path }))),
+    projects: async placeId => (await ctx.ready(), [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => ({ id: p.id, name: p.name, path: p.checkout ?? p.path }))),
     ...(opts.agentsActs !== undefined ? { acts: opts.agentsActs } : {}),
     ...(opts.skillsActs !== undefined ? { skills: opts.skillsActs } : {}),
     ...(opts.serversActs !== undefined ? { servers: opts.serversActs } : {}),
@@ -13538,8 +11355,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // The target's own daemon: this computer's, a joined computer's over the link it holds, or a workspace's by the
     // road its kind answers, which is the one reading every pane takes.
     channel: async (target, onEvent, origin) => {
-      if ("workspaceId" in target) return workspaces.daemonChannel(target.workspaceId, onEvent, origin);
-      if (target.placeId === HERE_PLACE_ID) return channelOver(await localRoad(), THIS_COMPUTER, onEvent);
+      if ("workspaceId" in target) return ctx.workspaces.daemonChannel(target.workspaceId, onEvent, origin);
+      if (target.placeId === HERE_PLACE_ID) return ctx.channelOver(await ctx.localRoad(), THIS_COMPUTER, onEvent);
       const onLink = placeDoor?.channel(target.placeId, onEvent);
       if (onLink === undefined) throw new Error(absentComputer(placeDoor?.nameOf(target.placeId) ?? target.placeId, null).sentence);
       return onLink;
@@ -13548,8 +11365,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     setupOf: (placeId, agent) => (adapters[agent] === undefined ? undefined : setupView(setups.get(placeId, agent))),
     setupWrite: async (placeId, agent, change) => {
       if (adapters[agent] === undefined) throw Object.assign(new Error(noAdapterLine(agent, Object.keys(adapters))), { kind: "usage" });
-      await setups.set(placeId, agent, change, { folder: path => configFolderOn(placeId, path), agentName: agentLabel(agent) });
-      setupRefusals.delete(keyOf(placeId, agent));
+      await setups.set(placeId, agent, change, { folder: path => ctx.configFolderOn(placeId, path), agentName: ctx.agentLabel(agent) });
+      ctx.setupRefusals.delete(keyOf(placeId, agent));
     },
     relayed: () => backend.capabilities.callbackRelay,
     now: () => clock.now(),
@@ -13557,85 +11374,92 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   bus.on("workspace.deleted", e => {
     if (e.type === "workspace.deleted") agentsRead.forget(e.workspaceId);
   });
+  return { preferences, agentsRead };
+}
 
+function runtimeOf(ctx: RuntimeContext): Runtime {
+  const {
+    opts, backend, store, adapters, local, placeDoor, bus, clock, deviceDoor, live, builders, gone, snoozeTimers,
+    indexFlushes, pendingEvents,
+  } = ctx;
   return {
     events: bus,
     backend,
-    workspaces,
-    projects,
-    sessions: sessionsApi,
-    slates,
+    workspaces: ctx.workspaces,
+    projects: ctx.projects,
+    sessions: ctx.sessionsApi,
+    slates: ctx.slates,
     devices: deviceDoor,
     ...(placeDoor !== undefined ? { places: placeDoor } : {}),
     ...(opts.recipes !== undefined ? { recipes: opts.recipes } : {}),
-    hereChannel: async onEvent => channelOver(await localRoad(), THIS_COMPUTER, onEvent),
-    agents: { ...agentsRead, homesHere },
-    preferences,
-    usage,
+    hereChannel: async onEvent => ctx.channelOver(await ctx.localRoad(), THIS_COMPUTER, onEvent),
+    agents: { ...ctx.agentsRead, homesHere: ctx.homesHere },
+    preferences: ctx.preferences,
+    usage: ctx.usage,
     status: {
-      ...status,
+      ...ctx.status,
       // Which workspaces this caller is served is decided here, after the probes, off the same reading the other
       // listing and every verb take: a record dropped while the probes ran leaves both lists at once, so nothing a
       // person is shown is denied by the next line they type.
       list: async (o, origin) => {
-        const rows = await status.list(o);
-        const shown = new Set(listedFor(origin).map(e => e.record.id));
+        const rows = await ctx.status.list(o);
+        const shown = new Set(ctx.listedFor(origin).map(e => e.record.id));
         return rows.filter(row => shown.has(row.id));
       },
       // A cost read answers for a workspace this host no longer holds, which is why the rule for a named id is read
       // here rather than through entryOf, which refuses an id it does not know.
       history: async (workspaceId, origin) => {
-        refuseNamed(workspaceId, origin);
-        return status.history(workspaceId);
+        ctx.refuseNamed(workspaceId, origin);
+        return ctx.status.history(workspaceId);
       },
     },
     harnesses: {
       list: async (workspaceId, origin) => {
-        const prefs = await preferences.get();
-        const entry = workspaceId === undefined ? undefined : await entryOf(workspaceId, origin);
+        const prefs = await ctx.preferences.get();
+        const entry = workspaceId === undefined ? undefined : await ctx.entryOf(workspaceId, origin);
         // Only a harness with an adapter can run a turn, and one the person turned off on that computer runs none
         // there; the rest of the table waits.
-        const table = HARNESS_CATALOGS.filter(c => c.harness in adapters && (entry === undefined || !agentOff(entry, c.harness)));
+        const table = HARNESS_CATALOGS.filter(c => c.harness in adapters && (entry === undefined || !ctx.agentOff(entry, c.harness)));
         // A record answers what its threads start at whether or not its machine is up; only the rest of the lists
         // waits on the binary, so a picker on a paused workspace still reads the access its next thread would run.
         // An agent whose kept config folder is refused, or cannot be read there, answers with why instead of its
         // lists; a link that dropped under the check says its computer is not answering, since that is not the agent's.
         const unchecked = (e: unknown, on: LiveWorkspace): string => {
-          const place = setupPlace(on);
-          if (isPlaceAbsent(e) && place !== undefined) return absentComputer(placeDoorOf().nameOf(place), null).said;
+          const place = ctx.setupPlace(on);
+          if (isPlaceAbsent(e) && place !== undefined) return absentComputer(ctx.placeDoorOf().nameOf(place), null).said;
           return e instanceof Error ? e.message : String(e);
         };
         const listsOn = async (c: HarnessCatalog, on: LiveWorkspace): Promise<HarnessCatalog> => {
-          const refusal = await setupRefusal(on, c.harness).catch((e: unknown) => unchecked(e, on));
-          return refusal !== null ? { ...c, refusal } : catalogOn(c, on, adapterFor(on, c.harness).adapter);
+          const refusal = await ctx.setupRefusal(on, c.harness).catch((e: unknown) => unchecked(e, on));
+          return refusal !== null ? { ...c, refusal } : ctx.catalogOn(c, on, ctx.adapterFor(on, c.harness).adapter);
         };
         const lists = entry === undefined || entry.record.phase !== "running" ? table : await Promise.all(table.map(c => listsOn(c, entry)));
         const project = entry === undefined ? undefined : prefs.projectDefaults[entry.record.project];
-        const agent = defaultAgentOf(prefs, entry);
+        const agent = ctx.defaultAgentOf(prefs, entry);
         return lists.map(c => {
           const picker = prefs.agentDefaults[c.harness]?.models;
           const unshaped = picker === undefined ? {} : { unshaped: { models: c.models, ...(c.legacyModels !== undefined ? { legacyModels: c.legacyModels } : {}) } };
-          return { ...shapeModels(defaultsOn(c, prefs, project).catalog, picker), ...unshaped, ...(c.harness === agent ? { isDefault: true } : {}) };
+          return { ...shapeModels(ctx.defaultsOn(c, prefs, project).catalog, picker), ...unshaped, ...(c.harness === agent ? { isDefault: true } : {}) };
         });
       },
     },
-    golden,
-    image,
+    golden: ctx.golden,
+    image: ctx.image,
     owner: async () => {
-      await ready();
-      return owner;
+      await ctx.ready();
+      return ctx.state.owner;
     },
     reap: async (olderThanMs, say) => {
-      if (say !== undefined) sayStops = say;
-      await ready();
-      await refreshBuilders();
+      if (say !== undefined) ctx.state.sayStops = say;
+      await ctx.ready();
+      await ctx.refreshBuilders();
       // A stale record can never seal; stopping it is the only thing that ends its bill. A reusable one no
       // process is using dies at six hours by our createdAt label, or at once when no age can be read: every
       // get(id) on it resets the provider's rolling idle timer (measured), so the kill it was created with
       // never fires while a host is up. Own builders get their heartbeat here, so other processes leave them be.
       const failed: ReapFailure[] = [];
       const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-      const grace = await expireGrace().catch((e: unknown) => {
+      const grace = await ctx.expireGrace().catch((e: unknown) => {
         failed.push({ message: `grace sweep: ${messageOf(e)}` });
         return { reaped: [], failed: [] };
       });
@@ -13643,7 +11467,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       failed.push(...grace.failed);
       const now = Date.now();
       for (const b of [...builders.values()]) {
-        if (b.life === "own") await hold(b);
+        if (b.life === "own") await ctx.hold(b);
         const bornAt = Date.parse(b.builder.machine.labels?.[CREATED_AT_LABEL] ?? b.record.createdAt);
         const ageMs = Number.isNaN(bornAt) ? undefined : now - bornAt;
         const expired = b.life === "reusable" && (ageMs === undefined || ageMs >= BUILDER_IDLE_MS);
@@ -13654,14 +11478,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           failed.push({ id: b.record.id, message: `could not stop: ${messageOf(e)}; stays recorded, retried next sweep` });
           continue;
         }
-        await forgetBuilder(b.record.id);
+        await ctx.forgetBuilder(b.record.id);
         reaped.push(
           b.life === "stale"
             ? { id: b.record.id, builder: true, reason: b.record.building === true ? "unfinished" : "recorded" }
             : { id: b.record.id, builder: true, reason: "expired", ...(ageMs !== undefined ? { ageMs } : {}) },
         );
       }
-      const knownIds = (): string[] => [...live.values()].flatMap(e => [e.record.machineId, e.machine.id]).concat([...builders.keys()], [...inflight], reaped.map(r => r.id), gone.ids());
+      const knownIds = (): string[] => [...live.values()].flatMap(e => [e.record.machineId, e.machine.id]).concat([...builders.keys()], [...ctx.inflight], reaped.map(r => r.id), gone.ids());
       const result = (swept: ReapResult, adopted: AdoptedMachine[]): SweepResult => {
         const allFailed = failed.concat(swept.failed ?? []);
         return { reaped: reaped.concat(swept.reaped), spared: swept.spared, ...(allFailed.length > 0 ? { failed: allFailed } : {}), ...(adopted.length > 0 ? { adopted } : {}) };
@@ -13680,13 +11504,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const entry of [...live.values()]) {
         if (entry.creating || entry.napping || entry.waking || entry.deleting) continue;
         if (isAbsentMachine(entry.machine)) {
-          await rereadHeld(entry.record.id, "sweep").catch((e: unknown) => void failed.push({ message: messageOf(e) }));
+          await ctx.rereadHeld(entry.record.id, "sweep").catch((e: unknown) => void failed.push({ message: messageOf(e) }));
           continue;
         }
         // A machine the listing still carries under a record marked gone is read once: the read is what decides,
         // and one that says running gives the record its machine back.
         if (listed.has(entry.record.machineId)) {
-          if (entry.record.phase === "gone") await recoverGone(entry);
+          if (entry.record.phase === "gone") await ctx.recoverGone(entry);
           continue;
         }
         if (entry.record.phase === "gone") continue;
@@ -13696,67 +11520,67 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           answer = providerSaid(e);
           return "gone";
         });
-        if (read === "gone") await adoptGone(entry, goneWords(entry.record.machineId, { by: "sweep", at: clock.now(), ...(answer !== undefined ? { answer } : {}) }));
+        if (read === "gone") await ctx.adoptGone(entry, goneWords(entry.record.machineId, { by: "sweep", at: clock.now(), ...(answer !== undefined ? { answer } : {}) }));
       }
       const claimed = new Set(knownIds());
-      const adopted = await adoptLost(listing, claimed, failed);
+      const adopted = await ctx.adoptLost(listing, claimed, failed);
       try {
-        return result(await reap({ backend, owner, listing, stop: m => gone.stop(backend, m), knownIds: () => [...knownIds(), ...claimed], ...(olderThanMs !== undefined ? { olderThanMs } : {}) }), adopted);
+        return result(await reap({ backend, owner: ctx.state.owner, listing, stop: m => gone.stop(backend, m), knownIds: () => [...knownIds(), ...claimed], ...(olderThanMs !== undefined ? { olderThanMs } : {}) }), adopted);
       } catch (e) {
         failed.push({ message: messageOf(e) });
         return result({ reaped: [], spared: [] }, adopted);
       }
     },
     close: async () => {
-      closing = true;
-      clearInterval(rootsRecheck);
-      await copiesMoving;
-      sweepStopped = true;
-      sweepTimer?.();
-      await sweeping;
-      idle.close();
-      alerts.close();
-      slates.close();
+      ctx.state.closing = true;
+      clearInterval(ctx.state.rootsRecheck);
+      await ctx.state.copiesMoving;
+      ctx.state.sweepStopped = true;
+      ctx.state.sweepTimer?.();
+      await ctx.state.sweeping;
+      ctx.idle.close();
+      ctx.alerts.close();
+      ctx.slates.close();
       // An agent's version or sign-in command that never answers would otherwise outlive this process.
       opts.agentsReader?.close?.();
       // What this host started on a machine finishes before it lets that machine go: the boot fires a daemon sync
       // at every running workspace without waiting for it, and a write landing after the close is this process
       // touching a computer it no longer holds. Each sync is a read and a write, so the wait is milliseconds.
-      await Promise.allSettled([...daemonSyncs.values()]);
-      await Promise.allSettled([...keptWrites.values()]);
+      await Promise.allSettled([...ctx.daemonSyncs.values()]);
+      await Promise.allSettled([...ctx.keptWrites.values()]);
       // The turns running on machines are not ended: each leads a process group on its own machine and its log is
       // there to be read again, so what this host lets go of is the reading of them, which is what holds this
       // process open after its last line.
-      for (const stop of [...machineReading]) stop();
-      machineReading.clear();
+      for (const stop of [...ctx.machineReading]) stop();
+      ctx.machineReading.clear();
       // A kept agent is no turn: it is ended rather than left idle with nothing to send to it, its tree at once, since
       // an agent slow to exit on its EOF would outlast the reader that reaps its group (a tail pump was left behind
       // so); the wait for it is short, and the next host's sweep ends what is left.
-      const keptGoing = [...keptAgents.keys()].map(threadId => {
-        const exited = keptAgents.get(threadId)!.agent.exited;
-        reapKept(threadId, { now: true });
+      const keptGoing = [...ctx.keptAgents.keys()].map(threadId => {
+        const exited = ctx.keptAgents.get(threadId)!.agent.exited;
+        ctx.reapKept(threadId, { now: true });
         return exited;
       });
       if (keptGoing.length > 0) await Promise.race([Promise.allSettled(keptGoing), new Promise(resolve => setTimeout(resolve, KEPT_CLOSE_WAIT_MS).unref())]);
       await local?.close?.();
       await placeDoor?.close();
-      closed = true;
-      beat?.();
-      beat = undefined;
-      for (const cancel of graceTimers.values()) cancel();
-      graceTimers.clear();
+      ctx.state.closed = true;
+      ctx.state.beat?.();
+      ctx.state.beat = undefined;
+      for (const cancel of ctx.graceTimers.values()) cancel();
+      ctx.graceTimers.clear();
       for (const cancel of snoozeTimers.values()) cancel();
       snoozeTimers.clear();
       for (const entry of live.values()) entry.prPoll?.();
       gone.close();
-      await ticking;
+      await ctx.state.ticking;
       // A clean exit frees its builders at once; a crash leaves the heartbeat to age and the pid to die.
       for (const b of [...builders.values()].filter(b => b.life === "own" && b.record.heldBy !== undefined)) {
         delete b.record.heldBy;
         await store.put(BUILDERS, b.record.id, b.record);
       }
-      for (const id of new Set([...transcriptTimers.keys(), ...pendingEvents.keys()])) void flushTranscript(id);
-      await Promise.all([...transcriptQueue.values(), ...indexFlushes.values()]);
+      for (const id of new Set([...ctx.transcriptTimers.keys(), ...pendingEvents.keys()])) void ctx.flushTranscript(id);
+      await Promise.all([...ctx.transcriptQueue.values(), ...indexFlushes.values()]);
     },
   };
 }
