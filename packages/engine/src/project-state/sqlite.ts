@@ -18,12 +18,12 @@ export const movedColumn = (column: string): string => `iif(${underPath(column)}
 export const pathParams = (from: string, to: string): Record<string, SQLInputValue> => ({ $from: from, $to: to });
 
 // Fetched on first use, not at import: loading node:sqlite prints an ExperimentalWarning, and vite-node 2 cannot resolve an import of it.
-const binding = (): typeof import("node:sqlite") => process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
+export const sqliteBinding = (): typeof import("node:sqlite") => process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 
 /** Runs fn on the database opened read-only, or returns nothing when the file is absent. */
 export function readOnly<T>(db: string, fn: (d: DatabaseSync) => T): T | undefined {
   if (!existsSync(db)) return undefined;
-  const { DatabaseSync } = binding();
+  const { DatabaseSync } = sqliteBinding();
   const d = new DatabaseSync(db, { readOnly: true });
   try {
     return fn(d);
@@ -39,7 +39,7 @@ export const countRows = (db: string, sql: string, params: Readonly<Record<strin
 /** Runs fn on the open database inside one transaction, or returns nothing when the file is absent. */
 export function inTransaction<T>(db: string, fn: (d: DatabaseSync) => T): T | undefined {
   if (!existsSync(db)) return undefined;
-  const { DatabaseSync } = binding();
+  const { DatabaseSync } = sqliteBinding();
   const d = new DatabaseSync(db);
   try {
     d.exec("begin");
