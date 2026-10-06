@@ -19,6 +19,7 @@ import {
   rewindChildrenLine,
   rewindKeptLine,
   type AdapterEvent,
+  type Caller,
   type DaemonFrame,
   type DaemonResponse,
   type EventUnion,
@@ -321,6 +322,22 @@ describe("rewinding a thread to one of its replies", () => {
     // The transcript is as the rewind left it: undo brings the files back, not the conversation.
     expect(await texts(ws.id)).toEqual(["reply 1"]);
     await expect(rt!.sessions.rewind(threadId, { undo: true })).rejects.toThrow(REWIND_NO_UNDO_LINE);
+  });
+
+  it("leaves the slate as the rewind left it on undo, since undo never puts the conversation back", async () => {
+    const { ws } = await workspace(harness({ cuts: "next" }));
+    const { threadId, turns } = await threeTurns(ws.id);
+    const asThread: Caller = { origin: "here", by: { kind: "thread", threadId, workspaceId: ws.id, rootThreadId: threadId } };
+    await rt!.slates.write({ text: `<slate><value name="pick" start="C" /><text id="t">Version {$pick}</text></slate>` }, asThread);
+    const fourth = await rt!.sessions.start(ws.id, { prompt: "four", thread: threadId });
+    await fourth.finished;
+    await settle();
+    await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true });
+    expect((await rt!.slates.get(threadId))!.empty).toBe("rewound-before");
+    expect(await rt!.sessions.rewind(threadId, { undo: true })).toEqual({ turns: 0, files: 2 });
+    const after = (await rt!.slates.get(threadId))!;
+    expect(after.document).toBeNull();
+    expect(after.empty).toBe("rewound-before");
   });
 
   it("refuses before anything is written: a working thread, the latest reply, and files a turn kept no checkpoint of", async () => {

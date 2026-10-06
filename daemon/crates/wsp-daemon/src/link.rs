@@ -428,6 +428,7 @@ impl Link {
             dialed: url,
             unit_path: self.ctx.options.unit_path.as_deref(),
             runtime_root: self.ctx.options.runtime_root.as_deref().unwrap_or(Path::new(wsp_runtime::DEFAULT_ROOT)),
+            system_root: Path::new("/"),
         });
         let signature =
             place::sign_place_bytes(&pem, &place_link_transcript(LinkRole::Place, &file.place_id, host_nonce, my_nonce, ephemerals))?;

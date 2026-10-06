@@ -64,6 +64,34 @@ describe("buildCommand", () => {
     expect(command.startsWith("cd ~ && codex app-server -c tools.update_plan.enabled='true' -c ")).toBe(true);
   });
 
+  it("serves the slate tools again as a server of their own that codex lists up front, and keeps them off the deferred wsp one", () => {
+    const command = buildCommand({ mcpServers: { wsp: { command: "/opt/wsp/bin/wsp", args: ["mcp"] } } });
+    const slate = JSON.stringify(["slate_catalog", "slate_write", "slate_state", "slate_read"]);
+    // Codex 0.155.1 keeps every MCP tool behind its search when the model has one, unless the server omits "deferred".
+    expect(command).toContain(`-c mcp_servers.wsp.disabled_tools='${slate}'`);
+    expect(command).toContain(`-c mcp_servers.wsp_slate.command='"/opt/wsp/bin/wsp"'`);
+    expect(command).toContain(`-c mcp_servers.wsp_slate.args='["mcp"]'`);
+    expect(command).toContain(`-c mcp_servers.wsp_slate.env_vars='${JSON.stringify(LAUNCH_ENV)}'`);
+    expect(command).toContain(`-c mcp_servers.wsp_slate.enabled_tools='${slate}'`);
+    expect(command).toContain(`-c mcp_servers.wsp_slate.omit_tools_from='["deferred"]'`);
+    expect(buildCommand({ mcpServers: { docs: { command: "npx", args: [] } } })).not.toContain("wsp_slate");
+    // The four slate tools are called without an ask in read-only and workspace-write, each named; no other tool is.
+    for (const tool of ["slate_catalog", "slate_write", "slate_state", "slate_read"]) expect(command).toContain(`-c mcp_servers.wsp_slate.tools.${tool}.approval_mode='"approve"'`);
+    expect(command.match(/approval_mode/g)).toHaveLength(4);
+    expect(command).not.toContain("default_tools_approval_mode");
+  });
+
+  it("serves a thread another thread started no slate server, and leaves its wsp one as the server lists it", () => {
+    for (const wsp of [{ command: "/opt/wsp/bin/wsp", args: ["mcp", "--scoped", "--no-slate"], noSlate: true as const }, { command: "wsp", args: ["mcp"], noSlate: true as const }]) {
+      const command = buildCommand({ mcpServers: { wsp } });
+      // The server told no slate lists none of the slate's tools, so there is nothing here to hide.
+      expect(command).not.toContain("disabled_tools");
+      expect(command).not.toContain("wsp_slate");
+      // The mark is the adapter's to read, never a word on the line a box's wsp would have to take.
+      expect(command).not.toContain("noSlate");
+    }
+  });
+
   it("refuses a server name that is not one plain word of a config key", () => {
     expect(() => buildCommand({ mcpServers: { "a.b": { command: "x", args: [] } } })).toThrow("server name");
   });
