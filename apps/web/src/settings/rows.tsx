@@ -18,7 +18,7 @@ import { cn } from "../lib/utils.js";
 import { FACT, SETTINGS_WORDS, VALUE } from "./format.js";
 
 const RESET_WORD = SETTINGS_WORDS.resetRow;
-import { CARD_INSET, LINE_FLOOR, LIST_TITLE, NOTE, ROW_FLOOR, SECTION_HEAD, SETTING_TITLE } from "./layout.js";
+import { CARD_INSET, GLYPH_FRAME, LINE_FLOOR, LIST_TITLE, NOTE, ROW_FLOOR, SECTION_HEAD, SETTING_TITLE } from "./layout.js";
 
 /** Which mono a word in a slot wears: the foreground for a value a person reads, the muted for a state. */
 export type WordClass = "value" | "fact";
@@ -312,7 +312,7 @@ export function HeadRow({ glyph, title, mark, line, slot, attrs }: { glyph: Reac
   return (
     <div data-settings-head-row className={cn("flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-4", CARD_INSET, ROW_FLOOR)} {...attrs}>
       <span className="flex min-w-40 flex-1 items-center gap-3">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-foreground/[0.04]">{glyph}</span>
+        <span className={GLYPH_FRAME}>{glyph}</span>
         <span className="flex min-w-0 flex-col gap-0.5">
           <span className="flex min-w-0 items-baseline gap-2">
             <span data-settings-title className={cn(LIST_TITLE, "truncate")}>

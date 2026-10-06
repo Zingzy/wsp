@@ -10,8 +10,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import { createPortal } from "react-dom";
 import { PaperclipIcon } from "lucide-react";
 import { FILE_MAX_WORDS, FILES_MAX, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS } from "@wsp/protocol";
-import { GLYPH_FRAME } from "../../settings/grid";
-import { NOTE, SETTING_TITLE } from "../../settings/layout";
+import { GLYPH_FRAME, NOTE, SETTING_TITLE } from "../../settings/layout";
 import { CARD_SURFACE } from "../../settings/rows";
 import { cn } from "../../lib/utils";
 
