@@ -3,7 +3,7 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, keepRun, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
+import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, claudeMemoryDir, endAfterResult, endRun, fmtDuration, keepRun, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, interruptLine, modeOptionOn, setModeLine, stopTaskLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
@@ -691,6 +691,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     ...(deps.oauthToken !== undefined ? { oauthToken: deps.oauthToken } : {}),
     ...(deps.projectDirName !== undefined ? { projectDirName: deps.projectDirName } : {}),
   });
+  const memory = deps.projectDirName === undefined ? {} : { memoryDir: claudeMemoryDir(deps.configDir, deps.projectDirName) };
 
   /** wsp's half for a refusal the CLI named a cause for: the road the caller handed this adapter, which is the one
    * rule every door reads for how this workspace is signed in, and the cause the failure is classed by. */
@@ -1207,6 +1208,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       permissionMode: options.permissionMode,
       contextWindow: options.contextWindow,
       ...(options.fast === true ? { fast: true } : {}),
+      ...memory,
       ...(options.title !== undefined ? { name: options.title } : {}),
       ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}),
       ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
@@ -1288,7 +1290,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   /** One run on the turn's road and environment, read to its end so the answer lands after the fork's file is gone. */
   const aside = async (q: AsideQuestion): Promise<AsideAnswer> => {
     const fork = newSessionId();
-    const command = asideCommand({ session: q.session, fork, configDir: deps.configDir, ...(q.cwd !== undefined ? { cwd: q.cwd } : {}), ...(q.model !== undefined ? { model: q.model } : {}), ...(q.mcpServers !== undefined ? { mcpServers: q.mcpServers } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
+    const command = asideCommand({ session: q.session, fork, configDir: deps.configDir, ...(q.cwd !== undefined ? { cwd: q.cwd } : {}), ...(q.model !== undefined ? { model: q.model } : {}), ...(q.mcpServers !== undefined ? { mcpServers: q.mcpServers } : {}), ...memory, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
     const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(q.question, fork)] });
     const wallMs = deps.asideWallMs ?? ASIDE_WALL_MS;
     let walled = false;

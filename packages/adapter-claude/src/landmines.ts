@@ -2,7 +2,7 @@
 // NOTICE; logic only) and measured behavior in solari-poc/RESULTS.md.
 
 import { randomUUID } from "node:crypto";
-import { inFolder, launchHasSlate, launchWords, MCP_SERVER_NAME, programWord, shellQuote, SLATE_BRIEF } from "@wsp/protocol";
+import { inFolder, launchHasSlate, MCP_SERVER_NAME, programWord, shellQuote, SLATE_BRIEF } from "@wsp/protocol";
 import type { AgentLaunch, McpServerSpec, TurnImage } from "@wsp/protocol";
 import { PERMISSION_PROMPT_TOOL, SKIP_PROMPTS_MODE } from "./permissions.js";
 
@@ -41,9 +41,9 @@ export interface ClaudeEnvOptions {
    * as a nesting mark, and this one is ours. An API key beside it wins inside the CLI, so the caller hands one or
    * the other and never both, decided by what the vault holds: its token where there is one, else its key. */
   oauthToken?: string;
-  /** The folder under the CLI's projects directory this run keys its sessions and its memory to. What a copy of a
-   * project folder is given, so every copy and the person's own terminal in that folder share one memory and one
-   * sessions list. Absent leaves the CLI keying off the folder the turn runs in. */
+  /** The folder under the CLI's projects directory this run keys its sessions and its memory to, which the CLI reads
+   * only beside CLAUDE_CONFIG_DIR; the launch names the memory folder as well, see memorySettings. Absent leaves the
+   * CLI keying off the folder the turn runs in. */
   projectDirName?: string;
 }
 
@@ -113,10 +113,47 @@ export interface BuildCommandOptions {
   /** The model's faster output. The CLI takes it as the fastMode setting, which --settings carries for this launch
    * alone; the result's fast_mode_state says whether the account served it (2.1.283, 2026-09-27). */
   fast?: boolean;
+  /** The folder the run keeps its auto memory in; see memorySettings. */
+  memoryDir?: string;
   /** The program run in place of claude and the words added after -p, from the person's setup on that computer. */
   launch?: AgentLaunch;
   /** Forward a subagent's own text and thinking, not only its tool calls; see forwardsSubagentText. */
   subagentText?: boolean;
+}
+
+/** The settings that put a run's auto memory in `dir`. The only road to it that holds on a computer with no
+ * CLAUDE_CONFIG_DIR: 2.1.280 reads PROJECT_DIR_ENV only beside that variable, and keys a worktree's memory to its
+ * repo's main checkout. */
+export const memorySettings = (dir: string | undefined): { autoMemoryDirectory?: string } => (dir === undefined ? {} : { autoMemoryDirectory: dir });
+
+/** One --settings flag for every setting a launch carries, none where it carries none. */
+export const settingsFlag = (settings: Readonly<Record<string, unknown>>): string[] =>
+  Object.keys(settings).length === 0 ? [] : [`--settings ${shellQuote(JSON.stringify(settings))}`];
+
+/** The person's launch words less a --settings that holds a JSON object, and that object, for the launch to fold into
+ * its own one flag: 2.1.280 keeps the last --settings whole and drops any before it. A --settings naming a file is
+ * the CLI's to read, so the words keep it and `file` says the launch adds no flag of its own. */
+export function personSettings(args: readonly string[]): { words: string[]; settings: Record<string, unknown>; file: boolean } {
+  const words: string[] = [];
+  let settings: Record<string, unknown> = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    const joined = arg.startsWith("--settings=");
+    if (arg !== "--settings" && !joined) {
+      words.push(arg);
+      continue;
+    }
+    const value = joined ? arg.slice("--settings=".length) : args[++i];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value ?? "");
+    } catch {
+      parsed = undefined;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { words: [...args], settings: {}, file: true };
+    settings = parsed as Record<string, unknown>;
+  }
+  return { words, settings, file: false };
 }
 
 /** The first CLI that takes --forward-subagent-text: the SDK of 0.3.270 passes it, and a CLI before it exits on a flag
@@ -187,7 +224,8 @@ export function mcpConfigFlag(servers: Readonly<Record<string, McpServerSpec>> |
  * on that channel, and EOF ends the process after its current turn.
  */
 export function buildCommand(options: BuildCommandOptions): string {
-  const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow, name, mcpServers, fast, subagentText } = options;
+  const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow, name, mcpServers, fast, memoryDir, subagentText } = options;
+  const person = personSettings(options.launch?.args ?? []);
   if ((sessionId === undefined) === (resume === undefined)) {
     throw new Error("buildCommand needs exactly one of sessionId or resume");
   }
@@ -200,7 +238,7 @@ export function buildCommand(options: BuildCommandOptions): string {
   const idFlag = sessionId === undefined ? `--resume ${id}${options.resumeAt === undefined ? "" : ` --resume-session-at ${options.resumeAt}`}` : `--session-id ${id}`;
   const claude = [
     `${programWord("claude", options.launch)} -p`,
-    ...launchWords(options.launch),
+    ...person.words.map(shellQuote),
     "--input-format stream-json",
     "--output-format stream-json",
     "--verbose",
@@ -211,7 +249,7 @@ export function buildCommand(options: BuildCommandOptions): string {
     ...(name === undefined ? [] : [`--name ${shellQuote(name)}`]),
     ...mcpConfigFlag(mcpServers),
     ...briefFlag(mcpServers),
-    ...(fast === true ? [`--settings ${shellQuote(JSON.stringify({ fastMode: true }))}`] : []),
+    ...(person.file ? [] : settingsFlag({ ...(fast === true ? { fastMode: true } : {}), ...memorySettings(memoryDir), ...person.settings })),
     idFlag,
   ].join(" ");
   return inFolder(cwd, claude);

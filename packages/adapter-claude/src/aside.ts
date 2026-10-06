@@ -9,7 +9,7 @@
 
 import { inFolder, programWord, shellQuote } from "@wsp/protocol";
 import type { AgentLaunch, AsideAnswer, McpServerSpec } from "@wsp/protocol";
-import { UUID_RE, mcpConfigFlag, slugFlag } from "./landmines.js";
+import { UUID_RE, mcpConfigFlag, memorySettings, settingsFlag, slugFlag } from "./landmines.js";
 
 export interface AsideCommandOptions {
   /** The thread's own session, as the CLI keys it. */
@@ -22,6 +22,8 @@ export interface AsideCommandOptions {
   model?: string;
   /** The servers the thread's turns are handed on their launch. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** The folder the thread's turns keep their auto memory in. */
+  memoryDir?: string;
   launch?: AgentLaunch;
 }
 
@@ -35,7 +37,7 @@ export interface AsideCommandOptions {
  * turn takes.
  */
 export function asideCommand(options: AsideCommandOptions): string {
-  const { session, fork, configDir, cwd, model, mcpServers } = options;
+  const { session, fork, configDir, cwd, model, mcpServers, memoryDir } = options;
   for (const id of [session, fork]) if (!UUID_RE.test(id)) throw new Error(`session identifier must be a UUID, got "${id}"`);
   const claude = [
     `${programWord("claude", options.launch)} -p`,
@@ -44,7 +46,7 @@ export function asideCommand(options: AsideCommandOptions): string {
     "--verbose",
     "--tools ''",
     "--disallowedTools 'mcp__*'",
-    `--settings ${shellQuote(JSON.stringify({ disableAllHooks: true }))}`,
+    ...settingsFlag({ disableAllHooks: true, ...memorySettings(memoryDir) }),
     ...mcpConfigFlag(mcpServers),
     ...slugFlag("--model", "model", model),
     `--resume ${session}`,

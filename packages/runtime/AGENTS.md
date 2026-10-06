@@ -33,6 +33,7 @@ An agent writes everything in its copy, the gh on its PATH included, and the dae
 - Trim a transcript with `dropOldest()`, and set aside any blob that does not parse or that the table refuses (#1520, #1666, #1722).
 - An undo is wsp's only when its owner row reads installed, never when any id of its group does (#1481).
 - A vault value reaches a computer somebody owns on stdin with `withEnvFromInput()` (`packages/engine/src/run-env.ts`), and a clone there runs no setup-git (#1482).
+- Claude Code reads `CLAUDE_CODE_PROJECT_DIR_NAME` only beside `CLAUDE_CONFIG_DIR`, which a Mac leaves unset, and files a worktree's memory under its main checkout: a launch names the memory folder with the `autoMemoryDirectory` setting (`memorySettings()` in `packages/adapter-claude/src/landmines.ts`), folded into the person's own `--settings` since the CLI keeps only the last one, and only a worktree wsp made keys off its own top (#1772).
 - A daemon or CLI one version behind still answers: gate a new op or flag on its version, and fake a missing op as the daemon refuses it (#1484, #1613).
 
 ## One home for
