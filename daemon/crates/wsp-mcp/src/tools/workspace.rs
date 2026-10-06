@@ -99,6 +99,7 @@ pub struct Words {
     pub thread_kept_folder: String,
     pub thread_kept_worktree: String,
     pub no_thread_here: String,
+    pub thread_on_machine: String,
     pub delete_names_nothing: String,
     pub local_folder: String,
     pub local_worktree: String,

@@ -82,7 +82,6 @@ import {
   PlaceDoorView,
   JoinMint,
   SshHostSuggestion,
-  PlaceSpend,
   AccountsAnswer,
   ResetAnswer,
   ReadingsAnswer,
@@ -189,10 +188,41 @@ export class RequestError extends Error {
 
 export const defaultBackoffMs = (attempt: number): number => Math.min(5_000, 250 * 2 ** (attempt - 1));
 
+/** Reads two callers may ask with the same words while the first is in flight, which then share one request: a
+ * development build's second mount, two panes opening together. A list, so an op added later is never shared by
+ * having been forgotten; an act is never on it, since two asks of one are two acts. */
+const SHARED_READS: ReadonlySet<string> = new Set([
+  "workspaces.list",
+  "workspaces.get",
+  "workspaces.checkout",
+  "workspaces.landing",
+  "workspaces.pullRequestView",
+  "workspaces.pullRequestDiff",
+  "agents.read",
+  "harnesses.list",
+  "editor.list",
+  "host.terminalConfig",
+  "capabilities.get",
+  "forwards.list",
+  "init.get",
+  "account.get",
+  "devices.list",
+  "image.get",
+  "usage.used",
+  "usage.accounts",
+  "places.list",
+  "projects.list",
+  "golden.get",
+  "release.get",
+  "preferences.get",
+]);
+
 export class ProtocolClient {
   #ws: WebSocket | null = null;
   #seq = 0;
   #pending = new Map<number, Pending>();
+  /** Each shared read in flight by its op and words, until it settles. */
+  #inFlight = new Map<string, Promise<unknown>>();
   #listeners = new Set<(e: ProtocolEvent) => void>();
   /** Per-channel listeners for the frames the host relays from a daemon. Kept off #listeners on purpose: a pty
    * chunk is not history, and the store folds everything that reaches an event listener. */
@@ -235,7 +265,17 @@ export class ProtocolClient {
     });
   }
 
-  async request<T = Record<string, unknown>>(op: string, params: Record<string, unknown> = {}): Promise<T> {
+  request<T = Record<string, unknown>>(op: string, params: Record<string, unknown> = {}): Promise<T> {
+    if (!SHARED_READS.has(op)) return this.#send(op, params);
+    const key = `${op} ${JSON.stringify(params)}`;
+    const held = this.#inFlight.get(key);
+    if (held !== undefined) return held as Promise<T>;
+    const asking = this.#send<T>(op, params).finally(() => this.#inFlight.delete(key));
+    this.#inFlight.set(key, asking);
+    return asking;
+  }
+
+  async #send<T>(op: string, params: Record<string, unknown>): Promise<T> {
     if (this.status !== "live") throw new DisconnectedError(this.#dead ?? "lost");
     const id = this.#next();
     return new Promise<T>((resolve, reject) => {
@@ -780,10 +820,6 @@ export interface Api {
   /** The workspace's cost ticks since the runtime began metering it, folded to the rate changes and the newest. Optional
    * so fixtures without a usage chart need not fake it; without it the chart starts with the next tick. */
   costHistory?(workspaceId: string): Promise<WorkspaceCostEvent[]>;
-  /** What each place has cost since the first of the month and what it burns now, one row per place anything was
-   * metered on. Optional so fixtures without the settings table need not fake it; without it the table says no
-   * money at all rather than guessing at one. */
-  spend?(): Promise<PlaceSpend[]>;
   /** What the person's turns used over a range, split one way. Optional so fixtures without the Usage page need not
    * fake it. */
   usageUsed?(range: UsageRange, split: UsageSplit): Promise<UsedAnswer>;
@@ -1102,7 +1138,6 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the chart interpolates whatever numbers it is handed.
     costHistory: async workspaceId => WorkspaceCostEvent.array().parse((await c.request<{ points?: unknown }>("cost.history", { workspaceId })).points),
     // Parsed, not trusted: a figure a person reads as money is a figure the wire type vouched for.
-    spend: async () => PlaceSpend.array().parse((await c.request<{ places?: unknown }>("cost.spend")).places),
     usageUsed: async (range, split) => UsedAnswer.parse((await c.request<{ used?: unknown }>("usage.used", { range, split, outside: true })).used),
     usageAccounts: async () => AccountsAnswer.parse(await c.request<unknown>("usage.accounts")),
     slates: slateApi(c),

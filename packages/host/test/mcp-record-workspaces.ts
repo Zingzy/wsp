@@ -47,6 +47,7 @@ import {
   worktreeRemovedLine,
   type WorkspaceState,
   mergeConflictsLine,
+  threadOnMachineLine,
   mergedInLine,
   nothingToMergeLine,
 } from "@wsp/protocol";
@@ -198,6 +199,7 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     threadKeptFolder,
     threadKeptWorktree,
     noThreadHere,
+    threadOnMachine: threadOnMachineLine("{name}"),
     deleteNamesNothing,
     localFolder,
     localWorktree,
