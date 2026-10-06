@@ -75,6 +75,18 @@ function omarchyWrapper(): void {
   writeFileSync(wrapperAt, OMARCHY_WRAPPER, { mode: 0o755 });
 }
 
+/** ASCII's cloud image: a shim on PATH falling back to a launcher that runs lazy-run, here a stand-in that leaves a
+ * mark and fails as the real one does when it cannot take its lock. The reads name it without running it. */
+function asciiLazyRun(): void {
+  const lib = join(dir, "ascii");
+  const launcher = join(lib, "bin", "cursor-agent");
+  const shimAt = join(bin, "cursor-agent");
+  mkdirSync(join(lib, "bin"), { recursive: true });
+  writeFileSync(join(lib, "lazy-run"), '#!/bin/sh\n: > "$HOME/lazy-ran"\necho "lazy-run: line 127: /var/lock/ascii-lazy-cursor.lock: Permission denied" >&2\nexit 1\n');
+  writeFileSync(launcher, `#!/bin/sh\n# ascii-lazy-harness cursor\nexec ${lib}/lazy-run cursor cursor-agent "$@"\n`);
+  writeFileSync(shimAt, `#!/bin/sh\n# ascii-harness-shim\nu=$(PATH=$(printf %s "$PATH" | tr : "\\n" | grep -vx ${bin} | paste -sd:) command -v cursor-agent 2>/dev/null)\n[ -n "$u" ] && exec "$u" "$@"\nexec ${launcher} "$@"\n`, { mode: 0o755 });
+}
+
 /** mise's own record of the tool once its first run installed it. */
 function miseInstalled(): void {
   mkdirSync(join(home, ".local", "share", "mise", "installs", "claude", "2.1.289", "bin"), { recursive: true });
@@ -201,5 +213,25 @@ describe("an agent whose command is a wrapper that installs it on its first run"
     const claude = (await agentsHere(here(), { versions: false })).find(a => a.id === "claude")!;
     expect(claude.found).toBe(true);
     expect(claude.installs).toBeUndefined();
+  }, 20_000);
+});
+
+describe("an ASCII lazy-run shim, the second installer wsp knows", () => {
+  it("is named so by the agents report, and nothing runs lazy-run to ask its version", async () => {
+    asciiLazyRun();
+    const cursor = (await readAgents(here(), { user: "ada", vault: {} })).agents.find(a => a.id === "cursor")!;
+    expect(cursor).toMatchObject({ installed: true, installsOnFirstRun: true });
+    expect(cursor.version).toBeUndefined();
+    expect(existsSync(join(home, "lazy-ran")), "lazy-run ran").toBe(false);
+  }, 20_000);
+});
+
+describe("an agent whose --version exits non-zero", () => {
+  it("has no version and says it could not be read, and its error is in no cell", async () => {
+    writeStub(join(bin, "codex"), '#!/bin/sh\necho "codex: line 3: /var/lock/codex.lock: Permission denied" >&2\nexit 1\n');
+    const codex = (await readAgents(here(), { user: "ada", vault: {} })).agents.find(a => a.id === "codex")!;
+    expect(codex).toMatchObject({ installed: true, versionUnread: true });
+    expect(codex.version).toBeUndefined();
+    expect(JSON.stringify(codex)).not.toContain("Permission denied");
   }, 20_000);
 });

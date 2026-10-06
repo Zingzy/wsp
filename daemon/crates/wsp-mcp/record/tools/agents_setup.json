@@ -95,6 +95,10 @@
               "type": "boolean",
               "const": true
             },
+            "versionUnread": {
+              "type": "boolean",
+              "const": true
+            },
             "path": {
               "type": "string"
             },
@@ -311,6 +315,10 @@
               ]
             },
             "installsOnFirstRun": {
+              "type": "boolean",
+              "const": true
+            },
+            "versionUnread": {
               "type": "boolean",
               "const": true
             },
