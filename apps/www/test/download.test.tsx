@@ -6,7 +6,7 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { downloadUrl, STABLE_NAMES } from "../../../packages/wspx/scripts/bundles.mjs";
+import { downloadUrl, STABLE_NAMES } from "../../../packages/protocol/src/bundles.mjs";
 import { INSTALL, RELEASES } from "../src/links";
 import { OTHER, platformOf } from "../src/downloads";
 

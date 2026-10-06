@@ -2,7 +2,7 @@
 // The two desktop downloads and which one a visitor is shown first. The names
 // and the URLs come from the release job's own formatter, so a rename there
 // moves these links with it and nothing on this page can go stale.
-import { downloadUrl, STABLE_NAMES } from "../../../packages/wspx/scripts/bundles.mjs";
+import { downloadUrl, STABLE_NAMES } from "../../../packages/protocol/src/bundles.mjs";
 
 export type Platform = "mac" | "linux";
 

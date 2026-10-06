@@ -10,16 +10,18 @@ const workflow = existsSync(path) ? readFileSync(path, "utf8") : "";
 const desktopScripts = (JSON.parse(readFileSync(join(repo, "apps", "desktop", "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;
 
 describe("the nightly desktop smoke", () => {
-  it("runs every night on main, by hand, and on a pull request that changes the workflow or the smoke", () => {
+  it("runs every night on main, by hand, and on a land branch push that changes the workflow or the smoke", () => {
     expect(workflow).toMatch(/\n {2}schedule:\n {4}- cron: "[^"]+"\n/);
     expect(workflow).toContain("\n  workflow_dispatch:\n");
-    const pr = workflow.slice(workflow.indexOf("\n  pull_request:\n"), workflow.indexOf("\n  schedule:\n"));
-    expect(pr).toContain("paths:");
+    const push = workflow.slice(workflow.indexOf("\n  push:\n"), workflow.indexOf("\n  schedule:\n"));
+    expect(push).toContain('branches:\n      - "land/**"\n');
+    expect(push).toContain("paths:");
     for (const file of [".github/workflows/desktop-smoke.yml", "apps/desktop/test/smoke.electron.test.ts", "apps/desktop/test/packaged.ts"]) {
-      expect(pr).toContain(`- "${file}"`);
+      expect(push).toContain(`- "${file}"`);
       expect(existsSync(join(repo, file)), file).toBe(true);
     }
-    expect(workflow).not.toContain("push:");
+    expect(workflow).not.toContain("pull_request:");
+    expect(workflow).not.toContain("- main\n");
   });
 
   it("holds a read of the repository and nothing else, on an Apple silicon runner", () => {

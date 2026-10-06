@@ -7,7 +7,7 @@
 // in the one place the app already puts a sentence a person may be waiting on.
 import { GET_THE_APP_WORD, releaseAbove, shellVersionNotice, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
 import { useEffect } from "react";
-import { RELEASES } from "../../../../packages/wspx/scripts/bundles.mjs";
+import { RELEASES } from "../../../../packages/protocol/src/bundles.mjs";
 import { bootPayload } from "../boot.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { addNotice } from "../notices/store.js";

@@ -8,7 +8,6 @@
 // has; adding an asset is one entry here and nothing else.
 import { WEB_DIR_ENV } from "@wsp/protocol";
 import { cpSync, existsSync, mkdirSync } from "node:fs";
-import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DAEMON_BIN, daemonBinaryIn, daemonTargetHere, noDaemonBuildLine } from "./daemon-binary.js";
@@ -35,8 +34,6 @@ interface Asset {
   stage(from: string, to: string): void;
 }
 
-const resolveHere = (specifier: string): string => createRequire(import.meta.url).resolve(specifier);
-
 /** The binary this computer runs, which is the one file every daemon folder must hold for the host on it to serve
  * its own workspace; a release folder holds every target's. On a platform wsp builds no daemon for the proof is a
  * file no build makes, so the stage refuses there and says why. */
@@ -50,7 +47,7 @@ const ASSETS: Record<AssetKind, Asset> = {
     name: "web app",
     dir: "web",
     proof: "index.html",
-    workspace: () => join(dirname(resolveHere("@wsp/web/package.json")), "dist"),
+    workspace: () => join(here(), "..", "..", "..", "apps", "web", "dist"),
     stage: (from, to) => cpSync(from, to, { recursive: true }),
   },
   cli: {

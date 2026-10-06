@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { REPO } from "../scripts/bundles.mjs";
+import { REPO } from "../../protocol/src/bundles.mjs";
 import { refusal, runRefusal, sharedLibrariesNamed, toolServerRefusal } from "../scripts/daemon-binary.mjs";
 import { daemonFeatures } from "../scripts/daemon-features.mjs";
 import { writeStub } from "../../protocol/test/stub-script.js";
