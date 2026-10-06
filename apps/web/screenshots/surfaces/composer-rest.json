@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "fixture": "tiles",
+  "widths": [
+    1440
+  ],
+  "reason": "Pins the composer at rest over the tiles fixture; the composer at 1280 and 390 is shot in composer-thread.",
+  "steps": [
+    "row-id=thread:coupon"
+  ],
+  "wait": "testid=composer-editor",
+  "settleMs": 800
+}

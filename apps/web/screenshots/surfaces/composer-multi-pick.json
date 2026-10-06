@@ -1,0 +1,23 @@
+{
+  "at": "/#p/pr_spoo-landing",
+  "fixture": "tiles-attempt",
+  "steps": [
+    "390:key:Escape",
+    "testid=composer-editor",
+    "type:Find why the cart total test is flaky and fix it",
+    "composer-picker=model",
+    "key:ArrowDown",
+    "key:Shift+Enter",
+    "composer-harness=codex",
+    "key:Shift+Enter",
+    "key:Escape",
+    "testid=composer-editor"
+  ],
+  "wait": "composer-model-chips",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The model picker's menu and its chips ride the composer, whose 1280 layout composer-thread already shoots; 390 is where the chips wrap, which is shot here.",
+  "settleMs": 700
+}

@@ -4,7 +4,7 @@ The React app the desktop shell and a browser tab load. Paths are under apps/web
 
 ## How it works
 
-One zustand store, `src/protocol/store.ts`, holds what the host said; every standing read lives in its `pull()`, which runs again each time the socket is live.
+One zustand store, `src/protocol/store/useStore.ts` (re-exported from `src/protocol/store.ts`), holds what the host said; every standing read lives in its `pull()`, which runs again each time the socket is live.
 A session event carries no row: the store reads that workspace's whole row list again with `reloadSessions()`.
 Every thread of a project folder shares one workspace record, so per-thread state keys by thread or request id.
 Which records a person sees is decided once, in `deriveSidebarProjects()`: sidebar, palette, switcher and Projects page draw from it.

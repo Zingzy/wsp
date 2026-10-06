@@ -1,0 +1,11 @@
+{
+  "at": "/",
+  "fixture": "orchestrator",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:migrate",
+    "390:key:Escape"
+  ],
+  "wait": "thread-rows"
+}

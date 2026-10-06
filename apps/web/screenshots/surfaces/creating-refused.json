@@ -1,0 +1,24 @@
+{
+  "at": "/",
+  "fixture": "ascii-only",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=project-switcher",
+    "switcher-option=pr_api",
+    "menu:k=project-switcher",
+    "menu-item=new-workspace",
+    "390:key:Escape",
+    "testid=composer-editor",
+    "type:pricing page",
+    "key:Enter"
+  ],
+  "wait": "creation-refused",
+  "settleMs": 700,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The creation log sits in the thread's column, whose 1280 layout composer-thread already shoots; 390 is where it reflows, which is shot here.",
+  "fresh": true
+}

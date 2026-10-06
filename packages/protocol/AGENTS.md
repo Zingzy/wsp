@@ -13,10 +13,10 @@ The daemon version is cut when a change lands, never on a branch. `src/format.ts
 
 1. A word or number changed in `src/daemon-contract.ts` moves the contract fixtures and so the daemon's sha, which
    cuts a daemon version (`packages/host/test/daemon-content.test.ts`).
-2. No value import cycle between the package's modules: `src/format.ts` and `src/words/` import only types from `src/index.ts`
-   (`test/import-cycles.test.ts`).
-3. `src/index.ts` re-exports `src/format.ts` whole, so a local name in index.ts that matches a format export shadows
-   it; and no file but `src/words/units.ts` spells out a byte formatter, the listed exceptions aside
+2. No value import cycle between the package's modules, folders included: `src/format.ts`, `src/words/`, `src/wire/` and
+   `src/views/` import only types from `src/index.ts` (`test/import-cycles.test.ts`).
+3. `src/index.ts` re-exports `src/format.ts` whole, so a name a `src/wire/` or `src/views/` file also exports fails
+   tsc as ambiguous; and no file but `src/words/units.ts` spells out a byte formatter, the listed exceptions aside
    (`test/format.test.ts`).
 4. A refusal has two halves, what happened and what to do (`test/refusal-shape.test.ts`); the exit class is read off
    the kind stamped on the error, never off its words (`test/exit.test.ts`).
@@ -40,9 +40,9 @@ The daemon version is cut when a change lands, never on a branch. `src/format.ts
 
 | Rule | File | Function |
 |---|---|---|
-| a place's daemon behind this host | `src/index.ts` | `placeDaemonBehind()` |
-| a computer's STATE word | `src/index.ts` | `placeStateOf()` |
-| turns folded into one thread | `src/index.ts` | `foldThreads()` |
+| a place's daemon behind this host | `src/wire/daemon-version.ts` | `placeDaemonBehind()` |
+| a computer's STATE word | `src/views/place-setup-words.ts` | `placeStateOf()` |
+| turns folded into one thread | `src/views/session.ts` | `foldThreads()` |
 | an error's exit class | `src/exit.ts` | `exitClassOf()` |
 | a refusal in two halves | `src/exit.ts` | `refusal()` |
 | bytes as a person reads them | `src/words/units.ts` | `fmtBytes()` |

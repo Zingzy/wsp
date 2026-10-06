@@ -1,0 +1,8 @@
+{
+  "at": "/",
+  "steps": [
+    "1440:row-id=thread:redirect",
+    "surface-launch=machine"
+  ],
+  "wait": "right-panel-tabbar"
+}

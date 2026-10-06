@@ -1,0 +1,12 @@
+{
+  "at": "/",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-computers",
+    "place-row=p_hetzner"
+  ],
+  "wait": "settings-at=computer:p_hetzner",
+  "settleMs": 700
+}
