@@ -34,3 +34,25 @@ and the skill row in one change. The check is
 ```
 pnpm exec vitest run --minWorkers=1 --maxWorkers=2 packages/host/test/parity.test.ts packages/host/test/skill.test.ts packages/host/test/contract.test.ts
 ```
+
+## Before a branch is called ready
+
+`scripts/test-files.sh <file>...` runs the named test files with
+`packages/host/test/memory.test.ts` and
+`packages/protocol/test/stub-script.test.ts` at two workers, and refuses a run
+naming no file or a folder, since either starts the whole suite. `--tools`
+adds `packages/host/test/mcp-record.test.ts`, which a change to what a tool
+lists or answers needs. `pnpm check:laws` runs the tests that read the whole
+tree (the words, parity, skill, contract and record tests and their kin) and
+`cargo fmt --check` when daemon/ changed. `scripts/pre-review.sh [<ticket>]`
+is the last command before a branch is called ready: it checks that the branch
+holds origin/main and is one commit ahead of it, the commit message, the diff
+against the pre-commit hook's rules and for pattern kills, the laws, the size
+check and the touched tests, and exits nonzero on any failure. It also runs
+the branch's test files on the merge-base and says which go red there, and
+given a ticket number prints each acceptance item and ruling the report has to
+answer. `--build` builds `@wsp/host` and the packages it loads first, which a
+fresh checkout needs before the laws can pass. `scripts/heavy.sh <command>`
+runs a command in one of two slots on a Mac, so builders working at once queue
+their tsc, `tsup --dts`, builds and test runs instead of swapping; both
+scripts put their own vitest and cargo runs through it.

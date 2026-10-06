@@ -9,6 +9,7 @@
   "scripts": {
     "prepare": "node scripts/hooks-path.mjs",
     "test": "vitest run",
+    "check:laws": "scripts/pre-review.sh --laws",
     "build": "pnpm -r build",
     "wsp": "node packages/host/dist/bin.js",
     "release": "pnpm --filter @zingzy/wsp release",
