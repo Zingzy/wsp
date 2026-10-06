@@ -96,6 +96,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
 import { formatChatTimestamp } from "../../lib/timestampFormat";
+import { SlateUpdatedLine } from "../../slate/SlateUpdatedLine";
 import { formatWorkspaceRelativePath } from "../../lib/filePathDisplay";
 import { AssistantSelectionToolbar, QUOTE_SOURCE_ATTRIBUTE, type QuotedSelection } from "./AssistantSelectionToolbar";
 
@@ -125,6 +126,8 @@ interface TimelineRowSharedState {
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   /** The replies Rewind to here stands on: the last reply of each earlier turn that kept something to rewind to. */
   rewindableMessageIds: ReadonlySet<MessageId>;
+  /** The last replies of the turns the agent wrote the slate in. */
+  slatedMessageIds: ReadonlySet<MessageId>;
   onRewind: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenFile: ((path: string, line?: number) => void) | undefined;
@@ -133,6 +136,7 @@ interface TimelineRowSharedState {
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   onToggleWorkEntry: (anchorKey: string) => void;
   onAnswerPermission: (sessionId: string, askId: string, optionId: string) => void;
+  dockedAskId: string | null;
   workGroupViewState: WorkGroupViewState;
   replyRuns: ReplyRuns | null;
 }
@@ -207,9 +211,13 @@ export interface MessagesTimelineProps {
   threadKey: string;
   onOpenTurnDiff?: (turnId: TurnId, filePath?: string) => void;
   rewindableMessageIds?: ReadonlySet<MessageId>;
+  slatedMessageIds?: ReadonlySet<MessageId>;
   onRewind?: (messageId: MessageId) => void;
   /** Answers a relayed permission prompt; the turn it blocks runs or is refused as the option says. */
   onAnswerPermission?: (sessionId: string, askId: string, optionId: string) => void;
+  /** The prompt answered where the composer stands, by its ask id: its row here keeps the record and offers
+   * nothing, while every other open prompt (another thread's, a subagent's) keeps its own buttons. */
+  dockedAskId?: string | null;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenFile?: (path: string, line?: number) => void;
   markdownCwd: string | undefined;
@@ -258,8 +266,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   threadKey,
   onOpenTurnDiff = NOOP_OPEN_TURN_DIFF,
   rewindableMessageIds = EMPTY_REWINDABLE,
+  slatedMessageIds = EMPTY_REWINDABLE,
   onRewind = NOOP_REWIND,
   onAnswerPermission = NOOP_ANSWER_PERMISSION,
+  dockedAskId = null,
   onImageExpand,
   onOpenFile,
   markdownCwd,
@@ -546,8 +556,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       turnDiffSummaryByAssistantMessageId,
       rewindableMessageIds,
+      slatedMessageIds,
       onRewind,
       onAnswerPermission,
+      dockedAskId,
       onImageExpand,
       onOpenFile,
       onOpenTurnDiff,
@@ -566,8 +578,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       turnDiffSummaryByAssistantMessageId,
       rewindableMessageIds,
+      slatedMessageIds,
       onRewind,
       onAnswerPermission,
+      dockedAskId,
       onImageExpand,
       onOpenFile,
       onOpenTurnDiff,
@@ -1116,6 +1130,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           resolvedTheme={ctx.resolvedTheme}
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
+        {ctx.slatedMessageIds.has(row.message.id) ? <SlateUpdatedLine /> : null}
         {row.showAssistantMeta ? (
           <div data-reply-meta className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
             <span className="flex items-center gap-0.5">
@@ -1169,7 +1184,7 @@ function ProposedPlanTimelineRow({
 
 function PermissionTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "permission" }> }) {
   const ctx = use(TimelineRowCtx);
-  return <PermissionPromptRow asker={row.asker} permission={row.permission} onAnswer={ctx.onAnswerPermission} />;
+  return <PermissionPromptRow asker={row.asker} permission={row.permission} onAnswer={ctx.onAnswerPermission} docked={ctx.dockedAskId === row.permission.askId} />;
 }
 
 function SubagentTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "subagent" }> }) {

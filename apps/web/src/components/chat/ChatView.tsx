@@ -34,7 +34,7 @@ import { TimelineRuleLine } from "./TimelineRuleLine";
 import { MessagesTimeline, type MachineWait, type ReplyRuns } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
-import { rewindableReplies, type RewindableReply } from "./RewindDialog";
+import { lastReplies, rewindableReplies, type RewindableReply } from "./RewindDialog";
 import { requestRewind } from "../../shell/shellRequests";
 import { TRANSCRIPT_LOADING } from "../../transcript-words";
 import { useAppDark } from "../../settings/theme";
@@ -48,11 +48,15 @@ export function ChatView({
   workspaceId,
   threadId = null,
   timestampFormat = DEFAULT_TIMESTAMP_FORMAT,
+  docked,
   children,
 }: {
   workspaceId: string;
   threadId?: string | null;
   timestampFormat?: TimestampFormat;
+  /** The prompt the composer's slot is answering, by ask id, read off the thread it is shown for; that prompt's
+   * timeline row then keeps the record alone. Absent, or null for a thread, and every row keeps its buttons. */
+  docked?: ((thread: ChatThreadHandle) => string | null) | undefined;
   children?: ((thread: ChatThreadHandle) => ReactNode) | undefined;
 }) {
   const workspace = useWorkspace(workspaceId);
@@ -205,6 +209,10 @@ export function ChatView({
   // replies can be rewound moves, never on a streamed chunk: a settled reply would redraw on every one.
   const rewindableKey = [...rewindable.keys()].join("\n");
   const rewindableIds = useMemo(() => new Set(rewindableKey === "" ? [] : rewindableKey.split("\n")), [rewindableKey]);
+  // A turn the agent wrote the slate in says so once, under its last reply.
+  const replies = lastReplies(view.entries);
+  const slatedKey = view.turns.flatMap(turn => (turn.slated === true && replies.has(turn.turnId) ? [replies.get(turn.turnId)!] : [])).join("\n");
+  const slatedIds = useMemo(() => new Set(slatedKey === "" ? [] : slatedKey.split("\n")), [slatedKey]);
   const rewindRef = useRef({ rewindable, threadId: turnRows.at(-1)?.threadId ?? threadId, agent: catalog?.label ?? agent ?? "", cutsConversation });
   rewindRef.current = { rewindable, threadId: turnRows.at(-1)?.threadId ?? threadId, agent: catalog?.label ?? agent ?? "", cutsConversation };
   const onRewind = useCallback(
@@ -271,6 +279,7 @@ export function ChatView({
             threadKey={threadId === null ? workspaceId : `${workspaceId}/${threadId}`}
             onImageExpand={noopImageExpand}
             onAnswerPermission={onAnswerPermission}
+            dockedAskId={docked?.(thread) ?? null}
             onOpenFile={onOpenFile}
             onIsAtEndChange={onIsAtEndChange}
             footer={footer}
@@ -280,6 +289,7 @@ export function ChatView({
             timestampFormat={timestampFormat}
             onQuote={onQuote}
             rewindableMessageIds={rewindableIds}
+            slatedMessageIds={slatedIds}
             onRewind={onRewind}
             replyRuns={replyRuns}
             onReachTop={thread.older}

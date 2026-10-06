@@ -18,15 +18,11 @@ import { DIST, describeWithDists, distOf } from "./built-bin.js";
  * page goes red until it says the same thing. */
 const HOST_MEMORY_BUDGET_MB = 40;
 
-/** What the run is held to, under the promise so a regression is caught while the promise still holds: the host
- * read 31.3 MB on CI when this was first set, main read 35.1 MB on 2026-10-01, and the per-model usage rows, the
- * top threads and the fifteen-minute draw added about 0.1 MB more; the pull request pane's reply, resolve and react
- * shapes took main from 35.9 to 36.1 MB on 2026-10-03. Main read 36.3 MB with the daemon's worktree ops; threads in
- * the project's folder and one turn in a worktree read 36.5, and the skill worked out at each ask rather than held
- * whole brought that to 36.4. Since the host has run under --stress-flush-code (2026-10-05) a reading leaves out the
- * bytecode of code no turn ran: the build that kept transcripts as rows collected less and read 37.0 without it and
- * 35.5 with it, as the build before it did both ways, so the cap stayed where it was. */
-const HOST_MEMORY_CAP_MB = 36.5;
+/** What the run is held to, under the promise so a regression is caught while the promise still holds. Main read
+ * 35.5 MB on Linux under Node 24 on 2026-10-05, most of it zod binding 24 methods onto every schema the protocol
+ * builds at load; bound on first read instead, it reads 26.5 there and 25.7 under Node 22. With the Slate's parser,
+ * kit, runs and tools merged in it read 26.9 on a Mac on 2026-10-06. */
+const HOST_MEMORY_CAP_MB = 28.5;
 
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");

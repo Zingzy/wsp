@@ -259,9 +259,9 @@ const openModelMenu = async () => {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APPS = join(HERE, "..", "..");
-/** The dev shell's fixture catalog, the one file allowed to repeat the table's sentences: the test below pins it to
- * the table's current words, so a screenshot of the shell is never a menu the table stopped saying. */
-const SHELL_FIXTURE = join(HERE, "shell", "main.tsx");
+/** The fake hosts' access modes, the one file allowed to repeat the table's sentences: the test below pins it to the
+ * table's current words, so a screenshot of the shell or the prompt dock is never a menu the table stopped saying. */
+const SHELL_FIXTURE = join(HERE, "fixtures", "access-modes.ts");
 /** Every source file of the web and desktop apps, where a second copy of a person's words could hide. */
 function appSources(dir: string, out: Array<readonly [string, string]> = []): Array<readonly [string, string]> {
   for (const e of readdirSync(dir, { withFileTypes: true })) {

@@ -1,0 +1,223 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The window's slates, keyed by thread id and filled by slates.get: fetched when a thread's slate is first drawn,
+// again on every session.slate and after a gap, and folded in place on slate.state. Each thread's engine lives for
+// the window's life, so switching threads and back keeps a section's fold and a field's unsent text.
+import { create } from "zustand";
+import { slateDomainKey, slateLinkDomain, type SessionSlateEvent, type SlateJson, type SlateRunEvent, type SlateValuesEvent, type TurnResult } from "@wsp/protocol";
+import { ActionRunner, StateSender, type SlateLink } from "./actions.js";
+import { SlateEngine } from "./engine.js";
+import { isRunRecord, type SlateAsk, type SlateDoc } from "./model.js";
+import type { SlateApi, SlateRecord } from "./wire.js";
+import { isOwnName } from "./paths.js";
+
+/** What the tab draws for a thread: nothing asked yet, the host's record, or no slate at all. */
+export interface SlateEntry {
+  readonly record: SlateRecord | null;
+  /** A document of a schema this build does not know: the tab says so and draws nothing. */
+  readonly newer?: number;
+}
+
+/** The consent sheet a thread's tab shows: the held run, and the host's ask where a press brought one. */
+export interface SlateAsking {
+  readonly run: string;
+  readonly ask?: SlateAsk;
+}
+
+interface SlateStoreState {
+  byThread: Record<string, SlateEntry | undefined>;
+  asking: Record<string, SlateAsking | undefined>;
+  /** The approval keys whose sheet this window already showed, by thread: a held run opens its sheet on its own once,
+   * then waits on its row's Review. */
+  seen: Record<string, readonly string[] | undefined>;
+  /** Each thread's latest ended turn as session.done carried it, for thread.context, thread.lastTurn and tokens. */
+  lastTurn: Record<string, TurnResult | undefined>;
+  /** A link a press would open, waiting on the person's word for its domain. */
+  linking: Record<string, { href: string; domain: string } | undefined>;
+}
+
+export const useSlateStore = create<SlateStoreState>(() => ({ byThread: {}, asking: {}, seen: {}, lastTurn: {}, linking: {} }));
+
+/** Opens a link a press named: a domain the person allowed for this thread at once, any other after they say so. */
+export function openLink(threadId: string, href: string): void {
+  const domain = slateLinkDomain(href);
+  if (domain === undefined || useSlateStore.getState().byThread[threadId]?.record?.approvals[slateDomainKey(domain)]?.state === "allowed") {
+    window.open(href, "_blank", "noopener,noreferrer");
+    return;
+  }
+  useSlateStore.setState(s => ({ linking: { ...s.linking, [threadId]: { href, domain } } }));
+}
+
+export function closeLink(threadId: string): void {
+  useSlateStore.setState(s => ({ linking: { ...s.linking, [threadId]: undefined } }));
+}
+
+export function askConsent(threadId: string, asking: SlateAsking | undefined): void {
+  useSlateStore.setState(s => ({ asking: { ...s.asking, [threadId]: asking } }));
+}
+
+/** The sheet for this key was shown and closed, answered or not: it does not open on its own again here. */
+export function markSeen(threadId: string, key: string): void {
+  useSlateStore.setState(s => {
+    const seen = s.seen[threadId] ?? [];
+    return seen.includes(key) ? s : { seen: { ...s.seen, [threadId]: [...seen, key] } };
+  });
+}
+
+/** Where the window's slate roads lead: the api once bound, and the thread the centre shows with its panel's key. */
+export interface SlateHost {
+  api(): SlateApi | null;
+  /** The thread the centre shows and the right panel key it opens under; null threadId when none. */
+  selected(): { threadId: string | null; panelKey: string };
+  /** Opens the right panel on a pane under a key; false where the pane cannot open there. */
+  openPane(panelKey: string, kind: string): boolean;
+  fill(threadId: string, text: string): void;
+}
+
+let host: SlateHost | null = null;
+
+export function bindSlates(next: SlateHost): void {
+  host = next;
+}
+
+export interface SlateBundle {
+  engine: SlateEngine;
+  sender: StateSender;
+  runner: ActionRunner;
+}
+
+const bundles = new Map<string, SlateBundle>();
+
+function linkFor(threadId: string): SlateLink {
+  const api = host?.api() ?? null;
+  const gone = () => Promise.reject(new Error("Not connected to wsp. The slate will catch up when it is."));
+  return {
+    event: ask => (api === null ? gone() : api.event(threadId, ask)),
+    approve: (key, scope) => (api === null ? gone() : api.approve(threadId, key, scope)),
+    cancel: run => (api === null ? gone() : api.cancel(threadId, run)),
+    revoke: key => (api === null ? gone() : api.revoke(threadId, key)),
+    consent: ask => askConsent(threadId, { run: ask.run, ask }),
+    writeState: values => (api === null ? gone() : api.state(threadId, values)),
+    fill: text => host?.fill(threadId, text),
+    pane: kind => (host === null ? false : host.openPane(host.selected().panelKey, kind)),
+    open: href => openLink(threadId, href),
+  };
+}
+
+/** The thread's engine, made on first ask and kept for the window's life. */
+export function slateBundle(threadId: string): SlateBundle {
+  let bundle = bundles.get(threadId);
+  if (bundle === undefined) {
+    const engine = new SlateEngine(threadId);
+    const link = () => linkFor(threadId);
+    const sender = new StateSender(engine, link);
+    bundle = { engine, sender, runner: new ActionRunner(engine, link) };
+    bundles.set(threadId, bundle);
+    const entry = useSlateStore.getState().byThread[threadId];
+    if (entry !== undefined) applyRecord(bundle.engine, entry);
+  }
+  return bundle;
+}
+
+/** The link a thread's consent sheet approves through. */
+export function slateLink(threadId: string): SlateLink {
+  return linkFor(threadId);
+}
+
+function documentOf(entry: SlateEntry): SlateDoc | null {
+  return entry.newer !== undefined ? null : (entry.record?.document ?? null);
+}
+
+function applyRecord(engine: SlateEngine, entry: SlateEntry): void {
+  engine.setRecord(documentOf(entry), entry.record?.values ?? {}, entry.record?.version ?? 0, entry.record?.revision ?? 0);
+}
+
+const inFlight = new Map<string, Promise<SlateEntry | undefined>>();
+/** One more get for a thread asked for again while its get was out, which may have been read before the write that
+ * asked: it runs once that get settles, and every ask in the meantime shares it. */
+const again = new Map<string, Promise<SlateEntry | undefined>>();
+
+/** Asks the host for the thread's record and folds it in; a new document diffs by piece id in its engine. */
+export function loadSlate(threadId: string): Promise<SlateEntry | undefined> {
+  const api = host?.api() ?? null;
+  if (api === null) return Promise.resolve(undefined);
+  const running = inFlight.get(threadId);
+  if (running !== undefined) {
+    let follow = again.get(threadId);
+    if (follow === undefined) {
+      follow = running.then(() => {
+        again.delete(threadId);
+        return loadSlate(threadId);
+      });
+      again.set(threadId, follow);
+    }
+    return follow;
+  }
+  const ask = api
+    .get(threadId)
+    .then(answer => {
+      const entry: SlateEntry = answer.newer === undefined ? { record: answer.record } : { record: answer.record, newer: answer.newer };
+      useSlateStore.setState(s => ({ byThread: { ...s.byThread, [threadId]: entry } }));
+      const bundle = bundles.get(threadId);
+      if (bundle !== undefined) applyRecord(bundle.engine, entry);
+      return entry;
+    })
+    .catch(() => undefined)
+    .finally(() => inFlight.delete(threadId));
+  inFlight.set(threadId, ask);
+  return ask;
+}
+
+/** Opens the Slate tab once, the first time a thread's slate is on screen, and tells the host so another window
+ * and a later write do not open it again. */
+const shownHere = new Set<string>();
+
+export function showOnce(threadId: string, entry: SlateEntry | undefined): void {
+  // An answer read before the host stored this window's shown must not open the tab a second time.
+  if (host === null || entry?.record == null || entry.record.shownOnce || entry.record.document === null || entry.newer !== undefined || shownHere.has(threadId)) return;
+  const selected = host.selected();
+  if (selected.threadId !== threadId) return;
+  if (!host.openPane(selected.panelKey, "slate")) return;
+  shownHere.add(threadId);
+  const record = { ...entry.record, shownOnce: true };
+  useSlateStore.setState(s => ({ byThread: { ...s.byThread, [threadId]: { ...entry, record } } }));
+  void host.api()?.shown(threadId).catch(() => {});
+}
+
+/** A slate event off the socket, from the protocol store's one subscription. */
+export function slateEvent(e: SessionSlateEvent | SlateValuesEvent | SlateRunEvent | { type: "session.done"; threadId?: string | undefined; result: TurnResult }): void {
+  switch (e.type) {
+    case "session.slate": {
+      // A write by the agent is the first-write moment; the person's and the host's own never open the tab.
+      const agent = e.by === "agent";
+      if (useSlateStore.getState().byThread[e.threadId] === undefined && !agent && host?.selected().threadId !== e.threadId) return;
+      void loadSlate(e.threadId).then(entry => {
+        if (agent) showOnce(e.threadId, entry);
+      });
+      return;
+    }
+    case "slate.values": {
+      // Values off the wire are JSON the host's batch wrote.
+      const values = e.values as Record<string, SlateJson>;
+      bundles.get(e.threadId)?.engine.applyValues(values, e.revision);
+      // A run newly held is a sheet the record does not carry yet: the header row and Review read it from there.
+      const asks = useSlateStore.getState().byThread[e.threadId]?.record?.asks ?? [];
+      const held = Object.entries(values).some(([path, value]) => isOwnName(path) && isRunRecord(value) && value.state === "held" && !asks.some(ask => `$${ask.run}` === path));
+      // An empty push is the host saying the asks changed: a server's tools arrived, or a call held for its confirm.
+      const asked = Object.keys(values).length === 0 && useSlateStore.getState().byThread[e.threadId] !== undefined;
+      if (held || asked) void loadSlate(e.threadId);
+      return;
+    }
+    case "slate.run":
+      bundles.get(e.threadId)?.engine.appendLines(e.run, e.lines);
+      return;
+    case "session.done":
+      if (e.threadId === undefined) return;
+      useSlateStore.setState(s => ({ lastTurn: { ...s.lastTurn, [e.threadId!]: e.result } }));
+      return;
+  }
+}
+
+/** After a reconnect the host could not replay: every slate drawn here is fetched again and diffs in place. */
+export function refetchSlates(): void {
+  for (const threadId of Object.keys(useSlateStore.getState().byThread)) void loadSlate(threadId);
+}

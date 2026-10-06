@@ -123,6 +123,22 @@ describe("ChatView", () => {
     expect(screen.queryByTestId("settled-footer")).toBeNull();
   });
 
+  it("says Updated the slate once under the reply of a turn the agent wrote the slate in", async () => {
+    const sc = { workspaceId: WS, sessionId: `sess_${WS}`, turnId: `turn_${WS}_1` };
+    const turn = settledTurn(WS, "show my inbox", "Put it on the slate.");
+    const slated: SessionEvent[] = [
+      turn[0]!,
+      turn[1]!,
+      { type: "session.slate", ...sc, at: T0 + 60_400, cause: "write", version: 1, by: "agent", pieces: ["root"] } as SessionEvent,
+      { type: "session.slate", ...sc, at: T0 + 60_500, cause: "write", version: 2, by: "agent", pieces: ["root"] } as SessionEvent,
+      ...turn.slice(2),
+    ];
+    const { api } = fixtureApi([workspace], { [WS]: slated });
+    await setup(api);
+    await screen.findByText("Put it on the slate.");
+    expect(screen.getAllByRole("button", { name: "Updated the slate" })).toHaveLength(1);
+  });
+
   it("replays the persisted transcript on mount and settles it on the reply's own time", async () => {
     const { api } = fixtureApi([workspace], { [WS]: settledTurn(WS, "add a health route", "Added GET /health.") });
     await setup(api);
@@ -837,7 +853,7 @@ describe("ChatView", () => {
     expect(within(waited).getByText("Nobody answered; denied")).toBeDefined();
     // A command is the whole command on the lead, with no code name in front of it, and it is drawn as code beside
     // the words rather than inside them, so the sentence face never closes two hyphens into one dash.
-    expect(waited.querySelector("[data-permission-says]")!.textContent).toBe("Run:");
+    expect(waited.querySelector("[data-permission-says]")!.textContent).toBe("Run a command:");
     const command = waited.querySelector<HTMLElement>("[data-permission-code]")!;
     expect(command.textContent).toBe("rm -rf build");
     expect(command.className).toContain("font-mono");
