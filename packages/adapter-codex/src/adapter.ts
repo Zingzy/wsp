@@ -132,7 +132,7 @@ export interface CodexSession {
    * turns the message down. */
   steer(prompt: string): Promise<"accepted" | "not-running">;
   /** Answers an approval the server asked for with accept or decline; gone when no such request is open. */
-  answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<"answered" | "gone">;
+  answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string; reason?: string }): Promise<"answered" | "gone">;
   /** turn/interrupt on one subagent's own thread, by that thread's id, the lead and its other subagents running on. */
   stopTask(task: string): Promise<TaskStop>;
 }
@@ -386,7 +386,10 @@ function itemDeltas(done: boolean, item: Item, sessionId: string): AdapterEvent[
         : [delta({ kind: "tool_use", text: JSON.stringify({ changes: changesOf(item.changes) }), toolName: "file_change", toolUseId: item.id })];
     case "mcpToolCall": {
       if (!done) return [delta({ kind: "tool_use", text: JSON.stringify(item.arguments ?? {}), toolName: `${str(item.server) ?? "mcp"}.${str(item.tool) ?? "tool"}`, toolUseId: item.id })];
-      const text = failed() ? (str(rec(item.error)?.message) ?? "") : JSON.stringify(rec(item.result)?.content ?? []);
+      // A tool that answers isError fails the call with its words in the result and no error message.
+      const said = str(rec(item.error)?.message);
+      const content = rec(item.result)?.content;
+      const text = failed() && said !== undefined && said !== "" ? said : failed() && content === undefined ? "" : JSON.stringify(content ?? []);
       return [delta({ kind: "tool_result", text, toolUseId: item.id, isError: failed() })];
     }
     case "collabAgentToolCall":
@@ -1054,6 +1057,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         const wrote = await stream.write(decisionLine(open.id, answer.optionId === PERMISSION_ALLOW ? "accept" : "decline")).catch(() => "gone" as const);
         if (wrote !== "written") return "gone";
         emit({ type: "permission.close", sessionId: threadId, askId, outcome: answer.outcome, optionId: answer.optionId });
+        // A decline carries no words on this server, so the person's reason goes to the turn as their own message.
+        if (answer.outcome === "denied" && answer.reason !== undefined) void session.steer(answer.reason);
         return "answered";
       },
       stopTask: async task => {

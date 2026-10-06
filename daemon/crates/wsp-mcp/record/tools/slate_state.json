@@ -1,0 +1,116 @@
+{
+  "cloudOff": {
+    "name": "slate_state",
+    "description": "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire. start starts a run the person allowed to run always.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "another thread's id"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {},
+          "description": "$path: new value"
+        },
+        "start": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "runs allowed always"
+        },
+        "if_version": {
+          "type": "integer",
+          "description": "only at this version"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "problems": {},
+        "waiting": {},
+        "notStarted": {}
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  },
+  "cloudOn": {
+    "name": "slate_state",
+    "description": "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire. start starts a run the person allowed to run always.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "another thread's id"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {},
+          "description": "$path: new value"
+        },
+        "start": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "runs allowed always"
+        },
+        "if_version": {
+          "type": "integer",
+          "description": "only at this version"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "problems": {},
+        "waiting": {},
+        "notStarted": {}
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  }
+}

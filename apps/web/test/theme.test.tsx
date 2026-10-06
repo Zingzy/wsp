@@ -2,6 +2,9 @@
 // The theme rule: which side each value draws, the html element following the
 // record's pick and, under system, the computer's own scheme without a reload,
 // and the desktop shell told the picked value so its frame follows.
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES } from "@wsp/protocol";
@@ -119,6 +122,37 @@ describe("the theme", () => {
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "light", lightTheme: "linen" } }));
     expect(setTheme).toHaveBeenLastCalledWith("light");
     expect(setTheme.mock.calls.every(([word]) => ["system", "light", "dark"].includes(word as string))).toBe(true);
+  });
+});
+
+describe("the window controls' ground and ink", () => {
+  afterEach(() => document.documentElement.classList.remove("wco"));
+
+  it("a window whose controls the shell draws over the page tells it each time the theme moves, after the theme is on the root", () => {
+    document.documentElement.classList.add("wco");
+    const themes: Array<string | undefined> = [];
+    window.wsp = { setTitleBar: () => themes.push(document.documentElement.dataset["theme"]) };
+    renderHook(() => useThemeEffect());
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "light", lightTheme: "linen" } }));
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "dark", darkTheme: "denim" } }));
+    expect(themes.slice(-2)).toEqual(["linen", "denim"]);
+  });
+
+  it("a window with no controls over the page, the Mac's or a tiling desktop's, tells the shell nothing", () => {
+    const setTitleBar = vi.fn();
+    window.wsp = { setTitleBar };
+    renderHook(() => useThemeEffect());
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "light", lightTheme: "linen" } }));
+    expect(setTitleBar).not.toHaveBeenCalled();
+  });
+
+  it("draws the controls on the theme's ground, in its ink at the share the pane toggles' glyphs take", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "index.css"), "utf8");
+    const wco = /\n\.wco \{([^}]*)\}/.exec(css)![1]!;
+    expect(wco).toContain("--titlebar-ground: var(--background);");
+    expect(wco).toContain("--titlebar-ink: color-mix(in srgb, var(--foreground) 80%, var(--background));");
+    const toggle = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "components", "ui", "toggle.tsx"), "utf8");
+    expect(toggle).toContain("[&_svg:not([class*='opacity-'])]:opacity-80");
   });
 });
 

@@ -286,15 +286,19 @@ export function resolveShortcutCommand(
   return null;
 }
 
-/** The commands a terminal hands on whatever their chord holds, so the panel's tab step leaves a terminal in it. */
-const TERMINAL_PASSES: ReadonlySet<KeybindingCommand> = new Set(["rightPanel.nextTab", "rightPanel.previousTab"]);
+/**
+ * The commands a focused terminal hands to the app whatever their chord holds, so a Control mod still reaches them:
+ * the toggle that opened the terminal closes it, the palette opens over it, and the panel's tab step leaves a
+ * terminal in it. Every Control chord here is one a terminal program loses, so the list stays short; the palette
+ * comes on ctrl+shift+p there, as mod+k's ctrl+k is the shell's kill to the end of the line.
+ */
+const TERMINAL_PASSES: ReadonlySet<KeybindingCommand> = new Set(["terminal.toggle", "commandPalette.toggle", "rightPanel.nextTab", "rightPanel.previousTab"]);
 
 /**
  * A chord the rules bind while a terminal has focus that the surface lets
- * bubble to the dispatcher instead of encoding it: a Command chord, or the
- * panel's tab step while the terminal sits in a panel of several tabs.
- * Control and Option chords are otherwise the terminal's on every platform,
- * so a Control-based mod never claims one.
+ * bubble to the dispatcher instead of encoding it: a Command chord, or a
+ * command the terminal passes. Control and Option chords are otherwise the
+ * terminal's on every platform.
  */
 export function isTerminalAppShortcut(
   event: ShortcutEventLike,

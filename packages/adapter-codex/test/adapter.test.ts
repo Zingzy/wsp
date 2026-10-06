@@ -316,6 +316,20 @@ describe("CodexAdapter over codex app-server", () => {
     expect(answer).toEqual({ id: "wsp-steer-1", result: { turnId: RECORDED_TURN } });
   });
 
+  it("an MCP call the tool failed keeps the tool's words, one that never reached it keeps the error, and one with neither says nothing", async () => {
+    const item = (body: Record<string, unknown>) => `{"method":"item/completed","params":{"item":${JSON.stringify(body)},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`;
+    const said = [{ type: "text", text: "slate refused: 1 error: P100 bad-syntax" }];
+    const launch = launcher(scripted([
+      item({ type: "mcpToolCall", id: "call_4", server: "wsp", tool: "slate_write", arguments: {}, status: "failed", result: { content: said }, error: null }),
+      item({ type: "mcpToolCall", id: "call_5", server: "wsp", tool: "slate_write", arguments: {}, status: "failed", result: null, error: { message: "server gone" } }),
+      item({ type: "mcpToolCall", id: "call_6", server: "wsp", tool: "slate_write", arguments: {}, status: "failed", result: null, error: null }),
+      completed("completed"),
+    ]));
+    const { events, onEvent } = collect();
+    await adapterOver(launch).start({ prompt: "x", onEvent }).finished;
+    expect(deltasOf(events).filter(d => d.kind === "tool_result").map(d => [d.toolUseId, d.text, d.isError])).toEqual([["call_4", JSON.stringify(said), true], ["call_5", "server gone", true], ["call_6", "", true]]);
+  });
+
   it("file changes, MCP calls and web searches, which that turn made none of, draw as codex exec's calls did", async () => {
     // Written from the 0.155.1 schema's ThreadItem variants, since the recorded turn ran one command and no other tool.
     const item = (phase: "started" | "completed", body: Record<string, unknown>) => `{"method":"item/${phase}","params":{"item":${JSON.stringify(body)},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`;
@@ -425,10 +439,11 @@ describe("a message sent while a Codex turn runs", () => {
 });
 
 describe("an approval Codex asks for", () => {
-  const approving = (request: string) =>
+  const approving = (request: string, also?: (self: Wire, message: Json) => void) =>
     launcher(seed => {
       const w = wire({
         onWrite: (message, self) => {
+          also?.(self, message);
           if (message.method === "thread/start") self.push(...opened());
           if (message.method === "turn/start")
             self.push(turnStarted, `{"method":"item/started","params":{"item":{"type":"fileChange","id":"call_9","changes":[{"path":"hi.txt","kind":{"type":"add"},"diff":"+hi\\n"}],"status":"inProgress"},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`, request);
@@ -461,6 +476,22 @@ describe("an approval Codex asks for", () => {
     expect(live.wires[0]!.written.at(-1)).toEqual({ id: 0, result: { decision: "accept" } });
     expect(events.at(-1)).toEqual({ type: "permission.close", sessionId: THREAD_ID, askId: "0", outcome: "allowed", optionId: PERMISSION_ALLOW });
     expect(await session.answer!("0", { optionId: PERMISSION_ALLOW, outcome: "allowed", denyMessage: "" })).toBe("gone");
+    live.wires[0]!.push(completed("completed"));
+    await session.finished;
+  });
+
+  it("a deny the person gave a reason for declines the call and puts the reason to the running turn", async () => {
+    const live = approving(commandAsk, (self, message) => {
+      if (message.method === "turn/steer") self.push(`{"id":${JSON.stringify(message.id)},"result":{"turnId":"${TURN_ID}"}}`);
+    });
+    const { events, onEvent } = collect();
+    const session = adapterOver(live).start({ prompt: "clean", permissionMode: "workspace-write", onEvent });
+    await until(() => events.some(e => e.type === "permission.ask"));
+    expect(await session.answer!("ask-7", { optionId: PERMISSION_DENY, outcome: "denied", denyMessage: "unused", reason: "Only clean dist" })).toBe("answered");
+    expect(live.wires[0]!.written).toContainEqual({ id: "ask-7", result: { decision: "decline" } });
+    await until(() => live.wires[0]!.written.some(m => m.method === "turn/steer"));
+    const steer = live.wires[0]!.written.find(m => m.method === "turn/steer")!;
+    expect(JSON.stringify(steer.params)).toContain("Only clean dist");
     live.wires[0]!.push(completed("completed"));
     await session.finished;
   });

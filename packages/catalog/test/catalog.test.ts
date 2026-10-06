@@ -14,6 +14,7 @@ import * as catalog from "../src/index.js";
 import { pinMismatchLine, SHARED_TOOL_ROOTS, TOOLS_PATH, WORKSPACE_OVERLAID } from "@wsp/protocol";
 import { agentName, APT_INDEX, BREW_PREFIX, GUEST_HOME, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, installShown, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NO_SIGN_IN, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, RELEASE_PINS, runsThreads, THREAD_AGENTS, LOCAL_BIN, installHomes, TOOL_PREFIX, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
+import { AGENT_STORE_ENVS } from "../../../vitest.env.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -330,6 +331,8 @@ describe("catalog", () => {
     expect(CATALOG_AGENTS.filter(a => a.guestStateHome !== undefined).map(a => [a.id, a.guestStateHome])).toEqual([["claude", "/root/.claude-cfg"]]);
     // The variable a person's config folder for that agent is laid in as; an agent with none takes no config folder.
     expect(CATALOG_AGENTS.filter(a => a.stateHomeEnv !== undefined).map(a => [a.id, a.stateHomeEnv])).toEqual([["claude", "CLAUDE_CONFIG_DIR"], ["codex", "CODEX_HOME"]]);
+    // The test run reads these off the modules' text, since its config loads before any package is built.
+    expect(AGENT_STORE_ENVS).toEqual(CATALOG_AGENTS.flatMap(a => (a.stateHomeEnv === undefined ? [] : [a.stateHomeEnv])).sort());
     // The update an agent's row answers is the vendor's own command, shown to the person and never run by wsp.
     expect(CATALOG_AGENTS.filter(a => a.updateLine !== undefined).map(a => [a.id, a.updateLine])).toEqual([["claude", "claude update"], ["codex", "npm i -g @openai/codex@latest"], ["opencode", "opencode upgrade"]]);
     expect(installLine(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.155.1");

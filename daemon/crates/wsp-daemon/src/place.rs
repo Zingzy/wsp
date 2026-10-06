@@ -223,6 +223,14 @@ fn names_under(dir: &Path) -> Vec<String> {
     out
 }
 
+/// How much room is left on the volume a setup installs onto and how big it is, the two numbers its floor and its
+/// size check read. The volume is wsp's install folder's, or where that is not there yet the nearest folder above
+/// it, which is where the first install makes it; the install loop's df walks up the same way.
+fn install_room(system_root: &Path) -> Option<(u64, u64)> {
+    let prefix = system_root.join(numbers::TOOL_PREFIX.trim_start_matches('/'));
+    disk_room(prefix.ancestors().find(|folder| folder.exists())?)
+}
+
 /// How much room is left on the volume the folder sits on and how big it is, or nothing when this computer will
 /// not say.
 fn disk_room(folder: &Path) -> Option<(u64, u64)> {
@@ -319,6 +327,8 @@ pub(crate) struct ReportInput<'a> {
     pub(crate) unit_path: Option<&'a str>,
     /// Where this daemon keeps the workspaces it runs; the copy word is probed under it.
     pub(crate) runtime_root: &'a Path,
+    /// The folder this computer's /opt sits under, which the disk is read off: `/`, or what a test hands in.
+    pub(crate) system_root: &'a Path,
 }
 
 /// Why this computer runs no workspace, as the row carries it: its own reason first, the kernel's and the
@@ -332,8 +342,7 @@ fn workspaces_blocked_by(its_own: Option<String>, runtime_root: &Path) -> Option
 /// What this computer says about itself on this link, in the shape the host parses.
 pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
     let path = input.unit_path.unwrap_or_default().to_owned();
-    let work = input.home.join("wsp-work");
-    let room = disk_room(if work.exists() { &work } else { input.home });
+    let room = install_room(input.system_root);
     let wsp = if input.wsp_argv.is_empty() { vec!["wsp".to_owned()] } else { input.wsp_argv.to_vec() };
     let doctor = wsp_runtime::doctor::assess(&wsp_runtime::doctor::read_facts());
     let blocked = workspaces_blocked_by(doctor.blocked.clone(), input.runtime_root);
@@ -998,6 +1007,42 @@ mod tests {
     }
 
     #[test]
+    fn the_report_reads_its_disk_off_the_volume_wsp_installs_onto_not_the_homes() {
+        // Two volumes: the home on the disk the temp folder sits on, the computer's /opt on a tmpfs.
+        let home = tempfile::tempdir().unwrap();
+        let Ok(system) = tempfile::tempdir_in("/dev/shm") else {
+            eprintln!("skipped: no /dev/shm here to put a second volume on");
+            return;
+        };
+        let size_of = |path: &Path| disk_room(path).map(|(_, size)| size);
+        if size_of(system.path()) == size_of(home.path()) {
+            eprintln!("skipped: /dev/shm and the temp folder answer the same size, so they are not two volumes here");
+            return;
+        }
+        std::fs::create_dir_all(home.path().join("wsp-work")).unwrap();
+        let file =
+            PlaceFile::parse(r#"{"placeId":"p","name":"box","hostName":"h","hostUrls":[],"hostPublicKey":"k","keyPath":"/k"}"#).unwrap();
+        let report = |system_root: &Path| {
+            place_report(&ReportInput {
+                file: &file,
+                home: home.path(),
+                wsp_argv: &[],
+                agents: &[],
+                agent_versions: &BTreeMap::new(),
+                daemon_port: 1,
+                dialed: "http://h:1",
+                unit_path: None,
+                runtime_root: home.path(),
+                system_root,
+            })
+        };
+        // wsp's install folder is not there before its first install, so the read is the folder it would be made in.
+        assert_eq!(report(system.path()).disk_size_bytes, size_of(system.path()));
+        std::fs::create_dir_all(system.path().join(numbers::TOOL_PREFIX.trim_start_matches('/'))).unwrap();
+        assert_eq!(report(system.path()).disk_size_bytes, size_of(system.path()));
+    }
+
+    #[test]
     fn the_report_is_read_off_the_home_and_the_words_given() {
         let home = tempfile::tempdir().unwrap();
         let file =
@@ -1016,6 +1061,7 @@ mod tests {
             dialed: "http://h:1",
             unit_path: Some("/units/own/bin:/usr/bin"),
             runtime_root: &home.path().join("runtime"),
+            system_root: Path::new("/"),
         });
         assert_eq!(report.name, "old-macbook");
         assert_eq!(report.wsp, argv);
@@ -1050,6 +1096,7 @@ mod tests {
             dialed: "http://h:1",
             unit_path: None,
             runtime_root: home.path(),
+            system_root: Path::new("/"),
         });
         assert_eq!(bare.wsp, vec!["wsp"]);
         // And the root the daemon was given is part of that reading: under one of the directories every
@@ -1066,6 +1113,7 @@ mod tests {
             dialed: "http://h:1",
             unit_path: None,
             runtime_root: under,
+            system_root: Path::new("/"),
         });
         assert!(!bad.runs_workspaces);
         assert_eq!(bad.copies, None);

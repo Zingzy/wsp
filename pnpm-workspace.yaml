@@ -9,3 +9,4 @@ allowBuilds:
   workerd: true
 patchedDependencies:
   "@pierre/diffs@1.3.0-beta.10": patches/@pierre%2Fdiffs@1.3.0-beta.10.patch
+  zod@3.25.76: patches/zod@3.25.76.patch
