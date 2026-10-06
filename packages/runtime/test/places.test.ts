@@ -109,109 +109,34 @@ import { scriptGuest } from "./script-guest.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 import { DOOR, HERE, agreeing, joinAt, nonce, relinkAt, report, signWith, wiring } from "./place-join.js";
-
-/** Every fact of a pull request a read answers but its number, link, state and host, which each case names. */
-const PR_REST: Omit<import("@wsp/protocol").PullRequest, "number" | "url" | "state" | "host"> = { draft: false, base: "main", branch: "work", headOid: "abc1234", headSubject: "Do the work", mergeable: "unknown", mergeState: "unknown", review: "none", checks: [], additions: 1, deletions: 0, changedFiles: 1, commits: 1 };
-
-let srv: RuntimeServer | undefined;
-let runtime: Runtime | undefined;
-const sockets: WebSocket[] = [];
-
-afterEach(async () => {
-  for (const ws of sockets.splice(0)) ws.close();
-  await srv?.close();
-  srv = undefined;
-  await runtime?.close();
-  runtime = undefined;
-});
-
-async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs; serverIcons?: ServerIcons; adapters?: Record<string, HarnessAdapterFactory> } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
-  const store = opts.store ?? memoryStore();
-  const hostKey = newPlaceKeyPair();
-  runtime = createRuntime({
-    backend: stubBackend(),
-    store,
-    adapters: opts.adapters ?? {},
-    ...(opts.vault === undefined ? {} : { vault: () => opts.vault! }),
-    ...(opts.agentsReader === undefined ? {} : { agentsReader: opts.agentsReader }),
-    ...(opts.agentsActs === undefined ? {} : { agentsActs: opts.agentsActs }),
-    ...(opts.skillsActs === undefined ? {} : { skillsActs: opts.skillsActs }),
-    ...(opts.serversActs === undefined ? {} : { serversActs: opts.serversActs }),
-    ...(opts.serverIcons === undefined ? {} : { serverIcons: opts.serverIcons }),
-    placeLinks: { ...wiring(hostKey, opts.provider, opts.update), ...(opts.leave === undefined ? {} : { leave: opts.leave }) },
-    ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
-    ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
-  });
-  srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, ...(opts.folders === undefined ? {} : { folders: opts.folders }), ...(serve.log === undefined ? {} : { log: serve.log }) });
-  return { hostKey, store };
-}
-
-/** A code minted over the host's own socket, which is the only road to one. */
-async function code(): Promise<string> {
-  const c = await WsClient.connect(srv!.port, { token: "host-token" });
-  const issued = await c.request("pair.issue");
-  c.close();
-  expect(issued.ok, String(issued["error"])).toBe(true);
-  return issued["code"] as string;
-}
-
-/** One join, as a computer would make it, on this file's own host. */
-const join = (hostKey: PlaceKeyPair, opts: Parameters<typeof joinAt>[2] = { code: "" }) => joinAt(srv!.port, hostKey, opts);
-
-/** A place that already joined, dialling in again, on this file's own host. */
-const relink = (hostKey: PlaceKeyPair, placeId: string, pair: PlaceKeyPair, sent?: PlaceReport, answers?: (c: WsClient) => void) => relinkAt(srv!.port, hostKey, placeId, pair, sent, answers);
-
-/** The same store with a timer in front of every read and write, as a store on a disk or behind a network has:
- * the loop turns inside each of them, which is where a handover that is not order-safe drops a frame. */
-function yielding(inner: Store): Store {
-  const soon = (): Promise<void> => new Promise(done => setTimeout(done, 30));
-  return {
-    get: async (c, id) => (await soon(), inner.get(c, id)),
-    put: async (c, id, v) => (await soon(), inner.put(c, id, v)),
-    list: async c => (await soon(), inner.list(c)),
-    keys: async c => (await soon(), inner.keys(c)),
-    delete: async (c, id) => (await soon(), inner.delete(c, id)),
-    getBlob: async (c, id) => (await soon(), inner.getBlob(c, id)),
-    putBlob: async (c, id, b) => (await soon(), inner.putBlob(c, id, b)),
-    deleteBlob: async (c, id) => (await soon(), inner.deleteBlob(c, id)),
-    statBlob: async (c, id) => (await soon(), inner.statBlob(c, id)),
-  };
-}
-
-const placesOf = async (): Promise<PlaceView[]> => {
-  const c = await WsClient.connect(srv!.port, { token: "host-token" });
-  const answer = await c.request("places.list");
-  c.close();
-  expect(answer.ok, String(answer["error"])).toBe(true);
-  return answer["places"] as PlaceView[];
-};
+import { PR_REST, ctx, sockets, serving, code, join, relink, yielding, placesOf, saysItsFacts, LOGINS, answersLeave, remove, ForkingPlace, PLACE_FACTS, PLACE_ROADS, KEEPS_NO_IMAGE, SEALED, HOLDS_PROJECTS, forks, daemonOps } from "./places-fixture.js";
 
 describe("a code spent by a road that proves itself another way", () => {
   it("spends once: the second spend is false, whatever asks", async () => {
     const store = memoryStore();
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {} });
-    const issued = await runtime.devices.issue({ now: 0, ttlMs: 10_000 });
-    expect(await runtime.devices.spend(issued.code, 1)).toBe(true);
-    expect(await runtime.devices.spend(issued.code, 2)).toBe(false);
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    const issued = await ctx.runtime.devices.issue({ now: 0, ttlMs: 10_000 });
+    expect(await ctx.runtime.devices.spend(issued.code, 1)).toBe(true);
+    expect(await ctx.runtime.devices.spend(issued.code, 2)).toBe(false);
   });
 
   it("still admits a device on a fresh code and refuses a spent one, which is one code store for both roads", async () => {
     const store = memoryStore();
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {} });
-    const first = await runtime.devices.issue({ now: 0, ttlMs: 10_000 });
-    expect(await runtime.devices.redeem(first.code, "a laptop", 1)).toBeDefined();
-    expect(await runtime.devices.redeem(first.code, "a laptop", 2)).toBeUndefined();
-    const second = await runtime.devices.issue({ now: 0, ttlMs: 10_000 });
-    expect(await runtime.devices.spend(second.code, 1)).toBe(true);
-    expect(await runtime.devices.redeem(second.code, "a laptop", 2)).toBeUndefined();
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    const first = await ctx.runtime.devices.issue({ now: 0, ttlMs: 10_000 });
+    expect(await ctx.runtime.devices.redeem(first.code, "a laptop", 1)).toBeDefined();
+    expect(await ctx.runtime.devices.redeem(first.code, "a laptop", 2)).toBeUndefined();
+    const second = await ctx.runtime.devices.issue({ now: 0, ttlMs: 10_000 });
+    expect(await ctx.runtime.devices.spend(second.code, 1)).toBe(true);
+    expect(await ctx.runtime.devices.redeem(second.code, "a laptop", 2)).toBeUndefined();
   });
 
   it("refuses a code that ran out, and spends it either way so one guess never gets two tries", async () => {
     const store = memoryStore();
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {} });
-    const issued = await runtime.devices.issue({ now: 0, ttlMs: 10 });
-    expect(await runtime.devices.spend(issued.code, 100)).toBe(false);
-    expect(await runtime.devices.spend(issued.code, 5)).toBe(false);
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    const issued = await ctx.runtime.devices.issue({ now: 0, ttlMs: 10 });
+    expect(await ctx.runtime.devices.spend(issued.code, 100)).toBe(false);
+    expect(await ctx.runtime.devices.spend(issued.code, 5)).toBe(false);
   });
 });
 
@@ -221,15 +146,15 @@ describe("a computer joining", () => {
     // reaches wait on that one reading rather than finding an empty host.
     const store = memoryStore();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     const first = await join(hostKey, { code: await code() });
     sockets.push(first.client.ws);
     // A second host over the same store, asked nothing, still sees the name the first one recorded.
-    await srv.close();
-    await runtime.close();
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    await ctx.srv.close();
+    await ctx.runtime.close();
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     const second = await join(hostKey, { code: await code() });
     sockets.push(second.client.ws);
     expect(second.placeId).toMatch(/^p_[0-9a-f]{16}$/);
@@ -246,7 +171,7 @@ describe("a computer joining", () => {
     expect(row).toMatchObject({ kind: "computer", name: "old-macbook", default: true, takesForks: true, os: "Ubuntu 24.04", present: true });
     expect(row.shape).toEqual({ cpu: 4, memMb: 4096 });
     // The computer is a place, not a workspace: nothing is on the sidebar or in wsp workspaces until a fork lands.
-    expect(await runtime!.workspaces.list()).toEqual([]);
+    expect(await ctx.runtime!.workspaces.list()).toEqual([]);
   });
 
   it("refuses a computer whose kernel cannot boot the image, in the doctor's own sentence, and writes no record for it", async () => {
@@ -266,8 +191,8 @@ describe("a computer joining", () => {
     const { client } = await join(hostKey, { code: await code() });
     sockets.push(client.ws);
     // What wsp run <place> and wsp exec <place> meet: both resolve their target through this one reading.
-    await expect(runtime!.workspaces.resolve("old-macbook")).rejects.toThrow(placeNotAWorkspaceLine("old-macbook"));
-    await expect(runtime!.workspaces.resolve("old-macbook")).rejects.toThrow(placeNotAWorkspaceFix("old-macbook"));
+    await expect(ctx.runtime!.workspaces.resolve("old-macbook")).rejects.toThrow(placeNotAWorkspaceLine("old-macbook"));
+    await expect(ctx.runtime!.workspaces.resolve("old-macbook")).rejects.toThrow(placeNotAWorkspaceFix("old-macbook"));
   });
 
   it("refuses a code this host is not holding, in the one sentence every reason reads as", async () => {
@@ -330,7 +255,7 @@ describe("a computer joining", () => {
     expect(String(again.proved["error"])).toContain("not a plain path");
     expect(await again.client.closed()).toBe(4401);
     expect((await placesOf()).find(p => p.id === joined.placeId)!.present).toBe(false);
-    expect((await runtime!.places!.reportOf(joined.placeId))!.login["HOME"]).toBe("/home/maya");
+    expect((await ctx.runtime!.places!.reportOf(joined.placeId))!.login["HOME"]).toBe("/home/maya");
   });
 
   it("keeps the name this computer joined under, whatever a later report calls itself", async () => {
@@ -346,9 +271,9 @@ describe("a computer joining", () => {
     await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
     expect((await placesOf()).find(p => p.id === joined.placeId)!.name).toBe("old-macbook");
     // The rest of the report is the newest one all the same: the name is the one field a relink cannot move.
-    expect((await runtime!.places!.reportOf(joined.placeId))!.name).toBe("attic-server");
-    await expect(runtime!.places!.placeFor("attic-server")).rejects.toThrow(/no place named attic-server/);
-    expect(await runtime!.places!.placeFor("old-macbook")).toEqual({ placeId: joined.placeId });
+    expect((await ctx.runtime!.places!.reportOf(joined.placeId))!.name).toBe("attic-server");
+    await expect(ctx.runtime!.places!.placeFor("attic-server")).rejects.toThrow(/no place named attic-server/);
+    expect(await ctx.runtime!.places!.placeFor("old-macbook")).toEqual({ placeId: joined.placeId });
   });
 
   it("refuses a word two computers on this host answer to, with both ids, and lands nothing on either", async () => {
@@ -359,8 +284,8 @@ describe("a computer joining", () => {
     sockets.push(second.client.ws);
     // Both joined under the word, which is the person's own doing and not a name one of them took; ids tell them
     // apart, so every road that resolves the word says so rather than taking whichever joined first.
-    await expect(runtime!.places!.placeFor("old-macbook")).rejects.toThrow(twoPlacesRefusal("old-macbook", [first.placeId, second.placeId]));
-    expect(await runtime!.places!.placeFor(second.placeId)).toEqual({ placeId: second.placeId });
+    await expect(ctx.runtime!.places!.placeFor("old-macbook")).rejects.toThrow(twoPlacesRefusal("old-macbook", [first.placeId, second.placeId]));
+    expect(await ctx.runtime!.places!.placeFor(second.placeId)).toEqual({ placeId: second.placeId });
   });
 
   it("keeps a report's PATH and store folders only where they are plain paths, as the ssh read does", async () => {
@@ -370,7 +295,7 @@ describe("a computer joining", () => {
     });
     const joined = await join(hostKey, { code: await code(), report: sent });
     sockets.push(joined.client.ws);
-    const kept = await runtime!.places!.reportOf(joined.placeId);
+    const kept = await ctx.runtime!.places!.reportOf(joined.placeId);
     expect(kept!.login["CLAUDE_CONFIG_DIR"]).toBeUndefined();
     expect(kept!.login["PATH"]).toBe("/home/maya/bin:/usr/bin");
     expect(kept!.login["HOME"]).toBe("/home/maya");
@@ -395,7 +320,7 @@ describe("a computer joining", () => {
     sockets.push(second.client.ws);
     expect(second.reply["notice"]).toBeUndefined();
     expect((await placesOf()).filter(p => p.name === "old-macbook").map(p => p.id).sort()).toEqual([first.placeId, second.placeId].sort());
-    expect(await runtime!.workspaces.list()).toEqual([]);
+    expect(await ctx.runtime!.workspaces.list()).toEqual([]);
   });
 });
 
@@ -404,7 +329,7 @@ describe("a place dialling back in", () => {
     const { hostKey } = await serving();
     const { client, placeId } = await join(hostKey, { code: await code() });
     client.close();
-    const again = await WsClient.connect(srv!.port);
+    const again = await WsClient.connect(ctx.srv!.port);
     sockets.push(again.ws);
     const mine = nonce();
     const agreed = agreeing();
@@ -423,7 +348,7 @@ describe("a place dialling back in", () => {
 
   it("refuses an id this host holds no place by, with its own key over the sentence it refused with", async () => {
     const { hostKey } = await serving();
-    const c = await WsClient.connect(srv!.port);
+    const c = await WsClient.connect(ctx.srv!.port);
     const mine = nonce();
     const answer = await c.request("place.auth", { placeId: "p_deadbeefdeadbeef", nonce: mine });
     expect(answer).toMatchObject({ ok: false, error: PLACE_UNKNOWN_REFUSAL, kind: "auth" });
@@ -443,7 +368,7 @@ describe("a place dialling back in", () => {
     const first = await join(hostKey, { code: await code() });
     first.client.close();
     const other = newPlaceKeyPair();
-    const c = await WsClient.connect(srv!.port);
+    const c = await WsClient.connect(ctx.srv!.port);
     const mine = nonce();
     const agreed = agreeing();
     const challenged = await c.request("place.auth", { placeId: first.placeId, nonce: mine, ephemeral: agreed.ephemeral });
@@ -461,7 +386,7 @@ describe("a place dialling back in", () => {
     const { hostKey } = await serving();
     const joined = await join(hostKey, { code: await code() });
     sockets.push(joined.client.ws);
-    const behind = await WsClient.connect(srv!.port);
+    const behind = await WsClient.connect(ctx.srv!.port);
     // A daemon older than the seal sends no half of the key agreement: every frame after the handshake would
     // travel where whoever carries the bytes reads it.
     const answer = await behind.request("place.auth", { placeId: joined.placeId, nonce: nonce() });
@@ -497,7 +422,7 @@ describe("a place dialling back in", () => {
     sockets.push(joined.client.ws);
     // The reply to the prove was binary and opened under the key both ends agreed: the client read it, which is
     // what the prove standing means. A frame in the clear after it is a carrier writing into the link.
-    const straight = await WsClient.connect(srv!.port);
+    const straight = await WsClient.connect(ctx.srv!.port);
     const agreed = agreeing();
     const challenged = await straight.request("place.auth", { placeId: joined.placeId, nonce: nonce(), ephemeral: agreed.ephemeral });
     expect(challenged.ok).toBe(true);
@@ -511,7 +436,7 @@ describe("a place dialling back in", () => {
     const { hostKey } = await serving();
     const joined = await join(hostKey, { code: await code() });
     joined.client.close();
-    const wrongOrder = await WsClient.connect(srv!.port);
+    const wrongOrder = await WsClient.connect(ctx.srv!.port);
     const agreed = agreeing();
     const challenged = await wrongOrder.request("place.auth", { placeId: joined.placeId, nonce: nonce(), ephemeral: agreed.ephemeral });
     // Everything after the host's reply is sealed, the refusal of a frame that is not the prove among it.
@@ -520,7 +445,7 @@ describe("a place dialling back in", () => {
     expect(answer.ok).toBe(false);
     expect(await wrongOrder.closed()).toBe(4401);
 
-    const bare = await WsClient.connect(srv!.port);
+    const bare = await WsClient.connect(ctx.srv!.port);
     const straight = await bare.request("place.prove", { signature: Buffer.alloc(64, 1).toString("base64"), report: report() });
     expect(straight.ok).toBe(false);
     expect(await bare.closed()).toBe(4401);
@@ -537,7 +462,7 @@ describe("the socket a place proved", () => {
     const raced = await Promise.race([client.request("capabilities.get"), new Promise<"silence">(done => setTimeout(() => done("silence"), 300))]);
     expect(raced).toBe("silence");
     // And a socket nothing handed over answers it at once, so the silence above is this socket's and not the op's.
-    const mine = await WsClient.connect(srv!.port, { token: "host-token" });
+    const mine = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(mine.ws);
     expect((await mine.request("capabilities.get")).ok).toBe(true);
   });
@@ -560,7 +485,7 @@ describe("the socket a place proved", () => {
     await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === false);
     // The person installed a tool under their home and restarted the agent: the next link is where wsp learns it.
     const moved = report("old-macbook", { login: { HOME: "/home/maya-moved", USER: "maya", PATH: "/home/maya/.npm-global/bin:/usr/bin" }, shape: { cpu: 8, memMb: 8192 } });
-    const again = await WsClient.connect(srv!.port);
+    const again = await WsClient.connect(ctx.srv!.port);
     sockets.push(again.ws);
     const mine = nonce();
     const agreed = agreeing();
@@ -574,7 +499,7 @@ describe("the socket a place proved", () => {
     await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
     expect((await placesOf()).find(p => p.id === joined.placeId)!.shape).toEqual({ cpu: 8, memMb: 8192 });
     // The record reads the newest login, so every path a fork there is built from moved with it.
-    await until(async () => (await runtime!.places!.reportOf(joined.placeId))!.login["HOME"] === "/home/maya-moved");
+    await until(async () => (await ctx.runtime!.places!.reportOf(joined.placeId))!.login["HOME"] === "/home/maya-moved");
   });
 
   it("marks the place absent when the socket goes, and moves its last seen", async () => {
@@ -587,30 +512,6 @@ describe("the socket a place proved", () => {
   });
 });
 
-/** A place answering machine.backend with the facts this test hands it, counting the asks: the facts belong to
- * the daemon that answered, so a test can move the answer between dials the way an update does. Its capacity is
- * answered too, since a computer whose facts are on the record is asked for that at every listing. */
-const saysItsFacts = (facts: () => Record<string, unknown>, asks: { count: number }, afterMs = 0) => (c: WsClient): void => {
-  c.onFrame(raw => {
-    const frame = raw as unknown as { id?: number; op?: string };
-    if (frame.op === "machine.capacity") {
-      const room = { cores: 4, memMb: 8192, memRoomMb: 4096, machineMemMb: 4096, diskFreeBytes: 10 * 1024 ** 3, images: [], machines: { running: 0, paused: 0 } };
-      c.say({ id: frame.id, ok: true, ...room });
-      return;
-    }
-    if (frame.op !== "machine.backend") return;
-    asks.count += 1;
-    // `afterMs` is a computer that takes a moment to answer, which is what makes a road that reads the row
-    // without waiting for it read a row that has not got it yet.
-    const answer = (): void => c.say({ id: frame.id, ok: true, ...facts() });
-    if (afterMs === 0) answer();
-    else setTimeout(answer, afterMs).unref?.();
-  });
-};
-
-/** Where a computer keeps the logins its workspaces share, as its daemon reports one. */
-const LOGINS = "/wsp/logins";
-
 describe("what a computer says it forks with", () => {
   it("is asked once per computer, and asked again when it dials back on another daemon, so a field the version before it never carried lands on the row", async () => {
     const { hostKey } = await serving();
@@ -621,7 +522,7 @@ describe("what a computer says it forks with", () => {
     const { client, placeId, pair } = await join(hostKey, { code: await code(), report: behind, answers });
     sockets.push(client.ws);
     // The first attach asks, and what that daemon said is kept: it shares no logins, so the row carries none.
-    await until(async () => runtime!.places!.offerOf(placeId) === PLACE_FACTS.offer);
+    await until(async () => ctx.runtime!.places!.offerOf(placeId) === PLACE_FACTS.offer);
     expect(asks.count).toBe(1);
     expect((await placesOf()).find(p => p.id === placeId)!.logins).toBeUndefined();
 
@@ -642,13 +543,13 @@ describe("what a computer says it forks with", () => {
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.logins === LOGINS);
     expect(asks.count).toBe(2);
     // The backend a fork there stands on reads the same answer, which is what fills a create's shares.
-    expect(runtime!.places!.backendOf(placeId)?.logins).toBe(LOGINS);
+    expect(ctx.runtime!.places!.backendOf(placeId)?.logins).toBe(LOGINS);
   });
 
   it("is read over the link a join has just opened, so the row an install answers with already says where that computer keeps its logins", async () => {
     const hostKey = newPlaceKeyPair();
     const asks = { count: 0 };
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -665,8 +566,8 @@ describe("what a computer says it forks with", () => {
         },
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    const added = await runtime.places!.add({ address: "root@10.0.0.9", name: "box", hostUrls: DOOR }, Date.now());
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const added = await ctx.runtime.places!.add({ address: "root@10.0.0.9", name: "box", hostUrls: DOOR }, Date.now());
     // Before the add answers, not behind it: the sign-in the join offers next reads this field off the row.
     expect(added.place.logins).toBe(LOGINS);
     expect(asks.count).toBe(1);
@@ -691,7 +592,7 @@ describe("a channel to the daemon on a computer you own", () => {
     };
     const { client, placeId } = await join(hostKey, { code: await code(), answers });
     sockets.push(client.ws);
-    const mine = await WsClient.connect(srv!.port, { token: "host-token" });
+    const mine = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(mine.ws);
     const opened = await mine.request("daemon.open", { placeId });
     expect(opened.ok, String(opened["error"])).toBe(true);
@@ -714,11 +615,11 @@ describe("a channel to the daemon on a computer you own", () => {
   it("is the host's own road: a socket let in on a ticket is refused, as it is for every other places op", async () => {
     const { hostKey } = await serving();
     const { placeId } = await join(hostKey, { code: await code() });
-    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const host = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(host.ws);
     const issued = await host.request("ticket.issue", { purpose: "connect" });
     expect(issued.ok, String(issued["error"])).toBe(true);
-    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    const ticketed = await WsClient.connect(ctx.srv!.port, { ticket: String(issued["ticket"]) });
     sockets.push(ticketed.ws);
     const refused = await ticketed.request("daemon.open", { placeId });
     expect(refused.ok).toBe(false);
@@ -784,7 +685,7 @@ describe("the list of every place", () => {
   it("falls back to this computer as the default when the place the mark named is gone, and forgets the cap set on it", async () => {
     const { hostKey, store } = await serving();
     const joined = await join(hostKey, { code: await code() });
-    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const host = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     expect(await host.request("places.set", { placeId: joined.placeId, threads: 1 })).toMatchObject({ ok: true });
     host.close();
     joined.client.close();
@@ -801,7 +702,7 @@ describe("the list of every place", () => {
     const joined = await join(hostKey, { code: await code(), report: report("srv", { agents: ["codex"], logins: [] }) });
     sockets.push(joined.client.ws);
     expect((await placesOf()).find(p => p.id === joined.placeId)!.signIns?.["codex"]).toBe("none");
-    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const host = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     expect(await host.request("places.loginLanded", { placeId: joined.placeId, agent: "codex" })).toMatchObject({ ok: true });
     host.close();
     expect((await placesOf()).find(p => p.id === joined.placeId)!.signIns?.["codex"]).toBe("signed-in");
@@ -809,10 +710,10 @@ describe("the list of every place", () => {
 
   it("is refused on a socket let in on a ticket, and is no op a thread may send", async () => {
     await serving();
-    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const host = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     const { ticket } = (await host.request("ticket.issue", { purpose: "relay" })) as { ticket: string };
     host.close();
-    const relayed = await WsClient.connect(srv!.port, { ticket });
+    const relayed = await WsClient.connect(ctx.srv!.port, { ticket });
     expect(await relayed.request("places.list")).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     expect(await relayed.request("places.remove", { placeId: "p_1" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     expect(await relayed.request("places.add", { address: "root@10.0.0.9" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
@@ -843,7 +744,7 @@ describe("a place's cap and what runs there", () => {
     const { hostKey, store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
     const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 2, memMb: 7885 } }) });
     sockets.push(joined.client.ws);
-    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const host = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     const machines = await capOf(host, "solari", { machines: 5 });
     expect(machines, String(machines["error"])).toMatchObject({ ok: true, place: { id: "solari", cap: { machines: 5, spendPerDayUsd: 10 } } });
     expect(await capOf(host, "solari", { spendPerDayUsd: 0 })).toMatchObject({ ok: true, place: { cap: { machines: 5, spendPerDayUsd: 0 } } });
@@ -862,9 +763,9 @@ describe("a place's cap and what runs there", () => {
     const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
     const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 2, memMb: 7885 } }) });
     sockets.push(joined.client.ws);
-    const watcher = await WsClient.connect(srv!.port, { token: "host-token" });
+    const watcher = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     expect((await watcher.request("events.subscribe")).ok).toBe(true);
-    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const host = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     const answered = (await capOf(host, joined.placeId, { threads: 1 })) as { place: PlaceView };
     await capOf(host, HERE_PLACE_ID, { threads: 2 });
     await until(() => watcher.events.filter(e => e.type === "place.changed").length === 2);
@@ -882,7 +783,7 @@ describe("a place's cap and what runs there", () => {
     const unset = (await placesOf()).find(p => p.id === joined.placeId)!;
     expect(unset).toMatchObject({ cap: { threads: 3 }, capDefault: { threads: 3 } });
     expect(unset.settings).toBeUndefined();
-    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const host = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     expect(await capOf(host, joined.placeId, { threads: 1 })).toMatchObject({ ok: true, place: { cap: { threads: 1 }, capDefault: { threads: 3 }, settings: { threads: 1 } } });
     expect(await capOf(host, "solari", { machines: 5, spendPerDayUsd: 2 })).toMatchObject({ ok: true, place: { cap: { machines: 5, spendPerDayUsd: 2 }, capDefault: { machines: 3, spendPerDayUsd: 10 } } });
     const back = (await host.request("places.set", { placeId: joined.placeId, reset: ["threads"] })) as { ok: boolean; place: PlaceView };
@@ -897,7 +798,7 @@ describe("a place's cap and what runs there", () => {
 
   it("refuses a number the row's kind does not take, a place this host does not hold and a set with no number, as usage, and writes nothing", async () => {
     const { store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
-    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const host = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     expect(await capOf(host, HERE_PLACE_ID, { machines: 2 })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once, turn limit, agents may start agents and levels deep, not machines at once` });
     expect(await capOf(host, "solari", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: "solari takes machines at once, spend per day, nap after, turn limit, agents may start agents and levels deep, not threads at once" });
     expect(await capOf(host, "p_nothing", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: noSuchPlaceRefusal("p_nothing", [HERE.name, "solari"]) });
@@ -929,15 +830,15 @@ describe("a place's cap and what runs there", () => {
     try {
       const hostKey = newPlaceKeyPair();
       const backend = stubBackend();
-      runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: { claude: held }, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
-      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-      const mac = await createOn(runtime, { on: HERE_PLACE_ID, name: "mac" });
-      const cloud = await createOn(runtime, { on: "solari", golden: "snap_g", name: "cloud" });
+      ctx.runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: { claude: held }, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
+      ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+      const mac = await createOn(ctx.runtime, { on: HERE_PLACE_ID, name: "mac" });
+      const cloud = await createOn(ctx.runtime, { on: "solari", golden: "snap_g", name: "cloud" });
       const running = async (): Promise<Record<string, number | undefined>> => Object.fromEntries((await placesOf()).map(p => [p.id, p.running]));
       expect(await running()).toEqual({ [HERE_PLACE_ID]: 0, solari: 1 });
-      const first = await runtime.sessions.start(mac.id, { prompt: "one" });
-      await runtime.sessions.start(mac.id, { prompt: "two" });
-      await runtime.sessions.start(cloud.id, { prompt: "three" });
+      const first = await ctx.runtime.sessions.start(mac.id, { prompt: "one" });
+      await ctx.runtime.sessions.start(mac.id, { prompt: "two" });
+      await ctx.runtime.sessions.start(cloud.id, { prompt: "three" });
       await until(() => ends.size === 3);
       // A thread on the cloud's machine is that machine's; the cloud counts machines, and this computer only its own threads.
       expect(await running()).toEqual({ [HERE_PLACE_ID]: 2, solari: 1 });
@@ -945,9 +846,9 @@ describe("a place's cap and what runs there", () => {
       await first.finished;
       await until(async () => (await running())[HERE_PLACE_ID] === 1);
       ends.get("three")!();
-      await until(async () => (await runtime!.sessions.list(cloud.id)).every(r => r.status !== "running"));
+      await until(async () => (await ctx.runtime!.sessions.list(cloud.id)).every(r => r.status !== "running"));
       // A napping machine holds no slot on its cloud.
-      await runtime.workspaces.nap(cloud.id);
+      await ctx.runtime.workspaces.nap(cloud.id);
       expect((await running())["solari"]).toBe(0);
     } finally {
       for (const end of ends.values()) end();
@@ -964,14 +865,14 @@ describe("a place's nap after", () => {
     try {
       const backend = stubBackend();
       const fc = fakeClock(Date.parse("2026-09-16T12:00:00.000Z"));
-      runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, clock: fc.clock, idle: { defaultWindowMs: 60 * MIN }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
-      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-      const idleAt = async (id: string): Promise<number | undefined> => (await runtime!.status.list()).find(s => s.id === id)?.idleAt;
-      const first = await createOn(runtime, { on: "solari", golden: "snap_g", name: "first" });
-      const own = await createOn(runtime, { on: "solari", golden: "snap_g", name: "own", idleWindowMs: 30 * MIN });
+      ctx.runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, clock: fc.clock, idle: { defaultWindowMs: 60 * MIN }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
+      ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+      const idleAt = async (id: string): Promise<number | undefined> => (await ctx.runtime!.status.list()).find(s => s.id === id)?.idleAt;
+      const first = await createOn(ctx.runtime, { on: "solari", golden: "snap_g", name: "first" });
+      const own = await createOn(ctx.runtime, { on: "solari", golden: "snap_g", name: "own", idleWindowMs: 30 * MIN });
       await until(async () => (await idleAt(first.id)) !== undefined);
       expect(await idleAt(first.id)).toBe(fc.clock.now() + 60 * MIN);
-      const c = await WsClient.connect(srv.port, { token: "host-token" });
+      const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
       expect((await placesOf()).find(p => p.id === "solari")).toMatchObject({ napMs: 60 * MIN, napDefault: 60 * MIN });
       fc.advance(MIN);
       const fiveMin = (await c.request("places.set", { placeId: "solari", napMs: 5 * MIN })) as { place: PlaceView };
@@ -985,7 +886,7 @@ describe("a place's nap after", () => {
       fc.advance(MIN);
       expect(await c.request("places.set", { placeId: "solari", machines: 4 })).toMatchObject({ ok: true });
       expect(await idleAt(first.id)).toBe(fc.clock.now() + 4 * MIN);
-      const second = await createOn(runtime, { on: "solari", golden: "snap_g", name: "second" });
+      const second = await createOn(ctx.runtime, { on: "solari", golden: "snap_g", name: "second" });
       await until(async () => (await idleAt(second.id)) !== undefined);
       expect(await idleAt(second.id)).toBe(fc.clock.now() + 5 * MIN);
       expect(await c.request("places.set", { placeId: "solari", napMs: null })).toMatchObject({ ok: true, place: { napMs: null, settings: { napMs: null } } });
@@ -1000,7 +901,7 @@ describe("a place's nap after", () => {
 
   it("is refused on the computer the host runs on, whose workspaces are folders that never nap, and says nothing of it on that row", async () => {
     await serving();
-    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const host = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     expect(await host.request("places.set", { placeId: HERE_PLACE_ID, napMs: 5 * MIN })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once, turn limit, agents may start agents and levels deep, not nap after` });
     expect(await host.request("places.set", { placeId: "p_1", napMs: 30_000 })).toMatchObject({ ok: false });
     host.close();
@@ -1043,7 +944,7 @@ describe("a place's turn limit", () => {
       [joined.placeId]: { turnLimitMs: null, turnLimitDefault: null },
       solari: { turnLimitMs: TURN_WALL_MS, turnLimitDefault: TURN_WALL_MS },
     });
-    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const host = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     const here = (await host.request("places.set", { placeId: HERE_PLACE_ID, turnLimitMs: 2 * HOUR })) as { place: PlaceView };
     expect(here).toMatchObject({ ok: true, place: { turnLimitMs: 2 * HOUR, turnLimitDefault: null, settings: { turnLimitMs: 2 * HOUR } } });
     expect(placeSettingsLine(here.place)).toContain("stops a turn at 2h (off by default)");
@@ -1064,7 +965,7 @@ describe("a place's turn limit", () => {
       let skew = 0;
       const local = fakeLocal(root);
       const backend = stubBackend();
-      runtime = createRuntime({
+      ctx.runtime = createRuntime({
         backend,
         places: wiredPlace("solari", backend),
         store: memoryStore(),
@@ -1072,27 +973,27 @@ describe("a place's turn limit", () => {
         placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }),
         local: { ...local, execStream: (o, waiting) => (handed.push(o), local.execStream({ ...o, now: () => Date.now() + skew, pollMs: 20 }, waiting)) },
       });
-      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-      const mac = await createOn(runtime, { on: HERE_PLACE_ID, name: "mac" });
+      ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+      const mac = await createOn(ctx.runtime, { on: HERE_PLACE_ID, name: "mac" });
       // The exec verb's road hands its own limits, idle among them; every road through the turn's adapter hands only the wall.
       const turnOn = (): MachineExecOptions | undefined => [...handed].reverse().find(o => o !== undefined && o.idleMs === undefined);
 
-      const off = await runtime.sessions.start(mac.id, { prompt: "one" });
+      const off = await ctx.runtime.sessions.start(mac.id, { prompt: "one" });
       await until(() => turnOn() !== undefined);
       expect(turnOn()).toEqual({ deadlineMs: Number.POSITIVE_INFINITY });
       // A day on, a computer with no limit still has its turn running.
       skew = 24 * HOUR;
       await new Promise(done => setTimeout(done, 200));
-      expect((await runtime.sessions.list(mac.id)).map(r => r.status)).toEqual(["running"]);
-      await runtime.sessions.interrupt(off.id);
+      expect((await ctx.runtime.sessions.list(mac.id)).map(r => r.status)).toEqual(["running"]);
+      await ctx.runtime.sessions.interrupt(off.id);
       await off.finished;
       skew = 0;
 
-      const host = await WsClient.connect(srv.port, { token: "host-token" });
+      const host = await WsClient.connect(ctx.srv.port, { token: "host-token" });
       expect(await host.request("places.set", { placeId: HERE_PLACE_ID, turnLimitMs: 2 * HOUR })).toMatchObject({ ok: true });
       host.close();
       handed.length = 0;
-      const capped = await runtime.sessions.start(mac.id, { prompt: "two" });
+      const capped = await ctx.runtime.sessions.start(mac.id, { prompt: "two" });
       await until(() => turnOn() !== undefined);
       expect(turnOn()).toEqual({ deadlineMs: 2 * HOUR });
       skew = 2 * HOUR;
@@ -1107,22 +1008,22 @@ describe("a place's turn limit", () => {
   it("stops a turn on a cloud's machine at six hours until the person sets another, and never once it is off", async () => {
     let skew = 0;
     const backend = stubBackend();
-    runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: { claude: busy }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), machineExec: { now: () => Date.now() + skew, pollMs: 5 } });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    const cloud = await createOn(runtime, { on: "solari", golden: "snap_g", name: "cloud" });
+    ctx.runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: { claude: busy }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), machineExec: { now: () => Date.now() + skew, pollMs: 5 } });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const cloud = await createOn(ctx.runtime, { on: "solari", golden: "snap_g", name: "cloud" });
     scriptGuest(backend, [], backend.execImpl);
-    const capped = await runtime.sessions.start(cloud.id, { prompt: "one" });
-    await until(async () => (await runtime!.sessions.history(cloud.id)).some(e => e.type === "session.start"));
+    const capped = await ctx.runtime.sessions.start(cloud.id, { prompt: "one" });
+    await until(async () => (await ctx.runtime!.sessions.history(cloud.id)).some(e => e.type === "session.start"));
     skew = TURN_WALL_MS;
     expect(await capped.finished).toEqual({ status: "failed", error: turnCutLine("wall", TURN_WALL_MS, TURN_WALL_MS) });
 
     skew = 0;
-    const host = await WsClient.connect(srv.port, { token: "host-token" });
+    const host = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     expect(await host.request("places.set", { placeId: "solari", turnLimitMs: null })).toMatchObject({ ok: true });
     host.close();
     const guest = scriptGuest(backend, [], backend.execImpl);
-    const open = await runtime.sessions.start(cloud.id, { prompt: "two" });
-    await until(async () => (await runtime!.sessions.history(cloud.id)).filter(e => e.type === "session.start").length === 2);
+    const open = await ctx.runtime.sessions.start(cloud.id, { prompt: "two" });
+    await until(async () => (await ctx.runtime!.sessions.history(cloud.id)).filter(e => e.type === "session.start").length === 2);
     // A day on, in the same poll that brings the turn's next line, so only the limit could stop it.
     const answer = backend.execImpl;
     backend.execImpl = async (m, cmd) => {
@@ -1134,8 +1035,8 @@ describe("a place's turn limit", () => {
     };
     await until(() => skew > 0);
     await new Promise(done => setTimeout(done, 200));
-    expect((await runtime.sessions.list(cloud.id)).map(r => r.status)).toEqual(["failed", "running"]);
-    await runtime.sessions.interrupt(open.id);
+    expect((await ctx.runtime.sessions.list(cloud.id)).map(r => r.status)).toEqual(["failed", "running"]);
+    await ctx.runtime.sessions.interrupt(open.id);
     await open.finished;
   }, 20_000);
 });
@@ -1145,25 +1046,25 @@ describe("whether agents may start agents, as a place's default", () => {
     const root = mkdtempSync(joinPath(tmpdir(), "wsp-spawn-place-"));
     try {
       const backend = stubBackend();
-      runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
-      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-      const c = await WsClient.connect(srv.port, { token: "host-token" });
+      ctx.runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
+      ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+      const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
       expect((await placesOf()).find(p => p.id === "solari")).toMatchObject({ spawn: AGENTS_ON, spawnDefault: AGENTS_ON });
-      const before = await createOn(runtime, { on: "solari", golden: "snap_g", name: "before" });
+      const before = await createOn(ctx.runtime, { on: "solari", golden: "snap_g", name: "before" });
       expect(await c.request("places.set", { placeId: "solari", spawn: { spawn: false } })).toMatchObject({ ok: true, place: { spawn: { ...AGENTS_ON, spawn: false }, settings: { spawn: { spawn: false } } } });
       expect(await c.request("places.set", { placeId: HERE_PLACE_ID, spawn: { maxMachines: 1 } })).toMatchObject({ ok: true, place: { spawn: { ...AGENTS_ON, maxMachines: 1 } } });
       // Read at every ask rather than copied at the create, so a workspace made before the change follows it.
-      expect((await runtime.workspaces.get(before.id)).agents).toEqual({ ...AGENTS_ON, spawn: false });
-      const after = await createOn(runtime, { on: "solari", golden: "snap_g", name: "after" });
-      expect((await runtime.workspaces.get(after.id)).agents).toEqual({ ...AGENTS_ON, spawn: false });
-      const own = await createOn(runtime, { on: "solari", golden: "snap_g", name: "own", agents: { maxDepth: 3 } });
-      expect((await runtime.workspaces.get(own.id)).agents).toEqual({ ...AGENTS_ON, spawn: false, maxDepth: 3 });
-      const mac = await createOn(runtime, { on: HERE_PLACE_ID, name: "mac" });
-      expect((await runtime.workspaces.get(mac.id)).agents).toEqual({ ...AGENTS_ON, maxMachines: 1 });
+      expect((await ctx.runtime.workspaces.get(before.id)).agents).toEqual({ ...AGENTS_ON, spawn: false });
+      const after = await createOn(ctx.runtime, { on: "solari", golden: "snap_g", name: "after" });
+      expect((await ctx.runtime.workspaces.get(after.id)).agents).toEqual({ ...AGENTS_ON, spawn: false });
+      const own = await createOn(ctx.runtime, { on: "solari", golden: "snap_g", name: "own", agents: { maxDepth: 3 } });
+      expect((await ctx.runtime.workspaces.get(own.id)).agents).toEqual({ ...AGENTS_ON, spawn: false, maxDepth: 3 });
+      const mac = await createOn(ctx.runtime, { on: HERE_PLACE_ID, name: "mac" });
+      expect((await ctx.runtime.workspaces.get(mac.id)).agents).toEqual({ ...AGENTS_ON, maxMachines: 1 });
       // A cap named alone on a workspace tightens the switch it reads as, which is its place's.
-      expect((await runtime.workspaces.agents(after.id, { maxMachines: 2 })).agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 2 });
+      expect((await ctx.runtime.workspaces.agents(after.id, { maxMachines: 2 })).agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 2 });
       expect(await c.request("places.set", { placeId: "solari", reset: ["spawn"] })).toMatchObject({ ok: true, place: { spawn: AGENTS_ON } });
-      expect((await runtime.workspaces.get(before.id)).agents).toEqual(AGENTS_ON);
+      expect((await ctx.runtime.workspaces.get(before.id)).agents).toEqual(AGENTS_ON);
       c.close();
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -1174,17 +1075,17 @@ describe("whether agents may start agents, as a place's default", () => {
     const root = mkdtempSync(joinPath(tmpdir(), "wsp-spawn-parts-"));
     const shipped = AGENTS_ON.maxDepth;
     try {
-      runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: wiring(newPlaceKeyPair()), local: fakeLocal(root) });
-      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-      const c = await WsClient.connect(srv.port, { token: "host-token" });
+      ctx.runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: wiring(newPlaceKeyPair()), local: fakeLocal(root) });
+      ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+      const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
       await c.request("places.set", { placeId: HERE_PLACE_ID, spawn: { spawn: false } });
       const back = (await c.request("places.set", { placeId: HERE_PLACE_ID, spawn: { spawn: true } })) as { place: PlaceView };
       expect(back.place.settings).toEqual({ spawn: { spawn: true } });
-      const mac = await createOn(runtime, { on: HERE_PLACE_ID, name: "mac" });
+      const mac = await createOn(ctx.runtime, { on: HERE_PLACE_ID, name: "mac" });
       // The default moves under a computer that toggled, and both its row and its workspace read the new one.
       (AGENTS_ON as { maxDepth: number }).maxDepth = shipped + 3;
       expect((await placesOf()).find(p => p.id === HERE_PLACE_ID)!.spawn?.maxDepth).toBe(shipped + 3);
-      expect((await runtime.workspaces.get(mac.id)).agents?.maxDepth).toBe(shipped + 3);
+      expect((await ctx.runtime.workspaces.get(mac.id)).agents?.maxDepth).toBe(shipped + 3);
       (AGENTS_ON as { maxDepth: number }).maxDepth = shipped;
       // A depth set and taken back leaves the rest of the switch as the person set it.
       expect(await c.request("places.set", { placeId: HERE_PLACE_ID, spawn: { maxDepth: 4 } })).toMatchObject({ place: { settings: { spawn: { spawn: true, maxDepth: 4 } }, spawn: { maxDepth: 4 } } });
@@ -1206,8 +1107,8 @@ describe("a computer that runs an older wsp than this host", () => {
     try {
       const hostKey = newPlaceKeyPair();
       let held: number | undefined = DAEMON_VERSION - 1;
-      runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey), local: { ...fakeLocal(root), hereDaemon: { version: async () => held ?? DAEMON_VERSION, held: () => held, fix: "updating the wsp app" } } });
-      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      ctx.runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey), local: { ...fakeLocal(root), hereDaemon: { version: async () => held ?? DAEMON_VERSION, held: () => held, fix: "updating the wsp app" } } });
+      ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
       const old = await join(hostKey, { code: await code(), report: report("spoo", { daemonVersion: DAEMON_VERSION - 1 }) });
       sockets.push(old.client.ws);
       const level = await join(hostKey, { code: await code(), report: report("box", { daemonVersion: DAEMON_VERSION }) });
@@ -1239,14 +1140,14 @@ describe("a cloud's spend per day", () => {
       const backend = stubBackend();
       // An hour into a local day, so the hours below all fall in it whatever zone this runs in.
       const fc = fakeClock(dayStart(Date.parse("2026-09-16T12:00:00.000Z")) + HOUR);
-      runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, clock: fc.clock, idle: { defaultWindowMs: 24 * HOUR }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
-      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-      const c = await WsClient.connect(srv.port, { token: "host-token" });
+      ctx.runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, clock: fc.clock, idle: { defaultWindowMs: 24 * HOUR }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
+      ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+      const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
       expect(await c.request("places.set", { placeId: "solari", spendPerDayUsd: 0.2 })).toMatchObject({ ok: true });
       c.close();
       const opened = async (name: string) => {
-        const made = await createOn(runtime!, { on: "solari", golden: "snap_g", name });
-        await until(async () => (await runtime!.status.history(made.id)).length === 1);
+        const made = await createOn(ctx.runtime!, { on: "solari", golden: "snap_g", name });
+        await until(async () => (await ctx.runtime!.status.history(made.id)).length === 1);
         return made;
       };
 
@@ -1256,41 +1157,21 @@ describe("a cloud's spend per day", () => {
       const second = await opened("second");
       fc.advance(HOUR / 2);
       // An hour and a half of the first and half an hour of the second is $0.22.
-      await expect(createOn(runtime, { on: "solari", golden: "snap_g", name: "third" })).rejects.toThrow(spendCapRefusal("solari", 0.22, 0.2));
-      const phases = Object.fromEntries((await runtime.workspaces.list()).map(w => [w.id, w.phase]));
+      await expect(createOn(ctx.runtime, { on: "solari", golden: "snap_g", name: "third" })).rejects.toThrow(spendCapRefusal("solari", 0.22, 0.2));
+      const phases = Object.fromEntries((await ctx.runtime.workspaces.list()).map(w => [w.id, w.phase]));
       expect(phases).toEqual({ [first.id]: "running", [second.id]: "running" });
       // A copy on this computer costs nothing, so no cloud's spend refuses it.
-      await expect(createOn(runtime, { on: HERE_PLACE_ID, name: "mac" })).resolves.toMatchObject({ name: "mac" });
+      await expect(createOn(ctx.runtime, { on: HERE_PLACE_ID, name: "mac" })).resolves.toMatchObject({ name: "mac" });
       // A higher spend per day lets the next machine through the same day.
-      const again = await WsClient.connect(srv.port, { token: "host-token" });
+      const again = await WsClient.connect(ctx.srv.port, { token: "host-token" });
       expect(await again.request("places.set", { placeId: "solari", spendPerDayUsd: 1 })).toMatchObject({ ok: true });
       again.close();
-      await expect(createOn(runtime, { on: "solari", golden: "snap_g", name: "third" })).resolves.toMatchObject({ name: "third" });
+      await expect(createOn(ctx.runtime, { on: "solari", golden: "snap_g", name: "third" })).resolves.toMatchObject({ name: "third" });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 });
-
-/** A computer that answers the frames a remove sends it: the reads of what wsp merged into the agents' own files
- * there, which on a computer with no list beside its job come back with nothing to take, and the sweep with what
- * its own leave took. */
-function answersLeave(client: WsClient, swept: readonly string[], asked?: string[]): void {
-  client.onFrame(raw => {
-    const frame = raw as unknown as { id?: number; op?: string };
-    if (frame.op === "exec") return void client.say({ id: frame.id, ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false });
-    if (frame.op !== "place.leave") return;
-    asked?.push("place.leave");
-    client.say({ id: frame.id, ok: true, swept: [...swept] });
-  });
-}
-
-async function remove(placeId: string): Promise<Record<string, unknown>> {
-  const c = await WsClient.connect(srv!.port, { token: "host-token" });
-  const answer = await c.request("places.remove", { placeId });
-  c.close();
-  return answer;
-}
 
 describe("moving a place onto the daemon this host deploys", () => {
   /** What the host's own updater does, in miniature: the binary in parts over the link the place is holding, each
@@ -1324,7 +1205,7 @@ describe("moving a place onto the daemon this host deploys", () => {
   };
 
   const update = async (placeId: string): Promise<Record<string, unknown>> => {
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     const answer = await c.request("places.update", { placeId });
     c.close();
     return answer;
@@ -1384,7 +1265,7 @@ describe("moving a place onto the daemon this host deploys", () => {
     const behind = report("old-macbook", { daemonVersion: DAEMON_VERSION - 1 });
     const { client, placeId, pair } = await join(hostKey, { code: await code(), report: behind, answers: answers(landed, sent) });
     sockets.push(client.ws);
-    await until(async () => runtime!.places!.offerOf(placeId) === PLACE_FACTS.offer);
+    await until(async () => ctx.runtime!.places!.offerOf(placeId) === PLACE_FACTS.offer);
     expect((await placesOf()).find(p => p.id === placeId)!.logins).toBeUndefined();
 
     // The computer restarts its agent on the binary the update landed and dials back on the new daemon, which
@@ -1564,7 +1445,7 @@ describe("taking a place back out over the login the install used", () => {
     const hostKey = newPlaceKeyPair();
     const store = memoryStore();
     let joined = "";
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store,
       adapters: {},
@@ -1586,8 +1467,8 @@ describe("taking a place back out over the login the install used", () => {
       placeJoinWaitMs: 60,
       placeUpdateWaitMs: 60,
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    await expect(runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now())).rejects.toThrow(placeNoLinkLine("vps"));
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    await expect(ctx.runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now())).rejects.toThrow(placeNoLinkLine("vps"));
     return { placeId: joined, store };
   };
 
@@ -1601,7 +1482,7 @@ describe("taking a place back out over the login the install used", () => {
       await answered;
       return took;
     });
-    const removing = runtime!.places!.remove(placeId);
+    const removing = ctx.runtime!.places!.remove(placeId);
     await until(() => asked.length === 1);
     // Still this host's while the leave runs: a box that refuses halfway is one a person can still name and try
     // again, and a record dropped first would leave the agent on it with nothing here to reach it by.
@@ -1631,14 +1512,14 @@ describe("taking a place back out over the login the install used", () => {
       },
     }, "ssh-ed25519 SHA256:kept");
     // Refused with the add's own kind, before the leave and with the record kept, so the person types it and removes again.
-    await expect(runtime!.places!.remove(placeId)).rejects.toMatchObject({ kind: PLACE_SUDO_KIND });
+    await expect(ctx.runtime!.places!.remove(placeId)).rejects.toMatchObject({ kind: PLACE_SUDO_KIND });
     expect(asked).toEqual([]);
     // The key the box's ssh answered the add with is kept on the record's road and handed to the read, which holds
     // the box against it before any password goes there; the view a client reads carries none of the road's own.
     expect(((await store.get("places", placeId)) as { road?: { hostKey?: string } }).road?.hostKey).toBe("ssh-ed25519 SHA256:kept");
     expect(logins[0]).toEqual({ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostKey: "ssh-ed25519 SHA256:kept" });
     expect(JSON.stringify((await placesOf()).find(p => p.id === placeId))).not.toContain("SHA256:kept");
-    const removed = await runtime!.places!.remove(placeId, { sudoPassword: "right" });
+    const removed = await ctx.runtime!.places!.remove(placeId, { sudoPassword: "right" });
     expect(tried).toEqual([undefined, "right"]);
     expect(acts).toEqual(["remove vps", "remove vps"]);
     expect(asked.map(r => r.sudoPassword)).toEqual(["right"]);
@@ -1649,7 +1530,7 @@ describe("taking a place back out over the login the install used", () => {
   it("rides no password on a login that reaches root without one, whatever came with the remove", async () => {
     const asked: PlaceLeaveRequest[] = [];
     const { placeId } = await installedAndSilent(async req => (asked.push(req), []), { sudoOver: async () => "free" });
-    await runtime!.places!.remove(placeId, { sudoPassword: "stray" });
+    await ctx.runtime!.places!.remove(placeId, { sudoPassword: "stray" });
     expect(asked).toHaveLength(1);
     expect(asked[0]!.sudoPassword).toBeUndefined();
   });
@@ -1663,9 +1544,9 @@ describe("taking a place back out over the login the install used", () => {
       },
       update: async req => (updates.push(req), { road: "ssh", at: "/root/.wsp/daemon/wsp-daemon" }),
     });
-    await expect(runtime!.places!.update(placeId)).rejects.toThrow("wsp add vps --update");
+    await expect(ctx.runtime!.places!.update(placeId)).rejects.toThrow("wsp add vps --update");
     expect(updates).toEqual([]);
-    await runtime!.places!.update(placeId, { sudoPassword: "right" });
+    await ctx.runtime!.places!.update(placeId, { sudoPassword: "right" });
     expect(updates.map(r => r.sudoPassword)).toEqual(["right"]);
   });
 
@@ -1675,7 +1556,7 @@ describe("taking a place back out over the login the install used", () => {
     const { placeId, store } = await installedAndSilent(async () => {
       throw new PlaceLoginRefusedError("ssh: connect to host 65.21.4.12 port 22: Connection refused");
     });
-    const removed = await runtime!.places!.remove(placeId);
+    const removed = await ctx.runtime!.places!.remove(placeId);
     expect(removed.removed).toBe(true);
     expect(removed.swept).toEqual([]);
     expect(removed.note).toBe(placeStillInstalledLine("vps"));
@@ -1687,7 +1568,7 @@ describe("taking a place back out over the login the install used", () => {
     const { placeId } = await installedAndSilent(async () => {
       throw new Error(said);
     });
-    const removed = await runtime!.places!.remove(placeId);
+    const removed = await ctx.runtime!.places!.remove(placeId);
     // The login stood and the leave ran: how far it got is that computer's to say, and a line reading that it did
     // not answer would be telling a person something that did not happen.
     expect(removed.note).toBe(`${placeLoginRoadLine("vps", "root@65.21.4.12", said)}; ${placeStillInstalledLine("vps")}`);
@@ -1697,7 +1578,7 @@ describe("taking a place back out over the login the install used", () => {
 
   it("says the agent is still installed on a host wired with no road to log in to one", async () => {
     const { placeId } = await installedAndSilent();
-    const removed = await runtime!.places!.remove(placeId);
+    const removed = await ctx.runtime!.places!.remove(placeId);
     expect(removed.swept).toEqual([]);
     expect(removed.note).toBe(placeStillInstalledLine("vps"));
   });
@@ -1714,7 +1595,7 @@ describe("taking a place back out over the login the install used", () => {
     const overLink = ["/home/maya/.wsp/place.json", "/home/maya/.wsp/daemon-token"];
     const store = memoryStore();
     let joined = "";
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store,
       adapters: {},
@@ -1735,8 +1616,8 @@ describe("taking a place back out over the login the install used", () => {
       },
       placeJoinWaitMs: 60,
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    await runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now());
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    await ctx.runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now());
     return { placeId: joined, overLink, askedOverLink, store };
   };
 
@@ -1747,7 +1628,7 @@ describe("taking a place back out over the login the install used", () => {
       asked.push(req);
       return took;
     });
-    const removed = await runtime!.places!.remove(placeId);
+    const removed = await ctx.runtime!.places!.remove(placeId);
     expect(asked).toHaveLength(1);
     expect(asked[0]!.ssh).toEqual({ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" });
     // The agent on the link is never asked: its sweep leaves the unit that restarts it, and a second sweep after
@@ -1762,7 +1643,7 @@ describe("taking a place back out over the login the install used", () => {
     const { placeId, overLink, askedOverLink } = await installedAndLinked(async () => {
       throw new PlaceLoginRefusedError("ssh: connect to host 65.21.4.12 port 22: Connection refused");
     });
-    const removed = await runtime!.places!.remove(placeId);
+    const removed = await ctx.runtime!.places!.remove(placeId);
     expect(askedOverLink).toEqual(["place.leave"]);
     expect(removed.swept).toEqual(overLink);
     // Which road finished it, since the two take different things off: this one left the unit that restarts the
@@ -1780,7 +1661,7 @@ describe("taking a place back out over the login the install used", () => {
       await until(async () => (await placesOf()).find(p => p.id === req.placeId)?.present === false);
       return took;
     }, box);
-    const removed = await runtime!.places!.remove(placeId);
+    const removed = await ctx.runtime!.places!.remove(placeId);
     expect(removed.swept).toEqual(took);
     expect(removed.note).toBe("wsp and the service that kept it running are removed from vps");
     expect(askedOverLink).toEqual([]);
@@ -1810,7 +1691,7 @@ describe("taking a place back out over the login the install used", () => {
       },
     );
     const started = Date.now();
-    const removed = await runtime!.places!.remove(placeId);
+    const removed = await ctx.runtime!.places!.remove(placeId);
     expect(Date.now() - started).toBeLessThan(2_000);
     expect(dialled).toEqual([{ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" }]);
     expect(asked).toBe(0);
@@ -1824,7 +1705,7 @@ describe("taking a place back out over the login the install used", () => {
     const { placeId, overLink, askedOverLink } = await installedAndLinked(async () => {
       throw new Error(said);
     });
-    const removed = await runtime!.places!.remove(placeId);
+    const removed = await ctx.runtime!.places!.remove(placeId);
     expect(askedOverLink).toEqual(["place.leave"]);
     expect(removed.swept).toEqual(overLink);
     expect(removed.note).toBe(placeSweptOverLinkLine("vps", "root@65.21.4.12", said));
@@ -1835,7 +1716,7 @@ describe("taking a place back out over the login the install used", () => {
 describe("dialling a computer that stopped answering", () => {
   /** The one road the app's Try now takes, over the person's own socket. */
   const dialled = async (placeId: string): Promise<Record<string, unknown>> => {
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     const answer = await c.request("places.dial", { placeId });
     c.close();
     expect(answer.ok, String(answer["error"])).toBe(true);
@@ -1865,7 +1746,7 @@ describe("dialling a computer that stopped answering", () => {
     const hostKey = newPlaceKeyPair();
     const logins: PlaceLogin[] = [];
     let box: WsClient | undefined;
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -1881,8 +1762,8 @@ describe("dialling a computer that stopped answering", () => {
         },
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    const added = await runtime.places!.add({ address: "root@65.21.4.12", hostUrls: DOOR }, Date.now());
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const added = await ctx.runtime.places!.add({ address: "root@65.21.4.12", hostUrls: DOOR }, Date.now());
     // The login the install used is kept on the row: the join frame the record was made from says nothing about it.
     expect(added.place.road?.ssh).toBe("root@65.21.4.12");
     box?.close();
@@ -1899,7 +1780,7 @@ describe("dialling a computer that stopped answering", () => {
     const hostKey = newPlaceKeyPair();
     let box: WsClient | undefined;
     let answer: (() => void) | undefined;
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -1913,24 +1794,24 @@ describe("dialling a computer that stopped answering", () => {
         dial: () => new Promise<void>(done => (answer = done)),
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    const added = await runtime.places!.add({ address: "root@65.21.4.12", hostUrls: DOOR }, Date.now());
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const added = await ctx.runtime.places!.add({ address: "root@65.21.4.12", hostUrls: DOOR }, Date.now());
     box?.close();
     await until(async () => (await placesOf()).find(p => p.id === added.place.id)!.present === false);
     const dialling = dialled(added.place.id);
     await until(() => answer !== undefined);
-    await runtime.places!.loginLanded(added.place.id, "codex");
-    expect(runtime.places!.signInsAt(added.place.id)).toEqual({ codex: "signed-in" });
+    await ctx.runtime.places!.loginLanded(added.place.id, "codex");
+    expect(ctx.runtime.places!.signInsAt(added.place.id)).toEqual({ codex: "signed-in" });
     answer!();
     expect(((await dialling)["place"] as PlaceView).signIns).toEqual({ codex: "signed-in" });
-    expect(runtime.places!.signInsAt(added.place.id)).toEqual({ codex: "signed-in" });
+    expect(ctx.runtime.places!.signInsAt(added.place.id)).toEqual({ codex: "signed-in" });
   });
 
   it("dials with the key file the add was given, since every ssh child runs with BatchMode on", async () => {
     const hostKey = newPlaceKeyPair();
     const logins: PlaceLogin[] = [];
     let box: WsClient | undefined;
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -1946,8 +1827,8 @@ describe("dialling a computer that stopped answering", () => {
         },
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    const added = await runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now());
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const added = await ctx.runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now());
     box?.close();
     await until(async () => (await placesOf()).find(p => p.id === added.place.id)!.present === false);
     await dialled(added.place.id);
@@ -1962,7 +1843,7 @@ describe("dialling a computer that stopped answering", () => {
   it("marks the step an install stopped in with the installer's one sentence and hands back that sentence alone", async () => {
     const hostKey = newPlaceKeyPair();
     const sentence = "spoo took wsp but could not connect back: the host at http://100.129.166.28:4640 did not answer in 20s";
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -1977,8 +1858,8 @@ describe("dialling a computer that stopped answering", () => {
       },
     });
     const stages: PlaceStageEvent[] = [];
-    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
-    await expect(runtime.places!.add({ address: "root@178.156.161.168", hostUrls: DOOR }, Date.now())).rejects.toThrow(new Error(sentence));
+    ctx.runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(ctx.runtime.places!.add({ address: "root@178.156.161.168", hostUrls: DOOR }, Date.now())).rejects.toThrow(new Error(sentence));
     expect(stages.filter(s => s.state === "failed").map(s => [s.step, s.note])).toEqual([["service", sentence]]);
   });
 
@@ -1986,7 +1867,7 @@ describe("dialling a computer that stopped answering", () => {
     const hostKey = newPlaceKeyPair();
     let box: WsClient | undefined;
     const said = "ssh: connect to host 65.21.4.12 port 22: Connection refused";
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2000,8 +1881,8 @@ describe("dialling a computer that stopped answering", () => {
         dial: () => Promise.reject(new Error(said)),
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    const added = await runtime.places!.add({ address: "root@65.21.4.12", hostUrls: DOOR }, Date.now());
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const added = await ctx.runtime.places!.add({ address: "root@65.21.4.12", hostUrls: DOOR }, Date.now());
     box?.close();
     await until(async () => (await placesOf()).find(p => p.id === added.place.id)!.present === false);
     const answer = await dialled(added.place.id);
@@ -2027,7 +1908,7 @@ describe("dialling a computer that stopped answering", () => {
   it("bounds the dial itself, so a road that hangs rather than refusing still answers the hand that pressed", async () => {
     const hostKey = newPlaceKeyPair();
     let box: WsClient | undefined;
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2043,8 +1924,8 @@ describe("dialling a computer that stopped answering", () => {
         dial: () => new Promise<void>(() => {}),
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    const added = await runtime.places!.add({ address: "root@65.21.4.12", hostUrls: DOOR }, Date.now());
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const added = await ctx.runtime.places!.add({ address: "root@65.21.4.12", hostUrls: DOOR }, Date.now());
     box?.close();
     await until(async () => (await placesOf()).find(p => p.id === added.place.id)!.present === false);
     const answer = await dialled(added.place.id);
@@ -2083,7 +1964,7 @@ describe("putting the agent on a computer over ssh", () => {
     const { hostKey } = await serving();
     // The wiring this host was served with names no installer, which is every host but the one with the ssh road.
     expect(hostKey).toBeDefined();
-    await expect(runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow(NO_PLACE_INSTALLER);
+    await expect(ctx.runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow(NO_PLACE_INSTALLER);
   });
 
   it("mints a code the computer spends, says what each step is doing, and answers once that computer's link is up", async () => {
@@ -2091,7 +1972,7 @@ describe("putting the agent on a computer over ssh", () => {
     const store = memoryStore();
     const stages: PlaceStageEvent[] = [];
     let handed: PlaceInstallRequest | undefined;
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store,
       adapters: {},
@@ -2106,10 +1987,10 @@ describe("putting the agent on a computer over ssh", () => {
         },
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    ctx.runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
     // The caller mints the stream, since the steps come back before the reply that would have named it.
-    const added = await runtime.places!.add({ addId: "a_mine", address: "root@10.0.0.9", name: "box", hostUrls: DOOR }, Date.now());
+    const added = await ctx.runtime.places!.add({ addId: "a_mine", address: "root@10.0.0.9", name: "box", hostUrls: DOOR }, Date.now());
     expect(added.place.name).toBe("box");
     expect(added.place.present).toBe(true);
     expect(added.hostKey).toBe("ssh-ed25519 SHA256:abc");
@@ -2132,7 +2013,7 @@ describe("putting the agent on a computer over ssh", () => {
   it("never says an address the box claims it dialled that this add did not hand it", async () => {
     const hostKey = newPlaceKeyPair();
     const stages: PlaceStageEvent[] = [];
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2144,15 +2025,15 @@ describe("putting the agent on a computer over ssh", () => {
         },
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
-    await runtime.places!.add({ address: "root@10.0.0.9", name: "box", hostUrls: DOOR }, Date.now());
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    ctx.runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await ctx.runtime.places!.add({ address: "root@10.0.0.9", name: "box", hostUrls: DOOR }, Date.now());
     expect(stages.find(s => s.step === "join" && s.state === "done")?.note).toBe("engine none");
   });
 
   it("waits for the link the agent dials, not the socket the join itself opened and closed", async () => {
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2171,8 +2052,8 @@ describe("putting the agent on a computer over ssh", () => {
       },
       placeJoinWaitMs: 4_000,
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    const added = await runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now());
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const added = await ctx.runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now());
     expect(added.place.present).toBe(true);
   });
 
@@ -2180,7 +2061,7 @@ describe("putting the agent on a computer over ssh", () => {
     const hostKey = newPlaceKeyPair();
     const stages: PlaceStageEvent[] = [];
     let minted = "";
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2193,18 +2074,18 @@ describe("putting the agent on a computer over ssh", () => {
         },
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
-    await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow("publickey");
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    ctx.runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(ctx.runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow("publickey");
     expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["wsp running", "wsp failed"]);
     expect(stages.at(-1)?.note).toContain("publickey");
     // The code went to the box as a file, so the add that failed has spent it and nobody can join with it after.
-    expect(await runtime.devices.spend(minted, Date.now())).toBe(false);
+    expect(await ctx.runtime.devices.spend(minted, Date.now())).toBe(false);
   });
 
   it("says a step the installer already marked failed once, not a second time as the add ends", async () => {
     const stages: PlaceStageEvent[] = [];
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2218,14 +2099,14 @@ describe("putting the agent on a computer over ssh", () => {
         },
       },
     });
-    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
-    await expect(runtime.places!.add({ address: "dev@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow("asks for");
+    ctx.runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(ctx.runtime.places!.add({ address: "dev@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow("asks for");
     expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["check running", "root running", "root failed"]);
   });
 
   it("draws a failure on the step that was under way, not on a step that only said what it had done", async () => {
     const stages: PlaceStageEvent[] = [];
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2238,21 +2119,21 @@ describe("putting the agent on a computer over ssh", () => {
         },
       },
     });
-    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
-    await expect(runtime.places!.add({ address: "root@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow("zsh");
+    ctx.runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(ctx.runtime.places!.add({ address: "root@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow("zsh");
     expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["connect running", "host-key done", "connect failed"]);
   });
 
   it("answers a refused login over the wire with the kind the app reads its login fix off, and any other refusal without it", async () => {
     let refuse: Error = new PlaceLoginRefusedError("maya@box: Permission denied (publickey).");
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
       placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => Promise.reject(refuse) },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door: { open: async () => ({ port: 4420, addresses: DOOR }) } });
-    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, door: { open: async () => ({ port: 4420, addresses: DOOR }) } });
+    const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     expect(await c.request("places.add", { address: "maya@box" })).toMatchObject({ ok: false, error: "maya@box: Permission denied (publickey).", kind: PLACE_LOGIN_REFUSED_KIND });
     refuse = new Error("root@spoo runs zsh as root's shell");
     expect(await c.request("places.add", { address: "root@spoo" })).not.toHaveProperty("kind");
@@ -2261,22 +2142,22 @@ describe("putting the agent on a computer over ssh", () => {
 
   it("gives up on a computer that took the agent and never dialled, in the sentence that says what to check", async () => {
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
       placeLinks: { ...wiring(hostKey), install: async () => ({ name: "box" }) },
       placeJoinWaitMs: 50,
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow(placeNoLinkLine("box"));
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    await expect(ctx.runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow(placeNoLinkLine("box"));
   });
 
   it("puts the agent's own last lines under that sentence, read over the login the install used", async () => {
     const hostKey = newPlaceKeyPair();
     const asked: PlaceLogin[] = [];
     const said = ["https://h645d7f8a8d48cbd6.example could not be dialled: not an http address", "http://100.129.175.77:4420 did not answer in 10s"];
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2290,10 +2171,10 @@ describe("putting the agent on a computer over ssh", () => {
       },
       placeJoinWaitMs: 50,
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     const stages: PlaceStageEvent[] = [];
-    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
-    await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow([placeNoLinkLine("box"), ...said].join("\n"));
+    ctx.runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(ctx.runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow([placeNoLinkLine("box"), ...said].join("\n"));
     expect(asked).toEqual([{ ssh: "root@10.0.0.9", keyPath: "/Users/lena/.ssh/hetzner" }]);
     // The step's note is one line by construction: a terminal prints it after the step's marker and the sheet puts
     // it in one span, so the box's own lines ride the throw, which both roads print whole.
@@ -2302,7 +2183,7 @@ describe("putting the agent on a computer over ssh", () => {
 
   it("says the wait's own sentence and nothing else when the box will not answer the read either", async () => {
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2315,8 +2196,8 @@ describe("putting the agent on a computer over ssh", () => {
       },
       placeJoinWaitMs: 50,
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    const failed = await runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now()).then(
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const failed = await ctx.runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now()).then(
       () => undefined,
       (e: unknown) => e as Error,
     );
@@ -2330,7 +2211,7 @@ describe("putting the agent on a computer over ssh", () => {
     let joined = "";
     const said = "spoo connected back but its agent did not start: systemctl exited 1; nothing this add put on it is left there";
     let taken = true;
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store,
       adapters: {},
@@ -2345,16 +2226,16 @@ describe("putting the agent on a computer over ssh", () => {
         },
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    runtime.events.on("place.removed", e => removed.push((e as { placeId: string }).placeId));
-    await expect(runtime.places!.add({ address: "root@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow(said);
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    ctx.runtime.events.on("place.removed", e => removed.push((e as { placeId: string }).placeId));
+    await expect(ctx.runtime.places!.add({ address: "root@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow(said);
     expect(joined).not.toBe("");
     expect(await store.get("places", joined)).toBeUndefined();
     expect((await placesOf()).some(p => p.id === joined)).toBe(false);
     expect(removed).toEqual([joined]);
     // An install that could not take its join back keeps the record, which is the road a remove sweeps that box by.
     taken = false;
-    await expect(runtime.places!.add({ address: "root@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow(said);
+    await expect(ctx.runtime.places!.add({ address: "root@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow(said);
     expect(await store.get("places", joined)).toBeDefined();
     expect(removed).toHaveLength(1);
   });
@@ -2364,7 +2245,7 @@ describe("putting the agent on a computer over ssh", () => {
     const store = memoryStore();
     const asked: PlaceUpdateRequest[] = [];
     let joined = "";
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store,
       adapters: {},
@@ -2388,14 +2269,14 @@ describe("putting the agent on a computer over ssh", () => {
       placeJoinWaitMs: 60,
       placeUpdateWaitMs: 60,
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    await expect(runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now())).rejects.toThrow(placeNoLinkLine("vps"));
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    await expect(ctx.runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now())).rejects.toThrow(placeNoLinkLine("vps"));
     // The wait's outcome says nothing about what road this host was handed, so the record holds the login either way.
     const held = (await store.get("places", joined)) as { road?: { ssh?: string; keyPath?: string } };
     expect(held.road).toMatchObject({ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" });
     // And the road that puts a daemon on that computer takes it: the one box that needs the update road is the one
     // whose agent could not dial.
-    const updated = await runtime.places!.update(joined);
+    const updated = await ctx.runtime.places!.update(joined);
     expect(updated.daemon?.road).toBe("ssh");
     expect(asked.map(r => r.ssh)).toEqual([{ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" }]);
   });
@@ -2408,7 +2289,7 @@ describe("the adds this host keeps", () => {
 
   it("keeps an add that failed mid-way, its steps, what it said and the fix, for a second client to read off places.list", async () => {
     let go: () => void = () => {};
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2423,9 +2304,9 @@ describe("the adds this host keeps", () => {
         },
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
-    const mine = await WsClient.connect(srv.port, { token: "host-token" });
-    const other = await WsClient.connect(srv.port, { token: "host-token" });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, door });
+    const mine = await WsClient.connect(ctx.srv.port, { token: "host-token" });
+    const other = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     sockets.push(mine.ws, other.ws);
     const answer = mine.request("places.add", { addId: "a_spoo", address: "root@spoo", sshPort: 2222 });
     await until(async () => (await addsOf(other)).length === 1);
@@ -2448,28 +2329,28 @@ describe("the adds this host keeps", () => {
 
   it("keeps the key a computer never met answered with, under its kind, so the app's Trust reads it off the record", async () => {
     const key = "ssh-ed25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw";
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
       placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => Promise.reject(Object.assign(new Error("maya@box has never been reached"), { kind: PLACE_HOST_KEY_KIND, hostKey: key })) },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
-    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, door });
+    const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     sockets.push(c.ws);
     expect(await c.request("places.add", { addId: "a_maya", address: "maya@box" })).toMatchObject({ ok: false, kind: PLACE_HOST_KEY_KIND });
     expect(await addsOf(c)).toEqual([expect.objectContaining({ addId: "a_maya", state: "failed", kind: PLACE_HOST_KEY_KIND, hostKey: key })]);
   });
 
   it("keeps the kind a refused login carries, so the app's login fix reads off the record", async () => {
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
       placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => Promise.reject(new PlaceLoginRefusedError("maya@box: Permission denied (publickey).")) },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
-    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, door });
+    const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     sockets.push(c.ws);
     await c.request("places.add", { addId: "a_maya", address: "maya@box" });
     expect(await addsOf(c)).toEqual([expect.objectContaining({ addId: "a_maya", state: "failed", said: "maya@box: Permission denied (publickey).", kind: PLACE_LOGIN_REFUSED_KIND, steps: [expect.objectContaining({ step: "connect", state: "failed" })] })]);
@@ -2477,7 +2358,7 @@ describe("the adds this host keeps", () => {
 
   it("marks an add done with the computer it made once that computer has joined", async () => {
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2490,9 +2371,9 @@ describe("the adds this host keeps", () => {
         },
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
-    const added = await runtime.places!.add({ addId: "a_box", address: "root@10.0.0.9", hostUrls: DOOR }, Date.now());
-    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, door });
+    const added = await ctx.runtime.places!.add({ addId: "a_box", address: "root@10.0.0.9", hostUrls: DOOR }, Date.now());
+    const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     sockets.push(c.ws);
     expect(await addsOf(c)).toEqual([expect.objectContaining({ addId: "a_box", state: "done", placeId: added.place.id })]);
   });
@@ -2501,9 +2382,9 @@ describe("the adds this host keeps", () => {
     const store = memoryStore();
     const put = store.put.bind(store);
     store.put = async (collection, id, value) => (collection === "pairings" ? Promise.reject(new Error("the state file is read-only")) : put(collection, id, value));
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => ({ name: "box" }) } });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
-    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => ({ name: "box" }) } });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, door });
+    const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     sockets.push(c.ws);
     expect(await c.request("places.add", { addId: "a_ro", address: "root@10.0.0.9" })).toMatchObject({ ok: false, error: "the state file is read-only" });
     expect(await addsOf(c)).toEqual([]);
@@ -2511,16 +2392,16 @@ describe("the adds this host keeps", () => {
 
   it("keeps the box's own lines under a failed add cut to the length a log line keeps, and says each cut", async () => {
     const long = `agent: ${"x".repeat(5_000)}`;
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
       placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => ({ name: "box", ssh: "root@10.0.0.9" }), log: async () => [long, "agent: dial refused"] },
       placeJoinWaitMs: 50,
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
-    await runtime.places!.add({ addId: "a_box", address: "root@10.0.0.9", hostUrls: DOOR }, Date.now()).catch(() => undefined);
-    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, door });
+    await ctx.runtime.places!.add({ addId: "a_box", address: "root@10.0.0.9", hostUrls: DOOR }, Date.now()).catch(() => undefined);
+    const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     sockets.push(c.ws);
     const [job] = (await addsOf(c)) as { said: string }[];
     expect(job!.said.split("\n")).toEqual([placeNoLinkLine("box"), `${long.slice(0, 400)} (cut ${long.length - 400} characters)`, "agent: dial refused"]);
@@ -2528,7 +2409,7 @@ describe("the adds this host keeps", () => {
 
   it("cuts the failed step's note to the length a log line keeps, and says the cut", async () => {
     const long = `root@10.0.0.9: ${"y".repeat(5_000)}`;
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2540,10 +2421,10 @@ describe("the adds this host keeps", () => {
         },
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, door });
     const stages: PlaceStageEvent[] = [];
-    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
-    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    ctx.runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     sockets.push(c.ws);
     await c.request("places.add", { addId: "a_long", address: "root@10.0.0.9" });
     const cut = `${long.slice(0, 400)} (cut ${long.length - 400} characters)`;
@@ -2554,7 +2435,7 @@ describe("the adds this host keeps", () => {
 
   it("refuses an add under the id of one still running, and leaves that one's job as it was", async () => {
     let go: () => void = () => {};
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -2567,8 +2448,8 @@ describe("the adds this host keeps", () => {
         },
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
-    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, door });
+    const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     sockets.push(c.ws);
     const first = c.request("places.add", { addId: "a_one", address: "root@10.0.0.9" });
     await until(async () => (await addsOf(c)).length === 1);
@@ -2579,15 +2460,15 @@ describe("the adds this host keeps", () => {
   });
 
   it("keeps every add still running and the last twenty that finished", async () => {
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
       placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => Promise.reject(new Error("root@10.0.0.9 did not answer on port 22")) },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
-    for (let n = 0; n < 22; n++) await runtime.places!.add({ addId: `a_${n}`, address: "root@10.0.0.9", hostUrls: DOOR }, Date.now()).catch(() => undefined);
-    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, door });
+    for (let n = 0; n < 22; n++) await ctx.runtime.places!.add({ addId: `a_${n}`, address: "root@10.0.0.9", hostUrls: DOOR }, Date.now()).catch(() => undefined);
+    const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     sockets.push(c.ws);
     expect(((await addsOf(c)) as { addId: string }[]).map(j => j.addId)).toEqual(Array.from({ length: 20 }, (_, n) => `a_${n + 2}`));
   });
@@ -2600,13 +2481,13 @@ describe("the road a pane takes to a place", () => {
     const { client, placeId } = await join(hostKey, { code: await code(), name: "box" });
     client.close();
     await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === false));
-    await expect(runtime!.places!.road(placeId)).rejects.toThrow(absentComputer("box", null).sentence);
+    await expect(ctx.runtime!.places!.road(placeId)).rejects.toThrow(absentComputer("box", null).sentence);
   });
 
   it("is refused with its own sentence while that computer has not said which port its daemon bound", async () => {
     const { hostKey } = await serving();
     const { client, placeId } = await join(hostKey, { code: await code(), name: "box" });
-    await expect(runtime!.places!.road(placeId)).rejects.toThrow(placeNoDaemonPortLine("box"));
+    await expect(ctx.runtime!.places!.road(placeId)).rejects.toThrow(placeNoDaemonPortLine("box"));
   });
 });
 
@@ -2614,7 +2495,7 @@ describe("the port a place's panes ride", () => {
   it("goes with the link that carried it, so nothing is left answering for a computer that is gone", async () => {
     const { hostKey } = await serving();
     const { client, placeId } = await join(hostKey, { code: await code(), name: "box", report: report("box", { daemonPort: 4321 }) });
-    const port = await runtime!.places!.road(placeId);
+    const port = await ctx.runtime!.places!.road(placeId);
     expect(port).toBeGreaterThan(0);
     client.close();
     await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === false));
@@ -2630,13 +2511,13 @@ describe("the port a place's panes ride", () => {
 describe("the device a join buys beside the place", () => {
   it("mints one with no scope, whose token matches and which is listed and revoked as a redeemed one is", async () => {
     const store = memoryStore();
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {} });
-    const admitted = await runtime.devices.admit("old-macbook", 1);
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    const admitted = await ctx.runtime.devices.admit("old-macbook", 1);
     expect(admitted.device.scope).toBeUndefined();
-    expect(await runtime.devices.match(admitted.deviceToken)).toMatchObject({ id: admitted.deviceId, name: "old-macbook" });
-    expect((await runtime.devices.list()).map(d => d.id)).toContain(admitted.deviceId);
-    expect(await runtime.devices.revoke(admitted.deviceId)).toBe(true);
-    expect(await runtime.devices.match(admitted.deviceToken)).toBeUndefined();
+    expect(await ctx.runtime.devices.match(admitted.deviceToken)).toMatchObject({ id: admitted.deviceId, name: "old-macbook" });
+    expect((await ctx.runtime.devices.list()).map(d => d.id)).toContain(admitted.deviceId);
+    expect(await ctx.runtime.devices.revoke(admitted.deviceId)).toBe(true);
+    expect(await ctx.runtime.devices.match(admitted.deviceToken)).toBeUndefined();
   });
 
   it("answers a join that asked for one, names it after the joining computer, and answers none to a join that did not", async () => {
@@ -2646,7 +2527,7 @@ describe("the device a join buys beside the place", () => {
     // The token rides the sealed reply to the prove, since the code that bought it crossed on that frame.
     const device = first.proved["device"] as { deviceId: string; deviceToken: string };
     expect(device.deviceToken).toBeTruthy();
-    expect(await runtime!.devices.match(device.deviceToken)).toMatchObject({ id: device.deviceId, name: "old-macbook" });
+    expect(await ctx.runtime!.devices.match(device.deviceToken)).toMatchObject({ id: device.deviceId, name: "old-macbook" });
     expect(first.reply["device"]).toBeUndefined();
     const second = await join(hostKey, { code: await code(), name: "attic" });
     sockets.push(second.client.ws);
@@ -2657,9 +2538,9 @@ describe("the device a join buys beside the place", () => {
     const { hostKey } = await serving();
     const { client, placeId } = await join(hostKey, { code: await code(), client: { name: "old-macbook" } });
     sockets.push(client.ws);
-    const device = (await runtime!.devices.list())[0]!;
+    const device = (await ctx.runtime!.devices.list())[0]!;
     expect(device.name).toBe("old-macbook");
-    expect(await runtime!.devices.revoke(device.id)).toBe(true);
+    expect(await ctx.runtime!.devices.revoke(device.id)).toBe(true);
     await new Promise(r => setTimeout(r, 50));
     expect(client.ws.readyState).toBe(client.ws.OPEN);
     expect((await placesOf()).find(p => p.id === placeId)?.present).toBe(true);
@@ -2679,7 +2560,7 @@ describe("what a join is told about the wsp it joined", () => {
 describe("the four events a computer you own rides the runtime's stream on", () => {
   it("carries the join with the address it came from, the link coming and going, and the remove", async () => {
     const { hostKey } = await serving();
-    const watcher = await WsClient.connect(srv!.port, { token: "host-token" });
+    const watcher = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     expect((await watcher.request("events.subscribe")).ok).toBe(true);
     const { client, placeId } = await join(hostKey, { code: await code() });
     await until(() => watcher.events.some(e => e.type === "place.present"));
@@ -2690,7 +2571,7 @@ describe("the four events a computer you own rides the runtime's stream on", () 
     expect(watcher.events.find(e => e.type === "place.present")).toMatchObject({ placeId });
     client.ws.close();
     await until(() => watcher.events.some(e => e.type === "place.absent"));
-    const remover = await WsClient.connect(srv!.port, { token: "host-token" });
+    const remover = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     expect((await remover.request("places.remove", { placeId })).ok).toBe(true);
     await until(() => watcher.events.some(e => e.type === "place.removed"));
     expect(watcher.events.filter(e => e.type === "place.removed")).toMatchObject([{ placeId }]);
@@ -2702,14 +2583,14 @@ describe("the four events a computer you own rides the runtime's stream on", () 
 describe("the door a computer you own dials", () => {
   it("is refused on a host that serves none, and answered on one that does", async () => {
     const { hostKey } = await serving();
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     const none = await c.request("places.door");
     expect(none).toMatchObject({ ok: false, error: PLACE_DOOR_UNSERVED });
     c.close();
-    await srv!.close();
+    await ctx.srv!.close();
     const view = { port: 4420, addresses: ["http://192.168.1.20:4420"] };
-    srv = await serveRuntime(runtime!, { port: 0, authToken: "host-token", devices: runtime!.devices, door: { open: async () => ({ ...view, backPort: 4420 }) } });
-    const opened = await WsClient.connect(srv.port, { token: "host-token" });
+    ctx.srv = await serveRuntime(ctx.runtime!, { port: 0, authToken: "host-token", devices: ctx.runtime!.devices, door: { open: async () => ({ ...view, backPort: 4420 }) } });
+    const opened = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     const answer = await opened.request("places.door");
     // Where to dial is the host's answer; the key proved there is the place door's own, off the pair it signs with.
     // The port a forward over ssh lands on is this computer's business and stays off the wire.
@@ -2719,12 +2600,12 @@ describe("the door a computer you own dials", () => {
 
   it("is refused on a socket let in by a ticket, as every other place op is", async () => {
     await serving();
-    await srv!.close();
-    srv = await serveRuntime(runtime!, { port: 0, authToken: "host-token", devices: runtime!.devices, door: { open: async () => ({ port: 4420, addresses: ["http://x:4420"] }) } });
-    const own = await WsClient.connect(srv.port, { token: "host-token" });
+    await ctx.srv!.close();
+    ctx.srv = await serveRuntime(ctx.runtime!, { port: 0, authToken: "host-token", devices: ctx.runtime!.devices, door: { open: async () => ({ port: 4420, addresses: ["http://x:4420"] }) } });
+    const own = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     const { ticket } = (await own.request("ticket.issue", { purpose: "relay" })) as { ticket: string };
     own.close();
-    const relayed = await WsClient.connect(srv.port, { ticket });
+    const relayed = await WsClient.connect(ctx.srv.port, { ticket });
     expect(await relayed.request("places.door")).toMatchObject({ ok: false, error: PLACE_DOOR_REFUSAL });
     relayed.close();
   });
@@ -2736,9 +2617,9 @@ describe("the join line and the ssh hosts the app asks for", () => {
 
   it("mints one code into every line the door and the relay answer on, and the code is the one a join spends", async () => {
     const { hostKey } = await serving();
-    await srv!.close();
-    srv = await serveRuntime(runtime!, { port: 0, authToken: "host-token", devices: runtime!.devices, door: { open: async () => view }, now: () => at });
-    const own = await WsClient.connect(srv.port, { token: "host-token" });
+    await ctx.srv!.close();
+    ctx.srv = await serveRuntime(ctx.runtime!, { port: 0, authToken: "host-token", devices: ctx.runtime!.devices, door: { open: async () => view }, now: () => at });
+    const own = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     const answer = await own.request("places.mint");
     own.close();
     expect(answer.ok, String(answer["error"])).toBe(true);
@@ -2753,39 +2634,39 @@ describe("the join line and the ssh hosts the app asks for", () => {
       expiresAt: new Date(at + PAIR_CODE_TTL_MS).toISOString(),
     });
     // The same mint wsp add spends: the code redeems once, as a pair.issue code does.
-    const spending = await WsClient.connect(srv.port);
+    const spending = await WsClient.connect(ctx.srv.port);
     expect((await spending.request("pair.redeem", { code: readJoinToken(token).code, name: "laptop" })).ok).toBe(true);
     spending.close();
   });
 
   it("hands neither a code nor the ssh hosts to a paired computer or a relayed socket", async () => {
     await serving();
-    await srv!.close();
+    await ctx.srv!.close();
     const read: unknown[] = [];
-    srv = await serveRuntime(runtime!, {
+    ctx.srv = await serveRuntime(ctx.runtime!, {
       port: 0,
       authToken: "host-token",
-      devices: runtime!.devices,
+      devices: ctx.runtime!.devices,
       door: { open: async () => view },
       sshHosts: async rows => {
         read.push(rows);
         return [{ alias: "hetzner", hostName: "65.21.4.12", user: "root", from: "config" }];
       },
     });
-    const own = await WsClient.connect(srv.port, { token: "host-token" });
+    const own = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     expect(await own.request("places.sshHosts")).toMatchObject({ ok: true, hosts: [{ alias: "hetzner", hostName: "65.21.4.12", user: "root", from: "config" }] });
     expect(read).toHaveLength(1);
     const code = (await own.request("pair.issue"))["code"] as string;
     const { ticket } = (await own.request("ticket.issue", { purpose: "relay" })) as { ticket: string };
     own.close();
-    const spending = await WsClient.connect(srv.port);
+    const spending = await WsClient.connect(ctx.srv.port);
     const { deviceToken } = (await spending.request("pair.redeem", { code, name: "phone" })) as { deviceToken: string };
     spending.close();
-    const paired = await WsClient.connect(srv.port, { token: deviceToken });
+    const paired = await WsClient.connect(ctx.srv.port, { token: deviceToken });
     expect(await paired.request("places.mint")).toMatchObject({ ok: false, error: deviceHeldRefusal("places.mint") });
     expect(await paired.request("places.sshHosts")).toMatchObject({ ok: false, error: deviceHeldRefusal("places.sshHosts") });
     paired.close();
-    const relayed = await WsClient.connect(srv.port, { ticket });
+    const relayed = await WsClient.connect(ctx.srv.port, { ticket });
     expect(await relayed.request("places.mint")).toMatchObject({ ok: false, error: MINT_JOIN_REFUSAL });
     expect(await relayed.request("places.sshHosts")).toMatchObject({ ok: false, error: SSH_HOSTS_REFUSAL });
     relayed.close();
@@ -2796,280 +2677,11 @@ describe("the join line and the ssh hosts the app asks for", () => {
 
   it("refuses a code on a host that serves no door", async () => {
     await serving();
-    const own = await WsClient.connect(srv!.port, { token: "host-token" });
+    const own = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     expect(await own.request("places.mint")).toMatchObject({ ok: false, error: PLACE_DOOR_UNSERVED });
     own.close();
   });
 });
-
-/** A joined computer that forks: it answers the machine ops on the socket it opened, as the agent on it does, and
- * records what the host asked it for. Nothing here is the server half itself, which lives with the agent; this is
- * one computer's worth of answers, so the runtime's own roads are what the test is reading. */
-interface ForkingPlace {
-  created: Record<string, unknown>[];
-  killed: string[];
-  paused: number;
-  resumed: number;
-  tunnels: { tunnelId: string; port: number }[];
-  /** What the next create answers with instead of a machine; cleared after one use. */
-  refuseCreate?: { error: string; kind: string; status: number };
-  /** What a pull request frame is refused with, for the note a bring back carries beside a landed push. */
-  refuseGitPr?: { error: string; code: string };
-  /** Every op the host sent, in order. */
-  ops: string[];
-  /** Every files or git frame the host sent for a workspace on this computer, whole: the workspace named on it is
-   * what a case reads. */
-  frames: Record<string, unknown>[];
-  /** How many times each op was asked. */
-  asked: Record<string, number>;
-  /** The ask of the machine's own daemon check that first answers yes; every one before it answers no. */
-  daemonAnswersAfter: number;
-  /** Ops this computer takes and never answers, so a test can close the socket with a frame in flight on it. */
-  swallow: Set<string>;
-  /** One event up the link, as this computer's daemon pushes one for a workspace on it. */
-  push(event: Record<string, unknown>): void;
-  /** Holds every resume frame until it is called, for a wake a test wants in flight. */
-  holdResumes(): () => void;
-}
-
-const PLACE_FACTS = {
-  offer: "docker",
-  capabilities: {
-    liveCloneForks: false,
-    pauseMode: "memory",
-    replacesMachine: true,
-    previewUrls: false,
-    signedUrls: false,
-    callbackRelay: true,
-    diskSnapshots: true,
-    images: true,
-    snapshotsAnyLife: false,
-    snapshotListing: true,
-    templates: true,
-    kept: false,
-    copies: true,
-    ownNetwork: true,
-    sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0 }],
-  },
-  pricing: { defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" } },
-  lifecycle: { budgets: { wakeAttempts: 1, daemonAnswersMs: 30_000 } },
-  baseTemplates: { sandbox: "ubuntu:24.04", desktop: "ubuntu:24.04" },
-};
-
-const PLACE_ROADS = { previewUrl: true, daemonAnswers: true, putBytes: true, describe: true, facts: true, metrics: true };
-/** What a computer somebody joined answers about itself once its workspaces are copies of the computer: it keeps
- * no image, so nothing behind an image is offered either. The shape the daemon of this build reports. */
-const KEEPS_NO_IMAGE = {
-  ...PLACE_FACTS,
-  capabilities: { ...PLACE_FACTS.capabilities, images: false, diskSnapshots: false, snapshotsAnyLife: false, snapshotListing: false, templates: false },
-  baseTemplates: undefined,
-};
-
-/** One sealed version of this host's own image, promoted to a template: what a fork at a provider that keeps
- * images stands on, and the image a create on a computer that keeps none is handed and must not send. */
-const SEALED = {
-  head: 1,
-  versions: [{ version: 1, snapshotId: "snap_g", templateId: "tpl_g", baseTemplate: "base", setupSha: "s1", createdAt: "2026-09-16T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 } }],
-};
-
-/** What a computer says about itself that keeps the project checkouts it holds on a disk of its own, and no image,
- * so the work of an add there runs in a copy of its own directories. */
-const HOLDS_PROJECTS = { ...KEEPS_NO_IMAGE, projects: "/wsp/projects" };
-
-function forks(
-  client: WsClient,
-  capacity: {
-    cores: number;
-    memMb: number;
-    memRoomMb: number;
-    machineMemMb: number;
-    diskFreeBytes: number;
-    images: { id: string; sizeBytes: number }[];
-    machines: { running: number; paused: number };
-  } = {
-    cores: 4,
-    memMb: 8192,
-    memRoomMb: 9000,
-    machineMemMb: 4096,
-    diskFreeBytes: 10 * 1024 * 1024 * 1024,
-    images: [{ id: "sha256:i", sizeBytes: 4 * 1024 * 1024 * 1024 }],
-    machines: { running: 1, paused: 0 },
-  },
-  /** What a command run on a machine there answers; nothing and exit 0 unless the test says. */
-  exec: (cmd: string) => { exitCode: number; stdout: string; stderr: string } = () => ({ exitCode: 0, stdout: "", stderr: "" }),
-  /** What this computer says it forks with; the default keeps images, which is the shape the copy road is read on. */
-  facts: Record<string, unknown> = PLACE_FACTS,
-): ForkingPlace {
-  let held: ((...args: never[]) => void)[] | undefined;
-  const seen: ForkingPlace = {
-    created: [],
-    killed: [],
-    paused: 0,
-    resumed: 0,
-    tunnels: [],
-    ops: [],
-    frames: [],
-    asked: {},
-    daemonAnswersAfter: 1,
-    swallow: new Set<string>(),
-    push: event => client.say(event),
-    holdResumes: () => {
-      held = [];
-      return () => {
-        for (const release of held ?? []) release();
-        held = undefined;
-      };
-    },
-  };
-  let made = 0;
-  let ptys = 0;
-  // The container's own word for itself, as a Docker daemon would answer it: a wake reads it before it resumes.
-  let state: "running" | "paused" = "running";
-  client.onFrame(raw => {
-    const frame = raw as unknown as Record<string, unknown>;
-    const op = typeof frame["op"] === "string" ? frame["op"] : undefined;
-    if (op === undefined) return;
-    const id = frame["id"];
-    const say = (payload: Record<string, unknown>): void => client.say({ id, ok: true, ...payload });
-    const machine = (machineId: string): Record<string, unknown> => ({ machine: { id: machineId, kind: "sandbox", daemonSupervisor: "entrypoint", roads: PLACE_ROADS } });
-    // A machine the host killed is gone from that computer, as the daemon there answers: a get or a state read of
-    // it is refused as missing, which is what the kill's own wait for gone reads.
-    const gone = (machineId: string): boolean => seen.killed.includes(machineId);
-    const missing = (machineId: string): void => void client.say({ id, ok: false, error: `no such machine: ${machineId}`, kind: "missing", status: 404 });
-    if (op.startsWith("machine.") || op.startsWith("tunnel.")) seen.ops.push(op);
-    seen.asked[op] = (seen.asked[op] ?? 0) + 1;
-    if (seen.swallow.has(op)) return;
-    switch (op) {
-      case "machine.backend":
-        return say(facts);
-      case "machine.capacity":
-        return say(capacity);
-      case "machine.create": {
-        if (seen.refuseCreate !== undefined) {
-          const refusal = seen.refuseCreate;
-          delete seen.refuseCreate;
-          return void client.say({ id, ok: false, ...refusal });
-        }
-        seen.created.push(frame["spec"] as Record<string, unknown>);
-        return say(machine(`k${++made}`));
-      }
-      case "machine.get":
-        return gone(String(frame["machineId"])) ? missing(String(frame["machineId"])) : say(machine(String(frame["machineId"])));
-      case "machine.state":
-        return gone(String(frame["machineId"])) ? missing(String(frame["machineId"])) : say({ state });
-      case "machine.exec":
-        return say({ result: exec(String(frame["cmd"])) });
-      case "machine.describe":
-        return say({ shape: { cpu: 2, memMb: 4096 } });
-      case "machine.facts":
-        return say({ facts: { os: "Ubuntu 24.04", uptimeMs: 1000, folder: "/root" } });
-      case "machine.metrics":
-        return say({});
-      case "machine.daemonAnswers":
-        return say({ answers: (seen.asked[op] ?? 0) >= seen.daemonAnswersAfter });
-      case "machine.previewUrl":
-        return say({ reach: { url: "http://127.0.0.1:49155", token: "", expiresAt: 1 } });
-      case "machine.pause":
-        seen.paused++;
-        state = "paused";
-        return say({});
-      case "machine.resume": {
-        seen.resumed++;
-        state = "running";
-        if (held === undefined) return say({});
-        held.push(() => say({}));
-        return;
-      }
-      case "machine.kill":
-        seen.killed.push(String(frame["machineId"]));
-        return say({});
-      case "machine.putBytes":
-        return say({});
-      // A container mints no signed URL, as the Docker machine's own answer says; a nap that would have exported a
-      // vault through one reads the refusal and keeps the vault it had.
-      case "machine.downloadUrl":
-      case "machine.uploadUrl":
-        return void client.say({ id, ok: false, error: "a container serves no signed URL" });
-      case "tunnel.open":
-        seen.tunnels.push({ tunnelId: String(frame["tunnelId"]), port: Number(frame["port"]) });
-        seen.frames.push(frame);
-        return say({});
-      case "tunnel.write":
-      case "tunnel.close":
-        seen.frames.push(frame);
-        return say({});
-      case "ssh.start":
-        seen.frames.push(frame);
-        return say({ port: 40022, hostKey: "ssh-ed25519 AAAAC3Nz the-fork" });
-      case "exec":
-        return say({ exitCode: 0, stdout: "", stderr: "", truncated: false });
-      // The workspace's own git, answered by this computer's daemon for the workspace the frame names, which is
-      // what a workspace with no daemon of its own is served by.
-      case "git.status":
-        seen.frames.push(frame);
-        return say({ branch: "work", ahead: 0, files: [] });
-      // The pane's road: this computer's daemon opens and drives a shell inside the workspace the frame names.
-      case "pty.create":
-        seen.frames.push(frame);
-        return say({ ptyId: `p${++ptys}`, pid: 4242 });
-      case "pty.attach":
-      case "pty.detach":
-      case "pty.write":
-      case "pty.resize":
-      case "pty.kill":
-      case "pty.tab":
-        seen.frames.push(frame);
-        return say({});
-      case "pty.list":
-        seen.frames.push(frame);
-        return say({ ptys: [] });
-      case "proc.watch":
-      case "proc.unwatch":
-      case "proc.kill":
-        return say({});
-      case "proc.inspect":
-        return say({ pid: frame["pid"] });
-      case "ping":
-      case "fs.list":
-      case "fs.files":
-      case "fs.read":
-      case "fs.write":
-      case "fs.search":
-      case "git.diff":
-      case "git.snapshot":
-      case "git.range":
-      case "git.turn":
-      case "git.prList":
-      case "guest.watch":
-      case "guest.reply":
-      case "guest.close":
-        seen.frames.push(frame);
-        return say({});
-      case "git.push":
-        seen.frames.push(frame);
-        return say({ branch: "work", base: String(frame["base"] ?? ""), remote: "origin", ahead: 1, uncommitted: 0, stat: [" README.md | 2 +-"] });
-      case "git.pr": {
-        seen.frames.push(frame);
-        if (seen.refuseGitPr !== undefined) return void client.say({ id, ok: false, ...seen.refuseGitPr });
-        return say({ pr: { number: 7, url: "https://github.com/o/r/pull/7", state: "open", host: "github.com", ...PR_REST }, created: true });
-      }
-      default:
-        return;
-    }
-  });
-  return seen;
-}
-
-/** Every op the computer's daemon serves, off the frames crate itself, with whether its request names the
- * workspace it is for: a new op there fails this table until it is placed on one side. */
-const daemonOps = (): { op: string; scoped: boolean }[] => {
-  const crate = (file: string): string => readFileSync(new URL(`../../../daemon/crates/wsp-frames/src/${file}`, import.meta.url), "utf8");
-  const listed = (text: string, name: string): string[] => [...text.match(new RegExp(`pub const ${name}: \\[&str; \\d+\\] = \\[([^\\]]*)\\]`))![1]!.matchAll(/"([^"]+)"/g)].map(m => m[1]!);
-  const request = crate("request.rs");
-  const body = request.slice(request.indexOf("pub enum DaemonOp"), request.indexOf("pub const DAEMON_OPS"));
-  const variants = new Map(body.split(/#\[serde\(rename = "/).slice(1).map(part => [part.slice(0, part.indexOf('"')), part.includes("machine_id")] as const));
-  return [...listed(request, "DAEMON_OPS"), ...listed(crate("machine.rs"), "MACHINE_OPS")].map(op => ({ op, scoped: variants.get(op) ?? false }));
-};
 
 describe("a fork at a provider this host is not wired to", () => {
   /** Two providers over two backends, as the host's own table hands them down: the wired one and one more whose key
@@ -3086,31 +2698,31 @@ describe("a fork at a provider this host is not wired to", () => {
     const solari = stubBackend();
     const box = stubBackend();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: solari,
       store: memoryStore(),
       adapters: {},
       places: twoProviders("solari", { solari, box }),
       placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     const rows = await placesOf();
     expect(rows.filter(p => p.kind === "provider").map(p => p.id)).toEqual(["solari", "box"]);
     for (const row of rows.filter(p => p.kind === "provider")) expect(row.takesForks, row.id).toBe(true);
 
     // Named on the line: the machine is minted by that provider and the record says where it stands.
-    const there = await createOn(runtime, { golden: "snap_g", name: "x", on: "box" });
+    const there = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "box" });
     expect(box.machines).toHaveLength(1);
     expect(solari.machines).toHaveLength(0);
     expect(there.place).toBe("box");
-    expect(await runtime.workspaces.get(there.id)).toMatchObject({ place: "box" });
+    expect(await ctx.runtime.workspaces.get(there.id)).toMatchObject({ place: "box" });
     // A second workspace of a project on that computer lands there too: the project says where, not a default.
-    const again = await createOn(runtime, { golden: "snap_g", name: "y", on: "box" });
+    const again = await createOn(ctx.runtime, { golden: "snap_g", name: "y", on: "box" });
     expect(box.machines).toHaveLength(2);
     expect(again.place).toBe("box");
 
     // A project on the wired provider is the road a record with no place word already takes.
-    const here = await createOn(runtime, { golden: "snap_g", name: "z", on: "solari" });
+    const here = await createOn(ctx.runtime, { golden: "snap_g", name: "z", on: "solari" });
     expect(solari.machines).toHaveLength(1);
     expect(here.place).toBeUndefined();
   });
@@ -3118,26 +2730,26 @@ describe("a fork at a provider this host is not wired to", () => {
   it("a fork there reads the provider's word on its machine, never the silence of a computer with no link", async () => {
     const solari = stubBackend();
     const box = stubBackend();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: solari,
       store: memoryStore(),
       adapters: {},
       places: twoProviders("solari", { solari, box }),
       placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }),
     });
-    const there = await createOn(runtime, { golden: "snap_g", name: "x", on: "box" });
-    const row = (await runtime.status.list()).find(s => s.id === there.id)!;
+    const there = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "box" });
+    const row = (await ctx.runtime.status.list()).find(s => s.id === there.id)!;
     expect(row.reason).toBeUndefined();
     expect(workspaceStateOf(row, row)).toBe("running");
-    await runtime.workspaces.nap(there.id);
-    const napped = (await runtime.status.list()).find(s => s.id === there.id)!;
+    await ctx.runtime.workspaces.nap(there.id);
+    const napped = (await ctx.runtime.status.list()).find(s => s.id === there.id)!;
     expect(workspaceStateOf(napped, napped)).toBe("paused");
   });
 
   it("a project image taken at that provider records the place and is removed there, never at the wired one", async () => {
     const solari = stubBackend();
     const box = stubBackend();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: solari,
       store: memoryStore(),
       adapters: {},
@@ -3145,17 +2757,17 @@ describe("a fork at a provider this host is not wired to", () => {
       placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }),
       killConfirm: { graceMs: 40, pollMs: 1 },
     });
-    const there = await createOn(runtime, { golden: "snap_g", name: "x", on: "box" });
-    const golden = await runtime.workspaces.snapshot(there.id);
+    const there = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "box" });
+    const golden = await ctx.runtime.workspaces.snapshot(there.id);
     expect(golden.place).toBe("box");
-    expect((await runtime.image.get()).projects).toEqual([{ ...golden, sizeBytes: box.snapshotBytes }]);
+    expect((await ctx.runtime.image.get()).projects).toEqual([{ ...golden, sizeBytes: box.snapshotBytes }]);
     // The wired provider answers a delete of an id it never held as a success, which is how a wrong door would pass.
     const wiredDeletes: string[] = [];
     solari.deleteSnapshot = async id => void wiredDeletes.push(id);
-    await runtime.golden.removeProject(golden.snapshotId);
+    await ctx.runtime.golden.removeProject(golden.snapshotId);
     expect(wiredDeletes).toEqual([]);
     expect(box.snapshots).toEqual([]);
-    expect(await runtime.golden.projects()).toEqual([]);
+    expect(await ctx.runtime.golden.projects()).toEqual([]);
   });
 
   it("carries each provider's own sizes at its own rates on its row, so a picker reads the row it is under", async () => {
@@ -3167,14 +2779,14 @@ describe("a fork at a provider this host is not wired to", () => {
     const made = stubBackend();
     const box: MachineBackend = { ...made, capabilities: { ...made.capabilities, sizes: free } };
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: solari,
       store: memoryStore(),
       adapters: {},
       places: twoProviders("solari", { solari, box }),
       placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     const rows = await placesOf();
     // The wired row reads off the runtime's own backend, the other off the one the table hands back for it.
     expect(rows.find(p => p.id === "solari")!.sizes).toEqual(solari.capabilities.sizes);
@@ -3187,15 +2799,15 @@ describe("a fork at a provider this host is not wired to", () => {
     const solari = stubBackend();
     const box = stubBackend();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: solari,
       store: memoryStore(),
       adapters: {},
       places: twoProviders("solari", { solari, box }),
       placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    await expect(createOn(runtime, { golden: "snap_g", name: "x", on: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*solari.*box/);
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    await expect(createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*solari.*box/);
   });
 });
 
@@ -3204,14 +2816,14 @@ describe("a fork on a computer you joined", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, KEEPS_NO_IMAGE)) });
     sockets.push(client.ws);
     // This host has sealed no image at all, and a computer that keeps none needs none: the create reads no image
     // head and builds no copy of one there before the fork, where the road behind it stopped for want of one.
-    const bare = await createOn(runtime, { name: "x", on: "srv" });
+    const bare = await createOn(ctx.runtime, { name: "x", on: "srv" });
     expect(place.created).toHaveLength(1);
     expect(place.created[0]).not.toHaveProperty("template");
     expect(place.created[0]).not.toHaveProperty("fromSnapshot");
@@ -3220,7 +2832,7 @@ describe("a fork on a computer you joined", () => {
     // And where this host does hold an image, the word the verb hands every create down is dropped rather than
     // sent on to a computer that would refuse it.
     await store.put("goldens", copyKey("solari", "default"), SEALED);
-    const named = await createOn(runtime, { golden: "snap_g", name: "y", on: "srv" });
+    const named = await createOn(ctx.runtime, { golden: "snap_g", name: "y", on: "srv" });
     expect(place.created).toHaveLength(2);
     expect(place.created[1]).not.toHaveProperty("template");
     expect(place.created[1]).not.toHaveProperty("fromSnapshot");
@@ -3246,13 +2858,13 @@ describe("a fork on a computer you joined", () => {
       };
     };
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, placeLinks: wiring(hostKey) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, placeLinks: wiring(hostKey) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     const signedIn = report("srv", { agents: ["claude", "codex"], logins: ["codex/auth.json"] });
     const { client } = await join(hostKey, { code: await code(), report: signedIn, answers: c => forks(c, undefined, undefined, KEEPS_NO_IMAGE) });
     sockets.push(client.ws);
-    const ws = await createOn(runtime, { name: "x", on: "srv" });
-    await (await runtime.sessions.start(ws.id, { prompt: "one", harness: "claude" })).finished;
+    const ws = await createOn(ctx.runtime, { name: "x", on: "srv" });
+    await (await ctx.runtime.sessions.start(ws.id, { prompt: "one", harness: "claude" })).finished;
     // Codex signed in there wins over any key this host holds; Claude Code keeps no login on a machine, so the
     // vault is the whole of its sign-in and nothing stands against it.
     expect(asked.at(-1)).toEqual({ claude: false, codex: true });
@@ -3276,18 +2888,18 @@ describe("a fork on a computer you joined", () => {
     };
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend,
       store: memoryStore(),
       adapters: { claude: factory },
       places: wiredPlace("solari", backend),
       placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, KEEPS_NO_IMAGE)) });
     sockets.push(client.ws);
-    const ws = await createOn(runtime, { name: "x", on: "srv" });
+    const ws = await createOn(ctx.runtime, { name: "x", on: "srv" });
 
     // The boot: the order that reads the folders no process inside can write before the home every workspace on
     // that computer shares, and every knob the recipe's job installs under, off the catalog's one table.
@@ -3298,13 +2910,13 @@ describe("a fork on a computer you joined", () => {
 
     // And a turn on it: the adapter exports the same, so a thread there runs the copy under the prefix and the
     // rustup proxy finds its own home.
-    await (await runtime.sessions.start(ws.id, { prompt: "one", harness: "claude" })).finished;
+    await (await ctx.runtime.sessions.start(ws.id, { prompt: "one", harness: "claude" })).finished;
     expect(envs.length).toBeGreaterThan(0);
     for (const env of envs) expect(env).toMatchObject({ PATH: PLACE_WORKSPACE_PATH, ...installEnv(installHomes(TOOL_PREFIX)) });
 
     // A fork at this host's own provider is a copy of an image sealed on the other order, with each manager's
     // own folders under a home that is root's alone: it takes neither the order nor a knob.
-    await createOn(runtime, { golden: "snap_g", name: "y", on: "solari" });
+    await createOn(ctx.runtime, { golden: "snap_g", name: "y", on: "solari" });
     expect(backend.machines).toHaveLength(1);
     expect(backend.machines[0]!.spec.envs).toEqual(GUEST_LOGIN_ENV);
   });
@@ -3314,10 +2926,10 @@ describe("a fork on a computer you joined", () => {
     const store = memoryStore();
     backend.capabilities.templates = true;
     backend.templates.set("tpl_g", { id: "tpl_g", name: "wsp-default-v1", status: "ready", snapshotId: "snap_g" });
-    runtime = createRuntime({ backend, store, adapters: {}, places: wiredPlace("solari", backend), placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store, adapters: {}, places: wiredPlace("solari", backend), placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     await store.put("goldens", copyKey("solari", "default"), SEALED);
-    const made = await createOn(runtime, { golden: "snap_g", name: "y", on: "solari" });
+    const made = await createOn(ctx.runtime, { golden: "snap_g", name: "y", on: "solari" });
     expect(backend.machines).toHaveLength(1);
     expect(backend.machines[0]!.spec).toMatchObject({ template: "tpl_g" });
     expect(made.golden).toBe("snap_g");
@@ -3327,16 +2939,16 @@ describe("a fork on a computer you joined", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "srv" });
     expect(place.created).toHaveLength(1);
     expect(backend.machines).toHaveLength(0);
     expect(made.place).toBe(placeId);
-    expect((await runtime.workspaces.get(made.id)).place).toBe(placeId);
+    expect((await ctx.runtime.workspaces.get(made.id)).place).toBe(placeId);
     expect(await store.get("workspaces", made.id)).toMatchObject({ place: placeId });
     // The place a fork landed on is where the next one lands when nobody says.
     expect((await placesOf()).find(p => p.default)!.id).toBe(placeId);
@@ -3346,8 +2958,8 @@ describe("a fork on a computer you joined", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     const sent: string[] = [];
     const exec = (cmd: string) => {
       sent.push(cmd);
@@ -3355,7 +2967,7 @@ describe("a fork on a computer you joined", () => {
     };
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c, undefined, exec) });
     sockets.push(client.ws);
-    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "srv" });
     expect(sent.filter(c => c.includes("/proc/meminfo"))).toEqual([]);
     expect(made).not.toHaveProperty("notice");
     expect(await store.get("workspaces", made.id)).toMatchObject({ size: { cpu: 2, memMb: 4096 } });
@@ -3367,8 +2979,8 @@ describe("a fork on a computer you joined", () => {
     // back died at "is not answering yet" before a byte left the box.
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client } = await join(hostKey, {
       code: await code(),
@@ -3377,17 +2989,17 @@ describe("a fork on a computer you joined", () => {
       answers: c => (place = forks(c)),
     });
     sockets.push(client.ws);
-    const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
+    const made = await ctx.runtime.workspaces.create({ project: (await projectOn(ctx.runtime, "srv")).id, golden: "snap_g", name: "work" });
     // Nothing was asked about a route or a daemon inside: a workspace here has neither.
     expect(place.asked["machine.previewUrl"]).toBeUndefined();
     // The two frames a bring back is made of go up this computer's link, each naming the workspace it is for, and
     // the checkout path is the one the workspace sees.
-    const back = await runtime.workspaces.bringBack({ workspaceId: made.id, title: "bring back proof" });
+    const back = await ctx.runtime.workspaces.bringBack({ workspaceId: made.id, title: "bring back proof" });
     expect(place.frames.map(f => f["op"])).toEqual(["git.push", "git.pr"]);
     for (const frame of place.frames) expect(frame["machineId"]).toBe(made.machineId);
     // The checkout as the workspace sees it, which is the project's own path on that computer, and absolute: the
     // daemon answering for a workspace has no working directory inside it and refuses a relative path.
-    const cwd = (await runtime.workspaces.get(made.id)).project.path;
+    const cwd = (await ctx.runtime.workspaces.get(made.id)).project.path;
     expect(cwd.startsWith("/")).toBe(true);
     expect(place.frames[0]).toMatchObject({ op: "git.push", cwd });
     expect(place.frames[1]).toMatchObject({ op: "git.pr", cwd });
@@ -3395,25 +3007,25 @@ describe("a fork on a computer you joined", () => {
     // The road to a daemon inside is refused in one sentence rather than minting a route to a port nothing listens
     // on, and so is the update that would deploy one.
     const said = placeServesDaemonLine("work", "srv");
-    await expect(runtime.workspaces.daemonReach(made.id)).rejects.toThrow(said);
-    await expect(runtime.workspaces.updateDaemon(made.id)).rejects.toThrow(said);
+    await expect(ctx.runtime.workspaces.daemonReach(made.id)).rejects.toThrow(said);
+    await expect(ctx.runtime.workspaces.updateDaemon(made.id)).rejects.toThrow(said);
     // And the row reads reachable while the workspace runs, off the computer's own answer for it, which is what
     // read Unreachable before.
-    const status = (await runtime.status.list()).find(w => w.id === made.id)!;
+    const status = (await ctx.runtime.status.list()).find(w => w.id === made.id)!;
     expect(status.reach.state).toBe("reachable");
     // And nothing was written or deployed inside it: no roots file, and no daemon put there by any road of this
     // host's, since the daemon answering for it is that computer's own.
     expect(place.asked["machine.putBytes"]).toBeUndefined();
     const wrote = place.asked["machine.exec"] ?? 0;
-    await runtime.status.list();
+    await ctx.runtime.status.list();
     expect(place.asked["machine.exec"] ?? 0).toBe(wrote);
   });
 
   it("hands a road into it one channel: its own hello, every frame up the link with the workspace named, and this workspace's sessions alone", async () => {
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client } = await join(hostKey, {
       code: await code(),
@@ -3422,10 +3034,10 @@ describe("a fork on a computer you joined", () => {
       answers: c => (place = forks(c)),
     });
     sockets.push(client.ws);
-    const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
-    const cwd = (await runtime.workspaces.get(made.id)).project.path;
+    const made = await ctx.runtime.workspaces.create({ project: (await projectOn(ctx.runtime, "srv")).id, golden: "snap_g", name: "work" });
+    const cwd = (await ctx.runtime.workspaces.get(made.id)).project.path;
     const heard: Record<string, unknown>[] = [];
-    const channel = await runtime.workspaces.daemonChannel(made.id, e => heard.push(e));
+    const channel = await ctx.runtime.workspaces.daemonChannel(made.id, e => heard.push(e));
     // The workspace's own hello, not the computer's: a client builds this workspace's paths off the root it reads
     // here, and the link's own named the computer's home.
     expect(heard).toEqual([{ type: "daemon.hello", root: cwd, version: DAEMON_VERSION }]);
@@ -3446,8 +3058,8 @@ describe("a fork on a computer you joined", () => {
   it("opens a pane's shell in the workspace's own folder, keeps that computer's readings off it, and lets its ptys go when it closes", async () => {
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client } = await join(hostKey, {
       code: await code(),
@@ -3456,10 +3068,10 @@ describe("a fork on a computer you joined", () => {
       answers: c => (place = forks(c)),
     });
     sockets.push(client.ws);
-    const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
-    const cwd = (await runtime.workspaces.get(made.id)).project.path;
+    const made = await ctx.runtime.workspaces.create({ project: (await projectOn(ctx.runtime, "srv")).id, golden: "snap_g", name: "work" });
+    const cwd = (await ctx.runtime.workspaces.get(made.id)).project.path;
     const heard: Record<string, unknown>[] = [];
-    const channel = await runtime.workspaces.daemonChannel(made.id, e => heard.push(e));
+    const channel = await ctx.runtime.workspaces.daemonChannel(made.id, e => heard.push(e));
 
     // The pane's first tab names no folder, and the daemon answering for a workspace has no working directory
     // inside one; a tab that names its own keeps it.
@@ -3504,8 +3116,8 @@ describe("a fork on a computer you joined", () => {
   /** A workspace forked on a computer this host holds a link to, whose daemon answers that workspace's frames. */
   const servedFork = async (daemonVersion = DAEMON_VERSION): Promise<{ place: ForkingPlace; placeId: string; machineId: string; id: string }> => {
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client, placeId } = await join(hostKey, {
       code: await code(),
@@ -3514,18 +3126,18 @@ describe("a fork on a computer you joined", () => {
       answers: c => (place = forks(c)),
     });
     sockets.push(client.ws);
-    const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
+    const made = await ctx.runtime.workspaces.create({ project: (await projectOn(ctx.runtime, "srv")).id, golden: "snap_g", name: "work" });
     return { place, placeId, machineId: made.machineId, id: made.id };
   };
 
   it("refuses a command on a fork's channel before anything reaches its computer, and that computer's own channel still runs it", async () => {
     const { place, placeId, id } = await servedFork();
-    const channel = await runtime!.workspaces.daemonChannel(id, () => {});
+    const channel = await ctx.runtime!.workspaces.daemonChannel(id, () => {});
     // The daemon runs exec on the computer itself, as its own user, whatever workspace the frame names.
     expect(await channel.send({ op: "exec", cmd: "kill -9 1" })).toMatchObject({ ok: false, code: "unsupported", error: forkOpRefusedLine("exec", "work", "srv") });
     expect(place.asked["exec"] ?? 0).toBe(0);
     channel.close();
-    const own = runtime!.places!.channel(placeId, () => {})!;
+    const own = ctx.runtime!.places!.channel(placeId, () => {})!;
     expect(await own.send({ op: "exec", cmd: "uptime" })).toMatchObject({ ok: true });
     expect(place.asked["exec"]).toBe(1);
     own.close();
@@ -3533,8 +3145,8 @@ describe("a fork on a computer you joined", () => {
 
   it("sends a page's frame up a fork's computer's link under the link's own id, so it cannot answer another request there", async () => {
     const { place, id } = await servedFork();
-    const channel = await runtime!.workspaces.daemonChannel(id, () => {});
-    const cwd = (await runtime!.workspaces.get(id)).project.path;
+    const channel = await ctx.runtime!.workspaces.daemonChannel(id, () => {});
+    const cwd = (await ctx.runtime!.workspaces.get(id)).project.path;
     const asking = channel.send({ op: "git.status", cwd, id: 4242 });
     await until(() => place.frames.some(f => f["op"] === "git.status"));
     expect(place.frames.find(f => f["op"] === "git.status")!["id"]).not.toBe(4242);
@@ -3544,7 +3156,7 @@ describe("a fork on a computer you joined", () => {
 
   it("refuses a fork's process watch, reads and kills before anything reaches its computer, and that computer's own channel still carries them", async () => {
     const { place, placeId, id } = await servedFork();
-    const channel = await runtime!.workspaces.daemonChannel(id, () => {});
+    const channel = await ctx.runtime!.workspaces.daemonChannel(id, () => {});
     // The daemon there acts on any pid it is handed, so a pid of the computer's own or of another workspace's is
     // refused here with nothing sent up the link.
     const frames = [
@@ -3560,7 +3172,7 @@ describe("a fork on a computer you joined", () => {
     channel.close();
 
     // The computer's own page reads and signals its own processes over the same link, as it did.
-    const own = runtime!.places!.channel(placeId, () => {})!;
+    const own = ctx.runtime!.places!.channel(placeId, () => {})!;
     for (const frame of frames) expect(await own.send(frame)).toMatchObject({ ok: true });
     expect(frames.map(f => place.asked[f.op])).toEqual([1, 1, 1, 1]);
     own.close();
@@ -3569,7 +3181,7 @@ describe("a fork on a computer you joined", () => {
   it("keeps the readings the computer's own page watches over the shared link off a fork's channel", async () => {
     const { place, id } = await servedFork();
     const heard: Record<string, unknown>[] = [];
-    const channel = await runtime!.workspaces.daemonChannel(id, e => heard.push(e));
+    const channel = await ctx.runtime!.workspaces.daemonChannel(id, e => heard.push(e));
     const ptyId = String(((await channel.send({ op: "pty.create", cols: 80, rows: 24 })) as Record<string, unknown>)["ptyId"]);
     await channel.send({ op: "pty.attach", ptyId });
     place.push({ type: "proc.snapshot", at: 1, procs: [{ pid: 1, ppid: 0, comm: "init" }] });
@@ -3636,8 +3248,8 @@ describe("a fork on a computer you joined", () => {
   ];
 
   it.each([
-    { road: "a client's", open: (id: string) => runtime!.workspaces.daemonChannel(id, () => {}), carried: [...PTY, ...FILES_AND_GIT, "ping"] },
-    { road: "the host's guest road's", open: (id: string) => runtime!.workspaces.guestChannel(id, () => {}), carried: [...PTY, ...FILES_AND_GIT, "ping", ...HOST_GUESTS, ...HOST_TUNNELS] },
+    { road: "a client's", open: (id: string) => ctx.runtime!.workspaces.daemonChannel(id, () => {}), carried: [...PTY, ...FILES_AND_GIT, "ping"] },
+    { road: "the host's guest road's", open: (id: string) => ctx.runtime!.workspaces.guestChannel(id, () => {}), carried: [...PTY, ...FILES_AND_GIT, "ping", ...HOST_GUESTS, ...HOST_TUNNELS] },
   ])("places every op the computer's daemon serves on $road channel into a fork: carried naming that fork, or refused before it leaves", async ({ open, carried }) => {
     const ops = daemonOps();
     const machineOps = ops.filter(o => o.op.startsWith("machine.")).map(o => o.op);
@@ -3663,7 +3275,7 @@ describe("a fork on a computer you joined", () => {
   it("carries an editor's ssh into a fork on the host's own road with the fork named, and hands that road the fork's tunnel frames alone", async () => {
     const { place, machineId, id } = await servedFork();
     const heard: Record<string, unknown>[] = [];
-    const road = await runtime!.workspaces.guestChannel(id, e => heard.push(e));
+    const road = await ctx.runtime!.workspaces.guestChannel(id, e => heard.push(e));
     expect(await road.send({ op: "ssh.start", authorizedKey: "ssh-ed25519 AAAAC3Nz the-mac" })).toMatchObject({ ok: true });
     expect(place.frames.at(-1)).toMatchObject({ op: "ssh.start", machineId });
     expect(await road.send({ op: "tunnel.open", tunnelId: "t1", port: 40022 })).toMatchObject({ ok: true });
@@ -3681,8 +3293,8 @@ describe("a fork on a computer you joined", () => {
   });
 
   it.each([
-    { road: "a client's", open: (id: string) => runtime!.workspaces.daemonChannel(id, () => {}) },
-    { road: "the host's guest road's", open: (id: string) => runtime!.workspaces.guestChannel(id, () => {}) },
+    { road: "a client's", open: (id: string) => ctx.runtime!.workspaces.daemonChannel(id, () => {}) },
+    { road: "the host's guest road's", open: (id: string) => ctx.runtime!.workspaces.guestChannel(id, () => {}) },
   ])("opens $road channel into a fork on a computer one daemon behind this wsp's, with the fork named on every frame", async ({ open }) => {
     // A daemon too old to name the fork on a frame cannot seal the link this channel rides, so a computer that is
     // only behind is one whose terminal, files and guests all still answer.
@@ -3697,8 +3309,8 @@ describe("a fork on a computer you joined", () => {
   it("takes the bring back on a computer one daemon behind this wsp's, and carries a pull request refusal as the note beside the landed push", async () => {
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client } = await join(hostKey, {
       code: await code(),
@@ -3707,9 +3319,9 @@ describe("a fork on a computer you joined", () => {
       answers: c => (place = forks(c)),
     });
     sockets.push(client.ws);
-    const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
+    const made = await ctx.runtime.workspaces.create({ project: (await projectOn(ctx.runtime, "srv")).id, golden: "snap_g", name: "work" });
     place.refuseGitPr = { error: noHostCliLine("github.com"), code: "no-host-cli" };
-    const back = await runtime.workspaces.bringBack({ workspaceId: made.id });
+    const back = await ctx.runtime.workspaces.bringBack({ workspaceId: made.id });
     expect(back.note).toBe(noHostCliLine("github.com"));
     expect(back.pr).toBeUndefined();
     expect(back).toMatchObject({ branch: "work", ahead: 1 });
@@ -3719,16 +3331,16 @@ describe("a fork on a computer you joined", () => {
   it("says the computer it was forked on where a record names one, and this host's own provider otherwise", async () => {
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, places: wiredPlace("solari", backend), placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, places: wiredPlace("solari", backend), placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(client.ws);
-    const there = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
+    const there = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "srv" });
     // The fork stands on a computer that offers Docker, and this host forks at Solari: the row says Docker, which
     // is what made it, and place says which computer it is on.
     expect(there.provider).toBe("docker");
     expect(there.place).toBeDefined();
-    const here = await createOn(runtime, { golden: "snap_g", name: "y", on: "solari" });
+    const here = await createOn(ctx.runtime, { golden: "snap_g", name: "y", on: "solari" });
     expect(here.provider).toBe("solari");
     expect(here.place).toBeUndefined();
   });
@@ -3736,18 +3348,18 @@ describe("a fork on a computer you joined", () => {
   it("lands where the project's computer is, whatever the default mark says: a workspace is that computer's copy", async () => {
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
+    await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "srv" });
     expect(place.created).toHaveLength(1);
     expect(backend.machines).toHaveLength(0);
     // A project on the provider this host forks at: the host's own backend takes it and the record carries no place,
     // and the mark on the places table says nothing about either.
-    await runtime.places!.markUsed(undefined);
-    const second = await createOn(runtime, { golden: "snap_g", name: "y", on: "solari" });
+    await ctx.runtime.places!.markUsed(undefined);
+    const second = await createOn(ctx.runtime, { golden: "snap_g", name: "y", on: "solari" });
     expect(backend.machines).toHaveLength(1);
     expect(second.place).toBeUndefined();
     expect(place.created).toHaveLength(1);
@@ -3756,8 +3368,8 @@ describe("a fork on a computer you joined", () => {
   it("says every computer on the row forks and the computer the app runs on does not, off the list the verbs read", async () => {
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const withDocker = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(withDocker.client.ws);
@@ -3768,27 +3380,27 @@ describe("a fork on a computer you joined", () => {
     expect(rows.find(p => p.id === withDocker.placeId)!.takesForks).toBe(true);
     expect(rows.find(p => p.id === "solari")!.takesForks).toBe(true);
     // What the row promises is what the create does: the fork lands on that computer's own backend.
-    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "srv" });
     expect(place.created).toHaveLength(1);
     expect(backend.machines).toHaveLength(0);
     expect(made.place).toBe(withDocker.placeId);
     // What the sidebar and wsp workspaces list for that computer: its forks, and no row for the computer itself.
-    expect((await runtime.workspaces.list()).map(w => [w.name, w.place])).toEqual([["x", withDocker.placeId]]);
+    expect((await ctx.runtime.workspaces.list()).map(w => [w.name, w.place])).toEqual([["x", withDocker.placeId]]);
   });
 
   it("refuses a word that names no place, and names what this host holds", async () => {
     const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(client.ws);
-    await expect(createOn(runtime!, { golden: "snap_g", name: "x", on: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*srv.*solari/);
+    await expect(createOn(ctx.runtime!, { golden: "snap_g", name: "x", on: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*srv.*solari/);
   });
 
   it("never holds a computer that forks nowhere: the join turned it down, so no word names one", async () => {
     const { hostKey } = await serving();
     const { client } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { runsWorkspaces: false }), answers: c => forks(c), expectProved: false });
     sockets.push(client.ws);
-    await expect(projectOn(runtime!, "srv")).rejects.toThrow(/no place named srv/);
-    expect((await runtime!.workspaces.list()).filter(w => w.name === "x")).toEqual([]);
+    await expect(projectOn(ctx.runtime!, "srv")).rejects.toThrow(/no place named srv/);
+    expect((await ctx.runtime!.workspaces.list()).filter(w => w.name === "x")).toEqual([]);
   });
 
   it("names the wall when that computer holds no copy of the image, and records nothing", async () => {
@@ -3797,40 +3409,40 @@ describe("a fork on a computer you joined", () => {
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
     place.refuseCreate = { error: "no such image: snap_g", kind: "missing", status: 404 };
-    await expect(createOn(runtime!, { golden: "snap_g", name: "x", on: "srv" })).rejects.toThrow(/srv holds no copy of snap_g/);
-    expect((await runtime!.workspaces.list()).filter(w => w.name === "x")).toEqual([]);
+    await expect(createOn(ctx.runtime!, { golden: "snap_g", name: "x", on: "srv" })).rejects.toThrow(/srv holds no copy of snap_g/);
+    expect((await ctx.runtime!.workspaces.list()).filter(w => w.name === "x")).toEqual([]);
   });
 
   it("gives the daemon on a machine that was stopped the whole budget to answer, rather than one ask at the start", async () => {
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
-    await runtime.workspaces.nap(made.id);
+    const made = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "srv" });
+    await ctx.runtime.workspaces.nap(made.id);
     // The daemon says no to the wake's first ask and yes to its second, which is a container still coming up off
     // its own layers; the machine that comes back is the one that napped and not a fresh fork of the image.
     const asked = place.asked["machine.daemonAnswers"] ?? 0;
     place.daemonAnswersAfter = asked + 2;
-    expect((await runtime.workspaces.wake(made.id)).machineId).toBe(made.machineId);
+    expect((await ctx.runtime.workspaces.wake(made.id)).machineId).toBe(made.machineId);
     expect(place.asked["machine.daemonAnswers"]).toBeGreaterThan(asked + 1);
   });
 
   it("naps and wakes on that computer and never on this host's provider", async () => {
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
-    await runtime.workspaces.nap(made.id);
+    const made = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "srv" });
+    await ctx.runtime.workspaces.nap(made.id);
     expect(place.paused).toBe(1);
-    await runtime.workspaces.wake(made.id);
+    await ctx.runtime.workspaces.wake(made.id);
     expect(place.resumed).toBe(1);
     expect(backend.machines).toHaveLength(0);
   });
@@ -3839,8 +3451,8 @@ describe("a fork on a computer you joined", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
@@ -3854,10 +3466,10 @@ describe("a fork on a computer you joined", () => {
       workspaceName: "older",
       createdAt: "2026-09-12T00:00:00.000Z",
     });
-    const made = await createOn(runtime, { golden: "snap_p", name: "x", on: "srv" });
+    const made = await createOn(ctx.runtime, { golden: "snap_p", name: "x", on: "srv" });
     // A computer somebody joined keeps no image, so there is nothing for a copy of this fork's disk to become:
     // the sentence is the far side's own and no frame is sent for it.
-    await expect(runtime.workspaces.snapshot(made.id)).rejects.toThrow(NO_IMAGES_HERE);
+    await expect(ctx.runtime.workspaces.snapshot(made.id)).rejects.toThrow(NO_IMAGES_HERE);
     expect(place.ops.filter(op => op.startsWith("machine.snapshot"))).toEqual([]);
     expect(backend.snapshots).toEqual([]);
   });
@@ -3866,17 +3478,17 @@ describe("a fork on a computer you joined", () => {
     const { hostKey } = await serving();
     const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(client.ws);
-    const made = await createOn(runtime!, { golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(ctx.runtime!, { golden: "snap_g", name: "x", on: "srv" });
     client.close();
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
-    const away = (await runtime!.status.list()).find(r => r.id === made.id)!;
+    const away = (await ctx.runtime!.status.list()).find(r => r.id === made.id)!;
     expect(away.reach.state).toBe("unreachable");
     expect(away.reason).toBe(absentComputer("srv", null).sentence);
     expect(away.machineState).toBe("running");
     const back = await relink(hostKey, placeId, key, report("srv"), c => forks(c));
     sockets.push(back.client.ws);
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === true);
-    await until(async () => (await runtime!.status.list()).find(r => r.id === made.id)!.reach.state !== "unreachable");
+    await until(async () => (await ctx.runtime!.status.list()).find(r => r.id === made.id)!.reach.state !== "unreachable");
   });
 
   it("refuses a keyed frame at a computer that is simply off at once, and waits only for one whose socket closed inside the wait", async () => {
@@ -3885,12 +3497,12 @@ describe("a fork on a computer you joined", () => {
     const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(client.ws);
     // One fork made while the computer is here, so the road is warm and what follows is the wait and nothing else.
-    await createOn(runtime!, { golden: "snap_g", name: "warm", on: "srv" });
+    await createOn(ctx.runtime!, { golden: "snap_g", name: "warm", on: "srv" });
     client.close();
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
 
     // A gap this host holds a closed socket for: a keyed frame waits, and the computer dialling back finishes it.
-    const waiting = createOn(runtime!, { golden: "snap_g", name: "held", on: "srv" });
+    const waiting = createOn(ctx.runtime!, { golden: "snap_g", name: "held", on: "srv" });
     let back!: ForkingPlace;
     const linked = await relink(hostKey, placeId, key, report("srv"), c => (back = forks(c)));
     sockets.push(linked.client.ws);
@@ -3901,17 +3513,17 @@ describe("a fork on a computer you joined", () => {
     // Past the wait, the same frame is refused with the one sentence every road on an absent computer reads.
     await new Promise(r => setTimeout(r, 450));
     let asked = Date.now();
-    await expect(createOn(runtime!, { golden: "snap_g", name: "late", on: "srv" })).rejects.toThrow(absentComputer("srv", null).sentence);
+    await expect(createOn(ctx.runtime!, { golden: "snap_g", name: "late", on: "srv" })).rejects.toThrow(absentComputer("srv", null).sentence);
     expect(Date.now() - asked).toBeLessThan(50);
 
     // And a host that has held no socket for that computer at all, which is every host at start, refuses at once
     // rather than waiting out a computer that is off.
-    await srv!.close();
-    await runtime!.close();
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey), placeRelinkWaitMs: 50_000 });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    await ctx.srv!.close();
+    await ctx.runtime!.close();
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey), placeRelinkWaitMs: 50_000 });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     asked = Date.now();
-    await expect(createOn(runtime, { golden: "snap_g", name: "cold", on: "srv" })).rejects.toThrow(absentComputer("srv", null).sentence);
+    await expect(createOn(ctx.runtime, { golden: "snap_g", name: "cold", on: "srv" })).rejects.toThrow(absentComputer("srv", null).sentence);
     expect(Date.now() - asked).toBeLessThan(50);
   });
 
@@ -3920,11 +3532,11 @@ describe("a fork on a computer you joined", () => {
     let first!: ForkingPlace;
     const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => (first = forks(c)) });
     sockets.push(client.ws);
-    const made = await createOn(runtime!, { golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(ctx.runtime!, { golden: "snap_g", name: "x", on: "srv" });
     // A pause is the machine moving, not a reading: the far side has taken it by the time the answer is lost, and
     // a second one would be a second move. So the frame names no key and the gap is its end.
     first.swallow.add("machine.pause");
-    const napping = runtime!.workspaces.nap(made.id);
+    const napping = ctx.runtime!.workspaces.nap(made.id);
     await until(() => first.asked["machine.pause"] === 1);
     client.close();
     await expect(napping).rejects.toThrow("connection lost");
@@ -3942,19 +3554,19 @@ describe("a fork on a computer you joined", () => {
     let first!: ForkingPlace;
     const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => (first = forks(c)) });
     sockets.push(client.ws);
-    const made = await createOn(runtime!, { golden: "snap_g", name: "x", on: "srv" });
-    await runtime!.workspaces.nap(made.id);
+    const made = await createOn(ctx.runtime!, { golden: "snap_g", name: "x", on: "srv" });
+    await ctx.runtime!.workspaces.nap(made.id);
     // A wake in flight across the relink: the machine resumes and its daemon says no, so the wake is still asking
     // when the computer's new socket lands.
     first.daemonAnswersAfter = Number.MAX_SAFE_INTEGER;
-    const waking = runtime!.workspaces.wake(made.id);
+    const waking = ctx.runtime!.workspaces.wake(made.id);
     await until(async () => first.resumed === 1);
     let second!: ForkingPlace;
     const back = await relink(hostKey, placeId, key, report("srv"), c => (second = forks(c)));
     sockets.push(back.client.ws);
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === true);
     // The second caller joins the wake in flight rather than finding a record the presence beat replaced.
-    const joined = runtime!.workspaces.wake(made.id);
+    const joined = ctx.runtime!.workspaces.wake(made.id);
     expect((await waking).id).toBe(made.id);
     expect((await joined).id).toBe(made.id);
     // One resume and one create between the two sockets: the wake was joined, not started again, and nothing
@@ -3969,19 +3581,19 @@ describe("a fork on a computer you joined", () => {
   it("holds a fork on a computer that is away at host start, and reads its machine once it dials in", async () => {
     const store = memoryStore();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     const first = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(first.client.ws);
-    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
-    await runtime.workspaces.nap(made.id);
+    const made = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "srv" });
+    await ctx.runtime.workspaces.nap(made.id);
     first.client.close();
-    await srv.close();
-    await runtime.close();
+    await ctx.srv.close();
+    await ctx.runtime.close();
     // A second host over the same store, with that computer away: the record keeps the word it was left with.
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    expect((await runtime.workspaces.get(made.id)).phase).toBe("napping");
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    expect((await ctx.runtime.workspaces.get(made.id)).phase).toBe("napping");
     let place!: ForkingPlace;
     const back = await relink(hostKey, first.placeId, first.pair, report("srv"), c => (place = forks(c)));
     sockets.push(back.client.ws);
@@ -3991,22 +3603,22 @@ describe("a fork on a computer you joined", () => {
   it("reads a running fork's machine again when its computer dials back in, and its daemon sync runs off that reading", async () => {
     const store = memoryStore();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     const first = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(first.client.ws);
-    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "srv" });
     first.client.close();
-    await srv.close();
-    await runtime.close();
+    await ctx.srv.close();
+    await ctx.runtime.close();
     // A second host over the same store with that computer away: the fork is held by a stand-in, so nothing about
     // its machine is read and no sync is started for it.
     const warned: string[] = [];
     const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
     try {
-      runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
-      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-      expect((await runtime.workspaces.get(made.id)).phase).toBe("running");
+      ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
+      ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+      expect((await ctx.runtime.workspaces.get(made.id)).phase).toBe("running");
       let place!: ForkingPlace;
       const back = await relink(hostKey, first.placeId, first.pair, report("srv"), c => (place = forks(c)));
       sockets.push(back.client.ws);
@@ -4014,7 +3626,7 @@ describe("a fork on a computer you joined", () => {
       await new Promise(r => setTimeout(r, 100));
       // The record was read again and the sync the reading handed back ran on it: a workspace this computer serves
       // the daemon for is asked for no version and given no deploy, and nothing is left saying otherwise.
-      expect((await runtime.workspaces.get(made.id)).phase).toBe("running");
+      expect((await ctx.runtime.workspaces.get(made.id)).phase).toBe("running");
       expect(warned.filter(l => l.includes("were not read again") || l.startsWith("daemon on"))).toEqual([]);
     } finally {
       warn.mockRestore();
@@ -4026,8 +3638,8 @@ describe("a fork on a computer you joined", () => {
     let place!: ForkingPlace;
     const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    const first = await runtime!.places!.forward(placeId, 32768);
-    const again = await runtime!.places!.forward(placeId, 32768);
+    const first = await ctx.runtime!.places!.forward(placeId, 32768);
+    const again = await ctx.runtime!.places!.forward(placeId, 32768);
     expect(again.localPort).toBe(first.localPort);
     await dialLocal(first.localPort);
     await until(async () => place.tunnels.some(t => t.port === 32768));
@@ -4039,7 +3651,7 @@ describe("a fork on a computer you joined", () => {
     const back = await relink(hostKey, placeId, key, report("srv"), c => (second = forks(c)));
     sockets.push(back.client.ws);
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === true);
-    expect((await runtime!.places!.forward(placeId, 32768)).localPort).toBe(first.localPort);
+    expect((await ctx.runtime!.places!.forward(placeId, 32768)).localPort).toBe(first.localPort);
     await dialLocal(first.localPort);
     await until(async () => second.tunnels.some(t => t.port === 32768));
   });
@@ -4049,12 +3661,12 @@ describe("a fork on a computer you joined", () => {
     let place!: ForkingPlace;
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    const { localPort } = await runtime!.places!.forward(placeId, 32768);
+    const { localPort } = await ctx.runtime!.places!.forward(placeId, 32768);
     const pane = netConnect({ host: "127.0.0.1", port: localPort });
     await until(async () => place.tunnels.length === 1);
     const own = place.tunnels[0]!.tunnelId;
     const heard: Record<string, unknown>[] = [];
-    const channel = runtime!.places!.channel(placeId, e => void heard.push(e))!;
+    const channel = ctx.runtime!.places!.channel(placeId, e => void heard.push(e))!;
     place.push({ type: "tunnel.data", tunnelId: own, data: "aGk=" });
     place.push({ type: "tunnel.data", tunnelId: "t9", data: "aGk=" });
     place.push({ type: "tunnel.end", tunnelId: "t9" });
@@ -4109,8 +3721,8 @@ describe("a fork on a computer you joined", () => {
       const frame = raw as unknown as { op?: string };
       if (frame.op === "place.leave") swept.push("asked");
     });
-    await createOn(runtime!, { golden: "snap_g", name: "x", on: "srv" });
-    await expect(runtime!.places!.remove(placeId)).rejects.toThrow(/srv still holds a fork \(x\); delete them first/);
+    await createOn(ctx.runtime!, { golden: "snap_g", name: "x", on: "srv" });
+    await expect(ctx.runtime!.places!.remove(placeId)).rejects.toThrow(/srv still holds a fork \(x\); delete them first/);
     expect(swept).toEqual([]);
     expect(place.killed).toEqual([]);
   });
@@ -4126,8 +3738,8 @@ describe("a fork on a computer you joined", () => {
       if (frame.op === "place.leave") swept.push("asked");
     });
     // A project with no workspace of it: the forks refusal cannot be what answers here, so the projects one is.
-    await projectOn(runtime!, "srv", "https://github.com/wsp/spoo-landing.git", { name: "spoo-landing" });
-    await expect(runtime!.places!.remove(placeId)).rejects.toThrow(/srv still holds a project \(spoo-landing\); wsp projects remove each of them first/);
+    await projectOn(ctx.runtime!, "srv", "https://github.com/wsp/spoo-landing.git", { name: "spoo-landing" });
+    await expect(ctx.runtime!.places!.remove(placeId)).rejects.toThrow(/srv still holds a project \(spoo-landing\); wsp projects remove each of them first/);
     expect(swept).toEqual([]);
     expect(place.killed).toEqual([]);
   });
@@ -4152,33 +3764,33 @@ describe("the image built through a computer you joined", () => {
     let place: ForkingPlace | undefined;
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    await expect(runtime!.image.build({ place: "srv" })).rejects.toThrow(/owns no image named default/);
-    await expect(runtime!.image.build({ place: placeId })).rejects.toThrow(/owns no image named default/);
+    await expect(ctx.runtime!.image.build({ place: "srv" })).rejects.toThrow(/owns no image named default/);
+    await expect(ctx.runtime!.image.build({ place: placeId })).rejects.toThrow(/owns no image named default/);
     // One frame taught this host what srv forks with; nothing was made there.
     expect(place!.asked["machine.backend"]).toBe(1);
     expect(place!.created).toEqual([]);
-    await expect(runtime!.image.build({ place: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*srv/);
+    await expect(ctx.runtime!.image.build({ place: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*srv/);
   });
 
   it("the image is built on the joined computer when it is the default place, and when the provider this host forks on forks nothing", async () => {
     const { hostKey } = await serving();
     const marked = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(marked.client.ws);
-    await runtime!.places!.markUsed(marked.placeId);
-    const picked = await runtime!.golden.buildPlace();
+    await ctx.runtime!.places!.markUsed(marked.placeId);
+    const picked = await ctx.runtime!.golden.buildPlace();
     expect([picked.place, picked.name]).toEqual([marked.placeId, "srv"]);
     expect(picked.backend.capabilities.sizes.length).toBeGreaterThan(0);
     // The provider a keyless host wires forks nothing and is the default: the one joined computer that runs
     // workspaces is where the image goes, with nothing named.
-    await srv?.close();
-    await runtime?.close();
+    await ctx.srv?.close();
+    await ctx.runtime?.close();
     const none = new NoProviderBackend();
     const keyless = newPlaceKeyPair();
-    runtime = createRuntime({ backend: none, store: memoryStore(), adapters: {}, places: wiredPlace("none", none), placeLinks: wiring(keyless) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend: none, store: memoryStore(), adapters: {}, places: wiredPlace("none", none), placeLinks: wiring(keyless) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     const joined = await join(keyless, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(joined.client.ws);
-    const only = await runtime.golden.buildPlace();
+    const only = await ctx.runtime.golden.buildPlace();
     expect([only.place, only.name]).toEqual([joined.placeId, "srv"]);
   });
 });
@@ -4195,25 +3807,25 @@ describe("the image build and the computer whose doctor said no, or that does no
     expect(String(proved["error"])).toBe("srv cannot run wsp workspaces: it mounts cgroup v1 at /sys/fs/cgroup");
     // Nothing on the store, nothing on the list, and no road names it: the refusal is the whole of what happened.
     expect(await store.list("places")).toEqual([]);
-    await expect(runtime!.golden.buildPlace("srv")).rejects.toThrow(/no place named srv/);
-    await expect(runtime!.image.build({ place: "srv" })).rejects.toThrow(/no place named srv/);
-    await expect(runtime!.golden.prepare({ place: "srv", recipe: copyRecipe() })).rejects.toThrow(/no place named srv/);
-    await expect(projectOn(runtime!, "srv")).rejects.toThrow(/no place named srv/);
+    await expect(ctx.runtime!.golden.buildPlace("srv")).rejects.toThrow(/no place named srv/);
+    await expect(ctx.runtime!.image.build({ place: "srv" })).rejects.toThrow(/no place named srv/);
+    await expect(ctx.runtime!.golden.prepare({ place: "srv", recipe: copyRecipe() })).rejects.toThrow(/no place named srv/);
+    await expect(projectOn(ctx.runtime!, "srv")).rejects.toThrow(/no place named srv/);
   });
 
   it("a default place that is not answering is the refusal the person reads, with its name in it, never a build sent to another place", async () => {
     const { hostKey } = await serving();
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv" });
-    await runtime!.places!.markUsed(placeId);
+    await ctx.runtime!.places!.markUsed(placeId);
     client.close();
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
-    await expect(runtime!.golden.buildPlace()).rejects.toThrow(absentComputer("srv", null).sentence);
+    await expect(ctx.runtime!.golden.buildPlace()).rejects.toThrow(absentComputer("srv", null).sentence);
   });
 
   it("this computer is never built into: naming it for a copy build or a build place is refused rather than read as the provider this host forks on", async () => {
     await serving();
-    await expect(runtime!.image.build({ place: HERE.name })).rejects.toThrow(placeBuildsNoImageLine(HERE.name));
-    await expect(runtime!.golden.buildPlace(HERE.name)).rejects.toThrow(placeBuildsNoImageLine(HERE.name));
+    await expect(ctx.runtime!.image.build({ place: HERE.name })).rejects.toThrow(placeBuildsNoImageLine(HERE.name));
+    await expect(ctx.runtime!.golden.buildPlace(HERE.name)).rejects.toThrow(placeBuildsNoImageLine(HERE.name));
   });
 });
 
@@ -4225,7 +3837,7 @@ describe("a computer joining a host that holds a sealed image", () => {
     backend.execImpl = dfOk;
     const hostKey = o.hostKey ?? newPlaceKeyPair();
     const store = o.store ?? memoryStore();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend,
       store,
       adapters: {},
@@ -4236,10 +3848,10 @@ describe("a computer joining a host that holds a sealed image", () => {
       placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
       ...(o.relinkWaitMs !== undefined ? { placeRelinkWaitMs: o.relinkWaitMs } : {}),
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     if (o.sealed) {
-      const b = await runtime.golden.prepare();
-      await runtime.golden.seal(b.id);
+      const b = await ctx.runtime.golden.prepare();
+      await ctx.runtime.golden.seal(b.id);
     }
     return { hostKey, store };
   }
@@ -4254,7 +3866,7 @@ describe("a computer joining a host that holds a sealed image", () => {
       hold(forks(c, undefined, cmd => dfOk(undefined, cmd)));
   const framesOf = (): GoldenStageEvent[] => {
     const frames: GoldenStageEvent[] = [];
-    runtime!.events.on("golden.stage", e => {
+    ctx.runtime!.events.on("golden.stage", e => {
       if (e.type === "golden.stage") frames.push(e);
     });
     return frames;
@@ -4279,7 +3891,7 @@ describe("a computer joining a host that holds a sealed image", () => {
     expect(linked.proved.ok, String(linked.proved["error"])).toBe(true);
     await settled();
     expect(place.asked["machine.create"]).toBeUndefined();
-    void runtime!.image.build({ place: placeId }).catch(() => undefined);
+    void ctx.runtime!.image.build({ place: placeId }).catch(() => undefined);
     await until(() => place.asked["machine.create"] === 1, 5000);
     expect(frames.some(f => f.place === placeId && f.stage === "creating")).toBe(true);
     // The fake computer runs no builder's setup, so the build stops there: the row says so in the seal's own
@@ -4289,7 +3901,7 @@ describe("a computer joining a host that holds a sealed image", () => {
     expect((await rowOf(placeId)).buildsImages).toBe(true);
     expect(frames.filter(f => f.place === placeId).map(f => f.stage)).toContain("failed");
     expect(place.killed).toHaveLength(1);
-    expect((await runtime!.image.get()).copies.map(c => c.place)).toEqual(["solari"]);
+    expect((await ctx.runtime!.image.get()).copies.map(c => c.place)).toEqual(["solari"]);
     expect(place.asked["machine.create"]).toBe(1);
   });
 
@@ -4299,13 +3911,13 @@ describe("a computer joining a host that holds a sealed image", () => {
     const { placeId } = await join(hostKey, { code: await code(), name: "srv", answers: answering(p => (place = p)) });
     await until(async () => (await rowOf(placeId)).present === true);
     const lines: string[] = [];
-    runtime!.events.on("workspace.creating", e => {
+    ctx.runtime!.events.on("workspace.creating", e => {
       if (e.type === "workspace.creating" && e.name === "x") lines.push(e.message);
     });
-    const head = (await runtime!.image.get()).copies.find(c => c.place === "solari")!.snapshotId;
+    const head = (await ctx.runtime!.image.get()).copies.find(c => c.place === "solari")!.snapshotId;
     // The fake computer runs no builder's tool install, so the copy's build stops there and the fork with it; a
     // fork that forked the image anyway would have asked this computer for a second machine.
-    await expect(createOn(runtime!, { golden: head, name: "x", on: "srv" })).rejects.toThrow(/launch failed/);
+    await expect(createOn(ctx.runtime!, { golden: head, name: "x", on: "srv" })).rejects.toThrow(/launch failed/);
     expect(lines[0]).toBe("building your image on srv first, about ten minutes, then x forks from it");
     expect(place.created).toHaveLength(1);
     expect((place.created[0]!["labels"] as Record<string, string>)["wsp-builder"]).toBe("1");
@@ -4322,7 +3934,7 @@ describe("a computer joining a host that holds a sealed image", () => {
     first.swallow.add("machine.create");
     // The fake computer runs no builder's setup, so the prepare stops there in the end; what this reads is how far
     // it got, and its answer is taken here so nothing of it is loose while the test waits.
-    const preparing = runtime!.golden.prepare({ place: joined.placeId, recipe: { setup: "true", smoke: "true" } }).catch(() => undefined);
+    const preparing = ctx.runtime!.golden.prepare({ place: joined.placeId, recipe: { setup: "true", smoke: "true" } }).catch(() => undefined);
     await until(() => first.asked["machine.create"] === 1, 5000);
     joined.client.close();
     await until(async () => (await rowOf(joined.placeId)).present === false);
@@ -4352,7 +3964,7 @@ describe("a computer joining a host that holds a sealed image", () => {
     const joined = await join(hostKey, { code: await code(), name: "srv", answers: answering(p => (place = p)) });
     await until(() => place.asked["machine.backend"] === 1);
     place.swallow.add("machine.create");
-    const preparing = runtime!.golden.prepare({ place: joined.placeId, recipe: { setup: "true", smoke: "true" } });
+    const preparing = ctx.runtime!.golden.prepare({ place: joined.placeId, recipe: { setup: "true", smoke: "true" } });
     await until(() => place.asked["machine.create"] === 1, 5000);
     const at = Date.now();
     joined.client.close();
@@ -4372,7 +3984,7 @@ describe("a computer joining a host that holds a sealed image", () => {
     const joined = await join(hostKey, { code: await code(), name: "srv", answers: answering(p => (place = p)) });
     await until(() => place.asked["machine.backend"] === 1);
     place.swallow.add("machine.create");
-    const building = runtime!.image.build({ place: joined.placeId });
+    const building = ctx.runtime!.image.build({ place: joined.placeId });
     await until(() => place.asked["machine.create"] === 1, 5000);
     joined.client.close();
     await expect(building).rejects.toThrow();
@@ -4398,8 +4010,8 @@ describe("a computer joining a host that holds a sealed image", () => {
     expect(blocked.asked["machine.create"]).toBeUndefined();
     expect((await placesOf()).some(p => p.name === "laptop")).toBe(false);
 
-    await srv?.close();
-    await runtime?.close();
+    await ctx.srv?.close();
+    await ctx.runtime?.close();
     const { hostKey: bare } = await serving();
     let place!: ForkingPlace;
     const { client, placeId } = await join(bare, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
@@ -4419,8 +4031,8 @@ describe("a computer joining a host that holds a sealed image", () => {
     joined.client.close();
     await until(async () => (await rowOf(joined.placeId)).present === false);
     const frames = framesOf();
-    const b = await runtime!.golden.prepare();
-    await runtime!.golden.seal(b.id);
+    const b = await ctx.runtime!.golden.prepare();
+    await ctx.runtime!.golden.seal(b.id);
     await settled();
     expect(frames.filter(f => f.place === joined.placeId)).toEqual([]);
     expect((await rowOf(joined.placeId)).build).toBeUndefined();
@@ -4442,14 +4054,14 @@ describe("a computer joining a host that holds a sealed image", () => {
     // was made on.
     await store.put("builders", "k7", { id: "k7", name: "default", kind: "sandbox", baseTemplate: "ubuntu:24.04", setupSha: "x", createdAt: new Date().toISOString(), size: { cpu: 2, memMb: 4096 }, firstLife: true, building: true, place: joined.placeId });
     joined.client.close();
-    await srv!.close();
-    await runtime!.close();
+    await ctx.srv!.close();
+    await ctx.runtime!.close();
     // The host comes back on the same state and the computer dials in again.
     await imageHost({ sealed: false, store, hostKey });
     let again!: ForkingPlace;
     const linked = await relink(hostKey, joined.placeId, joined.pair, report("srv"), answering(p => (again = p)));
     sockets.push(linked.client.ws);
-    const swept = await runtime!.reap();
+    const swept = await ctx.runtime!.reap();
     expect(again.asked["machine.get"]).toBeGreaterThanOrEqual(1);
     expect(again.killed).toEqual(["k7"]);
     expect(swept.reaped.map(r => r.id)).toContain("k7");
@@ -4475,7 +4087,7 @@ describe("a project on a computer you joined", () => {
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, HOLDS_PROJECTS)) });
     sockets.push(client.ws);
     const ran = onItself(client);
-    const project = await runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing-906" });
+    const project = await ctx.runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing-906" });
     // The checkout is wsp's own folder on that computer, and what a workspace of it reads is outside the
     // computer's own home.
     expect(project.checkout).toBe(`/wsp/projects/${project.id}/checkout`);
@@ -4490,13 +4102,13 @@ describe("a project on a computer you joined", () => {
     expect(envs["PATH"]).toBe(PLACE_WORKSPACE_PATH);
     expect(envs).toMatchObject(installEnv(installHomes(TOOL_PREFIX)));
     // The remove runs one command on the computer itself, over the same link, and says what went.
-    const { said } = await runtime!.projects.remove(project.id);
+    const { said } = await ctx.runtime!.projects.remove(project.id);
     // That one command reads whether the agent there kept memory for this project and then takes wsp's own
     // folder; this computer answered nothing, so the sentence ends at the checkout rather than naming a folder
     // that is not there.
     expect(ran.filter(cmd => cmd.includes("rm -rf"))).toEqual([removeScript({ dir: `/wsp/projects/${project.id}`, memoryDir: project.memoryDir })]);
     expect(said).toBe(`landing-906 is no longer a project on srv; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout`);
-    expect(await runtime!.projects.list()).toEqual([]);
+    expect(await ctx.runtime!.projects.list()).toEqual([]);
   });
 
   it("is refused in that computer's own absent sentence while it is not connected, with nothing made anywhere", async () => {
@@ -4505,13 +4117,13 @@ describe("a project on a computer you joined", () => {
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, HOLDS_PROJECTS)) });
     sockets.push(client.ws);
     // The computer says what it forks with once, then goes.
-    await until(async () => runtime!.places!.offerOf(placeId) === HOLDS_PROJECTS.offer);
+    await until(async () => ctx.runtime!.places!.offerOf(placeId) === HOLDS_PROJECTS.offer);
     client.close();
-    await until(async () => (await runtime!.places!.list(0)).find(p => p.id === placeId)?.present === false);
-    await expect(runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing-906" })).rejects.toThrow(absentComputer("srv", null).sentence);
+    await until(async () => (await ctx.runtime!.places!.list(0)).find(p => p.id === placeId)?.present === false);
+    await expect(ctx.runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing-906" })).rejects.toThrow(absentComputer("srv", null).sentence);
     // Nothing was forked there and nothing was recorded here: the refusal comes before either.
     expect(place.created).toEqual([]);
-    expect(await runtime!.projects.list()).toEqual([]);
+    expect(await ctx.runtime!.projects.list()).toEqual([]);
   });
 });
 
@@ -4528,7 +4140,7 @@ describe("the folders of a computer you own", () => {
     });
 
   async function mine(): Promise<WsClient> {
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(c.ws);
     return c;
   }
@@ -4546,7 +4158,7 @@ describe("the folders of a computer you own", () => {
       },
     });
     sockets.push(client.ws);
-    const project = await runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing" });
+    const project = await ctx.runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing" });
     const c = await mine();
     const listed = await c.request("host.folders", { on: placeId, dir: "/home/maya", hidden: true });
     expect(listed.ok, String(listed["error"])).toBe(true);
@@ -4586,12 +4198,12 @@ describe("the folders of a computer you own", () => {
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }) });
     sockets.push(client.ws);
     const c = await mine();
-    const rows = await runtime!.places!.list(Date.now());
+    const rows = await ctx.runtime!.places!.list(Date.now());
     const provider = rows.find(p => p.kind !== "computer")!;
     expect(await c.request("host.folders", { on: provider.id })).toMatchObject({ ok: false, error: providerFoldersRefusal(provider.name), kind: "usage" });
     expect(await c.request("host.folders", { on: "pl_nobody" })).toMatchObject({ ok: false, error: noSuchPlaceRefusal("pl_nobody", rows.map(p => p.name)), kind: "usage" });
     client.close();
-    await until(async () => (await runtime!.places!.list(0)).find(p => p.id === placeId)?.present === false);
+    await until(async () => (await ctx.runtime!.places!.list(0)).find(p => p.id === placeId)?.present === false);
     expect(await c.request("host.folders", { on: placeId })).toMatchObject({ ok: false, error: absentComputer("srv", null).sentence });
   });
 
@@ -4606,7 +4218,7 @@ describe("the folders of a computer you own", () => {
     expect((await c.request("host.folders", {}))["listing"]).toEqual(here);
     expect(seen).toEqual([{ hidden: true, wide: false }, { wide: false }]);
     const issued = await c.request("ticket.issue", { purpose: "connect" });
-    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    const ticketed = await WsClient.connect(ctx.srv!.port, { ticket: String(issued["ticket"]) });
     sockets.push(ticketed.ws);
     expect(await ticketed.request("host.folders", { on: placeId })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
   });
@@ -4636,8 +4248,8 @@ describe("the agents on a computer you own", () => {
     const { hostKey } = await serving({ agentsReader: { read: async on => (asked.push(on), READ), tools: async on => (asked.push(on), { auth: "open", readAt: "2026-09-25T12:00:00.000Z" }) }, vault: {} });
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }), answers: c => forks(c, undefined, undefined, HOLDS_PROJECTS) });
     sockets.push(client.ws);
-    const project = await runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing" });
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const project = await ctx.runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(c.ws);
     expect((await c.request("agents.read", { target: { placeId } })).ok).toBe(true);
     const tools = await c.request("servers.tools", { target: { placeId, project: project.id }, agent: "claude", name: "db" });
@@ -4666,7 +4278,7 @@ describe("the agents on a computer you own", () => {
         }),
     });
     sockets.push(client.ws);
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(c.ws);
     const answered = await c.request("agents.read", { target: { placeId } });
     expect(answered.ok, String(answered["error"])).toBe(true);
@@ -4702,7 +4314,7 @@ describe("the agents on a computer you own", () => {
           }),
       });
       sockets.push(client.ws);
-      const c = await WsClient.connect(srv!.port, { token: "host-token" });
+      const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
       sockets.push(c.ws);
       for (const dir of ["/tmp/x", "/etc/x", `${boxHome}/../x`, joinPath(boxHome, "out", "x"), joinPath(boxHome, ".wsp", "c"), boxHome]) {
         const refused = await c.request("agents.setup", { placeId, agent: "claude", configDir: dir });
@@ -4736,8 +4348,8 @@ describe("the agents on a computer you own", () => {
       const claude = { id: "claude", name: "Claude Code", installed: true, road: "own" as const, signIn: "signed-in" as const, signInRoad: "device" as const, wspTools: false };
       const reader: AgentsReader = { read: async () => ({ ...READ, agents: [claude] }), tools: async () => ({ auth: "open", readAt: "2026-10-01T12:00:00.000Z" }) };
       const hostKey = newPlaceKeyPair();
-      runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, placeLinks: wiring(hostKey), agentsReader: reader });
-      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      ctx.runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, placeLinks: wiring(hostKey), agentsReader: reader });
+      ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
       const { client, placeId } = await join(hostKey, {
         code: await code(),
         report: report("srv", { agents: ["claude"] }),
@@ -4753,26 +4365,26 @@ describe("the agents on a computer you own", () => {
         },
       });
       sockets.push(client.ws);
-      const ws = await createOn(runtime, { name: "x", on: "srv" });
+      const ws = await createOn(ctx.runtime, { name: "x", on: "srv" });
       const kept = joinPath(realpathSync(boxHome), "real", "c");
       symlinkSync(joinPath(boxHome, "real"), joinPath(boxHome, "in"));
-      expect((await runtime.agents.setup(placeId, "claude", { configDir: joinPath(boxHome, "in", "c") })).setup?.configDir).toBe(kept);
-      await (await runtime.sessions.start(ws.id, { prompt: "one", harness: "claude" })).finished;
+      expect((await ctx.runtime.agents.setup(placeId, "claude", { configDir: joinPath(boxHome, "in", "c") })).setup?.configDir).toBe(kept);
+      await (await ctx.runtime.sessions.start(ws.id, { prompt: "one", harness: "claude" })).finished;
       expect(starts).toEqual([kept]);
       rmSync(joinPath(boxHome, "real"), { recursive: true });
       symlinkSync(outside, joinPath(boxHome, "real"));
-      await expect(runtime.sessions.start(ws.id, { prompt: "two", harness: "claude" })).rejects.toMatchObject({ kind: "usage", message: expect.stringContaining(`Claude Code does not start with its config folder ${kept}: Claude Code's config folder has to be under the home folder ${realpathSync(boxHome)}`) });
+      await expect(ctx.runtime.sessions.start(ws.id, { prompt: "two", harness: "claude" })).rejects.toMatchObject({ kind: "usage", message: expect.stringContaining(`Claude Code does not start with its config folder ${kept}: Claude Code's config folder has to be under the home folder ${realpathSync(boxHome)}`) });
       expect(starts).toHaveLength(1);
-      const row = (await runtime.sessions.list(ws.id))[0]!;
-      await expect(runtime.sessions.rename(row.id, "named")).rejects.toMatchObject({ kind: "usage", message: expect.stringContaining(`Claude Code does not start with its config folder ${kept}`) });
-      expect((await runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toContain(`Claude Code does not start with its config folder ${kept}`);
+      const row = (await ctx.runtime.sessions.list(ws.id))[0]!;
+      await expect(ctx.runtime.sessions.rename(row.id, "named")).rejects.toMatchObject({ kind: "usage", message: expect.stringContaining(`Claude Code does not start with its config folder ${kept}`) });
+      expect((await ctx.runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toContain(`Claude Code does not start with its config folder ${kept}`);
       // The box answering that it could not read the folder is its own word, kept as it said it.
       flaky = true;
-      expect((await runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toBe(`srv did not say where ${kept} is: realpath: no such folder`);
+      expect((await ctx.runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toBe(`srv did not say where ${kept} is: realpath: no such folder`);
       // A link that drops under the check is the computer's state, never the agent's refusal.
       client.ws.close();
       await until(async () => (await placesOf()).find(p => p.id === placeId)?.present === false);
-      expect((await runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toBe(absentComputer("srv", null).said);
+      expect((await ctx.runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toBe(absentComputer("srv", null).said);
     } finally {
       rmSync(boxHome, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
@@ -4796,7 +4408,7 @@ describe("the agents on a computer you own", () => {
         }),
     });
     sockets.push(client.ws);
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(c.ws);
     const answered = await c.request("servers.tools", { target: { placeId }, agent: "claude", name: "airtable", refresh: true });
     expect(answered.ok, String(answered["error"])).toBe(true);
@@ -4804,7 +4416,7 @@ describe("the agents on a computer you own", () => {
     expect(asked).toEqual([expect.objectContaining({ kind: "box" })]);
     expect(frames.map(f => f["cmd"])).toEqual(["cat"]);
     const issued = await c.request("ticket.issue", { purpose: "connect" });
-    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    const ticketed = await WsClient.connect(ctx.srv!.port, { ticket: String(issued["ticket"]) });
     sockets.push(ticketed.ws);
     expect(await ticketed.request("servers.tools", { target: { placeId }, agent: "claude", name: "airtable" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     expect(asked).toHaveLength(1);
@@ -4814,23 +4426,23 @@ describe("the agents on a computer you own", () => {
     const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 }, agentsReader: reading([], []) });
     const { client } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }) });
     sockets.push(client.ws);
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(c.ws);
-    const rows = await runtime!.places!.list(Date.now());
+    const rows = await ctx.runtime!.places!.list(Date.now());
     const provider = rows.find(p => p.kind !== "computer")!;
     expect(await c.request("agents.read", { target: { placeId: provider.id } })).toMatchObject({ ok: false, error: providerAgentsRefusal(provider.name), kind: "usage" });
     expect(await c.request("agents.read", { target: { placeId: "pl_nobody" } })).toMatchObject({ ok: false, error: noSuchPlaceRefusal("pl_nobody", rows.map(p => p.name)), kind: "usage" });
     const issued = await c.request("ticket.issue", { purpose: "connect" });
-    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    const ticketed = await WsClient.connect(ctx.srv!.port, { ticket: String(issued["ticket"]) });
     sockets.push(ticketed.ws);
     expect(await ticketed.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     for (const ws of sockets.splice(0)) ws.close();
-    await srv!.close();
-    srv = undefined;
-    await runtime!.close();
-    runtime = undefined;
+    await ctx.srv!.close();
+    ctx.srv = undefined;
+    await ctx.runtime!.close();
+    ctx.runtime = undefined;
     await serving();
-    const bare = await WsClient.connect(srv!.port, { token: "host-token" });
+    const bare = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(bare.ws);
     expect(await bare.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).toMatchObject({ ok: false, error: NO_AGENTS_READER });
   });
@@ -4847,7 +4459,7 @@ describe("the agents on a computer you own", () => {
     const { hostKey } = await serving({ agentsReader: reading([], []), skillsActs: acts });
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }) });
     sockets.push(client.ws);
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(c.ws);
     await c.request("events.subscribe");
     const box = { placeId };
@@ -4860,11 +4472,11 @@ describe("the agents on a computer you own", () => {
     expect(asked).toEqual(["search pdf 20", "get a/b/pdf", "preview box pdf", "add here a/b/pdf claude false", "toggle box pdf false", "remove box pdf"]);
     await until(() => c.events.filter(e => e.type === "agents.changed").length === 3);
     const issued = await c.request("ticket.issue", { purpose: "connect" });
-    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    const ticketed = await WsClient.connect(ctx.srv!.port, { ticket: String(issued["ticket"]) });
     sockets.push(ticketed.ws);
-    const redeemer = await WsClient.connect(srv!.port);
+    const redeemer = await WsClient.connect(ctx.srv!.port);
     sockets.push(redeemer.ws);
-    const device = await WsClient.connect(srv!.port, { token: String((await redeemer.request("pair.redeem", { code: await code(), name: "the phone" }))["deviceToken"]) });
+    const device = await WsClient.connect(ctx.srv!.port, { token: String((await redeemer.request("pair.redeem", { code: await code(), name: "the phone" }))["deviceToken"]) });
     sockets.push(device.ws);
     for (const [op, extra] of [
       ["skills.search", { q: "pdf" }],
@@ -4886,18 +4498,18 @@ describe("the agents on a computer you own", () => {
     let on: (() => Promise<boolean>) | undefined;
     const icons: ServerIcons = { folder: "/nowhere/icons", icon: async (host, refresh, stillOn) => (asked.push(`${host} ${refresh === true}`), (on = stillOn), "data:image/png;base64,AA=="), forget: () => void (forgot += 1) };
     await serving({ serverIcons: icons });
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(c.ws);
     expect(await c.request("servers.icon", { host: "mcp.notion.com" })).toMatchObject({ ok: true, icon: "data:image/png;base64,AA==" });
     expect(await c.request("servers.icon", { host: "mcp.notion.com", refresh: true })).toMatchObject({ ok: true, icon: "data:image/png;base64,AA==" });
     expect(asked).toEqual(["mcp.notion.com false", "mcp.notion.com true"]);
     const issued = await c.request("ticket.issue", { purpose: "connect" });
-    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    const ticketed = await WsClient.connect(ctx.srv!.port, { ticket: String(issued["ticket"]) });
     sockets.push(ticketed.ws);
     expect(await ticketed.request("servers.icon", { host: "mcp.notion.com" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
-    const redeemer = await WsClient.connect(srv!.port);
+    const redeemer = await WsClient.connect(ctx.srv!.port);
     sockets.push(redeemer.ws);
-    const device = await WsClient.connect(srv!.port, { token: String((await redeemer.request("pair.redeem", { code: await code(), name: "the phone" }))["deviceToken"]) });
+    const device = await WsClient.connect(ctx.srv!.port, { token: String((await redeemer.request("pair.redeem", { code: await code(), name: "the phone" }))["deviceToken"]) });
     sockets.push(device.ws);
     expect(await device.request("servers.icon", { host: "mcp.notion.com" })).toMatchObject({ ok: false, error: deviceHeldRefusal("servers.icon") });
     expect(await c.request("preferences.set", { patch: { theme: "dark" } })).toMatchObject({ ok: true });
@@ -4925,7 +4537,7 @@ describe("the agents on a computer you own", () => {
     const { hostKey } = await serving({ agentsReader: reading([], []), serversActs: acts }, { log: line => void lines.push(line) });
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }) });
     sockets.push(client.ws);
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(c.ws);
     await c.request("events.subscribe");
     const box = { placeId };
@@ -4940,11 +4552,11 @@ describe("the agents on a computer you own", () => {
     expect(refused[0]).not.toContain("sk-acme-env-x");
     expect(refused[0]).not.toContain("tok-acme-hdr-x");
     const issued = await c.request("ticket.issue", { purpose: "connect" });
-    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    const ticketed = await WsClient.connect(ctx.srv!.port, { ticket: String(issued["ticket"]) });
     sockets.push(ticketed.ws);
-    const redeemer = await WsClient.connect(srv!.port);
+    const redeemer = await WsClient.connect(ctx.srv!.port);
     sockets.push(redeemer.ws);
-    const device = await WsClient.connect(srv!.port, { token: String((await redeemer.request("pair.redeem", { code: await code(), name: "the phone" }))["deviceToken"]) });
+    const device = await WsClient.connect(ctx.srv!.port, { token: String((await redeemer.request("pair.redeem", { code: await code(), name: "the phone" }))["deviceToken"]) });
     sockets.push(device.ws);
     for (const [op, extra] of [
       ["servers.add", { target: box, agent: "claude", name: "acme", command: "npx" }],
@@ -4989,8 +4601,8 @@ describe("the agents on a computer you own", () => {
         }),
     });
     sockets.push(client.ws);
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
-    const other = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
+    const other = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(c.ws, other.ws);
     expect((await other.request("events.subscribe")).ok).toBe(true);
     const started = await c.request("agents.signIn", { target: { placeId }, agent: "codex" });
@@ -5006,7 +4618,7 @@ describe("the agents on a computer you own", () => {
     await new Promise(r => setTimeout(r, 20));
     expect(c.events.filter(e => e.type === "agents.signIn")).toHaveLength(1);
     const issued = await c.request("ticket.issue", { purpose: "connect" });
-    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    const ticketed = await WsClient.connect(ctx.srv!.port, { ticket: String(issued["ticket"]) });
     sockets.push(ticketed.ws);
     for (const [op, extra] of [
       ["agents.signIn", { target: { placeId }, agent: "codex" }],
@@ -5030,18 +4642,18 @@ describe("the agents on a computer you own", () => {
     expect((await c.request("agents.signInStop", { signInId })).ok).toBe(true);
     await until(() => ended === 1);
     // A paired computer asks for neither a key nor a sign-in's line; the host's own socket asks for the line.
-    const redeemer = await WsClient.connect(srv!.port);
+    const redeemer = await WsClient.connect(ctx.srv!.port);
     sockets.push(redeemer.ws);
     const redeemed = await redeemer.request("pair.redeem", { code: await code(), name: "the phone" });
-    const device = await WsClient.connect(srv!.port, { token: String(redeemed["deviceToken"]) });
+    const device = await WsClient.connect(ctx.srv!.port, { token: String(redeemed["deviceToken"]) });
     sockets.push(device.ws);
     expect(await device.request("agents.key", { agent: "claude", key: "sk-ant-oat01-y" })).toMatchObject({ ok: false, error: deviceHeldRefusal("agents.key") });
     expect(await device.request("agents.signInLine", { target: { placeId }, agent: "codex" })).toMatchObject({ ok: false, error: deviceHeldRefusal("agents.signInLine") });
     // The owner's own browser on this computer is a device too: the line and the key are the host's alone.
     const hereCode = String((await c.request("pair.issue", { here: true }))["code"]);
-    const browserRedeem = await WsClient.connect(srv!.port);
+    const browserRedeem = await WsClient.connect(ctx.srv!.port);
     sockets.push(browserRedeem.ws);
-    const browser = await WsClient.connect(srv!.port, { token: String((await browserRedeem.request("pair.redeem", { code: hereCode, name: "this Mac's browser" }))["deviceToken"]) });
+    const browser = await WsClient.connect(ctx.srv!.port, { token: String((await browserRedeem.request("pair.redeem", { code: hereCode, name: "this Mac's browser" }))["deviceToken"]) });
     sockets.push(browser.ws);
     expect(await browser.request("agents.signInLine", { target: { placeId }, agent: "codex" })).toMatchObject({ ok: false, error: SIGN_IN_LINE_REFUSAL });
     expect(await browser.request("agents.key", { agent: "claude", key: "sk-ant-oat01-z" })).toMatchObject({ ok: false, error: AGENTS_KEY_REFUSAL });
@@ -5074,7 +4686,7 @@ describe("the agents on a computer you own", () => {
         }),
     });
     sockets.push(client.ws);
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(c.ws);
     const landed = async (agent: string): Promise<void> => {
       const before = c.events.filter(e => e.type === "agents.changed").length;
@@ -5128,7 +4740,7 @@ describe("the forward a computer dials back through", () => {
   /** One add of a box that reached this host only through the forward the install stood. */
   async function addedOverTheForward(store: Store, back: PlaceBackHolder, stages: PlaceStageEvent[] = []): Promise<{ hostKey: PlaceKeyPair; placeId: string }> {
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store,
       adapters: {},
@@ -5143,9 +4755,9 @@ describe("the forward a computer dials back through", () => {
         },
       },
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
-    const added = await runtime.places!.add({ address: "spoo", hostUrls: DOOR, doorPort: 4640 }, Date.now());
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    ctx.runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    const added = await ctx.runtime.places!.add({ address: "spoo", hostUrls: DOOR, doorPort: 4640 }, Date.now());
     return { hostKey, placeId: added.place.id };
   }
 
@@ -5173,13 +4785,13 @@ describe("the forward a computer dials back through", () => {
     const store = memoryStore();
     const first = backHolder();
     const { hostKey } = await addedOverTheForward(store, first.holder);
-    await srv!.close();
-    srv = undefined;
-    await runtime!.close();
+    await ctx.srv!.close();
+    ctx.srv = undefined;
+    await ctx.runtime!.close();
     expect(first.calls.at(-1)).toBe("close");
     const again = backHolder();
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: { ...wiring(hostKey), back: again.holder } });
-    await runtime.places!.load();
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: { ...wiring(hostKey), back: again.holder } });
+    await ctx.runtime.places!.load();
     expect(again.holds).toHaveLength(1);
     expect(again.holds[0]).toMatchObject({ login: { ssh: "root@spoo" }, back: AT_DOOR, home: "/home/maya" });
     expect(again.holds[0]!.moved).toBeDefined();
@@ -5188,7 +4800,7 @@ describe("the forward a computer dials back through", () => {
   it("lets the forward go when the computer is removed, after the sweep that may ride it", async () => {
     const back = backHolder();
     const { placeId } = await addedOverTheForward(memoryStore(), back.holder);
-    await runtime!.places!.remove(placeId);
+    await ctx.runtime!.places!.remove(placeId);
     expect(back.calls.at(-1)).toBe("release root@spoo");
   });
 
@@ -5210,7 +4822,7 @@ describe("the forward a computer dials back through", () => {
     back.holds[0]!.moved!({ boxPort: 23456 });
     await new Promise(r => setTimeout(r, 10));
     gate = undefined;
-    const removing = runtime!.places!.remove(placeId);
+    const removing = ctx.runtime!.places!.remove(placeId);
     await new Promise(r => setTimeout(r, 10));
     open();
     await removing;
@@ -5220,21 +4832,21 @@ describe("the forward a computer dials back through", () => {
 
   it("lets the forward go when the add that stood it left no record", async () => {
     const back = backHolder();
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
       placeLinks: { ...wiring(newPlaceKeyPair()), back: back.holder, install: async () => ({ name: "spoo", ssh: "root@spoo", back: AT_DOOR }) },
       placeJoinWaitMs: 30,
     });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    await expect(runtime.places!.add({ address: "spoo", hostUrls: DOOR, doorPort: 4640 }, Date.now())).rejects.toThrow(placeNoLinkLine("spoo"));
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    await expect(ctx.runtime.places!.add({ address: "spoo", hostUrls: DOOR, doorPort: 4640 }, Date.now())).rejects.toThrow(placeNoLinkLine("spoo"));
     expect(back.calls).toEqual(["release root@spoo"]);
   });
 
   it("hands the install the door's own port and the relay's address off the host's door", async () => {
     let handed: PlaceInstallRequest | undefined;
-    runtime = createRuntime({
+    ctx.runtime = createRuntime({
       backend: stubBackend(),
       store: memoryStore(),
       adapters: {},
@@ -5247,8 +4859,8 @@ describe("the forward a computer dials back through", () => {
       },
     });
     const relay = "https://h645d7f8a8d48cbd6.example";
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door: { open: async () => ({ port: 4640, addresses: DOOR, relay, backPort: 4640 }) } });
-    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, door: { open: async () => ({ port: 4640, addresses: DOOR, relay, backPort: 4640 }) } });
+    const c = await WsClient.connect(ctx.srv.port, { token: "host-token" });
     await c.request("places.add", { address: "root@spoo" });
     c.close();
     expect(handed).toMatchObject({ hostUrls: [...DOOR, relay], doorPort: 4640, relay });
@@ -5281,12 +4893,12 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
       },
     }));
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }, opts.update), placeRelinkWaitMs: 50, killConfirm: { graceMs: 40, pollMs: 1 } });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    ctx.runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }, opts.update), placeRelinkWaitMs: 50, killConfirm: { graceMs: 40, pollMs: 1 } });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
     let place!: ForkingPlace;
     const { client, placeId, pair } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }), answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
+    const made = await ctx.runtime.workspaces.create({ project: (await projectOn(ctx.runtime, "srv")).id, golden: "snap_g", name: "work" });
     await opts.before?.(made.id);
     const again = await relink(hostKey, placeId, pair, blocked(), c => (place = forks(c)));
     sockets.push(again.client.ws);
@@ -5301,7 +4913,7 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
     sockets.push(joined.client.ws);
     const before = (await placesOf()).find(p => p.id === joined.placeId)!.lastSeenAt!;
     const absences: Record<string, unknown>[] = [];
-    runtime!.events.on("place.absent", e => absences.push(e as Record<string, unknown>));
+    ctx.runtime!.events.on("place.absent", e => absences.push(e as Record<string, unknown>));
     await new Promise(r => setTimeout(r, 5));
     const again = await relink(hostKey, joined.placeId, joined.pair, report("srv", { runsWorkspaces: false, workspacesBlocked: BLOCKED }));
     sockets.push(again.client.ws);
@@ -5317,7 +4929,7 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
   it("refuses a send into a thread there in the doctor's sentence, and starts no turn", async () => {
     const { made, turns, place } = await blockedFork();
     const execs = place().asked["machine.exec"] ?? 0;
-    await expect(runtime!.sessions.start(made.id, { prompt: "one", harness: "claude" })).rejects.toThrow(SAID);
+    await expect(ctx.runtime!.sessions.start(made.id, { prompt: "one", harness: "claude" })).rejects.toThrow(SAID);
     expect(turns).toEqual([]);
     expect(place().asked["machine.exec"] ?? 0).toBe(execs);
   });
@@ -5345,9 +4957,9 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
       },
     });
     const before = async (id: string): Promise<void> => {
-      const started = await runtime!.sessions.start(id, { prompt: "one", harness: "claude" });
+      const started = await ctx.runtime!.sessions.start(id, { prompt: "one", harness: "claude" });
       thread = started.view().threadId!;
-      await until(async () => (await runtime!.sessions.list(id))[0]?.claudeSessionId !== undefined);
+      await until(async () => (await ctx.runtime!.sessions.list(id))[0]?.claudeSessionId !== undefined);
     };
     return { adapter, before, steered, opened, thread: () => thread };
   };
@@ -5355,7 +4967,7 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
   it("lets a send into a turn still running there join it, as a steer does, so the person can still steer or stop it", async () => {
     const through = runningThrough(true);
     const { made } = await blockedFork({ adapter: through.adapter, before: through.before });
-    const joined = await runtime!.sessions.start(made.id, { prompt: "two", thread: through.thread() });
+    const joined = await ctx.runtime!.sessions.start(made.id, { prompt: "two", thread: through.thread() });
     expect(joined.outcome).toBe("steered");
     expect(through.steered).toEqual(["two"]);
     expect(through.opened).toHaveLength(1);
@@ -5364,7 +4976,7 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
   it("refuses a send queued behind a turn running there once that turn ends, in the doctor's sentence, and starts no turn", async () => {
     const through = runningThrough(false);
     const { made } = await blockedFork({ adapter: through.adapter, before: through.before });
-    const queued = runtime!.sessions.start(made.id, { prompt: "two", thread: through.thread() });
+    const queued = ctx.runtime!.sessions.start(made.id, { prompt: "two", thread: through.thread() });
     const settled = queued.then(
       () => undefined,
       (e: unknown) => (e instanceof Error ? e.message : String(e)),
@@ -5377,7 +4989,7 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
 
   it("answers git.status for a copy there, the read an ask before a delete makes, and the beat the panes' link opens on", async () => {
     const { made, place } = await blockedFork();
-    const app = await WsClient.connect(srv!.port, { token: "host-token" });
+    const app = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     sockets.push(app.ws);
     const opened = await app.request("daemon.open", { workspaceId: made.id });
     expect(opened.ok, String(opened["error"])).toBe(true);
@@ -5390,8 +5002,8 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
   });
 
   it.each([
-    { road: "the panes' road, Terminal, Files and Diff included", open: (id: string) => runtime!.workspaces.daemonChannel(id, () => {}) },
-    { road: "the guest road, which a sign-in and an agent session inside the copy reach this host by", open: (id: string) => runtime!.workspaces.guestChannel(id, () => {}) },
+    { road: "the panes' road, Terminal, Files and Diff included", open: (id: string) => ctx.runtime!.workspaces.daemonChannel(id, () => {}) },
+    { road: "the guest road, which a sign-in and an agent session inside the copy reach this host by", open: (id: string) => ctx.runtime!.workspaces.guestChannel(id, () => {}) },
   ])("refuses every other frame on $road, in the doctor's sentence before it reaches that computer", async ({ open }) => {
     const { made, place } = await blockedFork();
     const channel = await open(made.id);
@@ -5405,8 +5017,8 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
   });
 
   it.each([
-    { road: "the panes' road", open: (id: string, on: (e: Record<string, unknown>) => void) => runtime!.workspaces.daemonChannel(id, on) },
-    { road: "the guest road", open: (id: string, on: (e: Record<string, unknown>) => void) => runtime!.workspaces.guestChannel(id, on) },
+    { road: "the panes' road", open: (id: string, on: (e: Record<string, unknown>) => void) => ctx.runtime!.workspaces.daemonChannel(id, on) },
+    { road: "the guest road", open: (id: string, on: (e: Record<string, unknown>) => void) => ctx.runtime!.workspaces.guestChannel(id, on) },
   ])("lets no session the computer pushes in on $road, so a sign-in or an agent session there opens nothing on this host", async ({ open }) => {
     const { made, place } = await blockedFork();
     const heard: Record<string, unknown>[] = [];
@@ -5422,35 +5034,35 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
 
   it("refuses the Browser's road to a port inside the copy in the doctor's sentence", async () => {
     const { made, place } = await blockedFork();
-    await expect(runtime!.workspaces.portReach(made.id, 3000)).rejects.toThrow(SAID);
-    await expect(runtime!.workspaces.portProbe(made.id, 3000)).rejects.toThrow(SAID);
+    await expect(ctx.runtime!.workspaces.portReach(made.id, 3000)).rejects.toThrow(SAID);
+    await expect(ctx.runtime!.workspaces.portProbe(made.id, 3000)).rejects.toThrow(SAID);
     expect(place().asked["machine.previewUrl"] ?? 0).toBe(0);
   });
 
   it("refuses a new workspace there, the road New thread and run --on take, in the doctor's sentence, and forks nothing", async () => {
     const { place } = await blockedFork();
     const made = place().created.length;
-    await expect(runtime!.workspaces.create({ project: (await projectOn(runtime!, "srv")).id, golden: "snap_g", name: "more" })).rejects.toThrow(SAID);
+    await expect(ctx.runtime!.workspaces.create({ project: (await projectOn(ctx.runtime!, "srv")).id, golden: "snap_g", name: "more" })).rejects.toThrow(SAID);
     expect(place().created).toHaveLength(made);
   });
 
   it("refuses a command inside the copy, on both of exec's roads, in the doctor's sentence", async () => {
     const { made, place } = await blockedFork();
     const execs = place().asked["machine.exec"] ?? 0;
-    await expect(runtime!.workspaces.exec(made.id, "true")).rejects.toThrow(SAID);
-    await expect(runtime!.workspaces.execStream(made.id, ["true"])).rejects.toThrow(SAID);
+    await expect(ctx.runtime!.workspaces.exec(made.id, "true")).rejects.toThrow(SAID);
+    await expect(ctx.runtime!.workspaces.execStream(made.id, ["true"])).rejects.toThrow(SAID);
     expect(place().asked["machine.exec"] ?? 0).toBe(execs);
   });
 
   it("refuses the bring back in the doctor's sentence, before a git frame leaves", async () => {
     const { made, place } = await blockedFork();
-    await expect(runtime!.workspaces.bringBack({ workspaceId: made.id })).rejects.toThrow(SAID);
+    await expect(ctx.runtime!.workspaces.bringBack({ workspaceId: made.id })).rejects.toThrow(SAID);
     expect(place().frames).toEqual([]);
   });
 
   it("refuses a wake of a stopped copy there in the row's sentence, not the boot's words, and resumes nothing", async () => {
-    const { made, place } = await blockedFork({ before: id => runtime!.workspaces.nap(id).then(() => undefined) });
-    await expect(runtime!.workspaces.wake(made.id)).rejects.toThrow(SAID);
+    const { made, place } = await blockedFork({ before: id => ctx.runtime!.workspaces.nap(id).then(() => undefined) });
+    await expect(ctx.runtime!.workspaces.wake(made.id)).rejects.toThrow(SAID);
     expect(place().resumed).toBe(0);
     expect(place().asked["machine.resume"] ?? 0).toBe(0);
   });
@@ -5459,26 +5071,26 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
     let session = "";
     const { renamed } = await blockedFork({
       before: async id => {
-        const started = await runtime!.sessions.start(id, { prompt: "one", harness: "claude" });
+        const started = await ctx.runtime!.sessions.start(id, { prompt: "one", harness: "claude" });
         await started.finished;
         session = started.id;
       },
     });
-    await expect(runtime!.sessions.rename(session, "a name")).rejects.toThrow(SAID);
+    await expect(ctx.runtime!.sessions.rename(session, "a name")).rejects.toThrow(SAID);
     expect(renamed).toEqual([]);
   });
 
   it("refuses carrying a folder into the copy or out of it in the doctor's sentence, before the bundler or the lander is asked", async () => {
     const { made } = await blockedFork();
-    await expect(runtime!.projects.import({ workspaceId: made.id, source: "/s", dest: "/d", bundler: {} as never })).rejects.toThrow(SAID);
-    await expect(runtime!.projects.export({ workspaceId: made.id, source: "/s", dest: "/d", lander: {} as never })).rejects.toThrow(SAID);
+    await expect(ctx.runtime!.projects.import({ workspaceId: made.id, source: "/s", dest: "/d", bundler: {} as never })).rejects.toThrow(SAID);
+    await expect(ctx.runtime!.projects.export({ workspaceId: made.id, source: "/s", dest: "/d", lander: {} as never })).rejects.toThrow(SAID);
   });
 
   it("deletes a workspace there over the link", async () => {
     const { made, place } = await blockedFork();
-    await runtime!.workspaces.delete(made.id);
+    await ctx.runtime!.workspaces.delete(made.id);
     expect(place().killed).toContain(made.machineId);
-    expect(await runtime!.workspaces.list()).toEqual([]);
+    expect(await ctx.runtime!.workspaces.list()).toEqual([]);
   });
 
   it("takes the computer out over the link, asking it to sweep itself", async () => {
@@ -5497,7 +5109,7 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
   it("hands the update pass the link", async () => {
     const asked: PlaceUpdateRequest[] = [];
     const { placeId } = await blockedFork({ update: async req => void asked.push(req) });
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const c = await WsClient.connect(ctx.srv!.port, { token: "host-token" });
     const answer = await c.request("places.update", { placeId });
     c.close();
     expect(answer.ok, String(answer["error"])).toBe(true);
@@ -5541,7 +5153,7 @@ describe("spending a banked reset on a computer you joined", () => {
 
   it("reads the account and then spends on that computer, under the login its workspaces share and the PATH it reported", async () => {
     const { ran } = await holding();
-    expect(await runtime!.usage.reset({ account: "codex:acct_a" })).toMatchObject({ outcome: "reset", said: "Reset used: Codex with ChatGPT Plus on srv's windows start again now, 1 left", account: { key: "codex:acct_a", credits: { count: 1 } } });
+    expect(await ctx.runtime!.usage.reset({ account: "codex:acct_a" })).toMatchObject({ outcome: "reset", said: "Reset used: Codex with ChatGPT Plus on srv's windows start again now, 1 left", account: { key: "codex:acct_a", credits: { count: 1 } } });
     expect(ran).toHaveLength(2);
     for (const cmd of ran) {
       expect(cmd).toContain(`CODEX_HOME='${LOGINS}/codex'`);
@@ -5555,7 +5167,7 @@ describe("spending a banked reset on a computer you joined", () => {
     const { client, placeId, ran } = await holding();
     client.close();
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
-    await expect(runtime!.usage.reset({ account: "codex:acct_a" })).rejects.toThrow(absentComputer("srv", null).sentence);
+    await expect(ctx.runtime!.usage.reset({ account: "codex:acct_a" })).rejects.toThrow(absentComputer("srv", null).sentence);
     expect(ran).toEqual([]);
   });
 });
