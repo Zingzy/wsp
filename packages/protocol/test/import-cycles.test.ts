@@ -2,15 +2,15 @@
 // A bundler orders the modules of a cycle as its split points fall, so a module that reads a value from its cycle
 // partner at load gets undefined in one bundle and the value in another: the desktop app once died at start on it.
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const SRC = fileURLToPath(new URL("../src", import.meta.url));
-const IMPORT = /^(?:import|export)\s+([^;]*?)\s+from\s+"(\.\/[^"]+)"/gm;
+const IMPORT = /^(?:import|export)\s+([^;]*?)\s+from\s+"(\.\.?\/[^"]+)"/gm;
 
-/** The protocol's own modules each module reads at run time, by file name. An import of types alone is erased from
- * the build and is no edge. */
+/** The protocol's own modules each module reads at run time, by path under src. An import of types alone is erased
+ * from the build and is no edge. */
 function valueImports(file: string): string[] {
   const text = readFileSync(join(SRC, file), "utf8");
   const out: string[] = [];
@@ -18,7 +18,7 @@ function valueImports(file: string): string[] {
     if (/^type\b/.test(clause!)) continue;
     const named = /^\{([^}]*)\}$/.exec(clause!.trim());
     if (named !== null && named[1]!.split(",").every(part => part.trim() === "" || /^type\s/.test(part.trim()))) continue;
-    out.push(target!.slice(2).replace(/\.js$/, ".ts"));
+    out.push(posix.join(dirname(file), target!).replace(/\.js$/, ".ts"));
   }
   return out;
 }
@@ -42,7 +42,9 @@ function cycles(graph: Map<string, string[]>): string[][] {
 }
 
 describe("the protocol's modules", () => {
-  const files = readdirSync(SRC).filter(f => /\.m?ts$/.test(f) && !f.endsWith(".d.mts"));
+  const files = readdirSync(SRC, { recursive: true, encoding: "utf8" })
+    .map(f => f.split("\\").join("/"))
+    .filter(f => /\.m?ts$/.test(f) && !f.endsWith(".d.mts"));
   const graph = new Map(files.map(f => [f, valueImports(f)]));
 
   it("reads the imports the index makes, so an empty graph cannot pass", () => {
