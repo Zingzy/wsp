@@ -5,7 +5,7 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { bundleEnv, bundleNames, downloadUrl, RELEASES, REPO, STABLE_NAMES } from "../scripts/bundles.mjs";
+import { bundleEnv, bundleNames, downloadUrl, RELEASES, REPO, STABLE_NAMES } from "../../protocol/src/bundles.mjs";
 
 const script = fileURLToPath(new URL("../scripts/bundle-env.mjs", import.meta.url));
 

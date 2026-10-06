@@ -40,13 +40,19 @@
       @keyframes halo { from { opacity: 0; scale: 0.7; } }
 
       /* ---- the screen ---- */
-      /* A window too short for the screen scrolls the page, at the window's edge, rather than squeezing the card, which cut its last rows to a strip. */
+      /* A window too short for a screen's fixed parts scrolls the page, at the window's edge, rather than squeezing them. */
       .setup { margin: 0 auto; display: flex; min-height: 100%; width: 560px; max-width: 100%; flex-direction: column; align-items: center; }
+      /* The agents screen fits the window, heading and keycap on screen: the list scrolls inside its card, which gives
+         way down to one whole row, and below that the page scrolls. The card and the line under it stand in the
+         screen's own column, so each keeps its least: the card one row, the line every line it wraps to. */
+      #agents { height: 100%; }
+      #agents .hint { width: 100%; flex: none; }
+      #rows { flex: 0 1 auto; min-height: calc(48px + 2px); overflow-y: auto; }
       /* Two flex items sharing what the bands leave, so the screen stands centred and each stops at its least. */
       .margin { flex: 1 1 0; min-height: 48px; width: 100%; }
       .margin.bottom { min-height: 40px; }
       .head { margin-bottom: 64px; display: flex; width: 100%; flex: none; flex-direction: column; align-items: center; }
-      .content { display: flex; width: 100%; flex: none; flex-direction: column; }
+      .content { display: contents; }
       .foot { position: relative; display: flex; width: 100%; flex: none; flex-direction: column; align-items: center; padding-top: 56px; }
       h1 { margin: 0; width: 100%; text-align: center; font: 600 34px/1.15 var(--font-sans); letter-spacing: -0.02em; }
       .sentence { margin: 16px 0 0; max-width: 440px; text-align: center; font-size: 15px; line-height: 1.5; color: var(--muted-foreground); }
@@ -68,7 +74,7 @@
       @keyframes draw { from { stroke-dashoffset: 22; } }
       @keyframes light { from { flood-opacity: 0; } }
       @keyframes rise { from { opacity: 0; translate: 0 12px; } }
-      #welcome .tilde .body, #welcome .tilde .lit, #welcome .foot, #agents .head, #agents .content, #agents .foot {
+      #welcome .tilde .body, #welcome .tilde .lit, #welcome .foot, #agents .head, #rows, #agents .hint, #agents .foot {
         animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
         animation-fill-mode: backwards;
       }
@@ -76,10 +82,10 @@
       #welcome .tilde .lit { animation-name: light; animation-duration: 0.4s; animation-delay: 0.7s; }
       #welcome .foot { animation-name: rise; animation-duration: 0.5s; animation-delay: 1s; }
       #agents .head { animation-name: rise; animation-duration: 0.34s; }
-      #agents .content { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.06s; }
+      #rows, #agents .hint { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.06s; }
       #agents .foot { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.1s; }
       @media (prefers-reduced-motion: reduce) {
-        #welcome .tilde .body, #welcome .tilde .lit, #welcome .foot, #welcome .hero::before, #agents .head, #agents .content, #agents .foot { animation: none; }
+        #welcome .tilde .body, #welcome .tilde .lit, #welcome .foot, #welcome .hero::before, #agents .head, #rows, #agents .hint, #agents .foot { animation: none; }
       }
 
       /* ---- the card and its one row: the app's settings/recipe/rows.tsx CARD, ROW, NAME, Slot, STATE_WORD ---- */

@@ -15,7 +15,7 @@ import { pipeline } from "node:stream/promises";
 import type { ReadableStream } from "node:stream/web";
 import { RELEASE_BODY_MAX_BYTES, RELEASE_TIMEOUT_MS, cappedText, releaseAssetUrl, releaseTagUrl } from "@wsp/host";
 import { RELEASE_API_ENV, compareVersions, type BundleOutcome } from "@wsp/protocol";
-import { RELEASE_TAG, bundleNames } from "../../../packages/wspx/scripts/bundles.mjs";
+import { RELEASE_TAG, bundleNames } from "../../../packages/protocol/src/bundles.mjs";
 import type { Staged } from "./self-update.js";
 
 export const BUNDLE_WORDS = {
