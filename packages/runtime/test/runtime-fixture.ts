@@ -55,9 +55,11 @@ export async function helloingDaemon(version: number, holdHello = false): Promis
     dials: () => dials,
     close: () =>
       new Promise<void>(done => {
+        // Stop accepting first: a dial landing after closeAllConnections would hold server.close open for good.
+        server.close(() => done());
         for (const socket of wss.clients) socket.terminate();
         server.closeAllConnections();
-        wss.close(() => server.close(() => done()));
+        wss.close();
       }),
   };
 }
