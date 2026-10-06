@@ -1,0 +1,19 @@
+{
+  "at": "/",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The side question's sheet rides the composer, whose 1280 layout composer-thread already shoots; 390 is where the sheet reflows, which is shot here.",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:redirect",
+    "390:key:Escape",
+    "390:key:Escape",
+    "testid=composer-editor",
+    "type:/btw which folder are you in and what did I last ask?",
+    "key:Enter"
+  ],
+  "wait": "k=aside-asking"
+}

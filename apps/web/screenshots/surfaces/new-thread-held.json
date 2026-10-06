@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "fixture": "mac-and-boxes",
+  "widths": [
+    1440
+  ],
+  "reason": "A 440px dialog, the same at every desktop width. Judged against the mockup's 1440 render; the dialog's narrow form is not in the design's reading.",
+  "steps": [
+    "key:ControlOrMeta+k",
+    "type:create task",
+    "key:Enter",
+    "key:Enter"
+  ],
+  "wait": "k=waiting"
+}

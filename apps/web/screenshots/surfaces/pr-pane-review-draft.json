@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "fixture": "review-draft",
+  "widths": [
+    1440
+  ],
+  "reason": "The right panel is min(42vw, 28rem), which is 28rem at both 1280 and 1440, so 1280 draws this pane as 1440 does; the panel at 390 is shot in files-tree.",
+  "steps": [
+    "row-id=thread:redirect",
+    "surface-launch=pr"
+  ],
+  "wait": "pr-draft-comment=c3",
+  "settleMs": 1200
+}

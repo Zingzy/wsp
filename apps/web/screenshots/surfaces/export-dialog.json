@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "widths": [
+    1440
+  ],
+  "reason": "A 440px dialog, the same at every desktop width. Judged against the mockup's 1440 render; the dialog's narrow form is not in the design's reading.",
+  "steps": [
+    "row-id=thread:redirect",
+    "key:ControlOrMeta+k",
+    "type:export",
+    "key:Enter"
+  ],
+  "wait": "k=progress",
+  "settleMs": 800
+}

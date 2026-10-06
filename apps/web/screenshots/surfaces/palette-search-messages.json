@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "fixture": "thread-states",
+  "steps": [
+    "key:ControlOrMeta+k",
+    "type:canonical"
+  ],
+  "wait": "palette-group=messages-search",
+  "widths": [
+    1440
+  ],
+  "reason": "The palette is a popup capped at 576px, the same at every desktop width. Judged against the mockup's 1440 render; its narrow form is not in the design's reading.",
+  "settleMs": 700
+}
