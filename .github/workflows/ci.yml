@@ -36,6 +36,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - name: The pull request's body names its ticket and carries no footer
+        if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/land/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/pr-body-check.mjs
       # The host spawns the daemon for this computer's own workspace and the command line package carries it, so the
       # build and the suite both want the one Linux binary this runner runs before anything of node's is built.
       - name: Toolchain from rust-toolchain.toml

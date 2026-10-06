@@ -265,8 +265,9 @@ section's tiles: the head and everything above it stay where they are.
 
 The hairline is the one divider the app draws inside a list, an exception to
 the no-rule law below that the owner asked for on 2026-09-28. It lives in the
-sidebar's section heads and nowhere else: no rule under a Settings header,
-none between rows or tiles.
+sidebar's section heads and in no other list: no rule under a Settings header,
+none between tiles. The settings card's hairlines between its rows are the
+other exception, and the don'ts list below names every line that may stand.
 
 ### The sidebar's corner
 
@@ -373,13 +374,18 @@ Each is the owner's ruling of the date given, stated as a rule. This list is
 the one home of a ruling; where Patterns or Components restate one for reading
 in place, this list decides.
 
-- No bullet or middle dot between pieces of text (2026-09-26). Facts sit 12px
-  apart or take a layout: `project @ computer`, `12 threads   9.4 GB`.
+- No bullet, middle dot, pipe or other separator character between pieces of
+  text (2026-09-26). Spacing separates: facts sit 12px apart or take a
+  layout, `project @ computer`, `12 threads   9.4 GB`.
 - No separator that does no work: no hairline between tiles or rows, no rule
   under every header, no box where spacing groups things (2026-09-26). A line
   stays only at the sidebar's edge, the panel's edge, the composer's frame, a
-  popover's search row and Add row, the settings search field, and the
-  settings card's edge and the hairlines between its rows (2026-10-01).
+  popover's search row and Add row, the settings search field, the settings
+  card's edge and the hairlines between its rows (2026-10-01), and the
+  sidebar section head's hairline (2026-09-28). The settings card's row rule
+  (`[&>*+*]:border-t border-border/50`) belongs to that card and the dialogs
+  built from it; any other card, such as the changed-files card under a
+  reply, separates its parts by space, whatever another design note shows.
 - Never label a location "this Mac" or "this computer"; every computer has a
   name, so show it (2026-09-26).
 - No chip, pill, badge or dot standing for a state (a standing rule, restated
