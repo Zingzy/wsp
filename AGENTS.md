@@ -59,6 +59,17 @@ and the skill row in one change. The check is
 pnpm exec vitest run --minWorkers=1 --maxWorkers=2 packages/host/test/parity.test.ts packages/host/test/skill.test.ts packages/host/test/contract.test.ts
 ```
 
+## Before a branch is called ready
+
+`scripts/test-files.sh <file>...` runs the named tests with memory and
+stub-script at two workers and refuses a run naming no file; `--tools` adds
+the tool record. `pnpm check:laws` runs the tests that read the whole tree.
+`scripts/pre-review.sh [<ticket>]` is the last command before a branch is
+called ready: one commit on origin/main, the hooks' rules, the laws, the
+touched tests and their red proof on the merge-base, and the ticket's lines
+to answer; `--build` builds the packages first. `scripts/heavy.sh <command>`
+queues heavy runs into two slots on a Mac.
+
 ## Glossary
 
 The words to use in code and to people. This list is the target; `packages/protocol/test/person-words.test.ts`
