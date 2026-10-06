@@ -18,7 +18,7 @@ import { isProjectHomeKey } from "../../protocol/store";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { agentName } from "@wsp/catalog";
 import { agentStartingLine, isSessionEvent } from "@wsp/protocol";
-import type { AttachmentRecord, SessionEvent, SessionHarness, SessionStartingEvent, SessionRunEvent, SessionView } from "@wsp/protocol";
+import type { AttachmentRecord, SessionEvent, SessionHarness, SessionHeldEvent, SessionStartingEvent, SessionRunEvent, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { Api, ProtocolEvent } from "../../protocol/client";
 import { createSessionFold } from "../../adapt/session";
@@ -120,8 +120,9 @@ export interface ThreadState {
   readonly pendingPrompt: Kept | null;
   readonly localErrors: ReadonlyArray<{ message: string; at: string }>;
   readonly fresh: boolean;
-  /** A send in flight, with the turn that had settled when it began, until its session.start lands or a reload rebuilds this. */
-  readonly sending: { readonly after: string | undefined } | null;
+  /** A send in flight, with the turn that had settled when it began and, once the host held one for it, the thread it
+   * runs on, until its session.start lands or a reload rebuilds this. */
+  readonly sending: { readonly after: string | undefined; readonly thread?: string } | null;
   /** Every thread id the history reply carried, this view or the one before it in this workspace held, or the wire showed and this view dropped; while fresh, an event from none of them is the person's own send. */
   readonly known: ReadonlyArray<string>;
   /** The last send's start once it landed: the key its rows waited under (the thread id the view held or was pinned to, or the workspace id without one) and the thread the start carried. Null from the send until then, and after a send that settled without a start. */
@@ -305,11 +306,15 @@ function foldTo(s: ThreadState, events: ReadonlyArray<SessionEvent>, threadId: s
   return shownThread(s, threadId) ?? openedThread(s, events) ?? shown;
 }
 
-/** The thread a send from a view showing none opened, as a reply shows it: the one whose start carries the sent prompt, else one the view never knew with no start at all, its harness dead before init. */
+/** The thread a send from a view showing none opened, as a reply shows it: the one whose start carries the sent prompt,
+ * else the one the host held for the send, its harness dead before init. A thread with no start the host never held
+ * for this send is an older one stopped before its own start, which a view that has read no history cannot tell from
+ * a new one by its id. */
 function openedThread(s: ThreadState, events: ReadonlyArray<SessionEvent>): string | undefined {
   const start = events.find(e => startsSend(s, e));
   if (start !== undefined) return start.threadId;
-  return threadIds(events).findLast(id => !s.known.includes(id) && !events.some(e => e.type === "session.start" && e.threadId === id));
+  const held = s.sending?.thread;
+  return held !== undefined && events.some(e => e.threadId === held) ? held : undefined;
 }
 
 /**
@@ -386,11 +391,20 @@ function startsSend(state: ThreadState, e: SessionEvent): boolean {
   return state.sending !== null && state.pendingPrompt !== null && unknownThread(state, e) && startOf(state.pendingPrompt, e);
 }
 
-/** An event of the send in flight on a view showing no thread: its own start, or the done and end of a thread the view never knew, its harness dying before it could start. A start with another prompt, a delta or a steer is another client's thread. */
+/** An event of the send in flight on a view showing no thread: its own start, or the done and end of the thread the
+ * host held for it, else of a thread the view never knew, its harness dying before it could start. A start with
+ * another prompt, a delta or a steer is another client's thread. */
 function sentEvent(state: ThreadState, e: SessionEvent): boolean {
   if (state.sending === null) return false;
   if (e.type === "session.start") return startsSend(state, e);
-  return (e.type === "session.done" || e.type === "session.end") && unknownThread(state, e);
+  if (e.type !== "session.done" && e.type !== "session.end") return false;
+  return state.sending.thread === undefined ? unknownThread(state, e) : e.threadId === state.sending.thread;
+}
+
+/** The thread the host held for the send in flight, by the request id the send carried; any other hold is another send's. */
+export function heldForSend(state: ThreadState, e: SessionHeldEvent): ThreadState {
+  if (state.sending === null || e.requestId === undefined || state.pendingPrompt?.requestId !== e.requestId) return state;
+  return { ...state, sending: { ...state.sending, thread: e.threadId } };
 }
 
 /**
@@ -751,6 +765,11 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     (e: ProtocolEvent) => {
       if (e.type === "thread.rewound" && e.workspaceId === workspaceId) {
         if (!heldRef.current) setRewinds(n => n + 1);
+        return;
+      }
+      // Taken before the reply is in: a hold is no row, and no reply carries one.
+      if (e.type === "session.held") {
+        if (e.workspaceId === workspaceId) setState(s => heldForSend(s, e));
         return;
       }
       if (hydratedRef.current !== viewKey) return;
