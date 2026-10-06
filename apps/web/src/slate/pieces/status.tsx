@@ -16,7 +16,7 @@ export const status: PieceView = {
     const toned = tone !== "default" && tone !== "muted";
     return (
       <span data-slate-status={tone} className={cn("inline-flex min-w-0 text-[13px] leading-5", toned ? cn(TONE_INK[tone], "font-medium") : "text-muted-foreground")}>
-        <span className="truncate">{capitalised(str(props["value"]) ?? "")}</span>
+        <span className="min-w-0 break-words">{capitalised(str(props["value"]) ?? "")}</span>
       </span>
     );
   },

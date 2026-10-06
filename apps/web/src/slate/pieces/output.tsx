@@ -78,14 +78,14 @@ export const output: PieceView = {
     return (
       <div data-slate-output={run} className={cn("flex min-w-0 flex-col [&>*+*]:border-t [&>*+*]:border-border/50", place === "page" && CARD_SURFACE)}>
         <div className={cn("flex min-h-11 min-w-0 items-center gap-3 py-3", inset)}>
-          {label === undefined ? null : <span className="min-w-0 truncate text-sm leading-5 text-foreground">{label}</span>}
+          {label === undefined ? null : <span className="min-w-0 break-words text-sm leading-5 text-foreground">{label}</span>}
           <span className="flex-1" />
           <span data-slate-run-state={state} className={cn("inline-flex shrink-0 items-center gap-1.5 text-[13px] leading-5 whitespace-nowrap", refreshing ? "text-muted-foreground" : RUN_INK[state], state === "failed" || state === "held" ? "font-medium" : "")}>
             {running ? <Crab className="text-status-working" /> : null}
             {refreshing ? <Refreshing /> : RUN_WORDS[state]}
           </span>
           {stale ? (
-            <span data-slate-stale className="min-w-0 truncate text-[13px] text-muted-foreground">
+            <span data-slate-stale className="min-w-0 break-words text-[13px] text-muted-foreground">
               from before the command changed
             </span>
           ) : null}

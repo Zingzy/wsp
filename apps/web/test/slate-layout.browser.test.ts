@@ -5,6 +5,7 @@
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
+import { LONG } from "./slate-render/cases";
 import { serveHarness, type Harness } from "./slate-render/serve";
 
 if (renderSkipped !== undefined) console.info(`slate layout render test skipped: ${renderSkipped}`);
@@ -58,6 +59,20 @@ describe.skipIf(renderSkipped !== undefined)("the slate's layout in Chromium", (
       return { note: toggle !== null && at(document.querySelector('[data-slate-piece="procs"] [data-slate-section-note]')!) === toggle, name: open !== null && at(name) === open };
     });
     expect(hits).toEqual({ note: true, name: true });
+    await page.close();
+  });
+
+  it("cuts nothing in a bar's name, a status, a chip or an output's label: each wraps and keeps every word", async () => {
+    const page = await open("long-words");
+    const shown = await page.evaluate(long =>
+      ["bars", "status", "chip", "output"].map(id => {
+        const text = [...document.querySelectorAll(`[data-slate-piece="${id}"] *`)].filter(e => e.textContent === long).at(-1) as HTMLElement | undefined;
+        if (text === undefined) return { id, found: false };
+        const line = parseFloat(getComputedStyle(text).lineHeight);
+        return { id, found: true, cut: text.scrollWidth > text.clientWidth + 1, wraps: text.getBoundingClientRect().height > line * 1.5 };
+      }),
+    LONG);
+    expect(shown).toEqual(["bars", "status", "chip", "output"].map(id => ({ id, found: true, cut: false, wraps: true })));
     await page.close();
   });
 
