@@ -763,6 +763,25 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
     );
     snoozeTimers.set(threadId, cancel);
   };
+  /** The timer of each Resume at reset still armed, by fold key. */
+  const resumeTimers = new Map<string, () => void>();
+  /** Arms the timer of a thread's Resume at reset, over any it had; a reset already past goes on at once. A timer
+   * longer than setTimeout holds is re-armed on the way, and one finding the arm moved or gone does nothing. */
+  const resumeOnReset = (threadId: string, at: number): void => {
+    resumeTimers.get(threadId)?.();
+    resumeTimers.delete(threadId);
+    const cancel = clock.schedule(
+      () => {
+        resumeTimers.delete(threadId);
+        if (threadRecords.get(threadId)?.limitResume?.at !== at) return;
+        if (clock.now() < at) resumeOnReset(threadId, at);
+        else void ctx.resumeAfterLimit(threadId).catch((e: unknown) => console.warn(`thread ${threadWord(threadId)} did not resume at its reset: ${e instanceof Error ? e.message : String(e)}`));
+      },
+      Math.min(Math.max(at - clock.now(), 0), MAX_TIMER_MS),
+      { unref: true },
+    );
+    resumeTimers.set(threadId, cancel);
+  };
   /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
    * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
    * takes the row, since a restart could re-open nothing from it. */
@@ -808,7 +827,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
     opts, backend, store, adapters, local, placeDoor, bus, goneConfirmMs, lateReadMs, clock, githubCache, readsState,
     tookTheResume, sleeps, daemonHelloTimeoutMs, vaultCapBytes, defaultIdleWindowMs, hostId, vaultExport, imageMovePlan,
     deviceDoor, threadLaunch, landing, live, projectsHeld, setups, builders, gone, preparing, copyBuilds, stageAt,
-    copyRows, rowSaysFailure, placeAway, frameStopped, threadRecords, snoozeTimers, wakeAt, sessions, execs,
+    copyRows, rowSaysFailure, placeAway, frameStopped, threadRecords, snoozeTimers, wakeAt, resumeTimers, resumeOnReset, sessions, execs,
     indexFlushes, transcripts, rows, unreadIndexes, pendingEvents, pendingBytes, transcriptIndex, indexFor,
     transcriptBytes, sizeOf, places,
     state: {
@@ -1033,6 +1052,8 @@ function runtimeOf(ctx: RuntimeContext): Runtime {
       ctx.graceTimers.clear();
       for (const cancel of snoozeTimers.values()) cancel();
       snoozeTimers.clear();
+      for (const cancel of ctx.resumeTimers.values()) cancel();
+      ctx.resumeTimers.clear();
       for (const entry of live.values()) entry.prPoll?.();
       gone.close();
       await ctx.state.ticking;

@@ -350,7 +350,8 @@ export function hourOf(at: number, timeZone?: string): number {
   return Number(hour) % 24;
 }
 
-/** When a window starts again, as a row's quiet word: minutes under an hour, hours under a day, then the weekday. */
+/** When a window starts again, as a row's quiet word: minutes under an hour, hours under a day, then the weekday. The
+ * one formatter for a reset wherever it shows: the Usage page's meters, the limit strip's fact and the armed tile. */
 export function resetsWord(resetsAt: number, now: number, timeZone?: string): string {
   const left = resetsAt - now;
   if (left <= 0) return "reset";
@@ -397,4 +398,38 @@ export function windowCell(w: LimitWindow, now: number, timeZone?: string): stri
 /** An account row's state cell: limit reached where the agent said so, else the note that says why it has no windows. */
 export function accountState(row: Pick<AccountRow, "status" | "note">): string {
   return row.status === "reached" ? USAGE_WORDS.reached : (row.note ?? "");
+}
+
+/** A turn an agent's usage limit stopped: the agent said it may not run more now, and when its plan starts again
+ * where it said that too, ms epoch. Read off the readings the adapters already take, never off the agent's words. */
+export const TurnLimit = z.object({ resetsAt: z.number().optional() });
+export type TurnLimit = z.infer<typeof TurnLimit>;
+
+/** Every sentence a turn stopped by a usage limit carries, in the thread, on its tile and in the timeline. */
+export const LIMIT_WORDS = {
+  /** The strip's title while the turn stands stopped. */
+  reached: "Usage limit reached",
+  /** The strip's title once Resume at reset is armed. */
+  resuming: "Resumes at the reset",
+  /** The tile's state word, in the warning ink the Usage page reads a reached limit in. */
+  tile: "At limit",
+  /** Under the title: the agent stopped this turn, and whether it said when it can go on. */
+  stopped: (agent: string): string => `${agent} stopped this turn until its plan resets.`,
+  stoppedUnknown: (agent: string): string => `${agent} stopped this turn and did not say when its plan resets.`,
+  armed: (agent: string): string => `${agent} goes on with this turn when its plan resets.`,
+  resume: "Resume at reset",
+  cancel: "Cancel",
+  /** The timeline's record of the turn going on, in the runtime notice's mono; the fold above it says when. */
+  resumed: "resumed at the reset",
+} as const;
+
+/** What Resume at reset hands the agent at the reset. Nobody typed it, so no client draws it as a message; the
+ * timeline's notice line stands for it. */
+export const LIMIT_RESUME_PROMPT = "Your usage limit has reset. Go on with the task you were working on when it stopped you.";
+
+/** The reset a plan's latest reading still holds the agent behind at `now`: the last of the windows at or past their
+ * cap that have not started again yet. Undefined where none is, which is a plan the agent may run on. */
+export function heldUntil(windows: readonly LimitWindow[], now: number): number | undefined {
+  const held = windows.filter(w => w.usedPercent >= 100 && w.resetsAt !== undefined && w.resetsAt > now).map(w => w.resetsAt!);
+  return held.length === 0 ? undefined : Math.max(...held);
 }

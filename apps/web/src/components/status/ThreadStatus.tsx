@@ -9,6 +9,7 @@ import { Crab } from "./Crab.js";
 import type { StatusKind, ThreadStatusInput } from "./kinds/index.js";
 import { RESTING } from "./kinds/resting.js";
 import { threadStatusOf } from "./threadStatusOf.js";
+import { useMinuteClock } from "./useMinuteClock.js";
 import { WorkingSince } from "./WorkingSince.js";
 
 /** The slot in a one-line row: 88px, right-aligned, 12px, so times and words line up down a list. */
@@ -53,9 +54,15 @@ export function ThreadStatus({
         glyph
       )}
       {kind.word !== undefined && <span data-status-word className={kind.timed || kind.glyphOnly ? "sr-only" : undefined}>{kind.word}</span>}
+      {kind.wordOf !== undefined && <TickingWord word={now => kind.wordOf!(thread, now)} />}
       {kind.timed && <WorkingSince since={thread.startedAt} />}
       {kind.aged && age !== undefined && <span>{age}</span>}
       {crab && kind.crab && <Crab />}
     </span>
   );
+}
+
+/** A word read off the minute clock, so a reset's "resets in 14 min" moves while it stands. */
+function TickingWord({ word }: { word: (now: number) => string }) {
+  return <span>{word(useMinuteClock())}</span>;
 }

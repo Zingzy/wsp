@@ -7,7 +7,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { installFakeLayout } from "./fake-layout.js";
 import type { EventUnion, HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
-import { QUESTION_TOOL, pickedOptionId, questionOptions } from "@wsp/protocol";
+import { QUESTION_TOOL, USAGE_WORDS, pickedOptionId, questionOptions } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
@@ -242,6 +242,17 @@ describe("ChatView", () => {
     expect(rows.filter(row => row.textContent?.includes(words))).toHaveLength(1);
     expect(screen.queryByTestId("settled-footer")).toBeNull();
     expect(document.querySelector("[data-chat-view]")!.textContent).not.toMatch(/\bfailed\b/);
+  });
+
+  it("a turn a usage limit stopped says limit reached under it, and no row repeats the agent's words", async () => {
+    const words = "You've hit your usage limit. Try again at 1:13 PM.";
+    const { api, emit } = fixtureApi([workspace]);
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "hi" });
+    emit({ type: "session.done", ...scope, result: { status: "failed", error: words, durationMs: 300, limit: { resetsAt: Date.now() + 3_600_000 } } });
+    emit({ type: "session.end", ...scope, exitCode: 1, sawResult: true });
+    expect(screen.getByTestId("settled-footer").textContent).toBe(USAGE_WORDS.reached);
+    expect(document.querySelector("[data-chat-view]")!.textContent).not.toContain(words);
   });
 
   it("a turn that fails with no words of its own says failed once, and no row stands in for the words", async () => {

@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { openingTitle, titleLine } from "../format.js";
 import { threadNeedsYou } from "../thread-state.js";
+import { TurnLimit } from "../usage.js";
 import { permissionPrompt } from "../wire/helpers.js";
 
 export const SessionStatus = z.enum(["running", "completed", "interrupted", "failed"]);
@@ -62,9 +63,9 @@ export const ThreadPlacement = z.object({ name: ThreadSection, whileState: z.str
 export type ThreadPlacement = z.infer<typeof ThreadPlacement>;
 
 /** What sessions.mark moves on a thread: a pin set or taken off, a snooze set until a moment or taken off, a
- * placement set or taken off. A field left out is left as it is. */
+ * placement set or taken off, Resume at reset armed or cancelled. A field left out is left as it is. */
 export const ThreadMarks = z
-  .object({ pinned: z.boolean().optional(), snoozedUntil: z.number().nullable().optional(), section: ThreadPlacement.nullable().optional() })
+  .object({ pinned: z.boolean().optional(), snoozedUntil: z.number().nullable().optional(), section: ThreadPlacement.nullable().optional(), resumeAtReset: z.boolean().optional() })
   .strict();
 export type ThreadMarks = z.infer<typeof ThreadMarks>;
 
@@ -127,6 +128,11 @@ export const SessionView = z.object({
    * turn did none of the work it was asked for, so a row carrying this is a turn that ran nothing. Absent on every
    * turn the agent worked on, however it ended. */
   refusal: TurnRefusal.optional(),
+  /** The usage limit that stopped this turn, off its own result; absent on every turn that ended another way. */
+  limit: TurnLimit.optional(),
+  /** The reset this turn is armed to go on at, ms epoch, where the person pressed Resume at reset; kept on the row
+   * so it survives a restart, and cleared when the turn goes on, is cancelled, or the thread moves on without it. */
+  resumeAt: z.number().optional(),
   /** What the turns that ran on this row have cost together, as each result reported it; absent where no turn of it
    * has ended and on a harness that reports no figure, which is not the same as nothing spent. It rides the row so
    * a listing can say what a thread spent without anyone reading its transcript. */
@@ -219,6 +225,9 @@ export const ThreadView = z.object({
   waitingOn: ThreadWaitingOn.optional(),
   /** Why the latest turn's agent cannot start or read its own store there now, as SessionView.setupRefusal carries it. */
   setupRefusal: z.string().optional(),
+  /** The usage limit that stopped the latest turn, and the reset it is armed to go on at, as SessionView carries them. */
+  limit: TurnLimit.optional(),
+  resumeAt: z.number().optional(),
   /** What this thread has cost: its rows' figures added up. Absent where no row of it carries one. */
   costUsd: z.number().optional(),
   /** The latest turn's process on the computer the host runs on, as SessionView.pid carries it. */
@@ -285,6 +294,8 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.asking !== undefined ? { asking: latest.asking } : {}),
       ...(latest.waitingOn !== undefined ? { waitingOn: latest.waitingOn } : {}),
       ...(latest.setupRefusal !== undefined ? { setupRefusal: latest.setupRefusal } : {}),
+      ...(latest.limit !== undefined ? { limit: latest.limit } : {}),
+      ...(latest.resumeAt !== undefined ? { resumeAt: latest.resumeAt } : {}),
       ...(latest.pid !== undefined ? { pid: latest.pid } : {}),
       ...(latest.readAt !== undefined ? { readAt: latest.readAt } : {}),
       ...(latest.settledAt !== undefined ? { settledAt: latest.settledAt } : {}),

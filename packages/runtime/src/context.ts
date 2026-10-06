@@ -208,6 +208,8 @@ export interface RuntimeCore {
   readonly threadRecords: Map<string, ThreadRecord & { workspaceId: string }>;
   readonly snoozeTimers: Map<string, () => void>;
   readonly wakeAt: (threadId: string, until: number) => void;
+  readonly resumeTimers: Map<string, () => void>;
+  readonly resumeOnReset: (threadId: string, at: number) => void;
   readonly sessions: Map<string, SessionEntry>;
   readonly execs: Set<{ workspaceId: string; end: (reason: string) => void }>;
   readonly indexFlushes: Map<string, Promise<void>>;
@@ -454,6 +456,8 @@ export interface BootArea {
   readonly pushHead: (threadId: string) => void;
   readonly mark: (threadIds: readonly string[], stamps: Partial<Omit<ThreadRecord, "harness" | "permissionMode">>, origin: Caller | undefined) => Promise<void>;
   readonly endSnoozeFor: (row: Pick<SessionView, "threadId" | "rootThreadId">) => void;
+  readonly armResume: (threadIds: readonly string[], on: boolean, origin: Caller | undefined) => Promise<void>;
+  readonly resumeAfterLimit: (threadId: string) => Promise<void>;
   readonly treeStandsOn: (workspaceId: string, caller: Caller | undefined) => boolean;
   readonly computerRows: () => Promise<{ id: string; name: string }[]>;
   readonly nameOfComputer: (computer: string, rows: readonly { id: string; name: string }[]) => string;
@@ -599,7 +603,7 @@ export interface TurnsArea {
     scopeDeviceId?: string;
     outcome: SessionStartOutcome;
     /** What this turn's own session.start row carries, for the road that still has to write it. */
-    opening: { prompt: string; requestId?: string; via?: "slate"; afterCut?: boolean; opensThread?: boolean; title?: string; attachments?: readonly AttachmentRecord[] };
+    opening: { prompt: string; requestId?: string; via?: "slate"; afterCut?: boolean; afterLimit?: number; opensThread?: boolean; title?: string; attachments?: readonly AttachmentRecord[] };
     /** The message the agent is handed and the effort it runs at, kept beside the run while the turn runs. */
     asked?: TurnAsked;
     /** The harness session this turn resumes, so the row it takes over keeps who opened the thread and with what. */
