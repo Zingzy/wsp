@@ -56,7 +56,18 @@ machineId?: string, } | { "op": "pty.list",
  * The workspace whose ptys are listed, as on pty.create above: with one, that workspace's alone, and
  * without one, this daemon's own alone.
  */
-machineId?: string, } | { "op": "ports.watch" } | { "op": "manifest.get" } | { "op": "manifest.record", cmd: string, cwd: string, port?: number, } | { "op": "manifest.restartScript" } | { "op": "inbox.watch" } | { "op": "inbox.rescan" } | { "op": "sys.watch" } | { "op": "sys.history", from: number, to: number, stepMs: number, } | { "op": "proc.watch" } | { "op": "proc.unwatch" } | { "op": "proc.inspect", pid: number, } | { "op": "proc.kill", pid: number, signal: ProcSignal, } | { "op": "ping" } | { "op": "fs.list", path: string, gitignore?: boolean, 
+machineId?: string, } | { "op": "ports.watch", 
+/**
+ * The processes whose listeners are this socket's: each one's process group, and every process under it.
+ * A watch that names none sees every listener on the machine, which is what the host's own watchers ask
+ * for. A second watch on the socket names the set again.
+ */
+roots?: Array<number>, 
+/**
+ * With roots, the workspace's folder: a process running in it is the workspace's too, a server started
+ * with setsid among them.
+ */
+folder?: string, } | { "op": "manifest.get" } | { "op": "manifest.record", cmd: string, cwd: string, port?: number, } | { "op": "manifest.restartScript" } | { "op": "inbox.watch" } | { "op": "inbox.rescan" } | { "op": "sys.watch" } | { "op": "sys.history", from: number, to: number, stepMs: number, } | { "op": "proc.watch" } | { "op": "proc.unwatch" } | { "op": "proc.inspect", pid: number, } | { "op": "proc.kill", pid: number, signal: ProcSignal, } | { "op": "ping" } | { "op": "fs.list", path: string, gitignore?: boolean, 
 /**
  * The workspace this frame is for, on a daemon that runs workspaces: the path then names the folder as
  * that workspace sees it, and the operation is answered inside it. Without one the path is resolved under

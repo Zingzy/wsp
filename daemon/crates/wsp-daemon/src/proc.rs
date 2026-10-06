@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Every process on the machine as proc.snapshot events. The sampler holds the clock, the subscribers and the last
-//! scan; what a machine of one kind is read with is its own module behind ProcSource, registered in readings.rs.
+//! Every process on the machine as proc.snapshot and proc.changes events: a watching socket's first frame is the
+//! whole list, every later one what moved since the frame before. The sampler holds the clock, the subscribers and
+//! the last scan; what a machine of one kind is read with is its own module behind ProcSource, registered in readings.rs.
 //! The module here is the guest's: straight from /proc, one stat file per pid per tick, cmdline only when a pid is
 //! new or exec'd, the uid from the pid directory's owner. One sampler per daemon; the first subscriber starts it
 //! and the last one leaving stops it. Inspecting one pid is the only path that touches /proc/net.
@@ -34,6 +35,7 @@ pub(crate) struct ProcStat {
     pub(crate) comm: String,
     pub(crate) state: String,
     pub(crate) ppid: u32,
+    pub(crate) pgrp: u32,
     /// utime plus stime, in ticks.
     pub(crate) ticks: u64,
     pub(crate) threads: u32,
@@ -55,6 +57,7 @@ pub(crate) fn parse_proc_pid_stat(text: &str) -> Result<ProcStat, String> {
         comm: text[open + 1..close].to_owned(),
         state: f.first().map_or("?", |s| *s).to_owned(),
         ppid: u32::try_from(n(1)?).map_err(|_| malformed())?,
+        pgrp: u32::try_from(n(2)?).map_err(|_| malformed())?,
         ticks: n(11)? + n(12)?,
         threads: u32::try_from(n(17)?).map_err(|_| malformed())?,
         starttime: n(19)?,
@@ -313,6 +316,9 @@ pub(crate) struct ProcSamplerOptions {
     /// The daemon's own pid, named in every snapshot.
     pub(crate) self_pid: u32,
     pub(crate) ptys: PtyPids,
+    /// From the cpu baseline to the first snapshot.
+    pub(crate) first: Duration,
+    /// Between every snapshot after it.
     pub(crate) interval: Duration,
     pub(crate) now: Clock,
     pub(crate) log: SharedLog,
@@ -326,6 +332,29 @@ struct Inner {
     last_procs: Vec<ProcEntry>,
     /// What the last tick said, so a watch that arrives mid-stream inherits it; None until one has finished.
     last: Option<Result<(), String>>,
+    /// The list every subscriber holds, which the next frame's changes are read against; None until the first
+    /// snapshot after a start.
+    sent: Option<Sent>,
+    /// The seq of the last frame sent, counted for as long as the daemon runs.
+    seq: u64,
+    /// The subscribers that watched again, each of which is sent a whole snapshot in place of the next changes.
+    owed: HashSet<u64>,
+}
+
+struct Sent {
+    seq: u64,
+    at: i64,
+    total: u64,
+    procs: Vec<ProcEntry>,
+}
+
+/// The rows of `now` that are new or differ from `before`, and the pids of `before` that `now` no longer lists.
+fn changes(before: &[ProcEntry], now: &[ProcEntry]) -> (Vec<ProcEntry>, Vec<u32>) {
+    let held: HashMap<u32, &ProcEntry> = before.iter().map(|p| (p.pid, p)).collect();
+    let listed: HashSet<u32> = now.iter().map(|p| p.pid).collect();
+    let moved = now.iter().filter(|p| held.get(&p.pid) != Some(p)).cloned().collect();
+    let gone = before.iter().map(|p| p.pid).filter(|pid| !listed.contains(pid)).collect();
+    (moved, gone)
 }
 
 pub(crate) struct ProcSampler {
@@ -336,7 +365,7 @@ pub(crate) struct ProcSampler {
 
 impl ProcSampler {
     pub(crate) fn new(source: Arc<dyn ProcSource>, opts: ProcSamplerOptions) -> Arc<ProcSampler> {
-        let opts = ProcSamplerOptions { interval: crate::sys::tick_of(opts.interval), ..opts };
+        let opts = ProcSamplerOptions { first: crate::sys::tick_of(opts.first), interval: crate::sys::tick_of(opts.interval), ..opts };
         Arc::new(ProcSampler { source, opts, inner: Mutex::new(Inner::default()) })
     }
 
@@ -349,11 +378,31 @@ impl ProcSampler {
         self.lock().running.is_some()
     }
 
+    /// A socket joining a stream already under way is sent the list the others hold, so the changes after it read
+    /// against the same rows for everyone.
     pub(crate) fn subscribe(self: &Arc<Self>, key: u64, out: Outbound) {
         let mut inner = self.lock();
+        if let Some(sent) = &inner.sent {
+            let snapshot = DaemonEvent::ProcSnapshot {
+                at: sent.at,
+                daemon: self.opts.self_pid,
+                total: sent.total,
+                procs: sent.procs.clone(),
+                seq: Some(sent.seq),
+            };
+            out.send_text(&frame_text(&snapshot));
+        }
         inner.subscribers.insert(key, out);
         if inner.subscribers.len() == 1 {
             self.start(&mut inner);
+        }
+    }
+
+    /// A watcher that missed a frame watches again: its next frame is whole, and the changes after it apply on it.
+    pub(crate) fn resend(&self, key: u64) {
+        let mut inner = self.lock();
+        if inner.subscribers.contains_key(&key) {
+            inner.owed.insert(key);
         }
     }
 
@@ -366,7 +415,7 @@ impl ProcSampler {
 
     /// One scan before a watch is taken, so a module that cannot read this machine refuses the op instead of leaving
     /// the pane at pending for a stream that never comes. Its reading is thrown away: cpu is a delta, so the first
-    /// snapshot still lands one interval after the reply. A sampler already polling scans every interval anyway, so a
+    /// snapshot still lands `first` after the reply. A sampler already polling scans every interval anyway, so a
     /// second watcher inherits what the last tick said rather than paying for a scan of its own, which would also run
     /// beside that tick and leave the module's per pid state read from two clocks.
     pub(crate) async fn probe(&self) -> Result<(), OpError> {
@@ -412,11 +461,22 @@ impl ProcSampler {
         if first {
             return;
         }
-        let snapshot = DaemonEvent::ProcSnapshot { at, daemon: self.opts.self_pid, total: scan.total, procs: scan.procs };
-        let text = frame_text(&snapshot);
-        for out in inner.subscribers.values() {
-            out.send_text(&text);
+        let daemon = self.opts.self_pid;
+        let seq = inner.seq + 1;
+        inner.seq = seq;
+        let whole = frame_text(&DaemonEvent::ProcSnapshot { at, daemon, total: scan.total, procs: scan.procs.clone(), seq: Some(seq) });
+        let moved = inner.sent.as_ref().map(|sent| {
+            let (procs, gone) = changes(&sent.procs, &scan.procs);
+            frame_text(&DaemonEvent::ProcChanges { at, daemon, total: scan.total, procs, gone, seq, base: sent.seq })
+        });
+        let owed = std::mem::take(&mut inner.owed);
+        for (key, out) in &inner.subscribers {
+            match &moved {
+                Some(moved) if !owed.contains(key) => out.send_text(moved),
+                _ => out.send_text(&whole),
+            };
         }
+        inner.sent = Some(Sent { seq, at, total: scan.total, procs: scan.procs });
     }
 
     pub(crate) async fn inspect(&self, pid: u32) -> Result<ProcInspectReply, OpError> {
@@ -437,8 +497,11 @@ impl ProcSampler {
             return;
         }
         inner.last_at = None;
+        inner.sent = None;
         let me = Arc::clone(self);
         let task = tokio::spawn(async move {
+            me.poll().await;
+            tokio::time::sleep(me.opts.first).await;
             let mut ticker = tokio::time::interval(me.opts.interval);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
@@ -457,6 +520,8 @@ impl ProcSampler {
         }
         inner.last_at = None;
         inner.last = None;
+        inner.sent = None;
+        inner.owed.clear();
     }
 }
 
@@ -517,6 +582,7 @@ mod tests {
                 comm: "my (odd) proc".into(),
                 state: "R".into(),
                 ppid: 7,
+                pgrp: 42,
                 ticks: 200,
                 threads: 3,
                 starttime: 12345,
@@ -589,6 +655,7 @@ mod tests {
             ProcSamplerOptions {
                 self_pid: 4242,
                 ptys: Arc::new(move || ptys.clone()),
+                first: Duration::from_secs(60),
                 interval: Duration::from_secs(60),
                 now: Arc::new(move || *now.0.lock().unwrap()),
                 log: quiet(),
@@ -624,6 +691,7 @@ mod tests {
         let opts = ProcSamplerOptions {
             self_pid: 1,
             ptys: Arc::new(Vec::new),
+            first: Duration::from_secs(60),
             interval: Duration::from_secs(60),
             now: Arc::new(now_ms),
             log: quiet(),
@@ -651,8 +719,14 @@ mod tests {
     #[tokio::test]
     async fn a_zero_interval_reads_as_the_shortest_tick_and_never_ends_the_daemon() {
         let source = Arc::new(Fake { scans: AtomicUsize::new(0), broken: AtomicBool::new(false) });
-        let opts =
-            ProcSamplerOptions { self_pid: 1, ptys: Arc::new(Vec::new), interval: Duration::ZERO, now: Arc::new(now_ms), log: quiet() };
+        let opts = ProcSamplerOptions {
+            self_pid: 1,
+            ptys: Arc::new(Vec::new),
+            first: Duration::ZERO,
+            interval: Duration::ZERO,
+            now: Arc::new(now_ms),
+            log: quiet(),
+        };
         let s = ProcSampler::new(source.clone(), opts);
         let (tx, mut rx) = mpsc::unbounded_channel();
         s.subscribe(1, Outbound(tx));
@@ -761,11 +835,12 @@ mod tests {
         assert_eq!(first["procs"][0]["cmdline"].as_str().unwrap().len(), 200);
         assert!(first["procs"][0]["cmdline"].as_str().unwrap().starts_with("sh -c xxx"));
         assert_eq!(first["procs"][0]["rss"], json!(10 * 16384));
-        // The same pid, comm and start time: the cached cmdline stands even though the file changed underneath.
+        // The same pid, comm and start time: the cached cmdline stands even though the file changed underneath, so
+        // the row has not changed.
         std::fs::write(b.root.path().join("9/cmdline"), b"ignored\0").unwrap();
         b.advance(2_000);
         b.sampler.poll().await;
-        assert!(b.got().remove(0)["procs"][0]["cmdline"].as_str().unwrap().starts_with("sh -c"));
+        assert_eq!(b.got().remove(0)["procs"], json!([]));
         // An exec changes the comm; the cmdline is read afresh.
         write_proc(
             b.root.path(),
@@ -775,6 +850,82 @@ mod tests {
         b.sampler.poll().await;
         let third = b.got().remove(0);
         assert_eq!((&third["procs"][0]["comm"], &third["procs"][0]["cmdline"]), (&json!("node"), &json!("node app.js")));
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_after_one_changed_process_carries_only_that_change() {
+        let mut b = sampler(
+            &[
+                FakeProc { pid: 1, comm: Some("init".into()), rss: Some(300), ..FakeProc::default() },
+                FakeProc { pid: 77, ppid: Some(1), comm: Some("bash".into()), rss: Some(500), ..FakeProc::default() },
+                FakeProc { pid: 78, ppid: Some(1), comm: Some("sleep".into()), rss: Some(100), ..FakeProc::default() },
+            ],
+            vec![],
+            None,
+            4096,
+        );
+        b.sampler.poll().await;
+        b.advance(5_000);
+        b.sampler.poll().await;
+        let first = b.got();
+        assert_eq!((first.len(), &first[0]["type"]), (1, &json!("proc.snapshot")));
+        assert_eq!(first[0]["procs"].as_array().unwrap().len(), 3);
+
+        write_proc(b.root.path(), &FakeProc { pid: 77, ppid: Some(1), comm: Some("bash".into()), rss: Some(900), ..FakeProc::default() });
+        b.advance(5_000);
+        b.sampler.poll().await;
+        let changed = b.got();
+        assert_eq!(changed.len(), 1);
+        assert_eq!(
+            (&changed[0]["type"], &changed[0]["at"], &changed[0]["total"], &changed[0]["gone"]),
+            (&json!("proc.changes"), &json!(1_010_000), &json!(3), &json!([]))
+        );
+        assert_eq!(
+            changed[0]["procs"].as_array().unwrap().iter().map(|p| (p["pid"].clone(), p["rss"].clone())).collect::<Vec<_>>(),
+            [(json!(77), json!(900 * 4096))]
+        );
+
+        std::fs::remove_dir_all(b.root.path().join("78")).unwrap();
+        b.advance(5_000);
+        b.sampler.poll().await;
+        let gone = b.got();
+        assert_eq!(
+            (&gone[0]["type"], &gone[0]["procs"], &gone[0]["gone"], &gone[0]["total"]),
+            (&json!("proc.changes"), &json!([]), &json!([78]), &json!(2))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_socket_joining_mid_stream_is_sent_the_whole_list_at_once_and_the_same_changes_after() {
+        let mut b = sampler(
+            &[
+                FakeProc { pid: 1, comm: Some("init".into()), ..FakeProc::default() },
+                FakeProc { pid: 5, rss: Some(10), ..FakeProc::default() },
+            ],
+            vec![],
+            None,
+            4096,
+        );
+        b.sampler.poll().await;
+        b.advance(5_000);
+        b.sampler.poll().await;
+        b.got();
+        let (tx, mut joined) = mpsc::unbounded_channel();
+        b.sampler.subscribe(2, Outbound(tx));
+        let first: Value = serde_json::from_str(joined.try_recv().unwrap().text()).unwrap();
+        assert_eq!(
+            (&first["type"], &first["at"], first["procs"].as_array().unwrap().len()),
+            (&json!("proc.snapshot"), &json!(1_005_000), 2)
+        );
+        write_proc(b.root.path(), &FakeProc { pid: 5, rss: Some(20), ..FakeProc::default() });
+        b.advance(5_000);
+        b.sampler.poll().await;
+        let after: Value = serde_json::from_str(joined.try_recv().unwrap().text()).unwrap();
+        assert_eq!(b.got(), std::slice::from_ref(&after));
+        assert_eq!(
+            (&after["type"], &after["procs"][0]["pid"], after["procs"].as_array().unwrap().len()),
+            (&json!("proc.changes"), &json!(5), 1)
+        );
     }
 
     #[tokio::test]
