@@ -4,6 +4,7 @@
 // draws the report kept from the first while the new read runs, and a client
 // with no such read says so instead of waiting.
 import { FRESH_MS } from "../src/components/agents/useAgentsReport.js";
+import { StrictMode } from "react";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentsReport, AgentsTarget } from "@wsp/protocol";
@@ -61,6 +62,20 @@ describe("a report's read", () => {
     expect(skeleton()).toBeNull();
     await act(async () => answer({ ...AGENTS_REPORT, agents: [] }));
     expect(agentRows()).toHaveLength(0);
+  });
+
+  it("reads a target once for two panels mounted together, StrictMode's second mount included", async () => {
+    const reads: AgentsTarget[] = [];
+    useStore.setState({ api: { agentsRead: async (t: AgentsTarget) => (reads.push(t), AGENTS_REPORT) } as unknown as Api });
+    render(
+      <StrictMode>
+        <Read target={{ placeId: "p_spoo" }} />
+        <Read target={{ placeId: "p_spoo" }} />
+      </StrictMode>,
+    );
+    await settle();
+    expect(reads).toHaveLength(1);
+    expect(agentRows()).toHaveLength(8);
   });
 
   it("says a client with no such read cannot read, rather than standing a skeleton", async () => {
