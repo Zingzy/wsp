@@ -1,10 +1,4 @@
 {
-  "apps/web/screenshots/fixture-state.mjs": 1539,
-  "apps/web/src/components/chat/MessagesTimeline.tsx": 2041,
-  "apps/web/src/components/ChatMarkdown.tsx": 1942,
-  "apps/web/src/components/ComposerPromptEditor.tsx": 1509,
-  "apps/web/src/protocol/store.ts": 1691,
-  "apps/web/src/terminal/ghostty/surface.ts": 1995,
   "daemon/crates/wsp-daemon/src/git.rs": 2096,
   "daemon/crates/wsp-daemon/src/hosts/github.rs": 1922,
   "daemon/crates/wsp-daemon/src/ops.rs": 2263,
