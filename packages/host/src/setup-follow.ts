@@ -5,7 +5,7 @@
 // and waits on the person where it was not told to go on; the tool returns at
 // the first wait, the end or its ceiling, and is called again for the next.
 import { PlaceSetupEvent, PlaceStageEvent, PROVIDER_KEY_WORDS, usageRefusal, type AddLine, type PlaceView, type PlaceWait, type SetupEnd } from "@wsp/protocol";
-import type { HostClient } from "./verbs.js";
+import type { HostClient } from "./verbs/client.js";
 
 /** What has been heard of one add or setup so far. */
 export interface SetupWatch {

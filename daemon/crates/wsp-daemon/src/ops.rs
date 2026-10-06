@@ -233,17 +233,13 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
                 let profile = ctx.options.apparmor_profile.clone().unwrap_or_else(|| wsp_frames::numbers::WORKSPACE_APPARMOR_PATH.into());
                 let install = ctx.options.install_root.as_deref().map(|root| root.to_string_lossy().into_owned()).unwrap_or_default();
                 let swept = fs::blocking(move || {
+                    // The add's record of what stood before it sits in wsp's folder, which the home's sweep takes.
+                    let found = crate::place::place_found(&home);
                     let mut swept = crate::place::sweep_place_home(&home, &crate::place::sh_stdout);
-                    // Only root's install loaded the profile and only root's jobs install under the prefix, and only
+                    // Only root's install loaded the profile and only root's jobs install outside the home, and only
                     // root can take either off.
                     if nix::unistd::geteuid().is_root() {
-                        swept.extend(crate::place::sweep_workspace_profile(&profile, &crate::place::sh_stdout));
-                        // The list naming what the setup wrote outside the home sits in the prefix, so it is read first.
-                        swept.extend(crate::place::sweep_outside_home(&install));
-                        swept.extend(crate::place::sweep_tool_prefix(
-                            std::path::Path::new(&format!("{install}{}", wsp_frames::numbers::TOOL_PREFIX)),
-                            std::path::Path::new(&format!("{install}{}", wsp_frames::numbers::TOOL_LINKS_DIR)),
-                        ));
+                        swept.extend(crate::place::sweep_outside_owned(found.as_ref(), &profile, &install, &crate::place::sh_stdout));
                     }
                     Ok(swept)
                 })
@@ -1354,7 +1350,7 @@ mod tests {
         assert!(tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.is_ok(), "the server went while a session stood");
         reply(&b, &c, json!({"id": 3, "op": "tunnel.close", "tunnelId": "s1"})).await;
         tokio::time::sleep(Duration::from_millis(1200)).await;
-        assert!(tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.is_err(), "the server outlived its idle window");
+        assert!(!crate::ssh::tests::stand_in_runs(dir.path()), "the server outlived its idle window");
     }
 
     /// The dial is the op's to choose (this machine's loopback, or inside a fork); what the tunnel says back names

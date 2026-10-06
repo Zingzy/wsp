@@ -16,6 +16,9 @@ export const BUDGET_BYTES = 24 * 1024 * 1024;
 /** Said as the settings say an op the connection lacks; a view that meets it reads the whole history instead. */
 const CANNOT_PAGE = "This wsp cannot read a thread a page at a time from here.";
 export const BUDGET_THREADS = 16;
+/** Heads read for tiles at once: the host reads a transcript with synchronous sqlite calls on its one event loop, so a
+ * click's read waits behind every head already sent, and holding them to two keeps that wait short. */
+export const WARM_AT_ONCE = 2;
 /** What one event weighs beyond its text: its ids, stamps and keys, as the wire carries them. */
 const EVENT_OVERHEAD = 200;
 
@@ -167,6 +170,11 @@ export function createTranscripts(clock: () => number = Date.now) {
   /** Events of a thread whose first read is on its way, kept for the read to place against. */
   const waiting = new Map<string, SessionEvent[]>();
   const loading = new Map<string, Promise<void>>();
+  /** Tiles in view waiting for their head, oldest first, and the heads being read for tiles now. */
+  let toWarm = new Set<string>();
+  let warming = new Set<string>();
+  /** Reads for a thread being opened; while one is out no tile's head is asked for. */
+  let opening = 0;
   const paging = new Map<string, Promise<void>>();
   /** The newest position seen per workspace, off the bus or a reply. */
   const seen = new Map<string, number>();
@@ -261,6 +269,7 @@ export function createTranscripts(clock: () => number = Date.now) {
     const was = held.get(threadId);
     if (was !== undefined && was.whole && !was.stale) return Promise.resolve();
     const asked = generation;
+    opening += 1;
     const read = (async () => {
       const reset = was === undefined || was.stale === "reset";
       if (reset) waiting.set(threadId, []);
@@ -292,27 +301,44 @@ export function createTranscripts(clock: () => number = Date.now) {
     })().finally(() => {
       if (loading.get(threadId) === read) loading.delete(threadId);
       waiting.delete(threadId);
+      if (asked === generation) opening -= 1;
+      pump();
     });
     loading.set(threadId, read);
     return read;
   };
 
+  /** Starts the heads waiting for tiles in view, WARM_AT_ONCE at a time and none while a thread is being opened. */
+  const pump = (): void => {
+    for (const threadId of toWarm) {
+      if (warming.size >= WARM_AT_ONCE || opening > 0) return;
+      toWarm.delete(threadId);
+      if (held.has(threadId) || loading.has(threadId) || api?.sessionHead === undefined) continue;
+      const asked = generation;
+      const mine = warming;
+      mine.add(threadId);
+      waiting.set(threadId, []);
+      const read = headFor(threadId)
+        .then(head => {
+          if (asked !== generation || held.has(threadId)) return;
+          land(head.facts.workspaceId, threadId, head, false);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (loading.get(threadId) === read) loading.delete(threadId);
+          waiting.delete(threadId);
+          mine.delete(threadId);
+          if (asked === generation) pump();
+        });
+      loading.set(threadId, read);
+    }
+  };
+
   /** A head alone, for a tile in view: what a click on it draws in its first frame. */
   const warm = (threadId: string): void => {
     if (held.has(threadId) || loading.has(threadId) || api?.sessionHead === undefined) return;
-    const asked = generation;
-    waiting.set(threadId, []);
-    const read = headFor(threadId)
-      .then(head => {
-        if (asked !== generation || held.has(threadId)) return;
-        land(head.facts.workspaceId, threadId, head, false);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (loading.get(threadId) === read) loading.delete(threadId);
-        waiting.delete(threadId);
-      });
-    loading.set(threadId, read);
+    toWarm.add(threadId);
+    pump();
   };
 
   /** The page before the oldest event held; one at a time per thread, dropped if the thread was read again meanwhile. */
@@ -416,6 +442,9 @@ export function createTranscripts(clock: () => number = Date.now) {
       folds.clear();
       waiting.clear();
       loading.clear();
+      toWarm = new Set();
+      warming = new Set();
+      opening = 0;
       paging.clear();
       seen.clear();
       dropped = new WeakSet();
@@ -460,7 +489,10 @@ export function createTranscripts(clock: () => number = Date.now) {
     /** Which tiles are in view: a running thread among them is never cut. */
     see(threadId: string, inView: boolean): void {
       if (inView) visible.add(threadId);
-      else visible.delete(threadId);
+      else {
+        visible.delete(threadId);
+        toWarm.delete(threadId);
+      }
     },
     /** Whether the bus carried this event to a thread that already had it. */
     dropped: (e: SessionEvent): boolean => dropped.has(e),
