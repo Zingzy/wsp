@@ -6,20 +6,37 @@
 // flight (01-architecture, 02-model, 09-events). The slate module in @wsp/protocol parses, validates, runs the
 // batch's pure core and sketches; this file decides who may write, keeps the record, spawns and tells the windows.
 import {
+  notFoundRefusal,
+  roadOf,
+  SLATE_SEND_KEY,
+  scopeOf,
+  threadWord,
+  usageRefusal,
+  type Caller,
+  type SessionSlateEvent,
+  type SlateAsk,
+  type SlateBy,
+  type SlateCause,
+  type SlateEmpty,
+  type SlateEventAnswer,
+  type SlateReadAnswer,
+  type SlateRunEvent,
+  type SlateStateAnswer,
+  type SlateValuesEvent,
+  type SlateView,
+  type SlateWriteAnswer,
+} from "@wsp/protocol";
+import {
   applySlatePatch,
   evaluateSlateExpression,
   getSlateValue,
   isSlateBinding,
-  notFoundRefusal,
   parseSlate,
   parseSlateOwnPath,
   parseSlatePatch,
   printSlate,
   resolveSlateProp,
   runSlateBatch,
-  roadOf,
-  SLATE_SEND_KEY,
-  scopeOf,
   sketchSlate,
   slateBytes,
   slateCatalog,
@@ -32,44 +49,28 @@ import {
   SLATE_SOURCES,
   slateStep,
   slateText,
-  threadWord,
-  usageRefusal,
   validateSlate,
   SLATE_RUN_IDLE,
-  type Caller,
-  type SessionSlateEvent,
-  type SlateAsk,
   type SlateBatchResult,
-  type SlateBy,
-  type SlateCause,
   type SlateDoc,
-  type SlateEmpty,
   type SlateEvalContext,
-  type SlateEventAnswer,
   type SlateJson,
   type SlateProblem,
   type SlatePropValue,
-  type SlateReadAnswer,
   type SlateRunDecl,
-  type SlateRunEvent,
   type SlateRunRecord,
-  type SlateStateAnswer,
   type SlateValues,
-  type SlateValuesEvent,
-  type SlateView,
-  type SlateWriteAnswer,
-} from "@wsp/protocol";
+} from "@wsp/protocol/slate";
 import type { Machine } from "@wsp/engine";
 import { mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import type { Store } from "./store.js";
+import { SLATES } from "./lazy-slates.js";
 import { createSlateRuns, HELD_APPROVAL, lastResult, mapStrings, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunApprovals, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
 import { boxLedger, boxRoad, boxSlateDir } from "./slate-box.js";
 import { HELD_CONFIRM, consentKey, createSlateMcp, slateSecretMark, type McpRunDecl, type McpServerSpec } from "./slate-mcp.js";
 import { HOST_SLATE_SOURCES, resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
-
-export const SLATES = "slates";
 
 /** The slate's content at one version: what a snapshot, the undo and a rewind keep. */
 interface SlateSnap {

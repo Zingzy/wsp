@@ -3,7 +3,7 @@
 // piece only when something it reads moved. Pieces are keyed by id, so a new document redraws the pieces whose JSON
 // changed and nothing else; a binding change marks the pieces whose dependency set holds the path and redraws them
 // on the next frame, at most ten times a second. Nothing here knows React; the views subscribe by piece id.
-import { slateEqual, slateSegments, slateTruthy, type SlateJson, type SlatePropValue } from "@wsp/protocol";
+import { slateEqual, slateSegments, slateTruthy, type SlateJson, type SlatePropValue } from "@wsp/protocol/slate";
 import { evaluate, resolveProp, type Resolve, type Row } from "./expr.js";
 import type { SlateDoc, SlatePiece } from "./model.js";
 import { viewOf } from "./pieces/registry.js";

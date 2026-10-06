@@ -10,8 +10,9 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, posix, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { writeOwn } from "@wsp/own-file";
-import { EXEC_DEADLINE_EXIT, EXEC_OUTPUT_MAX, EXEC_TIMEOUT_MAX_MS, runOutputTail, SLATE_LIMITS, SLATE_SECRET_IN_ARGS } from "@wsp/protocol";
-import type { SlateJson } from "@wsp/protocol";
+import { EXEC_DEADLINE_EXIT, EXEC_OUTPUT_MAX, EXEC_TIMEOUT_MAX_MS, runOutputTail } from "@wsp/protocol";
+import { SLATE_LIMITS, SLATE_SECRET_IN_ARGS } from "@wsp/protocol/slate";
+import type { SlateJson } from "@wsp/protocol/slate";
 
 export type RunState = "idle" | "held" | "running" | "done" | "failed" | "cancelled";
 

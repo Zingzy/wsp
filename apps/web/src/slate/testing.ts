@@ -2,7 +2,7 @@
 // What the renderer's tests share: a schema 2 document from its parts, a fake link to the host, and a scheduler
 // whose frames run when the test says.
 import { vi } from "vitest";
-import type { SlateDoc } from "@wsp/protocol";
+import type { SlateDoc } from "@wsp/protocol/slate";
 import type { SlateLink } from "./actions.js";
 import type { Scheduler } from "./engine.js";
 

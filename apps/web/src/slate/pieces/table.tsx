@@ -4,7 +4,7 @@
 // room, figures 12 px mono at the end, words 13 px muted. With more than two text columns a row folds to its title
 // over a note of the rest. One action that every row takes makes the row open, ending in a chevron. Nothing is cut:
 // long text wraps and the row grows. Rows are keyed by the piece's `key`, else their index.
-import type { SlateJson, SlatePropValue } from "@wsp/protocol";
+import type { SlateJson, SlatePropValue } from "@wsp/protocol/slate";
 import type { SlateStep } from "../model.js";
 import { Button } from "../../components/ui/button.js";
 import { ChevronRight } from "lucide-react";

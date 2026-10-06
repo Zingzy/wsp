@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The window's slate ops, each answer parsed against the wire type.
-import { SLATE_SCHEMA, SlateEventAnswer, SlateReadAnswer, SlatesGetAnswer, SlatesResolveAnswer, SlateStateAnswer, SlateWriteAnswer, type SlateDoc, type SlateJson, type SlateOpName, type SlateOpParams, type SlateView } from "@wsp/protocol";
+import { SlateEventAnswer, SlateReadAnswer, SlatesGetAnswer, SlatesResolveAnswer, SlateStateAnswer, SlateWriteAnswer, type SlateOpName, type SlateOpParams, type SlateView } from "@wsp/protocol";
+import { SLATE_SCHEMA, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
 import type { SlateEventAsk } from "./actions.js";
 import type { SlateApproval } from "./model.js";
 

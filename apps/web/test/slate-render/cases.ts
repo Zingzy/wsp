@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Slates the render tests open by name with ?doc=, each the smallest that shows one layout fault the matrix found.
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol/slate";
 
 export const RENDER_CASES: Readonly<Record<string, { text: string; values?: Record<string, SlateJson> }>> = {
   "long-head": {

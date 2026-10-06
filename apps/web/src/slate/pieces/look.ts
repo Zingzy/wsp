@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The meaning words a slate may say, drawn in the app's own tokens. The agent picks a word; this file
 // is the whole of how each one looks, in every theme, since every class reads a theme token.
-import { slateFigure, type SlateJson, type SlatePropValue } from "@wsp/protocol";
+import { slateFigure, type SlateJson, type SlatePropValue } from "@wsp/protocol/slate";
 import type { SlateEngine } from "../engine.js";
 import { truthy } from "../actions.js";
 import { whenOf } from "../paths.js";
@@ -58,7 +58,7 @@ export const str = (value: SlateJson | undefined): string | undefined =>
   value === undefined || value === null ? undefined : typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" ? String(value) : JSON.stringify(value);
 
 /** The sentence a control is held by: a non-empty text holds it, anything else (null, false, "") lets it go. */
-export { slateHeldText as heldBy } from "@wsp/protocol";
+export { slateHeldText as heldBy } from "@wsp/protocol/slate";
 
 /** A cell or a fact that reads as a figure: a number, or text that is one with a unit or a rate after it. */
 const FIGURE = /^[-+]?[$€£₹¥]?\d[\d,]*(\.\d+)?\s?(%|[A-Za-z]{1,5}(\/[A-Za-z]+)?)?$/;

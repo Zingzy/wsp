@@ -9,7 +9,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { McpTransport } from "@wsp/catalog";
 import { EXEC_OUTPUT_MAX, fmtBytes, runOutputTail } from "@wsp/protocol";
-import type { SlateAsk, SlateJson, SlateRunDecl } from "@wsp/protocol";
+import type { SlateAsk } from "@wsp/protocol";
+import type { SlateJson, SlateRunDecl } from "@wsp/protocol/slate";
 import { HELD_APPROVAL, HELD_BUDGET, HELD_PRESSED, lastResult, mapStrings, runningRecord, SECRET_DOTS, spent, stableJson, type Reshape, type RunResult, type RunApprovals, type RunBy, type RunRecord, type RunStartAnswer } from "./slate-runs.js";
 
 /** `files` is the text of each slate file its then reads, as on a command. */

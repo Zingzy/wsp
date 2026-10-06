@@ -11,7 +11,7 @@ const pkg = (path: string) => fileURLToPath(new URL(`../../packages/${path}`, im
 export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss()],
   // The browser cannot follow a package.json main into a dist a fresh worktree may not have.
-  resolve: command === "serve" ? { alias: { "@wsp/protocol": pkg("protocol/src/index.ts"), "@wsp/catalog": pkg("catalog/src/index.ts") } } : {},
+  resolve: command === "serve" ? { alias: { "@wsp/protocol/slate": pkg("protocol/src/slate/index.ts"), "@wsp/protocol": pkg("protocol/src/index.ts"), "@wsp/catalog": pkg("catalog/src/index.ts") } } : {},
   // noVNC's H.264 decoder module uses top-level await, which vite's default
   // es2020 target rejects. build.target covers only the production bundle;
   // the dev dependency prescan has its own esbuild target and needs the same.
@@ -36,6 +36,7 @@ export default defineConfig(({ command }) => ({
       "@wsp/adapter-codex": pkg("adapter-codex/src/index.ts"),
       "@wsp/adapter-cursor": pkg("adapter-cursor/src/index.ts"),
       "@wsp/adapter-opencode": pkg("adapter-opencode/src/index.ts"),
+      "@wsp/protocol/slate": pkg("protocol/src/slate/index.ts"),
       "@wsp/protocol": pkg("protocol/src/index.ts"),
       "@wsp/runtime": pkg("runtime/src/index.ts"),
       "@wsp/catalog": pkg("catalog/src/index.ts"),

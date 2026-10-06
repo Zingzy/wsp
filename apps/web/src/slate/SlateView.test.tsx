@@ -4,7 +4,8 @@
 // and a press raises slates.event with the host's params.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { slateStartValues, SLATE_PANE_KINDS, SLATE_PIECES, type SlateDoc, type SlateEventAnswer, type SlateJson } from "@wsp/protocol";
+import { type SlateEventAnswer } from "@wsp/protocol";
+import { slateStartValues, SLATE_PANE_KINDS, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
 import { PANES } from "../panes";
 import { ActionRunner, StateSender, type SlateLink } from "./actions";
 import { SlateEngine } from "./engine";

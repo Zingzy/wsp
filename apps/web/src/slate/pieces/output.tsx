@@ -4,7 +4,7 @@
 // tall, following the end while it runs, no box of its own; why under them when held or failed.
 // A finished run keeps its last lines until it next starts; after the agent changed its command they read as stale.
 import { useEffect, useRef } from "react";
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol/slate";
 import { Crab } from "../../components/status/Crab.js";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";

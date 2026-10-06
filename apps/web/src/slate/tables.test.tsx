@@ -3,7 +3,7 @@
 // left taking the room, figure columns right-aligned at the end; stacked tables share one column template.
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseSlate, slateStartValues, type SlateDoc } from "@wsp/protocol";
+import { parseSlate, slateStartValues, type SlateDoc } from "@wsp/protocol/slate";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { SLATE_VIEWS } from "./pieces";

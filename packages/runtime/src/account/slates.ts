@@ -3,12 +3,13 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { threadWord, isLocalWorkspace, SETTLE_MS, threadSettled } from "@wsp/protocol";
-import { createSlates, type Slates } from "../slates.js";
+import { lazySlates } from "../lazy-slates.js";
+import type { Slates } from "../slates.js";
 import type { RuntimeContext, SlatesArea } from "../context.js";
 
 export function slatesArea(ctx: RuntimeContext): SlatesArea {
   const { opts, store, local, bus, clock, live, threadRecords, sessions, transcripts } = ctx;
-  const slates: Slates = createSlates({
+  const slates: Slates = lazySlates({
     store,
     now: () => clock.now(),
     record: e => ctx.record(e),

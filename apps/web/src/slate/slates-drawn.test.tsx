@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol/slate";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { DIAGRAM_TEXT, GOLD_TEXT, GOLD_VALUES, INBOX_TEXT, INBOX_VALUES, QUIZ_TEXT, REACH_TEXT, REACH_VALUES, SPOO_TEXT, SPOO_VALUES, kitSlate } from "../../test/fixtures/slate/kit-slates";

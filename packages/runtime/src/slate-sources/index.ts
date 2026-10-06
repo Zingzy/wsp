@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The host's resolvers, one module per source (06-sources). A path is read by its first segment's module and then
 // walked by name and index; a source missing here reads as not there yet, which is what the renderer draws quietly.
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol/slate";
 import type { HostSlateSource, SlateSourceContext } from "./context.js";
 import { costSource } from "./cost.js";
 import { gitSource } from "./git.js";

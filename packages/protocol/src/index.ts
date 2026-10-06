@@ -180,5 +180,4 @@ export { keepRun } from "./kept-run.js";
 export type { KeptAgent, KeptRun, KeptTurn } from "./kept-run.js";
 export { ANALYTICS_ENV, CLOUD_ENV, LAUNCH_ENV, NO_SLATE_MCP_ARG, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV, STATE_STORE_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TaskStop, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";
-export * from "./slate/index.js";
 export * from "./slate/wire.js";
