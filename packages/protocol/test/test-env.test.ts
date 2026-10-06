@@ -6,12 +6,12 @@
 // into the code under test, and the only wsp variables a test may read off its
 // own process are the gates that decide whether the file runs at all.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as protocol from "../src/index.js";
 import { ROOT, sourceFiles, testFiles } from "./source-files.js";
-import { GATES, RUN_TMPDIR, TEST_ENV } from "../../../vitest.env.js";
+import { GATES, RUN_HOME, RUN_TMPDIR, TEST_ENV } from "../../../vitest.env.js";
 
 /** Every WSP_ variable a package names, by the constant it is exported as, so a read written as
  * process.env[TURN_TOKEN_ENV] is caught as the read of WSP_TURN that it is: the protocol's exports, and every constant
@@ -106,6 +106,19 @@ describe("the environment every test runs under", () => {
     expect(basename(tmpdir())).toMatch(/^wsp-run-\d+$/);
     expect(existsSync(tmpdir())).toBe(true);
     expect(RUN_TMPDIR).toBe(tmpdir());
+  });
+
+  it.skipIf(process.env.WSP_LIVE === "1" || process.env.WSP_RENDER === "1")("hands every case a home under the run's own folder, the one the home guard watches, and no agent store outside it", () => {
+    expect(homedir()).toBe(RUN_HOME);
+    expect(RUN_HOME.startsWith(`${RUN_TMPDIR}/`)).toBe(true);
+    expect(existsSync(homedir())).toBe(true);
+    // The variable a wsp thread sets, which put an export's sessions in the person's own store.
+    expect(process.env["CLAUDE_CONFIG_DIR"]).toBeUndefined();
+  });
+
+  it("points a shell's history file under the run's own folder, outside every home", () => {
+    expect(process.env["HISTFILE"]).toBe(join(RUN_TMPDIR, "shell-history"));
+    expect(process.env["HISTFILE"]!.startsWith(`${homedir()}/`)).toBe(false);
   });
 
   it("leaves no launch pair, home, named host, cloud, labs or person's home to a test, since none of them is a gate", () => {

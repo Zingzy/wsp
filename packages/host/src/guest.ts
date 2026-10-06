@@ -107,10 +107,12 @@ export function guestDoor(o: GuestDoorOptions): GuestDoor {
       [HOST_TOKEN_ENV]: e.token,
       ...(e.turnToken !== undefined ? { [TURN_TOKEN_ENV]: e.turnToken } : {}),
     };
+    const scope = who.device.scope;
     const session = module.open({
       argv: e.argv,
       cwd: e.cwd,
       env,
+      ...(scope.rootThreadId !== scope.threadId ? { noSlate: true as const } : {}),
       reply: message => down(held.link, "guest.reply", { session: e.session, message }),
       close: error => endHere(held, e.session, error),
     });

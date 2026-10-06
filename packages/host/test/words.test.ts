@@ -161,6 +161,7 @@ describe("the words a person and an agent read about threads on this computer", 
 
   it("leave the MCP server's instructions", () => {
     expect(offenders("instructions", instructions())).toEqual([]);
+    expect(offenders("a thread's instructions", instructions(true))).toEqual([]);
   });
 
   it("leave the skill, but for the rows of the box verbs and the lines a command shows", () => {

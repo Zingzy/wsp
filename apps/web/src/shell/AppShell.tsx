@@ -36,6 +36,7 @@ import { DisconnectedBanner } from "./DisconnectedBanner.js";
 import { KeybindingDispatcher } from "./KeybindingDispatcher.js";
 import { RightPanel } from "./RightPanel.js";
 import { SignInBanner } from "./SignInBanner.js";
+import { SlateWatcher } from "../slate/SlateHost.js";
 import { ThreadBreadcrumb } from "./ThreadBreadcrumb.js";
 
 /** The dragged width goes onto the host's preferences record, so a browser tab on the same host opens at it and
@@ -88,6 +89,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
       <KeybindingDispatcher />
+      <SlateWatcher />
       <CommandPalette />
       <FileFinder />
       <ContextMenuHost />
