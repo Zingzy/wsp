@@ -10,7 +10,6 @@ import { harnessCatalog } from "../src/harness-catalog.js";
 import { CATALOG_TTL_MS, TOOL_RESULT_KEPT, TRANSCRIPT_BYTES, TRANSCRIPT_FLUSH_MS, createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
 import { stubBackend, type StubBackend, createOn } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";

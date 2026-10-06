@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, expect } from "vitest";
 import type WebSocket from "ws";
-import { refusal, type PlaceReport, type PlaceView } from "@wsp/protocol";
+import type { PlaceReport, PlaceView } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HostFolders, type Runtime } from "../src/runtime.js";
 import { newPlaceKeyPair, type PlaceKeyPair, type PlaceLeaver, type PlaceUpdater } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it, vi } from "vitest";
-import { hostname } from "node:os";
 import { BUILDER_IDLE_MS, KILL_ASKS } from "@wsp/engine";
 import { daemonTokenFor, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { copyKey, createRuntime, type GoldenExec } from "../src/runtime.js";

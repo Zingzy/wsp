@@ -6,7 +6,7 @@ import { memoryStore, type Store } from "../src/store.js";
 import { until } from "./until.js";
 import { stubBackend, tokenGuest, type StubBackend, createOn } from "./stub-backend.js";
 import { scriptGuest } from "./script-guest.js";
-import { TOKEN, helloingDaemon, held } from "./runtime-fixture.js";
+import { TOKEN, helloingDaemon } from "./runtime-fixture.js";
 
 describe("a turn the host comes back to", () => {
   /** A harness whose run lives on the machine, not in this process: every event it emits is a line of the run's log,
