@@ -147,7 +147,8 @@ function spelling(files: string[], words: ReadonlyArray<keyof typeof CUT>): stri
 
 describe("the words a person reads", () => {
   const app = under("apps/web/src");
-  const tables = ["packages/protocol/src/format.ts", "packages/protocol/src/workspace-state.ts"];
+  const words = "packages/protocol/src/words";
+  const tables = [...readdirSync(join(ROOT, words)).map(f => `${words}/${f}`), "packages/protocol/src/workspace-state.ts"];
 
   it("found the app's strings at all, so a walk that matched nothing cannot pass", () => {
     expect(app.length).toBeGreaterThan(100);

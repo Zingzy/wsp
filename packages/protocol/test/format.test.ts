@@ -310,9 +310,10 @@ describe("a machine that stopped answering with its memory near full", () => {
 });
 
 describe("one copy of the rule", () => {
-  const HOME = join("packages", "protocol", "src", "format.ts");
-  // Snapshot storage prints the decimal GB the provider lists and bills in.
-  const EXCEPTIONS = new Set([join("packages", "host", "src", "storage.ts")]);
+  const HOME = join("packages", "protocol", "src", "words", "units.ts");
+  // Snapshot storage prints the decimal GB the provider lists and bills in; a relayed request's body limit is said in
+  // the KiB it is set in.
+  const EXCEPTIONS = new Set([join("packages", "host", "src", "storage.ts"), join("packages", "protocol", "src", "words", "computer.ts")]);
   // A byte count divided by a unit constant and closed with a unit suffix, or a table of unit suffixes.
   const RULE = /\/ ?(1024|1e9|1_000_000_000|\(1024 \* 1024\)|1024 \*\* [23]|[KMGT]I?B|[KMGT]iB)\)?[^`\n]*\} ?[KMGT]?i?B`|\[("[KMGT]?i?B?",? ?){3,}\]/;
 
@@ -361,7 +362,7 @@ describe("one copy of the image caps", () => {
 });
 
 describe("one registry for the tools a harness reports", () => {
-  const HOME = join("packages", "protocol", "src", "format.ts");
+  const HOME = join("packages", "protocol", "src", "words", "tools.ts");
   // One row per tool name there carries its line, the input field a client shows for the call and the kind of item it is.
   const RULE = /"(file_path|notebook_path|MultiEdit|NotebookEdit|WebSearch|WebFetch)"/;
 
@@ -435,7 +436,7 @@ describe("where the composer's model lists came from, in one line", () => {
 });
 
 describe("one home for the words under the composer's model lists", () => {
-  const HOME = join("packages", "protocol", "src", "format.ts");
+  const HOME = join("packages", "protocol", "src", "words", "thread.ts");
   // A footer assembled anywhere else took its binary word from whichever agent's catalog it was written against,
   // and a second copy of the sentences about whose sign-in pays would be the one a screen was left reading.
   const RULE = /\} table`|reported no models|no model in the|costs this wsp nothing|list prices, not a bill/;
