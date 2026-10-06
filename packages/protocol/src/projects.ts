@@ -184,6 +184,8 @@ export const notOnThisComputerLine = (project: string): string => `${project} is
 
 /** A folder a thread may not run in: only the project folder and the worktrees of its repo are a project's. */
 export const cwdOutsideLine = (path: string, project: string): string => `${path} is not in ${project} or a worktree of it; wsp add it first`;
+/** A start's folder that is not there: refused before the agent is launched into it, which would only die. */
+export const noCwdLine = (path: string): string => `there is no folder at ${path}; name one that exists`;
 
 /** What taking a thread away on this computer takes, the question a delete puts first: the thread's turns and
  * checkpoints, and the worktree wsp made with every thread in it where the thread ran in one. */

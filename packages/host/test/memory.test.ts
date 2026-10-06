@@ -23,8 +23,11 @@ const HOST_MEMORY_BUDGET_MB = 40;
  * top threads and the fifteen-minute draw added about 0.1 MB more; the pull request pane's reply, resolve and react
  * shapes took main from 35.9 to 36.1 MB on 2026-10-03. Main read 36.3 MB with the daemon's worktree ops; threads in
  * the project's folder and one turn in a worktree read 36.5, and the skill worked out at each ask rather than held
- * whole brought that to 36.4. */
-const HOST_MEMORY_CAP_MB = 36.5;
+ * whole brought that to 36.4. Since the host has run under --stress-flush-code (2026-10-05) a reading leaves out the
+ * bytecode of code no turn ran: the build that kept transcripts as rows collected less and read 37.0 without it and
+ * 35.5 with it, as the build before it did both ways, so the cap stayed where it was. Slates, their parser, kit,
+ * validator, runs and tools read 36.8 with it on this Mac on 2026-10-06. */
+const HOST_MEMORY_CAP_MB = 37.5;
 
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");
@@ -54,7 +57,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { createRuntime, jsonFileStore } from ${JSON.stringify(distOf("runtime"))};
+import { createRuntime, sqliteStore } from ${JSON.stringify(distOf("runtime"))};
 import { recipeShelf, startHost, localWiring, stateWriterHere } from ${JSON.stringify(DIST)};
 import { fakeCopier, NoProviderBackend } from ${JSON.stringify(distOf("engine"))};
 import { DAEMON_VERSION } from ${JSON.stringify(distOf("protocol"))};
@@ -95,7 +98,7 @@ const scripted = () => ({
 // measured is the host's own bookkeeping.
 const copier = fakeCopier();
 const daemon = async () => ({ version: DAEMON_VERSION, road: { url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }, sysSamples: async () => () => {}, close: async () => {} });
-const store = jsonFileStore(statePath, stateWriterHere());
+const store = sqliteStore(statePath, stateWriterHere());
 const runtime = createRuntime({
   statePath,
   backend: new NoProviderBackend(),
@@ -168,7 +171,10 @@ const RUN_CAP_MS = 240_000;
 /** Runs a script under a node of its own with collection exposed, and answers with everything it said. */
 function ran(script: string, home: string): Promise<{ out: string; code: number | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--expose-gc", "--input-type=module", "-e", script], {
+    // V8 keeps a function's bytecode until six collections pass with no call, and a forced collection does not count:
+    // a host that made less garbage on the way reached the quiet minute holding 1.5 MB more of its start-up code than
+    // one that collected ten times, with the same records held. So code no turn runs is let go at every collection.
+    const child = spawn(process.execPath, ["--expose-gc", "--stress-flush-code", "--input-type=module", "-e", script], {
       cwd: home,
       env: { ...process.env, HOME: home, WSP_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
