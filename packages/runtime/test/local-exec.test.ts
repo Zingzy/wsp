@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { shellQuote, turnCutLine, type ExecStream } from "@wsp/protocol";
-import { localExecStream, type GroupWorkReader } from "../src/local-exec.js";
+import { localExecStream, ownOrphans, type GroupWorkReader } from "../src/local-exec.js";
 import { alive, gone, grandchild, sweepStrays } from "./strays.js";
 
 async function collect(lines: AsyncIterable<string>): Promise<string[]> {
@@ -293,6 +293,18 @@ describe("what a run leaves on this computer", () => {
       await vi.waitFor(() => expect(alive(strangerPid)).toBe(false), { timeout: 5_000 });
     }
   }, 20_000);
+});
+
+describe("the processes a run starts with", () => {
+  it("are read once the subshell that backgrounded the input pump has gone, so the pump is never a turn's leftover", async () => {
+    // The script (100) runs the agent (101), which forked the pump's launcher (102) before it was exec'd; the
+    // launcher starts tail (103) and the read loop (104) and exits. On a loaded computer it can still stand when the
+    // agent first prints.
+    const launcherUp = [{ pid: 100, ppid: 9 }, { pid: 101, ppid: 100 }, { pid: 102, ppid: 101 }, { pid: 103, ppid: 102 }, { pid: 104, ppid: 102 }];
+    const launcherGone = [{ pid: 100, ppid: 9 }, { pid: 101, ppid: 100 }, { pid: 103, ppid: 1 }, { pid: 104, ppid: 1 }];
+    const reads = [launcherUp, launcherUp, launcherGone];
+    expect([...(await ownOrphans(async () => reads.shift() ?? launcherGone, 100))].sort()).toEqual([103, 104]);
+  });
 });
 
 describe("a real turn's process group", () => {
