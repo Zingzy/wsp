@@ -18,6 +18,8 @@ import {
   hostIdentity,
   jsonFileStore,
   localExecStream,
+  sqliteStore,
+  stateDbPath,
   type GoldenRecipe,
   type GoldenVersion,
   type HarnessAdapterFactory,
@@ -32,7 +34,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, serverValuesOf } from "@wsp/catalog";
-import { authRefusal, cloudOffRefusal, PRICES_URL, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
+import { authRefusal, cloudOffRefusal, PRICES_URL, STATE_STORE_ENV, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
 import { agentHome, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, verbCopier } from "@wsp/engine";
 import { CLOUD_ON } from "./cloud.js";
 import { noMachinesLine, PROVIDER_MODULES, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv, type ProviderModule } from "./providers.js";
@@ -804,7 +806,7 @@ export function makeRuntime(
   links: PlaceWiring = placeWiring(statePath, agents?.advertise),
   /** The store over the state file, handed in by a caller that has already read it once: a state this build cannot
    * read is refused at every collection read, and a caller that met that refusal has said so already. */
-  store: Store = jsonFileStore(statePath, stateWriterHere()),
+  store: Store = stateStore(statePath, env),
   /** The agents a turn runs; a test hands in stand-ins so no real agent starts. */
   adapters: Record<string, HarnessAdapterFactory> = HARNESS_ADAPTERS,
   /** The providers this host answers for, its own process's by default; a test hands in the table it means. */
@@ -1390,14 +1392,26 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
   return hostFor(rt, keys, { ...opts, providerEnv, links, here }, io, opts.running);
 }
 
+/** The store a state is kept in: the SQLite database beside the state file, or the JSON document where
+ * STATE_STORE_ENV says json in this environment or the .env beside it. A state file not imported yet that a live
+ * host serves stays the JSON document for this process too: that host goes on writing the file, and an import
+ * under it would leave every write it makes after out of the database. */
+export function stateStore(statePath: string, env: Readonly<Record<string, string | undefined>> = process.env): Store {
+  const json =
+    env[STATE_STORE_ENV] === "json" ||
+    savedEnv(statePath)[STATE_STORE_ENV] === "json" ||
+    (!existsSync(stateDbPath(statePath)) && existsSync(statePath) && servingHost(statePath) !== undefined);
+  return json ? jsonFileStore(statePath, stateWriterHere()) : sqliteStore(statePath, stateWriterHere());
+}
+
 /** The state file read once, before anything else on this host reads it: a file written in a shape this build does
  * not read is refused at every collection read, and the readers a runtime builds meet that refusal in the middle of
  * their own work, where one of them warns with the whole error and its stack behind a line of its own. It comes
  * before the wiring a runtime is built with, which mints this host's pairing key beside the state file on its own
  * first read: a start refused here leaves the home as it found it. Read here, the refusal is this start's, thrown
  * once and printed once, and the store is handed on so the file is not read twice over. */
-async function readOnce(statePath: string): Promise<Store> {
-  const store = jsonFileStore(statePath, stateWriterHere());
+async function readOnce(statePath: string, env: Readonly<Record<string, string | undefined>>): Promise<Store> {
+  const store = stateStore(statePath, env);
   await store.keys("workspaces");
   return store;
 }
@@ -1411,8 +1425,8 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noProviderKey: "local" });
-  // Read first, for the reason readOnce carries.
-  const store = await readOnce(opts.statePath);
+  // Read first, for the reason readOnce carries. A runtime handed in holds its own store, so no other is read.
+  const store = opts.runtime === undefined ? await readOnce(opts.statePath, providerEnv) : undefined;
   const links = placeWiring(opts.statePath, opts.advertise);
   const here = opts.here ?? {};
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { here, ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, store);

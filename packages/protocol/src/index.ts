@@ -5216,6 +5216,7 @@ const DAEMON_CONTENTS = [
   "1ee653af3b44dc450246290cc7bb7617da6ec8f062d9e859452472019e52e51e",
   "1fb569928a97d7ba40fd54d251dc4202f267133344e7da3153f3f4aa723e180e",
   "c92b490e1481821bfdc26584e0f8b19e73e28fefeefeae6fb61c189ad098d88e",
+  "a89600e669b83780c19582d096ed9c9a274446a75da14d185bc0afee9d299ba9",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5556,7 +5557,11 @@ const DAEMON_CONTENTS = [
  * the GraphQL budget spent; a read with nothing seen makes no such read. A read the git host refused for its rate limit
  * carries the code rate-limited, and a branch so refused never reads as having no pull request. git.prView reads the
  * page on one GraphQL call in place of four, the newest 100 conversation comments with the rest marked cut.
- * Version 121: leave tests take a temp install root, never /opt/wsp. */
+ * Version 121: leave tests take a temp install root, never /opt/wsp.
+ * Version 122: A turn's HEAD move lines name the branch HEAD was on: git.snapshot stamps the branch it stands on, or a
+ * detached HEAD, beside the reflog length, and git.turn reads the turn's window back from that stamp, so a merge reads
+ * "Merged origin/main into fix/x", a reset "Reset fix/x to origin/main", a pull "Pulled into fix/x" and a rebase
+ * "Rebased fix/x onto main", one that was detached says "a detached HEAD", and a pull that rebases is one line. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -7942,7 +7947,7 @@ export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, launchWords, PERMISSION_ALLOW, PERMISSION_DENY, programWord } from "./adapter-port.js";
 export { keepRun } from "./kept-run.js";
 export type { KeptAgent, KeptRun, KeptTurn } from "./kept-run.js";
-export { ANALYTICS_ENV, CLOUD_ENV, LAUNCH_ENV, NO_SLATE_MCP_ARG, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
+export { ANALYTICS_ENV, CLOUD_ENV, LAUNCH_ENV, NO_SLATE_MCP_ARG, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV, STATE_STORE_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TaskStop, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";
 export * from "./slate/index.js";
 export * from "./slate/wire.js";

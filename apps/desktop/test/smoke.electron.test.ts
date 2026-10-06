@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, computerNameHere, placeWiring, serve, serviceManagerFor, servingHost, shimPath, startHost, stopService, systemRunner, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
 import { DAEMON_VERSION, GET_THE_APP_WORD, HOST_WORDS, LAUNCH_ENV, STATE_SHAPE, type TurnResult } from "@wsp/protocol";
-import { createRuntime, memoryStore, STATE_SHAPE_KEY, tokenDigest, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
+import { createRuntime, memoryStore, sqliteStore, STATE_SHAPE_KEY, tokenDigest, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
@@ -50,9 +50,11 @@ const GOLDEN = {
   ],
 };
 
-/** A state file's text as this build writes one: the collections and the shape document a host reads a file by. */
-const stateText = (collections: Record<string, unknown>): string =>
-  JSON.stringify({ ...collections, [STATE_SHAPE_KEY]: { shape: STATE_SHAPE, wsp: "smoke", daemon: DAEMON_VERSION, bin: "smoke", at: "2026-09-01T00:00:00.000Z" } });
+/** The build a store this file opens says wrote it. */
+const SMOKE_WRITER = { wsp: "smoke", daemon: DAEMON_VERSION, bin: "smoke" };
+
+/** A state file's text as an earlier build wrote one, which the app's host imports at its first start. */
+const stateText = (collections: Record<string, unknown>): string => JSON.stringify({ ...collections, [STATE_SHAPE_KEY]: { shape: STATE_SHAPE, ...SMOKE_WRITER, at: "2026-09-01T00:00:00.000Z" } });
 
 /** What wsp init leaves behind once a golden is sealed, in the store's on-disk shape. */
 function seedGolden(home: string): void {
@@ -827,9 +829,9 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     // button opens Add a project. The screen standing is what says the host read the state back, so the file holds
     // everything the launch wrote by then.
     await win.waitForSelector("[data-k=first-run]");
-    const state = JSON.parse(readFileSync(join(home, "state.json"), "utf8")) as { workspaces?: Record<string, unknown>; projects?: Record<string, unknown> };
-    expect(Object.keys(state.workspaces ?? {})).toEqual([]);
-    expect(Object.keys(state.projects ?? {})).toEqual([]);
+    const state = sqliteStore(join(home, "state.json"), SMOKE_WRITER);
+    expect(await state.keys("workspaces")).toEqual([]);
+    expect(await state.keys("projects")).toEqual([]);
     expect(existsSync(join(home, ".env"))).toBe(false);
     expect(await win.locator("[data-row-id^='ws:']").count()).toBe(0);
     // The tick was live, so both agents found here carry the wsp server and its skill, with the shim as the command.
@@ -901,9 +903,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(existsSync(join(home, ".claude.json"))).toBe(false);
     expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toBe("");
     expect(existsSync(join(home, ".claude", "skills", "wsp"))).toBe(false);
-    const stateFile = join(home, "state.json");
-    const state = (existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, "utf8")) : {}) as { workspaces?: Record<string, unknown> };
-    expect(Object.keys(state.workspaces ?? {})).toEqual([]);
+    expect(await sqliteStore(join(home, "state.json"), SMOKE_WRITER).keys("workspaces")).toEqual([]);
   });
 
   it("with no provider key the welcome opens while nothing is recorded, and a recorded local workspace opens the app on it instead", async () => {
