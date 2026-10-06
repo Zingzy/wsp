@@ -258,7 +258,9 @@ describe("the tab's Approvals", () => {
     expect(await screen.findByText("Approvals in this thread")).toBeTruthy();
     expect(screen.getByText("bash deploy.sh")).toBeTruthy();
     expect(screen.getByText("links to example.com")).toBeTruthy();
-    expect(screen.queryByText("rm -rf x")).toBeNull();
+    // A refused one stands too, saying so, so a refusal can be undone from here.
+    expect(screen.getByText("rm -rf x")).toBeTruthy();
+    expect(screen.getByText("Refused. Run $x")).toBeTruthy();
     fireEvent.click(document.querySelector<HTMLElement>('[data-slate-revoke="k1"]')!);
     await waitFor(() => expect(api.revoke).toHaveBeenCalledWith("t1", "k1"));
     // The record read again after the revoke no longer holds it, and its row goes.

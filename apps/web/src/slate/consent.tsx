@@ -4,8 +4,8 @@
 // environment name with the value it carries now (a secret as dots), the computer and the folder, the timeout and who
 // wrote it, with Don't, Run once and Always in this thread. A run that names `confirm` asks in the destructive tier.
 import { useState } from "react";
-import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
-import { Button } from "../components/ui/button.js";
+import { AlertDialog, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
+import { Button, NEUTRAL_RING } from "../components/ui/button.js";
 import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { RUNS, type SlateEngine } from "./engine.js";
 import { cn } from "../lib/utils.js";
@@ -32,7 +32,7 @@ export function LinkConsent({ link, onOpen, onAlways, onClose }: { link: { href:
           <DialogTitle>{LINK_WORDS.title(link.domain)}</DialogTitle>
         </DialogHeader>
         <DialogPanel className="pt-1 pb-0">
-          <code data-slate-link-href className="block min-w-0 truncate font-mono text-xs text-muted-foreground" title={link.href}>
+          <code data-slate-link-href className="block min-w-0 break-all font-mono text-xs text-muted-foreground">
             {link.href}
           </code>
           {refused === undefined ? null : <p data-slate-refused className="pt-2 text-[13px] leading-5 text-error-foreground">{refused}</p>}
@@ -225,7 +225,9 @@ export function ConsentSheet({ ask, cadence, more = 0, answer, onClose }: { ask:
           </AlertDialogHeader>
           <div className="px-5 pt-2">{body}</div>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>{CONSENT_WORDS.dont}</AlertDialogClose>
+            <Button variant="outline" className={NEUTRAL_RING} disabled={busy} onClick={() => decide("refuse")}>
+              {CONSENT_WORDS.dont}
+            </Button>
             <Button variant="destructive" disabled={busy} onClick={() => decide("once")}>
               {CONSENT_WORDS.run}
             </Button>

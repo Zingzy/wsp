@@ -2,12 +2,12 @@
 // The Pull request pane as a small GitHub view in the Settings grammar: a head with the state glyph in its frame, the
 // title, who opened it, the number as a link out, the one word with its dot and the branches; then three tabs with
 // their counts. Conversation is Status first, then the description, then Activity, the conversation alone; Commits is
-// one rail by day; Files is the tree, a file opening its diff in place. The page is read as the pane opens and on its
-// refresh, which asks the host past the minute it holds a read; the head reads the fact the host pushes on the
-// workspace's status.
-import { useCallback, useEffect, useRef, useState } from "react";
+// one rail by day; Files is the tree, a file opening its diff in place. The page is kept per pull request for
+// PAGE_HOLD_MS, read again sooner when the status the host pushes says it moved, and on the refresh, which asks the
+// host past the minute it holds a read; the head reads that status's fact.
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import { ExternalLinkIcon, GitBranchIcon, GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPullRequestIcon, RefreshCwIcon } from "lucide-react";
-import { START_WORDS, isPullRequestFact, isPullRequestNamed, type PullRequestItem, type PullRequestPage } from "@wsp/protocol";
+import { START_WORDS, isPullRequestFact, isPullRequestNamed, type PullRequestFact, type PullRequestItem, type PullRequestKept, type PullRequestPage } from "@wsp/protocol";
 import { noticeFailure } from "../notices/store.js";
 import { PanelStripControl } from "../components/PanelStripSlot.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
@@ -15,6 +15,7 @@ import { Button } from "../components/ui/button.js";
 import { cn } from "../lib/utils.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
 import { failureOf } from "../protocol/failure.js";
+import { keepHeld, useHeld } from "../protocol/held.js";
 import { GlyphFrame } from "../settings/grid.js";
 import { useAppDark } from "../settings/theme.js";
 import { useProjects, useStatus, useStore, useWorkspace } from "../protocol/store.js";
@@ -43,6 +44,13 @@ function TabLabel({ word, count }: { word: string; count: number | undefined }) 
   );
 }
 
+/** How long a page read stands before an opening reads it again: the status push covers a move inside it. */
+const PAGE_HOLD_MS = 5 * 60_000;
+
+/** What of the status says the page moved: where it stands, its head, its review and each check's state. */
+const pageMark = (seen: PullRequestFact | PullRequestKept): string =>
+  JSON.stringify([seen.state, "headOid" in seen ? seen.headOid : "", "review" in seen ? seen.review : "", seen.checks?.map(c => `${c.name}:${c.state}`) ?? []]);
+
 /** One pane per workspace and pull request, so nothing read for one is drawn for another. */
 export function PullRequestSurface({ workspaceId }: { workspaceId: string }) {
   const seen = useStatus(workspaceId)?.pr;
@@ -57,8 +65,6 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
   const dark = useAppDark();
   const view = useStore(s => s.api?.pullRequestView);
   const agent = usePrAgent(workspaceId);
-  const [page, setPage] = useState<PullRequestPage | null>(null);
-  const [refusal, setRefusal] = useState<string | null>(null);
   const [asked, setAsked] = useState(0);
   const [tab, setTab] = useState<Tab>("conversation");
   const [reviewing, setReviewing] = useState(false);
@@ -70,27 +76,25 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
   const refreshed = useRef(false);
   const [sending, setSending] = useState<readonly PullRequestItem[]>([]);
 
-  useEffect(() => {
-    if (view === undefined || !isPullRequestNamed(seen)) return;
-    let gone = false;
-    // Only the read a refresh asked for skips what the host holds.
-    const fresh = refreshed.current;
-    refreshed.current = false;
-    view(workspaceId, fresh).then(
-      read => {
-        if (gone) return;
-        setPage(read);
-        setRefusal(null);
-      },
-      (e: unknown) => {
-        if (!gone) setRefusal(failureOf(e).said);
-      },
-    );
-    return () => {
-      gone = true;
-    };
-    // The page is read as the pane opens, on its refresh, and when the pull request's number moves.
-  }, [view, workspaceId, asked, isPullRequestNamed(seen) ? seen.number : null]);
+  const pageKey = isPullRequestNamed(seen) ? `pr:${workspaceId}:${seen.number}` : null;
+  const read =
+    view === undefined
+      ? undefined
+      : () => {
+          // Only the read a refresh asked for skips what the host holds.
+          const fresh = refreshed.current;
+          refreshed.current = false;
+          return view(workspaceId, fresh);
+        };
+  const held = useHeld<PullRequestPage>(pageKey, read, { holdMs: PAGE_HOLD_MS, ...(isPullRequestNamed(seen) ? { mark: pageMark(seen) } : {}), asked });
+  const page = held.value ?? null;
+  const refusal = held.error === undefined ? null : failureOf(held.error).said;
+  const setPage = useCallback(
+    (next: SetStateAction<PullRequestPage | null>) => {
+      if (pageKey !== null) keepHeld<PullRequestPage | null>(pageKey, was => (typeof next === "function" ? next(was ?? null) : next));
+    },
+    [pageKey],
+  );
 
   const refresh = useCallback(() => {
     refreshed.current = true;

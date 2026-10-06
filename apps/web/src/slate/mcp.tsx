@@ -5,7 +5,7 @@
 // tool and its arguments as they will be sent.
 import { useState } from "react";
 import { AlertDialog, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
-import { Button } from "../components/ui/button.js";
+import { Button, NEUTRAL_RING } from "../components/ui/button.js";
 import { Dialog, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { cn } from "../lib/utils.js";
 import { capitalised } from "../settings/format.js";
@@ -190,7 +190,7 @@ export function ToolConfirmSheet({ ask, answer, onClose }: { ask: SlateToolAsk; 
           {refused === undefined ? null : <p className="text-error-foreground">{refused}</p>}
         </div>
         <AlertDialogFooter>
-          <Button variant="outline" disabled={busy} onClick={() => decide("refuse")}>
+          <Button variant="outline" className={NEUTRAL_RING} disabled={busy} onClick={() => decide("refuse")}>
             {MCP_WORDS.dont}
           </Button>
           <Button variant="destructive" disabled={busy} onClick={() => decide("once")}>
