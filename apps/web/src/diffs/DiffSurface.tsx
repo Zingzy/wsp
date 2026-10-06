@@ -32,7 +32,7 @@ import { Spinner } from "../components/ui/spinner.js";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { noDiffLine } from "../actions/format.js";
-import { COMMIT_WORDS, EDIT_WORDS, SEND_TO_THREAD, SNAPSHOT_GONE, TURN_NOUN, TURN_SCOPE, VIEWED_WORDS } from "./words.js";
+import { COMMIT_WORDS, EDIT_WORDS, NARROWED_WORDS, SEND_TO_THREAD, SNAPSHOT_GONE, TURN_NOUN, TURN_SCOPE, VIEWED_WORDS } from "./words.js";
 import { CommitBox, type CommitDraftState } from "./CommitBox.js";
 import { DiscardDialog } from "./DiscardDialog.js";
 import { FileControls } from "./FileControls.js";
@@ -56,7 +56,7 @@ import { repoAbsence } from "../adapt/git.js";
 import { DaemonOpError, fsWrite, gitDiff, gitTurn, gitStatus } from "../terminal/daemon-fs.js";
 import { editable, SCOPE_LABELS, SCOPE_NOUNS, SCOPES, toDiffModel, type DiffFile } from "./model.js";
 import { useDiffRevealStore } from "./reveal.js";
-import { DEFAULT_SCOPE, useDiffStore, type DiffRenderMode } from "./store.js";
+import { DEFAULT_SCOPE, useDiffStore, wholeRange, type DiffRenderMode } from "./store.js";
 
 /** The diff read for one folder: in flight or failed with the last reply it may keep showing, or the reply itself. */
 type LoadState =
@@ -121,8 +121,11 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const turnCwd = turn?.cwd;
   const turnFrom = turn?.from;
   const turnTo = turn?.to;
+  const turnOnly = turn?.only;
+  const onlyKey = turnOnly?.join("\u0000");
   const renderMode = useDiffStore(s => s.renderMode);
   const setScope = useDiffStore(s => s.setScope);
+  const openTurn = useDiffStore(s => s.openTurn);
   const setRenderMode = useDiffStore(s => s.setRenderMode);
   const onKeyDown = useUpAFolder(workspaceId);
   const [load, setLoad] = useState<LoadState>({ kind: "pending", cwd, last: null });
@@ -133,7 +136,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const viewerRef = useRef<AnnotatableCodeViewHandle>(null);
   // A turn's range is read in the folder its snapshots were taken in, whatever the panes' root is now.
   const gitCwd = turnCwd ?? cwd;
-  const scopeKey = turnFrom === undefined ? `${cwd} ${scope}` : `${gitCwd} ${turnFrom}..${turnTo}`;
+  const scopeKey = turnFrom === undefined ? `${cwd} ${scope}` : `${gitCwd} ${turnFrom}..${turnTo}${onlyKey === undefined ? "" : ` ${onlyKey}`}`;
   const loadKey = turnFrom === undefined ? cwd : scopeKey;
   const revealRequest = useDiffRevealStore(s => s.pendingByWorkspaceId[workspaceId]);
   const takeReveal = useDiffRevealStore(s => s.take);
@@ -219,7 +222,8 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     setWriteNote(null);
   }, [scopeKey]);
 
-  const reply = lastReply(load);
+  const read = lastReply(load);
+  const reply = useMemo(() => (read === null || turnOnly === undefined ? read : { ...read, files: read.files.filter(f => turnOnly.includes(f.path)) }), [read, turnOnly]);
   const model = useMemo(() => (reply ? toDiffModel(reply, scopeKey) : null), [reply, scopeKey]);
   const fileKeys = useMemo(() => model?.files.map(f => f.fileKey) ?? [], [model]);
   const allCollapsed = areAllDiffFilesCollapsed(fileKeys, collapsed);
@@ -470,6 +474,14 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
             </TooltipTrigger>
             <TooltipPopup side="top">{pinned ? "Follow the agent's folder again" : "Stay here when the agent moves"}</TooltipPopup>
           </Tooltip>
+          {turn?.only !== undefined && read !== null && reply !== null ? (
+            <span className="flex shrink-0 items-center gap-2 text-xs whitespace-nowrap text-muted-foreground" data-diff-narrowed>
+              <span>{NARROWED_WORDS.line(reply.files.length, read.files.length)}</span>
+              <Button type="button" size="xs" variant="ghost" className="shrink-0 px-0 [:hover,[data-pressed]]:bg-transparent" onClick={() => openTurn(workspaceId, wholeRange(turn))}>
+                {NARROWED_WORDS.all}
+              </Button>
+            </span>
+          ) : null}
           {turn === undefined && scope === "branch" && reply?.base ? (
             <div
               className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-xs text-muted-foreground"

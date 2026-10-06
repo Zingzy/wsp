@@ -161,11 +161,11 @@ describe("chat tab rendering", () => {
     ];
     emit({ type: "session.changes", ...scope, from, to, files, moved: [], shared: true });
     const open = await screen.findByRole("button", { name: "Open diff" });
-    expect(screen.getByText("2 changed files")).toBeDefined();
+    // Another thread's turn in the same checkout, from an agent that named none of its edits: the list is the folder's.
+    expect(screen.getByText("2 changed files in this folder")).toBeDefined();
+    expect(screen.getByText("Other threads worked here too")).toBeDefined();
     const counts = document.querySelector<HTMLElement>('[aria-label="14 additions, 3 deletions"]')!;
     expect([...counts.children].map(c => c.className.includes("text-success") || c.className.includes("text-error-foreground"))).toEqual([true, true]);
-    // Another thread's turn in the same folder adds no line under the card.
-    expect(screen.queryByText(/another thread/)).toBeNull();
     fireEvent.click(open);
     expect(useDiffStore.getState().turnByWorkspaceId[WS]).toEqual({ turnId: CHAT_TURN, cwd: expect.any(String), from, to, path: "server.js" });
     const panel = useRightPanelStore.getState().byWorkspaceId[WS];

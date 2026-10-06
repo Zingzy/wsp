@@ -24,20 +24,27 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {};
 const EMPTY_MOVED: ReadonlyArray<string> = [];
+const NO_FILES: ReadonlyArray<TurnDiffFileChange> = [];
+
+const changedFiles = (n: number): string => `${n} changed file${n === 1 ? "" : "s"}`;
 
 export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   turnId: TurnId;
   files: ReadonlyArray<TurnDiffFileChange>;
   /** Each HEAD move the turn did not write, one quiet line with no files of its own. */
   moved?: ReadonlyArray<string>;
+  /** What else changed in the same folder meanwhile, whoever wrote it, listed under the turn's own files. */
+  others?: ReadonlyArray<TurnDiffFileChange>;
+  /** Other threads worked in the folder and the agent named none of its edits, so files are the folder's. */
+  folder?: boolean;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
   onToggleAllDirectories: () => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  const { turnId, files, moved = EMPTY_MOVED, allDirectoriesExpanded, resolvedTheme, onToggleAllDirectories, onOpenTurnDiff } = props;
+  const { turnId, files, moved = EMPTY_MOVED, others = NO_FILES, folder = false, allDirectoriesExpanded, resolvedTheme, onToggleAllDirectories, onOpenTurnDiff } = props;
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
-  const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
+  const hasDirectories = [...files, ...others].some((file) => /[/\\]/.test(file.path));
   const movedLines =
     moved.length === 0 ? null : (
       <div data-changed-files-moved="" className={cn("flex flex-col gap-0.5", files.length === 0 ? "mt-4" : "px-3 pb-1 pt-0.5")}>
@@ -49,7 +56,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
         ))}
       </div>
     );
-  if (files.length === 0) return movedLines;
+  if (files.length === 0 && others.length === 0) return movedLines;
 
   return (
     <div className="@container/changed-files mt-4 rounded-lg bg-secondary dark:bg-input/20" data-changed-files-state="tree">
@@ -58,9 +65,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
         className="sticky top-2 z-10 flex items-center justify-between gap-2 rounded-t-lg bg-secondary px-3 py-2 dark:bg-[color-mix(in_srgb,var(--input)_20%,var(--background))]"
       >
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-foreground">
-          <span>
-            {files.length} changed file{files.length === 1 ? "" : "s"}
-          </span>
+          <span>{files.length === 0 ? "No files from this thread's edits" : folder ? `${changedFiles(files.length)} in this folder` : changedFiles(files.length)}</span>
           {hasNonZeroStat(summaryStat) && (
             <DiffStatLabel additions={summaryStat.additions} deletions={summaryStat.deletions} layout="inline" className="text-xs leading-4" />
           )}
@@ -87,7 +92,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           )}
           <Tooltip>
             <TooltipTrigger
-              render={<Button type="button" size="xs" variant="ghost" aria-label="Open diff" onClick={() => onOpenTurnDiff(turnId, files[0]?.path)} />}
+              render={<Button type="button" size="xs" variant="ghost" aria-label="Open diff" onClick={() => onOpenTurnDiff(turnId, (files[0] ?? others[0])?.path)} />}
             >
               <FileDiffIcon className="size-3" />
               <span className="hidden @[24rem]/changed-files:inline">Open diff</span>
@@ -97,16 +102,34 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
         </div>
       </div>
       {movedLines}
-      <div className="p-2">
-        <ChangedFilesTree
-          key={`${turnId}:${allDirectoriesExpanded}`}
-          turnId={turnId}
-          files={files}
-          allDirectoriesExpanded={allDirectoriesExpanded}
-          resolvedTheme={resolvedTheme}
-          onOpenTurnDiff={onOpenTurnDiff}
-        />
-      </div>
+      {folder && <p className="px-3 pb-1 text-meta text-muted-foreground">Other threads worked here too</p>}
+      {files.length > 0 && (
+        <div className="p-2">
+          <ChangedFilesTree
+            key={`${turnId}:${allDirectoriesExpanded}`}
+            turnId={turnId}
+            files={files}
+            allDirectoriesExpanded={allDirectoriesExpanded}
+            resolvedTheme={resolvedTheme}
+            onOpenTurnDiff={onOpenTurnDiff}
+          />
+        </div>
+      )}
+      {others.length > 0 && (
+        <div data-changed-files-others="" className="pt-4">
+          <p className="px-3 text-xs text-muted-foreground">Also changed in this folder</p>
+          <div className="p-2">
+            <ChangedFilesTree
+              key={`${turnId}:others:${allDirectoriesExpanded}`}
+              turnId={turnId}
+              files={others}
+              allDirectoriesExpanded={allDirectoriesExpanded}
+              resolvedTheme={resolvedTheme}
+              onOpenTurnDiff={onOpenTurnDiff}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 });

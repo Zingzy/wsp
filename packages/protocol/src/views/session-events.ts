@@ -271,8 +271,11 @@ export type TurnChangedFile = z.infer<typeof TurnChangedFile>;
 /** What one turn changed in the folder it ran in: the files the agent itself changed, its own commits and its end
  * worktree edits, with the two snapshot shas off which the Changes pane reads the patches. moved names each HEAD move
  * the turn did not write (a checkout, pull, merge, rebase or reset) as one line, with no files of its own. shared:
- * another thread's turn ran in the same folder between the two, so some of these changes may be that thread's. A turn
- * that changed nothing and moved HEAD no way records none. */
+ * another thread's turn ran in the same checkout between the two. Where its agent names the files it writes, files are
+ * the ones its own tool calls wrote and others everything else that changed in the folder meanwhile, whoever wrote it
+ * (another thread, a shell command, the person); a file both wrote is in files, its diff holding the other's hunks too.
+ * Absent others on a shared turn means files are the folder's. A turn that changed nothing and moved HEAD no way
+ * records none. */
 export const SessionChangesEvent = z.object({
   type: z.literal("session.changes"),
   ...sessionScope,
@@ -281,6 +284,7 @@ export const SessionChangesEvent = z.object({
   files: z.array(TurnChangedFile),
   moved: z.array(z.string()),
   shared: z.literal(true).optional(),
+  others: z.array(TurnChangedFile).optional(),
 });
 export type SessionChangesEvent = z.infer<typeof SessionChangesEvent>;
 

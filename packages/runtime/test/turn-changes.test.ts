@@ -20,7 +20,7 @@ const sha = (n: number): string => String(n).repeat(40).slice(0, 40);
 /** A daemon whose snapshots count up and whose range answers what the case gives it; with hold, the first snapshot
  * (or the one numbered) answers when the case lets it, with stallAt that snapshot never answers, and with refuseAt
  * it is refused. */
-function fakeDaemon(o: { files?: { path: string; kind: string; additions: number; deletions: number }[]; moved?: string[]; stall?: boolean; stallAt?: number; refuseAt?: number; hold?: boolean | number } = {}) {
+function fakeDaemon(o: { files?: { path: string; kind: string; additions: number; deletions: number }[]; moved?: string[]; stall?: boolean; stallAt?: number; refuseAt?: number; hold?: boolean | number; root?: string } = {}) {
   const frames: Record<string, unknown>[] = [];
   let snapshots = 0;
   let letGo: () => void = () => {};
@@ -35,6 +35,7 @@ function fakeDaemon(o: { files?: { path: string; kind: string; additions: number
       if (snapshots === o.refuseAt) return { id: 1, ok: false, code: "unsupported", error: "the snapshot was refused" } as DaemonResponse;
       return { id: 1, ok: true, commit } as DaemonResponse;
     }
+    if (frame["op"] === "git.worktrees" && o.root !== undefined) return { id: 1, ok: true, worktrees: [{ path: o.root, branch: "main", head: sha(9) }] } as DaemonResponse;
     if (frame["op"] === "git.turn") return Promise.resolve({ id: 1, ok: true, base: null, truncated: false, moved: o.moved ?? [], files: (o.files ?? []).map(f => ({ ...f, patch: "" })) } as DaemonResponse);
     return Promise.resolve({ id: 1, ok: false, code: "unsupported", error: `${String(frame["op"])} is not in this case` } as DaemonResponse);
   };
@@ -43,22 +44,29 @@ function fakeDaemon(o: { files?: { path: string; kind: string; additions: number
     close: () => {},
     closed: new Promise(() => {}),
   });
-  return { open, frames, letGo: () => letGo() };
+  return { open, frames, letGo: () => letGo(), rootAt: (root: string) => void (o.root = root) };
 }
 
-/** An adapter whose turn waits on the case's word before it replies, so two turns can overlap. */
-function gated(o: { waitsForPrompt?: true } = {}): { factory: HarnessAdapterFactory; release: (n: number) => void; starts: HarnessStartOptions[] } {
+/** An adapter whose turn waits on the case's word before it replies, so two turns can overlap. wrote names the files
+ * each start's agent writes through its own Write calls, by the start's place, as paths under its folder. */
+function gated(o: { waitsForPrompt?: true; reportsEdits?: true; wrote?: Record<number, string[]> } = {}): { factory: HarnessAdapterFactory; release: (n: number) => void; starts: HarnessStartOptions[] } {
   const starts: HarnessStartOptions[] = [];
   const gates: (() => void)[] = [];
+  const { wrote = {}, ...flags } = o;
   const factory: HarnessAdapterFactory = () => ({
     steers: false,
-    ...o,
+    ...flags,
     start: (options: HarnessStartOptions) => {
       const index = starts.push(options) - 1;
       const sessionId = `sess-${index}`;
       const result: TurnResult = { status: "completed", text: "done" };
       const finished = (async () => {
         options.onEvent({ type: "session.start", sessionId } as AdapterEvent);
+        for (const [n, file] of (wrote[index] ?? []).entries()) {
+          const toolUseId = `write-${index}-${n}`;
+          options.onEvent({ type: "turn.delta", sessionId, kind: "tool_use", toolName: "Write", toolUseId, text: JSON.stringify({ file_path: join(options.cwd ?? "", file), content: "x" }) });
+          options.onEvent({ type: "turn.delta", sessionId, kind: "tool_result", toolUseId, text: "ok", isError: false });
+        }
         await new Promise<void>(resolve => (gates[index] = resolve));
         options.onEvent({ type: "turn.done", sessionId, result });
         options.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
@@ -89,10 +97,11 @@ async function workspaceWith(daemon: ReturnType<typeof fakeDaemon>, adapter: Har
   const snapshotWait = turnSnapshotMs !== undefined ? { turnSnapshotMs } : {};
   const store = memoryStore();
   let ws: Awaited<ReturnType<typeof createOn>>;
+  let folder: string | undefined;
   if (here) {
     const root = mkdtempSync(join(tmpdir(), "wsp-turn-changes-"));
     roots.push(root);
-    const folder = join(root, "work");
+    folder = join(root, "work");
     mkdirSync(folder, { recursive: true });
     execFileSync("git", ["init", "-q", folder]);
     const local = { ...fakeLocal(root), daemonRoad: async () => ({ url: "http://127.0.0.1:7070", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: DAEMON_TOKEN }) };
@@ -110,7 +119,7 @@ async function workspaceWith(daemon: ReturnType<typeof fakeDaemon>, adapter: Har
     if (e.type === "session.changes") events.push(e);
     if (e.type === "session.start" && e.prompt !== undefined && e.turnId !== undefined) turnOf.set(e.prompt, e.turnId);
   });
-  return { ws, events, turnOf, store };
+  return { ws, events, turnOf, store, folder };
 }
 
 async function until(ready: () => boolean): Promise<void> {
@@ -253,6 +262,98 @@ describe("what a turn changed", () => {
     const byTurn = new Map(events.map(e => [e.turnId, e]));
     expect(byTurn.get(turnOf.get("one"))).toMatchObject({ shared: true });
     expect(byTurn.get(turnOf.get("two"))).toMatchObject({ shared: true });
+  });
+
+  it("lists only each thread's own files when two threads in one folder write different files in overlapping turns, and marks the other's as another thread's", async () => {
+    const a = { path: "a.ts", kind: "added", additions: 1, deletions: 0 };
+    const b = { path: "b.ts", kind: "added", additions: 2, deletions: 0 };
+    const daemon = fakeDaemon({ files: [a, b] });
+    const agent = gated({ reportsEdits: true, wrote: { 0: ["a.ts"], 1: ["b.ts"] } });
+    const { ws, events, turnOf } = await workspaceWith(daemon, agent.factory);
+    const first = await rt!.sessions.start(ws.id, { prompt: "one" });
+    const second = await rt!.sessions.start(ws.id, { prompt: "two" });
+    const cwd = first.view().cwd!;
+    expect(second.view().cwd).toBe(cwd);
+    daemon.rootAt(cwd);
+    agent.release(1);
+    await second.finished;
+    agent.release(0);
+    await first.finished;
+    await until(() => events.length === 2);
+    const byTurn = new Map(events.map(e => [e.turnId, e]));
+    expect(byTurn.get(turnOf.get("one"))).toMatchObject({ files: [a], others: [b], shared: true });
+    expect(byTurn.get(turnOf.get("two"))).toMatchObject({ files: [b], others: [a], shared: true });
+  });
+
+  it("shows none of its own for a turn that wrote nothing while another thread changed the folder", async () => {
+    const b = { path: "b.ts", kind: "added", additions: 2, deletions: 0 };
+    const daemon = fakeDaemon({ files: [b] });
+    const agent = gated({ reportsEdits: true, wrote: { 1: ["b.ts"] } });
+    const { ws, events, turnOf } = await workspaceWith(daemon, agent.factory);
+    const quiet = await rt!.sessions.start(ws.id, { prompt: "just read" });
+    const busy = await rt!.sessions.start(ws.id, { prompt: "write b" });
+    daemon.rootAt(quiet.view().cwd!);
+    agent.release(1);
+    await busy.finished;
+    agent.release(0);
+    await quiet.finished;
+    await until(() => events.length === 2);
+    const byTurn = new Map(events.map(e => [e.turnId, e]));
+    expect(byTurn.get(turnOf.get("just read"))).toMatchObject({ files: [], others: [b], shared: true });
+    expect(byTurn.get(turnOf.get("write b"))).toMatchObject({ files: [b], others: [], shared: true });
+  });
+
+  it("splits the list of two threads in one repo at different subfolders, since each turn's range covers the whole checkout", async () => {
+    const x = { path: "a/x.ts", kind: "added", additions: 1, deletions: 0 };
+    const y = { path: "b/y.ts", kind: "added", additions: 2, deletions: 0 };
+    const daemon = fakeDaemon({ files: [x, y] });
+    const agent = gated({ reportsEdits: true, wrote: { 0: ["x.ts"], 1: ["y.ts"] } });
+    const { ws, events, turnOf, folder } = await workspaceWith(daemon, agent.factory, undefined, true);
+    const top = realpathSync(folder!);
+    for (const sub of ["a", "b"]) mkdirSync(join(top, sub));
+    daemon.rootAt(top);
+    const first = await rt!.sessions.start(ws.id, { prompt: "in a", cwd: join(top, "a") });
+    const second = await rt!.sessions.start(ws.id, { prompt: "in b", cwd: join(top, "b") });
+    expect([first.view().cwd, second.view().cwd]).toEqual([join(top, "a"), join(top, "b")]);
+    agent.release(1);
+    await second.finished;
+    agent.release(0);
+    await first.finished;
+    await until(() => events.length === 2);
+    const byTurn = new Map(events.map(e => [e.turnId, e]));
+    expect(byTurn.get(turnOf.get("in a"))).toMatchObject({ files: [x], others: [y], shared: true });
+    expect(byTurn.get(turnOf.get("in b"))).toMatchObject({ files: [y], others: [x], shared: true });
+  });
+
+  it("keeps the folder's list, marked shared and not split, where the agent reports none of its edits", async () => {
+    const a = { path: "a.ts", kind: "added", additions: 1, deletions: 0 };
+    const daemon = fakeDaemon({ files: [a] });
+    const agent = gated({ wrote: { 0: ["a.ts"] } });
+    const { ws, events, turnOf } = await workspaceWith(daemon, agent.factory);
+    const first = await rt!.sessions.start(ws.id, { prompt: "one" });
+    await rt!.sessions.start(ws.id, { prompt: "two" });
+    daemon.rootAt(first.view().cwd!);
+    agent.release(1);
+    agent.release(0);
+    await until(() => events.length === 2);
+    const one = events.find(e => e.turnId === turnOf.get("one"))!;
+    expect(one).toMatchObject({ files: [a], shared: true });
+    expect(one).not.toHaveProperty("others");
+  });
+
+  it("keeps every change as the turn's own where no other thread ran in its folder, edits it never reported included", async () => {
+    const a = { path: "a.ts", kind: "added", additions: 1, deletions: 0 };
+    const built = { path: "dist/out.js", kind: "added", additions: 9, deletions: 0 };
+    const daemon = fakeDaemon({ files: [a, built] });
+    const agent = gated({ reportsEdits: true, wrote: { 0: ["a.ts"] } });
+    const { ws, events } = await workspaceWith(daemon, agent.factory);
+    const handle = await rt!.sessions.start(ws.id, { prompt: "build" });
+    agent.release(0);
+    await handle.finished;
+    await until(() => events.length === 1);
+    expect(events[0]).toMatchObject({ files: [a, built] });
+    expect(events[0]).not.toHaveProperty("others");
+    expect(events[0]).not.toHaveProperty("shared");
   });
 
   /** One run on a box that outlives the host that launched it: each host the case starts re-opens it by its handle. */

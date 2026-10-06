@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Changes pane's own words, written here so the pane and its tests read one spelling.
 
+/** A turn's range opened on one list of its card: how many of the range's files show, and the act that shows them all. */
+export const NARROWED_WORDS = {
+  line: (shown: number, all: number): string => `${shown} of ${all} files`,
+  all: "Show all",
+} as const;
+
 /** The button that hands a pass of line comments to the thread's composer. */
 export const SEND_TO_THREAD = "Send to thread";
 

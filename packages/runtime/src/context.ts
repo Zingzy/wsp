@@ -566,7 +566,7 @@ export interface ThreadsArea {
   readonly takenTurn: (workspaceId: string, taken: Taken) => Promise<SessionHandle | undefined>;
   readonly recordSteer: (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate" }) => void;
   readonly snapshotOf: (entry: LiveWorkspace, cwd: string) => Promise<string | undefined>;
-  readonly readTurnChanges: (entry: LiveWorkspace, turn: { sessionId: string; turnId: string; threadId: string; cwd: string; from: string; startedAt: number }) => Promise<boolean>;
+  readonly readTurnChanges: (entry: LiveWorkspace, turn: { sessionId: string; turnId: string; threadId: string; cwd: string; from: string; startedAt: number; wrote?: ReadonlySet<string> }) => Promise<boolean>;
   readonly usageComputerOf: (r: WorkspaceRecord) => string;
   readonly vaultedFor: (agent: string, loginStands?: boolean) => Vaulted;
   readonly usageAccountOf: (entry: LiveWorkspace, harness: string, named?: { id: string; label?: string; }) => { key: string; label: string; road: AccountRoad; };
@@ -614,6 +614,8 @@ export interface TurnsArea {
      * commit itself where it is known as the turn is handed over, a launch's already in or a re-opened turn's off
      * its row. */
     snapshot?: { from: Promise<string | undefined> | string; cwd: string };
+    /** Whether the harness names every file its tool calls write (HarnessAdapter.reportsEdits). */
+    reportsEdits?: boolean;
     /** The box the turn's own exec stream reads to know it is waiting on something outside its own process: flipped
      * while a permission prompt of this turn stands open, and while its harness reports a command or a subagent it
      * started still running, so the turn's idle clock does not run out under a question nobody has answered yet nor

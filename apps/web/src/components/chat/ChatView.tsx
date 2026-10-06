@@ -25,7 +25,7 @@ import { openNamedFile } from "../../files/open";
 import { threadFolderOf } from "../../files/root";
 import { cn } from "../../lib/utils";
 import { DEFAULT_TIMESTAMP_FORMAT, turnWait, type MessageId, type TimestampFormat, type TurnDiffSummary, type TurnSummary } from "./adapt";
-import { useDiffStore } from "../../diffs/store";
+import { onlyOf, useDiffStore } from "../../diffs/store";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useReadStamp } from "./useReadStamp";
 import { threadsOpenedBy, type ThreadOnWorkspace } from "../../sidebar/threadTree";
@@ -142,7 +142,13 @@ export function ChatView({
   const diffPlacesRef = useRef(diffPlaces);
   diffPlacesRef.current = diffPlaces;
   const turnDiffs = useMemo(
-    () => new Map<MessageId, TurnDiffSummary>(diffPlacesRef.current.map(p => [p.messageId, { turnId: p.turn, files: p.changes.files, moved: p.changes.moved }])),
+    () =>
+      new Map<MessageId, TurnDiffSummary>(
+        diffPlacesRef.current.map(({ messageId, turn, changes: { files, moved, others, shared } }) => [
+          messageId,
+          { turnId: turn, files, moved, ...(others !== undefined ? { others } : shared === true ? { folder: true as const } : {}) },
+        ]),
+      ),
     [diffKey],
   );
   const turnsRef = useRef(view.turns);
@@ -152,7 +158,8 @@ export function ChatView({
       const changes = turnsRef.current.find(t => t.turnId === turnId)?.changes;
       const at = cwd ?? threadFolderOf(workspaceId);
       if (!changes || at === null) return;
-      useDiffStore.getState().openTurn(workspaceId, { turnId, cwd: at, from: changes.from, to: changes.to, ...(path === undefined ? {} : { path }) });
+      const only = onlyOf(changes, path);
+      useDiffStore.getState().openTurn(workspaceId, { turnId, cwd: at, from: changes.from, to: changes.to, ...(path === undefined ? {} : { path }), ...(only === undefined ? {} : { only }) });
       useRightPanelStore.getState().open(workspaceId, "diff");
     },
     [cwd, workspaceId],

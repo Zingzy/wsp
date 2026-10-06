@@ -152,7 +152,7 @@ export function threadMessages(events: ReadonlyArray<SessionEvent>, threadId: st
         continue;
       case "session.changes": {
         // The count lands after the turn's end, and reads with the turn's work above that end.
-        const row = message("tool", event.at, turnChangesLine(event.files));
+        const row = message("tool", event.at, turnChangesLine(event));
         if (rows.at(-1)?.who === "turn") rows.splice(rows.length - 1, 0, row);
         else rows.push(row);
         open = undefined;

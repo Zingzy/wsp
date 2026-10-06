@@ -3,7 +3,7 @@ import {
   type AdapterEvent, type PermissionAsk, type PermissionOption, type PermissionOutcome, type SessionEvent,
   type SessionAnswerResult, type SessionStartOutcome, type SessionView, type AttachmentRecord, type TurnResult,
   type TurnStatus, ThreadScope, WorkspaceOrigin, threadWord, leadAsk, askingLine, permissionModeOptionLabel,
-  pickedOptions, deniedLine,
+  pickedOptions, deniedLine, toolCallFacts,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import type { HarnessSession, HarnessAdapter } from "../types/harness.js";
@@ -56,6 +56,8 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
      * commit itself where it is known as the turn is handed over, a launch's already in or a re-opened turn's off
      * its row. */
     snapshot?: { from: Promise<string | undefined> | string; cwd: string };
+    /** Whether the harness names every file its tool calls write (HarnessAdapter.reportsEdits). */
+    reportsEdits?: boolean;
     /** The box the turn's own exec stream reads to know it is waiting on something outside its own process: flipped
      * while a permission prompt of this turn stands open, and while its harness reports a command or a subagent it
      * started still running, so the turn's idle clock does not run out under a question nobody has answered yet nor
@@ -70,6 +72,8 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
     const { lines: deltasWritten, subagents: subagentsWritten, reply: recordedReply, started: startWritten, changes: changesWritten } = t.written ?? { lines: 0, subagents: 0, started: false, changes: false };
     /** What the turn changed, read once at the first of its reply and its exit. */
     let changesRead = changesWritten;
+    /** The paths the agent's own tool calls wrote, read off every call including the ones a re-opened run reads past. */
+    const wrote = t.reportsEdits === true ? new Set<string>() : undefined;
     /** While the read is out the turn's ending keeps the launch's commit on its row, so a host that goes before the
      * card is in leaves the read to the next host. Once that ending is on disk (endWritten), a read that lands after
      * it writes the row again to take the commit off. */
@@ -83,7 +87,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
       const startedAt = view.startedAt ?? Date.now();
       void (async () => {
         const from = await taken;
-        return from !== undefined && (await ctx.readTurnChanges(entry, { sessionId, turnId, threadId, cwd, from, startedAt }));
+        return from !== undefined && (await ctx.readTurnChanges(entry, { sessionId, turnId, threadId, cwd, from, startedAt, ...(wrote !== undefined ? { wrote } : {}) }));
       })().then(read => {
         changesOut = false;
         const row = sessions.get(rowId);
@@ -289,8 +293,10 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           return;
         }
         case "turn.delta":
-          if (event.kind === "tool_use" && event.toolUseId !== undefined && event.toolName !== undefined) calls.set(event.toolUseId, { toolName: event.toolName, input: event.text });
-          else if (event.kind === "tool_result" && event.toolUseId !== undefined) calls.delete(event.toolUseId);
+          if (event.kind === "tool_use" && event.toolUseId !== undefined && event.toolName !== undefined) {
+            calls.set(event.toolUseId, { toolName: event.toolName, input: event.text });
+            if (wrote !== undefined) for (const path of toolCallFacts(event.toolName, event.text).changedFiles ?? []) wrote.add(path);
+          } else if (event.kind === "tool_result" && event.toolUseId !== undefined) calls.delete(event.toolUseId);
           if (replaying > 0) {
             replaying--;
             return;
@@ -692,6 +698,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
         entry,
         view,
         written: turnWritten(written, s.turnId),
+        ...(adapter.reportsEdits === true ? { reportsEdits: true } : {}),
         threadId,
         turnId: s.turnId,
         ...(s.notify !== undefined ? { notify: s.notify } : {}),

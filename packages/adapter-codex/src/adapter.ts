@@ -170,6 +170,8 @@ export interface CodexAdapter {
   readonly sessions: ReadonlyMap<string, CodexSession>;
   /** The server takes turn/steer while a turn runs. */
   readonly steers: true;
+  /** Every fileChange item names the files it wrote. */
+  readonly reportsEdits: true;
   /** A turn whose message is this alone runs the server's own compaction of the thread, as codex's own /compact does. */
   readonly compacts: typeof COMPACT;
   /** The server takes images as local paths, so each one lands on the machine before the turn starts. */
@@ -1254,6 +1256,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       : {}),
     sessions,
     steers: true,
+    reportsEdits: true,
     compacts: COMPACT,
     mcpServers: true,
     waitsForPrompt: true,
