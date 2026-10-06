@@ -23,7 +23,7 @@ import { daemonContentSha } from "./daemon-content.mjs";
 
 /** Every file the cut reads or writes, relative to the repo. */
 export const CUT_PATHS = {
-  record: "packages/protocol/src/index.ts",
+  record: "packages/protocol/src/wire/daemon-version.ts",
   rust: "daemon/crates/wsp-frames/src/numbers.rs",
   fixture: "daemon/fixtures/contract/numbers.json",
   note: "daemon/version-note.md",
