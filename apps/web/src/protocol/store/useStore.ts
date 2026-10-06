@@ -105,9 +105,10 @@ function dropWaiting(key: string): void {
  * older record over the one the person sees; the last reply, or the record read after a refusal, settles it. */
 let preferenceSetsInFlight = 0;
 
-/** Whether a record moved what the host's agent lists are marked and shaped by: the default agent, or an agent's own
- * defaults and picker. */
-const agentListsMoved = (a: Preferences, b: Preferences): boolean => a.defaultAgent !== b.defaultAgent || JSON.stringify(a.agentDefaults) !== JSON.stringify(b.agentDefaults);
+/** Whether a record moved what the host's agent lists are marked and shaped by: the default agent, an agent's own
+ * defaults and picker, or a project's own picks, which a workspace's lists are marked by. */
+const agentListsMoved = (a: Preferences, b: Preferences): boolean =>
+  a.defaultAgent !== b.defaultAgent || JSON.stringify(a.agentDefaults) !== JSON.stringify(b.agentDefaults) || JSON.stringify(a.projectDefaults) !== JSON.stringify(b.projectDefaults);
 /** Every init.job view taken so far. The setup snapshot read on a connect is a view of the moment it was asked
  * for, so a job started or ended between the ask and the reply would be painted over by the older one; a snapshot
  * that raced a view is dropped and the view stands. Dropping it loses nothing because the reply and the events
@@ -144,7 +145,8 @@ export const useStore = create<State>((set, get) => {
     else held.costs[e.workspaceId] = { rateUsdPerHour: e.rateUsdPerHour, accruedUsd: e.accruedUsd, at: e.at };
     frame ??= setTimeout(flushFrame, FRAME_MS);
   };
-  /** A record the host answered, and its agent lists read again where it moved what they are marked by. */
+  /** A record the host answered, and its agent lists read again where it moved what they are marked by: the host's
+   * and every workspace's, since a mark the host moved is lost to the composer once the default under it goes. */
   const preferencesLanded = (preferences: Preferences, before: Preferences): void => {
     set({ preferences });
     const api = get().api;
@@ -153,6 +155,7 @@ export const useStore = create<State>((set, get) => {
       .listHarnesses()
       .then(harnesses => set({ harnesses }))
       .catch(() => {});
+    for (const workspaceId of Object.keys(get().harnessesByWorkspace)) void get().loadHarnesses(workspaceId);
   };
   const patchCreation = (key: string, patch: (c: Creation) => Creation): void => {
     set(s => ({ creations: s.creations.map(c => (c.key === key ? patch(c) : c)) }));
@@ -880,6 +883,7 @@ export const useStore = create<State>((set, get) => {
             const { [e.workspaceId]: _p, ...spending } = s.spending;
             const { [e.workspaceId]: _r, ...sessions } = s.sessions;
             const { [e.workspaceId]: _b, ...broughtBack } = s.broughtBack;
+            const { [e.workspaceId]: _h, ...harnessesByWorkspace } = s.harnessesByWorkspace;
             const creation = s.creations.find(c => c.workspaceId === e.workspaceId);
             const workspaces = s.workspaces.filter(x => x.id !== e.workspaceId);
             // A page open on the workspace goes with it, or the centre keeps drawing a thread the host no longer has.
@@ -894,6 +898,7 @@ export const useStore = create<State>((set, get) => {
               spending,
               sessions,
               broughtBack,
+              harnessesByWorkspace,
               forwards: s.forwards.filter(f => f.workspaceId !== e.workspaceId),
             };
           });
