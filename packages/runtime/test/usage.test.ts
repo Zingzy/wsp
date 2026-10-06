@@ -182,6 +182,30 @@ describe("this computer's own sign-ins", () => {
     // A read for the accounts asks no vendor for its newest version.
     expect(asked).toEqual([[{ kind: "here" }, { latest: false }]]);
   });
+
+  it("reads this computer's sign-ins once a minute however many usage reads ask, and shares a read still out", async () => {
+    let reads = 0;
+    let now = 1_000_000;
+    const row = (id: string) => ({ id, name: id, installed: true, road: "npm", signIn: "signed-in", signInRoad: "login", wspTools: false });
+    rt = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      vault: () => ({}),
+      pricesFetch: async () => ({}),
+      clock: { now: () => now, schedule: (fn: () => void, ms: number) => { const t = setTimeout(fn, ms); return () => clearTimeout(t); } } as never,
+      agentsReader: {
+        read: async () => (reads++, await new Promise(r => setTimeout(r, 20)), { home: "/Users/maya", user: "maya", agents: [row("claude")], skills: [], servers: [], refused: [] }) as never,
+        tools: async () => ({ auth: "open", readAt: "2026-09-25T12:00:00.000Z" }) as never,
+      },
+    });
+    await Promise.all(Array.from({ length: 40 }, () => rt!.usage.accounts()));
+    for (let i = 0; i < 10; i++) await rt!.usage.accounts();
+    expect(reads).toBe(1);
+    now += 61_000;
+    await rt!.usage.accounts();
+    expect(reads).toBe(2);
+  });
 });
 
 describe("work done outside wsp", () => {

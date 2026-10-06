@@ -45,7 +45,9 @@ const EACH = [
   'd=$(mktemp -d) || exit 1',
   `T=; command -v timeout >/dev/null 2>&1 && T="timeout ${COMMAND_S}"`,
   "i=0",
-  'for c; do ( $T sh -c "$c" > "$d/$i" 2>&1 < /dev/null; echo $? > "$d/$i.x" ) & i=$((i+1)); done',
+  // macOS has no timeout command, and a probe that hung there outlived every batch and piled up by the hundred
+  // (2026-10-06), so where none is found the batch ends each probe itself after the same bound.
+  `for c; do ( if [ -n "$T" ]; then $T sh -c "$c"; else sh -c "$c" & p=$!; sh -c 'sleep ${COMMAND_S}; pkill -9 -P "$1"; kill -9 "$1"' sh $p >/dev/null 2>&1 & k=$!; wait $p 2>/dev/null; r=$?; kill $k 2>/dev/null; wait $k 2>/dev/null; (exit $r); fi > "$d/$i" 2>&1 < /dev/null; echo $? > "$d/$i.x" ) & i=$((i+1)); done`,
   "wait",
   "i=0",
   "for c; do printf '\\036%s\\037' \"$(cat \"$d/$i.x\" 2>/dev/null)\"; head -c 16384 \"$d/$i\" 2>/dev/null; i=$((i+1)); done",
