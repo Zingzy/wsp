@@ -4,7 +4,8 @@
 //! rather than once: a laptop gains a Docker, loses a disk and is renamed under wsp rather than by it. Signing and
 //! verifying are wsp-seal's; the bytes they cover are the protocol's.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -458,9 +459,12 @@ pub(crate) fn sweep_place_home(home: &Path, read: &dyn Fn(&str) -> String) -> Ve
 /// Takes the workspace AppArmor profile a root install loaded off this computer: unloaded while its file is still
 /// there, since the kernel holds a profile by name and a bare removal would leave it loaded for a binary that is
 /// gone, then the file. Answers the path when it went; nothing when there was none to take.
-pub(crate) fn sweep_workspace_profile(profile: &Path, read: &dyn Fn(&str) -> String) -> Option<String> {
+pub(crate) fn sweep_workspace_profile(profile: &Path, found: &HashSet<PathBuf>, read: &dyn Fn(&str) -> String) -> Option<String> {
     if !profile.is_file() {
         return None;
+    }
+    if found.contains(profile) {
+        return Some(words::place_stood_before(profile.to_string_lossy()));
     }
     let quoted = format!("'{}'", profile.to_string_lossy().replace('\'', r"'\''"));
     read(&format!("command -v apparmor_parser >/dev/null 2>&1 && apparmor_parser -R {quoted} 2>/dev/null; true"));
@@ -475,11 +479,65 @@ pub(crate) fn sweep_outside_home(root: &str) -> Vec<String> {
     outside_marks(&sh_stdout_within(&outside_sweep_script(root), Duration::from_secs(60)))
 }
 
-/// Takes wsp's install folder off this computer: every link in the links folder whose own target is under the
-/// prefix, then the prefix whole. A link is read, never followed, so a command of the computer's own there and a
-/// link pointing anywhere else stay; a prefix that is itself a link stays too, since what it points at is not
-/// wsp's. The host's own leave takes the same two by the same rule.
-pub(crate) fn sweep_tool_prefix(prefix: &Path, links: &Path) -> Vec<String> {
+/// The paths the add found standing before it wrote anything, off the record its deploy left under the home. None
+/// where the record is missing, unreadable, past the cap or does not end on its end entry: a computer joined before
+/// the record existed, one joined at its own terminal and a deploy killed while writing it all read alike, and the
+/// leave then takes nothing outside the home. Read before the home's sweep, which takes the record with wsp's folder.
+pub(crate) fn place_found(home: &Path) -> Option<HashSet<PathBuf>> {
+    let path = place_daemon_paths(home).place_found;
+    let meta = std::fs::symlink_metadata(&path).ok()?;
+    let end = format!("{}\0", numbers::PLACE_FOUND_END);
+    if !meta.is_file() || meta.len() > numbers::PLACE_FOUND_MAX_BYTES + end.len() as u64 {
+        return None;
+    }
+    let bytes = std::fs::read(&path).ok()?;
+    let body = bytes.strip_suffix(end.as_bytes())?;
+    if !body.is_empty() && !body.ends_with(b"\0") {
+        return None;
+    }
+    Some(body.split(|b| *b == 0).filter(|path| !path.is_empty()).map(|path| PathBuf::from(std::ffi::OsStr::from_bytes(path))).collect())
+}
+
+/// What a leave run as root takes outside the home: the workspace profile, what the setup wrote outside wsp's install
+/// folder, then that folder and the links into it, each by the add's record. With no whole record nothing of the
+/// profile or the folder goes, and one line names what stands there for a person to clear by hand; what the setup
+/// wrote outside the folder still goes, since its own list hashes each path. `install` is the folder /usr/local, /opt
+/// and /etc sit under, empty for this computer's own.
+pub(crate) fn sweep_outside_owned(
+    found: Option<&HashSet<PathBuf>>,
+    profile: &Path,
+    install: &str,
+    read: &dyn Fn(&str) -> String,
+) -> Vec<String> {
+    let prefix = PathBuf::from(format!("{install}{}", numbers::TOOL_PREFIX));
+    let links = PathBuf::from(format!("{install}{}", numbers::TOOL_LINKS_DIR));
+    let mut swept = Vec::new();
+    let Some(found) = found else {
+        let standing: Vec<String> = [profile, prefix.as_path()]
+            .into_iter()
+            .filter(|path| std::fs::symlink_metadata(path).is_ok())
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+        if !standing.is_empty() {
+            swept.push(words::place_owners_unknown(&standing));
+        }
+        swept.extend(sweep_outside_home(install));
+        return swept;
+    };
+    swept.extend(sweep_workspace_profile(profile, found, read));
+    // The list naming what the setup wrote outside the home sits in the prefix, so it is read first.
+    swept.extend(sweep_outside_home(install));
+    swept.extend(sweep_tool_prefix(&prefix, &links, found));
+    swept
+}
+
+/// Takes wsp's install folder off this computer, by the record of what stood before the add. Every link in the links
+/// folder the record does not name whose own target is under the prefix and is no path the record names, then the
+/// prefix whole where it did not stand; where it stood, every path under it the record does not name, deepest first,
+/// a folder only once it is empty, so a folder still holding a path from before stays with it. A link is read, never
+/// followed, so a command of the computer's own there and a link pointing anywhere else stay; a prefix that is itself
+/// a link stays too, since what it points at is not wsp's. The host's own leave takes the same paths by the same rule.
+pub(crate) fn sweep_tool_prefix(prefix: &Path, links: &Path, found: &HashSet<PathBuf>) -> Vec<String> {
     let Ok(meta) = std::fs::symlink_metadata(prefix) else { return Vec::new() };
     if !meta.is_dir() {
         return vec![words::place_kept_for_link(prefix.to_string_lossy())];
@@ -489,18 +547,53 @@ pub(crate) fn sweep_tool_prefix(prefix: &Path, links: &Path) -> Vec<String> {
     if std::fs::symlink_metadata(prefix.join("landed")).is_ok_and(|list| list.is_file() && list.len() > 0) {
         return vec![words::place_outside_left(prefix.to_string_lossy())];
     }
+    let stood = found.contains(prefix);
     let mut removed = Vec::new();
     for entry in std::fs::read_dir(links).into_iter().flatten().flatten() {
         let link = entry.path();
+        if found.contains(&link) {
+            continue;
+        }
         let Ok(target) = std::fs::read_link(&link) else { continue };
-        if lexical(&links.join(target)).starts_with(prefix) && std::fs::remove_file(&link).is_ok() {
+        let target = lexical(&links.join(target));
+        if target.starts_with(prefix) && !(stood && found.contains(&target)) && std::fs::remove_file(&link).is_ok() {
             removed.push(link.to_string_lossy().into_owned());
         }
     }
-    if std::fs::remove_dir_all(prefix).is_ok() {
-        removed.push(prefix.to_string_lossy().into_owned());
+    if !stood {
+        if std::fs::remove_dir_all(prefix).is_ok() {
+            removed.push(prefix.to_string_lossy().into_owned());
+        }
+        return removed;
     }
+    let mut gone = Vec::new();
+    take_unfound(prefix, found, &mut gone);
+    // The topmost path that went stands for everything under it.
+    let all: HashSet<&Path> = gone.iter().map(PathBuf::as_path).collect();
+    removed.extend(
+        gone.iter().filter(|path| path.parent().is_none_or(|up| !all.contains(up))).map(|path| path.to_string_lossy().into_owned()),
+    );
+    removed.push(words::place_stood_before(prefix.to_string_lossy()));
     removed
+}
+
+/// Every path under a folder the record does not name, children before their folder, each folder only once empty;
+/// a link is removed as itself and never followed. What went is appended in the order it went.
+fn take_unfound(folder: &Path, found: &HashSet<PathBuf>, gone: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(folder).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
+        if meta.is_dir() {
+            take_unfound(&path, found, gone);
+        }
+        if found.contains(&path) {
+            continue;
+        }
+        let taken = if meta.is_dir() { std::fs::remove_dir(&path) } else { std::fs::remove_file(&path) };
+        if taken.is_ok() {
+            gone.push(path);
+        }
+    }
 }
 
 /// A path with its `.` and `..` read off by name alone, which is how a link's target is read against the folder it
@@ -1446,7 +1539,7 @@ mod tests {
         let old = root.path().join("opt-wsp-old");
         std::fs::create_dir_all(&old).unwrap();
         std::os::unix::fs::symlink(&old, links.join("old")).unwrap();
-        let swept = sweep_tool_prefix(&prefix, &links);
+        let swept = sweep_tool_prefix(&prefix, &links, &HashSet::new());
         let said = |p: PathBuf| p.to_string_lossy().into_owned();
         let mut taken = swept.clone();
         taken.sort();
@@ -1459,7 +1552,7 @@ mod tests {
         left.sort();
         assert_eq!(left, ["env2", "jq", "old"]);
         assert!(old.exists());
-        assert!(sweep_tool_prefix(&prefix, &links).is_empty());
+        assert!(sweep_tool_prefix(&prefix, &links, &HashSet::new()).is_empty());
     }
 
     #[test]
@@ -1471,11 +1564,11 @@ mod tests {
         std::fs::create_dir_all(&links).unwrap();
         std::os::unix::fs::symlink(prefix.join("go/bin/x"), links.join("x")).unwrap();
         std::fs::write(prefix.join("landed"), "dir\t/opt/gcloud\n").unwrap();
-        assert_eq!(sweep_tool_prefix(&prefix, &links), [words::place_outside_left(prefix.to_string_lossy())]);
+        assert_eq!(sweep_tool_prefix(&prefix, &links, &HashSet::new()), [words::place_outside_left(prefix.to_string_lossy())]);
         assert!(prefix.join("landed").exists() && std::fs::symlink_metadata(links.join("x")).is_ok());
         // A list the leave finished with is gone, and an empty one holds nothing back.
         std::fs::write(prefix.join("landed"), "").unwrap();
-        assert!(sweep_tool_prefix(&prefix, &links).contains(&prefix.to_string_lossy().into_owned()));
+        assert!(sweep_tool_prefix(&prefix, &links, &HashSet::new()).contains(&prefix.to_string_lossy().into_owned()));
         assert!(!prefix.exists());
     }
 
@@ -1486,7 +1579,7 @@ mod tests {
         std::fs::write(elsewhere.path().join("keep"), "theirs").unwrap();
         let prefix = root.path().join("opt-wsp");
         std::os::unix::fs::symlink(elsewhere.path(), &prefix).unwrap();
-        let swept = sweep_tool_prefix(&prefix, &root.path().join("usr-local-bin"));
+        let swept = sweep_tool_prefix(&prefix, &root.path().join("usr-local-bin"), &HashSet::new());
         assert_eq!(swept, [words::place_kept_for_link(prefix.to_string_lossy())]);
         assert!(elsewhere.path().join("keep").exists());
     }
@@ -1501,7 +1594,7 @@ mod tests {
             asked.borrow_mut().push((script.to_owned(), profile.exists()));
             String::new()
         };
-        assert_eq!(sweep_workspace_profile(&profile, &read), Some(profile.to_string_lossy().into_owned()));
+        assert_eq!(sweep_workspace_profile(&profile, &HashSet::new(), &read), Some(profile.to_string_lossy().into_owned()));
         assert!(!profile.exists());
         let asked = asked.into_inner();
         assert_eq!(asked.len(), 1);
@@ -1509,7 +1602,216 @@ mod tests {
         assert!(asked[0].1, "the profile was unloaded while its file was still there");
         // A computer that never loaded one is asked nothing and says nothing.
         let never = |_: &str| -> String { panic!("nothing to unload") };
-        assert_eq!(sweep_workspace_profile(&profile, &never), None);
+        assert_eq!(sweep_workspace_profile(&profile, &HashSet::new(), &never), None);
+    }
+
+    /// The record a joined add's deploy writes under the home: each path NUL-terminated, then the end entry.
+    fn record_under(home: &Path, paths: &[PathBuf]) -> PathBuf {
+        let at = place_daemon_paths(home).place_found;
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        let mut bytes = Vec::new();
+        for path in paths {
+            bytes.extend_from_slice(path.as_os_str().as_encoded_bytes());
+            bytes.push(0);
+        }
+        bytes.extend_from_slice(numbers::PLACE_FOUND_END.as_bytes());
+        bytes.push(0);
+        std::fs::write(&at, bytes).unwrap();
+        at
+    }
+
+    /// Every path under a folder, read without following a link.
+    fn under(folder: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(folder).into_iter().flatten().flatten() {
+            out.push(entry.path());
+            if entry.file_type().unwrap().is_dir() {
+                under(&entry.path(), out);
+            }
+        }
+    }
+
+    /// What the deploy's listing names on a box as it stands: the profile where it stands, the prefix and every path
+    /// under it, and every link in the links folder, as find walks them without following a link.
+    fn standing(profile: &Path, prefix: &Path, links: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        if profile.exists() {
+            out.push(profile.to_path_buf());
+        }
+        if prefix.is_dir() {
+            out.push(prefix.to_path_buf());
+            under(prefix, &mut out);
+        }
+        for entry in std::fs::read_dir(links).into_iter().flatten().flatten() {
+            if entry.file_type().unwrap().is_symlink() {
+                out.push(entry.path());
+            }
+        }
+        out
+    }
+
+    /// Everything under a folder, relative to it and sorted.
+    fn tree(root: &Path) -> Vec<String> {
+        let mut paths = Vec::new();
+        under(root, &mut paths);
+        let mut out: Vec<String> = paths.iter().map(|path| path.strip_prefix(root).unwrap().to_string_lossy().into_owned()).collect();
+        out.sort();
+        out
+    }
+
+    /// A box as it stood before a joined add, under a root of its own: a profile, an install folder holding a file of
+    /// its own and a toolchain, and a command of its own linked out of that toolchain.
+    struct BoxOfItsOwn {
+        home: tempfile::TempDir,
+        root: tempfile::TempDir,
+        profile: PathBuf,
+        prefix: PathBuf,
+        links: PathBuf,
+    }
+
+    fn box_of_its_own() -> BoxOfItsOwn {
+        let home = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let profile = root.path().join("etc/apparmor.d/wsp-workspace");
+        let prefix = root.path().join(numbers::TOOL_PREFIX.trim_start_matches('/'));
+        let links = root.path().join(numbers::TOOL_LINKS_DIR.trim_start_matches('/'));
+        std::fs::create_dir_all(profile.parent().unwrap()).unwrap();
+        std::fs::write(&profile, "profile theirs {}\n").unwrap();
+        std::fs::create_dir_all(prefix.join("rustup/toolchains/theirs/bin")).unwrap();
+        std::fs::write(prefix.join("rustup/settings.toml"), "theirs\n").unwrap();
+        std::fs::write(prefix.join("rustup/toolchains/theirs/bin/rustc"), "theirs\n").unwrap();
+        std::fs::write(prefix.join("keep"), "theirs").unwrap();
+        // A name holding a newline, which a record split on lines would read as two names neither of which is it.
+        std::fs::write(prefix.join("two\nlines"), "theirs").unwrap();
+        std::fs::create_dir_all(&links).unwrap();
+        std::os::unix::fs::symlink(prefix.join("rustup/toolchains/theirs/bin/rustc"), links.join("rustc-theirs")).unwrap();
+        BoxOfItsOwn { home, root, profile, prefix, links }
+    }
+
+    /// What the setup does after the add on such a box: a toolchain of its own inside the rustup it found, a command
+    /// linked out of it, and a manager's folder of its own.
+    fn setup_installed(at: &BoxOfItsOwn) {
+        std::fs::create_dir_all(at.prefix.join("rustup/toolchains/stable/bin")).unwrap();
+        std::fs::write(at.prefix.join("rustup/toolchains/stable/bin/rustc"), "wsp's\n").unwrap();
+        std::os::unix::fs::symlink(at.prefix.join("rustup/toolchains/stable/bin/rustc"), at.links.join("rustc")).unwrap();
+        std::fs::create_dir_all(at.prefix.join("uv/bin")).unwrap();
+        std::fs::write(at.prefix.join("uv/bin/uv"), "wsp's\n").unwrap();
+    }
+
+    fn install_root(at: &BoxOfItsOwn) -> String {
+        at.root.path().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_profile_the_add_found_standing_stays_loaded_and_is_said() {
+        let at = box_of_its_own();
+        record_under(at.home.path(), std::slice::from_ref(&at.profile));
+        let found = place_found(at.home.path()).unwrap();
+        let never = |_: &str| -> String { panic!("a profile that stood before the add is not unloaded") };
+        assert_eq!(sweep_workspace_profile(&at.profile, &found, &never), Some(words::place_stood_before(at.profile.to_string_lossy())));
+        assert_eq!(std::fs::read_to_string(&at.profile).unwrap(), "profile theirs {}\n");
+    }
+
+    #[test]
+    fn with_no_record_nothing_outside_the_home_goes_and_one_line_names_what_stays() {
+        let at = box_of_its_own();
+        setup_installed(&at);
+        let before = tree(at.root.path());
+        assert!(place_found(at.home.path()).is_none());
+        let never = |_: &str| -> String { panic!("nothing is unloaded without a record") };
+        let swept = sweep_outside_owned(place_found(at.home.path()).as_ref(), &at.profile, &install_root(&at), &never);
+        assert_eq!(swept, [words::place_owners_unknown(&[at.profile.to_string_lossy(), at.prefix.to_string_lossy()])]);
+        assert_eq!(tree(at.root.path()), before);
+    }
+
+    #[test]
+    fn a_record_cut_short_reads_as_none_and_takes_nothing() {
+        let at = box_of_its_own();
+        let record = record_under(at.home.path(), &standing(&at.profile, &at.prefix, &at.links));
+        let whole = std::fs::read(&record).unwrap();
+        setup_installed(&at);
+        let before = tree(at.root.path());
+        // Cut anywhere short of its end entry: inside a path, after a path, and one byte short of the end.
+        for cut in [10, whole.iter().position(|b| *b == 0).unwrap() + 1, whole.len() - 1] {
+            std::fs::write(&record, &whole[..cut]).unwrap();
+            assert!(place_found(at.home.path()).is_none(), "a record cut at {cut} read as whole");
+            let swept = sweep_outside_owned(place_found(at.home.path()).as_ref(), &at.profile, &install_root(&at), &|_| String::new());
+            assert_eq!(swept.len(), 1, "{swept:?}");
+            assert_eq!(tree(at.root.path()), before);
+        }
+        // An empty file and a path that ends where the end entry's name begins are no record either.
+        std::fs::write(&record, b"").unwrap();
+        assert!(place_found(at.home.path()).is_none());
+        std::fs::write(&record, format!("/opt/x{}\0", numbers::PLACE_FOUND_END)).unwrap();
+        assert!(place_found(at.home.path()).is_none());
+        std::fs::write(&record, &whole).unwrap();
+        assert!(place_found(at.home.path()).is_some());
+    }
+
+    #[test]
+    fn a_record_past_the_cap_reads_as_none() {
+        let home = tempfile::tempdir().unwrap();
+        let record = record_under(home.path(), &[]);
+        assert_eq!(place_found(home.path()), Some(HashSet::new()));
+        let file = std::fs::OpenOptions::new().write(true).open(&record).unwrap();
+        file.set_len(numbers::PLACE_FOUND_MAX_BYTES + 64).unwrap();
+        assert!(place_found(home.path()).is_none());
+    }
+
+    #[test]
+    fn what_the_setup_wrote_inside_a_folder_that_stood_goes_and_every_path_from_before_stays() {
+        let at = box_of_its_own();
+        let before = tree(&at.prefix);
+        record_under(at.home.path(), &standing(&at.profile, &at.prefix, &at.links));
+        setup_installed(&at);
+        // A file of its own that the setup wrote over stays, as the person's: the record cannot tell its bytes apart.
+        std::fs::write(at.prefix.join("rustup/settings.toml"), "written over\n").unwrap();
+        let never = |_: &str| -> String { panic!("a profile that stood before the add is not unloaded") };
+        let swept = sweep_outside_owned(place_found(at.home.path()).as_ref(), &at.profile, &install_root(&at), &never);
+        assert_eq!(tree(&at.prefix), before);
+        let said = |p: PathBuf| p.to_string_lossy().into_owned();
+        for line in [
+            words::place_stood_before(at.profile.to_string_lossy()),
+            said(at.links.join("rustc")),
+            said(at.prefix.join("rustup/toolchains/stable")),
+            said(at.prefix.join("uv")),
+            words::place_stood_before(at.prefix.to_string_lossy()),
+        ] {
+            assert!(swept.contains(&line), "{line} in {swept:?}");
+        }
+        // The topmost path that went stands for everything under it.
+        assert!(!swept.contains(&said(at.prefix.join("uv/bin"))), "{swept:?}");
+        let left: Vec<_> = std::fs::read_dir(&at.links).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(left, ["rustc-theirs"]);
+        assert_eq!(std::fs::read_to_string(&at.profile).unwrap(), "profile theirs {}\n");
+    }
+
+    #[test]
+    fn a_folder_made_since_that_holds_a_path_from_before_stays() {
+        let at = box_of_its_own();
+        // A path the record names, under a folder it does not: the folder is not empty, so it stays with it.
+        std::fs::create_dir_all(at.prefix.join("since")).unwrap();
+        std::fs::write(at.prefix.join("since/old"), "theirs").unwrap();
+        record_under(at.home.path(), &[at.prefix.clone(), at.prefix.join("since/old")]);
+        sweep_tool_prefix(&at.prefix, &at.links, &place_found(at.home.path()).unwrap());
+        assert!(at.prefix.join("since/old").exists());
+        assert!(!at.prefix.join("keep").exists());
+    }
+
+    #[test]
+    fn where_nothing_stood_the_profile_and_the_folder_go_whole() {
+        let at = box_of_its_own();
+        std::fs::remove_file(&at.profile).unwrap();
+        std::fs::remove_dir_all(&at.prefix).unwrap();
+        std::fs::remove_file(at.links.join("rustc-theirs")).unwrap();
+        record_under(at.home.path(), &standing(&at.profile, &at.prefix, &at.links));
+        assert_eq!(place_found(at.home.path()), Some(HashSet::new()));
+        std::fs::write(&at.profile, "profile wsp-test-never-loaded {}\n").unwrap();
+        std::fs::create_dir_all(at.prefix.join("uv/bin")).unwrap();
+        std::os::unix::fs::symlink(at.prefix.join("uv/bin/uv"), at.links.join("uv")).unwrap();
+        let swept = sweep_outside_owned(place_found(at.home.path()).as_ref(), &at.profile, &install_root(&at), &|_| String::new());
+        assert!(!at.profile.exists() && !at.prefix.exists());
+        assert!(swept.contains(&at.prefix.to_string_lossy().into_owned()), "{swept:?}");
+        assert!(std::fs::read_dir(&at.links).unwrap().next().is_none());
     }
 
     #[test]

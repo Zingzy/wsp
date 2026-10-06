@@ -1313,10 +1313,11 @@ describe("daemon files and diff ops", () => {
       binDir: "/home/maya/.local/bin",
       openShim: "/home/maya/.local/bin/wsp-open",
       rootsPath: "/home/maya/.wsp/roots",
-      // A computer joined as a place keeps these three beside the daemon's own, so one sweep takes the lot.
+      // A computer joined as a place keeps these four beside the daemon's own, so one sweep takes the lot.
       placeFile: "/home/maya/.wsp/place.json",
       placeKey: "/home/maya/.wsp/place-key.pem",
       placeLog: "/home/maya/.wsp/place.log",
+      placeFound: "/home/maya/.wsp/place-found",
     });
     // The deploy on the host writes these and the runtime reads the token and the port back off them, which is
     // why the rule sits here and in neither of them.

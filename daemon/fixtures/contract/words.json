@@ -21,6 +21,8 @@
   "hostClosed": "the host closed the connection",
   "placeKeptForLink": "nothing was removed at {path}: a folder on the way to it is a link",
   "placeOutsideLeft": "nothing was removed at {prefix}: the leave did not finish taking what the setup wrote outside the home, which {prefix}/landed still lists",
+  "placeStoodBefore": "{path} stays: it was there before wsp was added",
+  "placeOwnersUnknown": "nothing was removed at {paths}: no whole record says what stood there before wsp was added, so it may be this computer's own; remove what wsp put there by hand",
   "onBase": "this workspace is on {base}, the branch it started from; move the commits onto a branch of their own and bring back again",
   "notOnABranch": "this workspace is not on a branch, so there is nothing to bring back yet",
   "nothingAhead": "{branch} has no commits that {base} lacks, so there is nothing to bring back",
