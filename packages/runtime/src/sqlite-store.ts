@@ -5,7 +5,9 @@
 // numbered migrations, and the migrations table says how far each one has run.
 import { closeSync, existsSync, linkSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
+import { Worker } from "node:worker_threads";
 import { sqliteBinding } from "@wsp/engine";
 import { OWN_FILE_MODE, ownFolder } from "@wsp/own-file";
 import { StateShape, stateWriterWords } from "@wsp/protocol";
@@ -49,6 +51,84 @@ function moveAside(statePath: string): string {
 /** How long a write waits on another process's write before it fails: the doctor and init run a runtime of their
  * own over the same database. */
 const BUSY_MS = 10_000;
+
+/** How often the checkpointer copies the WAL into the database while writes happen. Left to SQLite's own threshold,
+ * the commit that crosses it does the copy on the host's loop, since node's binding is synchronous: under a 5000-event
+ * turn's flushes 13 commits in 40 paid 10 to 30 ms for it, and each run's worst 17 to 340 ms. A checkpoint every second
+ * competed with the flushes' reads for the disk over a cold page cache. */
+const CHECKPOINT_EVERY_MS = 2_000;
+
+/** The WAL past which a commit checkpoints after all, so a checkpointer that stalled or died cannot let it grow
+ * without end. */
+export const WAL_BOUND_BYTES = 64 * 1024 * 1024;
+
+/** The WAL file a commit cuts back to once a checkpoint has copied it, so a burst does not keep its size on disk. */
+export const WAL_KEPT_BYTES = 16 * 1024 * 1024;
+
+/** Threads in a row that may end early before the checkpoints are left to the bound. One that ran this long checkpointed
+ * and counts as no failure. */
+const CHECKPOINTER_TRIES = 3;
+const CHECKPOINTER_LIVED_MS = 10 * CHECKPOINT_EVERY_MS;
+
+/** A passive checkpoint waits on no writer and no writer waits on it. It retries until the WAL is whole in the
+ * database, since a reader holding an old snapshot leaves the rest for later. The store is never closed, so the
+ * thread ends with the process or with the database's file, which it opens read-write so it never makes one. Every
+ * module is reached through getBuiltinModule, since a worker of a process run with --input-type=module is a module,
+ * where require is not defined. */
+const CHECKPOINTER = `
+const { workerData } = process.getBuiltinModule("node:worker_threads");
+const { existsSync } = process.getBuiltinModule("node:fs");
+const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
+let version, checkpoint, d, done;
+const end = () => {
+  clearInterval(tick);
+  d?.close();
+};
+const tick = setInterval(() => {
+  try {
+    if (!existsSync(workerData.path)) return end();
+    if (d === undefined) {
+      d = new DatabaseSync(new URL(workerData.url));
+      d.exec("pragma busy_timeout = " + workerData.busyMs);
+      version = d.prepare("pragma data_version");
+      checkpoint = d.prepare("pragma wal_checkpoint(passive)");
+    }
+    const now = version.get().data_version;
+    if (now === done) return;
+    const r = checkpoint.get();
+    if (r.log === r.checkpointed) done = now;
+  } catch (e) {
+    if (!existsSync(workerData.path)) return end();
+    throw e;
+  }
+}, workerData.every);
+`;
+
+/** Checkpoints the database on a thread of its own, with a connection of its own, off the loop that writes it. A
+ * thread that cannot be made or ends while the database is there is made again one interval later. */
+function checkpointer(dbPath: string, tries = CHECKPOINTER_TRIES): void {
+  const born = Date.now();
+  const again = (why: string): void => {
+    const left = Date.now() - born >= CHECKPOINTER_LIVED_MS ? CHECKPOINTER_TRIES : tries - 1;
+    if (left > 0) setTimeout(() => checkpointer(dbPath, left), CHECKPOINT_EVERY_MS).unref();
+    else console.warn(`the checkpoints of ${dbPath} stopped (${why}), so a commit takes one past ${WAL_BOUND_BYTES / 1048576} MB of WAL`);
+  };
+  const url = pathToFileURL(dbPath);
+  url.searchParams.set("mode", "rw");
+  let w: Worker;
+  try {
+    w = new Worker(CHECKPOINTER, { eval: true, workerData: { path: dbPath, url: url.href, every: CHECKPOINT_EVERY_MS, busyMs: BUSY_MS } });
+  } catch (e) {
+    again(e instanceof Error ? e.message : String(e));
+    return;
+  }
+  w.unref();
+  let why = "the thread ended";
+  w.on("error", (e: unknown) => (why = e instanceof Error ? e.message : String(e)));
+  w.on("exit", () => {
+    if (existsSync(dbPath)) again(why);
+  });
+}
 
 /** Why a host will not open a database a newer wsp migrated: its tables may be in a form this build cannot write. */
 export const stateMigratedByNewerLine = (dbPath: string, module: string, at: number, knows: number, wrote: StateShape | undefined): string =>
@@ -226,6 +306,9 @@ export function sqliteStore(statePath: string, writer: StateWriter, modules: rea
       refuseShape(d);
       d.exec("pragma journal_mode = wal");
       d.exec("pragma synchronous = normal");
+      const page = Number((d.prepare("pragma page_size").get() as { page_size: number }).page_size);
+      d.exec(`pragma wal_autocheckpoint = ${Math.ceil(WAL_BOUND_BYTES / page)}`);
+      d.exec(`pragma journal_size_limit = ${WAL_KEPT_BYTES}`);
       d.exec("begin immediate");
       try {
         refuseShape(d);
@@ -242,6 +325,7 @@ export function sqliteStore(statePath: string, writer: StateWriter, modules: rea
     }
     const s = statements(d);
     held = { d, s, seen: dataVersion(s), stamped: false };
+    checkpointer(dbPath);
     // An import cut short between the link and the move leaves the state file beside a whole database. Left there,
     // a run on the JSON store or an older wsp would read it as the state, so the move is finished here.
     if (existsSync(statePath)) console.warn(`${statePath} stood beside ${dbPath}, which holds the state, so it was moved to ${moveAside(statePath)}`);
