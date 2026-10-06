@@ -5,6 +5,8 @@
 // this shell does not have. Contract types come from keybindingTypes.ts.
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "./keybindingDefaults.js";
 import {
+  WORKSPACE_SELECT_SLOTS,
+  workspaceSelectCommand,
   type KeybindingCommand,
   type KeybindingShortcut,
   type KeybindingWhenNode,
@@ -288,11 +290,33 @@ export function resolveShortcutCommand(
 
 /**
  * The commands a focused terminal hands to the app whatever their chord holds, so a Control mod still reaches them:
- * the toggle that opened the terminal closes it, the palette opens over it, and the panel's tab step leaves a
- * terminal in it. Every Control chord here is one a terminal program loses, so the list stays short; the palette
- * comes on ctrl+shift+p there, as mod+k's ctrl+k is the shell's kill to the end of the line.
+ * the app-wide ones, each on a chord no shell reads. Settings is on ctrl+, and the workspaces on ctrl+1 to 9: the
+ * encoder sends ctrl+2 to 7 as the bytes ctrl+@ to ctrl+_ already send and the rest as a bare digit or nothing. The
+ * sidebar, the palette, the preview and search in files hold Shift, which is how a Linux terminal's own window takes
+ * its chords. The rules on mod+b, mod+k, mod+p and mod+o stand down while the terminal owns mod: ctrl+b is tmux's
+ * prefix, ctrl+k kills to the end of the line, ctrl+p walks the history and ctrl+o is nano's write out. The right
+ * panel's ctrl+alt+b stays the shell's too, bash's shell-backward-word. The terminal's zoom passes on ctrl+=, ctrl+-
+ * and ctrl+0 as a Linux terminal's own window takes them: the encoder sends the first two as sequences no shell binds
+ * and ctrl+0 as a bare digit, and undo stays on ctrl+_, which holds Shift and so is no zoom chord.
  */
-const TERMINAL_PASSES: ReadonlySet<KeybindingCommand> = new Set(["terminal.toggle", "commandPalette.toggle", "rightPanel.nextTab", "rightPanel.previousTab"]);
+const TERMINAL_PASSES: ReadonlySet<KeybindingCommand> = new Set([
+  "terminal.toggle",
+  "commandPalette.toggle",
+  "rightPanel.nextTab",
+  "rightPanel.previousTab",
+  "settings.toggle",
+  "sidebar.toggle",
+  "preview.toggle",
+  "files.search",
+  "terminal.zoomIn",
+  "terminal.zoomOut",
+  "terminal.zoomReset",
+  ...WORKSPACE_SELECT_SLOTS.map(workspaceSelectCommand),
+]);
+
+/** The Control keys a shell needs, which a focused terminal keeps whatever command a person moves onto one: the line
+ * editing letters, and m, i, h and [, which a terminal reads as Enter, Tab, Backspace and Escape. */
+const SHELL_KEEPS: ReadonlySet<string> = new Set(["c", "d", "r", "k", "l", "a", "e", "w", "u", "z", "m", "i", "h", "["]);
 
 /**
  * A chord the rules bind while a terminal has focus that the surface lets
@@ -307,7 +331,9 @@ export function isTerminalAppShortcut(
 ): boolean {
   if (!event.metaKey && !event.ctrlKey) return false;
   const command = resolveShortcutCommand(event, keybindings, { platform, context: { terminalFocus: true, panelTabsFocus: isPanelTabsFocused() } });
-  return command !== null && (event.metaKey || TERMINAL_PASSES.has(command));
+  if (command === null) return false;
+  if (event.metaKey) return true;
+  return TERMINAL_PASSES.has(command) && !(SHELL_KEEPS.has(event.key.toLowerCase()) && !event.shiftKey && !event.altKey);
 }
 
 function formatShortcutKeyLabel(key: string): string {

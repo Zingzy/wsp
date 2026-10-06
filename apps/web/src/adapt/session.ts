@@ -267,9 +267,9 @@ export function createSessionFold(): SessionFold {
     if (result.status === "completed" && !t.sawText && result.text !== undefined && result.text.length > 0) {
       addMessage(t, "assistant", result.text, at, false);
     }
-    if (result.status === "failed") {
-      const label = result.error ?? "session failed";
-      addWork(t, { createdAt: at, label, tone: "error", sourceActivityKind: "runtime.error" }, at);
+    // The failure's words stand as their own row; a failure with none leaves the turn's one word to say it.
+    if (result.status === "failed" && result.error !== undefined) {
+      addWork(t, { createdAt: at, label: result.error, tone: "error", sourceActivityKind: "runtime.error" }, at);
     }
     t.summary = {
       ...t.summary,
