@@ -102,7 +102,8 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   // The agent the open thread runs on, off its own record and then its own rows: a workspace's latest session is
   // as often another thread's.
   const own = thread.view.agent ?? rows.at(-1)?.harness;
-  const pinned = own !== undefined && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running);
+  // A thread whose head or row is known runs on its own agent before a row of its transcript is in view.
+  const pinned = own !== undefined && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running || thread.facts !== null);
   const latestRow = pinned ? rows.at(-1) ?? null : null;
   // The agent the host marks is its own answer with no project read, so the rule here falls back where the host's does.
   const fallback = catalogs.find(c => c.isDefault === true)?.harness ?? catalogs[0]?.harness ?? DEFAULT_AGENT.id;
