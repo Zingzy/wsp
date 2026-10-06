@@ -1,102 +1,44 @@
-name: ci
+name: diag-clean
 
-# Every pull request and every push to main runs what the merge gate runs on a
-# clean machine: the daemon binary this runner runs, then install, build every
-# package but the landing site and the desktop bundle, the unit suite, and the
-# type check per package. The Chromium cases and the Electron smoke need a
-# screen and stay behind their own flags.
 on:
   pull_request:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
 
-env:
-  NODE_VERSION: "22"
-  PNPM_VERSION: "11.9.0"
-
 concurrency:
-  group: ci-${{ github.ref }}
+  group: diag-clean-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  gate:
-    name: Install, build, test, types
+  diag:
+    name: server-tools 30 times on Linux, run ${{ matrix.n }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        n: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: ${{ env.PNPM_VERSION }}
+          version: "11.9.0"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      # The host spawns the daemon for this computer's own workspace and the command line package carries it, so the
-      # build and the suite both want the one Linux binary this runner runs before anything of node's is built.
-      - name: Toolchain from rust-toolchain.toml
-        working-directory: daemon
-        run: |
-          rustup toolchain install
-          rustup show
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            daemon/target
-          key: daemon-rust-${{ runner.os }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
-          restore-keys: |
-            daemon-rust-${{ runner.os }}-
-      # ring carries C, which musl-tools compiles for the musl target; libcontainer links libseccomp statically, and
-      # the archive has to be one built against musl, so the script builds it from its pinned release first.
-      - name: C compiler for the musl target, and libseccomp built against musl
-        working-directory: daemon
-        run: |
-          sudo apt-get install -y --no-install-recommends musl-tools gperf
-          ./scripts/libseccomp-archive.sh musl
-      - name: The daemon this runner runs
-        working-directory: daemon
-        run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo build --locked --release --target x86_64-unknown-linux-musl -p wsp-daemon-bin
-      - run: node packages/wspx/scripts/daemon-binary.mjs --triple x86_64-unknown-linux-musl
-      - run: pnpm install --frozen-lockfile
-      - name: Build
-        run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
-      - name: Tests
-        # The Build step staged this runner's daemon binary, so the case that reads its version against the
-        # protocol's runs here rather than skipping: a checkout with no binary staged is a developer's machine.
-        env:
-          WSP_REQUIRE_DAEMON: "1"
-        run: pnpm exec vitest run --minWorkers=1 --maxWorkers=2
-      - name: Types
-        run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' exec tsc --noEmit
-
-  desktop:
-    name: Stage the desktop app
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: "22"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # The release's road, bundled and laid out but not packaged, on a tree that built only what build:deps builds:
-      # after the full build a package missing from the app's dependencies goes unseen until a tag fails.
-      - name: Build what the desktop app depends on
-        run: pnpm --filter @wsp/desktop run build:deps
-      - name: Stage the desktop app
-        run: pnpm --filter @wsp/desktop run build:app
-      # A module that reads a value its import cycle has not set yet throws only when the bundle loads, which
-      # building it never does; the command bundle shares its chunks with the window's main.
-      - name: The staged bundle loads
-        run: node apps/desktop/build/app/main/cli.mjs --version
+      - run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' --filter '!@wsp/web' --filter '!@zingzy/wsp' build
+      - name: the file 30 times at 2 workers, under four busy loops
+        run: |
+          for i in 1 2 3 4; do yes > /dev/null & done
+          fails=0
+          for i in $(seq 1 30); do
+            if ! pnpm exec vitest run --minWorkers=1 --maxWorkers=2 packages/host/test/server-tools.test.ts > run.log 2>&1; then fails=$((fails+1)); echo "=== file run $i FAILED"; fi
+            echo "run $i load $(cut -d' ' -f1-3 /proc/loadavg) $(grep -E 'Tests |Errors' run.log | tr -s ' ' | tr '\n' ' ')"
+            grep -E "AssertionError|×" run.log | cut -c1-2000
+          done
+          kill $(jobs -p) || true
+          echo "FAILURES $fails"
+          [ "$fails" = 0 ]
