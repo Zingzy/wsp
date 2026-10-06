@@ -1597,6 +1597,9 @@ export interface Runtime {
      * names inside the project or a worktree of its repo. cwd is the folder the start runs in where it named one.
      * picks, where given, are read against the agent's lists on this computer before any folder is made or found. */
     folderFor(o: { project?: string; branch?: string; cwd?: string; picks?: StartPicksAsked }, origin?: Caller): Promise<{ workspace: WorkspaceView; cwd?: string }>;
+    /** The record of a project's folder on this computer, made where no thread has made it yet: what the folder's
+     * own acts name before its first thread. */
+    folder(o: { project: string }, origin?: Caller): Promise<WorkspaceView>;
     /** The worktree holding a branch of a project's repo on this computer, made under the host's folder where none
      * holds it. */
     worktree(o: { project: string; branch: string }, origin?: Caller): Promise<WorktreeMade>;
@@ -8611,6 +8614,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       const at = await folderFor(o, origin);
       return { workspace: view(at.entry.record), ...(at.cwd !== undefined ? { cwd: at.cwd } : {}) };
+    },
+
+    async folder({ project: named }, origin) {
+      await ready();
+      const project = await projectsDoor.resolve(named, origin);
+      if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
+      refuseRecording(project.name, origin);
+      return view((await projectFolder(project)).record);
     },
 
     async worktree({ project: named, branch }, origin) {

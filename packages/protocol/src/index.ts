@@ -6904,6 +6904,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** A wsp worktree for a branch of a project's repo, or the worktree that already holds the branch, answered as a
    * WorktreeMade. A new branch starts from the project folder's current commit. */
   z.object({ id: reqId, op: z.literal("worktree.make"), project: z.string(), branch: z.string() }),
+  /** The record of a project's folder on this computer, the one its threads share, made where no thread has made it
+   * yet, and replied as { workspace }. */
+  z.object({ id: reqId, op: z.literal("folder.make"), project: z.string() }),
   /** Takes a wsp worktree away with git, refused while a turn runs in it and, without force, while it holds files
    * no commit has. A worktree wsp did not make is never removed. */
   z.object({ id: reqId, op: z.literal("worktree.remove"), project: z.string(), branch: z.string(), force: z.boolean().optional() }),
@@ -7603,6 +7606,7 @@ export const DEVICE_OPS: readonly string[] = [
   "devices.revoke",
   "workspaces.landing",
   "workspaces.create",
+  "folder.make",
   "workspaces.list",
   "workspaces.resolve",
   "workspaces.get",
