@@ -24,9 +24,10 @@ import { ownsKeys } from "../../keyOwners";
 import { cn } from "../../lib/utils";
 import { Choice } from "../../settings/add/PickLists";
 import { PickRow } from "../../settings/add/PickRow";
+import { STEP_BODY, STEP_HEAD, StepFoot } from "../../settings/add/StepDialog";
 import { FACT } from "../../settings/format";
 import { GlyphFrame, Grid } from "../../settings/grid";
-import { CARD_INSET, LIST_TITLE, NOTE, ROW_FIELD, SETTING_TITLE } from "../../settings/layout";
+import { CARD_INSET, GLYPH, LIST_TITLE, NOTE, ROW_FIELD, SETTING_TITLE } from "../../settings/layout";
 import { Line } from "../../settings/rows";
 import { CopyRow } from "../../settings/sheetParts";
 import { Button } from "../ui/button";
@@ -59,11 +60,10 @@ const ANSWER_WORD = "Answer";
 const NEXT_WORD = "Next";
 const BACK_WORD = "Back";
 
-/** The dialog's title, head, body and foot, in the classes Add a computer draws them with. */
+/** The question's title, a step larger than a dialog's, as the question panel was locked. */
 const TITLE_CLASS = "text-base leading-6 font-semibold text-foreground";
-const HEAD_CLASS = "flex flex-row items-start justify-between gap-6 px-5 pt-4 pb-3";
-const BODY_CLASS = "flex flex-col gap-5 px-5 pt-2 pb-5";
-const FOOT_CLASS = "flex flex-col-reverse gap-2 px-5 pb-5 sm:flex-row sm:items-center sm:justify-end";
+/** The foot as the question panel was locked: no top padding and pb-5, where the dialog's foot has pt-3 pb-4. */
+const DOCK_FOOT = "pt-0 pb-5";
 /** The field a row opens, in its right column, wide enough for a sentence; under 640 px it takes the row's width. */
 const FIELD_CLASS = cn(ROW_FIELD, "w-96 max-sm:w-full");
 /** The step-log mono block the computer's page opens under a row, on the words' left edge past a glyph frame. */
@@ -71,7 +71,6 @@ const LOG_CLASS = "max-h-48 overflow-auto font-mono text-[11px] leading-4 whites
 const LOG_EDGE = "pl-[calc(var(--settings-inset,20px)+44px)] pr-(--settings-inset,20px) pb-4";
 /** A changed line's ink, the Changes pane's own: it tints its rows from --success and --destructive. */
 const LINE_INK = { "-": "text-destructive-foreground", "+": "text-success" } as const;
-const GLYPH = "size-4 text-foreground/80";
 /** The keys the dock takes while it has focus; every other key is the window's, a letter the start of a message. */
 const DOCK_KEYS = ownsKeys(["1", "2", "3", "4", "5", "6", "7", "8", "9", "ArrowUp", "ArrowDown", " ", "Enter", "Escape"]);
 
@@ -348,7 +347,7 @@ export function PromptDock({
         <ComposerSurface.Host>
           <ComposerSurface.Main>
             <div ref={rootRef} tabIndex={-1} data-prompt-root data-owns-keys={DOCK_KEYS} aria-label={title} className="flex min-w-0 flex-col outline-none" onKeyDown={onKeyDown}>
-              <div data-slot="dialog-header" className={HEAD_CLASS}>
+              <div data-slot="dialog-header" className={STEP_HEAD}>
                 <div className="flex min-w-0 flex-col gap-1">
                   <h2 data-prompt-title className={cn(TITLE_CLASS, "flex min-w-0 items-center gap-2")}>
                     {agent === null ? null : <HarnessMark harness={agent} label={agentName(agent)} className={cn(GLYPH, "shrink-0")} />}
@@ -371,7 +370,7 @@ export function PromptDock({
                   </span>
                 )}
               </div>
-              <div data-slot="dialog-panel" className={BODY_CLASS}>
+              <div data-slot="dialog-panel" className={STEP_BODY}>
                 {words.code === undefined || question !== undefined ? null : (
                   <div className="flex flex-col gap-2">
                     <CopyRow k="prompt-code" value={words.code} />
@@ -436,14 +435,17 @@ export function PromptDock({
                   </RadioGroup>
                 )}
               </div>
-              <div data-slot="dialog-footer" data-prompt-foot className={FOOT_CLASS}>
-                <span className="flex min-h-5 items-center max-sm:justify-center sm:me-auto">
-                  {onWriteInstead === undefined ? null : (
+              <StepFoot
+                data-prompt-foot
+                className={DOCK_FOOT}
+                left={
+                  onWriteInstead === undefined ? null : (
                     <Button size="xs" variant="ghost" data-prompt-write className="px-0 [:hover,[data-pressed]]:bg-transparent" onClick={onWriteInstead}>
                       {WRITE_INSTEAD}
                     </Button>
-                  )}
-                </span>
+                  )
+                }
+              >
                 {step === 0 || questions === undefined ? null : (
                   <Button variant="outline" data-prompt-back onClick={() => goTo(step - 1, questions[step - 1]!)}>
                     {BACK_WORD}
@@ -452,7 +454,7 @@ export function PromptDock({
                 <Button data-prompt-answer held={held} onClick={confirm}>
                   {primaryWord}
                 </Button>
-              </div>
+              </StepFoot>
             </div>
           </ComposerSurface.Main>
         </ComposerSurface.Host>

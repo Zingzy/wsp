@@ -6,7 +6,7 @@ import type { LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { agentName } from "@wsp/catalog";
 import { FACT } from "../../settings/format.js";
-import { GLYPH_FRAME } from "../../settings/grid.js";
+import { GLYPH_FRAME } from "../../settings/layout.js";
 import { HarnessMark, MarkSvg } from "../chat/HarnessMark.js";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../ui/alert-dialog.js";
 import { AddButton } from "../ui/add-button.js";

@@ -15,6 +15,10 @@ export const SETTING_TITLE = "text-sm leading-5 font-medium text-foreground";
 export const LIST_TITLE = "text-[15px] leading-6 font-medium text-foreground";
 /** The line under a title. */
 export const NOTE = "text-[13px] leading-5 text-muted-foreground";
+/** The 32 px frame a row's mark stands in. */
+export const GLYPH_FRAME = "flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-foreground/[0.04]";
+/** A lucide glyph in that frame. */
+export const GLYPH = "size-4 text-foreground/80";
 /** The head over every card. */
 export const SECTION_HEAD = "flex min-h-7 items-center text-[13.5px] font-medium text-foreground/70 group-data-[locked]/settings:text-sm group-data-[locked]/settings:font-normal";
 /** The one width every select in a setting row takes, so the controls line up down a card. */

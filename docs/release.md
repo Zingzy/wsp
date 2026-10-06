@@ -55,7 +55,7 @@ checkout of `main` on a computer with the Solari key in `.env`.
    `releases/latest/download/<name>` and what the site's two download buttons
    link. The mac job also uploads `wsp-<version>-mac.zip`, which an installed
    app downloads and replaces itself from. Every one of those names comes from
-   `packages/wspx/scripts/bundles.mjs`; the workflow spells none of them. They
+   `packages/protocol/src/bundles.mjs`; the workflow spells none of them. They
    land on a draft release on the tag, whose notes are the commits since the
    previous tag plus the README's lines on opening a downloaded bundle. Nothing
    else on the workflow reaches npm: step 4 stays a person's, because of the one

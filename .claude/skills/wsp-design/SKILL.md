@@ -104,14 +104,9 @@ gap and no line between tiles. A child list is 12px in with a 1px rail and a
 head after the first, Settled's too, has 12px above it.
 
 Settings, after T3 Code's settingsLayout (the owner's ruling, 2026-10-01):
-content max 760px, 56px above the title, 32px sides, 32px between sections.
-Each section is a quiet head (14px sans, foreground 70%, 28px tall, 16px in)
-10px over one soft card: radius 12, 1px `--border` at 60%, `--card` at 40%,
-a hairline at `--border` 50% between what it holds. A row grows with what it
-says, 12px above and below, 16px sides: its title at 14px 500 over a sentence
-at 13/1.45 muted that wraps (at most 576px wide), and from 640px the slot in a
-column of its own beside them (at least 160px, 32px off), under them below.
-Nothing in a row is cut for want of room. Grid columns 16px apart.
+content max 760px, each section a quiet head over one soft card, a hairline
+between what the card holds. The figures live in the code and the pieces are
+named under "The Settings pieces" below.
 
 Right panel (kept): agent rows 76px, available rows 60px, 2px between.
 
@@ -135,6 +130,99 @@ Density comes from smaller type, not from cutting content: a tile's rows one
 and three drop to 11px so the title at 14px is the one thing you read; a grid's
 numbers drop to 12px mono so ten rows fit without a line between them.
 
+## The Settings pieces
+
+Every screen, dialog, dock and panel is built from the pieces the Settings
+pages and the Add a computer dialog are built from. The code holds every
+figure: `apps/web/src/settings/layout.ts`, `rows.tsx`, `grid.tsx`,
+`format.ts`, `sheetParts.tsx`, `add/PickLists.tsx`, `add/StepDialog.tsx`, and
+the type scale, radii and shadows named in `index.css`'s `@theme`. This section
+names each piece; read its number there. `apps/web/test/design-skill.test.ts`
+fails when a name written here is no longer exported, or when a figure written
+beside one disagrees with the code.
+
+The check is always the same: put the screen beside a Settings page in the
+same theme. If a stranger could tell they came from different apps, it is
+wrong, however good it looks alone.
+
+**Card.** A quiet head over a soft card: `SECTION_HEAD`, then `Card`, whose
+surface is `CARD_SURFACE`, with faint rules between what it holds. A
+one-sentence lede under the head only where the rows need the why. An empty
+card draws no surface.
+
+**Row.** `Row`, at `CARD_INSET` (20 px) on each side and standing at
+`ROW_FLOOR`. A title over one sentence: `SETTING_TITLE` for a choice,
+`LIST_TITLE` for a named thing, `NOTE` under it. At the right, in its own
+column, at most one word in `FACT` or `VALUE` and at most one control. A row
+that opens a page is the whole button and ends in `Chevron`. Below the `sm`
+breakpoint the right column stands under the words.
+
+**Line.** `Line`: a label and its value or its keycaps (`KeyCaps`), standing
+at `LINE_FLOOR`. No description; the sentence is its hover.
+
+**List.** `Grid`, `GridHead`, `GridRow` and `GridName`, the state in
+`StateCell`, numbers in `Num`, a version in `VersionFact`, the columns from
+`LIST_COLUMNS` or `PAGE_COLUMNS`.
+
+**Lead.** A thing with its own glyph shows it in `GlyphFrame`, a lucide glyph
+in `GLYPH` (16 px).
+
+**Picks.** One of many: `Choice` rows, the radio at the left, the glyph frame,
+the name, the note; every name not picked dims to muted. Many of many:
+`PickRow`, the checkbox at the left in the same row shape. Never a filled pill
+to show the picked row, never a number keycap as a row's lead, never a tick at
+the right edge.
+
+**Buttons.** `Button`, the tactile keycap: outline xs for an inline act (Try
+again, Copy, Retry) with a lucide glyph, which the button sizes, where it
+helps, and `AddButton` for every Add. The primary act is the primary button at
+the foot's right, one per view. A quiet word (Skip for now) is a text button with no padding, so its
+text edge is its box edge.
+
+**Dialog.** `DialogPopup` at its own width, or `STEP_WIDTH` (560 px) for a
+flow of steps as Add a computer is. The head is `STEP_HEAD`: `DialogTitle`, then "n of N" as a
+`FACT` at the right, and one line under the title saying what the step is for.
+The body is `STEP_BODY`: cards. The foot is `StepFoot`: a quiet state at the
+left ("Saved, you can finish later"), the outline secondary and the primary at
+the right. No keyboard hint strip in the foot; a shortcut lives in a tooltip or
+on the Keybindings page. The prompt dock draws a question as one of these steps
+from the same head, body and foot.
+
+**Steps.** In a list of steps (`StepRow`) the state is an icon in the slot
+every row keeps: a muted empty circle (not started), `Crab` (an agent working,
+never a loading spinner), a check (done), the alert circle (failed). Loading is
+the plain `Spinner`. Never a status dot, never a word where an icon carries it,
+never a chip for state.
+
+**Machine words.** Paths, versions, counts and times are `FACT` or `VALUE`,
+sans with tabular figures. A command or a path a person may copy is a
+`CopyRow` field in mono; a long one clips with the whole of it on hover.
+
+**Words.** Sentence case, plain, one clause per row sentence. No em dashes.
+Never "this Mac": name the computer. Commas join facts of one kind only.
+
+**Scale.** A size, a radius or a shadow takes its name from `index.css`:
+`text-meta`, `text-note`, `text-head`, `text-title`; `rounded-field`,
+`rounded-card`, `rounded-popover`, `rounded-composer`; `shadow-keycap`,
+`shadow-composer`. Never a number at the site such as `text-[13px]`.
+`apps/web/test/design-literals.test.ts` fails on a new literal and
+`apps/web/test/design-pieces.test.ts` on a piece drawn by hand. Each keeps a
+list of the exceptions that stand today, and that list only shrinks.
+
+Before you show a screen:
+
+1. Every element maps to a piece above by name. Write the map down beside the
+   shots. A piece that is not here needs a reason, and it is reused from the
+   code, never redrawn.
+2. Shoot the screen and a Settings page in the same theme and width, and look
+   at them side by side. Type sizes, insets, row floors, radii, borders and
+   inks match by eye, and by `getBoundingClientRect` where in doubt.
+3. Both themes, 1440 and 390.
+4. Find one thing to remove, and remove it.
+
+A design review runs the same four checks and fails a screen that misses any of
+them, whatever else is good.
+
 ## Patterns
 
 ### Lists
@@ -142,9 +230,9 @@ numbers drop to 12px mono so ten rows fit without a line between them.
 One grammar for every list on a settings page and for the THREADS list inside
 a thread. See `references/computers-graphite.png` and `references/image-graphite.png`.
 
-- Glyph frame: 32px square, radius 6, 1px `--border`, fill foreground 4%. An
-  agent's catalog mark at 20px, a brand mark at 18px, a lucide glyph at 16px
-  in foreground 80%.
+- Glyph frame: `GLYPH_FRAME` (32 px), drawn by `GlyphFrame`. A lucide glyph
+  in it is `GLYPH` (16 px), and an agent's or a brand's mark stands at the
+  same size.
 - The section's name is the first column's header, in the group heading's
   sentence case sans: `Computer  Cores  Memory  Threads`, `Agents  Version
   Source`. No card title above it, no floating label between sections. Number
