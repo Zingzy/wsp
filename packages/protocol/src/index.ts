@@ -5270,6 +5270,7 @@ const DAEMON_CONTENTS = [
   "a9a90585446c8bd453c888fc716b3097631dbd87d7116d7f65a8a9a436df7352",
   "b704e47c6fcf966b5148ddb7d9e19ed17cddce96c9d70011e9367616d1226649",
   "31a6bcca711ff0e60f8953d4b8e5544bab64c3143c956122fc2a781a3a653a64",
+  "2540fa408c276c18c468074087ba6a23d1c0607d2324b74db6ef7ff07ad89bd7",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5627,7 +5628,8 @@ const DAEMON_CONTENTS = [
  * to, and a socket that watches again is sent a whole snapshot next.
  * Version 126: six small host and test faults.
  * Version 127: The daemon's ssh start picks a free port, lets it go, and races another process for it.
- * Version 128: remove takes back only what the add made outside the home. */
+ * Version 128: remove takes back only what the add made outside the home.
+ * Version 129: hold the ports a test counts on being refused. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

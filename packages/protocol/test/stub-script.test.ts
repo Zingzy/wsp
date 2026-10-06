@@ -132,7 +132,7 @@ const NEVER_RUN: Record<string, Record<string, string>> = {
   "packages/runtime/test/store.test.ts": { wide: "the state folders an older build left wider, for the store to repair" },
   "packages/host/test/connector.test.ts": { 'join(made, "cloudflared")': "packed into a release archive the unpack is tested on, and read back for its bytes and mode" },
   "packages/host/test/doctor.test.ts": { "daemonBinaryIn(daemon, triple)": "a stand-in daemon staged into a bundle as bytes" },
-  "packages/host/test/places.test.ts": { "daemonBinaryIn(daemonDir, target.triple)": "a stand-in daemon staged into a bundle as bytes" },
+  "packages/host/test/places-install-steps.test.ts": { "daemonBinaryIn(daemonDir, target.triple)": "a stand-in daemon staged into a bundle as bytes" },
   "packages/host/test/ssh-daemon-place.test.ts": { "daemonBinaryIn(dir, target.triple)": "a stand-in daemon staged into a bundle as bytes" },
   "packages/host/test/hooks-path.test.ts": {
     'join(dir, ".githooks", hook)': "committed to a throwaway repository, whose hook folder the prepare script builds from the commit",
