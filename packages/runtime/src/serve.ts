@@ -1340,6 +1340,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...brought });
               return;
             }
+            case "folder.make":
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.folder({ project: msg.project }, origin)) });
+              return;
             case "worktree.make":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.worktree({ project: msg.project, branch: msg.branch }, origin)) });
               return;

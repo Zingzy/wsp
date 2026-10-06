@@ -546,6 +546,30 @@ describe("the sidebar's list of thread tiles", () => {
     }
   });
 
+  it("the list's own menu holds Settle all read, so it is there with nothing settled and read trees to settle", async () => {
+    const { settleThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    await act(async () => {
+      useStore.setState({
+        sessions: sessions([
+          { ws: "ws_a", id: "th_read", prompt: "read already", status: "completed", startedAgo: 20 * 60_000, endedAgo: 10 * 60_000 },
+          { ws: "ws_a", id: "th_unseen", prompt: "nobody looked", status: "completed", startedAgo: 9 * 60_000, endedAgo: 8 * 60_000, readAgo: HOUR },
+        ]),
+      } as never);
+    });
+    await waitFor(() => expect(screen.getByText("read already")).toBeDefined());
+    expect(rowIds()).toEqual(expect.arrayContaining(["thread:th_read", "thread:th_unseen"]));
+    expect(rowIds().filter(id => id.startsWith("thread:"))).toHaveLength(2);
+    const picked: string[][] = [];
+    window.wsp = { contextMenu: async (items: Array<{ id: string }>) => (picked.push(items.map(item => item.id)), "settle-read") } as never;
+    try {
+      fireEvent.contextMenu(document.querySelector<HTMLElement>("[data-sidebar-tree]")!);
+      await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_read"]));
+      expect(picked).toEqual([["settle-read"]]);
+    } finally {
+      delete (window as { wsp?: unknown }).wsp;
+    }
+  });
+
   it("Delete copies on the Settled row and on a settled tile names what each copy holds that its remote lacks before anything goes", async () => {
     const deleteWorkspace = vi.fn(async (_id: string) => {});
     const read = { branch: "fix/cart", ahead: 0, behind: 0, changed: 0, readAt: 1 };
