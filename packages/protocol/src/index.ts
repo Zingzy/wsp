@@ -2639,6 +2639,10 @@ export type BundleOutcome = { ok: true } | { ok: false; error: string };
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
 export const DESKTOP_MAC_CLASS = "desktop-mac";
 
+/** The class the desktop preload puts on the html element where the shell draws the window controls over the page:
+ * the header row is the window's frame and leaves the room the titlebar-area variables name for the controls. */
+export const DESKTOP_WCO_CLASS = "wco";
+
 /** A key press the desktop shell took from its own menu and handed to the page, spelled the way a keyboard event
  * spells it, so the page's one keybinding table answers it. */
 export interface ShellChord {
@@ -2688,6 +2692,9 @@ export interface DesktopBridge {
   setTheme(theme: ThemePreference): void;
   /** Whether the page draws glass, so the window's own glass is on under it and off under a page drawn solid. */
   setGlass(glass: boolean): void;
+  /** The page's theme moved: window controls the shell draws over the page take the header's ground and ink again,
+   * read off the page's --titlebar-ground and --titlebar-ink. */
+  setTitleBar(): void;
   /** Something the person should hear about outside the app (a build waiting, a machine up, a prompt, a finished
    * turn): the shell shows a system notification while its window has no focus, and nothing while it has, since the
    * page already says it. The page decides nothing about focus; the shell owns that. */
@@ -5195,6 +5202,8 @@ const DAEMON_CONTENTS = [
   "1557c21f49fe3ec9248ca8c405e450b0f201e9bc4fd3f552bfd0f36132272b17",
   "1ee653af3b44dc450246290cc7bb7617da6ec8f062d9e859452472019e52e51e",
   "1fb569928a97d7ba40fd54d251dc4202f267133344e7da3153f3f4aa723e180e",
+  "c92b490e1481821bfdc26584e0f8b19e73e28fefeefeae6fb61c189ad098d88e",
+  "a89600e669b83780c19582d096ed9c9a274446a75da14d185bc0afee9d299ba9",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5534,7 +5543,12 @@ const DAEMON_CONTENTS = [
  * and state): one REST read compares them, and where none moved it answers unchanged with nothing else run and none of
  * the GraphQL budget spent; a read with nothing seen makes no such read. A read the git host refused for its rate limit
  * carries the code rate-limited, and a branch so refused never reads as having no pull request. git.prView reads the
- * page on one GraphQL call in place of four, the newest 100 conversation comments with the rest marked cut. */
+ * page on one GraphQL call in place of four, the newest 100 conversation comments with the rest marked cut.
+ * Version 121: leave tests take a temp install root, never /opt/wsp.
+ * Version 122: A turn's HEAD move lines name the branch HEAD was on: git.snapshot stamps the branch it stands on, or a
+ * detached HEAD, beside the reflog length, and git.turn reads the turn's window back from that stamp, so a merge reads
+ * "Merged origin/main into fix/x", a reset "Reset fix/x to origin/main", a pull "Pulled into fix/x" and a rebase
+ * "Rebased fix/x onto main", one that was detached says "a detached HEAD", and a pull that rebases is one line. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5589,6 +5603,9 @@ export function placeDaemonBehind(place: { daemonVersion?: number }): string | u
   const version = place.daemonVersion;
   return version === undefined || version >= DAEMON_VERSION ? undefined : `daemon ${version}, host ${DAEMON_VERSION}`;
 }
+
+/** The first daemon that answers fs.folders. */
+export const FS_FOLDERS_DAEMON_VERSION = 73;
 
 /** The line that moves a place onto this wsp's daemon, which is the fix half of every sentence about a place that
  * is behind. */
@@ -7880,5 +7897,5 @@ export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, launchWords, PERMISSION_ALLOW, PERMISSION_DENY, programWord } from "./adapter-port.js";
 export { keepRun } from "./kept-run.js";
 export type { KeptAgent, KeptRun, KeptTurn } from "./kept-run.js";
-export { ANALYTICS_ENV, CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
+export { ANALYTICS_ENV, CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, STATE_STORE_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TaskStop, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";

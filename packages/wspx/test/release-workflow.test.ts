@@ -84,6 +84,9 @@ describe("the release workflow", () => {
     expect(workflow).toContain("if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}");
     expect(npmJob).toContain("name: Publish\n        if: ${{ github.event_name == 'push' }}");
     expect(npmJob).toContain("needs.daemon.result == 'success' && (github.event_name != 'push' || needs.draft.result == 'success')");
+    // The linux job builds and starts the AppImage on a run by hand too, and only a pushed tag attaches it.
+    expect(linuxJob).toContain("needs.daemon.result == 'success' && (github.event_name != 'push' || needs.draft.result == 'success')");
+    expect(linuxJob).toContain("name: Attach them to the draft\n        if: ${{ github.event_name == 'push' }}");
   });
 
   it("refuses a tag off main's own line before it drafts anything", () => {
@@ -201,6 +204,18 @@ describe("the release workflow", () => {
     expect(desktopScripts["build"]).toBe("pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --publish never");
   });
 
+  it("starts the AppImage it uploads once, after the rename and before the upload, on a virtual display", () => {
+    const rename = linuxJob.indexOf("- name: Name the AppImage after the release");
+    const launch = linuxJob.indexOf("- name: Start the AppImage once and wait for its window's page\n");
+    const upload = linuxJob.indexOf("- name: Attach them to the draft\n");
+    expect(rename).toBeGreaterThan(-1);
+    expect(linuxJob.indexOf("- name:", rename + 1)).toBe(launch);
+    expect(linuxJob.indexOf("- name:", launch + 1)).toBe(upload);
+    expect(linuxJob.slice(launch, upload)).toContain('run: xvfb-run --auto-servernum node apps/desktop/scripts/appimage-launch.mjs "$APPIMAGE"\n');
+    const checked = spawnSync(process.execPath, ["--check", join(repo, "apps", "desktop", "scripts", "appimage-launch.mjs")], { encoding: "utf8" });
+    expect(checked.status, checked.stderr).toBe(0);
+  });
+
   it("builds every package the app's staging copies from in build:deps, the only build the release runs first", () => {
     expect(desktopScripts["build:deps"]).toBe('pnpm --filter "@wsp/desktop^..." build');
     for (const kind of ASSET_KINDS) {
@@ -219,6 +234,10 @@ describe("the release workflow", () => {
     expect(/^mac:\n((?: .*\n)+)/m.exec(builderConfig)?.[1]).toContain("arch: [universal]");
     expect(macJob).not.toContain("mac-arm64");
     expect(macJob).not.toContain("dist/mac");
+  });
+
+  it("builds the AppImage on the static runtime, which opens where libfuse.so.2 is not installed", () => {
+    expect(builderConfig).toMatch(/^toolsets:\n {2}appimage: "(?!0\.0\.0")[\d.]+"$/m);
   });
 
   it("hands the signing secrets by name to the step that builds, tells the step that checks whether one signed, and no value anywhere", () => {

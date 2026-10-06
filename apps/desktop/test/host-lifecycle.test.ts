@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -594,6 +594,47 @@ describe("openHost", () => {
     expect(unit).toContain(`ExecStart='${shim}' 'up' '--state' '${statePath}'`);
     expect(unit).toContain("Environment='WSP_STARTED_BY=service'");
     expect(ran.map(argv => argv.slice(0, 3).join(" "))).toEqual(["systemctl --user daemon-reload", "systemctl --user enable", "systemctl --user restart"]);
+  });
+
+  it("the unit carries no PATH, so a folder only the launching process had, an AppImage's mount among them, never lands in it", async () => {
+    vi.stubEnv("PATH", `/tmp/.mount_wsp.Ab12Cd:/tmp/.mount_wsp.Ab12Cd/usr/sbin:${process.env["PATH"] ?? ""}`);
+    const road = { ...launchd.road, platform: "linux", manager: SERVICE_MANAGERS.systemd, run: async (argv: readonly string[]) => {
+      if (argv.at(-1)?.endsWith(".service") && argv.includes("restart")) await launchd.load();
+      return { code: 0, output: "" };
+    } };
+    await open({ service: road });
+    const unit = readFileSync(join(home, ".config", "systemd", "user", `wsp-host-${serviceTag(statePath)}.service`), "utf8");
+    expect(unit).not.toContain(".mount_wsp");
+    expect(unit).not.toMatch(/^Environment='PATH=/m);
+  });
+
+  it.runIf(process.platform === "linux")("a unit whose host runs a program that is gone is started again, since systemd reads that host as up", async () => {
+    // The host an AppImage's mount left behind: alive, holding the lock, its program gone with the mount.
+    const bin = join(home, "sleep");
+    copyFileSync("/bin/sleep", bin);
+    const stale = spawn(bin, ["30"], { stdio: "ignore" });
+    try {
+      rmSync(bin);
+      writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: stale.pid, port: 4400, startedAt: new Date().toISOString(), startedBy: "service" }));
+      const ran: string[][] = [];
+      const road = { ...launchd.road, platform: "linux", manager: SERVICE_MANAGERS.systemd, waitMs: 2_000, run: async (argv: readonly string[]) => {
+        ran.push([...argv]);
+        if (argv.includes("restart")) {
+          stale.kill("SIGKILL");
+          await launchd.load();
+        }
+        return { code: 0, output: argv.includes("is-enabled") ? "enabled" : "" };
+      } };
+      const at = serviceAddressHere(statePath);
+      const unit = SERVICE_MANAGERS.systemd.unit(at);
+      mkdirSync(join(unit.path, ".."), { recursive: true });
+      writeFileSync(unit.path, SERVICE_MANAGERS.systemd.text({ ...at, argv: [shim, "up", "--state", statePath], cwd: home, env: {}, logPath: join(home, "host.log") }));
+      const session = await open({ service: road });
+      expect(ran.map(argv => argv.slice(0, 3).join(" "))).toContain("systemctl --user restart");
+      expect(session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
+    } finally {
+      stale.kill("SIGKILL");
+    }
   });
 
   it("refuses on a platform wsp writes no service for, in the one sentence wsp up --service says", async () => {

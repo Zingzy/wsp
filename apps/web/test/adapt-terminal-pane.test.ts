@@ -158,7 +158,8 @@ describe("a drop with memory near full", () => {
     expect(terminalPaneTitle(refused)).toBe("The connection to this task was refused; its threads keep running");
     expect(terminalEmptyLine(refused)).toBe(`No terminal opens from this window: ${reason}. The task's threads keep running.`);
     expect(terminalInputRefusal(refused)).toBe("Typing is refused: the connection to this task was refused");
-    expect(terminalPaneHints(refused, size, sizes)).toEqual([]);
+    // Why, in the muted line under the title: what turned the connection away, in its own words.
+    expect(terminalPaneHints(refused, size, sizes)).toEqual([reason]);
     const lines = [terminalPaneTitle(refused)!, terminalEmptyLine(refused)!, terminalInputRefusal(refused)!];
     // A person never reads machine or daemon, and nothing here says door either: the sentence is about this window.
     for (const line of lines) expect(line).not.toMatch(/\bmachines?\b|\bdaemons?\b|\bdoors?\b/i);

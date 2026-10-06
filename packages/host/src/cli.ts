@@ -18,6 +18,8 @@ import {
   hostIdentity,
   jsonFileStore,
   localExecStream,
+  sqliteStore,
+  stateDbPath,
   type GoldenRecipe,
   type GoldenVersion,
   type HarnessAdapterFactory,
@@ -32,7 +34,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, serverValuesOf } from "@wsp/catalog";
-import { authRefusal, cloudOffRefusal, PRICES_URL, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
+import { authRefusal, cloudOffRefusal, PRICES_URL, STATE_STORE_ENV, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
 import { agentHome, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, verbCopier } from "@wsp/engine";
 import { CLOUD_ON } from "./cloud.js";
 import { noMachinesLine, PROVIDER_MODULES, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv, type ProviderModule } from "./providers.js";
@@ -65,7 +67,7 @@ import { buildBesideHost } from "./init-beside.js";
 import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
 import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, hostInboxDir, hostLogPath, hostReadingsDir, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, heldOrStarted, refuseIfServed, rewriteLock, SERVICE_WAIT_MS, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
+import { addressLines, hostInboxDir, hostLogPath, hostReadingsDir, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, heldOrStarted, programGone, refuseIfServed, releaseLock, rewriteLock, SERVICE_WAIT_MS, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
 import { startOnce } from "./start-once.js";
 import {
@@ -804,7 +806,7 @@ export function makeRuntime(
   links: PlaceWiring = placeWiring(statePath, agents?.advertise),
   /** The store over the state file, handed in by a caller that has already read it once: a state this build cannot
    * read is refused at every collection read, and a caller that met that refusal has said so already. */
-  store: Store = jsonFileStore(statePath, stateWriterHere()),
+  store: Store = stateStore(statePath, env),
   /** The agents a turn runs; a test hands in stand-ins so no real agent starts. */
   adapters: Record<string, HarnessAdapterFactory> = HARNESS_ADAPTERS,
   /** The providers this host answers for, its own process's by default; a test hands in the table it means. */
@@ -993,22 +995,33 @@ const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 /** What a stop needs of the process it is ending: where signals arrive and how it exits. The default is this
  * process; a test hands in its own, since a real signal would take the test runner with it. */
 export interface StopProcess {
+  /** The program this process runs, read again while it serves on Linux. */
+  execPath: string;
+  platform: string;
   on(signal: (typeof STOP_SIGNALS)[number], listener: () => void): unknown;
   exit(code: number): void;
 }
+
+/** How often a serving host checks that its own program is still there. */
+export const OWN_FILES_POLL_MS = 5_000;
 
 /** Every way a host is told to go ends the same: the lock removed and what this host holds open freed. The turns
  * running on this computer are not among them; each leads a process group of its own, so no signal arriving here
  * reaches one, and the host that comes next re-opens it. A hangup is one of these signals for that reason, and none
  * of them is left to node's default exit, which runs no close at all: a second signal, with a close still in
- * flight, exits at once, so a close that hangs cannot trap the terminal. */
+ * flight, exits at once, so a close that hangs cannot trap the terminal. On Linux a host whose own program has gone
+ * (an AppImage's mount that went with its launch, a copy of the app since removed) stops the same way, since it
+ * serves out of files it can no longer read; the lock reads it as holding nothing by the same fact. A Mac's app never
+ * removes the files a host runs, so there a node upgrade under a host started by hand would be all it ever caught. */
 export function stopOnSignals(handle: HostHandle, io: CliIO, self: StopProcess = process): void {
   let stopping: Promise<void> | undefined;
+  let watch: ReturnType<typeof setInterval> | undefined;
   const stop = (sig: (typeof STOP_SIGNALS)[number]): void => {
     if (stopping !== undefined) {
       self.exit(exitCodeOf(sig));
       return;
     }
+    clearInterval(watch);
     stopping = handle.close().then(
       () => self.exit(0),
       (e: unknown) => {
@@ -1018,6 +1031,13 @@ export function stopOnSignals(handle: HostHandle, io: CliIO, self: StopProcess =
     );
   };
   for (const sig of STOP_SIGNALS) self.on(sig, () => stop(sig));
+  if (self.platform !== "linux") return;
+  watch = setInterval(() => {
+    if (!programGone(self.execPath)) return;
+    io.error(`${self.execPath}, which this host runs, is gone; it stops so the next start runs what the wsp command names now`);
+    stop("SIGTERM");
+  }, OWN_FILES_POLL_MS);
+  watch.unref();
 }
 
 /** Where an error nothing caught arrives. The default is this process; a test hands in its own, since either event
@@ -1372,14 +1392,26 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
   return hostFor(rt, keys, { ...opts, providerEnv, links, here }, io, opts.running);
 }
 
+/** The store a state is kept in: the SQLite database beside the state file, or the JSON document where
+ * STATE_STORE_ENV says json in this environment or the .env beside it. A state file not imported yet that a live
+ * host serves stays the JSON document for this process too: that host goes on writing the file, and an import
+ * under it would leave every write it makes after out of the database. */
+export function stateStore(statePath: string, env: Readonly<Record<string, string | undefined>> = process.env): Store {
+  const json =
+    env[STATE_STORE_ENV] === "json" ||
+    savedEnv(statePath)[STATE_STORE_ENV] === "json" ||
+    (!existsSync(stateDbPath(statePath)) && existsSync(statePath) && servingHost(statePath) !== undefined);
+  return json ? jsonFileStore(statePath, stateWriterHere()) : sqliteStore(statePath, stateWriterHere());
+}
+
 /** The state file read once, before anything else on this host reads it: a file written in a shape this build does
  * not read is refused at every collection read, and the readers a runtime builds meet that refusal in the middle of
  * their own work, where one of them warns with the whole error and its stack behind a line of its own. It comes
  * before the wiring a runtime is built with, which mints this host's pairing key beside the state file on its own
  * first read: a start refused here leaves the home as it found it. Read here, the refusal is this start's, thrown
  * once and printed once, and the store is handed on so the file is not read twice over. */
-async function readOnce(statePath: string): Promise<Store> {
-  const store = jsonFileStore(statePath, stateWriterHere());
+async function readOnce(statePath: string, env: Readonly<Record<string, string | undefined>>): Promise<Store> {
+  const store = stateStore(statePath, env);
   await store.keys("workspaces");
   return store;
 }
@@ -1393,8 +1425,8 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noProviderKey: "local" });
-  // Read first, for the reason readOnce carries.
-  const store = await readOnce(opts.statePath);
+  // Read first, for the reason readOnce carries. A runtime handed in holds its own store, so no other is read.
+  const store = opts.runtime === undefined ? await readOnce(opts.statePath, providerEnv) : undefined;
   const links = placeWiring(opts.statePath, opts.advertise);
   const here = opts.here ?? {};
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { here, ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, store);
@@ -1577,7 +1609,7 @@ async function hostFor(
         await relay?.close();
         await handle.close();
         await analytics.close();
-        rmSync(lockPath, { force: true });
+        releaseLock(lockPath);
       },
     };
     serving = host;
@@ -1585,7 +1617,7 @@ async function hostFor(
   } catch (e) {
     usage.close();
     await analytics.close();
-    rmSync(lockPath, { force: true });
+    releaseLock(lockPath);
     throw e;
   }
 }
