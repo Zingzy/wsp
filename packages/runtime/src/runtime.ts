@@ -1597,6 +1597,9 @@ export interface Runtime {
      * names inside the project or a worktree of its repo. cwd is the folder the start runs in where it named one.
      * picks, where given, are read against the agent's lists on this computer before any folder is made or found. */
     folderFor(o: { project?: string; branch?: string; cwd?: string; picks?: StartPicksAsked }, origin?: Caller): Promise<{ workspace: WorkspaceView; cwd?: string }>;
+    /** The record of a project's folder on this computer, made where no thread has made it yet: what the folder's
+     * own acts name before its first thread. */
+    folder(o: { project: string }, origin?: Caller): Promise<WorkspaceView>;
     /** The worktree holding a branch of a project's repo on this computer, made under the host's folder where none
      * holds it. */
     worktree(o: { project: string; branch: string }, origin?: Caller): Promise<WorktreeMade>;
@@ -8613,6 +8616,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return { workspace: view(at.entry.record), ...(at.cwd !== undefined ? { cwd: at.cwd } : {}) };
     },
 
+    async folder({ project: named }, origin) {
+      await ready();
+      const project = await projectsDoor.resolve(named, origin);
+      if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
+      refuseRecording(project.name, origin);
+      return view((await projectFolder(project)).record);
+    },
+
     async worktree({ project: named, branch }, origin) {
       await ready();
       const project = await projectsDoor.resolve(named, origin);
@@ -9129,15 +9140,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // A title in the harness's own store is the person's rename inside it or the one the harness itself made
           // for them, and both outrank anything we would generate; only the opening words, which codex writes there
           // at a thread's start, are the seed again, and a seed is no news to a row that already carries a name.
+          let unnamed: SessionView | undefined;
           for (const s of sessions.values()) {
             if (s.view.workspaceId !== entry.record.id || s.view.claudeSessionId !== sessionId) continue;
             const source = storedTitleSource(title, s.view.prompt);
-            if (source === "seed" && sourceOf(s.view) !== "seed") continue;
+            if (source === "seed" && sourceOf(s.view) !== "seed") {
+              if (s.view.harnessTitle !== undefined && s.view.harnessTitle !== title) unnamed = s.view;
+              continue;
+            }
             if (s.view.harnessTitle !== title) moved.add(threadKeyOf(s.view));
             s.view.harnessTitle = title;
             s.view.titleSource = source;
           }
           await persistSessions(entry.record.id);
+          // A name given before codex wrote the thread's index row had nowhere to land; by a turn's end the row is
+          // there, so the name the row carries is written again.
+          if (force && unnamed?.harnessTitle !== undefined) void nameInHarness(unnamed, unnamed.harnessTitle);
           for (const threadId of moved) pushHead(threadId);
         },
         (e: unknown) => {

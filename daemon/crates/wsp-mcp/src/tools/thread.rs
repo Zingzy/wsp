@@ -45,6 +45,14 @@ pub struct ThreadIn {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct DenyIn {
+    pub thread: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct StopIn {
     pub thread: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -221,7 +229,8 @@ fn open_ask(events: &[Value], thread_id: &str) -> Option<Ask> {
 }
 
 async fn answer(tool: &'static str, effect: &'static str, host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let ThreadIn { thread } = input(tool, arguments)?;
+    // thread_allow's entry lists no reason, so the check every call gets strips one before it reaches here.
+    let DenyIn { thread, reason } = input(tool, arguments)?;
     let words = turns();
     let road =
         words.answer_roads.iter().find(|r| r.effect == effect).ok_or_else(|| Failure::new(format!("no answer road for {effect}")))?;
@@ -239,11 +248,14 @@ async fn answer(tool: &'static str, effect: &'static str, host: Arc<Host>, argum
     struct Answered {
         outcome: String,
     }
-    let asked = params([
+    let mut asked = params([
         ("sessionId", Value::from(ask.session_id.as_str())),
         ("askId", Value::from(ask.ask_id.as_str())),
         ("optionId", Value::from(option.id.as_str())),
     ]);
+    if let Some(reason) = reason {
+        asked.insert("reason".to_owned(), Value::from(reason));
+    }
     let reply = client.request("sessions.answer", asked).await?;
     let Answered { outcome } = with_outcome("sessions.answer", reply, &["answered", "gone", "unsupported", "not-found", "no-option"])?;
     if outcome != "answered" {
@@ -351,7 +363,7 @@ mod tests {
         to_the_record::<RenameIn, RenameOut>(RENAME.listed);
         to_the_record::<ThreadIn, ForgetOut>(FORGET.listed);
         to_the_record::<ThreadIn, AnswerOut>(ALLOW.listed);
-        to_the_record::<ThreadIn, AnswerOut>(DENY.listed);
+        to_the_record::<DenyIn, AnswerOut>(DENY.listed);
     }
 
     #[test]
