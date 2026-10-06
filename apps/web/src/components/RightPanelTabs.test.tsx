@@ -34,7 +34,7 @@ describe("the right panel's launcher", () => {
   it("offers Browser, Terminal, Changes, Files, Computer, Processes, Agents and Slate and nothing else", () => {
     draw();
     expect(cards()).toEqual(["preview", "terminal", "diff", "files", "machine", "processes", "agents", "slate"]);
-    for (const label of ["Browser", "Terminal", "Changes", "Files", "Computer", "Processes", "Agents"]) expect(screen.getByText(label)).toBeTruthy();
+    for (const label of ["Browser", "Terminal", "Changes", "Files", "Computer", "Processes", "Agents", "Slate"]) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.queryByText("Screen")).toBeNull();
     expect(screen.queryByText("Workspace")).toBeNull();
     expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDFMPAS");

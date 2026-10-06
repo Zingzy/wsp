@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The slate's root column, and a column standing among its cards, gathers its children into cards 12 px apart, each
-// section 24 px clear of what is beside it. A column inside a card's row is layout alone.
+// section 32 px clear of what is beside it. A column inside a card's row is layout alone.
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { gapOf } from "./look.js";
