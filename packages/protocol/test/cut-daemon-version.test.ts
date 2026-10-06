@@ -108,7 +108,7 @@ describe("cutting the daemon version at landing", () => {
     change(edited, "committed");
     writeFileSync(join(edited, CUT_PATHS.record), `${read(edited, CUT_PATHS.record)}\n// an edit nobody committed\n`);
     const editedBefore = cutFiles(edited);
-    expect(() => cutDaemonVersion(edited, { note: "a change" })).toThrow(/uncommitted[\s\S]*packages\/protocol\/src\/index\.ts/);
+    expect(() => cutDaemonVersion(edited, { note: "a change" })).toThrow(/uncommitted[\s\S]*packages\/protocol\/src\/wire\/daemon-version\.ts/);
     expect(cutFiles(edited)).toEqual(editedBefore);
     // A file the sha would hash that git does not track yet is the landing folding in something nobody reviewed.
     const untracked = repoAt();

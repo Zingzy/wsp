@@ -49,6 +49,7 @@ describe("the protocol's modules", () => {
 
   it("reads the imports the index makes, so an empty graph cannot pass", () => {
     expect(graph.get("index.ts")).toContain("format.ts");
+    expect(graph.get("views/session.ts")).toContain("wire/helpers.ts");
   });
 
   it("import no value from one another in a cycle", () => {
