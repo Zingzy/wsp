@@ -182,6 +182,20 @@ describe("a thread on a project on this computer", () => {
     expect(copier.asks).toEqual([]);
   });
 
+  it("has its folder's record made when asked before any thread, once, and the first thread then runs on it", async () => {
+    const { rt, copier } = here();
+    const folder = repo();
+    const project = await rt.projects.add({ source: folder });
+    expect(await rt.workspaces.list()).toEqual([]);
+    const [a, b] = await Promise.all([rt.workspaces.folder({ project: project.id }), rt.workspaces.folder({ project: project.name })]);
+    expect(a.id).toBe(b.id);
+    expect(a.folder).toBe(folder);
+    expect(a.worktree).toBeUndefined();
+    expect((await rt.workspaces.list()).map(w => w.id)).toEqual([a.id]);
+    expect((await rt.workspaces.folderFor({ project: project.id })).workspace.id).toBe(a.id);
+    expect(copier.asks).toEqual([]);
+  });
+
   it("answers the project folder's start under the budget, with no git asked of a start that names nothing", async () => {
     const { rt, starts } = here();
     const project = await rt.projects.add({ source: repo() });

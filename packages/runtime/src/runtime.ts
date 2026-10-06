@@ -126,7 +126,7 @@ import {
   diskUsePct,
 } from "@wsp/engine";
 import { AGENT_KEEP_MS, AGENTS_KEPT, type KeptAgent } from "@wsp/protocol";
-import type { AgentsReport, AgentsSignInEvent, AgentsTarget, DaemonFrame, DaemonResponse, EditorChoice, EditorId, PlaceReport, RecipeFile, RecipeOptions, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
+import type { AgentsReport, AgentsSignInEvent, AgentsTarget, DaemonFrame, DaemonResponse, EditorChoice, EditorId, RecipeFile, RecipeOptions, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
   AdapterAttachOptions,
   AdapterEvent,
@@ -235,8 +235,9 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent, NO_SLATE_MCP_ARG, PR_POLL_IDLE_MS } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, everyModel, effortsFor, modelOf, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noCwdLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, attachmentKey, type KeptAttachment, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine, PERMISSION_DENIED_LINE, deniedLine } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, everyModel, effortsFor, modelOf, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noCwdLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBlocked, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, attachmentKey, type KeptAttachment, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine, PERMISSION_DENIED_LINE, deniedLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
+import { groupExists } from "./local-exec.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -1596,6 +1597,9 @@ export interface Runtime {
      * names inside the project or a worktree of its repo. cwd is the folder the start runs in where it named one.
      * picks, where given, are read against the agent's lists on this computer before any folder is made or found. */
     folderFor(o: { project?: string; branch?: string; cwd?: string; picks?: StartPicksAsked }, origin?: Caller): Promise<{ workspace: WorkspaceView; cwd?: string }>;
+    /** The record of a project's folder on this computer, made where no thread has made it yet: what the folder's
+     * own acts name before its first thread. */
+    folder(o: { project: string }, origin?: Caller): Promise<WorkspaceView>;
     /** The worktree holding a branch of a project's repo on this computer, made under the host's folder where none
      * holds it. */
     worktree(o: { project: string; branch: string }, origin?: Caller): Promise<WorktreeMade>;
@@ -2777,6 +2781,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * route to find out: a cloud fork needs one, this computer's daemon is on it. Read as truthy, the way the reach
      * word and the status poller read it before this seam existed. */
     hasDaemon: (entry: LiveWorkspace) => boolean;
+    /** Whether every workspace of this kind dials the one daemon of the computer the host runs on, which cannot tell
+     * one workspace's processes from another's: a channel's ports.watch then names the workspace's own. A cloud
+     * fork's daemon is its workspace's alone. */
+    sharedDaemon: boolean;
     /** The road to this machine's daemon: where it listens, when the route expires and the token that opens it. A
      * cloud fork's preview route with the token this runtime wrote on the guest; this computer's loopback daemon
      * with the token it holds in memory. Throws with the backend's own words when the machine has no road, which
@@ -3002,6 +3010,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A workspace whose computer answers its daemon frames has no daemon of its own to dial and no route worth
       // minting: nothing listens inside it, and the road to its files and its git is the link this host holds.
       hasDaemon: entry => servedByItsComputer(entry) === undefined && Boolean(entry.machine.previewUrl),
+      sharedDaemon: false,
       daemonRoad: entry =>
         servedByItsComputer(entry) === undefined
           ? cloudRoad(entry)
@@ -3055,6 +3064,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             turnRoad: "here",
             keepsAgents: true,
             hasDaemon: () => local.daemonRoad !== undefined,
+            sharedDaemon: true,
             daemonRoad: localRoad,
             ...(local.restartDaemon !== undefined ? { restartDaemon: local.restartDaemon } : {}),
             scratch: () => local.backend.folder,
@@ -4451,15 +4461,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * with the code the daemon put on it, so a caller reads the reason rather than the sentence.
    *
    * Where the workspace's daemon is the computer's own, the frames go up that computer's link with the workspace
-   * named on each one and nothing is dialled: a computer running a daemon too old to read that name would resolve
-   * the checkout's path against its own home, so it is refused first, in the word its row already carries. */
+   * named on each one and nothing is dialled. A daemon too old to read that name cannot seal the link, so one that
+   * is merely behind still answers here. */
   const withDaemon = async <T>(entry: LiveWorkspace, work: (ask: (frame: DaemonFrame) => Promise<Record<string, unknown>>) => Promise<T>): Promise<T> => {
     const served = servedByItsComputer(entry);
-    if (served !== undefined) {
-      const behind = await placeBehind(entry);
-      if (behind !== undefined) throw new Error(behind);
-      return work(async frame => replyOf(frame, await served(frame)));
-    }
+    if (served !== undefined) return work(async frame => replyOf(frame, await served(frame)));
     return overChannel(await ownDaemonChannel(entry, () => {}), work);
   };
   /** A daemon's reply to one of this host's own frames, or its refusal thrown with the code the daemon put on it. */
@@ -4483,23 +4489,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (local?.daemonRoad === undefined) throw new DaemonRefusal("no-host-cli", "this host runs no daemon on this computer");
     const home = local.homeDir;
     return overChannel(await channelOver(await localRoad(), THIS_COMPUTER, () => {}), ask => work(ask, home));
-  };
-
-  /** Why the computer holding this workspace cannot answer its frames yet, or nothing when it can: a daemon older
-   * than the one this wsp deploys reads no workspace name on a files or git frame and would resolve the path
-   * against its own home, which is a refusal a person cannot act on. The word is the one the computers table
-   * already shows for a computer that is behind, with the line that moves it on. */
-  const behindLine = (placeId: string, report: PlaceReport | undefined): string | undefined => {
-    if (report === undefined || placeDoor === undefined) return undefined;
-    const behind = placeDaemonBehind(report);
-    return behind === undefined ? undefined : placeBehindLine(placeDoor.nameOf(placeId), behind);
-  };
-
-  /** The same reading where nothing else needs the report: read for this and thrown away. */
-  const placeBehind = async (entry: LiveWorkspace): Promise<string | undefined> => {
-    const placeId = entry.record.place;
-    if (placeId === undefined || placeDoor === undefined) return undefined;
-    return behindLine(placeId, await placeDoor.reportOf(placeId));
   };
 
   /** Refuses a new machine on a place whose spend today has reached its spend per day. Only a cloud has one, so a copy
@@ -4549,6 +4538,103 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * tunnel reaches any port inside the workspace, and only this host's relay listens for one. */
   const GUEST_ROAD_FRAMES = [...WORKSPACE_FRAMES, "guest.watch", "guest.reply", "guest.close", "ssh.start", "tunnel.open", "tunnel.write", "tunnel.close"];
 
+  /** The ptys each local workspace's own channels opened, by pty, with the pid each leads. Every local workspace
+   * dials the one daemon this host runs and its panes list every pty there, so the one a workspace opened is the
+   * only record of whose it is. */
+  const ownPtys = new Map<string, Map<string, number>>();
+  /** Each local workspace's channels that watch ports, as the push that names that workspace's roots again. */
+  const portWatchers = new Map<string, Set<() => void>>();
+  /** The process group each local workspace's turns led, as the turn road launches them, kept past the turn for as
+   * long as the group has members: a server the turn left in its group is still the workspace's, and the kernel
+   * hands the number to nobody else while one is there. */
+  const turnGroups = new Map<string, Set<number>>();
+  /** How often the turns' groups are read again while any workspace holds one, so a group that emptied stops being a
+   * root before the kernel can hand its number to a stranger's group, whether or not a channel watches. */
+  const PORT_ROOTS_RECHECK_MS = 5_000;
+  let rootsRecheck: ReturnType<typeof setInterval> | undefined;
+  const armRootsRecheck = (): void => {
+    if (rootsRecheck !== undefined) return;
+    rootsRecheck = setInterval(() => {
+      for (const id of [...turnGroups.keys()]) portRootsMoved(id);
+      if (turnGroups.size > 0) return;
+      clearInterval(rootsRecheck);
+      rootsRecheck = undefined;
+    }, PORT_ROOTS_RECHECK_MS);
+    rootsRecheck.unref();
+  };
+  /** The processes whose listeners are a local workspace's: each of its turns' groups that still has members, and
+   * each terminal its channels opened. Never the host, which every workspace here runs under. */
+  const portRootsOf = (workspaceId: string): number[] => {
+    const roots = new Set<number>();
+    const groups = turnGroups.get(workspaceId);
+    for (const pid of groups ?? []) {
+      if (groupExists(pid)) roots.add(pid);
+      else groups?.delete(pid);
+    }
+    if (groups?.size === 0) turnGroups.delete(workspaceId);
+    for (const pid of ownPtys.get(workspaceId)?.values() ?? []) roots.add(pid);
+    return [...roots].sort((a, b) => a - b);
+  };
+  /** Reads the workspace's roots now, which drops a turn's group that emptied, and names them again to every channel
+   * that watches. */
+  const portRootsMoved = (workspaceId: string): void => {
+    portRootsOf(workspaceId);
+    for (const push of portWatchers.get(workspaceId) ?? []) push();
+  };
+  /** A local workspace's channel with its ports.watch rooted at that workspace's processes and its folder, named
+   * again on the same socket each time they move; the daemon answers a second watch with what the new roots opened
+   * and closed. */
+  const rootedPorts = (workspaceId: string, folder: string, ptys: Map<string, number>, channel: DaemonChannel): DaemonChannel => {
+    /** The roots this channel last named, undefined until it watches. */
+    let told: string | undefined;
+    const fresh = (): number[] | undefined => {
+      const roots = portRootsOf(workspaceId);
+      if (roots.join(",") === told) return undefined;
+      told = roots.join(",");
+      return roots;
+    };
+    const push = (): void => {
+      if (told === undefined) return;
+      const roots = fresh();
+      if (roots !== undefined) void channel.send({ id: null, op: "ports.watch", roots, folder } as DaemonFrame).catch(() => undefined);
+    };
+    const watchers = portWatchers.get(workspaceId) ?? new Set<() => void>();
+    portWatchers.set(workspaceId, watchers);
+    watchers.add(push);
+    const stop = (): void => {
+      watchers.delete(push);
+    };
+    void channel.closed.then(stop, stop);
+    return {
+      async send(frame) {
+        if (frame.op === "ports.watch") {
+          told = undefined;
+          return channel.send({ ...frame, roots: fresh() ?? [], folder } as DaemonFrame);
+        }
+        const reply = await channel.send(frame);
+        const said = reply as Record<string, unknown>;
+        if (frame.op === "pty.create" && said["ok"] === true && typeof said["pid"] === "number") {
+          ptys.set(String(said["ptyId"]), said["pid"]);
+          portRootsMoved(workspaceId);
+        }
+        // A pty that exited while none of this workspace's channels listened sent it no pty.exit; the list the panes
+        // ask for on every connect is what says it is gone, before its pid can be handed to a stranger.
+        if (frame.op === "pty.list" && said["ok"] === true && Array.isArray(said["ptys"])) {
+          const standing = new Set((said["ptys"] as Record<string, unknown>[]).filter(row => row["exited"] !== true).map(row => String(row["id"])));
+          const gone = [...ptys.keys()].filter(id => !standing.has(id));
+          for (const id of gone) ptys.delete(id);
+          if (gone.length > 0) portRootsMoved(workspaceId);
+        }
+        return reply;
+      },
+      close: () => {
+        stop();
+        channel.close();
+      },
+      closed: channel.closed,
+    };
+  };
+
   /** The channel a client of this host drives a served workspace's daemon over: every frame it carries goes up that
    * computer's link with the workspace named on it, and the events that come back are the ones this workspace's,
    * read off the link every road on that computer shares. Nothing is dialled and no token is spent, since the
@@ -4566,11 +4652,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A machine that answers its own daemon frames is one on a computer this host holds a link to.
     if (placeId === undefined || placeDoor === undefined) throw new Error(placeServesDaemonLine(entry.record.name, computerOf(entry)));
     const door = placeDoor;
-    // One read of what that computer last reported, and both facts an open needs off it.
-    const report = await door.reportOf(placeId);
-    const behind = behindLine(placeId, report);
-    if (behind !== undefined) throw new Error(behind);
-    const version = report?.daemonVersion;
+    const version = (await door.reportOf(placeId))?.daemonVersion;
     const machineId = entry.machine.id;
     const checkout = checkoutOf(entry.record);
     /** The ptys on that computer this channel named, so an event of a pty another pane opened is not pushed at
@@ -8538,6 +8620,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return { workspace: view(at.entry.record), ...(at.cwd !== undefined ? { cwd: at.cwd } : {}) };
     },
 
+    async folder({ project: named }, origin) {
+      await ready();
+      const project = await projectsDoor.resolve(named, origin);
+      if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
+      refuseRecording(project.name, origin);
+      return view((await projectFolder(project)).record);
+    },
+
     async worktree({ project: named, branch }, origin) {
       await ready();
       const project = await projectsDoor.resolve(named, origin);
@@ -8895,7 +8985,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async daemonChannel(id, onEvent, origin) {
-      return copyChannel(await entryOf(id, origin), onEvent, WORKSPACE_FRAMES);
+      const entry = await entryOf(id, origin);
+      if (!moduleOf(entry.record.kind).sharedDaemon) return copyChannel(entry, onEvent, WORKSPACE_FRAMES);
+      const ptys = ownPtys.get(id) ?? new Map<string, number>();
+      ownPtys.set(id, ptys);
+      const heard = (event: Record<string, unknown>): void => {
+        if (event["type"] === "pty.exit" && ptys.delete(String(event["ptyId"]))) portRootsMoved(id);
+        onEvent(event);
+      };
+      return rootedPorts(id, checkoutOf(entry.record), ptys, await copyChannel(entry, heard, WORKSPACE_FRAMES));
     },
 
     async guestChannel(id, onEvent) {
@@ -9046,15 +9144,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // A title in the harness's own store is the person's rename inside it or the one the harness itself made
           // for them, and both outrank anything we would generate; only the opening words, which codex writes there
           // at a thread's start, are the seed again, and a seed is no news to a row that already carries a name.
+          let unnamed: SessionView | undefined;
           for (const s of sessions.values()) {
             if (s.view.workspaceId !== entry.record.id || s.view.claudeSessionId !== sessionId) continue;
             const source = storedTitleSource(title, s.view.prompt);
-            if (source === "seed" && sourceOf(s.view) !== "seed") continue;
+            if (source === "seed" && sourceOf(s.view) !== "seed") {
+              if (s.view.harnessTitle !== undefined && s.view.harnessTitle !== title) unnamed = s.view;
+              continue;
+            }
             if (s.view.harnessTitle !== title) moved.add(threadKeyOf(s.view));
             s.view.harnessTitle = title;
             s.view.titleSource = source;
           }
           await persistSessions(entry.record.id);
+          // A name given before codex wrote the thread's index row had nowhere to land; by a turn's end the row is
+          // there, so the name the row carries is written again.
+          if (force && unnamed?.harnessTitle !== undefined) void nameInHarness(unnamed, unnamed.harnessTitle);
           for (const threadId of moved) pushHead(threadId);
         },
         (e: unknown) => {
@@ -9683,6 +9788,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     delete s.snapshot;
     const endedAt = Date.now();
     s.view.status = reply ?? "failed";
+    portRootsMoved(s.view.workspaceId);
     s.view.endedAt = endedAt;
     if (s.view.status === "failed") endSnoozeFor(s.view);
     // A prompt the turn was stopped on goes with it, on this road as on the harness's own exit: nothing can answer
@@ -10343,6 +10449,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
     if (turnId !== rowId) sessions.delete(turnId);
     sessions.set(rowId, { view, turnId, calls, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(started.from !== undefined ? { from: started.from } : {}), ...(t.asked !== undefined ? { asked: t.asked } : {}), ...(typeof t.snapshot?.from === "string" ? { snapshot: t.snapshot.from } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
+    if (started.pid !== undefined && moduleOf(entry.record.kind).sharedDaemon) {
+      const groups = turnGroups.get(workspaceId) ?? new Set<number>();
+      turnGroups.set(workspaceId, groups);
+      groups.add(started.pid);
+      armRootsRecheck();
+    }
+    portRootsMoved(workspaceId);
     void persistSessions(workspaceId);
     // A launch that hands its prompt over late resolves its snapshot after the row exists; the row takes it then.
     const taking = t.snapshot?.from;
@@ -10376,6 +10489,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         void deviceDoor.revoke(scopeDeviceId).catch((e: unknown) => console.warn(`the token of thread ${threadWord(threadId)} was not taken away: ${e instanceof Error ? e.message : String(e)}`));
       }
       if (!ended) view.status = status;
+      portRootsMoved(workspaceId);
       view.endedAt ??= Date.now();
       if (view.status === "failed") endSnoozeFor(view);
       // A pick this turn did not take landed on the thread's record alone; the row says it from here on, since
@@ -13595,6 +13709,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     close: async () => {
       closing = true;
+      clearInterval(rootsRecheck);
       await copiesMoving;
       sweepStopped = true;
       sweepTimer?.();

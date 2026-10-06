@@ -8,6 +8,10 @@
         "thread": {
           "type": "string",
           "description": "the thread's id, or a prefix of it that names one, as threads lists them"
+        },
+        "reason": {
+          "type": "string",
+          "description": "what the agent should do instead, in your words; the agent reads it with the refusal, as it reads the reason a person types in the app"
         }
       },
       "required": [
@@ -53,6 +57,10 @@
         "thread": {
           "type": "string",
           "description": "the thread's id, or a prefix of it that names one, as threads lists them"
+        },
+        "reason": {
+          "type": "string",
+          "description": "what the agent should do instead, in your words; the agent reads it with the refusal, as it reads the reason a person types in the app"
         }
       },
       "required": [

@@ -1,0 +1,37 @@
+[
+  {
+    "type": "proc.changes",
+    "at": 1757000005000,
+    "daemon": 42,
+    "total": 3,
+    "procs": [],
+    "gone": [],
+    "seq": 2,
+    "base": 1
+  },
+  {
+    "type": "proc.changes",
+    "at": 1757000005000,
+    "daemon": 42,
+    "total": 2,
+    "procs": [
+      {
+        "pid": 50,
+        "ppid": 1,
+        "user": "root",
+        "state": "R",
+        "comm": "node",
+        "cmdline": "node server.js",
+        "cpu": 12.5,
+        "rss": 81920,
+        "startedAt": 1757000001000,
+        "pty": "pty_1"
+      }
+    ],
+    "gone": [
+      51
+    ],
+    "seq": 3,
+    "base": 2
+  }
+]

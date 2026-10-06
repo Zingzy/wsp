@@ -83,6 +83,7 @@ export const SCRIPTED_ASK: PermissionAsk = {
 export function scriptedAgent(reply: (prompt: string) => string, names?: (title: string) => SessionRenameWrite) {
   const starts: HarnessStartOptions[] = [];
   const renames: { sessionId: string; title: string }[] = [];
+  const answers: { optionId: string; outcome: PermissionOutcome; denyMessage: string; reason?: string }[] = [];
   const adapter: HarnessAdapterFactory = () => ({
     steers: false,
     // Stands in for a harness that reads an image, as both the real ones do; a case about an agent that reads none
@@ -113,7 +114,8 @@ export function scriptedAgent(reply: (prompt: string) => string, names?: (title:
           localId: sessionId,
           finished: waiting,
           interrupt: async () => {},
-          answer: async (askId: string, picked: { optionId: string; outcome: PermissionOutcome }) => {
+          answer: async (askId: string, picked: { optionId: string; outcome: PermissionOutcome; denyMessage: string; reason?: string }) => {
+            answers.push(picked);
             const answered: TurnResult = { status: "completed", text: `re: ${picked.outcome}` };
             o.onEvent({ type: "permission.close", sessionId, askId, outcome: picked.outcome, optionId: picked.optionId });
             o.onEvent({ type: "turn.done", sessionId, result: answered });
@@ -140,7 +142,7 @@ export function scriptedAgent(reply: (prompt: string) => string, names?: (title:
       return { localId: sessionId, finished, interrupt: async () => {} };
     },
   });
-  return { adapter, starts, renames };
+  return { adapter, starts, renames, answers };
 }
 
 /** A harness whose first start never reaches the machine: the turn fails with the runtime's unreached line and no

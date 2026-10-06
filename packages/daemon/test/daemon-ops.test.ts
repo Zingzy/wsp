@@ -159,9 +159,11 @@ describe("daemon ops: ports, manifest, inbox", () => {
     expect((await a.request("proc.watch")).ok).toBe(true);
     writeProc(procRoot, { pid: 50, ppid: 1, comm: "node", ticks: [4, 0], cwd: "/root/app" });
     const deadline = Date.now() + 2000;
-    while (a.events.filter(e => e.type === "proc.snapshot").length < 2 && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
+    while (!a.events.some(e => e.type === "proc.changes") && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
     const snaps = a.events.filter(e => e.type === "proc.snapshot") as { procs: { pid: number; ppid: number; cpu: number; cmdline: string }[]; daemon: number; total: number }[];
-    expect(snaps.length).toBeGreaterThanOrEqual(2);
+    // One whole list for the socket, then only what moved after it.
+    expect(snaps).toHaveLength(1);
+    expect(a.events.some(e => e.type === "proc.changes")).toBe(true);
     expect(snaps[0]).toMatchObject({ daemon: daemon.pid, total: 3 });
     expect(snaps[0]!.procs.map(p => p.pid)).toEqual([1, 50, 51]);
     expect(snaps[0]!.procs[2]).toMatchObject({ ppid: 50, cmdline: "sh" });
@@ -181,9 +183,9 @@ describe("daemon ops: ports, manifest, inbox", () => {
 
     expect((await a.request("proc.unwatch")).ok).toBe(true);
     await new Promise(r => setTimeout(r, 60));
-    const after = a.events.filter(e => e.type === "proc.snapshot").length;
+    const after = a.events.filter(e => e.type === "proc.changes").length;
     await new Promise(r => setTimeout(r, 80));
-    expect(a.events.filter(e => e.type === "proc.snapshot").length).toBe(after);
+    expect(a.events.filter(e => e.type === "proc.changes").length).toBe(after);
     a.close();
   });
 
@@ -196,7 +198,7 @@ describe("daemon ops: ports, manifest, inbox", () => {
     // The fake tree stands in for /proc: this entry is whatever process holds the pid, alive or reused.
     writeProc(procRoot, { pid, ppid: 1, comm: "bash" });
     expect((await a.request("proc.watch")).ok).toBe(true);
-    const labelled = () => a.events.filter(e => e.type === "proc.snapshot").flatMap(e => (e["procs"] as { pid: number; pty?: string }[]).filter(p => p.pid === pid));
+    const labelled = () => a.events.filter(e => e.type === "proc.snapshot" || e.type === "proc.changes").flatMap(e => (e["procs"] as { pid: number; pty?: string }[]).filter(p => p.pid === pid));
     let deadline = Date.now() + 2000;
     while (labelled().length === 0 && Date.now() < deadline) await new Promise(r => setTimeout(r, 10));
     expect(labelled()[0]).toMatchObject({ pid, pty: ptyId });
@@ -209,8 +211,8 @@ describe("daemon ops: ports, manifest, inbox", () => {
       await new Promise(r => setTimeout(r, 20));
     }
     expect((await a.request("pty.list"))["ptys"]).toContainEqual(expect.objectContaining({ id: ptyId, exited: true }));
-    // The snapshot after the exit can be one the sampler had already built, so the wait is on a snapshot that dropped
-    // the label rather than on the next one to arrive.
+    // The frame after the exit can be one the sampler had already built, so the wait is on a change that dropped the
+    // label rather than on the next frame to arrive.
     const after = await vi.waitFor(
       () => {
         const last = labelled().at(-1)!;

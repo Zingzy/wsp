@@ -3907,7 +3907,7 @@ describe("wsp verbs over the host", () => {
     const half = await run("thread");
     expect(half.code).toBe(3);
     expect(half.io.errors).toEqual([
-      'wsp thread opens a line rather than being one. usage: wsp thread read <thread> [--last]\nusage: wsp thread head <thread>\nusage: wsp thread rename <thread> "<title>"\nusage: wsp thread forget <thread>\nusage: wsp thread allow <thread>\nusage: wsp thread deny <thread>',
+      'wsp thread opens a line rather than being one. usage: wsp thread read <thread> [--last]\nusage: wsp thread head <thread>\nusage: wsp thread rename <thread> "<title>"\nusage: wsp thread forget <thread>\nusage: wsp thread allow <thread>\nusage: wsp thread deny <thread> [--reason "<words>"]',
     ]);
   });
 
