@@ -82,6 +82,15 @@ describe("a turn's end in the ledger", () => {
     expect(byAgent.rows.map(r => [r.key, r.tokens.input, r.costReported, r.turns])).toEqual([["claude", 2_900, 1.25, 1]]);
   });
 
+  it("names every model on the split, one no agent's table lists by a name built from its id", async () => {
+    const used = (model: string) => ({ model, tokens: { input: 10, output: 1, cached: 0, cacheWrite: 0, reasoning: 0 }, costUsd: 0.01 });
+    const result: TurnResult = { status: "completed", text: "done", costUsd: 0.03, tokens: { input: 30, output: 3 }, models: [used("claude-sonnet-5-5"), used("gpt-6-astra"), used("claude-nimbus-7-2-20270101")] };
+    const { rt, ws } = await runtimeWith(turning(result));
+    await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+    const byModel = await rt.usage.used({ range: "day", split: "model" });
+    expect(byModel.rows.map(r => r.label).sort()).toEqual(["Claude Nimbus 7.2", "GPT-6-Astra", "Sonnet 5.5"]);
+  });
+
   it("files nothing for a turn that reported no tokens and no cost", async () => {
     const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done" }));
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;

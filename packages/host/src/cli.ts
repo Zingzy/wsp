@@ -96,7 +96,7 @@ import { restartRoads, type RestartingHost, type RestartRoad } from "./restart.j
 import { stopRecordedConnector } from "./connector.js";
 import { admittedDevices, hostsCommand, loginCommand, logoutCommand, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
-import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
+import { homeNamed, realState, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hereUrl, pairCommand, type HereAt } from "./pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { agentsReader } from "./agents-reader.js";
@@ -534,7 +534,7 @@ export function localWiring(
   /** The state file the host this wiring belongs to serves. Every file it writes for itself sits in that file's
    * own folder, the runs, the roots file and the inbox alike, so a host on a home somebody named writes nothing
    * under the home a bare line picks. */
-  statePath: string = join(defaultHomeIn(home), "state.json"),
+  statePath: string,
   copier: Copier | undefined = copierHere(),
   /** Where the daemon's own stderr goes as it starts. A serving host's stderr is its log, which is where those
    * lines belong; a line at a terminal asked a question of its own and hands a sink that keeps none. */

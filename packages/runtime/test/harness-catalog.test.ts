@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parseCatalogProbe } from "@wsp/adapter-claude";
 import { CLAUDE_CODE, THREAD_AGENTS } from "@wsp/catalog";
 import { HarnessCatalog, catalogSourceLine, effortsFor, exitClassOf, everyModel, listedPick, markedDefault, modelOf, noModelsLine, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
-import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "../src/harness-catalog.js";
+import { HARNESS_CATALOGS, NAMED_ONLY, catalogFromProbe, harnessCatalog, modelLabel, smallestModel } from "../src/harness-catalog.js";
 
 /** The agents whose models no table can list: the machine's own providers, or an account's. */
 const OPEN_MODELS: readonly string[] = ["opencode", "cursor"];
@@ -163,6 +163,14 @@ describe("harness catalogs", () => {
     expect(harnessCatalog("pi")!.permissionModes).toEqual([]);
     expect(harnessCatalog("opencode")!.efforts).toEqual([]);
     expect(harnessCatalog("aider")).toBeUndefined();
+  });
+});
+
+describe("models named and never offered", () => {
+  it("are none an agent's table lists, so a pin bump that lists one takes it off this list", () => {
+    const listed = new Set(HARNESS_CATALOGS.flatMap(everyModel).map(m => m.value));
+    expect(NAMED_ONLY.filter(m => listed.has(m.value)).map(m => m.value)).toEqual([]);
+    for (const m of NAMED_ONLY) expect(modelLabel(m.value)).toBe(m.label);
   });
 });
 

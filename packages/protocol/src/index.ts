@@ -1943,6 +1943,9 @@ export const WorkspaceCreatingEvent = z.object({
   /** What the machine answered this step with, for the line's title: a guest's refusal is evidence a person may
    * need and never a sentence written at them, so no surface draws it as one. */
   detail: z.string().optional(),
+  /** Set on a line saying what the step the create is on waits for, in the message's words. It comes once per ask,
+   * so a surface showing the step draws the newest in the step's place and never as a step of its own. */
+  waiting: z.literal(true).optional(),
   /** The thread this fork was asked for by, from the first stage: a create streams stages before the workspace has
    * a record, so the stream's tree rule reads who asked off the event rather than off a record that is not there
    * yet. Absent where a person asked for the machine. */
@@ -3239,6 +3242,14 @@ export const PLACE_LOGIN_REFUSED_KIND = "login";
  * the person to trust and adds again with it. */
 export const PLACE_HOST_KEY_KIND = "host-key";
 
+/** The password a login's sudo asks for, typed by the person for one add, remove or update: fed to sudo over the
+ * ssh connection's input, never written down, never logged and gone when the act ends. One line, as sudo reads it. */
+export const SudoPassword = z.string().max(1024).regex(/^[^\n\r\0]*$/);
+
+/** The kind an add is refused with where the login's sudo asks for a password: none was given, or sudo did not take
+ * the one that was. A client asks the person for it once and adds again with it. */
+export const PLACE_SUDO_KIND = "sudo";
+
 /** How far the install on one computer has got, keyed by the id the request was answered with, so two installs at
  * once are two lists. A step that is running is the one with a spinner; one that is done carries its note. */
 export const PlaceStageEvent = z.object({
@@ -3790,13 +3801,15 @@ export const PlacePresentEvent = z.object({ type: z.literal("place.present"), pl
 /** `said` is the runtime's own reason where it has one, as for a box whose kernel can no longer boot the image. */
 export const PlaceAbsentEvent = z.object({ type: z.literal("place.absent"), placeId: z.string(), said: z.string().optional() });
 export const PlaceRemovedEvent = z.object({ type: z.literal("place.removed"), placeId: z.string() });
+/** A setting of a computer changed, from any window or the command line: the row as it now reads. */
+export const PlaceChangedEvent = z.object({ type: z.literal("place.changed"), place: PlaceView });
 /** An add that has not reached Set up moved, or went: `pending` as it now stands, absent once it became a computer
  * or was taken away. */
 export const PlacePendingEvent = z.object({ type: z.literal("place.pending"), id: z.string(), pending: PendingComputer.optional() });
 export type PlacePendingEvent = z.infer<typeof PlacePendingEvent>;
 
-/** The four as one type, so the host's door and the app's fold read one shape. */
-export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent>;
+/** The five as one type, so the host's door and the app's fold read one shape. */
+export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent> | z.infer<typeof PlaceChangedEvent>;
 
 /** A project was recorded, so every client's list follows without a refetch. */
 export const ProjectAddedEvent = z.object({ type: z.literal("project.added"), project: ProjectView });
@@ -3885,6 +3898,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   PlacePresentEvent.extend(sequenced),
   PlaceAbsentEvent.extend(sequenced),
   PlaceRemovedEvent.extend(sequenced),
+  PlaceChangedEvent.extend(sequenced),
   AgentsChangedEvent.extend(sequenced),
   UsageAlertEvent.extend(sequenced),
   HostNoticeEvent.extend(sequenced),
@@ -5253,6 +5267,7 @@ const DAEMON_CONTENTS = [
   "9dc9610fb0581804589fcf952e0f5df34b029bbae2034ea135f420867b5b4c5c",
   "089d2b84fb314ca0fb7361046e327978a243aee796789f72cd5e2e8f8a71c191",
   "f9b9aedecc0b89b12571cea110ff89f317df4472af13de32ef2f5681334f46a7",
+  "a9a90585446c8bd453c888fc716b3097631dbd87d7116d7f65a8a9a436df7352",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5607,7 +5622,8 @@ const DAEMON_CONTENTS = [
  * listens as a close marked left, and a second watch names its roots again. A browser.open with no port hurries the
  * watch to a read a second through the spotter's window. proc.watch sends one whole proc.snapshot two seconds after the
  * watch and then a proc.changes every five seconds; every frame carries a seq and each proc.changes the base it applies
- * to, and a socket that watches again is sent a whole snapshot next. */
+ * to, and a socket that watches again is sent a whole snapshot next.
+ * Version 126: six small host and test faults. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -6726,10 +6742,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Puts the daemon this host deploys on one place where it is behind, over the link it holds or over the ssh road
    * the install used, and waits for that computer to dial back running it. The workspaces on it and what it was set
    * up with are kept. Answers a PlaceUpdateReply. */
-  z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string() }),
+  z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string(), sudoPassword: SudoPassword.optional() }),
   /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
    * the place record. Answers `{ removed, swept, note? }`. */
-  z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string() }),
+  z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string(), sudoPassword: SudoPassword.optional() }),
   /** Runs the doctor's computer road here, for a computer this host holds the link to: the six steps against that
    * link, and every line of them pushed as a doctor.line event under `doctorId` to the sockets subscribed to
    * events. The id is the caller's own, minted before the request, since the first line is said before the reply
@@ -6793,6 +6809,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
      * before a byte of wsp's leaves this computer where it is absent and the client holds no key of its own, so a
      * caller that sends none meets the same wall as one that sends a wrong one. */
     hostKey: z.string().max(200).optional(),
+    /** The password the login's sudo asks for, typed by the person for this add alone: fed to sudo over the ssh
+     * connection's input, never written down, never logged and gone when the add ends. One line, as sudo reads it. */
+    sudoPassword: SudoPassword.optional(),
     /** The saved recipe the computer is set up from once it joins, by its name or slug. Absent, it joins and waits
      * as a pending add for the person's picks, with the base tools going on meanwhile. */
     recipe: z.string().max(200).optional(),
@@ -7511,7 +7530,7 @@ export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape
 
 /** The request fields above that carry a secret: a key, a token, a code, a passphrase, or a record of logins or
  * environment values a person puts keys into. A new field that carries one is added here, beside its schema. */
-export const SECRET_REQUEST_FIELDS: readonly string[] = ["token", "key", "rows", "code", "passphrase", "env", "envs", "headers"];
+export const SECRET_REQUEST_FIELDS: readonly string[] = ["token", "key", "rows", "code", "passphrase", "env", "envs", "headers", "sudoPassword"];
 
 /** The secret values a request frame carries, read one level into a record and no deeper: a record of logins is as
  * deep as a secret field goes, and the frame may be a stranger's. */

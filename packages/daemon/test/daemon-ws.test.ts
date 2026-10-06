@@ -3,7 +3,7 @@ import { connect, createServer, type Server, type Socket } from "node:net";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { DAEMON_AUTH_DEADLINE_PASSED, DAEMON_FIRST_FRAME_NOT_AUTH, DAEMON_PRE_AUTH_BYTES_EXCEEDED, DAEMON_TOKEN_REFUSED, DAEMON_VERSION, TUNNEL_CAP, portScopeRefusal, unknownOpLine } from "@wsp/protocol";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { fakeProcTree, fakeStty, writeProc } from "./fake-proc.js";
 import { daemonUnderTest, type DaemonUnderTest } from "./harness.js";
@@ -83,6 +83,10 @@ class Client {
 
 let daemon: DaemonUnderTest;
 
+beforeAll(async () => {
+  daemon = await daemonUnderTest({ port: 0, token: TOKEN });
+});
+
 afterAll(async () => {
   await daemon?.close();
 });
@@ -97,7 +101,6 @@ async function ptyCount(port: number): Promise<number> {
 
 describe("daemon WS server", () => {
   it("closes 4401 with one sentence when the auth frame carries the wrong token", async () => {
-    daemon = await daemonUnderTest({ port: 0, token: TOKEN });
     const c = await Client.connect(daemon.port, "wrong");
     const { code, reason } = await c.closed;
     expect(code).toBe(4401);

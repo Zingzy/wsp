@@ -130,7 +130,7 @@ describe("the wsp tools a thread on this computer is launched with", () => {
     execFileSync("git", ["init", "-q", repo]);
     execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
     const held = heldAgent(false);
-    const rt = makeRuntime({}, statePath, undefined, {}, { here: { url: "http://127.0.0.1:9" }, run }, localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), undefined, memoryStore(), {
+    const rt = makeRuntime({}, statePath, undefined, {}, { here: { url: "http://127.0.0.1:9" }, run }, localWiring(join(dir, "user"), undefined, fakeDaemonStart, statePath, copyingFake()), undefined, memoryStore(), {
       claude: ctx => ({ ...held.adapter(ctx), mcpServers: true as const }),
     });
     const project = await rt.projects.add({ source: repo, on: HERE_PLACE_ID });

@@ -1034,4 +1034,16 @@ describe("the creation tile", () => {
     expect(gamma.dataset["creationLine"]).toBe(CREATE_STEP_WORDS.failed);
     expect(rowOf("delta").dataset["creationLine"]).toBe(CREATE_STEP_WORDS["fork-requested"]);
   });
+
+  it("says what the step waits for in its own words, once, the newest ask in place of the last", async () => {
+    await mount(fakeApi([COPIED], [status(COPIED)]), "api");
+    const wait = "waiting for Solari to serve the image; asking again in 15s";
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), project: "pr_1", workspaceId: "ws_beta", lines: [{ stage: "fork-requested", message: "starting beta on solari", at: "t", elapsedMs: 0 }], failed: null }] } as never));
+    const poll = (elapsedMs: number) => act(() => useStore.getState().applyEvent({ type: "workspace.creating", workspaceId: "ws_beta", name: "beta", stage: "fork-requested", message: wait, elapsedMs, waiting: true }));
+    poll(1_000);
+    poll(16_000);
+    const beta = rowOf("beta");
+    expect(beta.dataset["creationLine"]).toBe(`W${wait.slice(1)}`);
+    expect(useStore.getState().creations[0]!.lines).toHaveLength(1);
+  });
 });

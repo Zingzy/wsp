@@ -19,5 +19,10 @@ export const envInput = (env: Readonly<Record<string, string>>): Uint8Array =>
       .join(""),
   );
 
+/** The first line of a script sudo runs as root: sudo's own marks dropped, so the script reads a plain root shell
+ * and not a person's shell escalated. The harness vendor's installer refuses to run under sudo (measured
+ * 2026-09-11). */
+export const DROP_SUDO_MARKS = "unset SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND";
+
 /** The variable gh reads its token from, which the vault holds under the same name. */
 export const GITHUB_TOKEN_ENV = "GH_TOKEN";
