@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The font the person's terminal draws with, read from its config, so the
 // app's terminal pane can default to it. Nothing here travels to the machine.
+import { escapeRegExp } from "@wsp/protocol";
 import type { Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
 import { exists } from "./common.js";
@@ -30,8 +31,6 @@ function primaryFace(families: readonly string[]): string | undefined {
   }
   return kept[0];
 }
-
-const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** iTerm2: the default bookmark's Normal Font, else the first bookmark's; the value is "<font name> <size>".
  * A bookmark's keys are written in sorted order, so its Guid precedes its Normal Font and the next Guid ends it. */

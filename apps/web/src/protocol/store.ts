@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type Attachment, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PendingComputer, type PlaceSettingsAsk, type PlaceSettingWord, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
+import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type Attachment, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PendingComputer, type PlaceSettingsAsk, type PlaceSettingWord, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft, type AccountRow } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -11,6 +11,7 @@ import type { Launch, SidebarProjectSnapshot } from "../adapt/view-model.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { failureOf, type Failure } from "./failure.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
+import { refetchSlates, slateEvent } from "../slate/store.js";
 import { lastOpen, rememberOpen, type LastOpen } from "./lastWorkspace.js";
 import { claimKept, claiming, claimsAnswered, keepCreations, keptCreations, letGo, own } from "./keptCreations.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
@@ -204,6 +205,11 @@ interface State {
   preferences: Preferences;
   /** The newest release as the host last read it; null until it answers, and on a host that reads none. */
   release: ReleaseView | null;
+  /** Every sign-in's row by its key, as usage.accounts answered and usage.account pushes keep it; null until a slate
+   * that binds usage asks for it. */
+  usageAccounts: Record<string, AccountRow> | null;
+  /** Reads the accounts once; a slate's usage source asks when it is first bound. */
+  loadUsageAccounts(): void;
   /** Whether the centre shows the settings page in place of the selected workspace's thread. */
   settingsOpen: boolean;
   bind(api: Api): void;
@@ -478,6 +484,10 @@ let initJobViews = 0;
 /** How many of one place's build frames are kept: every stage of a build and the tail of its install steps. */
 export const GOLDEN_FRAMES_KEPT = 64;
 
+/** Whether usage.accounts was asked since the last gap, so every slate binding usage asks once between them. */
+let usageAccountsAsked = false;
+/** The rows pushed since usage.accounts was last asked: newer than its answer, so they stand over it. */
+let usageAccountsPushed: Record<string, AccountRow> = {};
 /** One frame at 60 Hz: how long a status row or a cost tick waits for the rest of its burst. */
 export const FRAME_MS = 16;
 
@@ -774,8 +784,27 @@ export const useStore = create<State>((set, get) => {
     gaps: 0,
     preferences: bootPreferences(),
     release: null,
+    usageAccounts: null,
+    loadUsageAccounts() {
+      if (usageAccountsAsked) return;
+      usageAccountsAsked = true;
+      usageAccountsPushed = {};
+      // The answer is the whole list as it is now: it replaces what was kept, so an account gone since the last answer
+      // goes too, and only a push that came after the ask stands over it.
+      void get().api?.usageAccounts?.().then(
+        answer => set({ usageAccounts: { ...Object.fromEntries(answer.accounts.map(row => [row.key, row])), ...usageAccountsPushed } }),
+        () => {
+          usageAccountsAsked = false;
+        },
+      );
+    },
     settingsOpen: false,
-    noteGap() { set(s => ({ gaps: s.gaps + 1 })); },
+    noteGap() {
+      set(s => ({ gaps: s.gaps + 1 }));
+      refetchSlates();
+      usageAccountsAsked = false;
+      if (get().usageAccounts !== null) get().loadUsageAccounts();
+    },
     bind(api) {
       set({ api });
       useComposerFilesStore.setState({ kept: api.sessionAttachment });
@@ -1391,6 +1420,7 @@ export const useStore = create<State>((set, get) => {
           return;
         }
         case "session.done":
+          slateEvent(e);
           // The reply is in, but the row stays running until the process exits (session.end): a turn is not over while
           // its agent keeps working, and a send that met a done-but-running row would be one the runtime refuses.
           return;
@@ -1427,6 +1457,15 @@ export const useStore = create<State>((set, get) => {
         }
         case "preferences.changed":
           if (preferenceSetsInFlight === 0) preferencesLanded(e.preferences, get().preferences);
+          return;
+        case "session.slate":
+        case "slate.values":
+        case "slate.run":
+          slateEvent(e);
+          return;
+        case "usage.account":
+          usageAccountsPushed = { ...usageAccountsPushed, [e.key]: e.row };
+          set(s => ({ usageAccounts: { ...s.usageAccounts, [e.key]: e.row } }));
           return;
         case "release.changed":
           set({ release: e.release });
@@ -1485,8 +1524,11 @@ export function useLaunches(): Record<string, Launch> {
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }
 export function useSelectedThreadId(): string | null { return useStore(s => s.selectedThreadId); }
 /** The selected workspace's id, or null while a creation row is selected: no command may act on a creation's key. */
+/** The workspace selected, or none while the selection is a workspace still being made. */
+export const selectedWorkspaceIdOf = (s: Pick<State, "selectedId" | "creations">): string | null => (s.selectedId !== null && s.creations.some(c => c.key === s.selectedId) ? null : s.selectedId);
+
 export function useSelectedWorkspaceId(): string | null {
-  return useStore(s => (s.selectedId !== null && s.creations.some(c => c.key === s.selectedId) ? null : s.selectedId));
+  return useStore(selectedWorkspaceIdOf);
 }
 export function useCreation(key: string | null): Creation | null {
   return useStore(s => (key ? s.creations.find(c => c.key === key) ?? null : null));
@@ -1606,6 +1648,12 @@ export function threadRows(sessions: ReadonlyArray<SessionView>, workspaceId: st
   if (own.length > 0 || threadKey !== workspaceId) return own;
   const latest = sessions.at(-1);
   return latest === undefined ? NO_SESSIONS : [latest];
+}
+
+/** The workspace whose rows hold a thread, where its composer keeps its draft. */
+export function threadWorkspaceIn(sessions: Readonly<Record<string, ReadonlyArray<SessionView>>>, threadId: string): string | null {
+  for (const [workspaceId, rows] of Object.entries(sessions)) if (rows.some(row => threadKeyOf(row) === threadId)) return workspaceId;
+  return null;
 }
 
 /** Subscribe a component to raw protocol events (the thread, terminal and browser surfaces use this). */

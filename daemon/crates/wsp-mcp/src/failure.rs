@@ -4,6 +4,7 @@
 //! failure object; a refusal before the server runs is one line on stderr and the class's exit code.
 
 use serde::Serialize;
+use serde_json::value::RawValue;
 
 use crate::record;
 
@@ -11,6 +12,10 @@ use crate::record;
 pub struct Failure {
     pub message: String,
     pub kind: Option<String>,
+    /// The lists a refused slate write carries beside its sentence, each in the bytes the host wrote it:
+    /// `problemListsOf` in packages/protocol/src/exit.ts.
+    pub errors: Option<String>,
+    pub warnings: Option<String>,
 }
 
 /// The failure object: what --json prints on stderr and a tool error carries beside its text.
@@ -19,16 +24,20 @@ pub struct Object {
     pub error: String,
     pub class: String,
     pub exit: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub errors: Option<Box<RawValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Box<RawValue>>,
 }
 
 impl Failure {
     /// A failure with no kind, which is the provider's class: the host, the runtime or the machine said no.
     pub fn new(message: impl Into<String>) -> Self {
-        Failure { message: message.into(), kind: None }
+        Failure { message: message.into(), kind: None, errors: None, warnings: None }
     }
 
     pub fn of_kind(message: impl Into<String>, kind: &str) -> Self {
-        Failure { message: message.into(), kind: Some(kind.to_owned()) }
+        Failure { kind: Some(kind.to_owned()), ..Failure::new(message) }
     }
 
     pub fn usage(message: impl Into<String>) -> Self {
@@ -43,7 +52,8 @@ impl Failure {
         let exit = record::exit();
         let class = self.kind.as_ref().and_then(|kind| exit.kinds.get(kind)).map_or("provider", String::as_str).to_owned();
         let code = exit.codes.get(&class).copied().unwrap_or(1);
-        Object { error: self.message.clone(), class, exit: code }
+        let raw = |list: &Option<String>| list.as_ref().and_then(|l| RawValue::from_string(l.clone()).ok());
+        Object { error: self.message.clone(), class, exit: code, errors: raw(&self.errors), warnings: raw(&self.warnings) }
     }
 }
 

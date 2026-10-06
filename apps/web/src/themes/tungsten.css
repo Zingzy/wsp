@@ -11,6 +11,7 @@
   --primary: #ece6dc;
   --primary-foreground: #141210;
   --hero-field: var(--color-amber-500);
+  --slate-accent: var(--hero-field);
   --border: #2a2623;
   --input: #373129;
   --success: var(--color-emerald-500);

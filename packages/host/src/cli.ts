@@ -18,6 +18,8 @@ import {
   hostIdentity,
   jsonFileStore,
   localExecStream,
+  sqliteStore,
+  stateDbPath,
   type GoldenRecipe,
   type GoldenVersion,
   type HarnessAdapterFactory,
@@ -32,7 +34,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, serverValuesOf } from "@wsp/catalog";
-import { authRefusal, cloudOffRefusal, PRICES_URL, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
+import { authRefusal, cloudOffRefusal, PRICES_URL, STATE_STORE_ENV, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
 import { agentHome, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, verbCopier } from "@wsp/engine";
 import { CLOUD_ON } from "./cloud.js";
 import { noMachinesLine, PROVIDER_MODULES, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv, type ProviderModule } from "./providers.js";
@@ -804,7 +806,7 @@ export function makeRuntime(
   links: PlaceWiring = placeWiring(statePath, agents?.advertise),
   /** The store over the state file, handed in by a caller that has already read it once: a state this build cannot
    * read is refused at every collection read, and a caller that met that refusal has said so already. */
-  store: Store = jsonFileStore(statePath, stateWriterHere()),
+  store: Store = stateStore(statePath, env),
   /** The agents a turn runs; a test hands in stand-ins so no real agent starts. */
   adapters: Record<string, HarnessAdapterFactory> = HARNESS_ADAPTERS,
   /** The providers this host answers for, its own process's by default; a test hands in the table it means. */
@@ -1390,14 +1392,26 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
   return hostFor(rt, keys, { ...opts, providerEnv, links, here }, io, opts.running);
 }
 
+/** The store a state is kept in: the SQLite database beside the state file, or the JSON document where
+ * STATE_STORE_ENV says json in this environment or the .env beside it. A state file not imported yet that a live
+ * host serves stays the JSON document for this process too: that host goes on writing the file, and an import
+ * under it would leave every write it makes after out of the database. */
+export function stateStore(statePath: string, env: Readonly<Record<string, string | undefined>> = process.env): Store {
+  const json =
+    env[STATE_STORE_ENV] === "json" ||
+    savedEnv(statePath)[STATE_STORE_ENV] === "json" ||
+    (!existsSync(stateDbPath(statePath)) && existsSync(statePath) && servingHost(statePath) !== undefined);
+  return json ? jsonFileStore(statePath, stateWriterHere()) : sqliteStore(statePath, stateWriterHere());
+}
+
 /** The state file read once, before anything else on this host reads it: a file written in a shape this build does
  * not read is refused at every collection read, and the readers a runtime builds meet that refusal in the middle of
  * their own work, where one of them warns with the whole error and its stack behind a line of its own. It comes
  * before the wiring a runtime is built with, which mints this host's pairing key beside the state file on its own
  * first read: a start refused here leaves the home as it found it. Read here, the refusal is this start's, thrown
  * once and printed once, and the store is handed on so the file is not read twice over. */
-async function readOnce(statePath: string): Promise<Store> {
-  const store = jsonFileStore(statePath, stateWriterHere());
+async function readOnce(statePath: string, env: Readonly<Record<string, string | undefined>>): Promise<Store> {
+  const store = stateStore(statePath, env);
   await store.keys("workspaces");
   return store;
 }
@@ -1411,8 +1425,8 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noProviderKey: "local" });
-  // Read first, for the reason readOnce carries.
-  const store = await readOnce(opts.statePath);
+  // Read first, for the reason readOnce carries. A runtime handed in holds its own store, so no other is read.
+  const store = opts.runtime === undefined ? await readOnce(opts.statePath, providerEnv) : undefined;
   const links = placeWiring(opts.statePath, opts.advertise);
   const here = opts.here ?? {};
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { here, ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, store);
@@ -2409,11 +2423,12 @@ export const MCP_OPTIONS: Options = {
   remove: { type: "boolean" },
   state: { type: "string" },
   scoped: { type: "boolean" },
+  "no-slate": { type: "boolean" },
   help: { type: "boolean", short: "h" },
 };
 
 const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (${MCP_AGENT_IDS})`;
-const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND} [--host <alias>] [${SCOPED_MCP_ARG}]\n       ${mcpInstallUsage()}`;
+const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND} [--host <alias>] [${SCOPED_MCP_ARG} [--no-slate]]\n       ${mcpInstallUsage()}`;
 
 /** The usage of the command a line stopped short of, whether it is a verb, `mcp` or the word the plumbing folds
  * under; none when no command owns the word. `mcp` needs its own answer here because it is not in the verb table
@@ -2430,7 +2445,7 @@ function commandUsage(word: string): string | undefined {
  * `--json` instead of taking it and printing prose. */
 async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string, run: RunningWsp, env: Readonly<Record<string, string | undefined>>, starts: { start?: HostStarter }): Promise<number> {
   const usage = mcpUsage();
-  let values: { agent?: string[]; host?: string; json?: boolean; remove?: boolean; state?: string; scoped?: boolean; help?: boolean };
+  let values: { agent?: string[]; host?: string; json?: boolean; remove?: boolean; state?: string; scoped?: boolean; "no-slate"?: boolean; help?: boolean };
   let words: string[];
   try {
     ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
@@ -2441,6 +2456,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     io.log(mcpPage(words[0] === "install"));
     return 0;
   }
+  if (values["no-slate"] === true && values.scoped !== true) return failed(io, jsonAsked(argv), usageRefusal(`--no-slate goes with ${SCOPED_MCP_ARG}: it is for a thread another thread started`, usage));
   // Ahead of every reading of the state: a scoped server missing its pair would otherwise dial this computer's host
   // on the host's own token, which is acting as the person.
   if (values.scoped === true && words.length === 0 && hostFromEnv(env) === undefined) return failed(io, jsonAsked(argv), authRefusal(scopedNoPairLine));
@@ -2452,7 +2468,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     // TypeScript server answers there. The agent starts it in its own folder, which is the folder a thread opened with
     // no workspace is placed by.
     const { serveMcp } = await import("./mcp.js");
-    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...starts, ...(values.host !== undefined ? { host: values.host } : {}) });
+    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...starts, ...(values.host !== undefined ? { host: values.host } : {}), ...(values.scoped === true ? { scoped: true } : {}), ...(values["no-slate"] === true ? { noSlate: true } : {}) });
     return 0;
   }
   const json = values.json === true;
@@ -2732,13 +2748,14 @@ const MCP_FLAG_WORDS: Readonly<Record<string, string>> = {
   state: COMMON_FLAG_WORDS.state,
   host: "write the server against a host on your account, by the name wsp hosts lists it under, so the tools drive that host",
   scoped: "what the host puts on a thread's own tools: without the launch pair in the environment the server refuses rather than dial this computer's host on its own token",
+  "no-slate": "what the host puts beside it for a thread another thread started, which has no slate: the server's instructions say nothing of one",
 };
 
 /** The tool server's own two pages, each with the flags it reads. `wsp mcp` alone serves; `wsp mcp install` writes
  * an agent's config. Both were two usage lines and no words until a person asked what --agent took. */
 function mcpPage(install: boolean): string {
   const line = COMMAND_LINES.find(l => l.words === (install ? `${MCP_COMMAND} install` : MCP_COMMAND))!;
-  const flags = install ? ["agent", "remove", "json", "state", "host"] : ["state", "host", "scoped"];
+  const flags = install ? ["agent", "remove", "json", "state", "host"] : ["state", "host", "scoped", "no-slate"];
   return helpPage(line.usage, wrap(`  ${line.about}`, HELP_WIDTH, "  "), flags.map(name => [`--${name}`, MCP_FLAG_WORDS[name]!] as const));
 }
 
