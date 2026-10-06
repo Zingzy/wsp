@@ -376,6 +376,35 @@ fn is_oid(s: &str) -> bool {
     (s.len() == 40 || s.len() == 64) && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// What HEAD stood on as a reflog entry moved it: a branch, or a detached HEAD. A turn whose end snapshot an older
+/// daemon took carries no record of it, and its lines name neither.
+#[derive(Clone)]
+enum Head {
+    Branch(String),
+    Detached,
+    Unknown,
+}
+
+impl Head {
+    /// HEAD as a reflog subject names the place it moved from: a branch by its name, a detached HEAD by its sha.
+    fn named(from: &str) -> Head {
+        if is_oid(from) {
+            Head::Detached
+        } else {
+            Head::Branch(short_ref(from))
+        }
+    }
+
+    /// HEAD's words with the words a line puts before them, or nothing where HEAD is unknown.
+    fn after(&self, lead: &str) -> String {
+        match self {
+            Head::Branch(name) => format!("{lead}{name}"),
+            Head::Detached => format!("{lead}a detached HEAD"),
+            Head::Unknown => String::new(),
+        }
+    }
+}
+
 /// How a reflog entry moved HEAD this turn.
 enum Op {
     /// A HEAD move the turn did not write: at most one line (a rebase names itself once, on its start step), no files.
@@ -387,31 +416,85 @@ enum Op {
     Own,
 }
 
-/// What a reflog subject says the move was. A clean or fast-forward merge reads as a move with no files; a merge
-/// completed by `git commit` after a conflict is the hand-resolved one. A rebase names itself once, off its start
-/// step; its other steps add no line, and the commits it replayed are not the turn's own.
-fn classify(subject: &str) -> Op {
-    if let Some(rest) = subject.strip_prefix("checkout: moving from ") {
-        Op::Foreign(Some(format!("Checked out {}", short_ref(rest.rsplit_once(" to ").map_or(rest, |(_, to)| to)))))
-    } else if subject.starts_with("pull") {
-        Op::Foreign(Some("Pulled".to_owned()))
-    } else if let Some(message) = subject.strip_prefix("commit (merge): ") {
-        Op::Resolved(format!("Merged {}", merged_ref(message)))
-    } else if let Some(rest) = subject.strip_prefix("merge ") {
-        Op::Foreign(Some(format!("Merged {}", short_ref(rest.split_once(':').map_or(rest, |(what, _)| what).trim()))))
-    } else if let Some(rest) = subject.strip_prefix("rebase (start): checkout ") {
-        let onto = rest.trim();
-        let named = if is_oid(onto) { onto[..8].to_owned() } else { short_ref(onto) };
-        Op::Foreign(Some(format!("Rebased onto {named}")))
-    } else if subject.starts_with("rebase") {
-        Op::Foreign(None)
-    } else if let Some(rest) = subject.strip_prefix("reset: moving to ") {
-        Op::Foreign(Some(format!("Reset to {}", short_ref(rest.trim()))))
-    } else if subject.starts_with("clone") {
-        Op::Foreign(Some("Cloned".to_owned()))
-    } else {
-        Op::Own
+/// Reads a turn's reflog newest first, keeping what HEAD stood on after each entry, so each move names the branch it
+/// moved. The walk starts from the end snapshot's own record of HEAD; going back, a checkout says where HEAD came
+/// from, and a rebase, whose steps run on a detached HEAD, names the branch its finish returned to.
+struct Walk {
+    on: Head,
+    returning: Option<Head>,
+}
+
+impl Walk {
+    /// What a reflog subject says the move was. A clean or fast-forward merge reads as a move with no files; a merge
+    /// completed by `git commit` after a conflict is the hand-resolved one. A rebase, or a pull that rebases, names
+    /// itself once, off its start step; its other steps add no line, and the commits it replayed are not the turn's own.
+    fn classify(&mut self, subject: &str) -> Op {
+        if let Some(rest) = subject.strip_prefix("checkout: moving from ") {
+            let (from, to) = rest.rsplit_once(" to ").unwrap_or((rest, rest));
+            self.on = Head::named(from);
+            Op::Foreign(Some(format!("Checked out {}", short_ref(to))))
+        } else if let Some((cmd, step, rest)) = replay_step(subject) {
+            match step {
+                "finish" | "abort" => {
+                    if let Some(back) = rest.strip_prefix("returning to ") {
+                        self.returning = Some(Head::named(back.trim()));
+                    }
+                    self.on = Head::Detached;
+                    Op::Foreign(None)
+                }
+                "start" => {
+                    self.on = self.returning.take().unwrap_or_else(|| self.on.clone());
+                    if cmd.starts_with("pull") {
+                        return Op::Foreign(Some(format!("Pulled{}", self.on.after(" into "))));
+                    }
+                    let onto = rest.strip_prefix("checkout ").unwrap_or(rest).trim();
+                    let named = if is_oid(onto) { onto[..8].to_owned() } else { short_ref(onto) };
+                    Op::Foreign(Some(format!("Rebased{} onto {named}", self.on.after(" "))))
+                }
+                _ => Op::Foreign(None),
+            }
+        } else if subject.starts_with("rebase") {
+            Op::Foreign(None)
+        } else if subject.starts_with("pull") {
+            Op::Foreign(Some(format!("Pulled{}", self.on.after(" into "))))
+        } else if let Some(message) = subject.strip_prefix("commit (merge): ") {
+            Op::Resolved(format!("Merged {}{}", merged_ref(message), self.on.after(" into ")))
+        } else if let Some(rest) = subject.strip_prefix("merge ") {
+            let what = short_ref(rest.split_once(':').map_or(rest, |(what, _)| what).trim());
+            Op::Foreign(Some(format!("Merged {what}{}", self.on.after(" into "))))
+        } else if let Some(rest) = subject.strip_prefix("reset: moving to ") {
+            Op::Foreign(Some(format!("Reset{} to {}", self.on.after(" "), short_ref(rest.trim()))))
+        } else if subject.starts_with("clone") {
+            Op::Foreign(Some("Cloned".to_owned()))
+        } else {
+            Op::Own
+        }
     }
+}
+
+/// A step of a rebase, or of a pull that rebases, as its reflog subject names it: the command, the step in its
+/// brackets and what follows ("rebase (finish): returning to refs/heads/feature").
+fn replay_step(subject: &str) -> Option<(&str, &str, &str)> {
+    if !(subject.starts_with("rebase") || subject.starts_with("pull")) {
+        return None;
+    }
+    let (head, rest) = subject.split_once(": ")?;
+    let (cmd, step) = head.strip_suffix(')')?.rsplit_once(" (")?;
+    Some((cmd, step, rest))
+}
+
+/// What HEAD stood on as a snapshot was taken, off the line git.snapshot stamped on its message.
+async fn snapshot_on<R: Runs>(runner: &R, cwd: &Path, snapshot: &str) -> Result<Head, OpError> {
+    let res = run_git(runner, cwd, &["show", "-s", "--format=%B", snapshot], None, None).await?;
+    if res.code != Some(0) {
+        return Ok(Head::Unknown);
+    }
+    let on = stdout_text(&res).lines().find_map(|l| l.trim().strip_prefix("head ").map(str::to_owned));
+    Ok(match on.as_deref() {
+        Some("detached") => Head::Detached,
+        Some(r) => Head::Branch(short_ref(r)),
+        None => Head::Unknown,
+    })
 }
 
 /// How many entries HEAD's reflog holds now. git.snapshot stamps this on each snapshot, so a turn's window is the
@@ -470,12 +553,13 @@ async fn turn_ops<R: Runs>(runner: &R, cwd: &Path, from: &str, to: &str) -> Resu
         return Ok((Vec::new(), Vec::new(), Vec::new()));
     }
     let text = stdout_text(&log);
+    let mut walk = Walk { on: snapshot_on(runner, cwd, to).await?, returning: None };
     let mut own: Vec<String> = Vec::new();
     let mut resolved: Vec<String> = Vec::new();
     let mut moves: Vec<String> = Vec::new();
     for line in text.lines().skip(skip as usize).take(take as usize) {
         let Some((oid, subject)) = line.split_once(' ') else { continue };
-        match classify(subject) {
+        match walk.classify(subject) {
             Op::Own => own.push(oid.to_owned()),
             Op::Resolved(named) => {
                 resolved.push(oid.to_owned());
@@ -1054,8 +1138,10 @@ pub(crate) async fn git_snapshot<R: Runs>(runner: &R, cwd: &Path) -> Result<wsp_
     let head = run_git(runner, at, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], None, None).await?;
     let parent = (head.code == Some(0)).then(|| stdout_text(&head).trim().to_owned());
     // The turn range reads a turn's window off the reflog by count, so each snapshot stamps the length HEAD's reflog
-    // holds as it is taken; the two stamps bound the entries the turn added.
-    let message = format!("wsp snapshot\n\nreflog {}", reflog_count(runner, at).await?);
+    // holds as it is taken; the two stamps bound the entries the turn added. The branch HEAD stands on is stamped too,
+    // so a move in the window names the branch it moved.
+    let on = head_ref(runner, at).await?;
+    let message = format!("wsp snapshot\n\nreflog {}\nhead {on}", reflog_count(runner, at).await?);
     let mut commit_args =
         vec!["-c", "user.name=wsp", "-c", "user.email=wsp@localhost", "commit-tree", tree.as_str(), "-m", message.as_str()];
     if let Some(parent) = parent.as_deref() {
@@ -1064,6 +1150,24 @@ pub(crate) async fn git_snapshot<R: Runs>(runner: &R, cwd: &Path) -> Result<wsp_
     let commit = run_git(runner, at, &commit_args, None, None).await?;
     checkpoint::ran(&commit, "commit-tree")?;
     Ok(wsp_frames::GitSnapshotReply { commit: stdout_text(&commit).trim().to_owned() })
+}
+
+/// The ref HEAD stands on, or `detached`. A rebase stopped on a conflict leaves HEAD detached and keeps the branch it
+/// rebases in its own state folder, so that branch is the one named.
+async fn head_ref<R: Runs>(runner: &R, top: &Path) -> Result<String, OpError> {
+    let on = run_git(runner, top, &["symbolic-ref", "-q", "HEAD"], None, None).await?;
+    if on.code == Some(0) {
+        return Ok(stdout_text(&on).trim().to_owned());
+    }
+    for state in ["rebase-merge/head-name", "rebase-apply/head-name"] {
+        let path = checkpoint::git_path(runner, top, state).await?;
+        let read = runner.run(top, "cat", &[&path.to_string_lossy()], None, None).await?;
+        let named = stdout_text(&read).trim().to_owned();
+        if read.code == Some(0) && named.starts_with("refs/") {
+            return Ok(named);
+        }
+    }
+    Ok("detached".to_owned())
 }
 
 /// The lines a patch adds, its file header left out.
@@ -1724,7 +1828,7 @@ mod tests {
         let to = git_snapshot(&here(), p).await.unwrap().commit;
         let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
         assert!(reply.files.is_empty(), "{:?}", paths_of(&reply));
-        assert_eq!(reply.moved, vec!["Pulled".to_owned()]);
+        assert_eq!(reply.moved, vec!["Pulled into main".to_owned()]);
     }
 
     /// A turn that commits two edits and moves HEAD no other way: both files are its own and it names no move.
@@ -1778,7 +1882,140 @@ mod tests {
         let to = git_snapshot(&here(), p).await.unwrap().commit;
         let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
         assert_eq!(paths_of(&reply), vec!["shared.txt"]);
-        assert_eq!(reply.moved, vec!["Merged main".to_owned()]);
+        assert_eq!(reply.moved, vec!["Merged main into feature".to_owned()]);
+    }
+
+    /// A clone on a branch of its own with main moved on upstream, the commit on the branch and the fetch done.
+    fn ahead_and_behind() -> (tempfile::TempDir, tempfile::TempDir, PathBuf) {
+        let up = committed(&["a.txt"]);
+        let work = tempfile::tempdir().unwrap();
+        let dir = work.path().join("clone");
+        git_in(work.path(), &["clone", "-q", up.path().to_str().unwrap(), dir.to_str().unwrap()]);
+        git_in(&dir, &["checkout", "-q", "-b", "fix/x"]);
+        std::fs::write(dir.join("own.txt"), "own\n").unwrap();
+        git_in(&dir, &["add", "-A"]);
+        git_in(&dir, &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "own"]);
+        std::fs::write(up.path().join("up.txt"), "up\n").unwrap();
+        git_in(up.path(), &["add", "-A"]);
+        git_in(up.path(), &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "up"]);
+        git_in(&dir, &["fetch", "-q"]);
+        (up, work, dir)
+    }
+
+    /// A builder's own merge of main into its branch and its soft-reset squash name the branch HEAD was on, so neither
+    /// reads as a merge into main while the pull request is still open.
+    #[tokio::test]
+    async fn a_merge_of_main_and_a_reset_onto_it_name_the_branch_they_moved() {
+        let (_up, _work, dir) = ahead_and_behind();
+        let p = dir.as_path();
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        git_in(p, &["-c", "commit.gpgsign=false", "merge", "-q", "--no-edit", "origin/main"]);
+        git_in(p, &["reset", "-q", "--soft", "origin/main"]);
+        git_in(p, &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "squash"]);
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(reply.moved, vec!["Merged origin/main into fix/x".to_owned(), "Reset fix/x to origin/main".to_owned()]);
+    }
+
+    /// A turn whose end snapshot an older daemon took, with no record of HEAD on it, names no branch rather than one
+    /// it cannot know.
+    #[tokio::test]
+    async fn an_end_snapshot_with_no_record_of_head_names_no_branch() {
+        let (_up, _work, dir) = ahead_and_behind();
+        let p = dir.as_path();
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        git_in(p, &["-c", "commit.gpgsign=false", "merge", "-q", "--no-edit", "origin/main"]);
+        let taken = git_snapshot(&here(), p).await.unwrap().commit;
+        let message = git_in(p, &["show", "-s", "--format=%B", &taken]);
+        let older = message.lines().filter(|l| !l.starts_with("head ")).collect::<Vec<_>>().join("\n");
+        let tree = format!("{taken}^{{tree}}");
+        let parent = format!("{taken}^");
+        let to = git_in(p, &["commit-tree", &tree, "-p", &parent, "-m", &older]).trim().to_owned();
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(reply.moved, vec!["Merged origin/main".to_owned()]);
+    }
+
+    /// A move made before a checkout in the same turn names the branch it was made on, not the one the turn ended on.
+    #[tokio::test]
+    async fn a_merge_before_a_checkout_names_the_branch_it_was_made_on() {
+        let (_up, _work, dir) = ahead_and_behind();
+        let p = dir.as_path();
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        git_in(p, &["-c", "commit.gpgsign=false", "merge", "-q", "--no-edit", "origin/main"]);
+        git_in(p, &["checkout", "-q", "main"]);
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(reply.moved, vec!["Merged origin/main into fix/x".to_owned(), "Checked out main".to_owned()]);
+    }
+
+    /// On a detached HEAD a merge and a reset say so rather than naming a branch nothing moved.
+    #[tokio::test]
+    async fn a_merge_and_a_reset_on_a_detached_head_say_a_detached_head() {
+        let (_up, _work, dir) = ahead_and_behind();
+        let p = dir.as_path();
+        git_in(p, &["checkout", "-q", "--detach"]);
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        git_in(p, &["-c", "commit.gpgsign=false", "merge", "-q", "--no-edit", "origin/main"]);
+        git_in(p, &["reset", "-q", "--hard", "origin/main"]);
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(
+            reply.moved,
+            vec!["Merged origin/main into a detached HEAD".to_owned(), "Reset a detached HEAD to origin/main".to_owned()]
+        );
+    }
+
+    /// A pull that rebases is one line naming the branch it returned to, though HEAD was detached for its steps.
+    #[tokio::test]
+    async fn a_pull_that_rebases_is_one_line_naming_the_branch() {
+        let (_up, _work, dir) = ahead_and_behind();
+        let p = dir.as_path();
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        git_in(p, &["-c", "commit.gpgsign=false", "pull", "-q", "--rebase", "origin", "main"]);
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(reply.moved, vec!["Pulled into fix/x".to_owned()]);
+    }
+
+    /// A turn that ends with its rebase stopped on a conflict names the branch being rebased, which git keeps beside
+    /// the rebase while HEAD is detached under it.
+    #[tokio::test]
+    async fn a_rebase_stopped_on_a_conflict_names_the_branch_it_rebases() {
+        let (up, _work, dir) = ahead_and_behind();
+        let p = dir.as_path();
+        std::fs::write(up.path().join("a.txt"), "theirs\n").unwrap();
+        git_in(up.path(), &["-c", "commit.gpgsign=false", "commit", "-q", "-am", "theirs"]);
+        std::fs::write(p.join("a.txt"), "mine\n").unwrap();
+        git_in(p, &["-c", "commit.gpgsign=false", "commit", "-q", "-am", "mine"]);
+        git_in(p, &["fetch", "-q"]);
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        // The rebase stops on a.txt, so it exits non-zero and git_in cannot run it.
+        let rebase = std::process::Command::new("git")
+            .args(["-c", "commit.gpgsign=false", "rebase", "origin/main"])
+            .current_dir(p)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@x")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@x")
+            .output()
+            .unwrap();
+        assert!(!rebase.status.success(), "the rebase was expected to stop on a conflict");
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(reply.moved, vec!["Rebased fix/x onto origin/main".to_owned()]);
+    }
+
+    /// A rebase of a detached HEAD has no branch to return to and says so.
+    #[tokio::test]
+    async fn a_rebase_of_a_detached_head_says_a_detached_head() {
+        let (_up, _work, dir) = ahead_and_behind();
+        let p = dir.as_path();
+        git_in(p, &["checkout", "-q", "--detach"]);
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        git_in(p, &["-c", "commit.gpgsign=false", "rebase", "-q", "origin/main"]);
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(reply.moved, vec!["Rebased a detached HEAD onto origin/main".to_owned()]);
     }
 
     /// A turn that leaves its start HEAD and comes back to it keeps every move line: the window is the entries the two
@@ -1834,7 +2071,7 @@ mod tests {
     }
 
     /// A rebase is one line and the edits standing at the turn's end, not the commits it replayed: the turn rebases
-    /// onto main and then edits a file, and the card is that file and "Rebased onto main".
+    /// onto main and then edits a file, and the card is that file and "Rebased feature onto main".
     #[tokio::test]
     async fn a_turn_that_rebases_names_it_once_and_lists_only_the_end_edits() {
         let dir = committed(&["a.txt"]);
@@ -1854,6 +2091,6 @@ mod tests {
         let to = git_snapshot(&here(), p).await.unwrap().commit;
         let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
         assert_eq!(paths_of(&reply), vec!["after.txt"]);
-        assert_eq!(reply.moved, vec!["Rebased onto main".to_owned()]);
+        assert_eq!(reply.moved, vec!["Rebased feature onto main".to_owned()]);
     }
 }

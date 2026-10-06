@@ -352,6 +352,12 @@ export function fmtCost(usd: number): string {
   return `$${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** Rupees as India writes them, lakh grouping and the ₹ sign: ₹1,44,740, paise only where the value has them. */
+export function fmtInr(inr: number): string {
+  const paise = Math.round(inr * 100) % 100 !== 0;
+  return inr.toLocaleString("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: paise ? 2 : 0, maximumFractionDigits: paise ? 2 : 0 });
+}
+
 /** The word beside a figure nobody is billed for: what the agent's own table lists for the tokens a turn spent, on
  * a computer whose turns run on the person's own sign-in. */
 export const LIST_PRICE_WORD = "list price";
@@ -1167,13 +1173,19 @@ export function wordsWithin(line: string, room: number): string | undefined {
   return boundary > 0 ? head.slice(0, boundary).replace(SEPARATOR_TAIL, "") : undefined;
 }
 
-/** Where a title read out of the harness's own store came from: one that is the thread's opening words, or their head,
- * is the seed under the harness's roof (codex names a thread from them the moment it starts) and the thread is still
- * asked for a name; any other is the person's rename or the harness's own made name, and stands. */
+/** The line that opens the block of landed paths after a message's words in the prompt an agent is handed. */
+export const ATTACHED_FILES_HEAD = "Attached files:";
+
+/** Where a title read out of the harness's own store came from: one that is the prompt the thread opened with, or its
+ * head, is the seed under the harness's roof (codex names a thread from it the moment it starts, every line of the
+ * prompt in its title column, the block of attached paths included) and the thread is still asked for a name; any
+ * other is the person's rename or the harness's own made name, and stands. The paths are the machine's and the row
+ * keeps none, so a prompt with files is matched as the opening words and that block's head. */
 export function storedTitleSource(stored: string, opening: string | undefined): TitleSource {
   if (opening === undefined) return "person";
   const title = stored.replace(/\s+/g, " ").trim();
-  return title !== "" && titleLine(opening).startsWith(title) ? "seed" : "person";
+  const handed = `${opening.replace(/\s+/g, " ").trim()} ${ATTACHED_FILES_HEAD}`;
+  return title !== "" && (handed.startsWith(title) || title.startsWith(handed)) ? "seed" : "person";
 }
 
 /** The most characters a generated title takes; a longer answer is cut to the words that fit. */

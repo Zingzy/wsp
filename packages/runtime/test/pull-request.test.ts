@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AUTO_MERGE_OFF_LINE,
   GIT_DIFF_CAP_BYTES,
+  PR_POLL_IDLE_MS,
   PR_POLL_MS,
   noSuchItemRefusal,
   pullRequestSendPrompt,
@@ -31,7 +32,7 @@ import {
   type TurnResult,
 } from "@wsp/protocol";
 import { LocalBackend } from "@wsp/engine";
-import { CHECKOUT_TTL_MS, copyKey, createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
+import { CHECKOUT_TTL_MS, PR_PAGE_HOLD_MS, RATE_LIMIT_HOLD_MS, copyKey, createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
 import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -231,7 +232,7 @@ describe("reading the pull request", () => {
     // Napped, the copy is never woken for a read, and the tile says why it is not read.
     await rt!.workspaces.nap(id);
     daemons.frames.length = 0;
-    advance(CHECKOUT_TTL_MS + 1);
+    advance(PR_POLL_IDLE_MS);
     await rt!.workspaces.checkout(id);
     await until(async () => typeof (await prOf(id))?.pr?.["why"] === "string");
     expect((await prOf(id))?.pr).toMatchObject({ why: pullRequestStoppedLine("github.com", name) });
@@ -254,12 +255,12 @@ describe("reading the pull request", () => {
     await rt!.workspaces.checkout(id);
     await until(async () => (await prOf(id))?.pr?.["number"] === 12);
     answer = () => ({ id: 1, ok: false, error: "gh said: error connecting to api.github.com" }) as DaemonResponse;
-    advance(PR_POLL_MS);
+    advance(PR_POLL_IDLE_MS);
     await until(() => daemons.ops("here").length === 2);
     await new Promise(r => setTimeout(r, 20));
     expect((await prOf(id))?.pr).toMatchObject({ number: 12, state: "open" });
     answer = () => ({ id: 1, ok: true, pr: open({ state: "merged" }) });
-    advance(PR_POLL_MS);
+    advance(PR_POLL_IDLE_MS);
     await until(() => daemons.ops("here").length === 3);
     await until(async () => (await prOf(id))?.pr?.["state"] === "merged");
   });
@@ -282,19 +283,146 @@ describe("reading the pull request", () => {
     await rt!.workspaces.checkout(id);
     await until(() => daemons.ops("here").length === 1);
     pr = open({ checks: [{ name: "ci", state: "pass" }] });
-    advance(PR_POLL_MS);
+    advance(PR_POLL_IDLE_MS);
     await until(() => daemons.ops("here").length === 2);
     // Merged on the host's page, with no window open and no turn ending: the timer is what sees it.
     pr = open({ state: "merged", checks: [{ name: "ci", state: "pass" }] });
-    advance(PR_POLL_MS);
+    advance(PR_POLL_IDLE_MS);
     await until(() => daemons.ops("here").length === 3);
     await until(async () => (await prOf(id))?.pr?.["state"] === "merged");
     // Merged is never read again, whatever asks.
-    advance(PR_POLL_MS * 3);
+    advance(PR_POLL_IDLE_MS * 3);
     advance(20_000);
     await rt!.workspaces.checkout(id);
     await new Promise(r => setTimeout(r, 20));
     expect(daemons.ops("here")).toHaveLength(3);
+  });
+});
+
+/** What a read saw of the pull request, its last update, head and state, before and after a push to it. */
+const SEEN = "2026-10-05T17:40:01Z ec5c10de663bd1860925ad42e9580bab4eb1d377 open";
+const MOVED = "2026-10-05T18:02:11Z c0ffee open";
+const RATE_LIMITED: Answer = () => ({ id: 1, ok: false, code: "rate-limited", error: "gh said: GraphQL: API rate limit already exceeded for user ID 1." }) as DaemonResponse;
+
+describe("what a read costs the git host", () => {
+  it("asks with what the last read saw, and an answer that it stood keeps the fact with nothing else read", async () => {
+    let answer: Answer = () => ({ id: 1, ok: true, pr: open(), seen: SEEN });
+    const daemons = fakeDaemons({ here: { "git.prRead": f => answer(f) } });
+    const { clock, advance } = fakeClock();
+    const { id, remote } = await withWorkspace(daemons, { clock });
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    answer = () => ({ id: 1, ok: true, unchanged: true, seen: SEEN });
+    advance(PR_POLL_IDLE_MS);
+    await until(() => daemons.ops("here").filter(op => op === "git.prRead").length === 2);
+    const reads = daemons.frames.filter(f => f.frame["op"] === "git.prRead").map(f => f.frame);
+    expect(reads[1]).toEqual({ op: "git.prRead", cwd: root, remote, number: 12, seen: SEEN });
+    await until(async () => (await prOf(id))?.pr?.["readAt"] === clock.now());
+    expect((await prOf(id))?.pr).toMatchObject({ number: 12, state: "open", headOid: HEAD, checks: [{ name: "ci", state: "pass" }] });
+    // A changed one answers in full with what it saw now, which the next read carries.
+    answer = () => ({ id: 1, ok: true, pr: open({ headOid: "c0ffee" }), seen: MOVED });
+    advance(PR_POLL_IDLE_MS);
+    await until(async () => (await prOf(id))?.pr?.["headOid"] === "c0ffee");
+    advance(PR_POLL_IDLE_MS);
+    await until(() => daemons.ops("here").filter(op => op === "git.prRead").length === 4);
+    expect(daemons.frames.filter(f => f.frame["op"] === "git.prRead").at(-1)!.frame).toMatchObject({ seen: MOVED });
+  });
+
+  it("asks with nothing seen while a check runs, since a check finishing moves nothing of what is seen", async () => {
+    const daemons = fakeDaemons({ here: { "git.prRead": () => ({ id: 1, ok: true, pr: open({ checks: [{ name: "ci", state: "pending" }] }), seen: SEEN }) } });
+    const { clock, advance } = fakeClock();
+    const { id } = await withWorkspace(daemons, { clock });
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    advance(PR_POLL_IDLE_MS);
+    await until(() => daemons.ops("here").filter(op => op === "git.prRead").length === 2);
+    expect(daemons.frames.filter(f => f.frame["op"] === "git.prRead").at(-1)!.frame).not.toHaveProperty("seen");
+  });
+
+  it("reads an open one every PR_POLL_MS while a window is open and every PR_POLL_IDLE_MS with none", async () => {
+    const daemons = fakeDaemons();
+    const { clock, advance } = fakeClock();
+    const { id } = await withWorkspace(daemons, { clock });
+    const reads = () => daemons.ops("here").filter(op => op === "git.prRead").length;
+    await rt!.workspaces.checkout(id);
+    await until(() => reads() === 1);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    // No window: three minutes pass with nothing read, and the quarter hour reads it.
+    advance(PR_POLL_MS);
+    await new Promise(r => setTimeout(r, 20));
+    expect(reads()).toBe(1);
+    advance(PR_POLL_IDLE_MS - PR_POLL_MS);
+    await until(() => reads() === 2);
+    // A window opens just after that read: its sidebar's ask reads nothing, and the timer moves to three minutes.
+    const release = rt!.status.watch();
+    try {
+      await rt!.workspaces.checkout(id);
+      await new Promise(r => setTimeout(r, 20));
+      expect(reads()).toBe(2);
+      advance(PR_POLL_MS);
+      await until(() => reads() === 3);
+      await new Promise(r => setTimeout(r, 20));
+      advance(PR_POLL_MS);
+      await until(() => reads() === 4);
+      // Within those three minutes the sidebar's asks read nothing, since the timer keeps it.
+      advance(CHECKOUT_TTL_MS + 1);
+      await rt!.workspaces.checkout(id);
+      await new Promise(r => setTimeout(r, 20));
+      expect(reads()).toBe(4);
+    } finally {
+      release();
+    }
+  });
+
+  it("reads a branch with no pull request again on view only once its head moves", async () => {
+    let head = "abc1234";
+    const daemons = fakeDaemons({
+      here: { "git.prRead": () => ({ id: 1, ok: true }) },
+      copy: { "git.status": () => ({ id: 1, ok: true, branch: { oid: head, head: "fix/ci", upstream: "origin/fix/ci", ahead: 1, behind: 0 }, entries: [], root: "/root/stub" }) },
+    });
+    const { clock, advance } = fakeClock();
+    const { id } = await withWorkspace(daemons, { clock });
+    const reads = () => daemons.ops("here").filter(op => op === "git.prRead").length;
+    await rt!.workspaces.checkout(id);
+    await until(() => reads() === 1);
+    await new Promise(r => setTimeout(r, 20));
+    for (let n = 0; n < 3; n++) {
+      advance(CHECKOUT_TTL_MS + 1);
+      await rt!.workspaces.checkout(id);
+    }
+    await new Promise(r => setTimeout(r, 20));
+    expect(reads()).toBe(1);
+    head = "def0123";
+    advance(CHECKOUT_TTL_MS + 1);
+    await rt!.workspaces.checkout(id);
+    await until(() => reads() === 2);
+  });
+});
+
+describe("a rate limit the git host answered", () => {
+  it("answers every page and status read on that road with the refusal for a minute, and asks again past it", async () => {
+    let page: Answer = RATE_LIMITED;
+    const daemons = fakeDaemons({ here: { "git.prView": f => page(f), "git.repoRead": () => ({ id: 1, ok: false, error: "no" }) as DaemonResponse } });
+    const { clock, advance } = fakeClock();
+    const { id } = await withWorkspace(daemons, { clock });
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    const asked = (op: string) => daemons.ops("here").filter(o => o === op).length;
+    const reads = asked("git.prRead");
+    advance(PR_POLL_IDLE_MS - 30_000);
+    await expect(rt!.workspaces.pullRequestView({ workspaceId: id })).rejects.toThrow("API rate limit already exceeded");
+    // Each mount within the minute meets the same refusal with no command line run, a fresh ask too.
+    for (let n = 0; n < 3; n++) await expect(rt!.workspaces.pullRequestView({ workspaceId: id, fresh: true })).rejects.toThrow("API rate limit already exceeded");
+    expect(asked("git.prView")).toBe(1);
+    // So does the status timer falling inside it, and the fact it held stands.
+    advance(30_000);
+    await new Promise(r => setTimeout(r, 20));
+    expect(asked("git.prRead")).toBe(reads);
+    expect((await prOf(id))?.pr).toMatchObject({ number: 12, state: "open" });
+    page = () => ({ id: 1, ok: true, ...PAGE }) as DaemonResponse;
+    advance(RATE_LIMIT_HOLD_MS - 30_000);
+    await rt!.workspaces.pullRequestView({ workspaceId: id });
+    expect(asked("git.prView")).toBe(2);
   });
 });
 
@@ -311,9 +439,9 @@ describe("settling on merge", () => {
     await lead.finished;
     await until(async () => (await prOf(id))?.pr?.["state"] === "open");
     expect((await rt!.sessions.list(id)).every(r => r.settledAt === undefined)).toBe(true);
-    // Merged on GitHub: the tile's next ask, past the window a read stands for, sees it.
+    // Merged on GitHub: the next read, past the interval an open one's read stands for, sees it.
     pr = open({ state: "merged" });
-    advance(CHECKOUT_TTL_MS + 1);
+    advance(PR_POLL_IDLE_MS);
     await rt!.workspaces.checkout(id);
     await until(async () => (await rt!.sessions.list(id)).every(r => r.settledAt !== undefined));
     await until(async () => (await rt!.workspaces.list()).find(w => w.id === id)?.phase === "napping");
@@ -393,20 +521,32 @@ const PAGE = {
 };
 
 describe("the acts on a pull request", () => {
-  it("reads the page over this computer's daemon, never kept", async () => {
+  it("reads the page over this computer's daemon and holds it a minute, read again past it, on a refresh and after a write", async () => {
     const merge = { methods: ["squash", "merge"], defaultMethod: "squash", autoMerge: true };
-    const daemons = fakeDaemons({ here: { "git.prView": () => ({ id: 1, ok: true, ...PAGE }), "git.repoRead": () => ({ id: 1, ok: true, ...merge }) } });
-    const { id, remote } = await withWorkspace(daemons);
+    const daemons = fakeDaemons({
+      here: { "git.prView": () => ({ id: 1, ok: true, ...PAGE }), "git.repoRead": () => ({ id: 1, ok: true, ...merge }), "git.prReact": f => ({ id: 1, ok: true, subject: String(f["subject"]), reactions: [] }) },
+    });
+    const { clock, advance } = fakeClock();
+    const { id, remote } = await withWorkspace(daemons, { clock });
     await rt!.workspaces.checkout(id);
     await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    const pages = () => daemons.frames.filter(f => f.frame["op"] === "git.prView");
     // The pane offers the methods the repository allows, read once an hour on this computer, and nothing is sent yet.
     expect(await rt!.workspaces.pullRequestView({ workspaceId: id })).toEqual({ ...PAGE, merge, sent: [], postsAsYou: true });
+    expect(pages()).toEqual([{ road: "here", frame: { op: "git.prView", cwd: root, remote, number: 12 } }]);
+    // A reopen within the minute, or the dev window's second mount, reads nothing.
+    advance(PR_PAGE_HOLD_MS - 1);
+    expect(await rt!.workspaces.pullRequestView({ workspaceId: id })).toEqual({ ...PAGE, merge, sent: [], postsAsYou: true });
+    expect(pages()).toHaveLength(1);
+    advance(1);
     await rt!.workspaces.pullRequestView({ workspaceId: id });
+    expect(pages()).toHaveLength(2);
+    await rt!.workspaces.pullRequestView({ workspaceId: id, fresh: true });
+    expect(pages()).toHaveLength(3);
+    await rt!.workspaces.pullRequestReact({ workspaceId: id, subject: "IC_kwDOx", content: "eyes", on: true });
+    await rt!.workspaces.pullRequestView({ workspaceId: id });
+    expect(pages()).toHaveLength(4);
     expect(daemons.ops("here").filter(op => op === "git.repoRead")).toHaveLength(1);
-    expect(daemons.frames.filter(f => f.frame["op"] === "git.prView")).toEqual([
-      { road: "here", frame: { op: "git.prView", cwd: root, remote, number: 12 } },
-      { road: "here", frame: { op: "git.prView", cwd: root, remote, number: 12 } },
-    ]);
   });
 
   it("reads the diff over this computer's daemon at the cap a git.diff has, never kept", async () => {
@@ -463,11 +603,11 @@ describe("the acts on a pull request", () => {
     await rt!.workspaces.pullRequestSend({ workspaceId: id, items: [{ kind: "comment", id: 5841958969 }] });
     expect((await rt!.workspaces.pullRequestView({ workspaceId: id })).sent).toHaveLength(1);
     // The same pull request read again keeps it.
-    advance(PR_POLL_MS);
+    advance(PR_POLL_IDLE_MS);
     await until(async () => daemons.frames.filter(f => f.frame["op"] === "git.prRead").length >= 2);
     expect((await rt!.workspaces.pullRequestView({ workspaceId: id })).sent).toHaveLength(1);
     pr = open({ number: 13, url: "https://github.com/wsp/pr-lab/pull/13" });
-    advance(PR_POLL_MS);
+    advance(PR_POLL_IDLE_MS);
     await until(async () => (await prOf(id))?.pr?.["number"] === 13);
     expect((await rt!.workspaces.pullRequestView({ workspaceId: id })).sent).toEqual([]);
     expect(await store.get("workspaces", id)).not.toHaveProperty("prSent");
@@ -537,7 +677,7 @@ describe("the acts on a pull request", () => {
     await until(async () => (await prOf(id))?.pr?.["number"] === 12);
     expect(await store.get("workspaces", id)).not.toHaveProperty("pr.checks");
     pr = open({ state: "merged", checks });
-    advance(PR_POLL_MS);
+    advance(PR_POLL_IDLE_MS);
     await until(async () => (await prOf(id))?.pr?.["state"] === "merged");
     expect(await store.get("workspaces", id)).toMatchObject({ pr: { number: 12, state: "merged", checks } });
   });
@@ -567,6 +707,27 @@ describe("the acts on a pull request", () => {
     await expect(rt!.workspaces.fix({ workspaceId: id, check: "lint" })).rejects.toThrow(checkNotFailedRefusal("lint", "pass"));
     await expect(rt!.workspaces.fix({ workspaceId: id, check: "e2e" })).rejects.toThrow("the pull request has no check called e2e; it has ci, lint");
     agent.end(1);
+  });
+
+  it("reads the checks whole before refusing a fix, never off what the last read held or saw", async () => {
+    // The check ran again and failed after a read that saw it pass, which moves nothing of what is seen.
+    let checks: PullRequest["checks"] = [{ name: "ci", workflow: "ci", state: "pass", run: { runId: 36, jobId: 109 } }];
+    const daemons = fakeDaemons({
+      here: {
+        "git.prRead": f => (f["seen"] === SEEN ? { id: 1, ok: true, unchanged: true, seen: SEEN } : { id: 1, ok: true, pr: open({ checks }), seen: SEEN }),
+        "git.runLog": () => ({ id: 1, ok: true, lines: ["Run check\texit 1"], truncated: false }),
+      },
+    });
+    const agent = heldAgent();
+    const { clock, advance } = fakeClock();
+    const { id } = await withWorkspace(daemons, { adapters: { claude: agent.factory }, clock });
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    checks = [{ name: "ci", workflow: "ci", state: "fail", run: { runId: 36, jobId: 109 } }];
+    advance(5_000);
+    expect(await rt!.workspaces.fix({ workspaceId: id, check: "ci" })).toMatchObject({ outcome: "started", check: "ci" });
+    expect(daemons.frames.filter(f => f.frame["op"] === "git.prRead").at(-1)!.frame).not.toHaveProperty("seen");
+    agent.end(0);
   });
 
   it("with no check updates from the base first, sends nothing when it merged clean, and sends the conflicts when it did not", async () => {

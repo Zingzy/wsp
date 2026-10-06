@@ -2106,9 +2106,8 @@ describe("wsp verbs over the host", () => {
 
     const same = await run("send", thread!.threadId!, "go on");
     expect(same.code).toBe(0);
-    // A send that names nothing keeps the thread's own access rather than dropping back to the adapter's default.
-    expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId, permissionMode: access });
-    expect(claude.starts.at(-1)!.model).toBeUndefined();
+    // A send that names nothing keeps the thread's own access, model and effort rather than the adapter's defaults.
+    expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId, permissionMode: access, model: shown, effort: level });
     const changed = await run("send", thread!.threadId!, "--model", "claude-fable-5-1", "--effort", "max", "now think");
     expect(changed.code).toBe(0);
     // The access is not among them: the thread keeps its own, whichever door the message came through.
@@ -3901,7 +3900,7 @@ describe("wsp verbs over the host", () => {
     const half = await run("thread");
     expect(half.code).toBe(3);
     expect(half.io.errors).toEqual([
-      'wsp thread opens a line rather than being one. usage: wsp thread read <thread> [--last]\nusage: wsp thread rename <thread> "<title>"\nusage: wsp thread forget <thread>\nusage: wsp thread allow <thread>\nusage: wsp thread deny <thread>',
+      'wsp thread opens a line rather than being one. usage: wsp thread read <thread> [--last]\nusage: wsp thread head <thread>\nusage: wsp thread rename <thread> "<title>"\nusage: wsp thread forget <thread>\nusage: wsp thread allow <thread>\nusage: wsp thread deny <thread>',
     ]);
   });
 

@@ -3,9 +3,9 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
-import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine, stopTaskLine } from "./permissions.js";
+import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, keepRun, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
+import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, interruptLine, modeOptionOn, setModeLine, stopTaskLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { asideAnswer, asideCommand, forkCleanupCommand } from "./aside.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
@@ -40,6 +40,8 @@ export interface StartOptions {
   promptAfter?: Promise<void>;
   /** The version the binary on this machine answered the catalog probe with; absent where it answered nothing. */
   version?: string;
+  /** The CLI stays up once the turn is over, for the thread's next message: kept() hands it over. */
+  keep?: boolean;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -67,8 +69,15 @@ export interface ClaudeSession {
   /** The process this turn leads on the computer the host runs on, where it runs there; absent on a turn running on
    * another machine. */
   readonly pid?: number;
+  /** Where this turn starts in the run's log, on a process that served the thread's earlier turns. */
+  readonly from?: number;
   readonly finished: Promise<TurnResult>;
+  /** Stops the turn: on a kept process an interrupt that leaves the process up, the process and its tree ended where
+   * the CLI does not answer it within the grace; on any other a stop of the process. */
   interrupt(): Promise<void>;
+  /** Once the turn is over, the CLI still up for the next message; nothing where the turn was not kept or its process
+   * went with it. */
+  kept?(): KeptAgent<ClaudeSession> | undefined;
   /** Writes a user message into the running turn; not-running before system/init and once result was seen or the process is gone. */
   steer(prompt: string): Promise<SteerOutcome>;
   /** Answers a permission prompt this turn raised, by the ask's own id and one of the options it carried; the tool
@@ -665,6 +674,14 @@ function limitOf(info: Record<string, unknown> | undefined): HarnessLimit | unde
   return { windows, ...(status !== undefined ? { status } : {}) };
 }
 
+/** Whether the turn settled inside `ms`. */
+async function settlesWithin(turn: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const settled = await Promise.race([turn.then(() => true, () => true), new Promise<boolean>(resolve => (timer = setTimeout(() => resolve(false), ms)))]);
+  clearTimeout(timer);
+  return settled;
+}
+
 export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   if (!deps.configDir.trim().startsWith("/")) throw new Error(`configDir must be an absolute path, got "${deps.configDir}"`);
   const sessions = new Map<string, ClaudeSession>();
@@ -686,7 +703,20 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   /** Everything a turn is once its stream exists. The launch and the attach differ only in where the stream came
    * from and in what is already known: an attached turn's CLI announced itself to an earlier host process, so it
    * takes a message from the first byte rather than waiting for an init line it may have printed long ago. */
-  const follow = (o: { stream: ExecStream; localId: string; announced: boolean; fresh: boolean; command?: string; onEvent: (event: AdapterEvent) => void }): ClaudeSession => {
+  const follow = (o: {
+    stream: ExecStream;
+    localId: string;
+    announced: boolean;
+    fresh: boolean;
+    command?: string;
+    /** The process this turn runs on, kept for the thread's next message once the turn is over. */
+    keeper?: KeptRun;
+    /** Where this turn starts in the run's log, on a kept process past its first turn. */
+    from?: number;
+    /** The CLI's running totals as the process's last turn left them: on a kept process they run on across turns. */
+    saved?: SavedUse;
+    onEvent: (event: AdapterEvent) => void;
+  }): ClaudeSession => {
     const { stream, localId, onEvent } = o;
 
     let claudeSessionId = localId;
@@ -700,6 +730,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let harnessCwd: string | undefined;
     let shellCwd: string | undefined;
     let backgroundTasks = 0;
+    /** The CLI's handles for the background tasks it reports running now. */
+    let runningTasks: string[] = [];
     /** The reply the agent gave while the CLI still reported work it started running: the turn is not over, so the
      * reply is kept here and delivered once nothing it started is left running. */
     let heldReply: TurnResult | undefined;
@@ -719,7 +751,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let compacted = false;
     let initModel: string | undefined;
     /** The session's running totals as its file saved them before this turn, which every result's totals start from. */
-    let saved: SavedUse | undefined;
+    let saved: SavedUse | undefined = o.saved;
+    /** The totals this turn's result left, which the process's next turn starts from. */
+    let totals: SavedUse | undefined;
     /** The messages whose call was already reported as drawn: every block of a message repeats the message's usage. */
     const drawn = new Set<string>();
     /** One line per task that finished after the held reply, in the order the CLI reported them. */
@@ -786,6 +820,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       settleTimer = undefined;
       heldReply = undefined;
       sawResult = true;
+      // A process is kept only past a turn that went as it should: one that refused or failed is launched again, so a
+      // sign-in or a fix made in between reaches the next turn, and one that answered nothing says why as it exits.
+      if ((result.status !== "completed" && result.status !== "interrupted") || answeredNothing(result)) o.keeper?.release();
       stream.closeInput();
       settleAsked();
       void endAfterResult(stream, exitMs, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
@@ -846,6 +883,10 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             saved = savedUseOf(event, localId);
             continue;
           }
+          if (event.type === "result" && !drainedNotice(event)) {
+            const costUsd = num(event.total_cost_usd);
+            totals = costUsd === undefined ? undefined : { costUsd, models: modelsOf(event.modelUsage) };
+          }
           if (event.type === "assistant" && typeof event.uuid === "string" && (event.parent_tool_use_id === undefined || event.parent_tool_use_id === null)) anchor = event.uuid;
           const control = controlLine(event);
           if (control !== undefined) {
@@ -895,6 +936,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (tasks !== undefined) {
             for (const task of tasks) taskNames.set(task.id, task.description);
             backgroundTasks = tasks.length;
+            runningTasks = tasks.map(task => task.id);
             // The runtime reads this to know the turn is working while the agent waits, which holds its idle clock.
             onEvent({ type: "turn.tasks", sessionId: claudeSessionId, running: backgroundTasks });
             if (heldReply !== undefined && backgroundTasks === 0 && !woken) armSettle();
@@ -968,7 +1010,12 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               if (sawResult) continue;
               woken = false;
               const result = spanned(withContext(ownUse(normalized.result, saved, o.fresh), heldContext, initModel));
-              if (backgroundTasks > 0) {
+              if (backgroundTasks > 0 && interruptRequested) {
+                // The person stopped the turn, so its result is the turn's end and the work it left in the background is
+                // stopped with it. The CLI stops that work by itself too, but only seconds after its result (5.2 s,
+                // measured on 2.1.289), which held a stopped turn past the interrupt's grace and into the kill.
+                for (const task of runningTasks) void stream.write(stopTaskLine(`wsp-stop-task-${++askedSeq}`, task));
+              } else if (backgroundTasks > 0) {
                 // The agent replied while the CLI still reports work it started. The turn is not over: ending it
                 // here kills that work mid-write and nothing ever says what came of it, so the reply is kept, the
                 // channel stays open and the stream goes on being read until nothing of the agent's is running.
@@ -1109,11 +1156,43 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         return answer.error.includes(STOP_TASK_UNSUPPORTED) ? { outcome: "unsupported" } : { outcome: "refused", error: answer.error };
       },
       interrupt: async () => {
+        const live = running();
         interruptRequested = true;
-        await endRun(stream, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS);
+        const graceMs = deps.interruptGraceMs ?? INTERRUPT_GRACE_MS;
+        if (o.keeper?.up === true && live) {
+          const wrote = await stream.write(interruptLine(`wsp-interrupt-${++askedSeq}`));
+          if (wrote === "written" && (await settlesWithin(finished, graceMs))) return;
+        }
+        o.keeper?.release();
+        await endRun(stream, graceMs);
       },
+      kept: () => {
+        const keeper = o.keeper;
+        if (keeper === undefined || !keeper.up || !sawResult) return undefined;
+        const sessionId = claudeSessionId;
+        const after = totals;
+        return {
+          next: turn => nextOn(keeper, localId, sessionId, after, turn),
+          close: c => keeper.close(c?.now === true ? 0 : exitMs, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS),
+          exited: keeper.exited,
+          sessionFile: { folder: `${deps.configDir}/projects`, name: `${sessionId}.jsonl`, depth: 1 },
+        };
+      },
+      ...(o.from !== undefined ? { from: o.from } : {}),
     };
     sessions.set(localId, session);
+    return session;
+  };
+
+  /** The thread's next message on a process its last turn left up: the CLI announces itself again for it and answers
+   * it as a turn of its own. */
+  const nextOn = (keeper: KeptRun, localId: string, sessionId: string, saved: SavedUse | undefined, turn: KeptTurn): ClaudeSession => {
+    const { stream, from } = keeper.turn();
+    const session = follow({ stream, localId, announced: false, fresh: false, keeper, ...(from !== undefined ? { from } : {}), ...(saved !== undefined ? { saved } : {}), onEvent: turn.onEvent });
+    const line = userMessageLine(turn.prompt, sessionId, turn.images);
+    if (turn.after === undefined) void stream.write(line);
+    else if (stream.writeAfter !== undefined) stream.writeAfter(line, turn.after);
+    else void turn.after.then(() => stream.write(line), () => {});
     return session;
   };
 
@@ -1135,8 +1214,10 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     });
     const launch = options.resume === undefined ? command : `${savedSpendCommand({ configDir: deps.configDir, sessionId: options.resume })}${command}`;
     const line = userMessageLine(options.prompt, localId, options.images);
-    const stream = deps.exec(launch, { env: { ...env }, input: [line], ...(options.promptAfter !== undefined ? { inputAfter: options.promptAfter } : {}) });
-    return follow({ stream, localId, announced: false, fresh: options.resume === undefined, command: launch, onEvent: options.onEvent });
+    const run = deps.exec(launch, { env: { ...env }, input: [line], ...(options.promptAfter !== undefined ? { inputAfter: options.promptAfter } : {}) });
+    const keeper = options.keep === true ? keepRun(run) : undefined;
+    const stream = keeper === undefined ? run : keeper.turn().stream;
+    return follow({ stream, localId, announced: false, fresh: options.resume === undefined, command: launch, ...(keeper !== undefined ? { keeper } : {}), onEvent: options.onEvent });
   };
 
   /** A launch, and where it resumes a session the CLI's store does not hold and a seed is at hand, a second launch in a
@@ -1185,6 +1266,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         return current.pid;
       },
       finished,
+      kept: () => current.kept?.(),
       interrupt: () => current.interrupt(),
       steer: prompt => current.steer(prompt),
       answer: (askId, answer) => current.answer(askId, answer),
@@ -1252,8 +1334,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     ...(attach !== undefined
       ? {
           attach: async (options: AdapterAttachOptions) => {
-            const stream = await attach(options.run, { input: true, startedAt: options.startedAt });
-            return stream === "gone" ? "gone" : follow({ stream, localId: options.sessionId, announced: true, fresh: false, onEvent: options.onEvent });
+            const stream = await attach(options.run, { input: true, startedAt: options.startedAt, ...(options.from !== undefined ? { from: options.from } : {}) });
+            return stream === "gone" ? "gone" : follow({ stream, localId: options.sessionId, announced: true, fresh: false, ...(options.from !== undefined ? { from: options.from } : {}), onEvent: options.onEvent });
           },
         }
       : {}),

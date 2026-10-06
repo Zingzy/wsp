@@ -58,15 +58,25 @@ function halves(slot: Element): { happened: string; fix: string } {
 
 /** The page with the shell's answers in place, opened and left until its scan has landed. `refusedScan` makes the
  * scan reject that many times before it answers, which is how a computer whose agents cannot be read is driven. */
-async function open(agents: unknown[] = AGENTS, opts: { refusedScan?: number; refusedTools?: string[]; unnamed?: true } = {}): Promise<Screen> {
+async function open(agents: unknown[] = AGENTS, opts: { refusedScan?: number; refusedTools?: string[]; unnamed?: true; titleBar?: { dark: boolean; colors: unknown[]; flip?: () => void } } = {}): Promise<Screen> {
   const asks: Asks = { install: [], finish: 0, scans: 0 };
   const dom = new JSDOM(PAGE, {
     runScripts: "dangerously",
     pretendToBeVisual: true,
     beforeParse(window) {
       // jsdom has no matchMedia; the page reads it once to follow the computer's appearance, which Chromium answers.
-      (window as unknown as { matchMedia: unknown }).matchMedia = () => ({ matches: false, addEventListener: () => {} });
+      const bar = opts.titleBar;
+      const scheme = {
+        get matches() {
+          return bar?.dark ?? false;
+        },
+        addEventListener: (_type: string, listen: () => void) => {
+          if (bar !== undefined) bar.flip = listen;
+        },
+      };
+      (window as unknown as { matchMedia: unknown }).matchMedia = () => scheme;
       (window as unknown as { wsp: unknown }).wsp = {
+        ...(bar === undefined ? {} : { setTitleBar: () => bar.colors.push(window.document.documentElement.classList.contains("dark")) }),
         here: () => (opts.unnamed === true ? Promise.reject(new Error("scutil: no ComputerName")) : Promise.resolve(HERE)),
         agents: () => {
           asks.scans += 1;
@@ -131,6 +141,16 @@ describe("the first launch", () => {
     expect((screen.at("#agents") as HTMLElement).hidden).toBe(false);
     expect(screen.text("#agents h1")).toBe("Your agents drive wsp");
     expect(doc.querySelectorAll("#agents button.primary")).toHaveLength(1);
+  });
+
+  it("tells the shell its theme moved once the computer's side is on, as it opens and as the side flips, and drags the window by its top band", async () => {
+    const bar: { dark: boolean; colors: unknown[]; flip?: () => void } = { dark: true, colors: [] };
+    await open(AGENTS, { titleBar: bar });
+    expect(bar.colors).toEqual([true]);
+    bar.dark = false;
+    bar.flip!();
+    expect(bar.colors).toEqual([true, false]);
+    expect(PAGE).toMatch(/body::before \{[^}]*height: var\(--workspace-topbar-height\); -webkit-app-region: drag; \}/);
   });
 
   it("draws one row per catalog agent, the found ones first and ticked, the missing ones held, and Open wsp gives the ticked ones the tools and then asks the shell to open the app", async () => {

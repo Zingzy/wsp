@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The right panel's launcher and its tab strip: six panes and no others,
+// The right panel's launcher and its tab strip: the registry's panes and no others,
 // each with its own letter, and a pane the workspace cannot serve yet drawn
 // held with the one line that says why.
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -31,20 +31,20 @@ const cards = () => [...document.querySelectorAll<HTMLElement>("[data-surface-la
 afterEach(cleanup);
 
 describe("the right panel's launcher", () => {
-  it("offers Browser, Terminal, Changes, Files, Computer, Processes and Agents and nothing else", () => {
+  it("offers Browser, Terminal, Changes, Files, Computer, Processes, Agents and Slate and nothing else", () => {
     draw();
-    expect(cards()).toEqual(["preview", "terminal", "diff", "files", "machine", "processes", "agents"]);
+    expect(cards()).toEqual(["preview", "terminal", "diff", "files", "machine", "processes", "agents", "slate"]);
     for (const label of ["Browser", "Terminal", "Changes", "Files", "Computer", "Processes", "Agents"]) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.queryByText("Screen")).toBeNull();
     expect(screen.queryByText("Workspace")).toBeNull();
-    expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDFMPA");
+    expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDFMPAS");
   });
 
   it("offers Pull request only once the work has one, beside Changes, and never draws it held", () => {
     draw({ prAvailable: true });
-    expect(cards()).toEqual(["preview", "terminal", "diff", "pr", "files", "machine", "processes", "agents"]);
+    expect(cards()).toEqual(["preview", "terminal", "diff", "pr", "files", "machine", "processes", "agents", "slate"]);
     expect(screen.getByText("Pull request")).toBeTruthy();
-    expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDRFMPA");
+    expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDRFMPAS");
     cleanup();
     draw({ prAvailable: false });
     expect(document.querySelector('[data-surface-launch="pr"]')).toBeNull();
@@ -68,7 +68,7 @@ describe("the right panel's launcher", () => {
 
   it("keeps a pane it cannot open drawn, held, with the one line that says why", () => {
     draw({ diffAvailable: false });
-    expect(cards()).toEqual(["preview", "terminal", "diff", "files", "machine", "processes", "agents"]);
+    expect(cards()).toEqual(["preview", "terminal", "diff", "files", "machine", "processes", "agents", "slate"]);
     const diff = document.querySelector<HTMLElement>('[data-surface-launch="diff"]')!;
     expect(diff.dataset["available"]).toBe("false");
     expect(diff.textContent).toContain("Review the changes once it runs.");

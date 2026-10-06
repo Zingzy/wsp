@@ -10,7 +10,7 @@ import { extname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { EXEC_BODY_MAX } from "@wsp/protocol";
 import { GuestUnusableError } from "../src/errors.js";
-import { DEADLINE_EXIT, INLINE_EXEC_MS, execDetached, putFiles } from "../src/exec-detached.js";
+import { CANCELLED_EXIT, DEADLINE_EXIT, INLINE_EXEC_MS, execDetached, putFiles } from "../src/exec-detached.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
@@ -188,6 +188,37 @@ describe("execDetached over a scripted guest", () => {
     expect(g.kills).toHaveLength(1);
     expect(g.kills[0]).toMatch(/p=\$\(cat "\$b\.pid"[^\n]*kill -TERM -- "-\$p" "\$p"[^\n]*kill -KILL -- "-\$p" "\$p"/);
     expect(g.cleaned()).toBe(1);
+  });
+
+  it("a cancel kills the recorded group, cleans up and answers at once, and one before the launch launches nothing", async () => {
+    const g = guest([{ out: "started\n" }, {}, {}, {}, {}, {}]);
+    const cancel = new AbortController();
+    const t0 = Date.now();
+    const running = execDetached(g.machine, "sleep 999", { deadlineMs: 60_000, pollMs: 200, signal: cancel.signal, onLine: () => cancel.abort() });
+    const res = await running;
+    expect(Date.now() - t0).toBeLessThan(2_000);
+    expect(res.exitCode).toBe(CANCELLED_EXIT);
+    expect(res.stdout).toBe("started\n");
+    expect(g.kills).toHaveLength(1);
+    expect(g.cleaned()).toBe(1);
+
+    const before = guest([{ exit: 0 }]);
+    const gone = new AbortController();
+    gone.abort();
+    expect((await execDetached(before.machine, "true", { deadlineMs: 10_000, pollMs: 1, signal: gone.signal })).exitCode).toBe(CANCELLED_EXIT);
+    expect(before.calls).toEqual([]);
+  });
+
+  it("a cancel during the pause between polls cuts the pause short rather than waiting it out", async () => {
+    // A poll that fails while the machine naps is retried a whole pollMs later, the longest pause the loop takes.
+    const g = guest([{ nap: true }, { nap: true }]);
+    const cancel = new AbortController();
+    setTimeout(() => cancel.abort(), 50);
+    const t0 = Date.now();
+    const res = await execDetached(g.machine, "sleep 999", { deadlineMs: 600_000, pollMs: 60_000, signal: cancel.signal });
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    expect(res.exitCode).toBe(CANCELLED_EXIT);
+    expect(g.kills).toHaveLength(1);
   });
 
   it("a poll that fails while the machine naps is retried after a pause and the run completes", async () => {

@@ -2,6 +2,7 @@
 import type { PullRequest } from "./PullRequest.js";
 
 /**
- * The pull request for the branch or the number asked about, absent where the host knows none.
+ * The pull request for the branch or the number asked about, absent where the host knows none or where what was
+ * seen had not moved; `seen` is its last update, head commit and state, to ask with next time.
  */
-export type GitPrReadReply = { pr?: PullRequest, };
+export type GitPrReadReply = { pr?: PullRequest, seen?: string, unchanged?: boolean, };

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ import { bootLineOf } from "@wsp/protocol";
 import { createRuntime, memoryStore, tokenDigest, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, hostRoadWord, hostStoppedLine, serve, type CliIO } from "../src/cli.js";
-import { hostTokenFor, ownPid, pidAlive } from "../src/host-lock.js";
+import { hostTokenFor, lockPathFor, ownPid, pidAlive, servingHost, takeLock, vanishedHost } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { stubBackend } from "./stub-backend.js";
 import { describeWithDists } from "./built-bin.js";
@@ -130,6 +130,15 @@ describe("serve takes host.lock next to the state file", () => {
     await h.close();
     handles.splice(0);
     expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("a host that lost its lock to the host started in its place leaves that host's lock at its close", async () => {
+    const h = await start();
+    const winner = { pid: process.pid + 1, port: h.port + 1, startedAt: new Date().toISOString(), startedBy: "service" };
+    writeFileSync(lockPath, JSON.stringify(winner));
+    await h.close();
+    handles.splice(0);
+    expect(readLock(lockPath)).toEqual(winner);
   });
 
   it("the state folder is the owner's when the host takes its lock, and one an older build left wider is repaired", async () => {
@@ -375,5 +384,43 @@ describe("what the lock's pid says", () => {
     // Process 1 belongs to root and answers EPERM to a signal from anyone else, which is the one reading here.
     expect(ownPid(1)).toBe(false);
     expect(pidAlive(1)).toBe(true);
+  });
+
+  it.runIf(process.platform === "linux")("a lock whose process runs a program file that is gone holds nothing, and the next host takes it", () => {
+    // What a host left on an AppImage's mount after the launch that mounted it ended looks like from here.
+    const bin = join(home, "sleep");
+    // A real program and not a stub: /proc names the interpreter as a script's program, which is never removed.
+    copyFileSync("/bin/sleep", bin);
+    const held = spawn(bin, ["30"], { stdio: "ignore" });
+    try {
+      rmSync(bin);
+      const statePath = join(home, "state.json");
+      writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: held.pid, port: 4400, startedAt: new Date().toISOString(), startedBy: "service" }));
+      expect(pidAlive(held.pid!)).toBe(true);
+      expect(servingHost(statePath)).toBeUndefined();
+      expect(vanishedHost(statePath)?.pid).toBe(held.pid);
+      expect(takeLock(lockPathFor(statePath), statePath, { port: 0 }).pid).toBe(process.pid);
+      expect(vanishedHost(statePath)).toBeUndefined();
+    } finally {
+      held.kill("SIGKILL");
+    }
+  });
+
+  it.runIf(process.platform === "linux")("a lock whose program was upgraded in place still holds: that host keeps serving, so no second host takes its state file", () => {
+    // A package manager unlinks the old binary and puts a new one at the same path; /proc marks the old one deleted.
+    const bin = join(home, "sleep");
+    copyFileSync("/bin/sleep", bin);
+    const held = spawn(bin, ["30"], { stdio: "ignore" });
+    try {
+      rmSync(bin);
+      copyFileSync("/bin/sleep", bin);
+      const statePath = join(home, "state.json");
+      writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: held.pid, port: 4400, startedAt: new Date().toISOString(), startedBy: "service" }));
+      expect(servingHost(statePath)?.pid).toBe(held.pid);
+      expect(vanishedHost(statePath)).toBeUndefined();
+      expect(() => takeLock(lockPathFor(statePath), statePath, { port: 0 })).toThrow(`another wsp host (pid ${held.pid}) is already serving`);
+    } finally {
+      held.kill("SIGKILL");
+    }
   });
 });

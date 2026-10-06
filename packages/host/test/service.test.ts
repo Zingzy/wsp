@@ -222,35 +222,34 @@ describe("one module per service manager", () => {
     expect(SERVICE_MANAGERS.launchd.unit(other).name).not.toBe(SERVICE_MANAGERS.launchd.unit(at).name);
   });
 
-  it("a service starts with the PATH the install had, WSP_HOME when it moved the state folder, the provider the shell named, and never a key", () => {
-    expect(serviceEnv({ PATH: "/opt/homebrew/bin:/usr/bin", SOLARI_API_KEY: KEY })).toEqual({ PATH: "/opt/homebrew/bin:/usr/bin" });
-    expect(serviceEnv({ PATH: "/usr/bin", WSP_HOME: "/Users/z/dev/.wsp" })).toEqual({ PATH: "/usr/bin", WSP_HOME: "/Users/z/dev/.wsp" });
+  it("a service starts with no PATH, WSP_HOME when it moved the state folder, the provider the shell named, and never a key", () => {
+    expect(serviceEnv({ PATH: "/opt/homebrew/bin:/usr/bin", SOLARI_API_KEY: KEY })).toEqual({});
+    expect(serviceEnv({ PATH: "/usr/bin", WSP_HOME: "/Users/z/dev/.wsp" })).toEqual({ WSP_HOME: "/Users/z/dev/.wsp" });
     // An empty variable names no home, so the unit carries none rather than one the service would read as a folder.
-    expect(serviceEnv({ PATH: "/usr/bin", WSP_HOME: "" })).toEqual({ PATH: "/usr/bin" });
-    expect(serviceEnv({}).PATH).toContain("/usr/bin");
+    expect(serviceEnv({ PATH: "/usr/bin", WSP_HOME: "" })).toEqual({});
+    expect(serviceEnv({ PATH: "/tmp/.mount_wsp.Ab12Cd:/usr/bin" })).toEqual({});
     // Every variable a provider is named in travels: the shell that installed the service is gone by the time it runs.
     expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "box", WSP_FAKE_AS: "solari" })).toEqual({
-      PATH: "/usr/bin",
       WSP_PROVIDER: "box",
       WSP_FAKE_AS: "solari",
     });
-    expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "" })).toEqual({ PATH: "/usr/bin" });
+    expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "" })).toEqual({});
   });
 
   it("a service installed from a shell holding labs carries labs, since it would otherwise come up without the rows that shell was using", () => {
-    expect(serviceEnv({ PATH: "/usr/bin", [LABS_ENV]: "1" })).toEqual({ PATH: "/usr/bin", [LABS_ENV]: "1" });
-    expect(serviceEnv({ PATH: "/usr/bin", [LABS_ENV]: "" })).toEqual({ PATH: "/usr/bin" });
-    expect(serviceEnv({ PATH: "/usr/bin", [CLOUD_ENV]: "1" })).toEqual({ PATH: "/usr/bin", [CLOUD_ENV]: "1" });
-    expect(serviceEnv({ PATH: "/usr/bin", [CLOUD_ENV]: "" })).toEqual({ PATH: "/usr/bin" });
-    expect(serviceEnv({ PATH: "/usr/bin" })).toEqual({ PATH: "/usr/bin" });
+    expect(serviceEnv({ PATH: "/usr/bin", [LABS_ENV]: "1" })).toEqual({ [LABS_ENV]: "1" });
+    expect(serviceEnv({ PATH: "/usr/bin", [LABS_ENV]: "" })).toEqual({});
+    expect(serviceEnv({ PATH: "/usr/bin", [CLOUD_ENV]: "1" })).toEqual({ [CLOUD_ENV]: "1" });
+    expect(serviceEnv({ PATH: "/usr/bin", [CLOUD_ENV]: "" })).toEqual({});
+    expect(serviceEnv({ PATH: "/usr/bin" })).toEqual({});
   });
 
   it("a service installed from a shell that turned the release check off keeps it off", () => {
-    expect(serviceEnv({ PATH: "/usr/bin", [UPDATE_CHECK_ENV]: "0" })).toEqual({ PATH: "/usr/bin", [UPDATE_CHECK_ENV]: "0" });
+    expect(serviceEnv({ PATH: "/usr/bin", [UPDATE_CHECK_ENV]: "0" })).toEqual({ [UPDATE_CHECK_ENV]: "0" });
   });
 
   it("a service installed from a shell that turned the usage counts off keeps them off", () => {
-    expect(serviceEnv({ PATH: "/usr/bin", [ANALYTICS_ENV]: "0" })).toEqual({ PATH: "/usr/bin", [ANALYTICS_ENV]: "0" });
+    expect(serviceEnv({ PATH: "/usr/bin", [ANALYTICS_ENV]: "0" })).toEqual({ [ANALYTICS_ENV]: "0" });
   });
 
   it("a manager writes every variable of the plan into the unit it hands over", () => {
@@ -583,7 +582,9 @@ describe("wsp up --service, wsp down and wsp status", () => {
     const plan = fake.plans[0]!;
     expect(plan.argv[0]).toBe(process.execPath);
     expect(plan.argv.slice(2)).toEqual(["up", "--state", statePath, "--port", "4400", "--listen", "127.0.0.1"]);
-    expect(plan.env["PATH"]).toBeDefined();
+    // The host reads the person's login shell at its start; a PATH copied from this process could name a folder
+    // that is gone by then.
+    expect(plan.env["PATH"]).toBeUndefined();
     // The host this unit starts is the one registered to serve the state file, and the word is what lets it past
     // the check every other client on this computer is refused by.
     expect(plan.env["WSP_STARTED_BY"]).toBe("service");

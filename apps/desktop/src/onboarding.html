@@ -21,6 +21,8 @@
       /* The app's stylesheet leaves html and body clear under the desktop's class so the sidebar shows the window's
          glass; this page has no glass to show, so its ground is painted here, flat, in the app's token. */
       .ground { position: fixed; inset: 0; background: var(--background); z-index: -1; }
+      /* The window has no title bar of its own, so the band a header row would fill is where it is dragged from. */
+      body::before { content: ""; position: fixed; inset: 0 0 auto; height: var(--workspace-topbar-height); -webkit-app-region: drag; }
       /* The welcome's one loud moment: the accent falling from the top of the window onto the mark, and a halo behind
          the mark itself; both leave with the welcome. */
       .glow {
@@ -198,12 +200,14 @@
       const text = e => String(e && e.message ? e.message : e).replace(/^.*Error: /, "");
 
       // The app's stylesheet has two sides told apart by the dark class; this page follows the computer's, with
-      // transitions held off for one frame across a flip, as the app does.
+      // transitions held off for one frame across a flip, as the app does. The window controls a Linux frame draws
+      // over the page take the page's ground and ink, so the shell hears of every flip.
       const html = document.documentElement;
       const scheme = window.matchMedia("(prefers-color-scheme: dark)");
       const follow = () => {
         html.classList.add("no-transitions");
         html.classList.toggle("dark", scheme.matches);
+        window.wsp.setTitleBar?.();
         requestAnimationFrame(() => html.classList.remove("no-transitions"));
       };
       follow();
