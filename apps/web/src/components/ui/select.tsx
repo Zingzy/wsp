@@ -151,9 +151,10 @@ function SelectPopup({
           >
             <ChevronUpIcon className="relative size-4.5 sm:size-4" />
           </SelectPrimitive.ScrollUpArrow>
+          {/* The popover tier's shadow in dark alone: in light the glass's own shadow is the one this list has drawn. */}
           <div
             className={cn(
-              "dropdown-glass relative h-full rounded-[12px] shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)] dark:shadow-[0_18px_44px_-18px_rgb(0_0_0/80%)]",
+              "dropdown-glass dark:popover-shadow relative h-full rounded-[12px]",
               matchTriggerWidth && "min-w-(--anchor-width)",
               popupClassName,
             )}
