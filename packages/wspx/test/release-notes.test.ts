@@ -92,6 +92,14 @@ describe("the lines about opening a downloaded bundle", () => {
     expect(bundleNote(readme, false)).not.toContain("<!--");
   });
 
+  it("say what starts the AppImage, since a double-click on Ubuntu's desktop hands it to Disk Image Mounter, which mounts it instead", () => {
+    const note = bundleNote(readme, false);
+    expect(note).toContain("A double-click on its icon on Ubuntu's desktop does not start it");
+    expect(note).toContain("chmod +x wsp-*.AppImage && ./wsp-*.AppImage");
+    expect(note).toContain("Run as a program");
+    expect(note).toContain("Disk Image Mounter");
+  });
+
   it("drop the paragraph on unsigned bundles once an identity signs them, and keep the rest", () => {
     const signed = bundleNote(readme, true);
     expect(signed).not.toContain("not signed yet");

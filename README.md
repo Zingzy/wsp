@@ -101,7 +101,7 @@ Open the macOS disk image and drag wsp onto the Applications folder it shows. On
 The bundles are not signed yet, so macOS refuses the first open of `wsp.app`. Open it once, dismiss the refusal, then in System Settings under Privacy & Security find the line saying wsp was blocked and pick Open Anyway. Or from a terminal: `xattr -dr com.apple.quarantine /Applications/wsp.app`. Every open after that is a double click.
 <!-- unsigned:end -->
 
-The Linux AppImage needs the run bit before it starts: `chmod +x wsp-*.AppImage`. It needs no FUSE 2. It mounts itself with `fusermount3` from the `fuse3` package, which Ubuntu, Fedora and Arch desktops already have. If it says it cannot mount the AppImage, install `fuse3`, or start it with `--appimage-extract-and-run`.
+Start the Linux AppImage from a terminal in the folder it downloaded to: `chmod +x wsp-*.AppImage && ./wsp-*.AppImage`. A double-click on its icon on Ubuntu's desktop does not start it: the desktop hands an AppImage to Disk Image Mounter, which mounts it and runs nothing. There, set the run bit, then right-click the icon and pick Run as a program. It needs no FUSE 2. It mounts itself with `fusermount3` from the `fuse3` package, which Ubuntu, Fedora and Arch desktops already have. If it says it cannot mount the AppImage, install `fuse3`, or start it with `--appimage-extract-and-run`.
 <!-- bundles:end -->
 
 ## What is next

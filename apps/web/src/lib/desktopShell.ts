@@ -26,6 +26,12 @@ export function isDesktopMac(): boolean {
   return typeof document !== "undefined" && document.documentElement.classList.contains(DESKTOP_MAC_CLASS);
 }
 
+/** Whether the page sits in a desktop window that draws no glass under it: every desktop app but the Mac's. Linux
+ * gets no transparency (Electron has no blur there), so the page stands solid and Settings offers no switch for it. */
+export function isSolidWindow(): boolean {
+  return isDesktopShell() && !isDesktopMac();
+}
+
 /** Whether the window has no title bar of its own, so the header row is its frame and the place it is dragged by. */
 export function headerIsWindowFrame(): boolean {
   return typeof document !== "undefined" && (isDesktopMac() || document.documentElement.classList.contains(DESKTOP_WCO_CLASS));

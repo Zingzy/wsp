@@ -257,10 +257,10 @@ describe("workspace switch", () => {
     expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.select.2", { platform: MAC })).toBeNull();
   });
 
-  it("keeps the terminal's own keys: Control chords while it has focus, and a Control mod for the digits", () => {
+  it("keeps the terminal its Control Tab while it has focus, and reads the digits with mod there on every platform", () => {
     expect(resolve(tab(), LINUX, { ...DESKTOP, terminalFocus: true })).toBeNull();
     expect(resolve(tab(), MAC, { ...DESKTOP, terminalFocus: true })).toBeNull();
-    expect(resolve(digit(2, { ctrlKey: true }), LINUX, { ...DESKTOP, terminalFocus: true })).toBeNull();
+    expect(resolve(digit(2, { ctrlKey: true }), LINUX, { ...DESKTOP, terminalFocus: true })).toBe("workspace.select.2");
     expect(resolve(digit(2, { metaKey: true }), MAC, { ...DESKTOP, terminalFocus: true })).toBe("workspace.select.2");
   });
 
@@ -463,10 +463,11 @@ describe("a person's own chords over the defaults", () => {
   it("gives an override the when of its command's default on that chord, else the command's first default's", () => {
     const whens = new Map<string, Set<string | undefined>>();
     for (const rule of DEFAULT_KEYBINDINGS) whens.set(rule.command, (whens.get(rule.command) ?? new Set()).add(rule.when));
-    // The switch's Tab pair stands down inside a panel of several tabs, and the palette's ctrl+k is a shell's while its
-    // ctrl+shift+p reaches it from a terminal.
-    expect([...whens].filter(([, set]) => set.size > 1).map(([command]) => command)).toEqual(["commandPalette.toggle", "workspace.previous", "workspace.next"]);
+    // The switch's Tab pair stands down inside a panel of several tabs, and the sidebar's ctrl+b and the palette's
+    // ctrl+k are a shell's while their Shift chords reach them from a terminal.
+    expect([...whens].filter(([, set]) => set.size > 1).map(([command]) => command)).toEqual(["sidebar.toggle", "commandPalette.toggle", "workspace.previous", "workspace.next"]);
     expect(rulesWith(DEFAULT_KEYBINDINGS, { "commandPalette.toggle": "mod+alt+k" }, LINUX).find(rule => rule.command === "commandPalette.toggle")?.when).toBeUndefined();
+    expect(rulesWith(DEFAULT_KEYBINDINGS, { "sidebar.toggle": "mod+alt+s" }, LINUX).find(rule => rule.command === "sidebar.toggle")?.when).toBeUndefined();
     const whenOf = (overrides: Record<string, string>, platform: string) => rulesWith(DEFAULT_KEYBINDINGS, overrides, platform).find(rule => rule.command === "workspace.next")?.when;
     expect(whenOf({ "workspace.next": "ctrl+tab" }, MAC)).toBe("!terminalFocus && !panelTabsFocus");
     // Off macOS a captured Control chord is spelled with mod, and it is the same chord.
