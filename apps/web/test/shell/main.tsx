@@ -61,11 +61,12 @@
 // past its six cards. ?pick=1 holds three projects, two on this Mac and one
 // on a joined box, with New thread set to ask, and opens the palette on the
 // page of projects it picks from; ?settings=general opens Settings on its
-// General page; ?panel=pr&ws=ws_a opens the Pull request pane on PR 838 (&pr=merged once merged, &pr=closed as it
+// General page, ?settings=appearance on Appearance; ?linux=1 holds the page as
+// the Linux app's window does, the bridge on it and no Mac glass; ?panel=pr&ws=ws_a opens the Pull request pane on PR 838 (&pr=merged once merged, &pr=closed as it
 // stands, closed with its checks kept).
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, DESKTOP_WCO_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
@@ -109,6 +110,10 @@ document.documentElement.classList.toggle(DESKTOP_MAC_CLASS, params.get("mac") =
 // the switcher's well reads, and neither answers with a picture, so the wells draw empty.
 if (params.get("shell") === "desktop") {
   window.wsp = { capturePreview: async () => undefined, workspacePreview: async () => undefined };
+}
+if (params.get("linux") === "1") {
+  document.documentElement.classList.add(DESKTOP_WCO_CLASS);
+  window.wsp = { ...window.wsp };
 }
 // The desktop's road: the folder picker is what a dialog draws for a folder on this computer.
 if (params.get("export") === "1") window.wsp = { ...window.wsp, pickFolder: async () => undefined };
@@ -388,6 +393,15 @@ const folding: SessionEvent[] = [
   { type: "session.delta", ...fan, kind: "text", text: "Root has 28G free.", parentToolUseId: "toolu_c" },
 ];
 
+// ?chat=failed replays a turn the agent refused in its own words, which run past one line of the column.
+const failedTurn = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_1", threadId: "thr_failed" };
+const FAILED_WORDS = "Not logged in · Please run /login; sign in from a terminal on this computer, then send again";
+const failedHistory: SessionEvent[] = [
+  { type: "session.start", ...failedTurn, prompt: "Reply with exactly the word hi." },
+  { type: "session.done", ...failedTurn, result: { status: "failed", error: FAILED_WORDS, durationMs: 1200 } },
+  { type: "session.end", ...failedTurn, exitCode: 1, sawResult: true },
+];
+
 const linger = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_1", threadId: "thr_linger" };
 const lingering: SessionEvent[] = [
   { type: "session.start", ...linger, prompt: "Start the dev server in the background and reply when it is up." },
@@ -549,13 +563,15 @@ const api: Api = {
         ? []
         : params.get("chat") === "1"
           ? chatHistory
-          : params.get("chat") === "diagram"
-            ? diagramHistory
-            : params.get("chat") === "hostile"
-              ? hostileHistory
-              : params.get("linger") === "1"
-                ? lingering
-                : [],
+          : params.get("chat") === "failed"
+            ? failedHistory
+            : params.get("chat") === "diagram"
+              ? diagramHistory
+              : params.get("chat") === "hostile"
+                ? hostileHistory
+                : params.get("linger") === "1"
+                  ? lingering
+                  : [],
   // The row closes on the runtime's own event and never on this reply, so the fixture pushes it: a click on an
   // option has to be seen landing, not only counted.
   answerPermission: async (sessionId, askId, optionId) => {
@@ -744,7 +760,9 @@ if (params.get("pick") === "1") {
   }));
   setTimeout(() => openCommandPalette({ page: "new-thread" }), 200);
 }
-if (params.get("settings") === "general") openSettingsGroup("general");
+const settingsGroup = params.get("settings");
+const settingsShown = settingsGroup === "general" || settingsGroup === "appearance";
+if (settingsShown) openSettingsGroup(settingsGroup);
 // ?init=building puts the init job mid-build on the store, as its events would, so the collapsed cloud row's progress
 // line can be measured and photographed; the fixture's golden is none, so the row is there.
 if (params.get("init") === "building") {
@@ -794,6 +812,8 @@ if (params.get("init") === "waiting") {
 }
 // The meter's tick for the running machine, so its row's second line reads cost, rate and countdown together.
 useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 2 * 3_600_000, accruedUsd: 0.29, at: new Date().toISOString() });
+// ?panel=closed shuts the right panel, which at a phone's width covers the thread it opens over.
+if (params.get("panel") === "closed" && shown !== null) useRightPanelStore.getState().close(shown);
 // ?panel=preview opens the right panel inline with nothing in it, the narrowest the centre column gets at a width.
 if (params.get("panel") === "preview" && shown !== null) {
   useRightPanelStore.setState({ byWorkspaceId: {} });
@@ -883,7 +903,7 @@ createRoot(document.getElementById("root")!).render(
     {params.get("version") === "behind" ? <VersionRule /> : null}
     {params.get("host") === "1" ? <HostRule /> : null}
     <AppShell>
-      {params.get("settings") === "general" ? (
+      {settingsShown ? (
         <SettingsPage />
       ) : shown === null ? (
         <div />

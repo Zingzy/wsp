@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { REDUCED_TRANSPARENCY_QUERY, SOLID_CLASS, SYSTEM_DARK_QUERY, applyTheme, useThemeEffect, useTransparencyEffect } from "../src/settings/theme.js";
 import { SIDE_DEFAULT } from "../src/themes/index.js";
@@ -25,6 +25,7 @@ afterEach(() => {
   vi.resetModules();
   delete window.wsp;
   window.localStorage.clear();
+  document.documentElement.classList.remove(DESKTOP_MAC_CLASS);
   document.documentElement.classList.add("dark");
 });
 
@@ -175,6 +176,7 @@ describe("transparency", () => {
     });
     const setGlass = vi.fn();
     window.wsp = { setGlass };
+    document.documentElement.classList.add(DESKTOP_MAC_CLASS);
     const solid = () => document.documentElement.classList.contains(SOLID_CLASS);
     renderHook(() => useTransparencyEffect());
     expect([solid(), setGlass.mock.lastCall]).toEqual([true, [false]]);
@@ -185,5 +187,19 @@ describe("transparency", () => {
     expect([solid(), setGlass.mock.lastCall]).toEqual([false, [true]]);
     act(() => useStore.setState(s => ({ preferences: { ...s.preferences, transparency: false } })));
     expect([solid(), setGlass.mock.lastCall]).toEqual([true, [false]]);
+  });
+
+  it("the Linux app's page is solid whatever the record says, since its window has no glass to show", () => {
+    const setGlass = vi.fn();
+    window.wsp = { setGlass };
+    renderHook(() => useTransparencyEffect());
+    expect([document.documentElement.classList.contains(SOLID_CLASS), setGlass.mock.lastCall]).toEqual([true, [false]]);
+    act(() => useStore.setState(s => ({ preferences: { ...s.preferences, transparency: true } })));
+    expect(document.documentElement.classList.contains(SOLID_CLASS)).toBe(true);
+  });
+
+  it("a browser tab keeps its frost while the record's transparency is on", () => {
+    renderHook(() => useTransparencyEffect());
+    expect(document.documentElement.classList.contains(SOLID_CLASS)).toBe(false);
   });
 });

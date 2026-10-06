@@ -504,7 +504,7 @@ describe("composer queue", () => {
     emit({ type: "session.end", ...X, exitCode: 127, sawResult: true });
     await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeDefined());
     expect(screen.getByText(/claude: command not found/i)).toBeDefined();
-    expect(screen.getByTestId("settled-footer").textContent).toContain("failed");
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
     expect(started).toHaveLength(1);
     expect(queued()).toEqual(["second"]);
     await enter("third");
@@ -745,7 +745,8 @@ describe("composer queue", () => {
     expect(screen.queryByRole("button", { name: "Stop generation" })).toBeNull();
     emit({ type: "session.done", ...A, result: { status: "completed", durationMs: 9_000 } });
     emit({ type: "session.end", ...A, exitCode: 0, sawResult: true });
-    expect(screen.getByTestId("settled-footer").textContent).not.toContain("9.0s");
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
+    expect(screen.queryByText(/9\.0s/)).toBeNull();
     expect(started).toHaveLength(0);
     expect(queued()).toEqual(["retry later"]);
     await enter("retry");
