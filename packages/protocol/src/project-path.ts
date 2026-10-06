@@ -131,6 +131,9 @@ export function placeDaemonPaths(home: string): {
   placeFile: string;
   placeKey: string;
   placeLog: string;
+  /** What stood before the add at the paths outside the home it or its setup writes, so a leave takes back only what
+   * wsp made: each path NUL-terminated, written by the add's deploy before anything of wsp's lands. */
+  placeFound: string;
 } {
   const at = home.replace(/\/+$/, "");
   const wsp = `${at}/.wsp`;
@@ -153,6 +156,7 @@ export function placeDaemonPaths(home: string): {
     placeFile: `${wsp}/place.json`,
     placeKey: `${wsp}/place-key.pem`,
     placeLog: `${wsp}/place.log`,
+    placeFound: `${wsp}/place-found`,
   };
 }
 
@@ -183,6 +187,7 @@ export function placeOwnedPaths(home: string): string[] {
     at.placeFile,
     at.placeKey,
     at.placeLog,
+    at.placeFound,
     at.dir,
     placeProvisionPaths(home).dir,
     at.bundle,

@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 127,
+  "daemonVersion": 128,
   "execBodyMax": 16384,
   "prReplyBodyMax": 65536,
   "guestMessageCapBytes": 4194304,
@@ -64,6 +64,8 @@
   "workspaceApparmorPath": "/etc/apparmor.d/wsp-workspace",
   "toolPrefix": "/opt/wsp",
   "toolLinksDir": "/usr/local/bin",
+  "placeFoundEnd": "wsp-found-end",
+  "placeFoundMaxBytes": 33554432,
   "openSocketPath": "/root/.wsp/open.sock",
   "guestDaemonSocketPath": "/root/.wsp/daemon.sock",
   "guestDaemonDir": "/root/wsp-daemon",
