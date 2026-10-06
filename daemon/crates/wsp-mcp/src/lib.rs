@@ -38,6 +38,8 @@ pub struct Args {
     pub host: Option<String>,
     /// A thread's own tools: they refuse unless the launch left the thread's address and token in the environment.
     pub scoped: bool,
+    /// A thread another thread started, which has no slate: its greeting says nothing of one.
+    pub no_slate: bool,
     /// A refusal before the server runs is the failure object rather than its sentence.
     pub json: bool,
     /// A session from inside a machine, served on this computer: a path or a folder it names is on its machine, so

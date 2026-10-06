@@ -20,7 +20,8 @@ const HOST_MEMORY_BUDGET_MB = 40;
 
 /** What the run is held to, under the promise so a regression is caught while the promise still holds. Main read
  * 35.5 MB on Linux under Node 24 on 2026-10-05, most of it zod binding 24 methods onto every schema the protocol
- * builds at load; bound on first read instead, it reads 26.5 there and 25.7 under Node 22. */
+ * builds at load; bound on first read instead, it reads 26.5 there and 25.7 under Node 22. With the Slate's parser,
+ * kit, runs and tools merged in it read 26.9 on a Mac on 2026-10-06. */
 const HOST_MEMORY_CAP_MB = 28.5;
 
 /** The one page that quotes the budget. */

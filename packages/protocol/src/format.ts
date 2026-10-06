@@ -352,6 +352,12 @@ export function fmtCost(usd: number): string {
   return `$${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** Rupees as India writes them, lakh grouping and the ₹ sign: ₹1,44,740, paise only where the value has them. */
+export function fmtInr(inr: number): string {
+  const paise = Math.round(inr * 100) % 100 !== 0;
+  return inr.toLocaleString("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: paise ? 2 : 0, maximumFractionDigits: paise ? 2 : 0 });
+}
+
 /** The word beside a figure nobody is billed for: what the agent's own table lists for the tokens a turn spent, on
  * a computer whose turns run on the person's own sign-in. */
 export const LIST_PRICE_WORD = "list price";

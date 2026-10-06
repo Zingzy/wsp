@@ -60,12 +60,13 @@ const TOKENS = [
   "--status-done",
   "--pr-merged",
   "--hero-field",
+  "--slate-accent",
 ] as const;
 /** What a dark theme names besides: the Mac's dark window stands on the glass, and these are its grounds there. */
 const DARK_TOKENS = ["--glass-ink", "--material-ground", "--material-raised", "--material-edge"] as const;
 /** The tokens allowed a hue: the primary, the status inks and the ink of a fresh thread's field. Everything else is a
  * neutral. */
-const HUED = new Set(["--primary", "--success", "--warning", "--error-foreground", "--warning-foreground", "--success-foreground", "--info-foreground", "--update-foreground", "--status-input", "--status-working", "--status-failed", "--status-done", "--pr-merged", "--hero-field"]);
+const HUED = new Set(["--primary", "--success", "--warning", "--error-foreground", "--warning-foreground", "--success-foreground", "--info-foreground", "--update-foreground", "--status-input", "--status-working", "--status-failed", "--status-done", "--pr-merged", "--hero-field", "--slate-accent"]);
 /** The inks a thread's status is drawn in, on the sidebar's rows and every list a thread shows in, and a merged pull
  * request's number on a tile. */
 const STATUS_INKS = ["--status-input", "--status-working", "--status-failed", "--status-done", "--pr-merged"] as const;
