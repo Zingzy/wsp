@@ -9129,15 +9129,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // A title in the harness's own store is the person's rename inside it or the one the harness itself made
           // for them, and both outrank anything we would generate; only the opening words, which codex writes there
           // at a thread's start, are the seed again, and a seed is no news to a row that already carries a name.
+          let unnamed: SessionView | undefined;
           for (const s of sessions.values()) {
             if (s.view.workspaceId !== entry.record.id || s.view.claudeSessionId !== sessionId) continue;
             const source = storedTitleSource(title, s.view.prompt);
-            if (source === "seed" && sourceOf(s.view) !== "seed") continue;
+            if (source === "seed" && sourceOf(s.view) !== "seed") {
+              if (s.view.harnessTitle !== undefined && s.view.harnessTitle !== title) unnamed = s.view;
+              continue;
+            }
             if (s.view.harnessTitle !== title) moved.add(threadKeyOf(s.view));
             s.view.harnessTitle = title;
             s.view.titleSource = source;
           }
           await persistSessions(entry.record.id);
+          // A name given before codex wrote the thread's index row had nowhere to land; by a turn's end the row is
+          // there, so the name the row carries is written again.
+          if (force && unnamed?.harnessTitle !== undefined) void nameInHarness(unnamed, unnamed.harnessTitle);
           for (const threadId of moved) pushHead(threadId);
         },
         (e: unknown) => {
