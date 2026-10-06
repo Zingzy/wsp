@@ -49,11 +49,12 @@ describe("the wsp command on a thread's machine", () => {
     // A host on loopback that names no address and is linked to no relay: a fork's wsp rides the link this host
     // holds to its daemon, so nothing about where this host answers may stand between its turns and a token.
     rt = createRuntime({
+      statePath,
       backend: withDaemonRoads(stubBackend()),
       daemonChannel: branchDaemons().open,
       store,
       adapters: { claude: ctx => ({ ...held.adapter(ctx), mcpServers: true as const }) },
-      local: localWiring(join(dir, "user")),
+      local: localWiring(join(dir, "user"), undefined, undefined, statePath),
       agents: { here: {}, wspMcp: { command: "wsp", args: ["mcp", SCOPED_MCP_ARG] } },
     });
     handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt });
@@ -148,11 +149,12 @@ describe("the wsp command a thread on this computer runs", () => {
     // through the same reach a real host hands it.
     const here: { url?: string } = {};
     rt = createRuntime({
+      statePath,
       backend: withDaemonRoads(stubBackend()),
       daemonChannel: branchDaemons().open,
       store: memoryStore(),
       adapters: { claude: held.adapter },
-      local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copyingFake()),
+      local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, statePath, copyingFake()),
       agents: { here, wspMcp: { command: "wsp", args: ["mcp"] } },
     });
     handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt, here });

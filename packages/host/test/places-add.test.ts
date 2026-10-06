@@ -11,11 +11,11 @@ import { writeStub } from "../../protocol/test/stub-script.js";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Manifest } from "@wsp/collect";
-import { RecipeFile, SETUP_STEP_WORDS, TOOL_PREFIX, type AddLine, type PlaceSetup, type PlaceView, type PlaceWait } from "@wsp/protocol";
+import { PLACE_SUDO_KIND, RecipeFile, SETUP_STEP_WORDS, TOOL_PREFIX, type AddLine, type PlaceSetup, type PlaceView, type PlaceWait } from "@wsp/protocol";
 import { sshWordReach, type SshLocalRun } from "@wsp/engine";
 import { PassThrough } from "node:stream";
 import { gunzipSync } from "node:zlib";
-import { addCommand, addFlags, choosingLine, followSetup, parsePlaceCheck, placeCheckRefusal, placeCheckRows, PLACE_CHECK_SCRIPT, PLACE_CHECK_SPARE_BYTES, RESUME_FLAGS_REFUSAL, SETUP_FLAGS_REFUSAL } from "../src/places.js";
+import { addCommand, addFlags, choosingLine, followSetup, parsePlaceCheck, placeCheckRefusal, placeCheckRows, PLACE_CHECK_SCRIPT, PLACE_CHECK_SPARE_BYTES, RESUME_FLAGS_REFUSAL, SETUP_FLAGS_REFUSAL, sudoPasswordAsk } from "../src/places.js";
 import { picksRows, placeProvisioner } from "../src/place-provision.js";
 import { addComputer, ADD_TOOL_FIX, watchSetup } from "../src/setup-follow.js";
 import { captured } from "./verbs-fixture.js";
@@ -36,7 +36,7 @@ const RUNNING: PlaceSetup = { state: "running", addId: "a_x", startedAt: "2026-1
 
 /** A host that plays one add: the install's steps, the setup's, a sign-in that waits and its landing when the test
  * says, and the end. The row it lists moves with what it said. */
-function fakeHost(o: { end?: "ready" | "failed"; signIn?: boolean; pending?: boolean; running?: string } = {}) {
+function fakeHost(o: { end?: "ready" | "failed"; signIn?: boolean; pending?: boolean; running?: string; sudoPassword?: string } = {}) {
   const asked: { op: string; params?: Record<string, unknown> }[] = [];
   const frames: ((frame: Record<string, unknown>) => void)[] = [];
   let row: PlaceView = PLACE;
@@ -65,6 +65,10 @@ function fakeHost(o: { end?: "ready" | "failed"; signIn?: boolean; pending?: boo
       asked.push({ op, ...(params === undefined ? {} : { params }) });
       if (op === "places.list") return { places: [row] };
       if (op !== "places.add" && op !== "places.setup") throw new Error(`unexpected op ${op}`);
+      if (o.sudoPassword !== undefined && params?.["sudoPassword"] !== o.sudoPassword) {
+        const said = params?.["sudoPassword"] === undefined ? "root@10.0.0.9 runs sudo only with dev's password" : "sudo on root@10.0.0.9 did not take that password";
+        throw Object.assign(new Error(`${said}. Type it in Add a computer in the app, or at wsp add in a terminal.`), { kind: PLACE_SUDO_KIND });
+      }
       // A setup already under way answers its own stream, not the one the caller minted.
       addId = o.running ?? String(params!["addId"] ?? "a_tool");
       if (o.pending === true) {
@@ -160,6 +164,32 @@ describe("wsp add <user@host> --recipe", () => {
     const host = fakeHost({ end: "failed" });
     expect(await addCommand(io, opts(tmp("add-failed")), ["root@10.0.0.9"], { recipe: "laptop" }, deps(host.client))).toBe(1);
     expect(io.lines.at(-1)).toBe("spoo: no agent installed: Codex");
+  });
+
+  it("at a terminal asks once for the password sudo wants there, without echo, and adds again carrying it in that one request", async () => {
+    const asked: string[] = [];
+    const io = { ...captured(), isTTY: true, askSecret: async (q: string) => (asked.push(q), "Tq-not-a-real-pw") };
+    const host = fakeHost({ sudoPassword: "Tq-not-a-real-pw", pending: true });
+    expect(await addCommand(io, opts(tmp("add-sudo")), ["dev@10.0.0.9"], {}, deps(host.client))).toBe(0);
+    expect(asked).toEqual([sudoPasswordAsk("dev@10.0.0.9", false)]);
+    // One line: a hint under it would be drawn twice once the prompt is answered.
+    expect(sudoPasswordAsk("dev@10.0.0.9", false)).not.toContain("\n");
+    const adds = host.asked.filter(a => a.op === "places.add");
+    expect(adds.map(a => a.params?.["sudoPassword"])).toEqual([undefined, "Tq-not-a-real-pw"]);
+    // The one stream both tries ride, and nothing the person reads holds the password.
+    expect(adds[0]!.params?.["addId"]).toBe(adds[1]!.params?.["addId"]);
+    expect(io.screen).not.toContain("Tq-not-a-real-pw");
+  });
+
+  it("asks again where sudo did not take it, up to sudo's own three, and off a terminal says the host's sentence asking nothing", async () => {
+    const asked: string[] = [];
+    const io = { ...captured(), isTTY: true, askSecret: async (q: string) => (asked.push(q), "wrong") };
+    await expect(addCommand(io, opts(tmp("add-sudo-wrong")), ["dev@10.0.0.9"], {}, deps(fakeHost({ sudoPassword: "right" }).client))).rejects.toThrow("sudo on root@10.0.0.9 did not take that password");
+    expect(asked).toEqual([sudoPasswordAsk("dev@10.0.0.9", false), sudoPasswordAsk("dev@10.0.0.9", true), sudoPasswordAsk("dev@10.0.0.9", true)]);
+    const piped = captured();
+    const host = fakeHost({ sudoPassword: "right" });
+    await expect(addCommand(piped, opts(tmp("add-sudo-pipe")), ["dev@10.0.0.9"], {}, deps(host.client))).rejects.toThrow("runs sudo only with dev's password. Type it in Add a computer in the app, or at wsp add in a terminal.");
+    expect(host.asked.filter(a => a.op === "places.add")).toHaveLength(1);
   });
 
   it("without a recipe says the computer waits on its picks and how to give them, and follows nothing", async () => {
@@ -266,10 +296,10 @@ describe("the checks a box passes before anything of wsp's goes on it", () => {
   it("passes root on systemd with cgroup v2 and the room, and refuses each that is missing in a sentence naming the fix", () => {
     expect(placeCheckRefusal("spoo", read(["uid 0", "systemd yes", "cgroup2 yes", `free ${10 * 1024 ** 3}`]), need)).toBeUndefined();
     expect(placeCheckRefusal("spoo", read(["uid 1000", "systemd yes"]), need)).toContain("not root");
-    // Root alone this time, said with what to do: a login with passwordless sudo is refused the same way.
+    // A box that answers a uid other than root under the road to root is refused in the one sentence naming both fixes.
     const asUser = placeCheckRefusal("dev@10.0.0.9", read(["uid 1000"]), need)!;
-    expect(asUser).toContain("wsp needs root there");
-    expect(asUser).toContain("add root@10.0.0.9 instead");
+    expect(asUser).toContain("wsp needs root to keep itself running");
+    expect(asUser).toContain("add root@10.0.0.9 instead or give that user passwordless sudo");
     // An alias is named by the host it reaches, beside the ssh config line that makes the alias log in as root.
     const asAlias = placeCheckRefusal("spoo", read(["uid 1000"]), need, "65.21.4.12")!;
     expect(asAlias).toContain("add root@65.21.4.12 instead");

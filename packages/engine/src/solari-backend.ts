@@ -1,4 +1,4 @@
-import { machineUnreachableLine, moveTimedOutLine, providerRoadRetryLine, RESUME_UNANSWERED, snapshotListedRefusedLine, snapshotListedWaitLine, type Capabilities } from "@wsp/protocol";
+import { imageServedWaitLine, machineUnreachableLine, moveTimedOutLine, providerKeyName, providerRoadRetryLine, RESUME_UNANSWERED, snapshotListedRefusedLine, snapshotListedWaitLine, type Capabilities } from "@wsp/protocol";
 import { ExecFailedError, MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
@@ -249,7 +249,7 @@ export class SolariBackend implements MachineBackend {
 
   /** A fork the provider answers "Snapshot not found" is read against its listing: a snapshot the listing holds is
    * not gone, so the fork is asked again under a key of its own inside a bound, and only an unlisted one is missing. */
-  async create(spec: MachineSpec): Promise<Machine> {
+  async create(spec: MachineSpec, waiting?: (line: string) => void): Promise<Machine> {
     const started = this.clock.now();
     for (let ask = 1; ; ask++) {
       try {
@@ -265,6 +265,7 @@ export class SolariBackend implements MachineBackend {
           throw Object.assign(new Error(message), e, { kind: "transient", message });
         }
         console.warn(snapshotListedWaitLine(snapshot, SNAPSHOT_LISTED_EVERY_MS, waited));
+        waiting?.(imageServedWaitLine(providerKeyName("solari"), SNAPSHOT_LISTED_EVERY_MS));
         await this.clock.sleep(SNAPSHOT_LISTED_EVERY_MS);
       }
     }

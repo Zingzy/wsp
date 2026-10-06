@@ -31,10 +31,10 @@ afterEach(() => {
 });
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { macKindOf, ALREADY_JOINED_LINE, DAEMON_VERSION, configHardLinkRefusal, backUrl, PLACE_LOGIN_REFUSED_KIND, PLACE_HOST_KEY_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoPicksLine, placeProvisioningLine, setupWord, RecipeFile, type PlaceProvisionRow, type PendingComputer, type PlaceSetup, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
+import { macKindOf, ALREADY_JOINED_LINE, DAEMON_VERSION, configHardLinkRefusal, backUrl, PLACE_LOGIN_REFUSED_KIND, PLACE_HOST_KEY_KIND, PLACE_SUDO_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoPicksLine, placeProvisioningLine, setupWord, RecipeFile, type PlaceProvisionRow, type PendingComputer, type PlaceSetup, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
-import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, outsideAfterScript, outsideBeforeScript, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
+import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, outsideAfterScript, outsideBeforeScript, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_SUDO_READ, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshRiding, type SshSudo, type SshSudoRoad, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine, noPlaceSystemLine } from "../src/daemon-binary.js";
 import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
@@ -106,6 +106,12 @@ import {
   addTakenLine,
   placeRootHomeRefusal,
   PLACE_CHECK_SCRIPT,
+  placeNoRootLine,
+  placeNoKeyForSudoLine,
+  placeSudoReader,
+  placeUndoer,
+  placeUndoNeedsSudoLine,
+  sudoPasswordAsk,
 } from "../src/places.js";
 import { BackCutError, backBindLine, heldPlaceScript } from "../src/place-back.js";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace as sweepPlaceHere, sweptLine, sweptSaid, writePlaceFile, type PlaceSweepOptions } from "../src/place-report.js";
@@ -1776,7 +1782,10 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
 
   /** A box that takes the deploy and answers the word it is told to say about its own chip, recording every script
    * run on it and every file landed there. `arch` is what its `uname -m` answered on the read that adopted it. */
-  function fakeBox(arch: string | undefined, shell = "bash", box: { reaches?: (url: string) => boolean; holds?: string; dials?: string; proxied?: boolean; home?: string; checks?: string[] } = {}): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; times: Record<string, number | undefined>; stage: PlaceStaging } {
+  function fakeBox(arch: string | undefined, shell = "bash", box: { reaches?: (url: string) => boolean; holds?: string; dials?: string; proxied?: boolean; home?: string; checks?: string[]; road?: SshSudoRoad; tries?: (password: string) => SshSudo; minusNRefused?: boolean } = {}): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; times: Record<string, number | undefined>; stage: PlaceStaging; tried: string[]; ridden: SshRiding[]; order: string[] } {
+    const tried: string[] = [];
+    const order: string[] = [];
+    const ridden: SshRiding[] = [];
     const ran: string[] = [];
     const landed: string[] = [];
     const stages: string[] = [];
@@ -1800,8 +1809,25 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       },
     };
     const backend = {
+      sudoFor: async () => {
+        order.push("read");
+        return box.road ?? "root";
+      },
+      sudoTry: async (_reach: SshReach, password: string) => {
+        order.push("try");
+        tried.push(password);
+        return box.tries?.(password) ?? "wrong";
+      },
+      riding: (riding: SshRiding) => {
+        ridden.push(riding);
+        return backend;
+      },
       hostNameFor: async (reach: SshReach) => (box.proxied === true ? undefined : (box.dials ?? reach.host)),
-      adopt: async () => ({ machine, login: { HOME: box.home ?? "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, shell, ...(arch === undefined ? {} : { arch }) }),
+      adopt: async () => {
+        // A sudoers the read cannot see through: the adopt under sudo -n, which rides no password, is refused.
+        if (box.minusNRefused === true && ridden.length === 0) throw new Error("maya@box did not answer over ssh: sudo: a password is required");
+        return { machine, login: { HOME: box.home ?? "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, shell, ...(arch === undefined ? {} : { arch }) };
+      },
       // A computer this computer's ssh client has already met: every case below is about what the install does
       // after that, so none of them stands on the first dial of a stranger.
       keyFor: async () => BOX_KEY,
@@ -1815,6 +1841,9 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       landed,
       stages,
       times,
+      tried,
+      ridden,
+      order,
       stage: (step, state, note, _placeId, ms) => {
         stages.push(`${step} ${state}${note === undefined ? "" : ` (${note})`}`);
         if (state !== "running") times[step] = ms;
@@ -1883,6 +1912,100 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(rows.slice(0, 3)).toEqual(["root running", "root done", "system running"]);
     expect(rows[3]).toMatch(/^system failed \(root@box has no cgroup v2/);
     expect(rows.some(line => line.startsWith("disk"))).toBe(false);
+  });
+
+  it("installs over a login whose sudo asks for nothing, as it does over root, with no password asked or ridden", async () => {
+    // Root's own shell is zsh here, which a root login is refused for; over sudo it never runs, and is not.
+    const box = fakeBox("x86_64", "zsh", { checks: ["uid 0", "systemd yes", "cgroup2 yes"], road: "free" });
+    await placeInstaller({ backend: box.backend as never, ...assets(tmp("sudo-free"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage);
+    expect(box.order).toEqual(["read"]);
+    expect(box.tried).toEqual([]);
+    expect(box.ridden).toEqual([]);
+    expect(box.stages).toContain("root done");
+    expect(box.ran.some(script => script.includes(WSP_READY_LINE) || script.includes("uname -m"))).toBe(true);
+  });
+
+  it("asks at the root row for the password a login's sudo wants, after reading the login as itself, with nothing of wsp's sent", async () => {
+    const box = fakeBox("x86_64", "zsh", { road: "asks" });
+    const said = await placeInstaller({ backend: box.backend as never, ...assets(tmp("sudo-asks"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage).then(
+      () => undefined,
+      (e: unknown) => e as Error & { kind?: string; fix?: string },
+    );
+    expect(said?.kind).toBe(PLACE_SUDO_KIND);
+    expect(said?.message).toMatch(/^sudo on maya@box asks for maya's password\. Type it in Add a computer in the app, or at wsp add in a terminal/);
+    expect(said?.fix).toContain("or add root@box instead, or give maya passwordless sudo");
+    // Connected and the chip read as the login itself; the login's own shell is not root's and is not refused.
+    expect(box.ridden).toEqual([{ asLogin: true }]);
+    expect(box.stages.filter(line => /^(connect|chip|root) /.test(line))).toEqual(["connect running", "connect done (Ubuntu 24.04.4 LTS)", "chip done (x86_64)", "root running", expect.stringMatching(/^root failed \(sudo on maya@box asks for maya/)]);
+    expect(box.ran).toEqual([]);
+    expect(box.landed).toEqual([]);
+  });
+
+  it("rides the password sudo took for every script of the install, and says it in no step", async () => {
+    const password = "Tq-not-a-real-pw";
+    const box = fakeBox("x86_64", "bash", { checks: ["uid 0", "systemd yes", "cgroup2 yes"], road: "asks", tries: pw => (pw === password ? "taken" : "wrong") });
+    await placeInstaller({ backend: box.backend as never, ...assets(tmp("sudo-taken"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"], sudoPassword: password }, box.stage);
+    expect(box.tried).toEqual([password]);
+    expect(box.order).toEqual(["read", "try"]);
+    expect(box.ridden).toEqual([{ sudoPassword: password }]);
+    expect(box.stages).toContain("root done");
+    expect(box.landed.length).toBeGreaterThan(0);
+    expect([...box.stages, ...box.ran].join("\n")).not.toContain(password);
+  });
+
+  it("asks again where sudo did not take the password, and refuses a login sudo will not run as root in one sentence naming both fixes", async () => {
+    const wrong = fakeBox("x86_64", "bash", { road: "asks", tries: () => "wrong" });
+    const asked = await placeInstaller({ backend: wrong.backend as never, ...assets(tmp("sudo-wrong"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"], sudoPassword: "nope" }, wrong.stage).catch((e: unknown) => e as Error & { kind?: string });
+    expect(asked).toMatchObject({ kind: PLACE_SUDO_KIND, message: expect.stringMatching(/^sudo on maya@box did not take that password\./) });
+    for (const sudo of ["none", "asks"] as const) {
+      // A login sudo refuses outright reads as one that asks until a password is typed; with one typed it is none.
+      const box = sudo === "none" ? fakeBox("x86_64", "bash", { road: "none" }) : fakeBox("x86_64", "bash", { road: "asks", tries: () => "none" });
+      const said = await placeInstaller({ backend: box.backend as never, ...assets(tmp(`sudo-${sudo}`), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"], ...(sudo === "asks" ? { sudoPassword: "right" } : {}) }, box.stage).catch((e: unknown) => e as Error & { kind?: string });
+      expect(said).toMatchObject({ message: "maya@box logs in as maya, who cannot run commands as root with sudo there, and wsp needs root to keep itself running as a system service; add root@box instead or give maya passwordless sudo" });
+      expect((said as { kind?: string }).kind).toBeUndefined();
+      expect(box.ran).toEqual([]);
+    }
+    // A sudo that wants a terminal: neither a password nor passwordless sudo gets past it, so the line names
+    // requiretty and root@host, read off the road or off the try.
+    for (const box of [fakeBox("x86_64", "bash", { road: "tty" }), fakeBox("x86_64", "bash", { road: "asks", tries: () => "tty" })]) {
+      const said = await placeInstaller({ backend: box.backend as never, ...assets(tmp("sudo-tty"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"], sudoPassword: "right" }, box.stage).catch((e: unknown) => e as Error);
+      expect((said as Error).message).toBe("maya@box: sudo there runs only from a terminal (Defaults requiretty), and wsp's commands over ssh have none; turn it off for maya with Defaults:maya !requiretty, or add root@box instead");
+      expect((said as Error).message).not.toContain("passwordless");
+    }
+    // An alias: the line names the ssh config road as well.
+    expect(placeNoRootLine("studio", "maya", "studio")).toBe("studio logs in as maya, who cannot run commands as root with sudo there, and wsp needs root to keep itself running as a system service; add root@studio instead, put User root under Host studio in your ssh config, or give maya passwordless sudo");
+  });
+
+  it("asks for the password where the read said free and the adopt under sudo -n was refused for one, never the login's refusal", async () => {
+    const box = fakeBox("x86_64", "bash", { road: "free", minusNRefused: true, tries: pw => (pw === "right" ? "taken" : "wrong") });
+    const said = await placeInstaller({ backend: box.backend as never, ...assets(tmp("sudo-mixed"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage).catch((e: unknown) => e as Error & { kind?: string });
+    expect(said).not.toBeInstanceOf(PlaceLoginRefusedError);
+    expect(said).toMatchObject({ kind: PLACE_SUDO_KIND, message: expect.stringMatching(/^sudo on maya@box asks for maya's password\./) });
+    expect(box.stages.filter(line => /^root /.test(line))).toEqual(["root running", expect.stringMatching(/^root failed \(sudo on maya@box asks/)]);
+    expect(box.ran).toEqual([]);
+    // With the password it is tried, ridden, and the install goes on.
+    const typed = fakeBox("x86_64", "bash", { road: "free", minusNRefused: true, checks: ["uid 0", "systemd yes", "cgroup2 yes"], tries: pw => (pw === "right" ? "taken" : "wrong") });
+    await placeInstaller({ backend: typed.backend as never, ...assets(tmp("sudo-mixed-typed"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"], sudoPassword: "right" }, typed.stage);
+    expect(typed.tried).toEqual(["right"]);
+    expect(typed.ridden).toEqual([{ sudoPassword: "right" }]);
+    expect(typed.stages).toContain("root done");
+  });
+
+  it("holds the box's key against the pinned one before the password is tried or anything runs as root", async () => {
+    for (const road of ["asks", "none", "free"] as const) {
+      const box = fakeBox("x86_64", "bash", { road, tries: () => "taken" });
+      const said = await placeInstaller({ backend: box.backend as never, ...assets(tmp(`sudo-pin-${road}`), [X86]) })(
+        { address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"], hostKey: "ssh-ed25519 SHA256:pinned", sudoPassword: "Tq-not-a-real-pw" },
+        box.stage,
+      ).catch((e: unknown) => e as Error);
+      expect((said as Error).message, road).toContain("not the ssh-ed25519 SHA256:pinned you pinned");
+      // The read as the login ran, which is the dial that wrote the key; no password tried, no road to root ridden,
+      // nothing adopted or run.
+      expect(box.order, road).toEqual(["read"]);
+      expect(box.tried).toEqual([]);
+      expect(box.ridden).toEqual([]);
+      expect(box.ran).toEqual([]);
+    }
   });
 
   it("names the chip it picked on the install line, so a wrong one is read rather than worked out later", async () => {
@@ -2318,8 +2441,11 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     ] as const;
     for (const { said, arm, gone } of cases) {
       const ran: string[] = [];
+      const asLogin: string[] = [];
       const transport: SshTransport = async (_reach, script, opts) => {
         ran.push(script);
+        if (opts.asLogin === true) asLogin.push(script);
+        if (script === SSH_SUDO_READ) return { exitCode: 0, stdout: "WSP_SUDO free\n", stderr: "" };
         if (script === SSH_READ_SCRIPT) return { exitCode: 0, stdout: `home /home/maya\narch ${said}\nuser maya\npath /usr/bin:/bin\ncpu 2\nmemkb 4194304\n`, stderr: "" };
         if (script.includes("PREFLIGHT_OK")) return { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" };
         if (script.includes("WSP_BYTES_OK")) return { exitCode: 0, stdout: "WSP_BYTES_OK\n", stderr: "" };
@@ -2335,6 +2461,9 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       const deploy = ran.find(script => script.includes(`case "$(uname -m)" in`))!;
       expect(deploy).toContain(arm);
       expect(deploy).not.toContain(gone);
+      // Only the read of the road to root runs as the login; with sudo asking for nothing, every script after it
+      // rides the client's own road to root.
+      expect(asLogin).toEqual([SSH_SUDO_READ]);
     }
   });
 
@@ -2351,6 +2480,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       const ran: string[] = [];
       const transport: SshTransport = async (_reach, script) => {
         ran.push(script);
+        if (script === SSH_SUDO_READ) return { exitCode: 0, stdout: "WSP_SUDO root\n", stderr: "" };
         return script === SSH_READ_SCRIPT
           ? { exitCode: 0, stdout: `home /home/maya\nsystem ${system}\narch ${arch}\nuser maya\npath /usr/bin:/bin\ncpu 2\nmemkb 4194304\n`, stderr: "" }
           : { exitCode: 0, stdout: "", stderr: "" };
@@ -2358,7 +2488,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       const backend = new SshBackend({ transport, hostKey: async () => BOX_KEY, knownHosts: async () => ({}), hostName: async reach => reach.host });
       const install = placeInstaller({ backend, ...assets(tmp(`road-${system}-${arch}`)) });
       await expect(install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {})).rejects.toThrow(line);
-      expect(ran).toEqual([SSH_READ_SCRIPT]);
+      expect(ran).toEqual([SSH_SUDO_READ, SSH_READ_SCRIPT]);
     }
     expect(noPlaceSystemLine("Darwin")).toBe("that computer is a Mac, and wsp joins only a Linux computer as a place; a Mac cannot join yet");
     expect(noPlaceSystemLine("FreeBSD")).toBe("that computer runs FreeBSD, and wsp joins only a Linux computer as a place");
@@ -2410,7 +2540,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
               ? { exitCode: 0, stdout: `${DAEMON_GONE_LINE}\n`, stderr: "" }
               : (reachAnswer(script) ?? { exitCode: 1, stdout: "WSP_STEP files\nWSP_STEP login\nWSP_STEP agent\nthe wsp-workspace apparmor profile is loaded, so workspaces isolate here\nWSP_READY\n", stderr: `${joinUnansweredLine("http://192.168.1.20:4400")}\n` }),
     };
-    const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64" }), keyFor: async () => BOX_KEY, hostNameFor: async (reach: SshReach) => reach.host };
+    const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64" }), keyFor: async () => BOX_KEY, sudoFor: async () => "root" as const, hostNameFor: async (reach: SshReach) => reach.host };
     const install = placeInstaller({ backend: backend as never, ...assets(root, [X86]) });
     const warned: string[] = [];
     const warn = vi.spyOn(console, "warn").mockImplementation((...said: unknown[]) => void warned.push(said.map(String).join(" ")));
@@ -2434,7 +2564,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       facts: async () => ({ os: "Linux 6.8.0" }),
       run: async (script: string) => (script.includes("PREFLIGHT_OK") ? { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" } : (reachAnswer(script) ?? { exitCode: 0, stdout: "DAEMON_UP\n", stderr: "" })),
     };
-    const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64" }), keyFor: async () => BOX_KEY, hostNameFor: async (reach: SshReach) => reach.host };
+    const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64" }), keyFor: async () => BOX_KEY, sudoFor: async () => "root" as const, hostNameFor: async (reach: SshReach) => reach.host };
     const install = placeInstaller({ backend: backend as never, ...assets(root) });
     // Without a key: the login alone, in the spelling a person would type back.
     expect(await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {})).toEqual({ name: "box", ssh: "maya@box" });
@@ -2477,6 +2607,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const backend = {
       adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64", hostKey: BOX_KEY }),
       keyFor: async () => BOX_KEY,
+      sudoFor: async () => "root" as const,
       hostNameFor: async (reach: SshReach) => reach.host,
       knownHostsEntry: async () => ({ file: "/home/maya/.ssh/known_hosts", target: "box" }),
     };
@@ -2526,6 +2657,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const root = tmp("install-refused");
     const backend = {
       adopt: async () => Promise.reject(new Error("maya@box: Permission denied (publickey).")),
+      sudoFor: async () => "root" as const,
       hostNameFor: async (reach: SshReach) => reach.host,
       keyFor: async () => "ssh-ed25519 SHA256:abc",
       // This computer's config points the file somewhere other than the default the plan line names, so the step
@@ -2575,7 +2707,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     // removes it is the client's own reading, never one built here from maya@box, which would remove nothing.
     const other = {
       ...(box.backend as Record<string, unknown>),
-      adopt: async () => ({ ...(await (box.backend as { adopt: () => Promise<object> }).adopt()), hostKey: "ssh-ed25519 SHA256:somebody-else" }),
+      keyFor: async () => "ssh-ed25519 SHA256:somebody-else",
       knownHostsEntry: async () => ({ file: "/Users/lena/.ssh/known_hosts_work", target: "[10.0.0.5]:2222" }),
     };
     const install = placeInstaller({ backend: other as never, ...assets(tmp("wrong-key"), [X86]) });
@@ -2583,7 +2715,8 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       hostKeyMismatchRefusal({ address: "maya@box", pinned: BOX_KEY, wrote: "ssh-ed25519 SHA256:somebody-else", target: "[10.0.0.5]:2222", file: "/Users/lena/.ssh/known_hosts_work" }),
     );
     expect(box.landed).toEqual([]);
-    // The read that adopted it ran, since the key ssh writes is read after the dial; nothing of wsp's followed it.
+    // The read as the login ran, since the key ssh writes is read after the dial; nothing of wsp's followed it.
+    expect(box.order).toEqual(["read"]);
     expect(box.ran).toEqual([]);
 
     // The same key, given as the bare fingerprint a person reads off ssh-keygen, is the key that answered.
@@ -2643,6 +2776,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const root = tmp("install-nokey");
     const backend = {
       adopt: async () => Promise.reject(new Error("ssh: connect to host box port 22: Connection refused")),
+      sudoFor: async () => Promise.reject(new Error("ssh: connect to host box port 22: Connection refused")),
       hostNameFor: async (reach: SshReach) => reach.host,
       keyFor: async () => undefined,
       knownHostsEntry: async () => ({ file: "/home/maya/.ssh/known_hosts", target: "box" }),
@@ -2661,7 +2795,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const kindOf = async (install: Promise<unknown>): Promise<unknown> => (await install.then(() => expect.unreachable(), (e: unknown) => e as { kind?: unknown }))!.kind;
 
     const refused = fakeBox("x86_64");
-    const denied = { ...(refused.backend as Record<string, unknown>), adopt: async () => Promise.reject(new Error("maya@box: Permission denied (publickey).")) };
+    const denied = { ...(refused.backend as Record<string, unknown>), sudoFor: async () => Promise.reject(new Error("maya@box: Permission denied (publickey).")) };
     const login = placeInstaller({ backend: denied as never, ...assets(tmp("kind-login"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: urls }, refused.stage);
     await expect(login).rejects.toBeInstanceOf(PlaceLoginRefusedError);
     expect(await kindOf(login)).toBe(PLACE_LOGIN_REFUSED_KIND);
@@ -2679,12 +2813,12 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       ["shell", fakeBox("x86_64", "zsh"), {}],
       ["chip", fakeBox("riscv64"), {}],
       ["unsaid chip", fakeBox(undefined), {}],
-      ["mismatch", pinnedOther, { adopt: async () => ({ ...(await (pinnedOther.backend as { adopt: () => Promise<object> }).adopt()), hostKey: "ssh-ed25519 SHA256:somebody-else" }) }, BOX_KEY],
+      ["mismatch", pinnedOther, { keyFor: async () => "ssh-ed25519 SHA256:somebody-else" }, BOX_KEY],
     ];
     for (const [what, box, over, hostKey] of after) {
       const install = placeInstaller({ backend: { ...(box.backend as Record<string, unknown>), ...over } as never, ...assets(tmp(`kind-${what.replace(" ", "-")}`), [X86]) });
       expect(await kindOf(install({ address: "root@spoo", code: "7QK3M2VD", hostUrls: urls, ...(hostKey === undefined ? {} : { hostKey }) }, box.stage)), what).toBeUndefined();
-      expect(box.stages, what).toEqual(["connect running", kept]);
+      expect(box.stages, what).toEqual(["connect running", what === "mismatch" ? "host-key done (ssh-ed25519 SHA256:somebody-else)" : kept]);
       expect(box.landed, what).toEqual([]);
     }
 
@@ -3488,8 +3622,23 @@ describe("wsp's own login files on a computer already joined, written by every u
         return answer;
       },
     };
-    return { ran, landed, backend: { adopt: async () => ({ machine, login: { HOME: home, PATH: "/usr/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, system, arch: "x86_64" }) } };
+    const ridden: SshRiding[] = [];
+    const backend = {
+      adopt: async () => ({ machine, login: { HOME: home, PATH: "/usr/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, system, arch: "x86_64" }),
+      riding: (riding: SshRiding) => (ridden.push(riding), backend),
+    };
+    return { ran, landed, ridden, backend };
   };
+
+  it("rides the password the login's sudo took for an update over ssh, and none where none came with it", async () => {
+    const box = fakeBox();
+    await placeUpdater({ daemonDir: daemonDir(), backend: box.backend as never })({ placeId: "p_1", name: "spoo", report: reportOf(), daemon: true, ssh: { ssh: "maya@box" }, sudoPassword: "Tq-not-a-real-pw" });
+    expect(box.ridden).toEqual([{ sudoPassword: "Tq-not-a-real-pw" }]);
+    expect(box.ran.join("\n")).not.toContain("Tq-not-a-real-pw");
+    const plain = fakeBox();
+    await placeUpdater({ daemonDir: daemonDir(), backend: plain.backend as never })({ placeId: "p_1", name: "spoo", report: reportOf(), daemon: true, ssh: { ssh: "maya@box" } });
+    expect(plain.ridden).toEqual([]);
+  });
 
   it("sends them over the link as one exec ahead of the first frame of the swap, in the text the deploy writes", async () => {
     const { link, frames } = fakeLink();
@@ -3673,9 +3822,9 @@ describe("the update over the ssh road, where the link is down", () => {
 describe("the leave over the ssh road, which a remove takes wherever this host holds a login", () => {
   /** One ssh child, as the transport sees it: the dial it was given and the line it was asked to run. */
   const leaver = (answer: { exitCode: number; stdout?: string; stderr?: string }) => {
-    const asked: { reach: SshReach; script: string }[] = [];
-    const transport: SshTransport = async (reach, script) => {
-      asked.push({ reach, script });
+    const asked: { reach: SshReach; script: string; sudoPassword?: string }[] = [];
+    const transport: SshTransport = async (reach, script, opts) => {
+      asked.push({ reach, script, ...(opts.sudoPassword === undefined ? {} : { sudoPassword: opts.sudoPassword }) });
       return { exitCode: answer.exitCode, stdout: answer.stdout ?? "", stderr: answer.stderr ?? "" };
     };
     return { asked, leave: placeLeaver({ transport }) };
@@ -3821,6 +3970,105 @@ describe("the leave over the ssh road, which a remove takes wherever this host h
     // go and not only the files.
     expect(await leave(asking())).toContain(`systemd system unit ${unit.name} (stopped)`);
     expect(await leave(asking())).toContain(placeFilePath(home));
+  });
+});
+
+describe("root over a login whose sudo asks for a password, for a remove and an update", () => {
+  /** A box whose login read and password try answer the way sudo there would. */
+  const box = (road: string, tried: { stdout?: string; stderr?: string } = {}) => {
+    const asked: { script: string; asLogin?: boolean; stdin?: string; sudoPassword?: string }[] = [];
+    const transport: SshTransport = async (_reach, script, opts) => {
+      asked.push({ script, ...(opts.asLogin === true ? { asLogin: true } : {}), ...(opts.stdin === undefined ? {} : { stdin: Buffer.from(opts.stdin).toString() }), ...(opts.sudoPassword === undefined ? {} : { sudoPassword: opts.sudoPassword }) });
+      if (script === SSH_SUDO_READ) return { exitCode: 0, stdout: `WSP_SUDO ${road}\n`, stderr: "" };
+      return { exitCode: tried.stdout === undefined ? 1 : 0, stdout: tried.stdout ?? "", stderr: tried.stderr ?? "" };
+    };
+    return { asked, transport };
+  };
+  const KEPT = "ssh-ed25519 SHA256:kept-at-the-add";
+  const login = { ssh: "maya@box", hostKey: KEPT };
+  const act = { verb: "remove" as const, name: "vps" };
+  /** The key the box answers with now, as this computer's ssh client reads it, and where it wrote it. */
+  const keys = (now: string | undefined = KEPT) => ({ hostKey: async () => now, knownHosts: async () => ({ file: "/root/.ssh/known_hosts", target: "box" }) });
+
+  it("refuses with the add's kind and the remove's own fix where sudo asks, and tries a typed password as the login", async () => {
+    const asks = box("asks", { stdout: "WSP_SUDO taken\n" });
+    const read = placeSudoReader({ transport: asks.transport, ...keys() });
+    const said = await read(login, undefined, act).catch((e: unknown) => e as Error & { kind?: string; fix?: string });
+    expect(said).toMatchObject({ kind: PLACE_SUDO_KIND, message: "sudo on maya@box asks for maya's password. Type it in the app's Remove confirm, or at wsp remove vps in a terminal, which hand it to sudo there and keep it nowhere." });
+    expect(await read(login, "Tq-not-a-real-pw", act)).toBe("taken");
+    expect(asks.asked.map(a => [a.script === SSH_SUDO_READ ? "read" : "try", a.asLogin, a.stdin])).toEqual([["read", true, undefined], ["read", true, undefined], ["try", true, "Tq-not-a-real-pw\n"]]);
+    const update = await read(login, undefined, { verb: "update", name: "vps" }).catch((e: unknown) => e as Error);
+    expect((update as Error).message).toContain("Type it at wsp add vps --update in a terminal");
+    expect(await placeSudoReader({ transport: box("free").transport, ...keys() })(login, "stray", act)).toBe("free");
+    await expect(placeSudoReader({ transport: box("tty").transport })(login, undefined, act)).rejects.toThrow("Defaults:maya !requiretty");
+  });
+
+  it("holds the box's key against the one the add kept before the password is asked for or tried, and refuses a record that kept none", async () => {
+    // The add's own mismatch line tells a person to take the old entry out; after that ssh's accept-new takes any
+    // key, so the remove that follows is held against the record's key, not ssh's.
+    const changed = box("asks", { stdout: "WSP_SUDO taken\n" });
+    const said = await placeSudoReader({ transport: changed.transport, ...keys("ssh-ed25519 SHA256:somebody-else") })(login, "Tq-not-a-real-pw", act).catch((e: unknown) => e as Error & { kind?: string });
+    expect((said as Error).message).toBe(hostKeyMismatchRefusal({ address: "maya@box", pinned: KEPT, wrote: "ssh-ed25519 SHA256:somebody-else", target: "box", file: "/root/.ssh/known_hosts" }));
+    expect((said as { kind?: string }).kind).toBeUndefined();
+    expect(changed.asked.map(a => a.script)).toEqual([SSH_SUDO_READ]);
+    expect(changed.asked.some(a => a.stdin !== undefined || a.sudoPassword !== undefined)).toBe(false);
+    // A record made before the key was kept, or one whose add could read none: no password road at all.
+    const bare = box("asks", { stdout: "WSP_SUDO taken\n" });
+    await expect(placeSudoReader({ transport: bare.transport, ...keys() })({ ssh: "maya@box" }, "Tq-not-a-real-pw", act)).rejects.toThrow(placeNoKeyForSudoLine("maya@box", "box"));
+    expect(bare.asked.map(a => a.script)).toEqual([SSH_SUDO_READ]);
+    expect(placeNoKeyForSudoLine("maya@box", "box")).toContain("remove it as root@box");
+    // A login that reaches root with no password sends none, so it is not held to a key it never needed.
+    expect(await placeSudoReader({ transport: box("free").transport, ...keys("ssh-ed25519 SHA256:somebody-else") })({ ssh: "maya@box" }, undefined, act)).toBe("free");
+  });
+
+  it("hands the password the remove carries to the leave and the scripts it runs over ssh, as sudo's input and never their own", async () => {
+    const asked: { script: string; sudoPassword?: string }[] = [];
+    const transport: SshTransport = async (_reach, script, opts) => {
+      asked.push({ script, ...(opts.sudoPassword === undefined ? {} : { sudoPassword: opts.sudoPassword }) });
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    await placeLeaver({ transport })({ placeId: "p_1", name: "vps", report: { wsp: ["wsp"] } as unknown as PlaceReport, ssh: login, sudoPassword: "Tq-not-a-real-pw" });
+    await placeRunner({ transport })(login, "true", 1000, "Tq-not-a-real-pw");
+    await placeRunner({ transport })(login, "true", 1000);
+    expect(asked.map(a => a.sudoPassword)).toEqual(["Tq-not-a-real-pw", "Tq-not-a-real-pw", undefined]);
+    expect(asked.map(a => a.script).join("\n")).not.toContain("Tq-not-a-real-pw");
+  });
+
+  it("says an undo on a box whose sudo asks for a password stays undone, with the line to run there", async () => {
+    const transport: SshTransport = async () => ({ exitCode: 1, stdout: "", stderr: "sudo: a password is required\n" });
+    await expect(placeUndoer({ transport })(login, "true")).rejects.toThrow(placeUndoNeedsSudoLine("maya@box"));
+    expect(placeUndoNeedsSudoLine("maya@box")).toContain("log in there and run wsp leave");
+  });
+
+  it("asks at the terminal once for a remove the host refused for the password, and removes again carrying it", async () => {
+    const home = tmp("remove-sudo");
+    const asked: string[] = [];
+    const io = { ...captured(), isTTY: true, askSecret: async (q: string) => (asked.push(q), "Tq-not-a-real-pw") };
+    const removes: (string | undefined)[] = [];
+    const dial = () =>
+      Promise.resolve({
+        request: (op: string, params?: Record<string, unknown>) => {
+          if (op === "places.list") return Promise.resolve({ places: [{ id: "p_1", kind: "computer", name: "vps", default: true, joinedAt: new Date(0).toISOString(), road: { ssh: "maya@box" } }] } as never);
+          if (op === "places.remove") {
+            removes.push(params?.["sudoPassword"] as string | undefined);
+            if (params?.["sudoPassword"] === undefined) return Promise.reject(Object.assign(new Error("maya@box runs sudo only with maya's password. Type it at wsp remove vps in a terminal."), { kind: PLACE_SUDO_KIND }));
+            return Promise.resolve({ removed: true, swept: [] } as never);
+          }
+          if (op === "devices.list") return Promise.resolve({ devices: [] } as never);
+          return Promise.reject(new Error(`unexpected op ${op}`));
+        },
+        events: () => Promise.resolve(),
+        onFrame: () => () => {},
+        closed: Promise.resolve(),
+        closeWords: () => "",
+        close: () => {},
+        drop: () => {},
+      } as never);
+    const opts = { statePath: join(home, "state.json"), home, env: { HOME: home, WSP_HOME: home } };
+    expect(await removeCommand(io, opts, ["vps"], { dial, now: () => 0, run: fakeRunner().run, platform: "linux", checkKey: async () => ({ state: "taken" }), ...noBoxSignIn })).toBe(0);
+    expect(asked).toEqual([sudoPasswordAsk("maya@box", false)]);
+    expect(removes).toEqual([undefined, "Tq-not-a-real-pw"]);
+    expect(io.screen).not.toContain("Tq-not-a-real-pw");
   });
 });
 

@@ -15,19 +15,19 @@ import {
   HOST_BEAT_MS,
   LOGIN_NO_KEY_REFUSAL,
   NO_HOSTS_LINE,
-  PAIR_CODE_ALPHABET,
-  PAIR_CODE_LENGTH,
   deviceAdmissionTranscript,
   fmtDuration,
   hostDroppedLine,
   hostKeyMovedLine,
   hostsTable,
+  isPairCode,
   isUrl,
   pairToken,
   readJoinToken,
   relayQuietLine,
   relayUrlOf,
   runForTheList,
+  sentPairCode,
   unknownWordLine,
   usageRefusal,
   type AccountDevice,
@@ -193,10 +193,7 @@ export function signAdmission(pair: PlaceKeyPair, device: string, at: number): A
 
 /** A word that is a code and nothing else: the alphabet's characters and the dash the screens group them with, at
  * the length a code is. What tells a code somebody cut the key off from the id of a computer on the account. */
-function isCodeAlone(word: string): boolean {
-  const letters = word.replace(/-/g, "").toUpperCase();
-  return letters.length === PAIR_CODE_LENGTH && [...letters].every(letter => PAIR_CODE_ALPHABET.includes(letter));
-}
+const isCodeAlone = (word: string): boolean => isPairCode(sentPairCode(word));
 
 interface RelayHostView {
   id: string;

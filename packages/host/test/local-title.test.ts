@@ -79,7 +79,7 @@ describe("the title a thread on this computer gets", () => {
   });
 
   it("is asked of the binary under the store the person's own shell would read, in the mode that still reads their sign-in", async () => {
-    const wiring = localWiring(home, { HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}`, CLAUDE_CONFIG_DIR: store }, fakeDaemonStart, undefined, copyingFake());
+    const wiring = localWiring(home, { HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}`, CLAUDE_CONFIG_DIR: store }, fakeDaemonStart, join(home, ".wsp", "state.json"), copyingFake());
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: titlingClaude }, local: wiring });
     runtimes.push(rt);
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
@@ -104,7 +104,7 @@ describe("the title a thread on this computer gets", () => {
   it("names no store and no sandbox when the person's shell names none, so the binary reads its own default and their Keychain login", async () => {
     // Claude keys its Keychain item by whether CLAUDE_CONFIG_DIR is set, so setting it to the default folder hides a
     // claude.ai login (measured on 2.1.257); IS_SANDBOX is a machine's fact and this computer is not one.
-    const wiring = localWiring(home, { HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}` }, fakeDaemonStart, undefined, copyingFake());
+    const wiring = localWiring(home, { HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}` }, fakeDaemonStart, join(home, ".wsp", "state.json"), copyingFake());
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: titlingClaude }, local: wiring });
     runtimes.push(rt);
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });

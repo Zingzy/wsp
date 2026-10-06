@@ -15,12 +15,14 @@
 // thread: the runtime runs a workspace's threads side by side and holds
 // each to one turn, so a fresh view owes the left one nothing.
 import { isProjectHomeKey } from "../../protocol/store";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { isSessionEvent } from "@wsp/protocol";
 import type { AttachmentRecord, SessionEvent, SessionHarness, SessionRunEvent, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
-import type { ProtocolEvent } from "../../protocol/client";
-import { deriveSession, entryTurnId, type TimelineEntry, type TurnPlan, type TurnSummary } from "./adapt";
+import type { Api, ProtocolEvent } from "../../protocol/client";
+import { createSessionFold } from "../../adapt/session";
+import { entryTurnId, type TimelineEntry, type TurnPlan, type TurnSummary } from "./adapt";
+import { comesAfter, liveIndex, transcripts, type HeldFold, type HeldThread } from "./transcripts";
 
 export interface ChatThreadView {
   readonly entries: ReadonlyArray<TimelineEntry>;
@@ -51,8 +53,16 @@ export interface ChatThreadView {
 
 export interface ChatThreadHandle {
   readonly view: ChatThreadView;
-  /** False until the history reply for this workspace has landed. */
+  /** False until the history reply for this workspace has landed, or the thread's head has. */
   readonly hydrated: boolean;
+  /** What the thread runs on before its transcript says it: its head's facts, else its latest row. Null for a view
+   * pinned to no thread and for a fresh one. */
+  readonly facts: ThreadSeed | null;
+  /** Asks for the thread's events before the oldest held, where the transcripts hold it; nothing otherwise. */
+  readonly older: () => void;
+  /** Moves when the view takes another thread's rows, and not when a pin names the thread it already shows: the list
+   * is drawn anew, at its end, for a thread it did not just show. */
+  readonly drawKey: string;
   /** True while this thread's turn is running or its send is in flight. */
   readonly busy: boolean;
   /** True from a send until its session.start lands (or its turn ends without one). */
@@ -72,6 +82,14 @@ export interface ChatThreadHandle {
   readonly setSending: (sending: boolean) => void;
   /** Clears the visible thread and marks the next send as a fresh session. */
   readonly startNewThread: () => void;
+}
+
+/** The agent, model, access and folder a pinned thread runs on, read before its transcript arrives. */
+export interface ThreadSeed {
+  readonly harness: string;
+  readonly model?: string | undefined;
+  readonly permissionMode?: string | undefined;
+  readonly cwd?: string | undefined;
 }
 
 /** Where a send's rows waited and where its start took them. */
@@ -129,27 +147,6 @@ function heldRows(state: ThreadState): HeldRow[] {
 
 function withRows(rows: ReadonlyArray<HeldRow>): Pick<ThreadState, "events" | "arrivals"> {
   return { events: rows.map(r => r.event), arrivals: rows.map(r => r.at) };
-}
-
-/**
- * Whether a row already held belongs after one arriving. Between two lines of one turn the runtime's own counter
- * decides, since that is the place it gave them and a restart writes the same line again under a new clock;
- * everything else is placed by the stamp the runtime wrote. `seq` never reaches a history reply, so nothing else can
- * place a reply's rows against the live ones a view holds, and a row from before the stamp existed has no order of
- * its own and keeps the place it arrived in.
- */
-function comesAfter(held: SessionEvent, arriving: SessionEvent): boolean {
-  if (
-    held.type === "session.delta" &&
-    arriving.type === "session.delta" &&
-    held.turnId === arriving.turnId &&
-    held.line !== undefined &&
-    arriving.line !== undefined
-  ) {
-    return held.line > arriving.line;
-  }
-  if (held.at === undefined || arriving.at === undefined) return false;
-  return held.at > arriving.at;
 }
 
 /**
@@ -229,8 +226,7 @@ function foldIn(held: ReadonlyArray<HeldRow>, arriving: ReadonlyArray<HeldRow>):
 /** A live row is one this view has not seen, so it is placed rather than folded: no tally, one copy per list. */
 function append(state: ThreadState, e: SessionEvent, at: string): ThreadState {
   const starts = e.type === "session.start";
-  let index = state.events.length;
-  while (index > 0 && comesAfter(state.events[index - 1]!, e)) index--;
+  const index = liveIndex(state.events, e);
   return {
     ...state,
     events: [...state.events.slice(0, index), e, ...state.events.slice(index)],
@@ -488,9 +484,36 @@ function sentEntry(sent: Kept): TimelineEntry {
   };
 }
 
+/** Whether a fold already holds the first of these events, the same objects in the same places, so only the rest are
+ * folded on. A row the wire left unstamped is placed by when this client took it, so that has to match too. */
+function foldHolds(held: HeldFold, events: ReadonlyArray<SessionEvent>, arrivals: ReadonlyArray<string>): boolean {
+  const n = held.events.length;
+  if (events.length < n) return false;
+  for (let i = 0; i < n; i++) {
+    const e = events[i]!;
+    if (e !== held.events[i] || (e.at === undefined && arrivals[i] !== held.arrivals[i])) return false;
+  }
+  return true;
+}
+
+/** The fold over these events: the one held, carried on by the events past it, or a new one where they differ. */
+export function foldOver(held: HeldFold | null, events: ReadonlyArray<SessionEvent>, arrivals: ReadonlyArray<string>): HeldFold {
+  const carried = held !== null && foldHolds(held, events, arrivals);
+  const fold = carried ? held.fold : createSessionFold();
+  for (let i = carried ? held.events.length : 0; i < events.length; i++) fold.add(events[i]!, arrivals[i]);
+  return { events, arrivals, fold };
+}
+
 export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<TimelineEntry> = []): ChatThreadView {
-  const model = deriveSession(state.events, { at: (_e, index) => state.arrivals[index] });
-  const entries: TimelineEntry[] = [...model.timeline];
+  return deriveChatView(state, previous, null).view;
+}
+
+/** The view, and the fold it was read off, which the next derivation carries on from rather than folding every event
+ * again: a thread that grows by one event costs one event. */
+export function deriveChatView(state: ThreadState, previous: ReadonlyArray<TimelineEntry>, held: HeldFold | null): { view: ChatThreadView; fold: HeldFold } {
+  const fold = foldOver(held, state.events, state.arrivals);
+  const model = fold.fold.model();
+  const entries = model.timeline.slice();
   // A kept send sits above the first row its turn wrote, whatever that row is: a reply the harness managed before it
   // died, or the line the runtime left in its place. A send still in flight has no turn yet and no rows under it, so
   // it sits at the tail, and so does one whose turn left no row at all.
@@ -509,21 +532,15 @@ export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<Tim
     });
   });
   const latestTurn = model.latestTurn;
-  let cwd: string | null = null;
-  let shellCwd: string | null = null;
-  for (const e of state.events) {
-    if (e.type === "session.start" && e.cwd !== undefined) cwd = e.cwd;
-    if (e.type === "session.delta" && e.cwd !== undefined) shellCwd = e.cwd;
-  }
-  return {
+  const view: ChatThreadView = {
     entries: stabilizeEntries(entries, previous),
     turns: model.turns,
     latestTurn,
     running: model.running,
     activeTurnStartedAt: model.running ? (latestTurn?.startedAt ?? null) : null,
     settled: latestTurn !== null && !model.running ? latestTurn : null,
-    cwd,
-    shellCwd,
+    cwd: model.cwd,
+    shellCwd: model.shellCwd,
     harness: model.harness,
     model: model.model,
     agent: model.agent,
@@ -531,6 +548,26 @@ export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<Tim
     runs: model.runs,
     plan: model.plan,
   };
+  return { view, fold };
+}
+
+/** A pinned view of a thread the transcripts hold, from what they hold: the send in flight read against those rows
+ * the way the live events would have settled it, and everything else the view keeps as it was. */
+export function seedTranscript(s: ThreadState, events: ReadonlyArray<SessionEvent>, arrivals: ReadonlyArray<string>, threadId: string): ThreadState {
+  if (s.events === events && s.arrivals === arrivals && s.sending === null && s.stray === null) return s;
+  const send = replaySend(s, events, threadId);
+  return { ...s, events, arrivals, known: knowing(s.known, events), ...send, refused: replaced(send.refused, events), ...replayStray(s, events) };
+}
+
+/** What the transcripts hold of a thread, where a view can draw it: some events, or a thread that holds none. */
+function heldRowsOf(threadId: string): HeldThread | undefined {
+  const t = transcripts.get(threadId);
+  return t !== undefined && (t.events.length > 0 || t.whole) ? t : undefined;
+}
+
+/** A pinned thread on a host that answers heads and pages is read through the transcripts. */
+function readsHeld(api: Api | null, workspaceId: string, threadId: string | null): threadId is string {
+  return api !== null && threadId !== null && !isProjectHomeKey(workspaceId) && transcripts.serves();
 }
 
 interface ViewKey {
@@ -573,13 +610,20 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   // The runtime stamps a row only once the harness announced its session, so a capped pinned thread resumes by its row and a dead one resumes nothing.
   const rowThread = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.threadId);
   const rowCwd = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.cwd);
+  const latestRow = useStore(s => (threadId === null ? undefined : s.sessions[workspaceId]?.findLast(r => (r.threadId ?? r.id) === threadId)));
   const viewKey = threadId === null ? workspaceId : `${workspaceId}/${threadId}`;
+  // A host whose head refused this thread is read the old way, off the workspace's whole history.
+  const [readsWhole, setReadsWhole] = useState<string | null>(null);
+  const held = readsHeld(api, workspaceId, threadId) && readsWhole !== viewKey;
   // A view drawn for the workspace's next thread shows nothing from the first paint, as it does when the pin leaves
   // for it later: a workspace that just finished being made takes the page with no loading line between.
   const mountedFresh = fresh && threadId === null;
-  const [state, setState] = useState<ThreadState>(mountedFresh ? { ...EMPTY, fresh: true } : EMPTY);
+  // A pinned thread the transcripts already hold draws it in its first frame, with no loading line and no request.
+  const [kept] = useState(() => (!mountedFresh && held ? heldRowsOf(threadId) : undefined));
+  const [state, setState] = useState<ThreadState>(() => (mountedFresh ? { ...EMPTY, fresh: true } : kept !== undefined && threadId !== null ? seedTranscript(EMPTY, kept.events, kept.arrivals, threadId) : EMPTY));
   const [viewed, setViewed] = useState({ workspaceId, threadId });
-  const [hydratedFor, setHydratedFor] = useState<string | null>(mountedFresh ? viewKey : null);
+  const [drawn, setDrawn] = useState(0);
+  const [hydratedFor, setHydratedFor] = useState<string | null>(mountedFresh || kept !== undefined ? viewKey : null);
   const hydratedRef = useRef<string | null>(null);
   /** Moves when a rewind on this workspace lands: its transcript lost turns, so the thread is read again. */
   const [rewinds, setRewinds] = useState(0);
@@ -587,10 +631,14 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
    * would drop what the socket pushes between the ask and it. Taken once, so a gap still rebuilds. */
   const carriedRef = useRef<string | null>(mountedFresh ? viewKey : null);
   const previousEntries = useRef<ReadonlyArray<TimelineEntry>>([]);
+  const foldRef = useRef<HeldFold | null>(null);
+  const heldRef = useRef(held);
+  heldRef.current = held;
 
   if (viewed.workspaceId !== workspaceId || viewed.threadId !== threadId) {
     const from = viewed;
     setViewed({ workspaceId, threadId });
+    const next = held ? heldRowsOf(threadId) : undefined;
     // A pin landing on the thread this view already holds is the same reading under a new name: the transcript
     // stays, so a view whose own first turn opened the thread it is now pinned to never blinks through loading.
     if (from.workspaceId === workspaceId && from.threadId === null && threadId !== null && heldThreadId(state) === threadId) {
@@ -602,8 +650,14 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
       carriedRef.current = viewKey;
       setHydratedFor(viewKey);
       setState(s => ({ ...EMPTY, fresh: true, known: knowing(s.known, s.events), stray: s.stray }));
+    } else if (next !== undefined && threadId !== null) {
+      carriedRef.current = null;
+      setDrawn(n => n + 1);
+      setHydratedFor(viewKey);
+      setState(s => seedTranscript(leaveView(s, from, { workspaceId, threadId }), next.events, next.arrivals, threadId));
     } else {
       carriedRef.current = null;
+      setDrawn(n => n + 1);
       setState(s => leaveView(s, from, { workspaceId, threadId }));
     }
   }
@@ -618,7 +672,38 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     if (carriedRef.current === viewKey) {
       carriedRef.current = null;
       hydratedRef.current = viewKey;
-      return;
+      // The rows in hand are drawn as they are; a thread the transcripts can hold is still read through them, so the
+      // next time it is shown it is drawn from what they hold.
+      if (!held) return;
+    }
+    if (held) {
+      let current = true;
+      let epoch = -1;
+      const release = transcripts.show(threadId);
+      const wholeInstead = () => {
+        if (current) setReadsWhole(viewKey);
+      };
+      // Every time the thread's rows change other than by a live event, the view takes them; a live event it folds
+      // itself, off the same bus, after the transcripts did.
+      const take = () => {
+        const t = transcripts.get(threadId);
+        if (!current || t === undefined) return;
+        if (t.stale) void transcripts.open(workspaceId, threadId).catch(wholeInstead);
+        if (t.epoch === epoch || (t.events.length === 0 && !t.whole)) return;
+        epoch = t.epoch;
+        setState(s => seedTranscript(s, t.events, t.arrivals, threadId));
+        hydratedRef.current = viewKey;
+        setHydratedFor(viewKey);
+      };
+      const off = transcripts.listen(threadId, take);
+      take();
+      void transcripts.open(workspaceId, threadId).catch(wholeInstead);
+      return () => {
+        current = false;
+        off();
+        release();
+        hydratedRef.current = null;
+      };
     }
     let current = true;
     api.sessionHistory(workspaceId).then(
@@ -641,29 +726,53 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
       current = false;
       hydratedRef.current = null;
     };
-  }, [api, workspaceId, threadId, viewKey, gaps, rewinds]);
+    // The transcripts keep a held thread fresh themselves, so a gap or a rewind reads it again through them.
+  }, [api, workspaceId, threadId, viewKey, held, held ? 0 : gaps, held ? 0 : rewinds]);
 
   const onEvent = useCallback(
     (e: ProtocolEvent) => {
       if (e.type === "thread.rewound" && e.workspaceId === workspaceId) {
-        setRewinds(n => n + 1);
+        if (!heldRef.current) setRewinds(n => n + 1);
         return;
       }
       if (hydratedRef.current !== viewKey) return;
       if (!isSessionEvent(e) || e.workspaceId !== workspaceId) return;
-      setState(s => reduceEvent(s, e, now(), threadId));
+      if (heldRef.current && transcripts.dropped(e)) return;
+      const at = (heldRef.current ? transcripts.arrivedAt(e) : undefined) ?? now();
+      setState(s => reduceEvent(s, e, at, threadId));
     },
     [workspaceId, threadId, viewKey],
   );
   useProtocolEvents(onEvent);
 
+  const heldFacts = useSyncExternalStore(
+    useCallback(fn => (threadId === null ? () => {} : transcripts.listen(threadId, fn)), [threadId]),
+    () => (threadId === null ? null : (transcripts.get(threadId)?.facts ?? null)),
+  );
+  const facts = useMemo<ThreadSeed | null>(() => {
+    if (threadId === null || state.fresh) return null;
+    if (heldFacts !== null) return { harness: heldFacts.harness, model: heldFacts.model, permissionMode: heldFacts.permissionMode, cwd: heldFacts.cwd };
+    return latestRow === undefined ? null : { harness: latestRow.harness, model: latestRow.model, permissionMode: latestRow.permissionMode, cwd: latestRow.cwd };
+  }, [heldFacts, latestRow, state.fresh, threadId]);
+
   // A view without a start resumes its row: pinned, always; on the latest view, only while it is empty.
   const fromRow = !state.fresh && startedSession(state.events) === undefined && (threadId !== null || state.events.length === 0);
   const view = useMemo(() => {
-    const next = deriveChatThread(state, previousEntries.current);
+    const carried = (held ? transcripts.fold(threadId) : undefined) ?? foldRef.current;
+    const { view: next, fold } = deriveChatView(state, previousEntries.current, carried);
+    foldRef.current = fold;
+    if (held) transcripts.keepFold(threadId, fold);
     previousEntries.current = next.entries;
-    return fromRow && rowCwd !== undefined ? { ...next, cwd: rowCwd } : next;
-  }, [state, fromRow, rowCwd]);
+    if (!fromRow) return next;
+    // Before a start is in view, the thread's head or row says what it runs on, so the composer draws the thread's own
+    // agent, model and access rather than the project's defaults.
+    const cwd = next.cwd ?? rowCwd ?? facts?.cwd ?? null;
+    if (facts === null) return cwd === next.cwd ? next : { ...next, cwd };
+    return { ...next, cwd, agent: next.agent ?? facts.harness, model: next.model ?? facts.model ?? null, permissionMode: next.permissionMode ?? facts.permissionMode ?? null };
+  }, [state, fromRow, rowCwd, facts, held, threadId]);
+  const older = useCallback(() => {
+    if (heldRef.current && threadId !== null) void transcripts.older(threadId).catch(() => {});
+  }, [threadId]);
   const setSending = useCallback(
     (sending: boolean) =>
       setState(s => {
@@ -692,6 +801,9 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   return {
     view,
     hydrated: hydratedFor === viewKey,
+    facts,
+    older,
+    drawKey: `${drawn}`,
     busy: state.sending !== null || view.running,
     sending: state.sending !== null,
     fresh: state.fresh,

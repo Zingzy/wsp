@@ -279,7 +279,7 @@ describe("composer checkout row", () => {
     provideTerminals(WS, null);
   });
 
-  it("asks again as a running turn moves while the branch is not known, and shows nothing but the branch", async () => {
+  it("asks again when a running turn's call finishes while the branch is not known, not on every line, and shows nothing but the branch", async () => {
     // A thread opened on a copy that is still being made asks before the copy's folder is there; the turn then runs,
     // and a row that held that first failure for the whole turn printed its placeholder word over a copy on main.
     let made = false;
@@ -292,7 +292,12 @@ describe("composer checkout row", () => {
     await settle();
     expect(branchSlot()!.textContent).toBe("");
     made = true;
+    const asked = wire.calls.filter(([op]) => op === "git.status").length;
+    // The call opening is a line like any other: each read that lands is a commit of its own, so it asks nothing.
     emit(CHAT_STREAM[3]! as unknown as EventUnion);
+    await settle();
+    expect(wire.calls.filter(([op]) => op === "git.status").length).toBe(asked);
+    emit(CHAT_STREAM[4]! as unknown as EventUnion);
     await waitFor(() => expect(branch()).toBe("main"));
     expect(branchSlot()!.textContent).toBe("main");
   });

@@ -39,6 +39,12 @@ const ESCAPE = `#!/bin/bash
 ${JSON.stringify(process.execPath)} -e 'const c = require("child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { detached: true, stdio: "ignore" }); require("fs").appendFileSync(process.env.HOME + "/escaped.pid", c.pid + "\\n"); c.unref()'
 exec "$(dirname "$0")/$1"
 `;
+/** Leaves a helper in a session of its own with an empty environment, holding the server's stdout, out of reach of
+ * both kills; then answers as \`server\` does. */
+const LEAK = `#!/bin/bash
+${JSON.stringify(process.execPath)} -e 'const c = require("child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { detached: true, env: {}, stdio: ["ignore", "inherit", "ignore"] }); require("fs").appendFileSync(process.env.HOME + "/escaped.pid", c.pid + "\\n"); c.unref()'
+exec "$(dirname "$0")/server"
+`;
 /** Says eight megabytes of nothing on stdout, then waits out the deadline. */
 const FLOOD = `#!/bin/bash\nhead -c 8000000 /dev/zero | tr '\\0' x\nsleep 60 & wait\n`;
 /** Claude Code's single-server check as its words read, for a server whose sign-in it holds. */
@@ -105,7 +111,7 @@ function fixture(): Fixture {
   mkdirSync(home);
   mkdirSync(bin);
   mkdirSync(join(root, "tmp"));
-  for (const [name, text] of Object.entries({ server: SERVER, mute: MUTE, crash: CRASH, claude: CLAUDE, escape: ESCAPE, flood: FLOOD, refuses: REFUSES })) {
+  for (const [name, text] of Object.entries({ server: SERVER, mute: MUTE, crash: CRASH, claude: CLAUDE, escape: ESCAPE, leak: LEAK, flood: FLOOD, refuses: REFUSES })) {
     writeStub(join(bin, name), text);
   }
   return { root, home, bin, config: servers => writeFileSync(join(home, ".claude.json"), JSON.stringify({ mcpServers: servers })) };
@@ -184,6 +190,8 @@ function box(f: Fixture): { machine: Pick<Machine, "exec">; lines: string[] } {
         child.stdout.on("data", c => (stdout += c));
         child.stderr.on("data", c => (stderr += c));
         child.on("close", code => resolve({ exitCode: code ?? 1, stdout, stderr }));
+        // A line that never reads its stdin can exit before the frame is written; the frame is lost either way.
+        child.stdin.on("error", () => {});
         child.stdin.end(o?.stdin ?? Buffer.alloc(0));
       });
     },
@@ -314,7 +322,7 @@ describe("one MCP server's tools, on the person's ask", () => {
     f.config(Object.fromEntries(names.map(n => [n, { command: join(f.bin, "counted"), args: [n], env: { FAKE_TOKEN: SECRET } }])));
     const reader = agentsReader({ vault: () => ({}), here: () => here(f) });
     const answers = await Promise.all(names.map(name => reader.tools({ kind: "here" }, { key: "here", agent: "claude", name })));
-    expect(answers.map(a => a.auth)).toEqual(names.map(() => "connected"));
+    expect(answers.map(a => a.auth), JSON.stringify(answers.map(a => a.refused))).toEqual(names.map(() => "connected"));
     const peaks = readFileSync(join(f.home, "peak"), "utf8").trim().split("\n").map(Number);
     expect(peaks).toHaveLength(6);
     expect(Math.max(...peaks)).toBeLessThanOrEqual(4);
@@ -394,6 +402,38 @@ describe("one MCP server's tools, on the person's ask", () => {
     expect(starts()).toBe(2);
     await expect(reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "nobody" })).rejects.toThrow(noSuchServerRefusal("nobody", "Claude Code"));
   }, 20_000);
+
+  it("says a server exited before it answered when its readers start late, as they do on a loaded computer", async () => {
+    const f = fixture();
+    // The readers copy what a server says with dd, so a dd that starts late is a reader still opening its file when the server is gone.
+    writeStub(join(f.bin, "dd"), `#!/bin/bash\nsleep 1\nexec /bin/dd "$@"\n`);
+    f.config({ crash: { command: join(f.bin, "crash"), args: [] } });
+    const logged: string[] = [];
+    const crashed = await agentsReader({ vault: () => ({}), here: () => here(f), log: line => logged.push(line) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "crash" });
+    expect(crashed).toMatchObject({ auth: "failed", refused: "it exited with 1 before it answered" });
+    expect(logged.join("\n")).toContain("airtable: AIRTABLE_API_KEY is not set");
+  }, 20_000);
+
+  it("reads a server's answer when its stderr reader never got going, rather than saying it could not be started", async () => {
+    const f = fixture();
+    // The stderr reader alone starts long after the drain's bound, as a starved process on a loaded runner does.
+    writeStub(join(f.bin, "dd"), `#!/bin/bash\ncase "$*" in *err*) sleep 30 ;; esac\nexec /bin/dd "$@"\n`);
+    f.config({ airtable: { command: join(f.bin, "server"), args: [], env: { FAKE_TOKEN: SECRET } } });
+    const answer = await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "airtable" });
+    expect(answer, JSON.stringify(answer)).toMatchObject({ auth: "connected" });
+  }, 20_000);
+
+  it("answers at once for a server whose helper escaped both kills and still holds its stdout, rather than at the deadline", async () => {
+    const f = fixture();
+    f.config({ leak: { command: join(f.bin, "leak"), args: [] } });
+    const began = Date.now();
+    const answer = await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "leak" });
+    expect(answer.auth).toBe("connected");
+    expect(answer.tools?.map(t => t.name)).toContain("list_records");
+    expect(escaped(f)).toHaveLength(1);
+    // The answer's deadline is twenty seconds; the drain's own bound is what ends the wait on the held pipe.
+    expect(Date.now() - began).toBeLessThan(10_000);
+  }, 30_000);
 
   it("asks an address over curl with its headers from a private file, and a server behind a sign-in the harness holds for the harness's word alone", async () => {
     const f = fixture();
