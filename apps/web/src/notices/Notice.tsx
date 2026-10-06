@@ -45,7 +45,7 @@ function Notice({ notice }: { notice: NoticeRecord }) {
   return (
     <div data-notice="" data-notice-id={notice.id} data-kind={notice.kind} className="flex items-start gap-3 py-3 pr-2 pl-3 font-sans">
       <Icon role="img" aria-label={word} className={cn("mt-0.5 size-4 shrink-0", tone)} />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 select-text">
         <p data-notice-title="" className="line-clamp-2 break-words text-[13px] leading-5 font-medium text-foreground">
           {notice.text}
         </p>

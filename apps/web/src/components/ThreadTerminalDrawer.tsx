@@ -541,7 +541,7 @@ function TerminalActionButton({ label, className, onClick, children }: TerminalA
         side="bottom"
         sideOffset={6}
         align="center"
-        className="pointer-events-none select-none"
+        className="pointer-events-none"
       >
         {label}
       </PopoverPopup>
