@@ -4,8 +4,9 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { fmtDuration, type SessionEvent } from "@wsp/protocol";
 import { deriveMessagesTimelineRows, deriveSession, toolGroupSummaryKind, workEntryKind } from "../src/adapt/index.js";
+import { createSessionFold } from "../src/adapt/session.js";
 import type { ToolGroupAction, ToolGroupSummaryKind, WorkLogEntry } from "../src/adapt/index.js";
-import { CHAT_STREAM, CHAT_TURN } from "./fixtures/chat-stream.js";
+import { CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { LIVE_RUN_1, LIVE_SID, sessionEventsOf } from "./fixtures/live-run-1.js";
 
 const scope = { workspaceId: "ws_t", sessionId: "sess_t" };
@@ -963,3 +964,79 @@ describe("the agent's plan", () => {
     expect(plans.map(e => e.kind === "proposed-plan" && [e.proposedPlan.turnId, e.proposedPlan.planMarkdown])).toEqual([["t1", "# Two"]]);
   });
 });
+
+describe("createSessionFold: one event at a time", () => {
+  it("reads the same model after every event as a fold of every event so far", () => {
+    const fold = createSessionFold();
+    liveEvents.forEach((e, i) => {
+      fold.add(e, liveAt(e, i));
+      if (i % 25 !== 0 && i !== liveEvents.length - 1) return;
+      const whole = deriveSession(liveEvents.slice(0, i + 1), { at: liveAt });
+      const step = fold.model();
+      expect(step.timeline).toEqual(whole.timeline);
+      expect(step.turns).toEqual(whole.turns);
+      expect([step.running, step.model, step.agent, step.permissionMode, step.cwd, step.shellCwd]).toEqual([whole.running, whole.model, whole.agent, whole.permissionMode, whole.cwd, whole.shellCwd]);
+    });
+  });
+
+  it("leaves every row it did not touch the same object, and hands out the runs map anew only when a run moved", () => {
+    const fold = createSessionFold();
+    for (const e of CHAT_STREAM) fold.add(e);
+    const before = fold.model();
+    fold.add({ type: "session.delta", workspaceId: CHAT_WS, sessionId: "sess_0001", turnId: CHAT_TURN, kind: "text", text: " more" });
+    const after = fold.model();
+    const same = after.timeline.filter((entry, i) => entry === before.timeline[i]).length;
+    expect(same).toBeGreaterThanOrEqual(before.timeline.length - 1);
+    expect(after.runs).toBe(before.runs);
+  });
+
+  it("names a row by its transcript position, so a thread held from the middle of a turn keeps its rows' names when the older events arrive", () => {
+    const turn = { workspaceId: "ws_t", sessionId: "s1", turnId: "turn_1", threadId: "thr_1" };
+    const events: SessionEvent[] = [
+      { type: "session.start", ...turn, prompt: "go", pos: 1 },
+      { type: "session.delta", ...turn, kind: "text", text: "first", pos: 2 },
+      { type: "session.delta", ...turn, kind: "tool_use", toolName: "Bash", toolUseId: "tu_1", text: "{}", pos: 3 },
+      { type: "session.delta", ...turn, kind: "tool_result", toolUseId: "tu_1", text: "ok", pos: 4 },
+      { type: "session.delta", ...turn, kind: "text", text: "second", pos: 5 },
+    ];
+    const tail = deriveSession(events.slice(3)).timeline.map(e => e.id);
+    const whole = deriveSession(events).timeline.map(e => e.id);
+    expect(tail.at(-1)).toBe(whole.at(-1));
+  });
+
+  it("names a group of calls by its last row, so the group keeps its name when its older calls arrive", () => {
+    const turn = { workspaceId: "ws_t", sessionId: "s1", turnId: "turn_1", threadId: "thr_1" };
+    const call = (n: number, pos: number): SessionEvent[] => [
+      { type: "session.delta", ...turn, kind: "tool_use", toolName: "Bash", toolUseId: `tu_${n}`, text: JSON.stringify({ command: `ls ${n}` }), pos },
+      { type: "session.delta", ...turn, kind: "tool_result", toolUseId: `tu_${n}`, text: "ok", pos: pos + 1 },
+    ];
+    const events: SessionEvent[] = [
+      { type: "session.start", ...turn, prompt: "go", pos: 1 },
+      ...call(1, 2),
+      ...call(2, 4),
+      ...call(3, 6),
+      { type: "session.delta", ...turn, kind: "text", text: "done", pos: 8 },
+      { type: "session.done", ...turn, result: { status: "completed", durationMs: 1 }, pos: 9 },
+      { type: "session.end", ...turn, exitCode: 0, sawResult: true, pos: 10 },
+    ];
+    const rows = (held: SessionEvent[]) => {
+      const model = deriveSession(held);
+      return deriveMessagesTimelineRows({ timelineEntries: model.timeline, turns: model.turns, expandedTurnIds: new Set(["turn_1"]), isWorking: false, activeTurnStartedAt: null }).filter(r => r.kind === "work-toggle").map(r => r.id);
+    };
+    expect(rows(events.slice(3))).toEqual(rows(events));
+  });
+
+  it("names a call's row by the call, so a result held without its call keeps its row's name when the call arrives", () => {
+    const turn = { workspaceId: "ws_t", sessionId: "s1", turnId: "turn_1", threadId: "thr_1" };
+    const events: SessionEvent[] = [
+      { type: "session.start", ...turn, prompt: "go", pos: 1 },
+      { type: "session.delta", ...turn, kind: "tool_use", toolName: "Bash", toolUseId: "tu_1", text: JSON.stringify({ command: "ls" }), pos: 2 },
+      { type: "session.delta", ...turn, kind: "tool_result", toolUseId: "tu_1", text: "ok", pos: 3 },
+      { type: "session.delta", ...turn, kind: "text", text: "done", pos: 4 },
+    ];
+    const ids = (held: SessionEvent[]) => deriveSession(held).timeline.map(e => e.id);
+    expect(ids(events.slice(2))).toEqual(["turn_1:call:tu_1", "turn_1:m@4"]);
+    expect(ids(events)).toEqual(["turn_1:m@1", "turn_1:call:tu_1", "turn_1:m@4"]);
+  });
+});
+
