@@ -56,6 +56,7 @@ const TOOLS_LIST = JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" 
  * answer's line, `\x1e`, then the tail of what it said on stderr. Outcome 0 answered, 1 exited first, 2 late. */
 const stdioScript = (seconds: string): string =>
   [
+    'PS4=\'+${EPOCHREALTIME} \'; set -x',
     'c=$1; shift; [ -n "$c" ] && cd "$c"',
     'd=$(mktemp -d "${TMPDIR:-/tmp}/wsp-tools.XXXXXX") || exit 1',
     "trap 'rm -rf \"$d\"' EXIT",
@@ -228,6 +229,7 @@ async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>,
   const [, head = "", err = ""] = (out ?? "").split("\x1e");
   const [status = "", ...rest] = head.split("\n");
   const [outcome, exit] = status.trim().split(" ");
+  if (out === undefined || outcome === undefined || outcome === "") console.warn("[DEBUG-st] " + JSON.stringify({ out: out === undefined ? null : out.slice(0, 600), ms: now() - began }));
   if (out === undefined || outcome === undefined || outcome === "") return { auth: "failed", refused: "it could not be started there" };
   // What a server says on stderr may carry its own key, so it goes to the host's log and never onto the page.
   if (outcome !== "0" && err.trim() !== "") log(`it said on stderr: ${err.trim()}`);

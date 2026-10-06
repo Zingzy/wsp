@@ -201,6 +201,8 @@ export function spawnRun(cmd: string, args: readonly string[], env: NodeJS.Proce
       killGroup("SIGKILL");
       child.stdout.destroy();
       child.stderr.destroy();
+      const outText = Buffer.concat(chunks).toString("utf8");
+      if (cmd === "bash" && (failed || code !== 0 || signal !== null || !outText.includes("\x1e"))) console.warn("[DEBUG-sr] " + JSON.stringify({ code, signal, failed, bytes, out: outText.slice(0, 600), err: errText }));
       resolve(!failed && code === 0 && signal === null ? Buffer.concat(chunks).toString("utf8") : undefined);
     };
     child.stdout.on("data", (b: Buffer) => {
@@ -210,7 +212,8 @@ export function spawnRun(cmd: string, args: readonly string[], env: NodeJS.Proce
         killGroup("SIGKILL");
       } else chunks.push(b);
     });
-    child.stderr.resume();
+    let errText = "";
+    child.stderr.on("data", (b: Buffer) => { errText = (errText + b.toString("utf8")).slice(-6000); });
     child.on("error", () => {
       failed = true;
       settle(null, null);
