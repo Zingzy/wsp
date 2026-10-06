@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "steps": [
+    "row-id=thread:redirect",
+    "key:ControlOrMeta+k",
+    "type:delete",
+    "key:Enter"
+  ],
+  "wait": "k=forget-refusal",
+  "mac": true,
+  "widths": [
+    1440
+  ],
+  "reason": "What this shot adds is the Mac window's glass behind the dialog's scrim; the dialog itself is shot in delete-dialog."
+}

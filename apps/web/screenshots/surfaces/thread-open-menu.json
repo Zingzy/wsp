@@ -1,0 +1,16 @@
+{
+  "at": "/",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:redirect",
+    "390:key:Escape",
+    "k=open-choose"
+  ],
+  "wait": "k=open-menu",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The Open menu drops from the page header's right edge at its own width, so 1280 draws it as 1440 does; 390 is where the header narrows, which is shot here."
+}

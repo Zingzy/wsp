@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "steps": [
+    "row-id=thread:redirect",
+    "k=project-switcher",
+    "switcher-option=pr_wsp",
+    "key:ControlOrMeta+n"
+  ],
+  "wait": "k=project-home",
+  "settleMs": 700,
+  "widths": [
+    1440
+  ],
+  "reason": "What this adds is the project New thread opens on with one filtered; the empty thread's heading and composer are shot at 1280 and 390 in workspace, and the box is 768px wide at most, so 1280 draws it as 1440 does."
+}

@@ -1,0 +1,11 @@
+{
+  "at": "/",
+  "steps": [
+    "row-id=thread:redirect"
+  ],
+  "wait": "surface-launcher-keys",
+  "widths": [
+    1440
+  ],
+  "reason": "The launcher sits in the right panel, which is 28rem at both 1280 and 1440, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render."
+}

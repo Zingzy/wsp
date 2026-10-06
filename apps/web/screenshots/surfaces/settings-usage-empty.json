@@ -1,0 +1,17 @@
+{
+  "at": "/",
+  "fixture": "mac-only",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-usage"
+  ],
+  "wait": "k=used-headline",
+  "settleMs": 700,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The same page with nothing used; settings-usage shoots the page with a week behind it, at 1440 and 390."
+}
