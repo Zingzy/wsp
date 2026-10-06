@@ -1,0 +1,150 @@
+diff --git a/v3/types.cjs b/v3/types.cjs
+index 11ed4dfc4745f9af1f1501874576b78b77d294ef..a29747a6617e5651d3fb38952aa1575ae8d54d50 100644
+--- a/v3/types.cjs
++++ b/v3/types.cjs
+@@ -259,38 +259,7 @@ class ZodType {
+         return this._refinement(refinement);
+     }
+     constructor(def) {
+-        /** Alias of safeParseAsync */
+-        this.spa = this.safeParseAsync;
+         this._def = def;
+-        this.parse = this.parse.bind(this);
+-        this.safeParse = this.safeParse.bind(this);
+-        this.parseAsync = this.parseAsync.bind(this);
+-        this.safeParseAsync = this.safeParseAsync.bind(this);
+-        this.spa = this.spa.bind(this);
+-        this.refine = this.refine.bind(this);
+-        this.refinement = this.refinement.bind(this);
+-        this.superRefine = this.superRefine.bind(this);
+-        this.optional = this.optional.bind(this);
+-        this.nullable = this.nullable.bind(this);
+-        this.nullish = this.nullish.bind(this);
+-        this.array = this.array.bind(this);
+-        this.promise = this.promise.bind(this);
+-        this.or = this.or.bind(this);
+-        this.and = this.and.bind(this);
+-        this.transform = this.transform.bind(this);
+-        this.brand = this.brand.bind(this);
+-        this.default = this.default.bind(this);
+-        this.catch = this.catch.bind(this);
+-        this.describe = this.describe.bind(this);
+-        this.pipe = this.pipe.bind(this);
+-        this.readonly = this.readonly.bind(this);
+-        this.isNullable = this.isNullable.bind(this);
+-        this.isOptional = this.isOptional.bind(this);
+-        this["~standard"] = {
+-            version: 1,
+-            vendor: "zod",
+-            validate: (data) => this["~validate"](data),
+-        };
+     }
+     optional() {
+         return ZodOptional.create(this, this._def);
+@@ -367,6 +336,31 @@ class ZodType {
+     }
+ }
+ exports.ZodType = ZodType;
++// Each method is bound to a schema the first time it is read from it, and its standard-schema object is made then
++// too, rather than both in every constructor: a protocol of thousands of schemas held 24 bound copies of each.
++const ownOf = (inst, key, value) => Object.defineProperty(inst, key, { value, writable: true, configurable: true, enumerable: true });
++const isSchema = (inst) => Object.prototype.hasOwnProperty.call(inst, "_def");
++for (const key of ["parse", "safeParse", "parseAsync", "safeParseAsync", "spa", "refine", "refinement", "superRefine", "optional", "nullable", "nullish", "array", "promise", "or", "and", "transform", "brand", "default", "catch", "describe", "pipe", "readonly", "isNullable", "isOptional"]) {
++    const method = key === "spa" ? ZodType.prototype.safeParseAsync : ZodType.prototype[key];
++    Object.defineProperty(ZodType.prototype, key, {
++        configurable: true,
++        get() {
++            return isSchema(this) ? ownOf(this, key, method.bind(this))[key] : method;
++        },
++        set(value) {
++            ownOf(this, key, value);
++        },
++    });
++}
++Object.defineProperty(ZodType.prototype, "~standard", {
++    configurable: true,
++    get() {
++        return isSchema(this) ? ownOf(this, "~standard", { version: 1, vendor: "zod", validate: (data) => this["~validate"](data) })["~standard"] : undefined;
++    },
++    set(value) {
++        ownOf(this, "~standard", value);
++    },
++});
+ exports.Schema = ZodType;
+ exports.ZodSchema = ZodType;
+ const cuidRegex = /^c[^\s-]{8,}$/i;
+diff --git a/v3/types.js b/v3/types.js
+index 40b11c0f01b2af54e0ed48e198607bd8836d9a63..e13c15794ecff35a017f7998c1d20ebe4c8484ad 100644
+--- a/v3/types.js
++++ b/v3/types.js
+@@ -253,38 +253,7 @@ export class ZodType {
+         return this._refinement(refinement);
+     }
+     constructor(def) {
+-        /** Alias of safeParseAsync */
+-        this.spa = this.safeParseAsync;
+         this._def = def;
+-        this.parse = this.parse.bind(this);
+-        this.safeParse = this.safeParse.bind(this);
+-        this.parseAsync = this.parseAsync.bind(this);
+-        this.safeParseAsync = this.safeParseAsync.bind(this);
+-        this.spa = this.spa.bind(this);
+-        this.refine = this.refine.bind(this);
+-        this.refinement = this.refinement.bind(this);
+-        this.superRefine = this.superRefine.bind(this);
+-        this.optional = this.optional.bind(this);
+-        this.nullable = this.nullable.bind(this);
+-        this.nullish = this.nullish.bind(this);
+-        this.array = this.array.bind(this);
+-        this.promise = this.promise.bind(this);
+-        this.or = this.or.bind(this);
+-        this.and = this.and.bind(this);
+-        this.transform = this.transform.bind(this);
+-        this.brand = this.brand.bind(this);
+-        this.default = this.default.bind(this);
+-        this.catch = this.catch.bind(this);
+-        this.describe = this.describe.bind(this);
+-        this.pipe = this.pipe.bind(this);
+-        this.readonly = this.readonly.bind(this);
+-        this.isNullable = this.isNullable.bind(this);
+-        this.isOptional = this.isOptional.bind(this);
+-        this["~standard"] = {
+-            version: 1,
+-            vendor: "zod",
+-            validate: (data) => this["~validate"](data),
+-        };
+     }
+     optional() {
+         return ZodOptional.create(this, this._def);
+@@ -474,6 +443,31 @@ function isValidCidr(ip, version) {
+     }
+     return false;
+ }
++// Each method is bound to a schema the first time it is read from it, and its standard-schema object is made then
++// too, rather than both in every constructor: a protocol of thousands of schemas held 24 bound copies of each.
++const ownOf = (inst, key, value) => Object.defineProperty(inst, key, { value, writable: true, configurable: true, enumerable: true });
++const isSchema = (inst) => Object.prototype.hasOwnProperty.call(inst, "_def");
++for (const key of ["parse", "safeParse", "parseAsync", "safeParseAsync", "spa", "refine", "refinement", "superRefine", "optional", "nullable", "nullish", "array", "promise", "or", "and", "transform", "brand", "default", "catch", "describe", "pipe", "readonly", "isNullable", "isOptional"]) {
++    const method = key === "spa" ? ZodType.prototype.safeParseAsync : ZodType.prototype[key];
++    Object.defineProperty(ZodType.prototype, key, {
++        configurable: true,
++        get() {
++            return isSchema(this) ? ownOf(this, key, method.bind(this))[key] : method;
++        },
++        set(value) {
++            ownOf(this, key, value);
++        },
++    });
++}
++Object.defineProperty(ZodType.prototype, "~standard", {
++    configurable: true,
++    get() {
++        return isSchema(this) ? ownOf(this, "~standard", { version: 1, vendor: "zod", validate: (data) => this["~validate"](data) })["~standard"] : undefined;
++    },
++    set(value) {
++        ownOf(this, "~standard", value);
++    },
++});
+ export class ZodString extends ZodType {
+     _parse(input) {
+         if (this._def.coerce) {

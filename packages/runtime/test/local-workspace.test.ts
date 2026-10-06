@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { HERE_PLACE_ID, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, HOST_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { DaemonChannel } from "../src/daemon-channel.js";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
@@ -1095,6 +1095,42 @@ describe("a local turn and a host restart", () => {
     const history = await rt2.sessions.history(ws.id);
     expect(history.filter(e => e.type === "session.delta").map(e => e.text)).toEqual(["reading the ticket", "wrote the fix"]);
     expect((await rt2.sessions.list(ws.id))[0]!.status).toBe("running");
+    await rt2.close();
+  }, 30_000);
+
+  it("a side question's token does not outlive a host that went down before the answer, though the thread's turn runs on", async () => {
+    const marker = join(root, "turn.pid");
+    const agents = { here: { url: "http://127.0.0.1:4801" }, wspMcp: { command: "node", args: ["/opt/wsp/dist/bin.js", "mcp"] } };
+    const asked: string[] = [];
+    let answer: (() => void) | undefined;
+    const asking: HarnessAdapterFactory = ctx => ({
+      ...runAdapter(`echo $$ > ${marker}; echo reading the ticket; while true; do sleep 0.05; done`)(ctx),
+      mcpServers: true,
+      asideServers: true,
+      aside: () => {
+        asked.push(ctx.env[HOST_TOKEN_ENV] ?? "");
+        return new Promise(resolve => (answer = () => resolve({ text: "late" })));
+      },
+    });
+    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: asking }, local: localWiring, agents });
+    const ws = await createOn(rt1, { on: HERE_PLACE_ID, name: "mac" });
+    const turn = await rt1.sessions.start(ws.id, { prompt: "build it" });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.delta"));
+    await grandchild(marker);
+    void rt1.sessions.aside(turn.id, "what is it doing?").catch(() => {});
+    await until(async () => asked.length === 1);
+    const side = asked[0]!;
+    expect(side).toMatch(/\S/);
+    expect(await rt1.devices.match(side)).toBeDefined();
+    expect(await rt1.devices.list()).toHaveLength(2);
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter("true") }, local: localWiring, agents });
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    expect(await rt2.devices.match(side)).toBeUndefined();
+    // The turn's own token stays: its turn is still running, and the turn holds it until it ends.
+    expect((await rt2.devices.list()).map(d => d.scope?.threadId)).toEqual([turn.view().threadId]);
+    answer?.();
     await rt2.close();
   }, 30_000);
 
