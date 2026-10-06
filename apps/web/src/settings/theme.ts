@@ -9,7 +9,7 @@ import { DESKTOP_WCO_CLASS, type Preferences, type ThemePreference } from "@wsp/
 import { useLayoutEffect, useSyncExternalStore } from "react";
 import { applyFonts } from "../appearanceFonts.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
-import { desktopBridge } from "../lib/desktopShell.js";
+import { desktopBridge, isSolidWindow } from "../lib/desktopShell.js";
 import { useStore } from "../protocol/store.js";
 import { themeFor } from "../themes/index.js";
 
@@ -59,11 +59,12 @@ export const SOLID_CLASS = "solid";
 /** The computer's Reduce transparency, as the page reads it. */
 export const REDUCED_TRANSPARENCY_QUERY = "(prefers-reduced-transparency: reduce)";
 
-/** Whether the page draws glass: the record's Transparency on, and the computer not asking for less of it. */
+/** Whether the page draws glass: the record's Transparency on, the computer not asking for less of it, and a window
+ * that draws glass, or a browser tab. */
 export function useGlass(): boolean {
   const transparency = useStore(s => s.preferences.transparency);
   const reduced = useMediaQuery(REDUCED_TRANSPARENCY_QUERY);
-  return transparency && !reduced;
+  return transparency && !reduced && !isSolidWindow();
 }
 
 /** Mounted once beside the theme: the root carries the solid class while the page draws no glass, and the desktop

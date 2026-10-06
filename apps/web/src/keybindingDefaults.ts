@@ -7,7 +7,8 @@
 // workspace switch is ours, and so is the new thread's mod+t, listed after
 // mod+n so a label reads it; a browser tab keeps mod+t for its own new tab,
 // so mod+n stays for the app in a tab. A Control chord is the terminal's while it has
-// focus, short of the few commands keybindings.ts passes, and Tab and the digits with
+// focus, short of the commands keybindings.ts passes; the sidebar comes on mod+shift+b
+// there, as mod+b's ctrl+b is readline's and tmux's. Tab and the digits with
 // mod are the browser's inside a tab, where keybindings.ts drops them. The Tab pair is
 // bound twice: inside a right panel of several tabs, a terminal there included, it steps the panel's
 // tabs and the switcher stands down, and everywhere else it opens the
@@ -38,7 +39,8 @@ type WhenToken =
   | { type: "rparen" };
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
-  { key: "mod+b", command: "sidebar.toggle" },
+  { key: "mod+shift+b", command: "sidebar.toggle" },
+  { key: "mod+b", command: "sidebar.toggle", when: "!terminalOwnsMod" },
   { key: "mod+j", command: "terminal.toggle" },
   { key: "mod+alt+b", command: "rightPanel.toggle" },
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
@@ -51,7 +53,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+p", command: "commandPalette.toggle" },
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalOwnsMod" },
   { key: "mod+p", command: "files.quickOpen", when: "!terminalOwnsMod" },
-  { key: "mod+shift+f", command: "files.search", when: "!terminalOwnsMod" },
+  { key: "mod+shift+f", command: "files.search" },
   { key: "mod+,", command: "settings.toggle" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+t", command: "chat.new", when: "!terminalFocus" },
@@ -69,7 +71,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "ctrl+shift+tab", command: "workspace.previous", when: "!terminalFocus && !panelTabsFocus" },
   { key: "ctrl+tab", command: "rightPanel.nextTab", when: "panelTabsFocus" },
   { key: "ctrl+shift+tab", command: "rightPanel.previousTab", when: "panelTabsFocus" },
-  ...WORKSPACE_SELECT_SLOTS.map(slot => ({ key: `mod+${slot}`, command: workspaceSelectCommand(slot), when: "!terminalOwnsMod" })),
+  ...WORKSPACE_SELECT_SLOTS.map(slot => ({ key: `mod+${slot}`, command: workspaceSelectCommand(slot) })),
 ];
 
 function normalizeKeyToken(token: string): string {
