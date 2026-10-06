@@ -175,6 +175,8 @@ async fn delete_thread(client: &Client, named: &str, confirm: bool) -> Result<An
     struct Folder {
         id: String,
         #[serde(default)]
+        name: String,
+        #[serde(default)]
         kind: Option<Kind>,
         #[serde(default)]
         worktree: Option<workspace::Worktree>,
@@ -193,9 +195,23 @@ async fn delete_thread(client: &Client, named: &str, confirm: bool) -> Result<An
     }
     let words = workspace::words();
     let not_here = || Failure::usage(fill(&words.no_thread_here, &[("ref", named)]));
-    let Ok(thread) = thread_of(client, named).await else { return Err(not_here().into()) };
-    let Listed { workspaces } = client.request("workspaces.list", Map::new()).await?;
-    let at = workspaces.into_iter().find(|w| w.id == thread.workspace_id).filter(|w| w.kind == Some(Kind::Local)).ok_or_else(not_here)?;
+    // The thread and the workspace it is on, read off the listings, as the command line reads them.
+    let found = async || -> Result<Option<(super::named::Thread, Option<Folder>)>, Refused> {
+        let Ok(thread) = thread_of(client, named).await else { return Ok(None) };
+        let Listed { workspaces } = client.request("workspaces.list", Map::new()).await?;
+        let at = workspaces.into_iter().find(|w| w.id == thread.workspace_id);
+        Ok(Some((thread, at)))
+    };
+    let Some((thread, Some(at))) = found().await?.filter(|(_, at)| at.as_ref().is_some_and(|w| w.kind == Some(Kind::Local))) else {
+        // As the command line: a word that names a thread on a box's machine says the thread goes with its machine,
+        // read again as that line reads it, and any other word names no thread here.
+        return match found().await? {
+            Some((_, Some(at))) if at.kind != Some(Kind::Local) => {
+                Err(Failure::usage(fill(&words.thread_on_machine, &[("name", &at.name)])).into())
+            }
+            _ => Err(not_here().into()),
+        };
+    };
     let id = thread.runtime_id().to_owned();
     let worktree = at.worktree.filter(|w| w.removable()).map(|w| w.path);
     if !confirm {

@@ -8,6 +8,7 @@ import { provideDaemonHello, provideDaemonWire, type DaemonHello } from "../src/
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import type { TerminalWire } from "../src/terminal/link.js";
+import { forgetHeld } from "../src/protocol/held.js";
 
 export const WS = "ws_a";
 /** What the fake daemon's hello names as its root. */
@@ -55,6 +56,7 @@ export function fakeWire(replies: Record<string, Reply>): FakeWire {
 
 export function resetSurfaces(): void {
   window.localStorage.clear();
+  forgetHeld();
   resetListings();
   provideDaemonWire(WS, null);
   provideDaemonHello(WS, DAEMON_HELLO);
