@@ -182,14 +182,21 @@ describe("the window's sources", () => {
     const app = fakeApp();
     const api = fakeHost({ "usage.account.key": "acct-1" });
     const doc = slate({ root: "w", pieces: { w: { type: "meter", props: { label: "Weekly", value: { bind: "usage.week.percent" } } } } });
-    drawBound(doc, app, api);
+    const { engine } = drawBound(doc, app, api);
     await act(async () => {});
     expect(app.get().loadUsageAccounts).toHaveBeenCalled();
-    act(() => app.set({ usageAccounts: { "acct-1": ACCOUNT } }));
-    await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
+    // The binder's own handler on the key's answer runs before this await returns.
+    await act(async () => vi.mocked(api.resolve).mock.results[0]!.value);
+    // The engine spaces redraws 100 ms apart, so a push right after one would otherwise draw past any short wait.
+    act(() => {
+      app.set({ usageAccounts: { "acct-1": ACCOUNT } });
+      engine.flush();
+    });
     expect(screen.getByRole("meter", { name: "Weekly" }).getAttribute("aria-valuenow")).toBe("46");
-    act(() => app.set({ usageAccounts: { "acct-1": { ...ACCOUNT, windows: [{ kind: "week", usedPercent: 52 }] } } }));
-    await act(async () => new Promise(resolve => setTimeout(resolve, 150)));
+    act(() => {
+      app.set({ usageAccounts: { "acct-1": { ...ACCOUNT, windows: [{ kind: "week", usedPercent: 52 }] } } });
+      engine.flush();
+    });
     expect(screen.getByRole("meter", { name: "Weekly" }).getAttribute("aria-valuenow")).toBe("52");
   });
 
