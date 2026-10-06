@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultStatePath, devCheckoutState, optsFor, statePick } from "../src/cli.js";
 import { servingHost } from "../src/host-lock.js";
+import { cliSource } from "./cli-source.js";
 import { SERVING_HOME_SH, servingElsewhere, servingHome } from "../src/serving-home.js";
 
 let dirs: string[] = [];
@@ -138,7 +139,7 @@ describe("the home this computer's host serves", () => {
 
     // The two readings above are the only lines that pick a state, so wsp host pair, wsp host devices and every other verb
     // or command that names no --state comes through this one rule.
-    const source = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
+    const source = cliSource();
     const calls = source
       .split("\n")
       .map(line => line.trim())
