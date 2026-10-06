@@ -937,7 +937,10 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             let diff = async {
                 // Refused before anything is built from them: a value git would read as an option never reaches it.
                 if !git::is_full_sha(&from) || !git::is_full_sha(&to) {
-                    return Err(OpError::coded(DaemonErrorCode::BadRequest, "from and to are each a commit's full 40 character sha"));
+                    return Err(OpError::coded(
+                        DaemonErrorCode::BadRequest,
+                        "from and to are each a commit's full sha, 40 or 64 hex digits",
+                    ));
                 }
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
                 let bound = bound_of(ctx, machine_id.as_deref(), &at).await?;
@@ -949,7 +952,10 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             let diff = async {
                 // Refused before anything is built from them: a value git would read as an option never reaches it.
                 if !git::is_full_sha(&from) || !git::is_full_sha(&to) {
-                    return Err(OpError::coded(DaemonErrorCode::BadRequest, "from and to are each a commit's full 40 character sha"));
+                    return Err(OpError::coded(
+                        DaemonErrorCode::BadRequest,
+                        "from and to are each a commit's full sha, 40 or 64 hex digits",
+                    ));
                 }
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
                 let bound = bound_of(ctx, machine_id.as_deref(), &at).await?;

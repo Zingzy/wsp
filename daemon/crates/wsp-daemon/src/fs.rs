@@ -299,8 +299,12 @@ pub(crate) async fn write_file(
         }
         let not_a_file = || OpError::coded(DaemonErrorCode::NotAFile, format!("{shown} is not a regular file"));
         let not_found = || OpError::coded(DaemonErrorCode::NotFound, format!("{shown} does not exist"));
+        let name = name.to_str().ok_or_else(|| OpError::coded(DaemonErrorCode::BadRequest, words::name_not_utf8(&shown)))?;
+        // The root is the runtime's own folder, which no workspace can swap; it may sit behind a link of the box's,
+        // and `folder` came back from the resolve with every link read, so both sides of the compare are real paths.
+        let open = std::fs::canonicalize(&open)?;
         let walk = folder.strip_prefix(&open).map_err(|_| crate::paths::outside_root(&shown))?;
-        let rel = name.to_str().and_then(|name| beneath::joined(walk, name)).ok_or_else(|| crate::paths::outside_root(&shown))?;
+        let rel = beneath::joined(walk, name).ok_or_else(|| crate::paths::outside_root(&shown))?;
         let held = nix::fcntl::open(&open, OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC, Mode::empty())
             .map_err(std::io::Error::from)?;
         let Some((dir, leaf)) = beneath::parent_of(&held, &rel).map_err(|_| crate::paths::outside_root(&shown))? else {
@@ -534,6 +538,33 @@ mod tests {
         assert_eq!((big.code, big.message), (Some(DaemonErrorCode::BadRequest), words::too_large_to_write(2 * 1024 * 1024)));
         assert_eq!(fs::read_to_string(dir.path().join("real.txt")).unwrap(), "real\n");
         assert_eq!(listed(dir.path()), vec!["folder", "link.txt", "real.txt"]);
+    }
+
+    /// The runtime's root may sit behind a link to another disk: the resolve answers the real folder, and the write
+    /// still lands under the root opened through that link.
+    #[tokio::test]
+    async fn a_root_behind_a_link_still_takes_a_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let (real, rootfs) = (dir.path().join("real-rootfs"), dir.path().join("rootfs"));
+        fs::create_dir_all(real.join("project")).unwrap();
+        std::os::unix::fs::symlink(&real, &rootfs).unwrap();
+        fs::write(real.join("project/notes.txt"), "old\n").unwrap();
+        let folder = fs::canonicalize(rootfs.join("project")).unwrap();
+        let wrote = write_file(rootfs, folder, "notes.txt".into(), "/project/notes.txt".to_owned(), "new\n".to_owned(), 1024).await;
+        assert_eq!(wrote.map(|w| w.bytes), Ok(4));
+        assert_eq!(fs::read_to_string(real.join("project/notes.txt")).unwrap(), "new\n");
+    }
+
+    /// A name that is not UTF-8 is refused for what it is, not as a path that left the root.
+    #[tokio::test]
+    async fn a_name_that_is_not_utf8_is_refused_as_such() {
+        use std::os::unix::ffi::OsStringExt;
+        let dir = tempfile::tempdir().unwrap();
+        let name = std::ffi::OsString::from_vec(vec![b'a', 0xff]);
+        let at = dir.path().to_path_buf();
+        let refused = write_file(at.clone(), at, name, "a?".to_owned(), "x".to_owned(), 1024).await.unwrap_err();
+        assert_eq!(refused.code, Some(DaemonErrorCode::BadRequest), "{}", refused.message);
+        assert_eq!(refused.message, words::name_not_utf8("a?"));
     }
 
     /// The folder a write resolved to is the workspace's, and a process inside can swap it for a link to the box's
