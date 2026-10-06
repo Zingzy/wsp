@@ -51,3 +51,4 @@ The daemon version is cut when a change lands, never on a branch. `src/format.ts
 | image caps and types | `src/attachments.ts` | `IMAGE_MAX_BYTES` |
 | the cpu time ps prints | `src/ps-time.ts` | `psCpuSeconds()` |
 | a value quoted for a shell | `src/shell-quote.ts` | `shellQuote()` |
+| a law test's allowed list | `test/allowed.ts` | `holdTo()` |
