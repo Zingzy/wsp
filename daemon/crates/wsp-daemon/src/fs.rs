@@ -14,7 +14,7 @@ use wsp_frames::{
     FsSearchReply, FsWriteReply, HostFolder, HostFolderListing,
 };
 
-use crate::git::{run_git, Runs};
+use crate::git::{run_git, GitLine, Runs};
 use crate::paths::{absolute, is_inside, OpError};
 
 /// Runs blocking work off the runtime thread and folds a lost worker into the op's failure.
@@ -66,13 +66,13 @@ async fn ignored_among<R: Runs>(runner: &R, dir: &Path, names: Vec<&str>) -> Res
     if names.is_empty() {
         return Ok(HashSet::new());
     }
-    let this_dir = run_git(runner, dir, &["check-ignore", "-q", "."], None, None).await?;
+    let this_dir = run_git(runner, dir, &GitLine::new(&["check-ignore", "-q", "."]), None, None).await?;
     if this_dir.code != Some(1) {
         return Ok(HashSet::new());
     }
     let mut input = names.join("\0").into_bytes();
     input.push(0);
-    let res = run_git(runner, dir, &["check-ignore", "-z", "--stdin"], Some(&input), None).await?;
+    let res = run_git(runner, dir, &GitLine::new(&["check-ignore", "-z", "--stdin"]), Some(&input), None).await?;
     if res.code != Some(0) {
         return Ok(HashSet::new());
     }

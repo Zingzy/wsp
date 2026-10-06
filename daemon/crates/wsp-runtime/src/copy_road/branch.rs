@@ -15,6 +15,7 @@ use wsp_frames::{words, GitWorktree, WorktreeRemoval, WorktreeReport};
 
 use super::aside::{remove_later, sweep, ASIDE_PREFIX};
 use super::rules::{config_files_in, git, has_branch, ignored, is_repo_top, sha_of, READ_MS, WRITE_MS};
+use crate::git_line::GitLine;
 
 /// One worktree as the verb is asked for it.
 pub struct Ask<'a> {
@@ -64,7 +65,7 @@ pub fn make_with(ask: &Ask, clone: CloneDir) -> Result<WorktreeReport, String> {
         // A worktree of ours whose folder was removed by hand still holds the branch in git's eyes; its record is
         // dropped so the branch can be checked out again. One somebody else made is git's to refuse.
         if made_here(Path::new(&held.path), &home) {
-            let _ = git(from, &["worktree", "remove", &held.path], WRITE_MS);
+            let _ = git(from, &GitLine::new(&["worktree", "remove"]).operands(&[&held.path]), WRITE_MS);
         }
     }
     let dir = root_for(from, &home)?.join(ask.project);
@@ -74,9 +75,9 @@ pub fn make_with(ask: &Ask, clone: CloneDir) -> Result<WorktreeReport, String> {
     let to = path.to_string_lossy();
     let existing = has_branch(from, ask.branch);
     let added = if existing {
-        git(from, &["worktree", "add", "--quiet", &to, ask.branch], WRITE_MS)
+        git(from, &GitLine::new(&["worktree", "add", "--quiet"]).operands(&[&to, ask.branch]), WRITE_MS)
     } else {
-        git(from, &["worktree", "add", "--quiet", "-b", ask.branch, &to, "HEAD"], WRITE_MS)
+        git(from, &GitLine::new(&["worktree", "add", "--quiet"]).value("-b", ask.branch).operands(&[&to, "HEAD"]), WRITE_MS)
     }
     .map_err(|e| format!("git worktree add: {e}"))?;
     if !added.ok() {
@@ -94,11 +95,11 @@ pub fn make_with(ask: &Ask, clone: CloneDir) -> Result<WorktreeReport, String> {
         }),
         Err(why) => {
             let tip = sha_of(&path, "HEAD");
-            let _ = git(from, &["worktree", "remove", "--force", &to], WRITE_MS);
+            let _ = git(from, &GitLine::new(&["worktree", "remove", "--force"]).operands(&[&to]), WRITE_MS);
             let _ = fs::remove_dir_all(&path);
             // A branch this call made points at the folder's HEAD and holds nothing of its own, so it goes too.
             if let (false, Some(tip)) = (existing, tip) {
-                let _ = git(from, &["update-ref", "-d", &format!("refs/heads/{}", ask.branch), &tip], WRITE_MS);
+                let _ = git(from, &GitLine::new(&["update-ref", "-d"]).revs(&[&format!("refs/heads/{}", ask.branch), &tip]), WRITE_MS);
             }
             Err(why)
         }
@@ -129,11 +130,13 @@ pub fn remove_with(from: &Path, home: &Path, path: &Path, force: bool, meanwhile
     }
     let said = at.to_string_lossy().into_owned();
     if !at.exists() {
-        let gone = git(from, &["worktree", "remove", &said], WRITE_MS).map_err(|e| format!("git worktree remove: {e}"))?;
+        let gone = git(from, &GitLine::new(&["worktree", "remove"]).operands(&[&said]), WRITE_MS)
+            .map_err(|e| format!("git worktree remove: {e}"))?;
         return if gone.ok() { Ok(WorktreeRemoval { path: said, rescued: None }) } else { Err(gone.why()) };
     }
     if !force {
-        let status = git(&at, &["status", "--porcelain", "--untracked-files=all"], READ_MS).map_err(|e| format!("git status: {e}"))?;
+        let status = git(&at, &GitLine::new(&["status", "--porcelain", "--untracked-files=all"]), READ_MS)
+            .map_err(|e| format!("git status: {e}"))?;
         if !status.ok() {
             return Err(status.why());
         }
@@ -142,12 +145,13 @@ pub fn remove_with(from: &Path, home: &Path, path: &Path, force: bool, meanwhile
             return Err(uncommitted(path, n));
         }
     }
-    let detached = git(&at, &["symbolic-ref", "--quiet", "HEAD"], READ_MS).is_ok_and(|r| r.code == Some(1));
+    let detached = git(&at, &GitLine::new(&["symbolic-ref", "--quiet", "HEAD"]), READ_MS).is_ok_and(|r| r.code == Some(1));
     let rescued = match (detached, sha_of(&at, "HEAD")) {
         (true, Some(sha)) => {
             let leaf = at.strip_prefix(at.parent().and_then(Path::parent).unwrap_or(&at)).unwrap_or(&at).to_string_lossy().into_owned();
             let name = format!("refs/rescue/{leaf}/{}", &sha[..12.min(sha.len())]);
-            let saved = git(from, &["update-ref", &name, &sha], WRITE_MS).map_err(|e| format!("git update-ref: {e}"))?;
+            let saved =
+                git(from, &GitLine::new(&["update-ref"]).revs(&[&name, &sha]), WRITE_MS).map_err(|e| format!("git update-ref: {e}"))?;
             if !saved.ok() {
                 return Err(saved.why());
             }
@@ -159,12 +163,8 @@ pub fn remove_with(from: &Path, home: &Path, path: &Path, force: bool, meanwhile
     if let Some(beside) = at.parent() {
         meanwhile(beside);
     }
-    let mut args = vec!["worktree", "remove"];
-    if force {
-        args.push("--force");
-    }
-    args.push(&said);
-    let removed = git(from, &args, WRITE_MS);
+    let removing = GitLine::new(&["worktree", "remove"]).words(if force { &["--force"] } else { &[] });
+    let removed = git(from, &removing.operands(&[&said]), WRITE_MS);
     if !removed.as_ref().is_ok_and(|r| r.ok()) {
         for (dir, held) in &aside {
             let _ = fs::rename(held, dir);
@@ -209,7 +209,8 @@ pub fn uncommitted(path: &Path, n: usize) -> String {
 
 /// Every worktree of the folder, the folder itself first, read from git each time and never kept.
 fn listed(from: &Path) -> Result<Vec<GitWorktree>, String> {
-    let read = git(from, &["worktree", "list", "--porcelain", "-z"], READ_MS).map_err(|e| format!("git worktree list: {e}"))?;
+    let read =
+        git(from, &GitLine::new(&["worktree", "list", "--porcelain", "-z"]), READ_MS).map_err(|e| format!("git worktree list: {e}"))?;
     if !read.ok() {
         return Err(read.why());
     }
@@ -245,8 +246,8 @@ fn one_part(what: &str, name: &str) -> Result<(), String> {
 
 /// A branch name git takes, and never one that reads as a flag on git's own line.
 fn branch_name(from: &Path, branch: &str) -> Result<(), String> {
-    let checked =
-        git(from, &["check-ref-format", &format!("refs/heads/{branch}")], READ_MS).map_err(|e| format!("git check-ref-format: {e}"))?;
+    let checked = git(from, &GitLine::new(&["check-ref-format"]).glued("refs/heads/", branch), READ_MS)
+        .map_err(|e| format!("git check-ref-format: {e}"))?;
     if branch.starts_with('-') || !checked.ok() {
         return Err(words::not_a_branch_name(branch));
     }
@@ -527,9 +528,13 @@ mod tests {
     use crate::copy_road::rules::repo;
     use std::os::unix::fs::PermissionsExt;
 
-    fn run(at: &Path, args: &[&str]) {
-        let ran = git(at, args, WRITE_MS).unwrap();
-        assert!(ran.ok(), "{args:?}: {}", ran.why());
+    fn run(at: &Path, args: &[&'static str]) {
+        run_line(at, GitLine::new(args));
+    }
+
+    fn run_line(at: &Path, line: GitLine) {
+        let ran = git(at, &line, WRITE_MS).unwrap();
+        assert!(ran.ok(), "{:?}: {}", line.argv(), ran.why());
     }
 
     /// A project holding what a checkout on this Mac holds: an ignored root and nested `node_modules` with a link
@@ -596,11 +601,15 @@ mod tests {
         assert_eq!(fs::read_to_string(at.join(".env.local")).unwrap(), "KEY=1\n");
         assert!(!at.join("target").exists(), "a directory nobody named is not carried");
         assert_eq!(fs::metadata(&at).unwrap().permissions().mode() & 0o777, 0o700);
-        assert_eq!(git(&at, &["rev-parse", "--abbrev-ref", "HEAD"], READ_MS).unwrap().out(), "feat/x");
+        assert_eq!(git(&at, &GitLine::new(&["rev-parse", "--abbrev-ref", "HEAD"]), READ_MS).unwrap().out(), "feat/x");
         assert_eq!(sha_of(&at, "HEAD").unwrap(), head, "a new branch starts at the folder's HEAD");
-        assert_eq!(git(&at, &["status", "--porcelain"], READ_MS).unwrap().out(), "", "what was carried is ignored, so the tree is clean");
         assert_eq!(
-            git(&from, &["rev-parse", "--abbrev-ref", "HEAD"], READ_MS).unwrap().out(),
+            git(&at, &GitLine::new(&["status", "--porcelain"]), READ_MS).unwrap().out(),
+            "",
+            "what was carried is ignored, so the tree is clean"
+        );
+        assert_eq!(
+            git(&from, &GitLine::new(&["rev-parse", "--abbrev-ref", "HEAD"]), READ_MS).unwrap().out(),
             "main",
             "the project folder stays on its branch"
         );
@@ -617,7 +626,7 @@ mod tests {
         run(&from, &["add", "--force", ".env.local"]);
         for n in 0..20 {
             fs::write(from.join("README.md"), format!("{n}\n")).unwrap();
-            run(&from, &["commit", "--quiet", "-am", &format!("turn {n}")]);
+            run_line(&from, GitLine::new(&["commit", "--quiet", "-a"]).value("-m", &format!("turn {n}")));
         }
         let tip = sha_of(&from, "ahead").unwrap();
         run(&from, &["checkout", "--quiet", "main"]);
@@ -644,7 +653,7 @@ mod tests {
         let home = dir.path().join("home");
         fs::create_dir_all(&home).unwrap();
         let hand = dir.path().join("by-hand");
-        run(&from, &["worktree", "add", "--quiet", "-b", "mine", &hand.to_string_lossy()]);
+        run_line(&from, GitLine::new(&["worktree", "add", "--quiet", "-b", "mine"]).operands(&[&hand.to_string_lossy()]));
         let report = make(&ask(&from, &home, "mine", &carry_names())).unwrap();
         assert_eq!(report.path, fs::canonicalize(&hand).unwrap().display().to_string());
         assert!(!report.made, "a worktree the person made is never wsp's");
@@ -782,7 +791,7 @@ mod tests {
         fs::create_dir_all(&home).unwrap();
         let names = carry_names();
         let at = PathBuf::from(make(&ask(&from, &home, "held", &names)).unwrap().path);
-        run(&from, &["worktree", "lock", &at.to_string_lossy()]);
+        run_line(&from, GitLine::new(&["worktree", "lock"]).operands(&[&at.to_string_lossy()]));
         // A make for another branch sweeps this project's folder while git is still deciding; what the removal
         // holds aside is not the sweep's to take.
         let swept = |beside: &Path| {
@@ -867,7 +876,7 @@ mod tests {
         assert_eq!(fs::read_to_string(at.join("node_modules/.pnpm/dep/index.js")).unwrap(), "dep\n");
         assert_eq!(fs::read_to_string(at.join("packages/app/node_modules/dep/index.js")).unwrap(), "dep\n");
         assert!(beside_names(&at).is_empty(), "{:?}", beside_names(&at));
-        assert_eq!(git(&at, &["status", "--porcelain"], READ_MS).unwrap().out(), "");
+        assert_eq!(git(&at, &GitLine::new(&["status", "--porcelain"]), READ_MS).unwrap().out(), "");
     }
 
     #[test]
@@ -906,7 +915,7 @@ mod tests {
         let kept = PathBuf::from(make(&ask(&from, &home, "kept", &names)).unwrap().path);
         let (pid, then) = killed();
         hold_as(&gone, pid, then);
-        run(&from, &["worktree", "remove", "--force", &gone.to_string_lossy()]);
+        run_line(&from, GitLine::new(&["worktree", "remove", "--force"]).operands(&[&gone.to_string_lossy()]));
         // The removal of another worktree here takes it, and the worktree a hold of its own came back into goes whole.
         hold_as(&kept, pid, then);
         let removed = remove(&from, &home, &kept, false).unwrap();
@@ -922,7 +931,7 @@ mod tests {
         let home = dir.path().join("home");
         fs::create_dir_all(&home).unwrap();
         let hand = dir.path().join("by-hand");
-        run(&from, &["worktree", "add", "--quiet", "-b", "mine", &hand.to_string_lossy()]);
+        run_line(&from, GitLine::new(&["worktree", "add", "--quiet", "-b", "mine"]).operands(&[&hand.to_string_lossy()]));
         let stray = fs::canonicalize(&home).unwrap().join("worktrees/prj_1/stray");
         fs::create_dir_all(&stray).unwrap();
         for path in [&from, &hand, &stray] {

@@ -178,6 +178,7 @@ fn c_path(at: &Path) -> io::Result<CString> {
 mod tests {
     use super::*;
     use crate::copy_road::rules::{git, repo, sha_of, READ_MS};
+    use crate::git_line::GitLine;
     use std::fs;
 
     #[test]
@@ -194,8 +195,8 @@ mod tests {
         let from = dir.path().join("work");
         repo(&from);
         fs::write(from.join(".gitignore"), b"node_modules/\n*.local\n").unwrap();
-        assert!(git(&from, &["add", ".gitignore"], READ_MS).unwrap().ok());
-        assert!(git(&from, &["commit", "--quiet", "-m", "ignore"], crate::copy_road::rules::WRITE_MS).unwrap().ok());
+        assert!(git(&from, &GitLine::new(&["add", ".gitignore"]), READ_MS).unwrap().ok());
+        assert!(git(&from, &GitLine::new(&["commit", "--quiet", "-m", "ignore"]), crate::copy_road::rules::WRITE_MS).unwrap().ok());
         fs::create_dir_all(from.join("node_modules/pkg")).unwrap();
         fs::write(from.join("node_modules/pkg/index.js"), b"dep\n").unwrap();
         fs::write(from.join(".env.local"), b"KEY=1\n").unwrap();

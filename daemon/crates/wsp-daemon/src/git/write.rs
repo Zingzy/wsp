@@ -12,7 +12,7 @@ use wsp_frames::{
 
 use wsp_runtime::copy_road::branch::worktrees_of;
 
-use super::{check, parse_porcelain_v2, run_git, stdout_text, GitResult, Runs};
+use super::{check, parse_porcelain_v2, run_git, stdout_text, GitLine, GitResult, Runs};
 use crate::paths::OpError;
 
 /// How long a write waits, once, for another git in the same copy to let go of its index.
@@ -47,7 +47,7 @@ pub(crate) fn refusal_of(res: &GitResult, copy: &str) -> OpError {
 }
 
 /// One git write, run again once after a wait where another git held the index.
-async fn write<R: Runs>(runner: &R, cwd: &Path, args: &[&str], input: Option<&[u8]>, copy: &str) -> Result<GitResult, OpError> {
+async fn write<R: Runs>(runner: &R, cwd: &Path, args: &GitLine<'_>, input: Option<&[u8]>, copy: &str) -> Result<GitResult, OpError> {
     let mut res = run_git(runner, cwd, args, input, None).await?;
     if res.code != Some(0) && res.stderr.contains("index.lock") {
         tokio::time::sleep(LOCK_WAIT).await;
@@ -62,9 +62,9 @@ async fn write<R: Runs>(runner: &R, cwd: &Path, args: &[&str], input: Option<&[u
 /// The checkout's top and every change in it, each untracked file on its own: status alone folds an untracked
 /// folder into one entry, and a pane names the files inside it.
 async fn changes<R: Runs>(runner: &R, cwd: &Path) -> Result<(String, Vec<GitStatusEntry>), OpError> {
-    let res = run_git(runner, cwd, &["status", "--porcelain=v2", "-z", "--untracked-files=all"], None, None).await?;
+    let res = run_git(runner, cwd, &GitLine::new(&["status", "--porcelain=v2", "-z", "--untracked-files=all"]), None, None).await?;
     check(&res, "status")?;
-    let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
+    let top = run_git(runner, cwd, &GitLine::new(&["rev-parse", "--show-toplevel"]), None, None).await?;
     check(&top, "rev-parse")?;
     Ok((stdout_text(&top).trim().to_owned(), parse_porcelain_v2(&stdout_text(&res)).1))
 }
@@ -83,13 +83,14 @@ pub(crate) async fn discard<R: Runs>(runner: &R, cwd: &Path, path: &str) -> Resu
     let Some(entry) = entry_of(&entries, path) else { return Err(OpError::plain(words::no_change(path))) };
     let spec = literal(path);
     if entry.xy == "??" {
-        write(runner, top, &["clean", "-f", "--", &spec], None, &copy).await?;
+        write(runner, top, &GitLine::new(&["clean", "-f"]).operands(&[&spec]), None, &copy).await?;
     } else if let Some(orig) = &entry.orig_path {
-        write(runner, top, &["restore", "--staged", "--", &spec], None, &copy).await?;
-        write(runner, top, &["clean", "-f", "--", &spec], None, &copy).await?;
-        write(runner, top, &["restore", "--source=HEAD", "--staged", "--worktree", "--", &literal(orig)], None, &copy).await?;
+        write(runner, top, &GitLine::new(&["restore", "--staged"]).operands(&[&spec]), None, &copy).await?;
+        write(runner, top, &GitLine::new(&["clean", "-f"]).operands(&[&spec]), None, &copy).await?;
+        write(runner, top, &GitLine::new(&["restore", "--source=HEAD", "--staged", "--worktree"]).operands(&[&literal(orig)]), None, &copy)
+            .await?;
     } else {
-        write(runner, top, &["restore", "--source=HEAD", "--staged", "--worktree", "--", &spec], None, &copy).await?;
+        write(runner, top, &GitLine::new(&["restore", "--source=HEAD", "--staged", "--worktree"]).operands(&[&spec]), None, &copy).await?;
     }
     // A file no commit has may leave the folders made for it empty, which git never sees and the Files pane does.
     if entry.xy == "??" || entry.xy.starts_with('A') || entry.orig_path.is_some() {
@@ -123,18 +124,17 @@ pub(crate) async fn commit<R: Runs>(runner: &R, cwd: &Path, message: &str, paths
     for path in paths {
         let Some(entry) = entry_of(&entries, path) else { return Err(OpError::plain(words::no_change(path))) };
         if entry.xy == "??" {
-            write(runner, top, &["add", "--", &literal(path)], None, &copy).await?;
+            write(runner, top, &GitLine::new(&["add"]).operands(&[&literal(path)]), None, &copy).await?;
         }
         specs.extend(entry.orig_path.iter().map(|orig| literal(orig)));
         specs.push(literal(path));
     }
-    let mut args = vec!["commit", "-q", "-F", "-", "--"];
-    args.extend(specs.iter().map(String::as_str));
-    write(runner, top, &args, Some(message.as_bytes()), &copy).await?;
-    let head = write(runner, top, &["log", "-1", "--format=%H%x00%s"], None, &copy).await?;
+    let specs: Vec<&str> = specs.iter().map(String::as_str).collect();
+    write(runner, top, &GitLine::new(&["commit", "-q", "-F", "-"]).operands(&specs), Some(message.as_bytes()), &copy).await?;
+    let head = write(runner, top, &GitLine::new(&["log", "-1", "--format=%H%x00%s"]), None, &copy).await?;
     let head = stdout_text(&head);
     let (oid, subject) = head.trim_end_matches('\n').split_once('\0').unwrap_or((head.trim(), ""));
-    let stat = write(runner, top, &["show", "--shortstat", "--format=", "HEAD"], None, &copy).await?;
+    let stat = write(runner, top, &GitLine::new(&["show", "--shortstat", "--format=", "HEAD"]), None, &copy).await?;
     let (files_changed, insertions, deletions) = shortstat(&stdout_text(&stat));
     Ok(GitCommitReply { oid: oid.to_owned(), subject: subject.to_owned(), files_changed, insertions, deletions })
 }
@@ -178,7 +178,7 @@ pub(crate) async fn merge_in<R: Runs>(runner: &R, cwd: &Path, branch: &str, from
 /// commit with its upstream set, and every untracked file dropped, while what git ignores stays.
 pub(crate) async fn start_on<R: Runs>(runner: &R, cwd: &Path, branch: &str) -> Result<GitStartOnReply, OpError> {
     let (remote, _) = crate::bring_back::remote_url(runner, cwd).await?;
-    let fetched = run_git(runner, cwd, &["fetch", "--no-tags", "--", &remote, branch], None, None).await?;
+    let fetched = run_git(runner, cwd, &GitLine::new(&["fetch", "--no-tags"]).operands(&[&remote, branch]), None, None).await?;
     if fetched.code != Some(0) {
         if let Some(refusal) = crate::bring_back::no_credential(runner, cwd, &remote, &fetched.stderr, words::no_start_credential).await? {
             return Err(OpError::coded(DaemonErrorCode::NoGitCredential, refusal));
@@ -189,23 +189,25 @@ pub(crate) async fn start_on<R: Runs>(runner: &R, cwd: &Path, branch: &str) -> R
         return Err(OpError::plain(words::start_on_refused(branch, &last_line(&fetched))));
     }
     // Asked of git outright rather than left to checkout, which on some versions moves a branch another worktree holds.
-    let worktrees = run_git(runner, cwd, &["worktree", "list", "--porcelain", "-z"], None, None).await?;
+    let worktrees = run_git(runner, cwd, &GitLine::new(&["worktree", "list", "--porcelain", "-z"]), None, None).await?;
     check(&worktrees, "worktree list")?;
-    let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
+    let top = run_git(runner, cwd, &GitLine::new(&["rev-parse", "--show-toplevel"]), None, None).await?;
     check(&top, "rev-parse")?;
     if let Some(held) = held_elsewhere(&stdout_text(&worktrees), stdout_text(&top).trim(), branch) {
         return Err(OpError::plain(words::start_on_refused(branch, &format!("it is already checked out at {held}"))));
     }
     let theirs = format!("{remote}/{branch}");
-    let put = run_git(runner, cwd, &["checkout", "-q", "-f", "-B", branch, &theirs], None, None).await?;
+    let put =
+        run_git(runner, cwd, &GitLine::new(&["checkout", "-q", "-f"]).value("-B", branch).glued("refs/remotes/", &theirs), None, None)
+            .await?;
     if put.code != Some(0) {
         return Err(OpError::plain(words::start_on_refused(branch, &last_line(&put))));
     }
-    let cleaned = run_git(runner, cwd, &["clean", "-fdq"], None, None).await?;
+    let cleaned = run_git(runner, cwd, &GitLine::new(&["clean", "-fdq"]), None, None).await?;
     if cleaned.code != Some(0) {
         return Err(OpError::plain(words::start_on_refused(branch, &last_line(&cleaned))));
     }
-    let head = run_git(runner, cwd, &["rev-parse", "HEAD"], None, None).await?;
+    let head = run_git(runner, cwd, &GitLine::new(&["rev-parse", "HEAD"]), None, None).await?;
     check(&head, "rev-parse")?;
     Ok(GitStartOnReply { branch: branch.to_owned(), oid: stdout_text(&head).trim().to_owned() })
 }
@@ -225,7 +227,7 @@ fn refused_outside_a_repo(res: &GitResult) -> Result<(), OpError> {
 
 /// A name git takes for a branch and that cannot read as a flag on git's own line.
 async fn branch_name<R: Runs>(runner: &R, cwd: &Path, name: &str) -> Result<(), OpError> {
-    let checked = run_git(runner, cwd, &["check-ref-format", &format!("refs/heads/{name}")], None, None).await?;
+    let checked = run_git(runner, cwd, &GitLine::new(&["check-ref-format"]).glued("refs/heads/", name), None, None).await?;
     if name.starts_with('-') || checked.code != Some(0) {
         return Err(OpError::coded(DaemonErrorCode::BadRequest, words::not_a_branch_name(name)));
     }
@@ -236,16 +238,17 @@ async fn branch_name<R: Runs>(runner: &R, cwd: &Path, name: &str) -> Result<(), 
 /// is reset, so the work in the folder moves onto the branch as it stands.
 pub(crate) async fn switch_new<R: Runs>(runner: &R, cwd: &Path, branch: &str) -> Result<GitStartOnReply, OpError> {
     branch_name(runner, cwd, branch).await?;
-    let mut put = run_git(runner, cwd, &["switch", "-q", "-c", branch], None, None).await?;
+    let switch = GitLine::new(&["switch", "-q"]).value("-c", branch);
+    let mut put = run_git(runner, cwd, &switch, None, None).await?;
     if put.code != Some(0) && put.stderr.contains("index.lock") {
         tokio::time::sleep(LOCK_WAIT).await;
-        put = run_git(runner, cwd, &["switch", "-q", "-c", branch], None, None).await?;
+        put = run_git(runner, cwd, &switch, None, None).await?;
     }
     if put.code != Some(0) {
         refused_outside_a_repo(&put)?;
         return Err(OpError::plain(words::switch_new_refused(branch, &last_line(&put))));
     }
-    let head = run_git(runner, cwd, &["rev-parse", "HEAD"], None, None).await?;
+    let head = run_git(runner, cwd, &GitLine::new(&["rev-parse", "HEAD"]), None, None).await?;
     check(&head, "rev-parse")?;
     Ok(GitStartOnReply { branch: branch.to_owned(), oid: stdout_text(&head).trim().to_owned() })
 }
@@ -268,7 +271,7 @@ pub(crate) async fn fetch_branch<R: Runs>(
         return Err(OpError::coded(DaemonErrorCode::BadRequest, format!("{remote:?} is not a remote")));
     }
     let spec = format!("refs/heads/{branch}:refs/heads/{into}");
-    let fetched = run_git(runner, cwd, &["fetch", "--no-tags", "--", remote, &spec], None, None).await?;
+    let fetched = run_git(runner, cwd, &GitLine::new(&["fetch", "--no-tags"]).operands(&[remote, &spec]), None, None).await?;
     if fetched.code != Some(0) {
         if let Some(refusal) = crate::bring_back::no_credential(runner, cwd, remote, &fetched.stderr, words::no_start_credential).await? {
             return Err(OpError::coded(DaemonErrorCode::NoGitCredential, refusal));
@@ -279,7 +282,7 @@ pub(crate) async fn fetch_branch<R: Runs>(
         refused_outside_a_repo(&fetched)?;
         return Err(OpError::plain(words::fetch_branch_refused(into, &last_line(&fetched))));
     }
-    let tip = run_git(runner, cwd, &["rev-parse", "--verify", &format!("refs/heads/{into}")], None, None).await?;
+    let tip = run_git(runner, cwd, &GitLine::new(&["rev-parse", "--verify"]).glued("refs/heads/", into), None, None).await?;
     check(&tip, "rev-parse")?;
     Ok(GitStartOnReply { branch: into.to_owned(), oid: stdout_text(&tip).trim().to_owned() })
 }
@@ -333,12 +336,10 @@ async fn merge_remote<R: Runs>(
     if !dirty.is_empty() {
         return Err(OpError::plain((said.dirty)(&dirty)));
     }
-    let (fetch, theirs): (Vec<&str>, String) = match from {
-        From::Remote(remote) => (vec!["fetch", "--no-tags", "--", remote, branch], format!("{remote}/{branch}")),
+    let (fetch, theirs) = match from {
+        From::Remote(remote) => (GitLine::new(&["fetch", "--no-tags"]).operands(&[remote, branch]), format!("{remote}/{branch}")),
         From::Folder(path) => (
-            vec![
-                "GIT_NO_LAZY_FETCH=1",
-                "git",
+            GitLine::new(&[
                 "-c",
                 "uploadpack.packObjectsHook=",
                 "-c",
@@ -346,17 +347,13 @@ async fn merge_remote<R: Runs>(
                 "fetch",
                 "--no-tags",
                 "--upload-pack=git-upload-pack",
-                "--",
-                path,
-                branch,
-            ],
+            ])
+            .env("GIT_NO_LAZY_FETCH", "1")
+            .operands(&[path, branch]),
             "FETCH_HEAD".to_owned(),
         ),
     };
-    let fetched = match from {
-        From::Remote(_) => run_git(runner, top, &fetch, None, None).await?,
-        From::Folder(_) => runner.run(top, "env", &fetch, None, None).await?,
-    };
+    let fetched = run_git(runner, top, &fetch, None, None).await?;
     if fetched.code != Some(0) {
         if let From::Remote(remote) = from {
             if let Some(refusal) = crate::bring_back::no_credential(runner, top, remote, &fetched.stderr, said.credential).await? {
@@ -365,21 +362,19 @@ async fn merge_remote<R: Runs>(
         }
         return Err(refusal_as(&fetched, &copy, said.refused));
     }
-    let before = run_git(runner, top, &["rev-parse", "HEAD"], None, None).await?;
+    let before = run_git(runner, top, &GitLine::new(&["rev-parse", "HEAD"]), None, None).await?;
     check(&before, "rev-parse")?;
     let before = stdout_text(&before).trim().to_owned();
-    let mut merge = vec!["merge", "--no-edit"];
-    if no_ff {
-        merge.push("--no-ff");
-    }
-    merge.push(&theirs);
-    let merged = run_git(runner, top, &merge, None, None).await?;
+    let merge = GitLine::new(&["merge", "--no-edit"]).words(if no_ff { &["--no-ff"] } else { &[] });
+    let merged = run_git(runner, top, &merge.revs(&[&theirs]), None, None).await?;
     if merged.code == Some(0) {
-        let counted = run_git(runner, top, &["rev-list", "--count", &format!("{before}..{theirs}")], None, None).await?;
+        let counted =
+            run_git(runner, top, &GitLine::new(&["rev-list", "--count"]).revs(&[&format!("{before}..{theirs}")]), None, None).await?;
         check(&counted, "rev-list")?;
-        let after = run_git(runner, top, &["rev-parse", "HEAD"], None, None).await?;
+        let after = run_git(runner, top, &GitLine::new(&["rev-parse", "HEAD"]), None, None).await?;
         check(&after, "rev-parse")?;
-        let took = run_git(runner, top, &["rev-parse", "--verify", &format!("{theirs}^{{commit}}")], None, None).await?;
+        let took =
+            run_git(runner, top, &GitLine::new(&["rev-parse", "--verify"]).revs(&[&format!("{theirs}^{{commit}}")]), None, None).await?;
         check(&took, "rev-parse")?;
         return Ok(Merge::Took {
             commits: stdout_text(&counted).trim().parse().unwrap_or(0),
@@ -388,13 +383,13 @@ async fn merge_remote<R: Runs>(
         });
     }
     // Whatever stopped the merge, one in progress is taken back before anything is answered.
-    let underway = run_git(runner, top, &["rev-parse", "-q", "--verify", "MERGE_HEAD"], None, None).await?;
+    let underway = run_git(runner, top, &GitLine::new(&["rev-parse", "-q", "--verify", "MERGE_HEAD"]), None, None).await?;
     if underway.code != Some(0) {
         return Err(refusal_as(&merged, &copy, said.refused));
     }
-    let listed = run_git(runner, top, &["diff", "--name-only", "--diff-filter=U", "-z"], None, None).await?;
+    let listed = run_git(runner, top, &GitLine::new(&["diff", "--name-only", "--diff-filter=U", "-z"]), None, None).await?;
     let conflicts: Vec<String> = stdout_text(&listed).split('\0').filter(|p| !p.is_empty()).map(str::to_owned).collect();
-    let aborted = run_git(runner, top, &["merge", "--abort"], None, None).await?;
+    let aborted = run_git(runner, top, &GitLine::new(&["merge", "--abort"]), None, None).await?;
     check(&aborted, "merge --abort")?;
     if conflicts.is_empty() {
         return Err(refusal_as(&merged, &copy, said.refused));
@@ -972,7 +967,10 @@ mod tests {
             ]
             .map(str::to_owned)
         );
-        assert!(asked.iter().any(|a| a == &["merge", "--no-edit", "--no-ff", "FETCH_HEAD"].map(str::to_owned)), "{asked:?}");
+        assert!(
+            asked.iter().any(|a| a == &["merge", "--no-edit", "--no-ff", "--end-of-options", "FETCH_HEAD"].map(str::to_owned)),
+            "{asked:?}"
+        );
     }
 
     /// Every key a served repository's config can set that names a command, and every hook, each writing a marker

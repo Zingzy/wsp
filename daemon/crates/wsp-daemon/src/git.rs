@@ -14,6 +14,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use wsp_frames::{DaemonErrorCode, GitBranch, GitDiffFile, GitDiffReply, GitDiffScope, GitStatusEntry, GitStatusReply};
+pub(crate) use wsp_runtime::git_line::{GitLine, Oid as GitOid};
 
 use crate::fs::utf8_text;
 use crate::paths::OpError;
@@ -84,15 +85,21 @@ pub(crate) struct OnThisSide {
 /// ways of running cannot part ways on it.
 pub(crate) const GIT_ENV: [(&str, &str); 3] = [("GIT_OPTIONAL_LOCKS", "0"), ("GIT_TERMINAL_PROMPT", "0"), ("LC_ALL", "C")];
 
-/// Runs git through the way given: the one place the program is named git.
+/// Runs git through the way given: the one place the program is named git, under env where the line carries a
+/// variable. The line is a `GitLine`, so a name an agent chose reaches git behind a separator and never as a flag.
 pub(crate) async fn run_git<R: Runs>(
     runner: &R,
     cwd: &Path,
-    args: &[&str],
+    line: &GitLine<'_>,
     input: Option<&[u8]>,
     max_bytes: Option<usize>,
 ) -> Result<GitResult, OpError> {
-    runner.run(cwd, "git", args, input, max_bytes).await
+    let env = line.env_words();
+    if env.is_empty() {
+        return runner.run(cwd, "git", &line.argv(), input, max_bytes).await;
+    }
+    let all: Vec<&str> = env.into_iter().chain(["git"]).chain(line.argv()).collect();
+    runner.run(cwd, "env", &all, input, max_bytes).await
 }
 
 /// Exit 0 and 1 are answers, a cut is the cap's doing; anything else failed, and a missing repo has its own code.
@@ -160,9 +167,9 @@ pub(crate) fn parse_porcelain_v2(text: &str) -> (GitBranch, Vec<GitStatusEntry>)
 }
 
 pub(crate) async fn git_status<R: Runs>(runner: &R, cwd: &Path) -> Result<GitStatusReply, OpError> {
-    let res = run_git(runner, cwd, &["status", "--porcelain=v2", "--branch", "--show-stash", "-z"], None, None).await?;
+    let res = run_git(runner, cwd, &GitLine::new(&["status", "--porcelain=v2", "--branch", "--show-stash", "-z"]), None, None).await?;
     check(&res, "status")?;
-    let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
+    let top = run_git(runner, cwd, &GitLine::new(&["rev-parse", "--show-toplevel"]), None, None).await?;
     check(&top, "rev-parse")?;
     let (mut branch, entries) = parse_porcelain_v2(&stdout_text(&res));
     counted_without_upstream(runner, cwd, &mut branch).await?;
@@ -188,7 +195,9 @@ async fn counted_without_upstream<R: Runs>(runner: &R, cwd: &Path, branch: &mut 
         branch.upstream = None;
     }
     let Some(base) = default_branch(runner, cwd).await? else { return Ok(()) };
-    let counted = run_git(runner, cwd, &["rev-list", "--left-right", "--count", &format!("{base}...HEAD")], None, None).await?;
+    let counted =
+        run_git(runner, cwd, &GitLine::new(&["rev-list", "--left-right", "--count"]).revs(&[&format!("{base}...HEAD")]), None, None)
+            .await?;
     check(&counted, "rev-list")?;
     let text = stdout_text(&counted);
     let mut counts = text.split_whitespace().map(str::parse::<u64>);
@@ -200,7 +209,7 @@ async fn counted_without_upstream<R: Runs>(runner: &R, cwd: &Path, branch: &mut 
 }
 
 pub(crate) async fn rev_exists<R: Runs>(runner: &R, cwd: &Path, rev: &str) -> Result<bool, OpError> {
-    Ok(run_git(runner, cwd, &["rev-parse", "--verify", "-q", rev], None, None).await?.code == Some(0))
+    Ok(run_git(runner, cwd, &GitLine::new(&["rev-parse", "--verify", "-q"]).revs(&[rev]), None, None).await?.code == Some(0))
 }
 
 /// Where a branch's base is looked for, in order: origin's HEAD where a remote set it, else a local main or master.
@@ -212,7 +221,7 @@ pub(crate) const DEFAULT_BRANCHES: [&str; 3] = ["refs/remotes/origin/HEAD", "ref
 pub(crate) async fn default_branch<R: Runs>(runner: &R, cwd: &Path) -> Result<Option<String>, OpError> {
     for name in DEFAULT_BRANCHES {
         if name.ends_with("/HEAD") {
-            let named = run_git(runner, cwd, &["symbolic-ref", "-q", "--short", name], None, None).await?;
+            let named = run_git(runner, cwd, &GitLine::new(&["symbolic-ref", "-q", "--short", name]), None, None).await?;
             check(&named, "symbolic-ref")?;
             let target = stdout_text(&named).trim().to_owned();
             if named.code == Some(0) && rev_exists(runner, cwd, &target).await? {
@@ -322,37 +331,39 @@ pub(crate) async fn git_diff<R: Runs>(
     whole: bool,
     cap: usize,
 ) -> Result<GitDiffReply, OpError> {
-    let mut args: Vec<String> = Vec::new();
+    let mut revs: Vec<String> = Vec::new();
     let mut base = None;
     match scope {
-        GitDiffScope::Staged => args.push("--cached".to_owned()),
+        GitDiffScope::Staged => {}
         GitDiffScope::Branch => {
             base = default_branch(runner, cwd).await?;
             match &base {
-                None => args.push("HEAD".to_owned()),
+                None => revs.push("HEAD".to_owned()),
                 Some(base) => {
-                    let mb = run_git(runner, cwd, &["merge-base", base, "HEAD"], None, None).await?;
+                    let mb = run_git(runner, cwd, &GitLine::new(&["merge-base"]).revs(&[base, "HEAD"]), None, None).await?;
                     check(&mb, "merge-base")?;
-                    args.push(if mb.code == Some(0) { stdout_text(&mb).trim().to_owned() } else { "HEAD".to_owned() });
+                    revs.push(if mb.code == Some(0) { stdout_text(&mb).trim().to_owned() } else { "HEAD".to_owned() });
                 }
             }
         }
         GitDiffScope::Unstaged => {}
-        GitDiffScope::Head => args.push(if rev_exists(runner, cwd, "HEAD").await? { "HEAD" } else { EMPTY_TREE }.to_owned()),
+        GitDiffScope::Head => revs.push(if rev_exists(runner, cwd, "HEAD").await? { "HEAD" } else { EMPTY_TREE }.to_owned()),
     }
     let listing = Listing {
+        cached: scope == GitDiffScope::Staged,
         untracked: matches!(scope, GitDiffScope::Head | GitDiffScope::Branch),
         blobs: true,
         whole,
         worktree: scope != GitDiffScope::Staged,
     };
-    diff_listed(runner, cwd, bound, &args, path, paths, listing, cap, base).await
+    diff_listed(runner, cwd, bound, &revs, path, paths, listing, cap, base).await
 }
 
 /// The HEAD a snapshot was taken on, which git.snapshot recorded as the snapshot commit's parent; None where the
 /// checkout had no commit yet.
 async fn snapshot_head<R: Runs>(runner: &R, cwd: &Path, snapshot: &str) -> Result<Option<String>, OpError> {
-    let res = run_git(runner, cwd, &["rev-parse", "--verify", "--quiet", &format!("{snapshot}^")], None, None).await?;
+    let res =
+        run_git(runner, cwd, &GitLine::new(&["rev-parse", "--verify", "--quiet"]).revs(&[&format!("{snapshot}^")]), None, None).await?;
     Ok((res.code == Some(0)).then(|| stdout_text(&res).trim().to_owned()).filter(|s| !s.is_empty()))
 }
 
@@ -485,7 +496,7 @@ fn replay_step(subject: &str) -> Option<(&str, &str, &str)> {
 
 /// What HEAD stood on as a snapshot was taken, off the line git.snapshot stamped on its message.
 async fn snapshot_on<R: Runs>(runner: &R, cwd: &Path, snapshot: &str) -> Result<Head, OpError> {
-    let res = run_git(runner, cwd, &["show", "-s", "--format=%B", snapshot], None, None).await?;
+    let res = run_git(runner, cwd, &GitLine::new(&["show", "-s", "--format=%B"]).revs(&[snapshot]), None, None).await?;
     if res.code != Some(0) {
         return Ok(Head::Unknown);
     }
@@ -500,7 +511,7 @@ async fn snapshot_on<R: Runs>(runner: &R, cwd: &Path, snapshot: &str) -> Result<
 /// How many entries HEAD's reflog holds now. git.snapshot stamps this on each snapshot, so a turn's window is the
 /// entries added between its two snapshots, read by count and never by time.
 async fn reflog_count<R: Runs>(runner: &R, cwd: &Path) -> Result<u64, OpError> {
-    let res = run_git(runner, cwd, &["reflog", "--format=%H", "HEAD"], None, None).await?;
+    let res = run_git(runner, cwd, &GitLine::new(&["reflog", "--format=%H", "HEAD"]), None, None).await?;
     if res.code != Some(0) {
         return Ok(0);
     }
@@ -510,7 +521,7 @@ async fn reflog_count<R: Runs>(runner: &R, cwd: &Path) -> Result<u64, OpError> {
 /// The reflog length git.snapshot stamped on a snapshot's own message, which bounds the turn's window; None on a
 /// snapshot an older daemon wrote without one.
 async fn snapshot_reflog<R: Runs>(runner: &R, cwd: &Path, snapshot: &str) -> Result<Option<u64>, OpError> {
-    let res = run_git(runner, cwd, &["show", "-s", "--format=%B", snapshot], None, None).await?;
+    let res = run_git(runner, cwd, &GitLine::new(&["show", "-s", "--format=%B"]).revs(&[snapshot]), None, None).await?;
     if res.code != Some(0) {
         return Ok(None);
     }
@@ -528,7 +539,7 @@ async fn first_parent_or_empty<R: Runs>(runner: &R, cwd: &Path, commit: &str) ->
 async fn no_hand_merge_tree<R: Runs>(runner: &R, cwd: &Path, a: &str, b: &str) -> Result<Option<String>, OpError> {
     // merge-tree exits 1 when a path conflicts, and still writes the tree on its first line; only a real error leaves
     // no object id there, so the id's own shape is what says it wrote one.
-    let res = run_git(runner, cwd, &["merge-tree", "--write-tree", a, b], None, None).await?;
+    let res = run_git(runner, cwd, &GitLine::new(&["merge-tree", "--write-tree"]).revs(&[a, b]), None, None).await?;
     let tree = stdout_text(&res).lines().next().unwrap_or("").trim().to_owned();
     Ok(is_oid(&tree).then_some(tree))
 }
@@ -548,7 +559,7 @@ async fn turn_ops<R: Runs>(runner: &R, cwd: &Path, from: &str, to: &str) -> Resu
     if take == 0 {
         return Ok((Vec::new(), Vec::new(), Vec::new()));
     }
-    let log = run_git(runner, cwd, &["reflog", "--format=%H %gs", "HEAD"], None, None).await?;
+    let log = run_git(runner, cwd, &GitLine::new(&["reflog", "--format=%H %gs", "HEAD"]), None, None).await?;
     if log.code != Some(0) {
         return Ok((Vec::new(), Vec::new(), Vec::new()));
     }
@@ -592,9 +603,9 @@ async fn changed_between<R: Runs>(runner: &R, cwd: &Path, from: &str, to: &str, 
     if files.is_empty() {
         return Ok(HashSet::new());
     }
-    let mut args: Vec<String> = ["diff", "--name-only", "-z", from, to, "--"].iter().map(|s| (*s).to_owned()).collect();
-    args.extend(files.iter().map(|f| format!(":(top,literal){}", f.path)));
-    let out = run_git(runner, cwd, &args.iter().map(String::as_str).collect::<Vec<_>>(), None, None).await?;
+    let specs: Vec<String> = files.iter().map(|f| format!(":(top,literal){}", f.path)).collect();
+    let specs: Vec<&str> = specs.iter().map(String::as_str).collect();
+    let out = run_git(runner, cwd, &GitLine::new(&["diff", "--name-only", "-z"]).revs(&[from, to]).operands(&specs), None, None).await?;
     check(&out, "diff --name-only")?;
     Ok(stdout_text(&out).split('\0').filter(|s| !s.is_empty()).map(str::to_owned).collect())
 }
@@ -612,7 +623,7 @@ pub(crate) async fn git_range<R: Runs>(
     cap: usize,
 ) -> Result<GitDiffReply, OpError> {
     range_held(runner, cwd, from, to).await?;
-    let listing = Listing { untracked: false, blobs: false, whole: false, worktree: false };
+    let listing = Listing { cached: false, untracked: false, blobs: false, whole: false, worktree: false };
     diff_listed(runner, cwd, bound, &[from.to_owned(), to.to_owned()], path, &[], listing, cap, None).await
 }
 
@@ -621,7 +632,7 @@ pub(crate) async fn git_range<R: Runs>(
 async fn range_held<R: Runs>(runner: &R, cwd: &Path, from: &str, to: &str) -> Result<(), OpError> {
     for sha in [from, to] {
         let spec = format!("{sha}^{{commit}}");
-        let held = run_git(runner, cwd, &["cat-file", "-e", &spec], None, None).await?;
+        let held = run_git(runner, cwd, &GitLine::new(&["cat-file", "-e"]).revs(&[&spec]), None, None).await?;
         if held.code != Some(0) {
             if held.stderr.to_ascii_lowercase().contains("not a git repository") {
                 return Err(not_a_repo());
@@ -652,7 +663,7 @@ pub(crate) async fn git_turn<R: Runs>(
     let start_head = snapshot_head(runner, cwd, from).await?;
     let end_head = snapshot_head(runner, cwd, to).await?;
     let (own, resolved, moved) = turn_ops(runner, cwd, from, to).await?;
-    let listing = Listing { untracked: false, blobs: false, whole: false, worktree: false };
+    let listing = Listing { cached: false, untracked: false, blobs: false, whole: false, worktree: false };
     let mut files: Vec<GitDiffFile> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     let mut truncated = false;
@@ -688,7 +699,7 @@ pub(crate) async fn git_turn<R: Runs>(
 
 /// The parents of a commit, in order; a merge the turn resolved has two.
 async fn parents_of<R: Runs>(runner: &R, cwd: &Path, commit: &str) -> Result<Vec<String>, OpError> {
-    let res = run_git(runner, cwd, &["rev-list", "--parents", "-n", "1", commit], None, None).await?;
+    let res = run_git(runner, cwd, &GitLine::new(&["rev-list", "--parents", "-n", "1"]).revs(&[commit]), None, None).await?;
     Ok(stdout_text(&res).split_whitespace().skip(1).map(str::to_owned).collect())
 }
 
@@ -696,6 +707,8 @@ async fn parents_of<R: Runs>(runner: &R, cwd: &Path, commit: &str) -> Result<Vec
 /// whole files in one hunk.
 #[derive(Clone, Copy)]
 struct Listing {
+    /// The index against HEAD rather than a revision against the worktree.
+    cached: bool,
     untracked: bool,
     blobs: bool,
     whole: bool,
@@ -710,7 +723,7 @@ struct Listing {
 /// Called once per tracked file whose worktree hunk `rebuilt_patch` diffs from the object, never per untracked file:
 /// a checkout with tens of thousands of untracked files would spawn one git and write one loose object for each.
 async fn written_blob<R: Runs>(runner: &R, top: &Path, path: &str, bytes: &[u8]) -> Result<Option<String>, OpError> {
-    let res = run_git(runner, top, &["hash-object", "-w", "--stdin", "--path", path], Some(bytes), None).await?;
+    let res = run_git(runner, top, &GitLine::new(&["hash-object", "-w", "--stdin"]).value("--path", path), Some(bytes), None).await?;
     let id = stdout_text(&res).trim().to_owned();
     Ok((res.code == Some(0) && !id.is_empty()).then_some(id))
 }
@@ -724,7 +737,7 @@ enum ObjectFormat {
 /// Read from the repository, never inferred: a format wrong by a byte hashes every blob wrong, so anything but the
 /// two git names, or a call that failed, fails the op rather than falling back to sha1.
 async fn object_format<R: Runs>(runner: &R, cwd: &Path) -> Result<ObjectFormat, OpError> {
-    let res = run_git(runner, cwd, &["rev-parse", "--show-object-format"], None, None).await?;
+    let res = run_git(runner, cwd, &GitLine::new(&["rev-parse", "--show-object-format"]), None, None).await?;
     check(&res, "rev-parse --show-object-format")?;
     match stdout_text(&res).trim() {
         "sha1" => Ok(ObjectFormat::Sha1),
@@ -762,7 +775,7 @@ fn read_blob(format: &ObjectFormat, bytes: &[u8]) -> String {
 /// How long git writes a blob id in this repository's patches: as long as it cuts HEAD to, which grows with the
 /// objects it holds, and seven where nothing is committed yet.
 async fn abbrev_of<R: Runs>(runner: &R, cwd: &Path) -> Result<usize, OpError> {
-    let res = run_git(runner, cwd, &["rev-parse", "--short", "HEAD"], None, None).await?;
+    let res = run_git(runner, cwd, &GitLine::new(&["rev-parse", "--short", "HEAD"]), None, None).await?;
     let short = stdout_text(&res).trim().len();
     Ok(if res.code == Some(0) && short >= 4 { short } else { 7 })
 }
@@ -788,12 +801,8 @@ async fn rebuilt_patch<R: Runs>(
     };
     let header = &git_worktree[..cut];
     let Some(base) = index_pre_image(header) else { return Ok(None) };
-    let mut args = vec!["diff", "--no-color", "--no-ext-diff"];
-    if whole {
-        args.push(WHOLE);
-    }
-    args.extend([base, dst]);
-    let res = run_git(runner, cwd, &args, None, Some(cap)).await?;
+    let args = GitLine::new(&["diff", "--no-color", "--no-ext-diff"]).words(if whole { &[WHOLE] } else { &[] });
+    let res = run_git(runner, cwd, &args.revs(&[base, dst]), None, Some(cap)).await?;
     check(&res, "diff")?;
     let mut out = with_post_image(header, dst, abbrev);
     match body_of(&res.stdout) {
@@ -889,14 +898,14 @@ async fn diff_listed<R: Runs>(
     runner: &R,
     cwd: &Path,
     bound: &Path,
-    args: &[String],
+    revs: &[String],
     path: Option<&str>,
     paths: &[String],
-    Listing { untracked: with_untracked, blobs: with_blobs, whole, worktree }: Listing,
+    Listing { cached, untracked: with_untracked, blobs: with_blobs, whole, worktree }: Listing,
     cap: usize,
     base: Option<String>,
 ) -> Result<GitDiffReply, OpError> {
-    let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
+    let top = run_git(runner, cwd, &GitLine::new(&["rev-parse", "--show-toplevel"]), None, None).await?;
     check(&top, "rev-parse")?;
     let top = PathBuf::from(stdout_text(&top).trim());
     // Bound's own path from the top where the top sits above it: the prefix every answered path must carry.
@@ -916,26 +925,21 @@ async fn diff_listed<R: Runs>(
     // The object format is the repository's own, read before the listing so it is git's real answer, not one a link
     // swapped in over the top mid-read could turn into a failure; a broken answer here fails the diff.
     let format = if worktree && with_blobs { Some(object_format(runner, cwd).await?) } else { None };
-    let mut list_args: Vec<&str> = vec!["diff"];
-    list_args.extend(args.iter().map(String::as_str));
-    list_args.extend(["-M", "--name-status", "-z"]);
-    if !narrowed.is_empty() {
-        list_args.push("--");
-        list_args.extend(&narrowed);
-    }
-    let listed = run_git(runner, cwd, &list_args, None, None).await?;
+    let revs: Vec<&str> = revs.iter().map(String::as_str).collect();
+    let diff_of = |words: &[&'static str]| {
+        let line = GitLine::new(&["diff"]).words(if cached { &["--cached"] } else { &[] }).words(words).revs(&revs);
+        if narrowed.is_empty() {
+            line
+        } else {
+            line.operands(&narrowed)
+        }
+    };
+    let listed = run_git(runner, cwd, &diff_of(&["-M", "--name-status", "-z"]), None, None).await?;
     check(&listed, "diff --name-status")?;
     if listed.code != Some(0) {
         return Err(OpError::plain(format!("git diff --name-status failed: {}", listed.stderr.trim())));
     }
-    let mut count_args: Vec<&str> = vec!["diff"];
-    count_args.extend(args.iter().map(String::as_str));
-    count_args.extend(["-M", "--numstat", "-z"]);
-    if !narrowed.is_empty() {
-        count_args.push("--");
-        count_args.extend(&narrowed);
-    }
-    let counted = run_git(runner, cwd, &count_args, None, None).await?;
+    let counted = run_git(runner, cwd, &diff_of(&["-M", "--numstat", "-z"]), None, None).await?;
     check(&counted, "diff --numstat")?;
     let counts = parse_numstat(&stdout_text(&counted));
     let mut listed_files: Vec<(ListedFile, Untracked)> = parse_name_status(&stdout_text(&listed))
@@ -944,9 +948,8 @@ async fn diff_listed<R: Runs>(
         .map(|f| (ListedFile { orig_path: f.orig_path.filter(|o| inside(o)), ..f }, Untracked::No))
         .collect();
     if with_untracked {
-        let mut others = vec!["ls-files", "--others", "--exclude-standard", "--eol", "--full-name", "-z", "--"];
-        others.extend(if narrowed.is_empty() { vec![":/"] } else { narrowed.clone() });
-        let untracked = run_git(runner, cwd, &others, None, None).await?;
+        let others = GitLine::new(&["ls-files", "--others", "--exclude-standard", "--eol", "--full-name", "-z"]);
+        let untracked = run_git(runner, cwd, &others.operands(if narrowed.is_empty() { &[":/"] } else { &narrowed }), None, None).await?;
         check(&untracked, "ls-files")?;
         // `--eol` leaves the worktree column, `w/`, empty for anything that is not a regular file.
         let text = stdout_text(&untracked);
@@ -1034,14 +1037,13 @@ async fn diff_listed<R: Runs>(
             untracked::patch_of(&file.path, bytes, *exec, Some(dst), abbrev)
         } else {
             let specs: Vec<String> = file.orig_path.iter().chain([&file.path]).map(|p| format!(":(top,literal){p}")).collect();
-            let mut diff_args: Vec<&str> = vec!["diff"];
-            diff_args.extend(args.iter().map(String::as_str));
-            diff_args.extend(["-M", "--no-color", "--no-ext-diff"]);
-            if whole {
-                diff_args.push(WHOLE);
-            }
-            diff_args.push("--");
-            diff_args.extend(specs.iter().map(String::as_str));
+            let specs: Vec<&str> = specs.iter().map(String::as_str).collect();
+            let diff_args = GitLine::new(&["diff"])
+                .words(if cached { &["--cached"] } else { &[] })
+                .words(&["-M", "--no-color", "--no-ext-diff"])
+                .words(if whole { &[WHOLE] } else { &[] })
+                .revs(&revs)
+                .operands(&specs);
             let res = run_git(runner, cwd, &diff_args, None, Some(remaining)).await?;
             check(&res, "diff")?;
             if !worktree {
@@ -1128,26 +1130,27 @@ pub(crate) async fn git_snapshot<R: Runs>(runner: &R, cwd: &Path) -> Result<wsp_
     let top = checkpoint::top_of(runner, cwd).await?;
     let at = top.as_path();
     let tree = checkpoint::with_index(runner, at, |index| async move {
-        let added = checkpoint::git_on(runner, at, &index, &["add", "-A"]).await?;
+        let added = checkpoint::git_on(runner, at, &index, &["add", "-A"], None).await?;
         checkpoint::ran(&added, "add")?;
-        let written = checkpoint::git_on(runner, at, &index, &["write-tree"]).await?;
+        let written = checkpoint::git_on(runner, at, &index, &["write-tree"], None).await?;
         checkpoint::ran(&written, "write-tree")?;
         Ok(stdout_text(&written).trim().to_owned())
     })
     .await?;
-    let head = run_git(runner, at, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], None, None).await?;
+    let head = run_git(runner, at, &GitLine::new(&["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]), None, None).await?;
     let parent = (head.code == Some(0)).then(|| stdout_text(&head).trim().to_owned());
     // The turn range reads a turn's window off the reflog by count, so each snapshot stamps the length HEAD's reflog
     // holds as it is taken; the two stamps bound the entries the turn added. The branch HEAD stands on is stamped too,
     // so a move in the window names the branch it moved.
     let on = head_ref(runner, at).await?;
     let message = format!("wsp snapshot\n\nreflog {}\nhead {on}", reflog_count(runner, at).await?);
-    let mut commit_args =
-        vec!["-c", "user.name=wsp", "-c", "user.email=wsp@localhost", "commit-tree", tree.as_str(), "-m", message.as_str()];
-    if let Some(parent) = parent.as_deref() {
-        commit_args.extend(["-p", parent]);
-    }
-    let commit = run_git(runner, at, &commit_args, None, None).await?;
+    let tree = GitOid::parse(&tree).ok_or_else(|| OpError::plain(format!("git write-tree answered {tree:?}")))?;
+    let commit_args = GitLine::new(&["-c", "user.name=wsp", "-c", "user.email=wsp@localhost", "commit-tree"]).value("-m", &message);
+    let commit_args = match parent.as_deref() {
+        Some(parent) => commit_args.value("-p", parent),
+        None => commit_args,
+    };
+    let commit = run_git(runner, at, &commit_args.oid(&tree), None, None).await?;
     checkpoint::ran(&commit, "commit-tree")?;
     Ok(wsp_frames::GitSnapshotReply { commit: stdout_text(&commit).trim().to_owned() })
 }
@@ -1155,7 +1158,7 @@ pub(crate) async fn git_snapshot<R: Runs>(runner: &R, cwd: &Path) -> Result<wsp_
 /// The ref HEAD stands on, or `detached`. A rebase stopped on a conflict leaves HEAD detached and keeps the branch it
 /// rebases in its own state folder, so that branch is the one named.
 async fn head_ref<R: Runs>(runner: &R, top: &Path) -> Result<String, OpError> {
-    let on = run_git(runner, top, &["symbolic-ref", "-q", "HEAD"], None, None).await?;
+    let on = run_git(runner, top, &GitLine::new(&["symbolic-ref", "-q", "HEAD"]), None, None).await?;
     if on.code == Some(0) {
         return Ok(stdout_text(&on).trim().to_owned());
     }
@@ -1184,7 +1187,7 @@ async fn blobs_of<R: Runs>(runner: &R, top: &Path, paths: Vec<&str>) -> Result<s
         return Ok(std::collections::HashMap::new());
     }
     let input = paths.iter().map(|p| format!("{p}\n")).collect::<String>();
-    let res = run_git(runner, top, &["hash-object", "--stdin-paths"], Some(input.as_bytes()), None).await?;
+    let res = run_git(runner, top, &GitLine::new(&["hash-object", "--stdin-paths"]), Some(input.as_bytes()), None).await?;
     if res.code != Some(0) {
         return Ok(std::collections::HashMap::new());
     }
@@ -1294,7 +1297,8 @@ mod tests {
     async fn every_git_call_carries_optional_locks_off_and_the_c_locale_and_runs_at_the_work_score() {
         let dir = tempfile::tempdir().unwrap();
         let alias = "!sh -c 'echo \"$GIT_OPTIONAL_LOCKS|$LC_ALL|$GIT_TERMINAL_PROMPT\"; cat /proc/self/oom_score_adj'";
-        let res = run_git(&here(), dir.path(), &["-c", &format!("alias.probe={alias}"), "probe"], None, None).await.unwrap();
+        let res =
+            run_git(&here(), dir.path(), &GitLine::new(&["-c"]).glued("alias.probe=", alias).words(&["probe"]), None, None).await.unwrap();
         assert_eq!((res.code, res.truncated), (Some(0), false), "{}", res.stderr);
         assert_eq!(String::from_utf8_lossy(&res.stdout), format!("0|C|0\n{}\n", numbers::WORK_OOM_SCORE_ADJ));
     }
@@ -1303,11 +1307,16 @@ mod tests {
     async fn stdout_past_the_cap_ends_git_and_says_so_while_stdin_reaches_it() {
         let dir = tempfile::tempdir().unwrap();
         let echo = "!sh -c 'cat; yes | head -c 200000'";
-        let res = run_git(&here(), dir.path(), &["-c", &format!("alias.probe={echo}"), "probe"], Some(b"in\n"), Some(10)).await.unwrap();
+        let res =
+            run_git(&here(), dir.path(), &GitLine::new(&["-c"]).glued("alias.probe=", echo).words(&["probe"]), Some(b"in\n"), Some(10))
+                .await
+                .unwrap();
         assert!(res.truncated);
         assert_eq!(res.code, None);
         assert!(res.stdout.starts_with(b"in\ny\n"), "{:?}", &res.stdout[..8]);
-        let whole = run_git(&here(), dir.path(), &["-c", &format!("alias.probe={echo}"), "probe"], Some(b"in\n"), None).await.unwrap();
+        let whole = run_git(&here(), dir.path(), &GitLine::new(&["-c"]).glued("alias.probe=", echo).words(&["probe"]), Some(b"in\n"), None)
+            .await
+            .unwrap();
         assert_eq!((whole.code, whole.truncated, whole.stdout.len()), (Some(0), false, 200_003));
     }
 
@@ -1317,10 +1326,12 @@ mod tests {
         let err = git_status(&here(), dir.path()).await.unwrap_err();
         assert_eq!((err.code, err.message.as_str()), (Some(DaemonErrorCode::NotAGitRepo), "not inside a git repository"));
         let boom = "!sh -c 'echo boom >&2; exit 3'";
-        let res = run_git(&here(), dir.path(), &["-c", &format!("alias.probe={boom}"), "probe"], None, None).await.unwrap();
+        let res =
+            run_git(&here(), dir.path(), &GitLine::new(&["-c"]).glued("alias.probe=", boom).words(&["probe"]), None, None).await.unwrap();
         let err = check(&res, "probe").unwrap_err();
         assert_eq!((err.code, err.message.as_str()), (None, "git probe failed (3): boom"));
-        let answered = run_git(&here(), dir.path(), &["-c", "alias.probe=!sh -c 'exit 1'", "probe"], None, None).await.unwrap();
+        let answered =
+            run_git(&here(), dir.path(), &GitLine::new(&["-c", "alias.probe=!sh -c 'exit 1'", "probe"]), None, None).await.unwrap();
         assert_eq!(check(&answered, "probe"), Ok(()));
     }
 
