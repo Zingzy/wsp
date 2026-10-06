@@ -7,7 +7,7 @@
 // that adds another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_WORDS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_LOGIN_REFUSED_KIND, PLACE_SUDO_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
@@ -618,6 +618,31 @@ describe("a computer's own page", () => {
     answer = async () => ({ removed: false, swept: [], note: "old-macbook was not removed: its record is locked" });
     fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
     await waitFor(() => expect(document.querySelector("[data-k='remove-refusal']")?.textContent).toBe("old-macbook was not removed: its record is locked"));
+  });
+
+  it("asks in the Remove confirm for the password the box's sudo wants, and removes again with it held nowhere else", async () => {
+    useStore.setState({ places: [here, { ...laptop, present: true }] });
+    const asked: (string | undefined)[] = [];
+    await mountComputers(
+      computersApi({
+        removePlace: async (_id: string, sudoPassword?: string) => {
+          asked.push(sudoPassword);
+          if (sudoPassword === undefined) throw new RequestError("dev@old-macbook runs sudo only with dev's password. Type it in the app's Remove confirm.", PLACE_SUDO_KIND, "Type it in the app's Remove confirm.");
+          return { removed: true, swept: [] };
+        },
+      } as unknown as Partial<Api>).api,
+      { kind: "computer", id: "p_1" },
+    );
+    fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
+    fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
+    await waitFor(() => expect(document.querySelector("[data-k='remove-refusal']")?.textContent).toBe("dev@old-macbook runs sudo only with dev's password. Type it below; it goes to sudo there and is kept nowhere."));
+    const field = document.querySelector<HTMLInputElement>("[data-remove-place-dialog] [data-k=sudo-password] input, [data-remove-place-dialog] input[data-k=sudo-password]")!;
+    expect(field.type).toBe("password");
+    expect(document.querySelector<HTMLButtonElement>("[data-k='remove-confirm']")!.disabled).toBe(true);
+    fireEvent.change(field, { target: { value: "Tq-not-a-real-pw" } });
+    fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
+    await waitFor(() => expect(asked).toEqual([undefined, "Tq-not-a-real-pw"]));
+    await waitFor(() => expect(pageAt()).toBe("computers"));
   });
 
   it("gives a computer that is answering no line to run by hand, and the Mac no Remove at all", async () => {

@@ -5,14 +5,20 @@
 // it in the refusal slot, with the host's fix.
 //
 // A computer that is not answering cannot be swept from here, so the dialog
-// hands over the line that sweeps it on the computer itself.
+// hands over the line that sweeps it on the computer itself. Where the login
+// it was added over runs sudo only with a password, the refusal asks for it
+// in a field under the slot, held in this dialog alone and sent with the next
+// Remove.
 import { useState } from "react";
-import { PLACES_WORDS, type PlaceView } from "@wsp/protocol";
+import { PLACE_SUDO_KIND, PLACES_WORDS, type PlaceView } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, NEUTRAL_RING } from "../components/ui/button.js";
+import { Input } from "../components/ui/input.js";
+import { cn } from "../lib/utils.js";
 import { failureOf } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
-import { WHERE_WORDS } from "./format.js";
+import { ADD_COMPUTER_WORDS, WHERE_WORDS } from "./format.js";
+import { ROW_FIELD } from "./layout.js";
 import { hereName, placeIsOffline, removeSentence, removeTitle, type PlaceHolding } from "./places.js";
 import { CopyRow, RefusalSlot } from "./sheetParts.js";
 
@@ -24,9 +30,15 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
   const places = useStore(s => s.places);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<{ said: string; fix?: string } | null>(null);
+  const [asksSudo, setAsksSudo] = useState(false);
+  const [password, setPassword] = useState("");
 
   const change = (next: boolean): void => {
-    if (!next) setRefusal(null);
+    if (!next) {
+      setRefusal(null);
+      setAsksSudo(false);
+      setPassword("");
+    }
     onOpenChange(next);
   };
 
@@ -35,10 +47,12 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
       setRefusal({ said: CANNOT_REMOVE });
       return;
     }
+    const typed = asksSudo && password !== "" ? password : undefined;
+    setPassword("");
     setBusy(true);
     setRefusal(null);
     try {
-      const answer = await api.removePlace(place.id);
+      const answer = await api.removePlace(place.id, typed);
       // A remove the host did not make is not a failure to report twice: the row is already gone from the list.
       if (answer.note !== undefined && !answer.removed) setRefusal({ said: answer.note });
       else {
@@ -47,7 +61,10 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
       }
     } catch (e) {
       const failure = failureOf(e);
-      setRefusal({ said: failure.said, ...(failure.fix === undefined ? {} : { fix: failure.fix }) });
+      // The host's fix names the terminal and this confirm for a client with no field; here the field is the fix.
+      const sudo = failure.kind === PLACE_SUDO_KIND;
+      setAsksSudo(sudo);
+      setRefusal({ said: failure.said, ...(sudo ? { fix: ADD_COMPUTER_WORDS.sudoFix } : failure.fix === undefined ? {} : { fix: failure.fix }) });
     } finally {
       setBusy(false);
     }
@@ -66,12 +83,13 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
             <p className="text-[13px] text-muted-foreground">{PLACES_WORDS.remove.leaveTakes}</p>
           </div>
         ) : null}
-        <div className="px-5 pt-2">
+        <div className="flex flex-col gap-2 px-5 pt-2">
           <RefusalSlot k="remove-refusal" {...(refusal ?? {})} />
+          {asksSudo ? <Input data-k="sudo-password" aria-label="Password for sudo" type="password" autoFocus autoComplete="off" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && password !== "" && void remove()} className={cn(ROW_FIELD, "w-44")} /> : null}
         </div>
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>{WHERE_WORDS.cancel}</AlertDialogClose>
-          <Button data-k="remove-confirm" variant="destructive" disabled={busy} onClick={() => void remove()}>
+          <Button data-k="remove-confirm" variant="destructive" disabled={busy || (asksSudo && password === "")} onClick={() => void remove()}>
             {busy ? WHERE_WORDS.removing : WHERE_WORDS.remove}
           </Button>
         </AlertDialogFooter>

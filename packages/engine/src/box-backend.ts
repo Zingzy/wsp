@@ -13,6 +13,7 @@ import { DAEMON_UNIT, moveTimedOutLine, providerKeyName, providerRoadRetryLine, 
 import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, StopRefusedError, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
+import { DROP_SUDO_MARKS } from "./run-env.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, DOCTOR_LABEL, GOLDEN_LABEL, HOST_LABEL, NAME_LABEL, OWNER_LABEL, SMOKE_LABEL, WORKSPACE_LABEL, WSP_LABEL } from "./labels.js";
 import type { BackendPricing, ExecResult, Lifecycle, LifecycleBudgets, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
 import { DAEMON_PORT } from "./preview.js";
@@ -676,10 +677,9 @@ export function envLandingScript(envs: Record<string, string>): string {
 }
 
 /** The command the API is asked to run for one exec: root's, since the endpoint runs as the box user with
- * passwordless sudo and everything wsp puts on a machine is root's own. The shell drops sudo's own marks first, so
- * a command reads a plain root shell and not a person's shell escalated: the harness vendor's installer refuses to
- * run under sudo (measured 2026-09-11). bash -c, never -lc: a login shell resets PATH. */
-export const sudoCommand = (cmd: string): string => `sudo -n bash -c ${shellQuote(`unset SUDO_USER SUDO_UID SUDO_GID SUDO_COMMAND\n${EXEC_ENV}\n${cmd}`)}`;
+ * passwordless sudo and everything wsp puts on a machine is root's own. The shell drops sudo's own marks first.
+ * bash -c, never -lc: a login shell resets PATH. */
+export const sudoCommand = (cmd: string): string => `sudo -n bash -c ${shellQuote(`${DROP_SUDO_MARKS}\n${EXEC_ENV}\n${cmd}`)}`;
 
 export class BoxMachine implements Machine {
   /** The desktop stream is minted per open and lives ten minutes, which a field read once cannot carry; the desktop
