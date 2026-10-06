@@ -29,7 +29,7 @@ describe("a session with a tool server", () => {
     const started = Date.now();
     await expect(served([daemonOf(DAEMON_VERSION), "mcp", "--guest"], {}, [{ jsonrpc: "2.0", id: 0, method: "initialize" }])).rejects.toThrow("the tool server exited with code 2 before it answered");
     expect(Date.now() - started).toBeLessThan(3_000);
-  }, 5_000);
+  });
 });
 
 describe("the binary WSP_MCP_BIN names", () => {

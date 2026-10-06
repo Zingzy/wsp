@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "steps": [
+    "row-id=thread:redirect",
+    "focus:surface-launcher-keys",
+    "key:ArrowDown",
+    "key:ArrowDown"
+  ],
+  "wait": "surface-launcher-keys",
+  "mac": true,
+  "widths": [
+    1440
+  ],
+  "reason": "What this shot adds is the Mac window's glass behind the launcher; the launcher itself is shot in panel-launcher."
+}

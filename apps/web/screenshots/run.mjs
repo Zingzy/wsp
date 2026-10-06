@@ -23,9 +23,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { chromium } from "playwright";
 import { fixtureAgents, fixtureChanges, fixtureCloud, fixtureCompares, fixtureFiles, fixtureFleet, fixtureFolders, fixtureKeys, fixturePulls, fixtureRepos, fixtureState, HERE_AGENTS, HERE_HOST_ITEMS, HERE_PROJECT_FILES } from "./fixture-state.mjs";
-import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, WEB_DIR, whatIsNotBuilt } from "./host.mjs";
+import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, whatIsNotBuilt } from "./host.mjs";
 import { leaveMidWork, writeKeys, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
-import { indexMarkdown, readSurfaces, shotPlan } from "./plan.mjs";
+import { indexMarkdown, readSurfaces, shippedSurfaces, shotPlan } from "./plan.mjs";
 import { APP_UP, failuresToCheck, STILL_LOADING } from "./ready.mjs";
 
 function usage(why) {
@@ -34,7 +34,7 @@ function usage(why) {
 }
 
 function parseArgs(argv) {
-  const args = { surfaces: join(WEB_DIR, "screenshots", "surfaces.json") };
+  const args = {};
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     const value = argv[i + 1];
@@ -231,7 +231,7 @@ async function unmeantFailures(page, shot) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const list = readSurfaces(JSON.parse(readFileSync(args.surfaces, "utf8")));
+  const list = readSurfaces(args.surfaces === undefined ? shippedSurfaces() : JSON.parse(readFileSync(args.surfaces, "utf8")));
   const unbuilt = await whatIsNotBuilt();
   if (unbuilt !== undefined) {
     console.error(unbuilt);

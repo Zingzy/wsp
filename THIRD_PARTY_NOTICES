@@ -7,8 +7,9 @@ here are included or relied upon under their own licenses, reproduced below.
 
 1. pingdotgg/t3code (MIT)
 
-   Files under apps/web/src/components (the ui, chat, preview, files and
-   diffs folders, ChatMarkdown.tsx, ComposerPromptEditor.tsx,
+   Files under apps/web/src/components (the ui, chat, preview, files,
+   diffs, markdown and composer-editor folders, ChatMarkdown.tsx,
+   ComposerPromptEditor.tsx,
    composerInlineChip.ts, RenderErrorBoundary.tsx, the right-panel,
    page-header, diff-worker-pool and terminal drawer
    components; FileMarkdownPreview.tsx, ChatView.tsx, useChatThread.ts,

@@ -123,6 +123,16 @@ fn io_at(path: &Path) -> impl FnOnce(io::Error) -> Error + '_ {
     move |source| Error::Io { path: path.to_owned(), source }
 }
 
+/// The size line where the broker inside reads it. The file sits in the workspace's wsp home, where a process inside
+/// may put a link at its name, so it is written through the folder's descriptor and never by its path.
+fn write_size(file: &Path, cols: u16, rows: u16) -> Result<(), Error> {
+    let (Some(folder), Some(name)) = (file.parent(), file.file_name().and_then(|n| n.to_str())) else {
+        return Err(Error::Io { path: file.to_owned(), source: io::Error::from(io::ErrorKind::InvalidInput) });
+    };
+    crate::bundle::write_file_in(folder, name, crate::pty::size_line(cols, rows).as_bytes(), 0o644)
+        .map_err(|e| Error::Io { path: e.path, source: e.source })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     Creating,
@@ -188,7 +198,7 @@ impl PtyInsideSize {
     /// The size the pane holds now: written where the broker inside reads it, then the window-change signal that
     /// tells it to, which is the one thing that reaches a process whose pipes carry a person's keystrokes.
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), Error> {
-        fs::write(&self.file, crate::pty::size_line(cols, rows)).map_err(io_at(&self.file))?;
+        write_size(&self.file, cols, rows)?;
         kill(Pid::from_raw(self.pid as i32), Signal::SIGWINCH).map_err(|e| Error::Container(format!("the pty was not resized: {e}")))
     }
 }
@@ -341,7 +351,7 @@ impl Runtime {
         if let Some(dir) = size_file.parent() {
             fs::create_dir_all(dir).map_err(io_at(dir))?;
         }
-        fs::write(&size_file, crate::pty::size_line(opts.cols, opts.rows)).map_err(io_at(&size_file))?;
+        write_size(&size_file, opts.cols, opts.rows)?;
         let pid_file = self.layout.workspace(id).join(format!("pty-{at}.pid"));
         let _ = fs::remove_file(&pid_file);
         let line = crate::pty::helper_argv(self.layout.root(), id, &pid_file, &crate::pty::broker_line(profile::INIT_PATH, &ask));
@@ -922,6 +932,22 @@ pub fn helper_failure_line(e: &Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A process inside a workspace writes its wsp home, so a link at a pane's size file names a file of the
+    /// computer's own; the size lands in a file of the workspace's in its place, at the open and at every resize.
+    #[test]
+    fn a_link_at_the_size_file_is_taken_off_and_the_computers_file_is_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let (home, theirs) = (dir.path().join("wsp-home"), dir.path().join("shadow"));
+        fs::create_dir(&home).unwrap();
+        fs::write(&theirs, "root:x\n").unwrap();
+        let size = home.join("pty-0.size");
+        std::os::unix::fs::symlink(&theirs, &size).unwrap();
+        write_size(&size, 80, 24).unwrap();
+        assert_eq!(fs::read_to_string(&theirs).unwrap(), "root:x\n");
+        assert!(fs::symlink_metadata(&size).unwrap().is_file());
+        assert_eq!(fs::read_to_string(&size).unwrap(), crate::pty::size_line(80, 24));
+    }
 
     /// The flag `Exec.truncated` rides on, read where it is set: true only where bytes were dropped. At the cap
     /// less one byte nothing was, at the cap itself nothing was either, and one byte past it something was.

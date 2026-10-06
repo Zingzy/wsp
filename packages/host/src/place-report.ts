@@ -13,7 +13,7 @@ import { spawnRun } from "@wsp/collect";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS, configSum } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, landedFilesScript, writeConfigHere, localShape, outsideMarks, outsideSweepScript, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
-import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOutsideLeftLine, placeOwnedPaths, TOOL_LINKS_DIR, TOOL_PREFIX, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOutsideLeftLine, placeOwnedPaths, placeOwnersUnknownLine, placeStoodBeforeLine, PLACE_FOUND_END, PLACE_FOUND_MAX_BYTES, TOOL_LINKS_DIR, TOOL_PREFIX, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { apparmorOffStep, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { onPath, runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
@@ -301,6 +301,8 @@ export const placeService = (home: string, uid?: number): ServiceAddress => ({ r
 export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSweep> {
   const home = opts.home ?? homedir();
   const sh = opts.sh ?? shStdout;
+  // The add's record of what stood before it sits in wsp's folder here, which the walk below takes.
+  const found = placeFound(home);
   // Before a single path of the list below goes: the list this read reads sits inside the provision folder that
   // walk takes, and what it says is which files in the agents' homes here are still wsp's own copies.
   const own = ownMarks(sh(landedFilesScript(home)));
@@ -359,24 +361,56 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
   }
   // The workspace profile only root's install loaded, unloaded before its file goes, as the host's remove does it.
   const profile = opts.apparmorProfile ?? WSP_WORKSPACE_APPARMOR_PATH;
+  const tools = opts.tools ?? { prefix: TOOL_PREFIX, links: TOOL_LINKS_DIR };
   const root = (opts.uid ?? process.getuid?.()) === 0;
-  if (root && there(profile)) {
-    sh(apparmorOffStep(profile).join("\n"));
-    if (!there(profile)) removed.push(profile);
+  // Only root's jobs install outside the home, and only root can take it off. What the setup wrote outside wsp's
+  // install folder goes first, since the list naming it sits in that folder; that list hashes each path, so it
+  // needs no record of the add's.
+  if (root) {
+    if (found === undefined) {
+      const standing = [profile, tools.prefix].filter(there);
+      if (standing.length > 0) removed.push(placeOwnersUnknownLine(standing));
+      removed.push(...outsideMarks(sh(outsideSweepScript(opts.systemRoot))));
+    } else {
+      if (found.has(profile)) removed.push(placeStoodBeforeLine(profile));
+      else if (there(profile)) {
+        sh(apparmorOffStep(profile).join("\n"));
+        if (!there(profile)) removed.push(profile);
+      }
+      removed.push(...outsideMarks(sh(outsideSweepScript(opts.systemRoot))), ...sweepTools(tools, found));
+    }
   }
-  // Only root's jobs install there, and only root can take it off. What the setup wrote outside the home goes
-  // first, since the list naming it sits in wsp's install folder.
-  if (root) removed.push(...outsideMarks(sh(outsideSweepScript(opts.systemRoot))), ...sweepTools(opts.tools ?? { prefix: TOOL_PREFIX, links: TOOL_LINKS_DIR }));
   const said = unsourced(sshDaemonPlace({ home, path: "" }), home);
   if (said !== undefined && "removed" in said) removed.push(said.removed);
   return { removed, kept: [placeKeptLine(workFolderIn(home)), ...(said !== undefined && "kept" in said ? [said.kept] : [])] };
 }
 
-/** Takes wsp's install folder off this computer: every link in the links folder whose own target is under the
- * prefix, then the prefix whole. A link is read, never followed, so a command of the computer's own there and a link
- * pointing anywhere else stay; a prefix that is itself a link stays too, since what it points at is not wsp's. The
- * daemon's leave takes the same two by the same rule. */
-export function sweepTools(at: ToolFolders): string[] {
+/** The paths the add found standing before it wrote anything, off the record its deploy left here. Nothing where
+ * the record is missing, unreadable, past the cap or does not end on its end entry: a computer joined before the
+ * record existed, one joined at its own terminal and a deploy killed while writing it all read alike, and the leave
+ * then takes nothing outside the home. */
+export function placeFound(home: string): ReadonlySet<string> | undefined {
+  const path = placeDaemonPaths(home).placeFound;
+  let text: string;
+  try {
+    const at = lstatSync(path);
+    if (!at.isFile() || at.size > PLACE_FOUND_MAX_BYTES + PLACE_FOUND_END.length + 1) return undefined;
+    text = readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+  const end = `${PLACE_FOUND_END}\0`;
+  if (text !== end && !text.endsWith(`\0${end}`)) return undefined;
+  return new Set(text.slice(0, -end.length).split("\0").filter(entry => entry !== ""));
+}
+
+/** Takes wsp's install folder off this computer, by the record of what stood before the add. Every link in the links
+ * folder the record does not name whose own target is under the prefix and is no path the record names, then the
+ * prefix whole where it did not stand; where it stood, every path under it the record does not name, deepest first,
+ * a folder only once it is empty, so a folder still holding a path from before stays with it. A link is read, never
+ * followed, so a command of the computer's own there and a link pointing anywhere else stay; a prefix that is itself
+ * a link stays too, since what it points at is not wsp's. The daemon's leave takes the same paths by the same rule. */
+export function sweepTools(at: ToolFolders, found: ReadonlySet<string>): string[] {
   let prefix;
   try {
     prefix = lstatSync(at.prefix);
@@ -387,6 +421,7 @@ export function sweepTools(at: ToolFolders): string[] {
   // The list of what the setup wrote outside the home goes last in a leave that finished; one still holding lines is
   // the only record of what a leave cut short left behind.
   if (holdsLines(join(at.prefix, "landed"))) return [placeOutsideLeftLine(at.prefix)];
+  const stood = found.has(at.prefix);
   const removed: string[] = [];
   let names: string[];
   try {
@@ -396,6 +431,7 @@ export function sweepTools(at: ToolFolders): string[] {
   }
   for (const name of names) {
     const link = join(at.links, name);
+    if (found.has(link)) continue;
     let target: string;
     try {
       target = resolve(at.links, readlinkSync(link));
@@ -403,6 +439,7 @@ export function sweepTools(at: ToolFolders): string[] {
       continue;
     }
     if (target !== at.prefix && !target.startsWith(`${at.prefix}/`)) continue;
+    if (stood && found.has(target)) continue;
     try {
       unlinkSync(link);
       removed.push(link);
@@ -410,9 +447,41 @@ export function sweepTools(at: ToolFolders): string[] {
       continue;
     }
   }
-  rmSync(at.prefix, { recursive: true, force: true });
-  if (!there(at.prefix)) removed.push(at.prefix);
-  return removed;
+  if (!stood) {
+    rmSync(at.prefix, { recursive: true, force: true });
+    if (!there(at.prefix)) removed.push(at.prefix);
+    return removed;
+  }
+  const gone = new Set<string>();
+  const walk = (folder: string): void => {
+    let entries: string[];
+    try {
+      entries = readdirSync(folder);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      const path = join(folder, name);
+      let kind;
+      try {
+        kind = lstatSync(path);
+      } catch {
+        continue;
+      }
+      if (kind.isDirectory()) walk(path);
+      if (found.has(path)) continue;
+      try {
+        if (kind.isDirectory()) rmdirSync(path);
+        else unlinkSync(path);
+        gone.add(path);
+      } catch {
+        continue;
+      }
+    }
+  };
+  walk(at.prefix);
+  // The topmost path that went stands for everything under it.
+  return [...removed, ...[...gone].filter(path => !gone.has(dirname(path))), placeStoodBeforeLine(at.prefix)];
 }
 
 /** Whether a file stands at that path with anything in it, read without following a link. */

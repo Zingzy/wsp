@@ -28,6 +28,12 @@ describe("requestSecrets", () => {
     expect(requestSecrets(frame).sort()).toEqual(["e1", "k1", "r1"]);
     expect(requestSecrets("not a frame")).toEqual([]);
   });
+
+  it("reads the sudo password an add carries, so a refusal that ever said it is redacted in the host's log", () => {
+    const frame = { id: 2, op: "places.add", address: "maya@box", sudoPassword: "Tq-not-a-real-pw" };
+    expect(requestSecrets(frame)).toEqual(["Tq-not-a-real-pw"]);
+    expect(redacted("sudo on maya@box said Tq-not-a-real-pw", requestSecrets(frame))).toBe("sudo on maya@box said <redacted>");
+  });
 });
 
 describe("issuesLine", () => {

@@ -11,7 +11,7 @@
 // what the panes follow. The branch is read, not switched: the daemon has no
 // checkout op, and a detached head shows no branch word.
 import { GitBranchIcon } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { DETACHED_HEAD, type PlaceView } from "@wsp/protocol";
 import { projectFolderOf, useRootStore, useThreadFolder } from "../../files/root";
 import { useDaemonWire } from "../../files/wire";
@@ -22,7 +22,17 @@ import { useBranch, useLinkWord } from "../../terminal/paneWords";
 import { cn } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerSurface } from "./ComposerSurface";
-import type { ChatThreadHandle } from "./useChatThread";
+import type { ChatThreadHandle, ChatThreadView } from "./useChatThread";
+
+/** How many of the agent's calls have finished, its own and its subagents' folds, as the timeline holds them. */
+function finishedCalls(entries: ChatThreadView["entries"]): number {
+  let n = 0;
+  for (const entry of entries) {
+    if (entry.kind === "work" && (entry.entry.toolLifecycleStatus === "completed" || entry.entry.toolLifecycleStatus === "failed")) n += 1;
+    else if (entry.kind === "subagent" && entry.subagent.state !== "running") n += 1;
+  }
+  return n;
+}
 
 /** Whether the composer is about to open a new thread, so the folder is the one the next start opens rather than a
  * turn's: a fresh view, or an empty one whose send resumes no folder. */
@@ -91,7 +101,10 @@ export function ComposerCheckoutRow({
   const workspace = useWorkspace(workspaceId);
   const fact = useStatus(workspaceId)?.checkout;
   const onCheckout = fact !== undefined && workspace !== null && folder === projectFolderOf(workspace);
-  const branch = useBranch(wire, folder, !onCheckout, linkWord, { running, moved: thread.view.entries.length });
+  // The branch moves only by a call the agent made, so it is read again when a turn starts or ends or a call finishes,
+  // not on every line of text: each read that lands is a commit of its own.
+  const moved = useMemo(() => thread.view.turns.length + finishedCalls(thread.view.entries), [thread.view.turns.length, thread.view.entries]);
+  const branch = useBranch(wire, folder, !onCheckout, linkWord, { running, moved });
   const head = onCheckout ? fact.branch : branch.kind === "repo" ? branch.head : null;
 
   useEffect(() => {

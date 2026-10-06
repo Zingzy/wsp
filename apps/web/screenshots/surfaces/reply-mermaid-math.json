@@ -1,0 +1,12 @@
+{
+  "at": "/",
+  "fixture": "replies",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:diagram",
+    "390:key:Escape"
+  ],
+  "wait": "mermaid=true",
+  "settleMs": 1500
+}

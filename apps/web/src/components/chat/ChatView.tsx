@@ -224,9 +224,9 @@ export function ChatView({
     },
     [workspaceId],
   );
-  // A turn that completed says so by its reply standing; any other ending keeps its own line, since the state word
-  // is the news.
-  const settledOnReply = view.settled?.state === "completed";
+  // A turn that completed says so by its reply standing, and one that failed in words by the row those words stand
+  // in; any other ending keeps its own line, since the state word is the news.
+  const settledOnReply = view.settled?.state === "completed" || (view.settled?.state === "error" && view.settled.error !== null);
   // What the machine needs from the person, said here on the thread they are reading and nowhere else.
   const machine = useMachineLine(workspaceId);
   const footer = thread.hydrated ? (
@@ -263,7 +263,10 @@ export function ChatView({
             </div>
           </>
         ) : (
+          // One list per thread shown: a thread drawn from what the transcripts hold replaces the last one with no
+          // loading line between, and opens at its own end rather than at the offset the last one was read to.
           <MessagesTimeline
+            key={thread.drawKey}
             isWorking={view.running}
             machineWait={machineWait}
             activeTurnStartedAt={view.activeTurnStartedAt}
@@ -289,6 +292,7 @@ export function ChatView({
             slatedMessageIds={slatedIds}
             onRewind={onRewind}
             replyRuns={replyRuns}
+            onReachTop={thread.older}
           />
         )}
       </div>

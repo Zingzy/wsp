@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "steps": [
+    "k=settings-row",
+    "k=settings-computers"
+  ],
+  "wait": "settings-at=computers",
+  "mac": true,
+  "widths": [
+    1440
+  ],
+  "reason": "What this shot adds is the Mac window's glass behind the page; the page itself is shot at every width in settings-computers."
+}

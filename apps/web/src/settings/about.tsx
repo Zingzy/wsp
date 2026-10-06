@@ -11,7 +11,7 @@ import { onAnotherComputer } from "../boot.js";
 import { Mark } from "../brand/Brand.js";
 import { Button } from "../components/ui/button.js";
 import { desktopBridge } from "../lib/desktopShell.js";
-import { RELEASES } from "../../../../packages/wspx/scripts/bundles.mjs";
+import { RELEASES } from "../../../../packages/protocol/src/bundles.mjs";
 import { releaseAhead } from "../shell/shellVersion.js";
 import { ABOUT_WORDS } from "./format.js";
 import { GlyphFrame } from "./grid.js";

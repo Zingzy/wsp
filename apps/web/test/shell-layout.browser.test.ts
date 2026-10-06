@@ -477,6 +477,34 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   });
 
+  it("a turn that failed in the agent's own words says them once, whole and wrapped inside the column, with no failed under them, at every width, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      for (const width of [1440, 390]) {
+        await page!.setViewportSize({ width, height: 844 });
+        // The right panel stands open at the wide width, as it opens, and narrows the column; at a phone's it would
+        // cover the thread.
+        await page!.goto(`${base}?theme=${theme}&ws=ws_a&chat=failed${width === 390 ? "&panel=closed" : ""}`);
+        const row = page!.locator('[data-timeline-row-kind="work"]', { hasText: "Not logged in" });
+        await row.waitFor();
+        // The text's own boxes, line by line: an ellipsis clips the paint and leaves the line running on past the
+        // label's edge, where wrapped words stay inside it.
+        const read = await row.evaluate(el => {
+          const label = [...el.querySelectorAll<HTMLElement>("span")].find(s => s.textContent?.startsWith("Not logged in"))!;
+          const range = document.createRange();
+          range.selectNodeContents(label);
+          const lines = [...range.getClientRects()].filter(r => r.width > 0);
+          return { text: label.textContent, lines: new Set(lines.map(r => Math.round(r.top))).size, overrun: Math.max(...lines.map(r => r.right)) - label.getBoundingClientRect().right };
+        });
+        const where = `${theme} ${width}`;
+        expect(read.text, where).toBe("Not logged in · Please run /login; sign in from a terminal on this computer, then send again");
+        expect(read.overrun, where).toBeLessThanOrEqual(0.5);
+        expect(read.lines, where).toBeGreaterThan(1);
+        expect(await page!.locator("[data-testid=settled-footer]").count(), where).toBe(0);
+        expect(await page!.locator("[data-chat-view]").evaluate(el => el.textContent!.match(/failed/g)), where).toBeNull();
+      }
+    }
+  });
+
   it("a toast with a 200-character token stands top right of the centre pane, inside its box and off the sidebar, its where one line and no clock, at every width, in both themes", async () => {
     const token = "ZGVza3RvcC1wb29s".repeat(13).slice(0, 200);
     const toast = `${encodeURIComponent(`Stopped the builder ${token} to make room at the machine cap.`)}&where=${"spoo-".repeat(40)}`;

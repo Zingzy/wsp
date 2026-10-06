@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { compareVersions } from "../../protocol/src/semver.mjs";
-import { bundleNames } from "../scripts/bundles.mjs";
+import { bundleNames } from "../../protocol/src/bundles.mjs";
 import { PERMISSIONS_AGAIN, bundleNote, changeLines, cliArgs, previousTag, releaseNotes, renameNote } from "../scripts/release-notes.mjs";
 
 const readme = readFileSync(fileURLToPath(new URL("../../../README.md", import.meta.url)), "utf8");
@@ -25,7 +25,7 @@ describe("what the draft job can load", () => {
   // The release workflow writes the notes on a bare checkout: node and the repo, no pnpm install and no build. So
   // every file that job reaches has to resolve on its own, which is why the version order lives in a plain module
   // rather than behind the protocol's package name. A bare specifier here fails the release, not the suite.
-  const GRAPH = ["../scripts/release-notes.mjs", "../scripts/bundles.mjs", "../scripts/tag-version.mjs", "../scripts/release.mjs", "../../protocol/src/semver.mjs"];
+  const GRAPH = ["../scripts/release-notes.mjs", "../../protocol/src/bundles.mjs", "../scripts/tag-version.mjs", "../scripts/release.mjs", "../../protocol/src/semver.mjs"];
   const IMPORTS = /(?:^|\n)\s*(?:import|export)[^\n]*?from\s+"([^"]+)"/g;
 
   it("is node and the repo: nothing the draft job reaches imports a package that an install would have to put there", () => {
@@ -90,6 +90,14 @@ describe("the lines about opening a downloaded bundle", () => {
     expect(bundleNote(readme, false)).toContain("chmod +x");
     expect(bundleNote(readme, false)).toContain("install `fuse3`");
     expect(bundleNote(readme, false)).not.toContain("<!--");
+  });
+
+  it("say what starts the AppImage, since a double-click on Ubuntu's desktop hands it to Disk Image Mounter, which mounts it instead", () => {
+    const note = bundleNote(readme, false);
+    expect(note).toContain("A double-click on its icon on Ubuntu's desktop does not start it");
+    expect(note).toContain("chmod +x wsp-*.AppImage && ./wsp-*.AppImage");
+    expect(note).toContain("Run as a program");
+    expect(note).toContain("Disk Image Mounter");
   });
 
   it("drop the paragraph on unsigned bundles once an identity signs them, and keep the rest", () => {

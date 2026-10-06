@@ -25,7 +25,9 @@ use crate::paths::OpError;
 use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::tunnel::Tunnels;
+mod runner;
 use crate::{bring_back, frame_text as text, fs, git, hosts, paths, readings, ssh, tunnel, Ctx, Listener, Outbound, Outgoing};
+use runner::Runner;
 
 type Detach = Box<dyn FnOnce() + Send>;
 
@@ -233,17 +235,13 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
                 let profile = ctx.options.apparmor_profile.clone().unwrap_or_else(|| wsp_frames::numbers::WORKSPACE_APPARMOR_PATH.into());
                 let install = ctx.options.install_root.as_deref().map(|root| root.to_string_lossy().into_owned()).unwrap_or_default();
                 let swept = fs::blocking(move || {
+                    // The add's record of what stood before it sits in wsp's folder, which the home's sweep takes.
+                    let found = crate::place::place_found(&home);
                     let mut swept = crate::place::sweep_place_home(&home, &crate::place::sh_stdout);
-                    // Only root's install loaded the profile and only root's jobs install under the prefix, and only
+                    // Only root's install loaded the profile and only root's jobs install outside the home, and only
                     // root can take either off.
                     if nix::unistd::geteuid().is_root() {
-                        swept.extend(crate::place::sweep_workspace_profile(&profile, &crate::place::sh_stdout));
-                        // The list naming what the setup wrote outside the home sits in the prefix, so it is read first.
-                        swept.extend(crate::place::sweep_outside_home(&install));
-                        swept.extend(crate::place::sweep_tool_prefix(
-                            std::path::Path::new(&format!("{install}{}", wsp_frames::numbers::TOOL_PREFIX)),
-                            std::path::Path::new(&format!("{install}{}", wsp_frames::numbers::TOOL_LINKS_DIR)),
-                        ));
+                        swept.extend(crate::place::sweep_outside_owned(found.as_ref(), &profile, &install, &crate::place::sh_stdout));
                     }
                     Ok(swept)
                 })
@@ -461,47 +459,6 @@ async fn bound_of(ctx: &Ctx, machine: Option<&str>, at: &Path) -> Result<PathBuf
         Ok(real.min_by_key(|r| r.as_os_str().len()).unwrap_or(at))
     })
     .await
-}
-
-/// Which way an op runs a program, and so which machine it is answered for: this computer, or one workspace this
-/// computer holds. One enum rather than a generic on every arm, and one module behind each way.
-enum Runner {
-    Here(git::here::Here),
-    #[cfg(target_os = "linux")]
-    Inside(git::inside::Inside),
-}
-
-impl git::Runs for Runner {
-    async fn run(
-        &self,
-        cwd: &Path,
-        program: &str,
-        args: &[&str],
-        input: Option<&[u8]>,
-        max_bytes: Option<usize>,
-    ) -> Result<git::GitResult, OpError> {
-        match self {
-            Runner::Here(here) => here.run(cwd, program, args, input, max_bytes).await,
-            #[cfg(target_os = "linux")]
-            Runner::Inside(inside) => inside.run(cwd, program, args, input, max_bytes).await,
-        }
-    }
-
-    async fn on_path(&self, program: &str) -> Result<bool, OpError> {
-        match self {
-            Runner::Here(here) => here.on_path(program).await,
-            #[cfg(target_os = "linux")]
-            Runner::Inside(inside) => inside.on_path(program).await,
-        }
-    }
-
-    fn on_this_side(&self, folder: &Path) -> Option<git::OnThisSide> {
-        match self {
-            Runner::Here(here) => here.on_this_side(folder),
-            #[cfg(target_os = "linux")]
-            Runner::Inside(inside) => inside.on_this_side(folder),
-        }
-    }
 }
 
 /// The workspace a frame names, on the daemon of the computer holding it: a workspace on a computer somebody owns
@@ -870,8 +827,12 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                     folder if folder.is_empty() => ".".to_owned(),
                     folder => folder.into_owned(),
                 };
-                let (_, under, _) = road(ctx, machine_id.as_deref(), &parent, Reads).await?;
-                fs::write_file(under, name.to_owned(), path.clone(), contents, numbers::FS_WRITE_CAP_BYTES).await
+                let (runner, under, named) = road(ctx, machine_id.as_deref(), &parent, Reads).await?;
+                // Opened from the root the way of running opens it on this side, every folder below it by descriptor.
+                let open = git::Runs::on_this_side(&runner, &named)
+                    .ok_or_else(|| OpError::plain(format!("{path} cannot be opened on this computer")))?
+                    .open;
+                fs::write_file(open, under, name.to_owned(), path.clone(), contents, numbers::FS_WRITE_CAP_BYTES).await
             };
             answer(id, wrote.await)
         }
@@ -937,7 +898,10 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             let diff = async {
                 // Refused before anything is built from them: a value git would read as an option never reaches it.
                 if !git::is_full_sha(&from) || !git::is_full_sha(&to) {
-                    return Err(OpError::coded(DaemonErrorCode::BadRequest, "from and to are each a commit's full 40 character sha"));
+                    return Err(OpError::coded(
+                        DaemonErrorCode::BadRequest,
+                        "from and to are each a commit's full sha, 40 or 64 hex digits",
+                    ));
                 }
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
                 let bound = bound_of(ctx, machine_id.as_deref(), &at).await?;
@@ -949,7 +913,10 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             let diff = async {
                 // Refused before anything is built from them: a value git would read as an option never reaches it.
                 if !git::is_full_sha(&from) || !git::is_full_sha(&to) {
-                    return Err(OpError::coded(DaemonErrorCode::BadRequest, "from and to are each a commit's full 40 character sha"));
+                    return Err(OpError::coded(
+                        DaemonErrorCode::BadRequest,
+                        "from and to are each a commit's full sha, 40 or 64 hex digits",
+                    ));
                 }
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
                 let bound = bound_of(ctx, machine_id.as_deref(), &at).await?;
@@ -1354,7 +1321,7 @@ mod tests {
         assert!(tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.is_ok(), "the server went while a session stood");
         reply(&b, &c, json!({"id": 3, "op": "tunnel.close", "tunnelId": "s1"})).await;
         tokio::time::sleep(Duration::from_millis(1200)).await;
-        assert!(tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.is_err(), "the server outlived its idle window");
+        assert!(!crate::ssh::tests::stand_in_runs(dir.path()), "the server outlived its idle window");
     }
 
     /// The dial is the op's to choose (this machine's loopback, or inside a fork); what the tunnel says back names

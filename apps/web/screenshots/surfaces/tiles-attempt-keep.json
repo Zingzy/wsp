@@ -1,0 +1,18 @@
+{
+  "at": "/",
+  "fixture": "tiles-attempt",
+  "steps": [
+    "1440:row-id=thread:sonnet",
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "menu:row-id=thread:sonnet",
+    "menu-item=keep"
+  ],
+  "wait": "k=end-workspace",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does; 390 opens it over the page, which is shot here.",
+  "settleMs": 700
+}

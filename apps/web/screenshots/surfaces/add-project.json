@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "widths": [
+    1440
+  ],
+  "reason": "A 440px dialog over Settings, the same at every desktop width; add-project-clone-here shoots the dialog at 390.",
+  "steps": [
+    "k=settings-row",
+    "k=settings-projects",
+    "k=add-project-button"
+  ],
+  "wait": "k=add-project"
+}

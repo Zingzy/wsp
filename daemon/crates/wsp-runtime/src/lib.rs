@@ -22,6 +22,7 @@ pub mod doctor;
 #[cfg(target_os = "linux")]
 pub mod engine;
 pub mod files;
+pub mod git_line;
 pub mod hardening;
 #[cfg(target_os = "linux")]
 pub mod init;

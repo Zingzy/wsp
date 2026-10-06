@@ -1,0 +1,8 @@
+{
+  "at": "/",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger"
+  ],
+  "wait": "row-id=thread:redirect"
+}

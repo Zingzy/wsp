@@ -8,13 +8,17 @@ use wsp_frames::{
     checkpoint_id_ok, checkpoint_prefix, DaemonErrorCode, GitCheckpointDropReply, GitCheckpointReply, GitRestoreReply, CHECKPOINT_REFS,
 };
 
-use super::{check, parse_name_status, run_git, stdout_text, GitResult, Runs};
+use super::{check, parse_name_status, run_git, stdout_text, GitLine, GitOid as Oid, GitResult, Runs};
 use crate::paths::OpError;
 
 /// Who a checkpoint's commit says wrote it: commit-tree refuses a repo with no identity set, and the person's own
 /// name does not belong on a record wsp keeps.
-const CHECKPOINT_IDENTITY: [&str; 4] =
-    ["GIT_AUTHOR_NAME=wsp", "GIT_AUTHOR_EMAIL=wsp@localhost", "GIT_COMMITTER_NAME=wsp", "GIT_COMMITTER_EMAIL=wsp@localhost"];
+const CHECKPOINT_IDENTITY: [(&str, &str); 4] = [
+    ("GIT_AUTHOR_NAME", "wsp"),
+    ("GIT_AUTHOR_EMAIL", "wsp@localhost"),
+    ("GIT_COMMITTER_NAME", "wsp"),
+    ("GIT_COMMITTER_EMAIL", "wsp@localhost"),
+];
 
 /// How many checkpoint refs one thread keeps under its scope, the `-before-` refs a restore writes among them.
 pub(crate) const REFS_PER_THREAD: usize = 100;
@@ -76,9 +80,14 @@ fn prefix_for(top: &Path, scope: Option<&str>) -> Result<String, OpError> {
 
 /// The refs under a prefix, oldest commit first.
 async fn refs_under<R: Runs>(runner: &R, top: &Path, prefix: &str) -> Result<Vec<String>, OpError> {
-    let listed =
-        run_git(runner, top, &["for-each-ref", "--sort=creatordate", "--format=%(refname)", prefix.trim_end_matches('/')], None, None)
-            .await?;
+    let listed = run_git(
+        runner,
+        top,
+        &GitLine::new(&["for-each-ref", "--sort=creatordate", "--format=%(refname)"]).revs(&[prefix.trim_end_matches('/')]),
+        None,
+        None,
+    )
+    .await?;
     ran(&listed, "for-each-ref")?;
     Ok(stdout_text(&listed).lines().filter(|name| name.starts_with(prefix)).map(str::to_owned).collect())
 }
@@ -88,7 +97,7 @@ async fn delete_refs<R: Runs>(runner: &R, top: &Path, names: &[String]) -> Resul
         return Ok(());
     }
     let lines: String = names.iter().map(|name| format!("delete {name}\n")).collect();
-    let deleted = run_git(runner, top, &["update-ref", "--stdin"], Some(lines.as_bytes()), None).await?;
+    let deleted = run_git(runner, top, &GitLine::new(&["update-ref", "--stdin"]), Some(lines.as_bytes()), None).await?;
     ran(&deleted, "update-ref")
 }
 
@@ -109,17 +118,26 @@ pub(crate) async fn restore<R: Runs>(runner: &R, cwd: &Path, scope: Option<&str>
     if !named {
         return Err(OpError::coded(DaemonErrorCode::BadRequest, format!("{checkpoint:?} is not a checkpoint of this folder")));
     }
-    let target = run_git(runner, &top, &["rev-parse", "--verify", "-q", &format!("{checkpoint}^{{commit}}")], None, None).await?;
+    let target =
+        run_git(runner, &top, &GitLine::new(&["rev-parse", "--verify", "-q"]).revs(&[&format!("{checkpoint}^{{commit}}")]), None, None)
+            .await?;
     if target.code != Some(0) {
         return Err(OpError::plain(format!("no checkpoint {checkpoint} in this folder")));
     }
-    let target = stdout_text(&target).trim().to_owned();
+    let target = Oid::parse(&stdout_text(&target)).ok_or_else(|| OpError::plain(format!("no commit id for checkpoint {checkpoint}")))?;
     let millis = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis());
     let before = record(runner, &top, &format!("{checkpoint}-before-{millis}")).await?;
     let thread = checkpoint[prefix.len()..].split('/').next().unwrap_or_default();
     keep_newest(runner, &top, &format!("{prefix}{thread}/"), &[checkpoint, &before.checkpoint_ref]).await?;
 
-    let changed = run_git(runner, &top, &["diff", "--name-status", "--no-renames", "-z", &target, &before.commit], None, None).await?;
+    let changed = run_git(
+        runner,
+        &top,
+        &GitLine::new(&["diff", "--name-status", "--no-renames", "-z"]).revs(&[target.as_str(), &before.commit]),
+        None,
+        None,
+    )
+    .await?;
     check(&changed, "diff --name-status")?;
     let text = stdout_text(&changed);
     let added: Vec<String> = text
@@ -137,11 +155,11 @@ pub(crate) async fn restore<R: Runs>(runner: &R, cwd: &Path, scope: Option<&str>
         ran(&removed, "rm")?;
     }
     let at = top.as_path();
-    let target = target.as_str();
+    let target = &target;
     with_index(runner, at, |index| async move {
-        let read = git_on(runner, at, &index, &["read-tree", target]).await?;
+        let read = git_on(runner, at, &index, &["read-tree"], Some(target)).await?;
         ran(&read, "read-tree")?;
-        let out = git_on(runner, at, &index, &["checkout-index", "-a", "-f"]).await?;
+        let out = git_on(runner, at, &index, &["checkout-index", "-a", "-f"], None).await?;
         ran(&out, "checkout-index")
     })
     .await?;
@@ -152,33 +170,36 @@ pub(crate) async fn restore<R: Runs>(runner: &R, cwd: &Path, scope: Option<&str>
 /// commit of it under the ref.
 async fn record<R: Runs>(runner: &R, top: &Path, name: &str) -> Result<GitCheckpointReply, OpError> {
     let tree = with_index(runner, top, |index| async move {
-        let added = git_on(runner, top, &index, &["add", "-A"]).await?;
+        let added = git_on(runner, top, &index, &["add", "-A"], None).await?;
         ran(&added, "add")?;
-        let written = git_on(runner, top, &index, &["write-tree"]).await?;
+        let written = git_on(runner, top, &index, &["write-tree"], None).await?;
         ran(&written, "write-tree")?;
         Ok(stdout_text(&written).trim().to_owned())
     })
     .await?;
-    let held = run_git(runner, top, &["rev-parse", "--verify", "-q", &format!("{name}^{{commit}}")], None, None).await?;
+    let held =
+        run_git(runner, top, &GitLine::new(&["rev-parse", "--verify", "-q"]).revs(&[&format!("{name}^{{commit}}")]), None, None).await?;
     if held.code == Some(0) {
         let commit = stdout_text(&held).trim().to_owned();
-        let tree_then = run_git(runner, top, &["rev-parse", &format!("{commit}^{{tree}}")], None, None).await?;
+        let tree_then =
+            run_git(runner, top, &GitLine::new(&["rev-parse", "--verify", "-q"]).revs(&[&format!("{commit}^{{tree}}")]), None, None)
+                .await?;
         if stdout_text(&tree_then).trim() == tree {
             return Ok(GitCheckpointReply { checkpoint_ref: name.to_owned(), commit, changed: false });
         }
     }
-    let mut args: Vec<&str> = CHECKPOINT_IDENTITY.to_vec();
-    args.extend(["git", "commit-tree", &tree, "-m", "wsp checkpoint"]);
-    let committed = runner.run(top, "env", &args, None, None).await?;
+    let tree = Oid::parse(&tree).ok_or_else(|| OpError::plain(format!("git write-tree answered {tree:?}")))?;
+    let line = CHECKPOINT_IDENTITY.iter().fold(GitLine::new(&["commit-tree", "-m", "wsp checkpoint"]), |line, (k, v)| line.env(k, v));
+    let committed = run_git(runner, top, &line.oid(&tree), None, None).await?;
     ran(&committed, "commit-tree")?;
     let commit = stdout_text(&committed).trim().to_owned();
-    let moved = run_git(runner, top, &["update-ref", name, &commit], None, None).await?;
+    let moved = run_git(runner, top, &GitLine::new(&["update-ref"]).revs(&[name, &commit]), None, None).await?;
     ran(&moved, "update-ref")?;
     Ok(GitCheckpointReply { checkpoint_ref: name.to_owned(), commit, changed: true })
 }
 
 pub(super) async fn top_of<R: Runs>(runner: &R, cwd: &Path) -> Result<PathBuf, OpError> {
-    let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
+    let top = run_git(runner, cwd, &GitLine::new(&["rev-parse", "--show-toplevel"]), None, None).await?;
     check(&top, "rev-parse")?;
     if top.code != Some(0) {
         return Err(super::not_a_repo());
@@ -211,18 +232,26 @@ where
 }
 
 pub(super) async fn git_path<R: Runs>(runner: &R, top: &Path, name: &str) -> Result<PathBuf, OpError> {
-    let at = run_git(runner, top, &["rev-parse", "--git-path", name], None, None).await?;
+    let at = run_git(runner, top, &GitLine::new(&["rev-parse"]).value("--git-path", name), None, None).await?;
     ran(&at, "rev-parse --git-path")?;
     Ok(top.join(stdout_text(&at).trim()))
 }
 
 /// git with its index at that path: the variable is the only way git takes one, so the program is env. The
 /// fsmonitor is off, since a checkout's config is the agent's to write and that setting names a program git starts.
-pub(super) async fn git_on<R: Runs>(runner: &R, top: &Path, index: &Path, args: &[&str]) -> Result<GitResult, OpError> {
-    let variable = format!("GIT_INDEX_FILE={}", index.to_string_lossy());
-    let mut all = vec![variable.as_str(), "git", "-c", "core.fsmonitor=false"];
-    all.extend_from_slice(args);
-    runner.run(top, "env", &all, None, None).await
+pub(super) async fn git_on<R: Runs>(
+    runner: &R,
+    top: &Path,
+    index: &Path,
+    words: &[&'static str],
+    tree: Option<&Oid>,
+) -> Result<GitResult, OpError> {
+    let line = GitLine::new(&["-c", "core.fsmonitor=false"]).words(words).env("GIT_INDEX_FILE", &index.to_string_lossy());
+    let line = match tree {
+        Some(tree) => line.oid(tree),
+        None => line,
+    };
+    run_git(runner, top, &line, None, None).await
 }
 
 /// Exit 0 alone is success for the plumbing here; unlike a diff, a 1 is a failure.

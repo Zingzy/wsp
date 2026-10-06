@@ -261,8 +261,8 @@ pub enum DaemonOp {
         #[ts(optional)]
         machine_id: Option<String>,
     },
-    /// The diff between two commits, each named by its full 40 hex characters and nothing else, answered as git.diff
-    /// answers: a pure diff of the two trees.
+    /// The diff between two commits, each named by its full sha, 40 or 64 hex digits and nothing else, answered as
+    /// git.diff answers: a pure diff of the two trees.
     #[serde(rename = "git.range", rename_all = "camelCase")]
     GitRange {
         cwd: String,
@@ -278,7 +278,7 @@ pub enum DaemonOp {
     },
     /// What a turn changed between two of its snapshots, the agent's own work alone: its commits, the edits it left in
     /// the end worktree, and the files it resolved by hand in a merge, with a line naming each HEAD move it did not
-    /// write. Answers a GitDiffReply, the moves on its `moved`. The snapshots are each a full 40 hex sha.
+    /// write. Answers a GitDiffReply, the moves on its `moved`. The snapshots are each a full sha, 40 or 64 hex digits.
     #[serde(rename = "git.turn", rename_all = "camelCase")]
     GitTurn {
         cwd: String,

@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "fixture": "tiles",
+  "steps": [
+    "row-id=thread:dark"
+  ],
+  "wait": "workspace-paused",
+  "widths": [
+    1440
+  ],
+  "reason": "Fresh: opening the thread stamps it read, so each shot takes a host of its own and it is shot once. The tiles themselves are shot in tiles and tiles-sections.",
+  "fresh": true
+}

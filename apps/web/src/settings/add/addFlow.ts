@@ -6,7 +6,7 @@
 // Set up hands them to the host. Which step a pending add was left at is this
 // window's own, kept beside its id.
 import { create } from "zustand";
-import { PLACE_HOST_KEY_KIND, type PendingComputer, type PlaceAddJob, type PlaceEstimate, type PlaceSetup, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions } from "@wsp/protocol";
+import { PLACE_HOST_KEY_KIND, PLACE_SUDO_KIND, type PendingComputer, type PlaceAddJob, type PlaceEstimate, type PlaceSetup, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions } from "@wsp/protocol";
 import { noticeFailure } from "../../notices/store.js";
 import type { Api } from "../../protocol/client.js";
 import { useStore } from "../../protocol/store.js";
@@ -87,9 +87,12 @@ interface AddFlowState {
   refused: Failure | null;
   /** What the picks weigh against the computer's room, read on the summary; null until the host answered. */
   estimate: PlaceEstimate | null;
+  /** The host key the person trusted for the address, sent again with every add of that address from this dialog,
+   * so the one that carries a sudo password is held against it before the password leaves. */
+  trustedKey: string | null;
 }
 
-const CLOSED: AddFlowState = { open: false, step: "where", address: "", addId: null, placeId: null, pendingId: null, picks: null, from: "here", options: null, optionsRefused: null, saveAs: { on: false, name: "", icon: "rocket" }, saves: 0, starting: false, refused: null, estimate: null };
+const CLOSED: AddFlowState = { open: false, step: "where", address: "", addId: null, placeId: null, pendingId: null, picks: null, from: "here", options: null, optionsRefused: null, saveAs: { on: false, name: "", icon: "rocket" }, saves: 0, starting: false, refused: null, estimate: null, trustedKey: null };
 
 export const useAddFlow = create<AddFlowState>(() => CLOSED);
 
@@ -164,14 +167,20 @@ export function go(step: AddStep): void {
   if (pendingId !== null && step !== "running" && step !== "ready") keepReached(pendingId, step);
 }
 
-/** Asks the host to add the computer over ssh, with the key the person trusted where one was asked. */
-export function connect(api: Api, address: string, hostKey?: string): void {
-  const addId = addOverSsh(api, { address: address.trim(), ...(hostKey === undefined ? {} : { hostKey }) });
-  useAddFlow.setState({ address: address.trim(), addId, step: "checks" });
+/** Asks the host to add the computer over ssh, with the key the person trusted and the sudo password they typed,
+ * where either was asked. */
+export function connect(api: Api, address: string, hostKey?: string, sudoPassword?: string): void {
+  const at = useAddFlow.getState();
+  const key = hostKey ?? (at.address === address.trim() ? at.trustedKey : null) ?? undefined;
+  const addId = addOverSsh(api, { address: address.trim(), ...(key === undefined ? {} : { hostKey: key }), ...(sudoPassword === undefined ? {} : { sudoPassword }) });
+  useAddFlow.setState({ address: address.trim(), addId, step: "checks", trustedKey: key ?? null });
 }
 
 /** The key a computer this one never dialled answered with, on an add refused for it, for the person to trust. */
 export const askedHostKey = (job: PlaceAddJob | undefined): string | undefined => (job?.state === "failed" && job.kind === PLACE_HOST_KEY_KIND ? job.hostKey : undefined);
+
+/** Whether the add stopped for the password the login's sudo asks for, which the root row then asks for. */
+export const askedSudo = (job: PlaceAddJob | undefined): boolean => job?.state === "failed" && job.kind === PLACE_SUDO_KIND;
 
 /** Reads what the picks can be made from on every open: the host answers what it last read at once and reads again
  * behind it. Options already here stand through a refusal, which is said only where there is nothing to draw. */

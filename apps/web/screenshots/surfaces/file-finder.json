@@ -1,0 +1,19 @@
+{
+  "at": "/",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The finder is the palette's popup, capped at 576px, so 1280 draws it as 1440 does; 390 is where it narrows, which is shot here.",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:redirect",
+    "390:key:Escape",
+    "key:ControlOrMeta+p",
+    "file-finder-input=files",
+    "type:rea"
+  ],
+  "wait": "file-finder=files",
+  "settleMs": 800
+}

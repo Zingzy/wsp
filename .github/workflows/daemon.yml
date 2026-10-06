@@ -1,29 +1,24 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 name: daemon
 
-# The Rust daemon under daemon/ has its own gate, run on every pull request
-# and every push to main that touches it or the wire it is held to: format,
-# lints as errors, the tests, the release build, the static musl build, and
-# the wire suite driven against the built binary, which is the contract
-# every daemon speaking the protocol is held to. It sits in its own workflow
-# so the paths filter leaves the node jobs in ci.yml exactly as they are.
+# The Rust daemon under daemon/ has its own gate, run on a land/** push that touches it or the wire it is held to,
+# every night on main and on a run started by hand: format, lints as errors, the tests, the release build, the static
+# musl build, and the wire suite driven against the built binary, which is the contract every daemon speaking the
+# protocol is held to. It sits in its own workflow so the paths filter leaves the node jobs in ci.yml exactly as they
+# are. A push to main carries a commit its land/** run already tested, so it runs nothing here.
 on:
-  pull_request:
-    paths:
-      - "daemon/**"
-      - "packages/daemon/**"
-      - "packages/protocol/**"
-      - "packages/host/test/mcp-binary*.ts"
-      - ".github/workflows/daemon.yml"
   push:
     branches:
-      - main
+      - "land/**"
     paths:
       - "daemon/**"
       - "packages/daemon/**"
       - "packages/protocol/**"
       - "packages/host/test/mcp-binary*.ts"
       - ".github/workflows/daemon.yml"
+  schedule:
+    - cron: "37 2 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read

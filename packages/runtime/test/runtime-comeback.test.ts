@@ -1,0 +1,617 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { describe, expect, it, vi } from "vitest";
+import { DAEMON_VERSION, PERMISSION_ALLOW, RUN_GONE_LINE, TURN_TOKEN_ENV, foldThreads, threadWordOf, type AdapterEvent, type ExecStream, type SessionView, type TurnResult } from "@wsp/protocol";
+import { TRANSCRIPTS_HELD, createRuntime, type HarnessAdapterFactory, type HarnessSession } from "../src/runtime.js";
+import { memoryStore, type Store } from "../src/store.js";
+import { until } from "./until.js";
+import { stubBackend, tokenGuest, type StubBackend, createOn } from "./stub-backend.js";
+import { scriptGuest } from "./script-guest.js";
+import { TOKEN, helloingDaemon } from "./runtime-fixture.js";
+
+describe("a turn the host comes back to", () => {
+  /** A harness whose run lives on the machine, not in this process: every event it emits is a line of the run's log,
+   * and an attach replays that log from its first line before the rest of it arrives, which is what reading the
+   * guest's own log from byte zero does. Forgetting a run is the machine having swept it. */
+  /** `namedAtLaunch`: the harness names its session at the launch and a resume keeps it, as Claude Code does, so a
+   * later turn of the thread takes over the row of the one before. */
+  const machineRuns = ({ namedAtLaunch }: { namedAtLaunch?: true } = {}) => {
+    const named = namedAtLaunch === true;
+    interface Run {
+      log: AdapterEvent[];
+      sessionId: string;
+      localId: string;
+      live?: (event: AdapterEvent) => void;
+      settle?: (result: TurnResult) => void;
+      result?: TurnResult;
+    }
+    const runs = new Map<string, Run>();
+    let minted = 0;
+    /** Set, nothing on the machine answers the question the attach asks, and the run is neither there nor gone. */
+    let unreachable: Error | undefined;
+    const deliver = (run: Run, event: AdapterEvent): void => {
+      if (event.type === "turn.done") run.result = event.result;
+      run.live?.(event);
+      if (event.type === "session.end") run.settle?.(run.result ?? { status: "failed" });
+    };
+    const emit = (handle: string, event: AdapterEvent): void => {
+      const run = runs.get(handle)!;
+      run.log.push(event);
+      deliver(run, event);
+    };
+    const open = (run: Run, handle: string, onEvent: (event: AdapterEvent) => void, localId: string): HarnessSession => {
+      let settle!: (result: TurnResult) => void;
+      const finished = new Promise<TurnResult>(resolve => {
+        settle = resolve;
+      });
+      run.settle = settle;
+      run.live = onEvent;
+      return { localId, run: handle, finished, interrupt: async () => {} };
+    };
+    const asked: string[] = [];
+    /** The message and effort each attach was handed, in order. */
+    const reopenedWith: { prompt?: string; effort?: string }[] = [];
+    /** The launch environment of each turn this fixture started, in order; an attach after a restart adds none. */
+    const envs: Readonly<Record<string, string>>[] = [];
+    const adapter: HarnessAdapterFactory = ctx => ({
+      steers: false,
+      // Answering nothing leaves the row on its seed, so the only thing that can stop a second question after the
+      // restart is the start row the turn already wrote.
+      titleFor: async turn => {
+        asked.push(turn.opening);
+        return null;
+      },
+      start: o => {
+        envs.push({ ...ctx.env });
+        // The shape a handle the guest's run directory reports has to have to be one of this host's.
+        const handle = `/tmp/wsp-run/${(++minted).toString(16).padStart(12, "0")}`;
+        // The CLI keys the session by its own id, not by the one the launch minted, so the row and the harness
+        // session are two different ids across the restart.
+        const sessionId = o.resume ?? `sess-${minted}`;
+        const run: Run = { log: [], sessionId, localId: named ? sessionId : `local-${minted}` };
+        runs.set(handle, run);
+        const session = open(run, handle, o.onEvent, run.localId);
+        queueMicrotask(() => emit(handle, { type: "session.start", sessionId: run.sessionId, model: "claude-sonnet-4-5", cwd: o.cwd ?? "/root/work" }));
+        return session;
+      },
+      attach: async o => {
+        if (unreachable !== undefined) throw unreachable;
+        reopenedWith.push({ prompt: o.prompt, effort: o.effort });
+        const run = runs.get(o.run);
+        // A machine that answered and no longer holds the run: no reader, and nothing is ever emitted for it.
+        if (run === undefined) return "gone";
+        const session = open(run, o.run, o.onEvent, o.sessionId);
+        const replayed = [...run.log];
+        queueMicrotask(() => {
+          for (const event of replayed) deliver(run, event);
+        });
+        return session;
+      },
+    });
+    return {
+      adapter,
+      emit,
+      envs,
+      handles: () => [...runs.keys()],
+      sweep: (handle: string) => runs.delete(handle),
+      unreach: (e: Error) => (unreachable = e),
+      asked: () => [...asked],
+      reopened: () => [...reopenedWith],
+    };
+  };
+
+  /** A workspace with one turn running on the machine, the host stopped under it, and what that turn's run is. */
+  const hostWentDown = async (h: ReturnType<typeof machineRuns>, store: Store, backend: StubBackend): Promise<{ workspaceId: string; run: string }> => {
+    const rt = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    await rt.sessions.start(ws.id, { prompt: "build it" });
+    await until(async () => (await rt.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const run = h.handles()[0]!;
+    h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: "reading the ticket" });
+    await rt.close();
+    return { workspaceId: ws.id, run };
+  };
+
+  it("a run re-read after a restart files each call by its age against the run's newest stamp, so a call made long before stays out", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    // The machine's clock means nothing to this host: only the twenty minutes between the run's two calls do.
+    const stamp = 1_000_000;
+    const rt = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+    h.emit(run, { type: "limit", sessionId: "sess-1", limit: { windows: [{ kind: "session", usedPercent: 10 }] } });
+    h.emit(run, { type: "turn.usage", sessionId: "sess-1", tokens: 30_000, at: stamp });
+    h.emit(run, { type: "turn.usage", sessionId: "sess-1", tokens: 1_500, at: stamp + 20 * 60_000 });
+    await rt.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+    await until(async () => (await rt2.usage.accounts()).accounts.some(a => a.burn !== undefined));
+    expect((await rt2.usage.accounts()).accounts.flatMap(a => (a.burn !== undefined ? [a.burn] : []))).toEqual([{ tokensPerMinute: 100, threads: 1 }]);
+    await rt2.close();
+  });
+
+  it("a thread's later turn re-opened after a restart is handed its own message, not the one that opened the thread", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns({ namedAtLaunch: true });
+    const rt = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const first = await rt.sessions.start(ws.id, { prompt: "build it", effort: "low" });
+    await until(async () => (await rt.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    h.emit(h.handles()[0]!, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "built" } });
+    h.emit(h.handles()[0]!, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await first.finished;
+    await rt.sessions.start(ws.id, { prompt: "now test it", thread: first.view().threadId!, effort: "high" });
+    await until(() => h.handles().length === 2);
+    await rt.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(ws.id)).map(s => [s.status, s.prompt])).toEqual([["running", "build it"]]);
+    expect(h.reopened()).toEqual([{ prompt: "now test it", effort: "high" }]);
+    await rt2.close();
+  });
+
+  it("the run outlives the host: the row keeps its run, stays running across the restart and completes with its reply", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    const stored = (await store.get("sessions", workspaceId)) as { sessions: { status: string; run?: string }[] };
+    expect(stored.sessions.map(s => [s.status, s.run])).toEqual([["running", run]]);
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+    // A harness that hands the message over after its process starts may not have handed it yet when the host went.
+    expect(h.reopened().map(r => r.prompt)).toEqual(["build it"]);
+    h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: "wrote the fix" });
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+    h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "completed");
+    const history = await rt2.sessions.history(workspaceId);
+    // the line the old host already wrote is read past, so the replay costs the transcript nothing
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.delta", "session.delta", "session.done", "session.end"]);
+    expect(history.filter(e => e.type === "session.delta").map(e => e.text)).toEqual(["reading the ticket", "wrote the fix"]);
+    expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: 0, sawResult: true });
+    // The name goes out under the one start row the turn writes, so the host that re-opened the run asks nothing:
+    // its own asked-set is empty and the row is still on its seed, and the start row is what stands in for both.
+    expect(h.asked()).toEqual(["build it"]);
+    expect((await rt2.sessions.list(workspaceId))[0]!.harnessTitle).toBeUndefined();
+    await rt2.close();
+  });
+
+  it("more running turns than the host holds transcripts, re-opened together, each read past what it already wrote", async () => {
+    // Every turn is re-opened at once, and each open lets the oldest held transcript go: a turn that looked its
+    // transcript up again found nothing and wrote its start and its lines a second time.
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const spaces = [];
+    for (let n = 0; n < TRANSCRIPTS_HELD + 2; n++) {
+      const ws = await createOn(rt, { golden: "snap_g", name: `w${n}` });
+      await rt.sessions.start(ws.id, { prompt: "build it" });
+      await until(async () => (await rt.sessions.history(ws.id)).some(e => e.type === "session.start"));
+      spaces.push(ws);
+    }
+    const runs = h.handles();
+    runs.forEach((run, n) => h.emit(run, { type: "turn.delta", sessionId: `sess-${n + 1}`, kind: "text", text: `reading ticket ${n}` }));
+    await rt.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    await rt2.workspaces.list();
+    runs.forEach((run, n) => {
+      h.emit(run, { type: "turn.done", sessionId: `sess-${n + 1}`, result: { status: "completed", text: "done" } });
+      h.emit(run, { type: "session.end", sessionId: `sess-${n + 1}`, exitCode: 0, sawResult: true });
+    });
+    for (const ws of spaces) await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
+    for (const [n, ws] of spaces.entries()) {
+      const history = await rt2.sessions.history(ws.id);
+      expect(history.map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+      expect(history.filter(e => e.type === "session.delta").map(e => e.text)).toEqual([`reading ticket ${n}`]);
+    }
+    await rt2.close();
+  });
+
+  it("a host that comes back to a turn still running on an old daemon says in its log that the update waits for the turn, and deploys once it ends", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const store = memoryStore();
+    const h = machineRuns();
+    const daemon = await helloingDaemon(DAEMON_VERSION - 1);
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
+    try {
+      const { workspaceId, run } = await hostWentDown(h, store, backend);
+      backend.machines[0]!.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+      const deployed: string[] = [];
+      const recipe = { setup: "true", smoke: "true", deployDaemon: async (m: { id: string }) => void deployed.push(m.id) };
+      const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter }, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 2_000 });
+      expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+      const waits = `daemon on m1 (workspace ${workspaceId}): update waits for the running turn`;
+      await until(() => warned.includes(waits));
+      await new Promise(r => setTimeout(r, 100));
+      expect(deployed).toEqual([]);
+
+      h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+      h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+      await until(() => deployed.length === 1);
+      expect(deployed).toEqual(["m1"]);
+      expect(warned.filter(l => l.startsWith("daemon on"))).toEqual([waits]);
+      await rt2.close();
+    } finally {
+      warn.mockRestore();
+      await daemon.close();
+    }
+  });
+
+  it("waits out the running turn on a store whose sessions listing answers last, since the sync starts after the rows are in", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const store = memoryStore();
+    const h = machineRuns();
+    const daemon = await helloingDaemon(DAEMON_VERSION - 1);
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
+    try {
+      const { workspaceId, run } = await hostWentDown(h, store, backend);
+      backend.machines[0]!.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+      const deployed: string[] = [];
+      let rowsIn = (): void => {};
+      // A deploy is what releases the held listing, so a host that starts the sync before the rows are in reaches
+      // this read with its deploy already done rather than with a wait nobody can time.
+      const held = new Promise<void>(resolve => (rowsIn = resolve));
+      const recipe = {
+        setup: "true",
+        smoke: "true",
+        deployDaemon: async (m: { id: string }) => {
+          deployed.push(m.id);
+          rowsIn();
+        },
+      };
+      const late: Store = {
+        ...store,
+        list: async collection => {
+          if (collection === "sessions") await held;
+          return store.list(collection);
+        },
+      };
+      const rt2 = createRuntime({ backend, store: late, adapters: { claude: h.adapter }, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 2_000 });
+      const listing = rt2.sessions.list(workspaceId);
+      const rows = setTimeout(rowsIn, 300);
+      expect((await listing).map(s => s.status)).toEqual(["running"]);
+      clearTimeout(rows);
+      // Nothing was deployed while the rows were still coming in, because no sync had started.
+      expect(deployed).toEqual([]);
+      const waits = `daemon on m1 (workspace ${workspaceId}): update waits for the running turn`;
+      await until(() => warned.includes(waits));
+      expect(deployed).toEqual([]);
+
+      h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+      h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+      await until(() => deployed.length === 1);
+      expect(deployed).toEqual(["m1"]);
+      expect(warned.filter(l => l.startsWith("daemon on"))).toEqual([waits]);
+      await rt2.close();
+    } finally {
+      warn.mockRestore();
+      await daemon.close();
+    }
+  });
+
+  it("hands no deploy to a machine that napped while the update waited for its turn, and leaves no note on its row", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const store = memoryStore();
+    const h = machineRuns();
+    const daemon = await helloingDaemon(DAEMON_VERSION - 1);
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(line => warned.push(String(line)));
+    try {
+      const { workspaceId } = await hostWentDown(h, store, backend);
+      backend.machines[0]!.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+      const deployed: string[] = [];
+      const recipe = { setup: "true", smoke: "true", deployDaemon: async (m: { id: string }) => void deployed.push(m.id) };
+      const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter }, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 2_000 });
+      expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+      const waits = `daemon on m1 (workspace ${workspaceId}): update waits for the running turn`;
+      await until(() => warned.includes(waits));
+      // The nap moves the phase before it ends the turn the update is waiting on, so the wait comes back to a
+      // machine the provider has paused.
+      await rt2.workspaces.nap(workspaceId);
+      await new Promise(r => setTimeout(r, 100));
+      expect(deployed).toEqual([]);
+      expect((await rt2.workspaces.get(workspaceId)).daemonNote).toBeUndefined();
+      expect(warned.filter(l => l.startsWith("daemon on"))).toEqual([waits]);
+      await rt2.close();
+    } finally {
+      warn.mockRestore();
+      await daemon.close();
+    }
+  });
+
+  it("a turn cut on the way back takes its open prompt with it, so no settled thread is left reading as waiting on a person", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    h.emit(run, { type: "permission.ask", sessionId: "sess-1", ask: { askId: "ask_1", toolName: "Write", detail: "out.txt", input: '{"file_path":"/root/out.txt"}', options: [{ id: PERMISSION_ALLOW, label: "Allow", effect: "allow" }] } });
+    await until(async () => ((await store.get("sessions", workspaceId)) as { sessions: SessionView[] }).sessions[0]!.asking !== undefined);
+
+    // The host comes back with no adapter for the harness, so the run cannot be re-opened and the turn is cut.
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "failed");
+    const [row] = await rt2.sessions.list(workspaceId);
+    expect(row!.asking).toBeUndefined();
+    expect(threadWordOf(foldThreads([row!])[0]!)).toBe("Failed");
+    await rt2.close();
+  });
+
+  /** What the machine answers when a connecting host asks which runs it holds, and what it was told to end. */
+  const guestRuns = (backend: StubBackend, claims: readonly string[]) => {
+    const reaps: string[] = [];
+    backend.execImpl = (_m, cmd) => {
+      if (cmd.includes("printf '%s\\n' \"$d\"")) return { exitCode: 0, stdout: `${claims.map(base => `${base}.d`).join("\n")}\n`, stderr: "" };
+      if (cmd.includes("kill -TERM")) reaps.push(cmd);
+      return { exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : "", stderr: "" };
+    };
+    return { reaps };
+  };
+
+  it("a host that connects ends the runs on the machine that no thread of its own holds, and leaves the one it re-opened", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    const orphan = "/tmp/wsp-run/aabbccddeeff";
+    const guest = guestRuns(backend, [run, orphan]);
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+
+    expect(guest.reaps).toHaveLength(1);
+    expect(guest.reaps[0]).toContain(`rm -rf '${orphan}'.*`);
+    expect(guest.reaps[0]).not.toContain(run);
+    await rt2.close();
+  });
+
+  it("a run whose row this host could not re-open is ended on the machine, not left holding it", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    const guest = guestRuns(backend, [run]);
+
+    // No adapter for the row's harness: the turn reads as one the restart cut, and nothing here reads its run again.
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "failed");
+
+    expect(guest.reaps).toHaveLength(1);
+    expect(guest.reaps[0]).toContain(`rm -rf '${run}'.*`);
+    await rt2.close();
+  });
+
+  it("a run the machine no longer holds ends the turn on those words, and a second restart does not end it again", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    h.sweep(run);
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "failed");
+    const history = await rt2.sessions.history(workspaceId);
+    expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: null, sawResult: false, reason: RUN_GONE_LINE });
+    await rt2.close();
+
+    const rt3 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt3.sessions.history(workspaceId)).filter(e => e.type === "session.end")).toHaveLength(1);
+    await rt3.close();
+  });
+
+  it("a machine that answers nothing about the run leaves the turn running, kills nothing, and the poll that finds the machine gone is what settles it", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    h.unreach(new Error("gateway said 502"));
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+    // Nothing was told about the turn either way: no end row, and the run is still there to be read next time.
+    expect((await rt2.sessions.history(workspaceId)).some(e => e.type === "session.end")).toBe(false);
+    expect(h.handles()).toContain(run);
+    // The machine really is away, and the road that watches machines can still settle a row this host never opened.
+    const [ws] = await rt2.workspaces.list();
+    await rt2.workspaces.delete(ws!.id);
+    await until(async () => (await rt2.sessions.list(workspaceId)).every(s => s.status !== "running"));
+    await rt2.close();
+  });
+
+  it("a turn whose reply is already written settles completed when the run is gone at boot, and tells its parent nothing more", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
+    await rt1.sessions.start(ws.id, { prompt: "build it", notify: ["me"] });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const run = h.handles()[0]!;
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.notify"));
+    await rt1.close();
+    h.sweep(run);
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const rows = await rt2.sessions.list(ws.id);
+    expect(rows.map(s => s.status)).toEqual(["completed"]);
+    const history = await rt2.sessions.history(ws.id);
+    expect(history.map(e => e.type)).toEqual(["session.start", "session.notify", "session.done", "session.end"]);
+    expect(history.at(-1)).toMatchObject({ type: "session.end", sawResult: true, reason: RUN_GONE_LINE });
+    await rt2.close();
+  });
+
+  it("a turn longer than the transcript cap replays without writing a line twice: the count comes off the last row's stamp, not off how many rows survive", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
+    await rt1.sessions.start(ws.id, { prompt: "build it" });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const run = h.handles()[0]!;
+    const printed = 5200;
+    for (let i = 0; i < printed; i++) h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: `line ${i}` });
+    // A non-delta row is what flushes the transcript, so the capped store is what the next host reads.
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+    const before = (await rt1.sessions.history(ws.id)).filter(e => e.type === "session.delta");
+    expect(before.length).toBeLessThan(printed);
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    await rt2.sessions.list(ws.id);
+    h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
+    const deltas = (await rt2.sessions.history(ws.id)).filter(e => e.type === "session.delta");
+    expect(new Set(deltas.map(e => e.text)).size).toBe(deltas.length);
+    expect(deltas.at(-1)).toMatchObject({ text: `line ${printed - 1}`, line: printed });
+    await rt2.close();
+  });
+
+  it("a turn the host restart did not end keeps its token: the coordinator thread still names itself with me after the restart", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
+    const turn = await rt1.sessions.start(ws.id, { prompt: "coordinate the builders" });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const threadId = turn.view().threadId!;
+    const token = h.envs[0]![TURN_TOKEN_ENV]!;
+    // The row the next host reads carries it beside the run, since the process it is in outlives this host.
+    const stored = (await store.get("sessions", ws.id)) as { sessions: { status: string; turnToken?: string }[] };
+    expect(stored.sessions.map(s => [s.status, s.turnToken])).toEqual([["running", token]]);
+    await rt1.close();
+
+    // The host came back and re-opened the run, so that turn is still working with the same variable in its process.
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    const kid = await rt2.sessions.start(ws.id, { prompt: "build it", notify: ["me"], turnToken: token, startedBy: "agent" });
+    expect(kid.view().threadId).not.toBe(threadId);
+    const kidRun = h.handles()[1]!;
+    h.emit(kidRun, { type: "turn.done", sessionId: "sess-2", result: { status: "completed", text: "done" } });
+    h.emit(kidRun, { type: "session.end", sessionId: "sess-2", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.sessions.history(ws.id)).some(e => e.type === "session.notify"));
+    expect((await rt2.sessions.history(ws.id)).find(e => e.type === "session.notify")).toMatchObject({ threadId: kid.view().threadId, notify: threadId });
+    await rt2.close();
+  });
+
+  it("a turn the host restart did not end keeps the device its launch carried, and hands it back at its own exit", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a", agents: { spawn: true, maxMachines: 3, maxDepth: 1 } });
+    await rt1.sessions.start(ws.id, { prompt: "coordinate the builders" });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const device = (await rt1.devices.list())[0]!;
+    // The row the next host reads carries the device beside the run, for the same reason it carries the token: the
+    // process out there still holds both, and only the row knows which device to take away when that turn ends.
+    const stored = (await store.get("sessions", ws.id)) as { sessions: { status: string; scopeDeviceId?: string }[] };
+    expect(stored.sessions.map(s => [s.status, s.scopeDeviceId])).toEqual([["running", device.id]]);
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    // The load's sweep spares a device whose thread is running, so the re-opened turn is what hands it back.
+    expect((await rt2.devices.list()).map(d => d.id)).toEqual([device.id]);
+    const run = h.handles()[0]!;
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+    h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.devices.list()).length === 0);
+    expect(await rt2.devices.list()).toEqual([]);
+    await rt2.close();
+  });
+
+  it("a host with no adapter for the harness cannot re-open the run, so the turn reads as one the restart cut", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId } = await hostWentDown(h, store, backend);
+
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["failed"]);
+    expect((await rt2.sessions.history(workspaceId)).at(-1)).toMatchObject({ type: "session.end", reason: "host restarted while the agent was working" });
+    await rt2.close();
+  });
+
+  it("a turn whose reply landed before the restart has its line recorded once, not again on the replay", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
+    await rt1.sessions.start(ws.id, { prompt: "build it", notify: ["me"] });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const run = h.handles()[0]!;
+    // the reply landed and the harness process had not exited when the host went down
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.notify"));
+    expect((await rt1.sessions.list(ws.id))[0]).toMatchObject({ status: "running" });
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
+    expect((await rt2.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.notify", "session.done", "session.end"]);
+    await rt2.close();
+  });
+});
+
+describe("a host that comes back to a turn still running on a machine", () => {
+  /** An adapter whose turn is the machine's own run, launched and re-opened through the wiring's exec stream:
+   * the poll that reads that run is the timer this case is about. */
+  const pollingAdapter = (): HarnessAdapterFactory => ctx => {
+    const session = (stream: ExecStream, sessionId: string, onEvent: (event: AdapterEvent) => void): HarnessSession => {
+      const finished = (async () => {
+        onEvent({ type: "session.start", sessionId });
+        for await (const line of stream.lines) void line;
+        const result: TurnResult = { status: "completed", text: "done" };
+        onEvent({ type: "turn.done", sessionId, result });
+        return result;
+      })();
+      return { localId: sessionId, finished, ...(stream.run !== undefined ? { run: stream.run } : {}), interrupt: async () => {} };
+    };
+    return {
+      steers: false,
+      start: o => session(ctx.execStream("claude -p hi", { env: {} }), "66666666-6666-4666-8666-666666666666", o.onEvent),
+      attach: async o => {
+        const opened = await ctx.execStream.attach!(o.run, { input: false, startedAt: o.startedAt });
+        return opened === "gone" ? "gone" : session(opened, o.sessionId, o.onEvent);
+      },
+    };
+  };
+
+  it("lets go of the poll that reads it when it closes, so nothing it opened holds this process open", async () => {
+    // Counted, not named: the runner holds timers of its own, and what this case is about is the one this runtime
+    // adds. The list goes into the failure so a run that drifts says what it was holding.
+    const held = (): string[] => process.getActiveResourcesInfo().filter(kind => kind === "Timeout");
+    const backend = stubBackend();
+    const store = memoryStore();
+    scriptGuest(backend, [], tokenGuest);
+    const first = createRuntime({ backend, store, adapters: { claude: pollingAdapter() } });
+    const ws = await createOn(first, { golden: "snap_g", name: "a" });
+    await first.sessions.start(ws.id, { prompt: "build it" });
+    await until(async () => ((await store.get("sessions", ws.id)) as { sessions: { run?: string }[] } | undefined)?.sessions[0]?.run !== undefined);
+    await first.close();
+
+    const before = held().length;
+    const again = createRuntime({ backend, store, adapters: { claude: pollingAdapter() } });
+    expect((await again.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    await vi.waitFor(() => expect(held().length).toBeGreaterThan(before));
+    await again.close();
+    expect(held().length, `left open: ${process.getActiveResourcesInfo().join(", ")}`).toBe(before);
+  }, 20_000);
+});

@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "fixture": "long-prompt",
+  "widths": [
+    1440
+  ],
+  "reason": "Pins how a long pasted prompt folds in the transcript; the composer and transcript at 1280 and 390 are shot in composer-thread.",
+  "steps": [
+    "row-id=thread:brief"
+  ],
+  "wait": "testid=composer-editor",
+  "settleMs": 800
+}

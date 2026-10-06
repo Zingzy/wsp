@@ -244,6 +244,11 @@ describe("one module per service manager", () => {
     expect(serviceEnv({ PATH: "/usr/bin" })).toEqual({});
   });
 
+  it("a service carries the login shell the installing process named, since the host reads its PATH from that shell", () => {
+    expect(serviceEnv({ PATH: "/usr/bin", SHELL: "/bin/zsh" })).toEqual({ SHELL: "/bin/zsh" });
+    expect(serviceEnv({ PATH: "/usr/bin", SHELL: "" })).toEqual({});
+  });
+
   it("a service installed from a shell that turned the release check off keeps it off", () => {
     expect(serviceEnv({ PATH: "/usr/bin", [UPDATE_CHECK_ENV]: "0" })).toEqual({ [UPDATE_CHECK_ENV]: "0" });
   });

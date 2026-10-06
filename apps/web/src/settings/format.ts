@@ -3,9 +3,9 @@
 // preference value where a value has words of its own.
 import { fmtPx, listWords, offlineFor, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type ProductUsageOff, type SendKey, type ServerSignIn, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
-/** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
- * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
- * run all draw with, so one type ladder holds across them. */
+/** The muted sans with tabular figures a state word or a description of machine words wears, and the foreground one
+ * a value a person reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet
+ * and the first run all draw with, so one type ladder holds across them. */
 export const FACT = "text-[13px] tabular-nums text-muted-foreground";
 export const VALUE = "text-sm tabular-nums text-foreground";
 
@@ -180,6 +180,8 @@ export const ADD_COMPUTER_WORDS = {
    * slot's two lines: a third line moves what is under them. There is no file picker on this road: the host reads
    * the ssh agent and config as they stand, so the key a box wants is named where every other ssh client reads it. */
   refusedFix: "Check the user and the address, or name a key in your ssh config.",
+  /** Under the root row where the login's sudo asks for a password: the field below it is where it goes. */
+  sudoFix: "Type it below; it goes to sudo there and is kept nowhere.",
   /** An add the host no longer lists while nothing here waits on it: the host restarted, or never got the ask. */
   hostLost: "The host lost track of this add, so how it ended is not known; add it again if the computer is not listed.",
 } as const;

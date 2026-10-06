@@ -68,6 +68,24 @@ pub fn place_outside_left(prefix: impl std::fmt::Display) -> String {
     format!("nothing was removed at {prefix}: the leave did not finish taking what the setup wrote outside the home, which {prefix}/landed still lists")
 }
 
+/// Why a path outside the home a leave would have taken is still there: it stood before wsp was added, as the add
+/// wrote down, so it is the computer's own. Said on both roads a leave runs on, and pinned to one text by the
+/// contract fixture.
+pub fn place_stood_before(path: impl std::fmt::Display) -> String {
+    format!("{path} stays: it was there before wsp was added")
+}
+
+/// Why a leave took nothing at the paths outside the home it would have: no whole record says what stood there
+/// before wsp was added, so they may be the computer's own. Said on both roads a leave runs on, and pinned to one
+/// text by the contract fixture.
+pub fn place_owners_unknown(paths: &[impl AsRef<str>]) -> String {
+    let paths: Vec<&str> = paths.iter().map(AsRef::as_ref).collect();
+    format!(
+        "nothing was removed at {}: no whole record says what stood there before wsp was added, so it may be this computer's own; remove what wsp put there by hand",
+        paths.join(" or ")
+    )
+}
+
 pub fn guest_no_daemon_line(port: impl std::fmt::Display) -> String {
     format!("this machine's wsp daemon is not answering on 127.0.0.1:{port}")
 }
@@ -225,6 +243,11 @@ pub fn no_git_identity(name: &str) -> String {
 /// What a discard or a commit naming a file git sees no change in is refused with.
 pub fn no_change(path: &str) -> String {
     format!("{path} has no change")
+}
+
+/// What a pane's save of a file whose name is not UTF-8 is refused with: the daemon opens names one at a time as text.
+pub fn name_not_utf8(path: &str) -> String {
+    format!("{path} has a name that is not UTF-8, and the daemon writes only UTF-8 names")
 }
 
 /// What a pane's save of more than the write cap is refused with.

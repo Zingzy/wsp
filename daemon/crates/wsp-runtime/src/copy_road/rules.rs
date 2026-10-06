@@ -12,6 +12,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use crate::git_line::{GitLine, Oid};
+
 /// How long one git read has: a rev-parse on a cold index is the slowest of them.
 pub const READ_MS: u64 = 15_000;
 /// How long the fetch before a reset has, which is the one git call that needs the network and the person's own
@@ -53,11 +55,12 @@ impl GitRun {
 /// copy; the prompt is off, so a fetch needing a password fails instead of waiting for one; and the language is
 /// fixed, so a caller reading git's own words reads the same ones everywhere. Both pipes are drained while the
 /// call runs, so output past a pipe's buffer cannot wedge it, and the deadline kills what has not finished.
-pub fn git(cwd: &Path, args: &[&str], deadline_ms: u64) -> io::Result<GitRun> {
+pub fn git(cwd: &Path, line: &GitLine, deadline_ms: u64) -> io::Result<GitRun> {
     let mut child = Command::new("git")
         .arg("-c")
         .arg("core.hooksPath=/dev/null")
-        .args(args)
+        .args(line.argv())
+        .envs(line.env_words().into_iter().filter_map(|kv| kv.split_once('=')))
         .current_dir(cwd)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("LC_ALL", "C")
@@ -154,7 +157,7 @@ pub fn bytes_word(bytes: u64) -> String {
 /// Whether this folder is the top of a git work tree, which is what a project on a computer somebody owns stands
 /// on: the top is the folder itself and not a folder above it, so a subdirectory of a repo is not a project.
 pub fn is_repo_top(from: &Path) -> bool {
-    let Ok(read) = git(from, &["rev-parse", "--show-toplevel"], READ_MS) else { return false };
+    let Ok(read) = git(from, &GitLine::new(&["rev-parse", "--show-toplevel"]), READ_MS) else { return false };
     read.ok() && fs::canonicalize(read.out()).ok() == fs::canonicalize(from).ok()
 }
 
@@ -164,7 +167,7 @@ pub fn is_repo_top(from: &Path) -> bool {
 /// person's own global config, so a folder whose branches are named otherwise would otherwise be copied at a branch
 /// that is not there.
 pub fn default_branch(from: &Path) -> String {
-    if let Ok(read) = git(from, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], READ_MS) {
+    if let Ok(read) = git(from, &GitLine::new(&["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]), READ_MS) {
         if read.ok() {
             if let Some(branch) = read.out().strip_prefix("origin/") {
                 if !branch.is_empty() {
@@ -173,7 +176,7 @@ pub fn default_branch(from: &Path) -> String {
             }
         }
     }
-    if let Ok(read) = git(from, &["config", "--get", "init.defaultBranch"], READ_MS) {
+    if let Ok(read) = git(from, &GitLine::new(&["config", "--get", "init.defaultBranch"]), READ_MS) {
         if read.ok() && !read.out().is_empty() && has_branch(from, read.out()) {
             return read.out().to_owned();
         }
@@ -181,7 +184,7 @@ pub fn default_branch(from: &Path) -> String {
     if has_branch(from, "main") {
         return "main".to_owned();
     }
-    git(from, &["rev-parse", "--abbrev-ref", "HEAD"], READ_MS)
+    git(from, &GitLine::new(&["rev-parse", "--abbrev-ref", "HEAD"]), READ_MS)
         .ok()
         .filter(GitRun::ok)
         .map_or_else(|| "main".to_owned(), |r| r.out().to_owned())
@@ -189,12 +192,12 @@ pub fn default_branch(from: &Path) -> String {
 
 /// Whether the folder holds a branch of this name.
 pub fn has_branch(dir: &Path, branch: &str) -> bool {
-    git(dir, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")], READ_MS).is_ok_and(|r| r.ok())
+    git(dir, &GitLine::new(&["rev-parse", "--verify", "--quiet"]).glued("refs/heads/", branch), READ_MS).is_ok_and(|r| r.ok())
 }
 
 /// A ref resolved to the sha it names in this folder, or nothing where the folder has no such ref.
 pub fn sha_of(dir: &Path, reference: &str) -> Option<String> {
-    let read = git(dir, &["rev-parse", "--verify", &format!("{reference}^{{commit}}")], READ_MS).ok()?;
+    let read = git(dir, &GitLine::new(&["rev-parse", "--verify"]).revs(&[&format!("{reference}^{{commit}}")]), READ_MS).ok()?;
     read.ok().then(|| read.out().to_owned()).filter(|sha| !sha.is_empty())
 }
 
@@ -279,7 +282,7 @@ fn under(dir: &OwnedFd, name: &str) -> io::Result<OwnedFd> {
 /// else nothing: the fetch needs the network and the person's own credentials, and a copy that starts at the local
 /// tip is a copy that works.
 pub fn fetch(to: &Path, branch: &str) -> Option<String> {
-    let read = git(to, &["fetch", "--quiet", "origin", branch], FETCH_MS).ok()?;
+    let read = git(to, &GitLine::new(&["fetch", "--quiet"]).operands(&["origin", branch]), FETCH_MS).ok()?;
     if !read.ok() {
         return None;
     }
@@ -295,11 +298,13 @@ pub fn reset_to(to: &Path, branch: &str, sha: &str) -> Result<(), String> {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(format!("{}: {e}", to.join(".git/worktrees").display())),
         _ => {}
     }
-    let checked = git(to, &["checkout", "-f", "-B", branch, sha], WRITE_MS).map_err(|e| format!("git checkout: {e}"))?;
+    let sha = Oid::parse(sha).ok_or_else(|| format!("{sha:?} is not a commit id"))?;
+    let checked =
+        git(to, &GitLine::new(&["checkout", "-f"]).value("-B", branch).oid(&sha), WRITE_MS).map_err(|e| format!("git checkout: {e}"))?;
     if !checked.ok() {
         return Err(checked.why());
     }
-    let cleaned = git(to, &["clean", "-fd"], WRITE_MS).map_err(|e| format!("git clean: {e}"))?;
+    let cleaned = git(to, &GitLine::new(&["clean", "-fd"]), WRITE_MS).map_err(|e| format!("git clean: {e}"))?;
     if !cleaned.ok() {
         return Err(cleaned.why());
     }
@@ -346,7 +351,9 @@ pub fn config_files_in(from: &Path, listed: &[String]) -> Vec<String> {
 /// Everything git ignores in this folder, an ignored directory as one entry ending in a slash and nothing under it
 /// listed; empty where git cannot say.
 pub fn ignored(from: &Path) -> Vec<String> {
-    let Ok(read) = git(from, &["ls-files", "-o", "-i", "--exclude-standard", "--directory", "-z"], READ_MS) else { return Vec::new() };
+    let Ok(read) = git(from, &GitLine::new(&["ls-files", "-o", "-i", "--exclude-standard", "--directory", "-z"]), READ_MS) else {
+        return Vec::new();
+    };
     if !read.ok() {
         return Vec::new();
     }
@@ -363,11 +370,11 @@ pub(crate) fn repo(at: &Path) {
         vec!["config", "user.name", "t"],
         vec!["config", "commit.gpgsign", "false"],
     ] {
-        assert!(git(at, &args, READ_MS).unwrap().ok(), "{args:?}");
+        assert!(git(at, &GitLine::new(&args), READ_MS).unwrap().ok(), "{args:?}");
     }
     fs::write(at.join("README.md"), b"one\n").unwrap();
-    assert!(git(at, &["add", "README.md"], READ_MS).unwrap().ok());
-    assert!(git(at, &["commit", "--quiet", "-m", "first"], WRITE_MS).unwrap().ok());
+    assert!(git(at, &GitLine::new(&["add", "README.md"]), READ_MS).unwrap().ok());
+    assert!(git(at, &GitLine::new(&["commit", "--quiet", "-m", "first"]), WRITE_MS).unwrap().ok());
 }
 
 #[cfg(test)]
@@ -395,18 +402,18 @@ mod tests {
         // No remote and no config: main is there, so main it is.
         assert_eq!(default_branch(&at), "main");
         // main renamed away: the branch it is on, whatever the person's own git names a fresh repo's first branch.
-        assert!(git(&at, &["branch", "--quiet", "-m", "main", "trunk"], READ_MS).unwrap().ok());
+        assert!(git(&at, &GitLine::new(&["branch", "--quiet", "-m", "main", "trunk"]), READ_MS).unwrap().ok());
         assert_eq!(default_branch(&at), "trunk");
         // The config outranks the branch it is on, where the folder holds the branch it names.
-        assert!(git(&at, &["branch", "--quiet", "release"], READ_MS).unwrap().ok());
-        assert!(git(&at, &["config", "init.defaultBranch", "release"], READ_MS).unwrap().ok());
+        assert!(git(&at, &GitLine::new(&["branch", "--quiet", "release"]), READ_MS).unwrap().ok());
+        assert!(git(&at, &GitLine::new(&["config", "init.defaultBranch", "release"]), READ_MS).unwrap().ok());
         assert_eq!(default_branch(&at), "release");
         // A config naming a branch the folder has not got is passed over rather than copied at nothing.
-        assert!(git(&at, &["config", "init.defaultBranch", "nowhere"], READ_MS).unwrap().ok());
+        assert!(git(&at, &GitLine::new(&["config", "init.defaultBranch", "nowhere"]), READ_MS).unwrap().ok());
         assert_eq!(default_branch(&at), "trunk");
         // The remote's own HEAD outranks the config.
-        assert!(git(&at, &["remote", "add", "origin", "https://example.invalid/x.git"], READ_MS).unwrap().ok());
-        assert!(git(&at, &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"], READ_MS).unwrap().ok());
+        assert!(git(&at, &GitLine::new(&["remote", "add", "origin", "https://example.invalid/x.git"]), READ_MS).unwrap().ok());
+        assert!(git(&at, &GitLine::new(&["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"]), READ_MS).unwrap().ok());
         assert_eq!(default_branch(&at), "trunk");
     }
 
@@ -481,8 +488,8 @@ mod tests {
         repo(&at);
         let base = sha_of(&at, "HEAD").unwrap();
         fs::write(at.join(".gitignore"), b".env.local\n").unwrap();
-        assert!(git(&at, &["add", ".gitignore"], READ_MS).unwrap().ok());
-        assert!(git(&at, &["commit", "--quiet", "-m", "ignore"], WRITE_MS).unwrap().ok());
+        assert!(git(&at, &GitLine::new(&["add", ".gitignore"]), READ_MS).unwrap().ok());
+        assert!(git(&at, &GitLine::new(&["commit", "--quiet", "-m", "ignore"]), WRITE_MS).unwrap().ok());
         let with_ignore = sha_of(&at, "HEAD").unwrap();
         fs::write(at.join("README.md"), b"half edited\n").unwrap();
         fs::write(at.join("scratch.txt"), b"untracked\n").unwrap();
@@ -491,7 +498,7 @@ mod tests {
         assert_eq!(fs::read_to_string(at.join("README.md")).unwrap(), "one\n", "the half-edited file is the base's again");
         assert!(!at.join("scratch.txt").exists(), "an untracked file goes");
         assert_eq!(fs::read_to_string(at.join(".env.local")).unwrap(), "KEY=1\n", "an ignored file stays");
-        let status = git(&at, &["status", "--porcelain"], READ_MS).unwrap();
+        let status = git(&at, &GitLine::new(&["status", "--porcelain"]), READ_MS).unwrap();
         assert_eq!(status.out(), "");
         assert_eq!(sha_of(&at, "HEAD").unwrap(), with_ignore);
         assert_ne!(base, with_ignore);
@@ -502,10 +509,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let at = dir.path().join("work");
         repo(&at);
-        assert!(git(&at, &["remote", "add", "origin", "https://127.0.0.1:1/x.git"], READ_MS).unwrap().ok());
+        assert!(git(&at, &GitLine::new(&["remote", "add", "origin", "https://127.0.0.1:1/x.git"]), READ_MS).unwrap().ok());
         assert_eq!(fetch(&at, "main"), None);
         // The local tip is still the base a copy would stand at.
         assert!(sha_of(&at, "main").is_some());
+    }
+
+    /// A fetch reads a flag after its remote, and a project's base can be any name a branch takes.
+    #[test]
+    fn a_base_named_as_a_flag_is_fetched_as_a_branch_and_runs_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (from, at) = (dir.path().join("from"), dir.path().join("work"));
+        repo(&from);
+        repo(&at);
+        let origin = from.to_string_lossy();
+        assert!(git(&at, &GitLine::new(&["remote", "add"]).operands(&["origin", &origin]), READ_MS).unwrap().ok());
+        let marker = dir.path().join("ran");
+        let base = format!("--upload-pack=touch${{IFS}}{};git-upload-pack", marker.display());
+        assert_eq!(fetch(&at, &base), None);
+        assert!(!marker.exists(), "the base's name ran as a command");
     }
 
     #[test]
@@ -547,13 +569,19 @@ mod tests {
         let at = dir.path().join("work");
         repo(&at);
         let held = dir.path().join("held");
-        assert!(git(&at, &["worktree", "add", "--quiet", "-b", "held", &held.to_string_lossy()], WRITE_MS).unwrap().ok());
-        assert!(git(&at, &["worktree", "lock", &held.to_string_lossy()], READ_MS).unwrap().ok());
-        let locked = git(&at, &["worktree", "remove", &held.to_string_lossy()], WRITE_MS).unwrap();
+        assert!(git(&at, &GitLine::new(&["worktree", "add", "--quiet", "-b", "held"]).operands(&[&held.to_string_lossy()]), WRITE_MS)
+            .unwrap()
+            .ok());
+        assert!(git(&at, &GitLine::new(&["worktree", "lock"]).operands(&[&held.to_string_lossy()]), READ_MS).unwrap().ok());
+        let locked = git(&at, &GitLine::new(&["worktree", "remove"]).operands(&[&held.to_string_lossy()]), WRITE_MS).unwrap();
         assert!(!locked.ok());
         assert_eq!(locked.why(), "fatal: cannot remove a locked working tree;", "{}", locked.stderr);
-        let head =
-            git(&at, &["worktree", "add", "--quiet", "-b", "HEAD", &dir.path().join("h").to_string_lossy(), "HEAD"], WRITE_MS).unwrap();
+        let head = git(
+            &at,
+            &GitLine::new(&["worktree", "add", "--quiet", "-b", "HEAD"]).operands(&[&dir.path().join("h").to_string_lossy(), "HEAD"]),
+            WRITE_MS,
+        )
+        .unwrap();
         assert!(!head.ok());
         assert_eq!(head.why(), "fatal: 'HEAD' is not a valid branch name", "{}", head.stderr);
         // A line with neither mark is still read, and a hint is never the answer.

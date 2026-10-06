@@ -29,20 +29,18 @@ import { useAdds } from "../adds.js";
 import { ComputerGlyph } from "../ComputerGlyph.js";
 import { ADD_COMPUTER_WORDS, FACT } from "../format.js";
 import { Grid, GridHead } from "../grid.js";
-import { NOTE, ROW_FIELD } from "../layout.js";
+import { GLYPH, NOTE, ROW_FIELD } from "../layout.js";
 import { placeName } from "../places.js";
 import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
 import { CopyRow, DeviceCode, RefusalSlot } from "../sheetParts.js";
-import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
+import { STEP_TITLES, askedHostKey, askedSudo, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
 import { everything, folderKey, githubPick, noPicks, tickUsedClis } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
 import { checkRows, opensLog, runningMs, setupCount, setupRows, setupStanding, stepLogs, type StepLine } from "./setup.js";
+import { STEP_BODY, STEP_HEAD, STEP_WIDTH, StepFoot } from "./StepDialog.js";
 import { RetryActs, SkipAct, StepRow, useNow } from "./StepRow.js";
-
-const GLYPH = "size-4 text-foreground/80";
-
 
 const sshLogin = (host: SshHostSuggestion): string => [host.user, host.hostName ?? host.alias].filter(Boolean).join("@");
 
@@ -71,11 +69,34 @@ function WhereStep({ address, hostKey, hosts, hostsRefused, onPick }: { address:
   );
 }
 
-function ChecksStep({ rows, onAgain }: { rows: readonly StepLine[]; onAgain: () => void }) {
+/** The checks as rows. Where the login's sudo asks for a password, the root row asks for it: a field held in this
+ * step alone, sent with the next add and cleared as it goes. */
+function ChecksStep({ rows, asksSudo, onAgain }: { rows: readonly StepLine[]; asksSudo: boolean; onAgain: (sudoPassword?: string) => void }) {
+  const [password, setPassword] = useState("");
+  const again = (): void => {
+    const typed = password;
+    setPassword("");
+    onAgain(asksSudo ? typed : undefined);
+  };
   return (
     <Grid id="checks">
       {rows.map(row => (
-        <StepRow key={row.id} row={row} {...(row.state === "failed" ? { acts: <Button size="xs" variant="outline" data-k="try-again" onClick={onAgain}>Try again</Button> } : {})} />
+        <StepRow
+          key={row.id}
+          row={row}
+          {...(row.state === "failed"
+            ? {
+                acts: (
+                  <>
+                    {asksSudo ? <Input data-k="sudo-password" aria-label="Password for sudo" type="password" autoFocus autoComplete="off" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && password !== "" && again()} className={cn(ROW_FIELD, "w-44 max-sm:w-36")} /> : null}
+                    <Button size="xs" variant="outline" data-k="try-again" held={asksSudo && password === ""} onClick={again}>
+                      Try again
+                    </Button>
+                  </>
+                ),
+              }
+            : {})}
+        />
       ))}
     </Grid>
   );
@@ -405,17 +426,6 @@ function SavedLine() {
   );
 }
 
-/** The dialog's foot: the saved line at the left once a choice is kept, the acts at the right. Under 640 px the acts
- * stack with the primary on top and the line stands under them. */
-function Foot({ left, children }: { left: ReactNode; children: ReactNode }) {
-  return (
-    <div data-slot="dialog-footer" className="flex flex-col-reverse gap-2 px-5 pt-3 pb-4 sm:flex-row sm:items-center sm:justify-end">
-      <span className="flex min-h-5 items-center max-sm:justify-center sm:me-auto">{left}</span>
-      {children}
-    </div>
-  );
-}
-
 const PICK_STEPS: ReadonlySet<AddStep> = new Set(["startfrom", "agents", "mcp", "clis", "skills", "plugins", "github", "projects", "other", "summary"]);
 
 /** Whether picks hold nothing at all, which is where a first pick step fills them with everything. */
@@ -498,9 +508,9 @@ export function AddComputerDialog() {
   const back = (): void => {
     if (canBack) go(backTo);
   };
-  const doConnect = (key?: string): void => {
+  const doConnect = (key?: string, sudoPassword?: string): void => {
     if (api === null || flow.address.trim() === "") return;
-    connect(api, flow.address, key);
+    connect(api, flow.address, key, sudoPassword);
   };
   const startTask = (): void => {
     const project = projects.find(p => p.computer === flow.placeId);
@@ -530,7 +540,7 @@ export function AddComputerDialog() {
       case "hostkey":
         return <WhereStep address={flow.address} hostKey={keyAsked} hosts={[]} hostsRefused={null} onPick={() => {}} />;
       case "checks":
-        return <ChecksStep rows={checkRows(job)} onAgain={() => go("where")} />;
+        return <ChecksStep rows={checkRows(job)} asksSudo={askedSudo(job)} onAgain={sudoPassword => (sudoPassword === undefined ? go("where") : doConnect(undefined, sudoPassword))} />;
       case "startfrom":
         return optionsBody(o => <StartFromStep here={here} picks={picks} options={o} from={flow.from} onPick={(from, next) => setPicks(api, next, from)} />);
       case "agents":
@@ -677,7 +687,7 @@ export function AddComputerDialog() {
 
   return (
     <Dialog open onOpenChange={open => (open ? undefined : close())}>
-      <DialogPopup data-add-computer={view} initialFocus={view === "where" || view === "hostkey" ? undefined : false} className="max-w-[560px] [--settings-inset:16px] sm:h-[640px]">
+      <DialogPopup data-add-computer={view} initialFocus={view === "where" || view === "hostkey" ? undefined : false} className={cn(STEP_WIDTH, "[--settings-inset:16px] sm:h-[640px]")}>
         {view === "ready" && place !== undefined ? (
           <>
             <DialogTitle className="sr-only">{head.title}</DialogTitle>
@@ -685,7 +695,7 @@ export function AddComputerDialog() {
           </>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            <DialogHeader className="flex-row items-start justify-between gap-6 pb-3">
+            <DialogHeader className={STEP_HEAD}>
               <div className="flex min-w-0 flex-col gap-1">
                 <DialogTitle>{head.title}</DialogTitle>
                 {head.line === undefined ? null : <DialogDescription>{head.line}</DialogDescription>}
@@ -694,8 +704,8 @@ export function AddComputerDialog() {
                 {figure.words}
               </span>
             </DialogHeader>
-            <DialogPanel className="flex flex-col gap-5 pt-2 pb-5">{body()}</DialogPanel>
-            <Foot left={saved ? <SavedLine /> : null}>{foot}</Foot>
+            <DialogPanel className={STEP_BODY}>{body()}</DialogPanel>
+            <StepFoot left={saved ? <SavedLine /> : null}>{foot}</StepFoot>
           </div>
         )}
       </DialogPopup>

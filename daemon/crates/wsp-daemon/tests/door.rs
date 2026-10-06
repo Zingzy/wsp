@@ -21,7 +21,7 @@ use wsp_daemon::{Daemon, Options};
 use wsp_frames::{numbers, words, DaemonEvent};
 
 mod held_port;
-use held_port::refused_port;
+use held_port::listen_v6_only;
 
 const TOKEN: &str = "test-token-123";
 
@@ -132,17 +132,6 @@ async fn shim(sock: &Path, url: &str) -> String {
     let mut out = String::new();
     s.read_to_string(&mut out).await.unwrap();
     out.lines().next().unwrap_or("").to_owned()
-}
-
-/// [::1] only, at a port free on 127.0.0.1: the daemon dials v4 first and must be refused there.
-async fn listen_v6_only() -> TcpListener {
-    loop {
-        let v6 = TcpListener::bind("[::1]:0").await.unwrap();
-        let port = v6.local_addr().unwrap().port();
-        if TcpListener::bind(("127.0.0.1", port)).await.is_ok() {
-            return v6;
-        }
-    }
 }
 
 /// An echo server: every byte in comes back behind "echo:", and the connection ends when the peer's does. The
@@ -971,8 +960,8 @@ async fn starts_in_the_home_directory_not_wherever_the_daemon_runs() {
 async fn an_unscoped_socket_tunnels_a_laptop_connection_to_a_guest_loopback_port_open_write_data_end_close() {
     let d = start(None).await;
     let server = listen_v6_only().await;
-    let port = server.local_addr().unwrap().port();
-    let _live = echo(server);
+    let port = server.listener.local_addr().unwrap().port();
+    let _live = echo(server.listener);
     let mut c = authed(&d).await;
     assert_eq!(c.request("tunnel.open", json!({ "tunnelId": "t1", "port": port })).await["ok"], true);
     let line = b"GET /oauth/callback?code=x HTTP/1.1\r\n";
@@ -1031,13 +1020,17 @@ async fn refuses_a_bad_port_a_duplicate_id_and_a_port_nothing_listens_on() {
     let mut c = authed(&d).await;
     let zero = c.request("tunnel.open", json!({ "tunnelId": "x", "port": 0 })).await;
     assert_eq!((zero["ok"].as_bool(), zero["code"].as_str()), (Some(false), Some("bad-request")));
-    let held = refused_port().await;
-    let port = held.port;
-    assert!(!held.addrs().into_iter().any(held_port::squatter_binds), "another test's listener could take the refused port");
-    let refused = c.request("tunnel.open", json!({ "tunnelId": "x", "port": port })).await;
-    assert_eq!(refused["ok"], false);
-    assert_eq!(refused["error"], format!("connect ECONNREFUSED ::1:{port}"));
-    assert!(refused.get("code").is_none(), "a failed dial is a plain failure, as under node: {refused}");
+    // The dial falls through to ::1, which only Linux holds refused (held_port).
+    #[cfg(target_os = "linux")]
+    {
+        let held = held_port::refused_port().await;
+        let port = held.port;
+        assert!(!held.addrs().into_iter().any(held_port::squatter_binds), "another test's listener could take the refused port");
+        let refused = c.request("tunnel.open", json!({ "tunnelId": "x", "port": port })).await;
+        assert_eq!(refused["ok"], false);
+        assert_eq!(refused["error"], format!("connect ECONNREFUSED ::1:{port}"));
+        assert!(refused.get("code").is_none(), "a failed dial is a plain failure, as under node: {refused}");
+    }
     let ending = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = ending.local_addr().unwrap().port();
     tokio::spawn(async move {
