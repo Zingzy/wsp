@@ -8,7 +8,10 @@ use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 
 /// A port nothing listens on at 127.0.0.1 or ::1, the two loopbacks a tunnel dials. A connected socket of ours owns
-/// it on each, and the kernel never hands a port a connected socket holds to a bind to port 0.
+/// it on each. Linux never hands a port any socket holds to a bind to port 0, on either family
+/// (inet_csk_find_open_port, net/ipv4/inet_connection_sock.c); XNU keeps that for v4 alone (in_pcbbind,
+/// bsd/netinet/in_pcb.c), while its v6 port-0 bind under SO_REUSEADDR looks past connected sockets (in6_pcbsetport,
+/// bsd/netinet6/in6_src.c). So a test that needs ::1 refused runs on Linux only.
 pub struct RefusedPort {
     pub port: u16,
     _held: [(TcpListener, TcpStream); 2],
@@ -34,6 +37,23 @@ pub async fn refused_port() -> RefusedPort {
             continue;
         };
         return RefusedPort { port, _held: [(anchor4, held4), (anchor6, held6)] };
+    }
+}
+
+/// A listener on [::1] alone, its port held refused on 127.0.0.1, which a tunnel dials first, for as long as this
+/// stands; the v4 hold is one XNU keeps too.
+pub struct V6Only {
+    pub listener: TcpListener,
+    _held: (TcpListener, TcpStream),
+}
+
+pub async fn listen_v6_only() -> V6Only {
+    loop {
+        let anchor4 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let held4 = TcpStream::connect(anchor4.local_addr().unwrap()).await.unwrap();
+        if let Ok(listener) = TcpListener::bind(("::1", held4.local_addr().unwrap().port())).await {
+            return V6Only { listener, _held: (anchor4, held4) };
+        }
     }
 }
 
