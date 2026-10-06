@@ -158,19 +158,20 @@ mod held_port;
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn a_refused_dial_is_named_as_node_names_it() {
-        let held = super::held_port::refused_port().await;
+        let held = held_port::refused_port().await;
         let port = held.port;
-        assert!(!held.addrs().into_iter().any(super::held_port::squatter_binds), "another test's listener could take the refused port");
+        assert!(!held.addrs().into_iter().any(held_port::squatter_binds), "another test's listener could take the refused port");
         let err = connect_loopback(port).await.expect_err("nothing listens there");
         assert_eq!(err, format!("connect ECONNREFUSED ::1:{port}"));
     }
 
     #[tokio::test]
     async fn the_dial_tries_127_0_0_1_then_1() {
-        let v6 = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-        let port = v6.local_addr().unwrap().port();
+        let v6 = held_port::listen_v6_only().await;
+        let port = v6.listener.local_addr().unwrap().port();
         let stream = connect_loopback(port).await.unwrap();
         assert!(stream.peer_addr().unwrap().ip().is_ipv6());
     }
