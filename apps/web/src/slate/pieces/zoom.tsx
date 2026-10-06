@@ -71,9 +71,12 @@ export function ZoomFrame({ children, floor, fill, cap, className, controls }: {
   );
   const shown = useRef(view);
   shown.current = view;
+  /** Once the person zooms or pans, a resize keeps their view, held inside the frame, until they fit it again. */
+  const moved = useRef(false);
   // A drawing wider than the frame opens at its top with its first node, the top-most then the left-most, in the middle:
   // a long edge out to one side widens the box, so its corner and its middle can both be empty ground.
   const fit = useCallback(() => {
+    moved.current = false;
     if (natural === null) {
       setView({ k: fitted, x: 0, y: 0 });
       return;
@@ -83,11 +86,14 @@ export function ZoomFrame({ children, floor, fill, cap, className, controls }: {
     const middle = origin === undefined || first === undefined ? natural.w / 2 : (first.left + first.width / 2 - origin.left) / shown.current.k;
     setView(place({ k: fitted, x: box.w / 2 - middle * fitted, y: 0 }));
   }, [place, fitted, natural, box]);
-  useEffect(fit, [fit]);
-  const zoomAt = useCallback((px: number, py: number, by: number) => setView(v => {
-    const k = Math.min(MOST, Math.max(LEAST, v.k * by));
-    return place({ k, x: px - ((px - v.x) * k) / v.k, y: py - ((py - v.y) * k) / v.k });
-  }), [place]);
+  useEffect(() => (moved.current ? setView(place) : fit()), [fit, place]);
+  const zoomAt = useCallback((px: number, py: number, by: number) => {
+    moved.current = true;
+    setView(v => {
+      const k = Math.min(MOST, Math.max(LEAST, v.k * by));
+      return place({ k, x: px - ((px - v.x) * k) / v.k, y: py - ((py - v.y) * k) / v.k });
+    });
+  }, [place]);
   useImperativeHandle(controls, () => ({ fit, zoom: by => zoomAt(box.w / 2, box.h / 2, by) }), [fit, zoomAt, box]);
 
   // A trackpad's pinch arrives as a wheel with ctrl held; the listener is not passive, so it can keep the page still.
@@ -128,6 +134,7 @@ export function ZoomFrame({ children, floor, fill, cap, className, controls }: {
         const from = drag.current;
         if (from === null || from.id !== event.pointerId) return;
         drag.current = { id: from.id, x: event.clientX, y: event.clientY };
+        moved.current = true;
         setView(v => place({ k: v.k, x: v.x + event.clientX - from.x, y: v.y + event.clientY - from.y }));
       }}
       onPointerUp={() => (drag.current = null)}

@@ -238,6 +238,27 @@ describe("the richer kit in the renderer", () => {
     void engine;
   });
 
+  it("moves the pick with the arrow keys as a radio group does, one stop in the tab order, wrapping at the ends", async () => {
+    const { view, link, frame } = draw(compiled(`<slate><value name="pick" start={null} /><column><choices id="answer" label="Which layer?" value={$pick} options={["Link", "Network", "Transport"]} /></column></slate>`));
+    const options = () => within(piece(view.container, "answer")).getAllByRole("radio");
+    const written = () => JSON.stringify((link.writeState as unknown as { mock: { calls: unknown[][] } }).mock.calls.at(-1));
+    expect(options().map(o => o.tabIndex)).toEqual([0, -1, -1]);
+    await act(async () => fireEvent.keyDown(options()[0]!, { key: "ArrowDown" }));
+    frame();
+    expect(written()).toContain("Network");
+    expect(document.activeElement).toBe(options()[1]);
+    expect(options().map(o => o.tabIndex)).toEqual([-1, 0, -1]);
+    await act(async () => fireEvent.keyDown(options()[1]!, { key: "ArrowLeft" }));
+    await act(async () => fireEvent.keyDown(options()[0]!, { key: "ArrowUp" }));
+    frame();
+    expect(written()).toContain("Transport");
+    expect(document.activeElement).toBe(options()[2]);
+    await act(async () => fireEvent.keyDown(options()[2]!, { key: "ArrowRight" }));
+    frame();
+    expect(written()).toContain("Link");
+    expect(document.activeElement).toBe(options()[0]);
+  });
+
   it("draws every new piece's catalog example without a failure", () => {
     const declared = `<value name="hist" start={[1, 2, 3]} /><value name="pick" start={null} /><value name="up" start={true} /><value name="done" start={1} /><value name="steps" start={[1, 2]} /><value name="q" start={{ options: ["a", "b"], answer: "a" }} />`;
     for (const type of ["heading", "grid", "status", "chip", "ring", "chart", "sparkline", "bars", "choices"]) {
