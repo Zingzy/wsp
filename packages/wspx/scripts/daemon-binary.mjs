@@ -15,7 +15,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { REPO } from "./bundles.mjs";
+import { REPO } from "../../protocol/src/bundles.mjs";
 import { daemonFeatures, tripleHere } from "./daemon-features.mjs";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));

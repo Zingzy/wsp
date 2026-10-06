@@ -1,0 +1,19 @@
+{
+  "at": "/",
+  "fixture": "changes",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The right panel is min(42vw, 28rem), which is 28rem at both 1280 and 1440, so 1280 draws this pane as 1440 does; 390 is where the panel takes the window, which is shot here.",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:redirect",
+    "390:key:Escape",
+    "390:key:ControlOrMeta+Alt+b",
+    "surface-launch=diff"
+  ],
+  "wait": "changed-files",
+  "settleMs": 1200
+}

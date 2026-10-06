@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "fixture": "tree-conflict",
+  "widths": [
+    1440
+  ],
+  "reason": "The lead's thread sits in the thread's column, whose 1280 and 390 layouts composer-thread already shoots; this pins the THREADS rows the tree of branches adds under the lead's reply.",
+  "steps": [
+    "row-id=thread:tree-lead"
+  ],
+  "wait": "tree-branch",
+  "settleMs": 1200
+}

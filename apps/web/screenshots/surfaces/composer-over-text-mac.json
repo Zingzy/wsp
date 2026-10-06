@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "fixture": "long-prompt",
+  "steps": [
+    "row-id=thread:brief"
+  ],
+  "wait": "testid=composer-editor",
+  "mac": true,
+  "widths": [
+    1440
+  ],
+  "reason": "What this shot adds is the Mac window's glass under the composer over a long transcript; the prompt itself is shot in long-prompt.",
+  "settleMs": 800
+}

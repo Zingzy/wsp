@@ -6,9 +6,10 @@ import { CLOUD_ENV, DAEMON_VERSION, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { TRANSCRIPT_LOADING } from "../src/transcript-words.js";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { GHOST_IS_NOT_A_CONTROL, HELD, HELD_ON_THE_PAGE, whyHeld, OPEN_OVER_THE_PAGE, PRESS_NEEDS_FOCUS, READ_PAGE, SAID_ON_THE_PAGE, SEVERAL_READ, UNDER_AN_OPEN_MENU, attrWord, diffLines, findByWords, findField, openMenu, parseArgs, typedField, whyNotClicked, whyNotOne } from "./drive.mjs";
 import { atProvider, HERE_LABEL, FIXTURE_NAMES, fixtureCloud, fixtureFleet, fixtureFolders, fixtureMachines, fixtureRepos, fixtureSnapshots, fixtureState, threadId } from "./fixture-state.mjs";
@@ -22,8 +23,11 @@ import { StatusWord } from "../src/settings/agentKinds";
 import { NO_FINDER_CHOOSER, PASTE_THIS, homeOf, keptLog, labLines, launchDiesLine, parseArgs as parseLabArgs, pointerPath, stopLab, whyALaunchDies, whyNotOursToRemove } from "./lab.mjs";
 
 describe("the fixtures a lab serves", () => {
-  it("has one per kind of person the testers play", () => {
-    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "mac-and-boxes", "orchestrator", "thread-states", "tiles", "tiles-marks", "tiles-snoozed", "tiles-attempt", "image-built", "long-prompt", "changes", "pull-request", "pull-request-conflict", "tree", "tree-conflict", "review-draft", "review-posted", "rewind", "replies", "usage"]);
+  it("has one per kind of person the testers play, each a file of its own in fixtures/", () => {
+    const files = readdirSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures")).filter(file => file.endsWith(".mjs"));
+    expect(FIXTURE_NAMES).toEqual(files.map(file => file.slice(0, -".mjs".length)).sort());
+    // What a surface is served when it names none, and what a lab starts with.
+    expect(FIXTURE_NAMES).toEqual(expect.arrayContaining(["mac-in-use", "mac-only"]));
   });
 
   it("gives the two personas who have this computer and nothing else the first run, with no project added", () => {

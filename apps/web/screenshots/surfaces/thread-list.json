@@ -1,0 +1,12 @@
+{
+  "at": "/",
+  "fixture": "thread-states",
+  "steps": [
+    "row-id=thread:migrate"
+  ],
+  "wait": "thread-rows",
+  "widths": [
+    1440
+  ],
+  "reason": "The Threads list under an opener's transcript is shot at every width in opener-transcript; this one is the same list over the thread-states fixture, judged at 1440."
+}

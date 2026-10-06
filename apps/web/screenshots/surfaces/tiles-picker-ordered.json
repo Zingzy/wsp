@@ -1,0 +1,16 @@
+{
+  "at": "/",
+  "fixture": "tiles-marks",
+  "steps": [
+    "1440:row-id=thread:cart",
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=project-switcher"
+  ],
+  "wait": "project-switcher-menu",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does; 390 opens it over the page, which is shot here."
+}

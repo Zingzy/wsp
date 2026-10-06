@@ -1,0 +1,19 @@
+{
+  "daemon/crates/wsp-daemon/src/git.rs": 2096,
+  "daemon/crates/wsp-daemon/src/hosts/github.rs": 1922,
+  "daemon/crates/wsp-daemon/src/ops.rs": 2263,
+  "daemon/crates/wsp-daemon/src/place.rs": 1842,
+  "daemon/crates/wsp-daemon/src/ports.rs": 1635,
+  "daemon/crates/wsp-runtime/src/bundle.rs": 2585,
+  "daemon/crates/wsp-runtime/src/engine.rs": 2083,
+  "daemon/crates/wsp-runtime/src/net.rs": 1629,
+  "daemon/crates/wsp-runtime/src/ops.rs": 2980,
+  "packages/catalog/src/mcp.ts": 1797,
+  "packages/engine/src/golden-import.ts": 1582,
+  "packages/host/src/doctor.ts": 2023,
+  "packages/host/src/init.ts": 1748,
+  "packages/protocol/src/index.ts": 8038,
+  "packages/runtime/src/runtime.ts": 13762,
+  "packages/runtime/src/serve.ts": 2289,
+  "packages/runtime/src/slates.ts": 1648
+}

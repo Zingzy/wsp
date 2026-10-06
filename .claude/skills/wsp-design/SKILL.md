@@ -518,11 +518,14 @@ pnpm --filter @wsp/web build && pnpm --filter @wsp/host build
 pnpm --filter @wsp/web screenshots -- --out <folder> [--surfaces <file.json>]
 ```
 
-`apps/web/screenshots/surfaces.json` names the surfaces and their steps; add a
-surface for a new screen there. Shots are 1440 and 390 wide, both themes,
-device scale 2, reduced motion. If the harness refuses its own fixture, fix the
-fixture (`apps/web/screenshots/fixture-state.mjs`) rather than photographing a
-running app; until then the browser tests' fixture pages under
+`apps/web/screenshots/surfaces/` holds one file per surface, named for it, with
+its route and steps; add a surface for a new screen as a new file there (the
+widths every surface is shot at are in `widths.json` beside it). `--surfaces`
+still takes one file in the old `{ "surfaces": [...] }` shape for a subset.
+Shots are 1440, 1280 and 390 wide, both themes, device scale 2, reduced motion. If
+the harness refuses its own fixture, fix the fixture (one file per fixture in
+`apps/web/screenshots/fixtures/`, built from `fixture-kit.mjs`) rather than
+photographing a running app; until then the browser tests' fixture pages under
 `apps/web/test/*/index.html` render the same components off a vite child on a
 free port (`?screen=<name>&theme=dark`, the names being the `screen ===`
 strings in each page's `main.tsx`).

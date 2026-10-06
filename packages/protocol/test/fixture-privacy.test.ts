@@ -173,7 +173,7 @@ const EXEMPT: ReadonlyArray<{ files: readonly string[]; values: readonly string[
       "daemon/crates/wsp-daemon-bin/tests/runtime_live.rs",
       "packages/engine/test/machine-facts.test.ts",
       "packages/host/test/place-machines.runtime.test.ts",
-      "packages/host/test/verbs.test.ts",
+      "packages/host/test/verbs-threads.test.ts",
       "packages/protocol/test/machine-link.test.ts",
     ],
     values: ["/Users/zingzy"],
