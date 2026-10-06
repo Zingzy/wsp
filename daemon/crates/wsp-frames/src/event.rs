@@ -85,6 +85,11 @@ pub enum DaemonEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         exited: Option<bool>,
+        /// The port still listens, held by a process that is no longer the watching workspace's: it left the view
+        /// and did not stop.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        left: Option<bool>,
         /// When the close was seen, as the node daemon stamps it: an ISO date, never a number.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -133,8 +138,23 @@ pub enum DaemonEvent {
         disk: Usage,
         at: i64,
     },
+    /// Every process read this tick: a watching socket's first frame, and its next one after it watches again. seq
+    /// counts the sampler's frames, so the changes after it name it as their base. This daemon always sends it; a
+    /// daemon a version behind sends none and no changes either, so a snapshot without one is a whole list to hold.
     #[serde(rename = "proc.snapshot")]
-    ProcSnapshot { at: i64, daemon: u32, total: u64, procs: Vec<ProcEntry> },
+    ProcSnapshot {
+        at: i64,
+        daemon: u32,
+        total: u64,
+        procs: Vec<ProcEntry>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        seq: Option<u64>,
+    },
+    /// What moved since frame `base`: the rows new or changed, whole, and the pids gone. A client holding any other
+    /// frame than `base` applies nothing and watches again for a whole snapshot.
+    #[serde(rename = "proc.changes")]
+    ProcChanges { at: i64, daemon: u32, total: u64, procs: Vec<ProcEntry>, gone: Vec<u32>, seq: u64, base: u64 },
     /// A process inside the machine opened a session; this one goes up to the watcher alone.
     #[serde(rename = "guest.opened", rename_all = "camelCase")]
     GuestOpened {

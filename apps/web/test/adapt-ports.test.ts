@@ -43,7 +43,7 @@ describe("applyStoppedEvent", () => {
   const AT = "2026-09-05T12:04:00.000Z";
   const T0 = 1_000_000;
   const closeHeld = { type: "port.close", port: 8412, pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, at: AT } as const;
-  const heldRow: StoppedPort = { port: 8412, pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, at: AT, seenAt: T0, movedTo: null };
+  const heldRow: StoppedPort = { port: 8412, pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, left: false, at: AT, seenAt: T0, movedTo: null };
 
   it("a close records who held the port and when, stamped with the local clock it arrived on", () => {
     const next = applyStoppedEvent(new Map(), closeHeld, T0);
@@ -52,7 +52,7 @@ describe("applyStoppedEvent", () => {
 
   it("a plain close records the port with nothing known about its holder", () => {
     const next = applyStoppedEvent(new Map(), { type: "port.close", workspaceId: "ws", port: 3000 }, T0);
-    expect(next.get(3000)).toEqual({ port: 3000, pid: null, process: null, command: null, exited: null, at: null, seenAt: T0, movedTo: null });
+    expect(next.get(3000)).toEqual({ port: 3000, pid: null, process: null, command: null, exited: null, left: false, at: null, seenAt: T0, movedTo: null });
   });
 
   it("the same port opening again forgets the stop; an unrelated open returns the same map", () => {
@@ -73,7 +73,7 @@ describe("applyStoppedEvent", () => {
 
 describe("stoppedSentence", () => {
   const clock = () => "12:04";
-  const base: StoppedPort = { port: 8412, pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, at: "2026-09-05T12:04:00.000Z", seenAt: 0, movedTo: null };
+  const base: StoppedPort = { port: 8412, pid: 53479, process: "python3", command: "python3 -m http.server 8412", exited: true, left: false, at: "2026-09-05T12:04:00.000Z", seenAt: 0, movedTo: null };
 
   it.each<[string, StoppedPort | undefined, string]>([
     ["nothing known", undefined, ":8412 stopped listening"],

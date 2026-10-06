@@ -67,7 +67,7 @@ const FOOT_CLASS = "flex flex-col-reverse gap-2 px-5 pb-5 sm:flex-row sm:items-c
 /** The field a row opens, in its right column, wide enough for a sentence; under 640 px it takes the row's width. */
 const FIELD_CLASS = cn(ROW_FIELD, "w-96 max-sm:w-full");
 /** The step-log mono block the computer's page opens under a row, on the words' left edge past a glyph frame. */
-const LOG_CLASS = "max-h-48 overflow-auto font-mono text-[11px] leading-4 whitespace-pre-wrap break-words text-muted-foreground tabular-nums";
+const LOG_CLASS = "max-h-48 overflow-auto font-mono text-[11px] leading-4 whitespace-pre-wrap break-words text-muted-foreground tabular-nums select-text";
 const LOG_EDGE = "pl-[calc(var(--settings-inset,20px)+44px)] pr-(--settings-inset,20px) pb-4";
 /** A changed line's ink, the Changes pane's own: it tints its rows from --success and --destructive. */
 const LINE_INK = { "-": "text-destructive-foreground", "+": "text-success" } as const;

@@ -20,10 +20,12 @@
 
 import { readFileSync } from "node:fs";
 import {
+  applyProcChanges,
   DAEMON_SAMPLER_INTERVAL_MS,
   LOOPBACK,
   MachineListReply,
   MachineReadingReply,
+  ProcChanges,
   ProcSnapshot,
   SysSample,
   byProcColumn,
@@ -182,7 +184,15 @@ export async function openHere(home: string, deps: HereDeps = systemHere(), now:
         sys = SysSample.parse(event);
         refresh?.();
       } else if (event.type === "proc.snapshot") procs = ProcSnapshot.parse(event);
-      else return;
+      else if (event.type === "proc.changes") {
+        const next = procs === undefined ? undefined : applyProcChanges(procs, ProcChanges.parse(event));
+        // A lost frame: the processes held stay, and the daemon's next frame to a watch asked again is whole.
+        if (next === undefined) {
+          void link.request("proc.watch").catch(() => undefined);
+          return;
+        }
+        procs = next;
+      } else return;
       droppedAt = undefined;
       pushed();
     },

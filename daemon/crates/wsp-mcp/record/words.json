@@ -255,7 +255,7 @@
     "thread_rename": "wsp thread rename <thread> \"<title>\"",
     "thread_forget": "wsp thread forget <thread>",
     "thread_allow": "wsp thread allow <thread>",
-    "thread_deny": "wsp thread deny <thread>",
+    "thread_deny": "wsp thread deny <thread> [--reason \"<words>\"]",
     "slate_catalog": "wsp slate catalog [<name>]",
     "slate_write": "wsp slate write [<thread>] [<file>] [--check] [--set <path>=<json>]... [--press <piece>] [--row <n>] [--action <n>] [--if-version <n>]",
     "slate_state": "wsp slate state [<thread>] [<path>=<json>...] [--start <run>]... [--if-version <n>]",
