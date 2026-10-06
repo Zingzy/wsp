@@ -12,6 +12,7 @@
 // against what those threads spent.
 import { HeroField, HeroMark } from "./EmptyHero.js";
 import { SetupCard, SetupRoom } from "./SetupCard.js";
+import { answerPrompt } from "./answerPrompt.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
@@ -97,13 +98,9 @@ export function ChatView({
     [cwd, workspaceId],
   );
   // The prompt row's own options: the answer travels straight to the runtime and the row closes on the event the
-  // runtime records, never on the reply here, so two clients watching one prompt end up saying the same thing.
-  const onAnswerPermission = useCallback(
-    (sessionId: string, askId: string, optionId: string) => {
-      void api?.answerPermission?.(sessionId, askId, optionId);
-    },
-    [api],
-  );
+  // runtime records, never on the reply here, so two clients watching one prompt end up saying the same thing; the
+  // reply comes back only as a refusal, said under the row.
+  const onAnswerPermission = useMemo(() => answerPrompt(api), [api]);
   // A Working thread on a workspace that is not running is a contradiction: the row says what it waits for instead,
   // naming the workspace and, while it wakes, where it runs, since that is what the send is waiting on.
   const state = useWorkspaceState(workspaceId);

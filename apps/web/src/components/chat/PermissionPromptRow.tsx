@@ -26,6 +26,7 @@ import { isPromptOpen, type PermissionPrompt } from "../../adapt";
 import { permissionOutcomeLine, permissionPromptWords, pickedOptions, toolCallFacts } from "@wsp/protocol";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { usePromptRefusal, type AnswerPrompt, type PromptRefused } from "./answerPrompt";
 import { QuestionPrompt } from "./QuestionPrompt";
 
 /** A command wraps where a person would break it, at its spaces, and nowhere else: each run without a space is a
@@ -79,7 +80,7 @@ export function PermissionPromptRow({
   docked = false,
 }: {
   permission: PermissionPrompt;
-  onAnswer: (sessionId: string, askId: string, optionId: string) => void;
+  onAnswer: AnswerPrompt;
   /** Who is asking, where the asker is not the thread's own agent; drawn above the prompt so a person answering
    * several running agents knows which one this is. */
   asker?: string;
@@ -89,6 +90,7 @@ export function PermissionPromptRow({
 }) {
   const open = isPromptOpen(permission) && !docked;
   const waiting = isPromptOpen(permission) && docked;
+  const refused = usePromptRefusal(permission.askId);
   const answer = (optionId: string): void => onAnswer(permission.sessionId, permission.askId, optionId);
   const picked = pickedOptions(permission.options, permission.optionId ?? "");
   const named = picked === undefined || picked.length === 0 ? undefined : { label: picked.map(o => o.label).join(", "), effect: picked[0]!.effect };
@@ -169,7 +171,18 @@ export function PermissionPromptRow({
             ))}
           </div>
         )}
+        {refused === null ? null : <PromptRefusal refused={refused} />}
       </div>
     </div>
+  );
+}
+
+/** A pick the host would not take, said under the prompt that is still open, so its buttons never look dead. */
+export function PromptRefusal({ refused }: { refused: PromptRefused }) {
+  return (
+    <p role="alert" data-permission-refused="" className="text-note leading-5 text-error-foreground">
+      {refused.said}
+      {refused.fix === undefined ? null : <span className="text-foreground"> {refused.fix}</span>}
+    </p>
   );
 }

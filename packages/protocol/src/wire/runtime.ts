@@ -504,8 +504,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.steer"), sessionId: z.string(), prompt: z.string(), requestId: z.string().optional() }),
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
-   * options; replies with a SessionAnswerResult. Takes the runtime's session id, as sessions.interrupt does. A deny
-   * may carry the person's reason, what the agent should do instead. */
+   * options; replies with a SessionAnswerResult. Takes the session id the prompt's row carries, the agent's own, or
+   * the runtime's. A deny may carry the person's reason, what the agent should do instead. */
   z.object({ id: reqId, op: z.literal("sessions.answer"), sessionId: z.string(), askId: z.string(), optionId: z.string(), reason: z.string().optional() }),
   /** Puts the session's running turn into another access mode from its next tool call on; replies with a
    * SessionAccessResult. Takes the runtime's session id, as sessions.interrupt does. */

@@ -5,7 +5,7 @@
 // it closes. Same fixture api shape as chat-composer.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { QUESTION_TOOL, otherOptionId, pickedOptionId, questionOptions, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceView } from "@wsp/protocol";
+import { QUESTION_TOOL, otherOptionId, pickedOptionId, questionOptions, type EventUnion, type HarnessCatalog, type SessionAnswerOutcome, type SessionEvent, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
@@ -41,7 +41,7 @@ interface Answer {
   readonly reason?: string;
 }
 
-function fixture(asks: SessionEvent[]) {
+function fixture(asks: SessionEvent[], outcome: () => Promise<SessionAnswerOutcome> = async () => "answered") {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const answered: Answer[] = [];
   const history: SessionEvent[] = [{ type: "session.start", ...sc, at: T0, model: "claude-sonnet-5", prompt: "set it up" }, ...asks];
@@ -66,7 +66,7 @@ function fixture(asks: SessionEvent[]) {
     startSession: async opts => ({ id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running", prompt: opts.prompt, startedAt: 0 }),
     answerPermission: async (_sessionId, askId, optionId, reason) => {
       answered.push({ askId, optionId, ...(reason === undefined ? {} : { reason }) });
-      return "answered";
+      return outcome();
     },
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
@@ -183,6 +183,24 @@ describe("the prompt dock", () => {
     fireEvent.change(field(), { target: { value: "Run only the thread-rows file" } });
     press(field(), "Enter");
     await waitFor(() => expect(answered.at(-1)).toEqual({ askId: "ask_d", optionId: "deny", reason: "Run only the thread-rows file" }));
+  });
+
+  it("says a pick the host refused under the prompt, which stays open, and takes the sentence back on the next pick", async () => {
+    let next: () => Promise<SessionAnswerOutcome> = async () => "not-found";
+    const { api, answered } = fixture([bash("ask_r")], () => next());
+    await setup(api);
+    press(root(), "Enter");
+    await waitFor(() => expect(document.querySelector("[data-permission-refused]")?.textContent).toBe("This host holds no turn of that thread."));
+    expect(document.querySelector('[data-prompt-dock="ask_r"]')).not.toBeNull();
+    next = async () => {
+      throw new Error("workspace api is paused; wake it first");
+    };
+    press(root(), "Enter");
+    await waitFor(() => expect(document.querySelector("[data-permission-refused]")?.textContent).toBe("Workspace api is paused; wake it first."));
+    next = async () => "answered";
+    press(root(), "Enter");
+    await waitFor(() => expect(answered).toHaveLength(3));
+    await waitFor(() => expect(document.querySelector("[data-permission-refused]")).toBeNull());
   });
 
   it("folds to one row over the composer on Esc, and opens again from that row", async () => {

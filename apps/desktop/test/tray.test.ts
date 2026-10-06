@@ -18,6 +18,7 @@ const row = (over: Partial<SessionView> & Pick<SessionView, "id">): SessionView 
 const input = (over: Partial<TrayInput> = {}): TrayInput => ({
   sessions: [],
   asks: new Map(),
+  refused: new Map(),
   workspaces,
   places,
   host: { label: "zingzy's MacBook Pro", remote: false, lost: false },
@@ -66,6 +67,20 @@ describe("the menu bar's model", () => {
       { label: TRAY_WORDS.stop, act: { kind: "stop", sessionId: "s2" } },
     ]);
     expect(working!.actions.map(a => a.label)).toEqual([TRAY_WORDS.open, TRAY_WORDS.stop]);
+  });
+
+  it("finds a Codex row's prompt by the agent's session id the prompt carries, and answers it by the row's own id", () => {
+    const asks = new Map([["019a-codex-thread", { askId: "a1", options: [{ id: "o_yes", effect: "allow" as const }] }]]);
+    const [asking] = threadRows(trayModel(input({ asks, sessions: [row({ id: "s_launch", threadId: "t_codex", harness: "codex", claudeSessionId: "019a-codex-thread", asking: "Bash: ls" })] })).rows);
+    expect(asking!.actions).toContainEqual({ label: TRAY_WORDS.allow, act: { kind: "answer", sessionId: "s_launch", askId: "a1", optionId: "o_yes" } });
+  });
+
+  it("says a pick the host refused on the thread's row while its prompt stays open, and the place it runs once it closes", () => {
+    const asks = new Map([["s2", { askId: "a1", options: [{ id: "o_yes", effect: "allow" as const }] }]]);
+    const sessions = [row({ id: "s2", threadId: "t_ask", asking: "Bash: ls" })];
+    const refused = new Map([["a1", "this host holds no turn of that thread"]]);
+    expect(threadRows(trayModel(input({ asks, refused, sessions })).rows)[0]!.sublabel).toBe("This host holds no turn of that thread");
+    expect(threadRows(trayModel(input({ refused, sessions })).rows)[0]!.sublabel).toBe(TRAY_WORDS.where("Needs you", "zingzy's MacBook Pro"));
   });
 
   it("a prompt the menu never saw open, one that asked before it was listening, offers Open and Stop and still marks the icon", () => {

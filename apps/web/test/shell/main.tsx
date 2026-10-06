@@ -18,7 +18,8 @@
 // out and photographed in both states, and an option clicked or an access
 // picked closes it the way the runtime's event does; &access=refused has that
 // turn's harness refuse the change its own row said it takes, which is the one
-// refusal the composer says under the box; ?local=1&ws=ws_m&fold=1 replays one
+// refusal the composer says under the box; &answer=not-found has the host refuse
+// a pick, which the prompt says under its options; ?local=1&ws=ws_m&fold=1 replays one
 // that fanned out to three subagents, one holding a prompt of its own and one
 // launched in the background, so a fold's body can be measured against its
 // header; ?shell=desktop puts a desktop bridge on the page so the workspace
@@ -573,8 +574,10 @@ const api: Api = {
                   ? lingering
                   : [],
   // The row closes on the runtime's own event and never on this reply, so the fixture pushes it: a click on an
-  // option has to be seen landing, not only counted.
+  // option has to be seen landing, not only counted. ?answer=not-found is a host holding no turn under the row's id,
+  // which the prompt says under its options.
   answerPermission: async (sessionId, askId, optionId) => {
+    if (params.get("answer") === "not-found") return "not-found";
     closePrompt(askId, optionId);
     return "answered";
   },

@@ -34,7 +34,9 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { RadioGroup } from "../ui/radio-group";
 import { ComposerSurface } from "./ComposerSurface";
+import { usePromptRefusal, type AnswerPrompt } from "./answerPrompt";
 import { HarnessMark } from "./HarnessMark";
+import { PromptRefusal } from "./PermissionPromptRow";
 
 /** One row of a card: a name, the one sentence it may carry, and the field it opens where it opens one. */
 interface MenuRow {
@@ -141,7 +143,7 @@ export function PromptDock({
   modes?: ReadonlyArray<ModeWords>;
   /** The pick, and on a deny the words typed into its field: what the agent should do instead. An answer typed in
    * Other rides the pick itself. */
-  onAnswer: (sessionId: string, askId: string, optionId: string, reason?: string) => void;
+  onAnswer: AnswerPrompt;
   /** Hands the composer back with the prompt folded to one row above it, for a person who wants to write first. */
   onWriteInstead?: () => void;
 }) {
@@ -186,6 +188,7 @@ export function PromptDock({
 
   const typedNow = (): string => fieldRef.current?.value.trim() ?? "";
 
+  const refused = usePromptRefusal(permission.askId);
   const answer = useCallback(
     (optionId: string, reason?: string) => onAnswer(permission.sessionId, permission.askId, optionId, reason === undefined || reason === "" ? undefined : reason),
     [onAnswer, permission.askId, permission.sessionId],
@@ -434,6 +437,7 @@ export function PromptDock({
                     </Grid>
                   </RadioGroup>
                 )}
+                {refused === null ? null : <PromptRefusal refused={refused} />}
               </div>
               <StepFoot
                 data-prompt-foot

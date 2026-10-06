@@ -38,6 +38,7 @@ export const TRAY_WORDS = {
   allow: "Allow",
   deny: "Deny",
   stop: "Stop",
+  refused: (said: string): string => `${said.charAt(0).toUpperCase()}${said.slice(1)}`,
 };
 
 /** A prompt the menu saw open, by the turn that asks it: what sessions.answer names it by and what it offers. */
@@ -57,6 +58,8 @@ export interface TrayHost {
 export interface TrayInput {
   sessions: readonly SessionView[];
   asks: ReadonlyMap<string, OpenAsk>;
+  /** A pick the host would not take, by the prompt it was made on. */
+  refused: ReadonlyMap<string, string>;
   workspaces: readonly WorkspaceView[];
   places: readonly PlaceView[];
   host: TrayHost;
@@ -91,10 +94,14 @@ const LIVE = new Set(["waiting", "running"]);
  * the person as a question does. */
 const listed = (thread: ThreadView, state: string): boolean => LIVE.has(state) || (state === "failed" && threadNeedsYou(thread));
 
+/** The prompt a thread's row stands on: a prompt carries the agent's own session id, which a Codex thread's row id is not. */
+const openAskOf = (thread: ThreadView, asks: ReadonlyMap<string, OpenAsk>): OpenAsk | undefined =>
+  thread.asking === undefined ? undefined : asks.get(thread.claudeSessionId ?? thread.sessionId);
+
 function threadActions(thread: ThreadView, asks: ReadonlyMap<string, OpenAsk>): { label: string; act: TrayAct }[] {
   // A failure has nothing left to answer or stop: it is opened, and read there.
   if (thread.status === "failed") return [{ label: TRAY_WORDS.open, act: { kind: "open", threadId: thread.id } }];
-  const ask = thread.asking === undefined ? undefined : asks.get(thread.sessionId);
+  const ask = openAskOf(thread, asks);
   const pick = (effect: PermissionOption["effect"]) => ask?.options.find(o => o.effect === effect);
   const allow = pick("allow");
   const deny = pick("deny");
@@ -109,6 +116,12 @@ function threadActions(thread: ThreadView, asks: ReadonlyMap<string, OpenAsk>): 
 const computerOf = (input: Pick<TrayInput, "workspaces" | "places">, workspaceId: string): string => {
   const workspace = input.workspaces.find(w => w.id === workspaceId);
   return workspace === undefined ? "" : workspaceComputerName(input.places, workspace);
+};
+
+/** A pick the host refused on the prompt this row still stands on, said where the row says where it runs. */
+const refusedOn = (thread: ThreadView, input: Pick<TrayInput, "asks" | "refused">): string | undefined => {
+  const said = input.refused.get(openAskOf(thread, input.asks)?.askId ?? "");
+  return said === undefined ? undefined : TRAY_WORDS.refused(said);
 };
 
 const TAIL: TrayRow[] = [{ kind: "separator" }, { kind: "line", label: TRAY_WORDS.openApp, act: { kind: "openApp" } }, { kind: "line", label: QUIT_WORD, act: { kind: "quit" } }];
@@ -134,7 +147,7 @@ export function trayModel(input: TrayInput): TrayModel {
     kind: "thread",
     threadId: thread.id,
     label: thread.title,
-    sublabel: TRAY_WORDS.where(threadStateWord(state), computerOf(input, thread.workspaceId)),
+    sublabel: refusedOn(thread, input) ?? TRAY_WORDS.where(threadStateWord(state), computerOf(input, thread.workspaceId)),
     actions: threadActions(thread, input.asks),
   }));
   return {

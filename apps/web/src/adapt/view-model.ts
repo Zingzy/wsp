@@ -107,7 +107,7 @@ export interface ProposedPlan {
 export interface PermissionPrompt {
   readonly askId: string;
   readonly turnId: string | null;
-  /** The runtime's session id, what sessions.answer takes. */
+  /** The agent's own session id, as the prompt's row carries it, which sessions.answer takes. */
   readonly sessionId: string;
   readonly toolName: string;
   /** The tool's input as the harness sent it, JSON. */

@@ -39,7 +39,7 @@ import {
   askingLine,
   type PermissionEffect,
   type PermissionOption,
-  type SessionAnswerOutcome,
+  ANSWER_WORDS,
   SessionAnswerResult,
   type SessionPermissionEvent,
   notAFileLine,
@@ -754,15 +754,6 @@ export function noOpenAskLine(threadId: string): string {
 export function noSuchAnswerLine(threadId: string, verb: string): string {
   return `the prompt thread ${threadWord(threadId)} is stopped on takes no ${verb}; wsp thread read shows what it asks`;
 }
-
-/** What a pick the host would not take came to, one line per outcome it can answer with; `answered` is the only one
- * that is not a failure and has no line here. */
-export const ANSWER_WORDS: Readonly<Record<Exclude<SessionAnswerOutcome, "answered">, string>> = {
-  gone: "the prompt closed before the answer reached it",
-  unsupported: "this thread's agent raises no prompt this host can answer",
-  "not-found": "this host holds no turn of that thread",
-  "no-option": "the prompt carries no option by that id",
-};
 
 /** Picks one option on a prompt the runtime holds open, the op the app's own buttons send; anything but a pick the
  * harness took is the caller's failure, in the words of the outcome. */
