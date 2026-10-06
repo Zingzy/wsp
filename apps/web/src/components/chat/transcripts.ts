@@ -13,6 +13,8 @@ import type { Api, ProtocolEvent } from "../../protocol/client";
 import type { SessionFold } from "../../adapt/session";
 
 export const BUDGET_BYTES = 24 * 1024 * 1024;
+/** Said as the settings say an op the connection lacks; a view that meets it reads the whole history instead. */
+const CANNOT_PAGE = "This wsp cannot read a thread a page at a time from here.";
 export const BUDGET_THREADS = 16;
 /** What one event weighs beyond its text: its ids, stamps and keys, as the wire carries them. */
 const EVENT_OVERHEAD = 200;
@@ -243,11 +245,11 @@ export function createTranscripts(clock: () => number = Date.now) {
   };
 
   const headFor = async (threadId: string): Promise<ThreadHead> => {
-    if (api?.sessionHead === undefined) throw new Error("this host answers no thread head");
+    if (api?.sessionHead === undefined) throw new Error(CANNOT_PAGE);
     return api.sessionHead(threadId);
   };
   const windowFor = async (workspaceId: string, threadId: string, before?: number): Promise<HistoryPage> => {
-    if (api?.sessionPage === undefined) throw new Error("this host answers no history page");
+    if (api?.sessionPage === undefined) throw new Error(CANNOT_PAGE);
     return api.sessionPage(workspaceId, threadId, { limit: HISTORY_PAGE_EVENTS, ...(before === undefined ? {} : { before }) });
   };
 
