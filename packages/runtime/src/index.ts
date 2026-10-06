@@ -3,6 +3,7 @@ export * from "./runtime.js";
 export * from "./serve.js";
 export * from "./status.js";
 export * from "./store.js";
+export * from "./sqlite-store.js";
 export * from "./machine-exec.js";
 export * from "./local-exec.js";
 export * from "./reach.js";
@@ -60,3 +61,5 @@ export type {
   WorkspaceView,
 } from "@wsp/protocol";
 export { hostIdentity, localConfigDir } from "./host-id.js";
+export * from "./slates.js";
+export * from "./slate-runs.js";

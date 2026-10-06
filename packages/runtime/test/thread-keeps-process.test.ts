@@ -93,6 +93,20 @@ describe("a thread on this computer keeps its agent process between turns", () =
     await gone(pidOf(one.result.text));
   }, 30_000);
 
+  it("a slate write from the kept process, by the token it still holds, lands on its own thread's slate", async () => {
+    const rt = host();
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const one = await send(rt, ws.id, "one");
+    const two = await send(rt, ws.id, "two", { thread: one.threadId });
+    expect(pidOf(two.result.text)).toBe(pidOf(one.result.text));
+    // Between turns too: the process is up and resting, and its token names its thread until the keep ends.
+    const wrote = await rt.slates.write({ turnToken: tokenOf(two.result.text), text: `<slate title="Kept"><column><text>still here</text></column></slate>` });
+    expect(wrote.version).toBe(1);
+    expect((await rt.slates.get(one.threadId))?.version).toBe(1);
+    await rt.close();
+    await gone(pidOf(one.result.text));
+  }, 30_000);
+
   it("answers a Codex thread's second send on the app server its first turn left up", async () => {
     const rt = host();
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });

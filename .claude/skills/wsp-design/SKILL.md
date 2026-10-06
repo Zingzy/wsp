@@ -64,10 +64,10 @@ themes Paper's until tuned.
 | `--accent` | #141414 over page | #f4f4f5 | row hover, the pressed tab chip, code spans |
 | `--border` | #232323 | #e4e4e7 | sidebar and panel edges, glyph frames |
 | `--input` / `--input-fill` | #1e1e1e / #101010 | #d4d4d8 / #ffffff | button and field edge and fill |
-| `--primary` | #346bf1 | #1b4ed8 | the one primary button, the focus ring, the line of the Usage page's chart (2026-10-01) |
-| `--warning` | #fe9a00 | #e17100 | a cloud's Full and At limit, an account's Limit reached on the Usage page |
-| `--error-foreground` | #ff6467 | #c10007 | a refusal sentence, Remove inside a dialog, a diff count's deletions |
-| `--success` | #00bc7d | #009966 | the sign-in dot on an agents panel row, a diff count's additions |
+| `--primary` | #346bf1 | #1b4ed8 | the one primary button, the focus ring, the line of the Usage page's chart (2026-10-01), a slate's one accent piece |
+| `--warning` | #fe9a00 | #e17100 | a cloud's Full and At limit, an account's Limit reached on the Usage page, a slate's warning tone |
+| `--error-foreground` | #ff6467 | #c10007 | a refusal sentence, Remove inside a dialog, a diff count's deletions, a slate's bad tone |
+| `--success` | #00bc7d | #009966 | the sign-in dot on an agents panel row, a diff count's additions, a slate's good tone |
 | `--sidebar` | #000000 | #fafafa | the sidebar |
 | `--sidebar-foreground` | #f1f3f7 | #27272a | tile titles |
 | `--sidebar-muted-foreground` | #a3a3a3 | #52525c | tile rows one and three, idle titles |
@@ -75,7 +75,7 @@ themes Paper's until tuned.
 | `--sidebar-row-edge` | transparent | #e4e4e4 | inset ring on the selected tile, light side only |
 | `--sidebar-rail` | #292929 over sidebar | #d1d1d1 | the tree's rail |
 | `--project-hue` | #2bd2c2 | #00877b | fallback hue for a project glyph |
-| `--status-input` | #a3b3ff | #4f39f6 | Needs you (the thread waits on an approval or input) |
+| `--status-input` | #a3b3ff | #4f39f6 | Needs you (the thread waits on an approval or input), a slate's info tone |
 | `--status-working` | #f472b6 | #be185d | Working: the elapsed time and the crab, rose pink |
 | `--status-failed` | #ffa2a2 | #c10007 | Failed |
 | `--status-done` | #5ee9b5 | #007a55 | Done, until seen |
@@ -85,7 +85,12 @@ blue is the primary (the owner's ruling, 2026-09-26). Nothing else is coloured
 at rest except a real brand or agent mark, a project's own glyph, and the
 line counts, whose additions are `--success` and deletions `--error-foreground`
 as in T3, one tone on the card under a reply, the Changes pane and the PR pane
-(2026-10-01).
+(2026-10-01). A slate's tone on a word, a figure or a meter's fill takes
+`--success` (good), `--warning`, `--error-foreground` (bad), `--status-input`
+(info) or `--primary` (accent), never on a background, a border or a whole
+row. One loud thing per slate: at most one piece takes the accent, and it
+reads `--slate-accent`, which a theme whose primary is its text colour sets to
+its hero hue.
 
 ### Spacing and pitch
 

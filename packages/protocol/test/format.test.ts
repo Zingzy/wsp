@@ -157,6 +157,7 @@ import {
   GENERATED_TITLE_MAX,
   openingTitle,
   storedTitleSource,
+  attachedFilesPrompt,
   titlePrompt,
   titleLine,
   toolActivityLine,
@@ -869,6 +870,13 @@ describe("storedTitleSource", () => {
     expect(storedTitleSource("make a server, and its tests", opening)).toBe("seed");
     expect(storedTitleSource("make a server", opening)).toBe("seed");
     expect(storedTitleSource("  make   a server,  ", opening)).toBe("seed");
+    // Codex's title column holds the message whole, every line of it.
+    expect(storedTitleSource(opening, opening)).toBe("seed");
+    expect(storedTitleSource("make a server, and its tests\nwith a", opening)).toBe("seed");
+    // A message with files is handed over as its words and then the block of landed paths, and titled with all of it.
+    expect(storedTitleSource(attachedFilesPrompt(opening, ["/w/.wsp-files/t/r/notes.txt"]), opening)).toBe("seed");
+    expect(storedTitleSource("make a server, and its tests with a health route Attached", opening)).toBe("seed");
+    expect(storedTitleSource("make a server, and its tests with a health route and a page", opening)).toBe("person");
     expect(storedTitleSource("Building the server", opening)).toBe("person");
     expect(storedTitleSource("make a server, and its tests, please", opening)).toBe("person");
     expect(storedTitleSource("make a server", undefined)).toBe("person");

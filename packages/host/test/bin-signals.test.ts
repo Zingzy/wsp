@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DAEMON_VERSION, STATE_SHAPE } from "@wsp/protocol";
-import { STATE_SHAPE_KEY } from "@wsp/runtime";
+import { sqliteStore, STATE_SHAPE_KEY } from "@wsp/runtime";
 import { BIN, DIST, describeWithBin } from "./built-bin.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 
@@ -92,8 +92,7 @@ describeWithBin("the wsp bin stops cleanly on a signal", () => {
     // A workspace is one project's copy, so a state with nothing in it records none and the line says the road.
     expect(output.join(""), output.join("")).toMatch(/^no projects yet; wsp add <folder> records one here/m);
     expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(200);
-    const held = JSON.parse(readFileSync(statePath, "utf8")) as { workspaces?: Record<string, unknown> };
-    expect(Object.values(held.workspaces ?? {})).toEqual([]);
+    expect(await sqliteStore(statePath, { wsp: "test", daemon: DAEMON_VERSION, bin: BIN }).keys("workspaces")).toEqual([]);
 
     child.kill("SIGINT");
     expect(await exited(child), output.join("")).toEqual({ code: 0, signal: null });
