@@ -2,13 +2,15 @@
 name: desktop smoke
 
 # The packaged desktop app, driven through Electron by the smoke, every night on
-# main: the smoke needs a 200 MB bundle and a Mac, so no pull request's gate runs
-# it, and a smoke nothing runs goes stale unseen. The tree is one chip's, this
-# runner's, packaged from the release's config with the daemon built from the
-# same commit. A pull request that changes this file or the smoke runs it too,
-# and so does a run started by hand.
+# main: the smoke needs a 200 MB bundle and a Mac, so no landing's gate runs it
+# for every change, and a smoke nothing runs goes stale unseen. The tree is one
+# chip's, this runner's, packaged from the release's config with the daemon
+# built from the same commit. A land/** push that changes this file or the
+# smoke runs it too, and so does a run started by hand.
 on:
-  pull_request:
+  push:
+    branches:
+      - "land/**"
     paths:
       - ".github/workflows/desktop-smoke.yml"
       - "apps/desktop/test/smoke.electron.test.ts"

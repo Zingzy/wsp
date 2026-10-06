@@ -75,7 +75,9 @@ const bridge = (agents: ReadonlyArray<{ id: string; name: string; found: boolean
 const NO_AGENTS = bridge(AGENTS.map(a => ({ ...a, found: false })));
 /** The catalog's six agents as the Linux VM had them, none installed, in a window too short to hold them all. */
 const SIX_MISSING = bridge(["Claude Code", "Codex", "Gemini CLI", "OpenCode", "Pi", "Hermes Agent"].map((name, i) => ({ id: ["claude", "codex", "gemini", "opencode", "pi", "hermes"][i]!, name, found: false, configured: false })));
-const SHORT = { width: 1280, height: 600 };
+const SHORT = { width: 1280, height: 560 };
+/** A window shorter than the agents screen's heading, one row with the line under it, and the keycap. */
+const TOO_SHORT = { width: 1280, height: 360 };
 /** A read of this computer's agents that throws. */
 const UNREAD = `${bridge()}\nwindow.wsp.agents = async () => { throw new Error("Error invoking remote method 'agents': Error: EACCES: permission denied"); };`;
 /** The catalog's six agents, every one here: the most names one refusal can ever have to carry. */
@@ -401,21 +403,41 @@ describe.skipIf(renderSkipped !== undefined)("the first launch laid out in Chrom
     expect(await page!.evaluate(() => (window as unknown as { __installed?: string[] }).__installed)).toBeUndefined();
   });
 
-  it("in a window too short for the screen no row is cut: the card keeps every row whole and the page scrolls to the last one at the window's edge, not the column", async () => {
-    await agents("light", "reduce", SIX_MISSING, SHORT);
+  it("in a short window the page still fits and the list scrolls inside its card, rows whole, heading and keycap on screen, in both appearances", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await agents(theme, "reduce", SIX_MISSING, SHORT);
+      expect(await page!.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight && document.body.scrollHeight <= window.innerHeight)).toBe(true);
+      const card = await box("#rows");
+      expect(card.w).toBe(560);
+      expect(card.h).toBeLessThan(6 * 48 + 2);
+      expect(await page!.$eval("#rows", el => el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === "auto")).toBe(true);
+      expect(await page!.$$eval("#rows .row", els => els.map(el => el.getBoundingClientRect().height))).toEqual(Array.from({ length: 6 }, () => 48));
+      expect((await box("#agents h1")).y).toBeGreaterThanOrEqual(0);
+      const key = await box("#open");
+      expect(Math.floor(key.y + key.h)).toBeLessThanOrEqual(SHORT.height);
+      // The last row is reached inside the card, and the page does not move.
+      await page!.$eval("#rows .row:last-child", el => el.scrollIntoView({ block: "end" }));
+      expect(await page!.$eval("#rows", el => el.scrollTop)).toBeGreaterThan(0);
+      expect(await page!.evaluate(() => document.body.scrollTop + document.documentElement.scrollTop)).toBe(0);
+      await page!.$eval("#rows", el => el.scrollTo(0, 0));
+      await page!.screenshot({ path: join(SHOTS, `onboarding-agents-short-${theme}.png`) });
+      await page!.close();
+    }
+  });
+
+  it("in a window too short for the heading, one row and the keycap, the card stops at one whole row and the page scrolls at the window's edge, not the column", async () => {
+    await agents("light", "reduce", SIX_MISSING, TOO_SHORT);
     const card = await box("#rows");
-    const last = await box("#rows .row:last-child");
-    expect(card.h).toBe(6 * 48 + 2);
+    expect(card.h).toBe(48 + 2);
     expect(card.w).toBe(560);
-    expect(last.y + last.h).toBeLessThanOrEqual(card.y + card.h);
     // A classic Linux scrollbar on the 560 px column would stand mid-window and narrow the card; the page's stands at the edge.
     expect(await page!.$eval("#agents", el => getComputedStyle(el).overflowY)).toBe("visible");
     await page!.$eval("#open", el => el.scrollIntoView({ block: "end" }));
     expect(await page!.$eval("#agents", el => el.scrollTop)).toBe(0);
     expect(await page!.evaluate(() => document.body.scrollTop + document.documentElement.scrollTop)).toBeGreaterThan(0);
     const key = await box("#open");
-    expect(Math.floor(key.y + key.h)).toBeLessThanOrEqual(SHORT.height);
-    await page!.screenshot({ path: join(SHOTS, "onboarding-agents-short-light.png") });
+    expect(Math.floor(key.y + key.h)).toBeLessThanOrEqual(TOO_SHORT.height);
+    await page!.screenshot({ path: join(SHOTS, "onboarding-agents-too-short-light.png") });
   });
 
   it("a read of the agents that fails says so in the refusal slot, with the shell's words on its title, and offers Check again", async () => {
@@ -542,10 +564,10 @@ describe.skipIf(renderSkipped !== undefined)("the first launch laid out in Chrom
           return { target: ((a.effect as KeyframeEffect).target as Element).getAttribute("class") ?? "", end: (t.delay ?? 0) + Number(t.duration) };
         }),
     );
-    expect(timing.map(t => t.target).sort()).toEqual(["content", "foot", "head"]);
+    expect(timing.map(t => t.target).sort()).toEqual(["card", "foot", "head", "hint"]);
     for (const t of timing) expect(t.end).toBeLessThanOrEqual(500);
     await settle();
-    for (const s of ["#agents .head", "#agents .content", "#agents .foot"]) expect(await opacity(s)).toBe(1);
+    for (const s of ["#agents .head", "#rows", "#agents .hint", "#agents .foot"]) expect(await opacity(s)).toBe(1);
   });
 
   it("with reduced motion the final frame is there at 0 ms", async () => {

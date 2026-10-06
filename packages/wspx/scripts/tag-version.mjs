@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { RELEASE_TAG as TAG } from "./bundles.mjs";
+import { RELEASE_TAG as TAG } from "../../protocol/src/bundles.mjs";
 import { versionedManifests } from "./release.mjs";
 
 /** Whether a ref name is a release tag, the one rule for what the workflow answers to. */

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { RELEASES, REPO } from "../../../packages/wspx/scripts/bundles.mjs";
+import { RELEASES, REPO } from "../../../packages/protocol/src/bundles.mjs";
 
 export { RELEASES, REPO };
 export const INSTALL = "npm i -g @zingzy/wsp";

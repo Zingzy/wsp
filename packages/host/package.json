@@ -21,7 +21,6 @@
     "@wsp/own-file": "workspace:*",
     "@wsp/protocol": "workspace:*",
     "@wsp/runtime": "workspace:*",
-    "@wsp/web": "workspace:*",
     "smol-toml": "1.9.0",
     "ws": "^8.21.3",
     "zod": "3.25.76"

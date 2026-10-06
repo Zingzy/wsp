@@ -8,7 +8,7 @@
 // the list is testable without the dialog.
 import { ArrowDownIcon, ArrowLeftIcon, ArrowUpIcon, BookOpenIcon, BugIcon, ChevronDownIcon, ChevronUpIcon, FileTextIcon, FolderIcon, FolderOpenIcon, FolderPlusIcon, GithubIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { REPO } from "../../../../../packages/wspx/scripts/bundles.mjs";
+import { REPO } from "../../../../../packages/protocol/src/bundles.mjs";
 import { agentName } from "@wsp/catalog";
 import { HERE_PLACE_ID, PLACES_WORDS, type PlaceView, type ProjectView, type SessionSearchHit } from "@wsp/protocol";
 import { THREAD_WORDS } from "../../actions/format.js";
