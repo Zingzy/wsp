@@ -17,6 +17,8 @@ on:
       - ".github/workflows/desktop-smoke.yml"
       - "apps/desktop/test/smoke.electron.test.ts"
       - "apps/desktop/test/packaged.ts"
+      - "apps/desktop/test/launched-app.ts"
+      - "apps/desktop/test/workspace-menu.ts"
       - "apps/desktop/test/flows.electron.test.ts"
       - "apps/desktop/test/flow-agents.ts"
   schedule:

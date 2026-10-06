@@ -4,10 +4,11 @@
 // flow-agents.ts for Claude Code and Codex. Each case asserts what the window shows. Gated on WSP_DESKTOP_FLOWS=1.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cli } from "@wsp/host";
 import { LAUNCH_ENV, WEB_DIR_ENV, type ThreadView } from "@wsp/protocol";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -25,6 +26,7 @@ for (const name of [...LAUNCH_ENV, "ELECTRON_RUN_AS_NODE"]) delete process.env[n
 const WSP_BIN = fileURLToPath(new URL("../../../packages/host/dist/bin.js", import.meta.url));
 const WEB_ROOT = fileURLToPath(new URL("../../web/", import.meta.url));
 const PROJECT = "flows";
+const UP = ["up", "--port", "0", "--no-relay"];
 /** The system folders a stand-in's PATH keeps after its own bin, for git, sh and node's neighbours. */
 const SYSTEM_PATH = ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(":");
 
@@ -48,6 +50,16 @@ function wsp(flow: Pick<Flow, "env" | "dir">, ...args: string[]): string {
   return ran.stdout;
 }
 
+/** One wsp line against the flow's host that refuses where no host serves the flow's state, where a line typed in a
+ * terminal would start one: a teardown that started a host would leave it serving. Its output, or nothing on a
+ * refusal. */
+async function wspIfServing(flow: Pick<Flow, "env" | "dir">, ...args: string[]): Promise<string | undefined> {
+  const out: string[] = [];
+  const nobody = (question: string): Promise<string> => Promise.reject(new Error(`wsp ${args.join(" ")} asked: ${question}`));
+  const code = await cli(args, { log: line => void out.push(line), error: () => {}, ask: nobody, askSecret: nobody }, undefined, flow.env, false, { cwd: flow.dir });
+  return code === 0 ? out.join("\n") : undefined;
+}
+
 /** The thread id a `wsp run` line printed. */
 const threadIdOf = (out: string): string => {
   const id = /\bthread ([0-9a-f-]{36})\b/.exec(out)?.[1];
@@ -57,7 +69,7 @@ const threadIdOf = (out: string): string => {
 
 /** A temp home with a project folder on main, both agents on the PATH, a host serving it in the foreground and the
  * app attached to that host by the lock beside its state. */
-async function openFlow(webDir: string | undefined): Promise<Flow> {
+async function openFlow(webDir: string | undefined, up: readonly string[] = UP): Promise<Flow> {
   const dir = mkdtempSync(join(tmpdir(), "wsp-flows-"));
   const home = join(dir, "home");
   const folder = join(home, "work", PROJECT);
@@ -70,13 +82,16 @@ async function openFlow(webDir: string | undefined): Promise<Flow> {
   const bin = writeFlowAgents(dir);
   const path = `${bin}:${SYSTEM_PATH}`;
   const env: Record<string, string> = { HOME: home, WSP_HOME: home, PATH: path, LANG: "en_US.UTF-8", ...(webDir !== undefined ? { [WEB_DIR_ENV]: webDir } : {}) };
-  const host = spawn(process.execPath, [WSP_BIN, "up", "--port", "0", "--no-relay"], { env, cwd: dir, stdio: ["ignore", "pipe", "pipe"], detached: true });
+  const host = spawn(process.execPath, [WSP_BIN, ...up], { env, cwd: dir, stdio: ["ignore", "pipe", "pipe"], detached: true });
   const out: string[] = [];
   host.stdout!.on("data", (d: Buffer) => out.push(d.toString()));
   host.stderr!.on("data", (d: Buffer) => out.push(d.toString()));
   let app: ElectronApplication | undefined;
   try {
-    await vi.waitFor(() => expect(existsSync(join(home, "host.lock")), out.join("")).toBe(true), { timeout: 30_000, interval: 100 });
+    for (const until = Date.now() + 30_000; !existsSync(join(home, "host.lock")); await new Promise(resolve => setTimeout(resolve, 100))) {
+      if (host.exitCode !== null || host.signalCode !== null) throw new Error(`wsp up exited (${host.exitCode ?? host.signalCode}) before it wrote its lock:\n${out.join("")}`);
+      if (Date.now() > until) throw new Error(`wsp up wrote no lock in 30 s:\n${out.join("")}`);
+    }
     wsp({ env, dir }, "add", folder, "--name", PROJECT);
     // The folder's history holds what a window in use holds, a thread stopped before its agent said anything among
     // them, whose rows carry no start. A host holding a workspace opens the app on it rather than on the welcome.
@@ -93,10 +108,13 @@ async function openFlow(webDir: string | undefined): Promise<Flow> {
     const win = await windowAt(app, APP_URL);
     await win.waitForLoadState("domcontentloaded");
     return { dir, home, folder, env, host, hostSaid: out, app, win, said };
-  } catch (e) {
-    // A launch that failed after the host started leaves no flow for afterAll to close.
-    await closeFlow({ dir, env, host, ...(app !== undefined ? { app } : {}) });
-    throw e;
+  } catch (launch) {
+    // A launch that failed after the host started leaves no flow for afterAll to close. Its own error is the one
+    // reported, with a teardown that failed after it as its cause.
+    await closeFlow({ dir, env, host, ...(app !== undefined ? { app } : {}) }).catch((teardown: unknown) => {
+      if (launch instanceof Error) launch.cause = teardown;
+    });
+    throw launch;
   }
 }
 
@@ -109,9 +127,9 @@ function namingFlow(dir: string): string[] {
     .filter(line => line.includes(dir) || line.includes(real));
 }
 
-/** The threads whose turn still runs on the flow's host, as wsp threads --json lists them. */
-function runningThreads(flow: Pick<Flow, "env" | "dir">): string[] {
-  const listed = spawnSync(process.execPath, [WSP_BIN, "threads", "--json"], { encoding: "utf8", env: flow.env, cwd: flow.dir, timeout: 30_000 }).stdout;
+/** The threads whose turn still runs on the flow's host, as wsp threads --json lists them; none where no host serves. */
+async function runningThreads(flow: Pick<Flow, "env" | "dir">): Promise<string[]> {
+  const listed = (await wspIfServing(flow, "threads", "--json")) ?? "";
   const rows = listed.split("\n").filter(line => line.trim() !== "").flatMap(line => {
     const value = JSON.parse(line) as ThreadView | { threads?: ThreadView[] };
     return "threads" in value ? (value.threads ?? []) : [value as ThreadView];
@@ -129,7 +147,7 @@ async function closeFlow(flow: Pick<Flow, "dir" | "env" | "host"> & { app?: Elec
   }
   // A turn still running when its host goes keeps the input its host feeds it open for the next host, so each one is
   // stopped first, a case that failed on an open prompt among them.
-  for (const thread of runningThreads(flow)) spawnSync(process.execPath, [WSP_BIN, "stop", thread], { env: flow.env, cwd: flow.dir, timeout: 30_000 });
+  for (const thread of await runningThreads(flow)) await wspIfServing(flow, "stop", thread);
   // wsp down asks this computer's service manager first, which a runner may not have; the host is this file's child.
   const host = flow.host.pid!;
   if (alive(host)) process.kill(host, "SIGTERM");
@@ -355,4 +373,14 @@ suite("the everyday flows in the packaged app, on $page", { timeout: 90_000 }, (
     await row.click();
     await expect.poll(() => paneText(win), { timeout: 20_000 }).toContain(`${FLOW_WORDS.reply} started from a terminal`);
   });
+});
+
+(FLOWS ? describe : describe.skip)("a flow whose host dies before it writes its lock", () => {
+  it("fails with the host's own words and leaves nothing running", async () => {
+    const flowDirs = (): string[] => readdirSync(tmpdir()).filter(name => name.startsWith("wsp-flows-") && !name.startsWith("wsp-flows-devpage-"));
+    const before = new Set(flowDirs());
+    await expect(openFlow(undefined, ["up", "--port", "not-a-port"])).rejects.toThrow(/^wsp up exited \(\d+\) before it wrote its lock/);
+    // The teardown removes the flow's folder only once no process names it.
+    expect(flowDirs().filter(name => !before.has(name))).toEqual([]);
+  }, 90_000);
 });

@@ -124,4 +124,13 @@ describe("the flows run", () => {
     expect(scripts["flows"]).toContain("apps/desktop/test/flows.electron.test.ts");
     expect(read(".github", "workflows", "desktop-smoke.yml")).toContain("pnpm --filter @wsp/desktop flows");
   });
+
+  it("runs the Mac smoke on a land/** push that changes the smoke, the flows or any helper of theirs beside them", () => {
+    const smoke = read(".github", "workflows", "desktop-smoke.yml");
+    const paths = [...(/^ {4}paths:\n((?: {6}- .*\n)+)/m.exec(smoke)?.[1] ?? "").matchAll(/- "([^"]+)"/g)].map(m => m[1]!);
+    const helpers = (file: string): string[] => [...read("apps", "desktop", "test", file).matchAll(/from "\.\/([\w-]+)\.js"/g)].map(m => `${m[1]!}.ts`);
+    const seen = new Set<string>();
+    for (let next = ["smoke.electron.test.ts", "flows.electron.test.ts"]; next.length > 0; next = next.flatMap(helpers).filter(file => !seen.has(file))) for (const file of next) seen.add(file);
+    for (const file of seen) expect(touches(paths, `apps/desktop/test/${file}`), file).toBe(true);
+  });
 });
