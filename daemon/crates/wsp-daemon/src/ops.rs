@@ -866,8 +866,12 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                     folder if folder.is_empty() => ".".to_owned(),
                     folder => folder.into_owned(),
                 };
-                let (_, under, _) = road(ctx, machine_id.as_deref(), &parent, Reads).await?;
-                fs::write_file(under, name.to_owned(), path.clone(), contents, numbers::FS_WRITE_CAP_BYTES).await
+                let (runner, under, named) = road(ctx, machine_id.as_deref(), &parent, Reads).await?;
+                // Opened from the root the way of running opens it on this side, every folder below it by descriptor.
+                let open = git::Runs::on_this_side(&runner, &named)
+                    .ok_or_else(|| OpError::plain(format!("{path} cannot be opened on this computer")))?
+                    .open;
+                fs::write_file(open, under, name.to_owned(), path.clone(), contents, numbers::FS_WRITE_CAP_BYTES).await
             };
             answer(id, wrote.await)
         }

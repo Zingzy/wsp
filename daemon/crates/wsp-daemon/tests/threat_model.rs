@@ -36,7 +36,10 @@ const WRITES: [&str; 13] = [
     "lchown",
 ];
 
-/// What an open writes with, read off the lines of one `OpenOptions` chain.
+/// The roads from a name read at run time to a `&'static str`, which a git line's own words are.
+const STATIC_STRINGS: [&str; 5] = [".leak()", "Box::leak", "OnceLock<String>", "LazyLock<String>", "OnceCell<String>"];
+
+/// What an open writes with, read off the lines of one `OpenOptions` or `File::options()` chain.
 const OPEN_WRITES: [&str; 5] = [".write(true)", ".append(true)", ".create(true)", ".create_new(true)", ".truncate(true)"];
 
 const OWN: &str =
@@ -48,7 +51,7 @@ const UNLINK: &str = "unlinks a name in a folder of the runtime's own, which tak
 const TREE: &str =
     "takes away a workspace's tree once its processes are killed and its mounts are off; remove_dir_all follows no link beneath the path";
 const COPY_MADE: &str = "a copy being made, in a folder of the runtime's own that no workspace mounts until it is done";
-const BENEATH: &str = "opens the leaf with O_NOFOLLOW in a folder this daemon opened beneath a root, and writes only a regular file";
+const PTY: &str = "the pid file in the runtime's own folder, and in the wsp home the folder itself, which the runtime made and no workspace can swap, and an unlink of the size file there; the size file is written through write_file_in";
 const BROKER: &str = "runs inside the workspace as its own pty broker, with the workspace's rights and in its view";
 const ASIDE: &str = "the copy road's set-aside folders beside a project on the computer the person sits at";
 const LEAVE: &str = "the leave's last fallback, after a walk by descriptor found every folder on the way to be a folder and no link";
@@ -57,7 +60,6 @@ const LEAVE: &str = "the leave's last fallback, after a walk by descriptor found
 const EXEMPT: &[(&str, &str, &str)] = &[
     ("wsp-daemon-bin/src/main.rs", "write_port_file", OWN),
     ("wsp-daemon-bin/src/score.rs", "set", KERNEL),
-    ("wsp-daemon/src/fs.rs", "write_file", BENEATH),
     ("wsp-daemon/src/lib.rs", "run", ASIDE),
     ("wsp-daemon/src/manifest.rs", "save", OWN),
     ("wsp-daemon/src/place.rs", "install_daemon", INSTALL),
@@ -94,6 +96,8 @@ const EXEMPT: &[(&str, &str, &str)] = &[
     ("wsp-runtime/src/copy.rs", "remove_tree", TREE),
     ("wsp-runtime/src/copy.rs", "same_as", COPY_MADE),
     ("wsp-runtime/src/copy.rs", "walk", COPY_MADE),
+    ("wsp-runtime/src/copy_plain.rs", "write_file", COPY_MADE),
+    ("wsp-runtime/src/copy_reflink.rs", "clone_file", COPY_MADE),
     ("wsp-runtime/src/copy_reflink.rs", "clones_into", OWN),
     ("wsp-runtime/src/engine.rs", "bind", UNLINK),
     ("wsp-runtime/src/net.rs", "rules_down", KERNEL),
@@ -118,7 +122,7 @@ const EXEMPT: &[(&str, &str, &str)] = &[
     ("wsp-runtime/src/runtime.rs", "drop", UNLINK),
     ("wsp-runtime/src/runtime.rs", "helper_create", OWN),
     ("wsp-runtime/src/runtime.rs", "kill", OWN),
-    ("wsp-runtime/src/runtime.rs", "pty", OWN),
+    ("wsp-runtime/src/runtime.rs", "pty", PTY),
     ("wsp-runtime/src/runtime.rs", "remove_stale_notify_sockets", OWN),
     ("wsp-runtime/src/runtime.rs", "spawn", OWN),
 ];
@@ -172,7 +176,7 @@ fn source_lines() -> Vec<Line> {
             let mut i = 0;
             while i < all.len() {
                 let trimmed = all[i].trim();
-                if trimmed.starts_with("#[cfg(") && trimmed.contains("test") && !trimmed.contains("not(test") {
+                if test_gate(trimmed) {
                     i = past_item(&all, i + 1);
                     continue;
                 }
@@ -187,6 +191,13 @@ fn source_lines() -> Vec<Line> {
         }
     }
     lines
+}
+
+/// A `cfg` that keeps an item to test builds: `test` as a word of its own and not under `not(`, so a feature named
+/// `testing` is read as the source it is.
+fn test_gate(line: &str) -> bool {
+    let words = || line.split(|c: char| !c.is_alphanumeric() && c != '_');
+    line.starts_with("#[cfg(") && words().any(|word| word == "test") && !line.contains("not(test")
 }
 
 /// The index past the item that starts at `from`: to its matching brace, or past its semicolon.
@@ -210,20 +221,18 @@ fn writes_by_path(text: &str) -> bool {
             let after = text[at + call.len()..].chars().next();
             !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
         })
-    }) || text.contains("File::create(")
-        || text.contains("DirBuilder::new(")
+    }) || ["File::create(", "File::create_new(", "DirBuilder::new("].iter().any(|call| text.contains(call))
 }
 
 #[test]
-fn git_runs_only_through_the_runner_that_keeps_a_chosen_name_behind_a_separator() {
+fn git_runs_only_through_its_runner() {
     let mut found = Vec::new();
     let mut runners_seen = 0;
     for line in source_lines() {
         let names_git = line.text.contains("\"git\"");
         let runner = GIT_RUNNERS.iter().any(|(file, function)| line.file == *file && line.function == *function);
         runners_seen += usize::from(names_git && runner);
-        // `leak` is the one road from a name read at run time to the `&'static str` a line's own words are.
-        if (names_git && !runner) || line.text.contains(".leak()") || line.text.contains("Box::leak") {
+        if (names_git && !runner) || STATIC_STRINGS.iter().any(|road| line.text.contains(road)) {
             found.push(format!("{}:{} in {}: {}", line.file, line.at, line.function, line.text.trim()));
         }
     }
@@ -237,7 +246,7 @@ fn git_runs_only_through_the_runner_that_keeps_a_chosen_name_behind_a_separator(
 }
 
 #[test]
-fn a_root_path_writes_by_path_only_in_a_function_named_with_its_reason() {
+fn a_root_write_names_its_reason() {
     let lines: Vec<Line> = source_lines().into_iter().filter(|l| !l.file.starts_with(PERSONS_OWN)).collect();
     let mut found = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
@@ -250,7 +259,8 @@ fn a_root_path_writes_by_path_only_in_a_function_named_with_its_reason() {
             continue;
         }
         let chain: String = lines[i..(i + 4).min(lines.len())].iter().map(|l| l.text.as_str()).collect();
-        let opens_to_write = line.text.contains("OpenOptions::new()") && OPEN_WRITES.iter().any(|w| chain.contains(w));
+        let opens_to_write = (line.text.contains("OpenOptions::new()") || line.text.contains("File::options()"))
+            && OPEN_WRITES.iter().any(|w| chain.contains(w));
         if !writes_by_path(&line.text) && !opens_to_write {
             continue;
         }

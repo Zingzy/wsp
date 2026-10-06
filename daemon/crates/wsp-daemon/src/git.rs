@@ -382,11 +382,6 @@ fn merged_ref(message: &str) -> String {
     message.split_whitespace().last().map(short_ref).unwrap_or_default()
 }
 
-/// Whether a token is a git object id by shape: forty hex digits for sha-1, sixty-four for sha-256.
-fn is_oid(s: &str) -> bool {
-    (s.len() == 40 || s.len() == 64) && s.bytes().all(|b| b.is_ascii_hexdigit())
-}
-
 /// What HEAD stood on as a reflog entry moved it: a branch, or a detached HEAD. A turn whose end snapshot an older
 /// daemon took carries no record of it, and its lines name neither.
 #[derive(Clone)]
@@ -399,7 +394,7 @@ enum Head {
 impl Head {
     /// HEAD as a reflog subject names the place it moved from: a branch by its name, a detached HEAD by its sha.
     fn named(from: &str) -> Head {
-        if is_oid(from) {
+        if GitOid::parse(from).is_some() {
             Head::Detached
         } else {
             Head::Branch(short_ref(from))
@@ -459,7 +454,7 @@ impl Walk {
                         return Op::Foreign(Some(format!("Pulled{}", self.on.after(" into "))));
                     }
                     let onto = rest.strip_prefix("checkout ").unwrap_or(rest).trim();
-                    let named = if is_oid(onto) { onto[..8].to_owned() } else { short_ref(onto) };
+                    let named = if GitOid::parse(onto).is_some() { onto[..8].to_owned() } else { short_ref(onto) };
                     Op::Foreign(Some(format!("Rebased{} onto {named}", self.on.after(" "))))
                 }
                 _ => Op::Foreign(None),
@@ -541,7 +536,7 @@ async fn no_hand_merge_tree<R: Runs>(runner: &R, cwd: &Path, a: &str, b: &str) -
     // no object id there, so the id's own shape is what says it wrote one.
     let res = run_git(runner, cwd, &GitLine::new(&["merge-tree", "--write-tree"]).revs(&[a, b]), None, None).await?;
     let tree = stdout_text(&res).lines().next().unwrap_or("").trim().to_owned();
-    Ok(is_oid(&tree).then_some(tree))
+    Ok(GitOid::parse(&tree).is_some().then_some(tree))
 }
 
 /// The ops a turn made, read from HEAD's reflog over the turn's own window: the commits it wrote, the merges it
@@ -1118,9 +1113,9 @@ enum Untracked {
     NotRegular,
 }
 
-/// Whether a ref is a commit named by its full sha and nothing else.
+/// Whether a ref is a commit named by its full id and nothing else, not a byte around it.
 pub(crate) fn is_full_sha(value: &str) -> bool {
-    value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit())
+    GitOid::parse(value).is_some_and(|oid| oid.as_str() == value)
 }
 
 /// The checkout as it stands as one commit on top of HEAD, taken the way a checkpoint takes its tree: an index of
