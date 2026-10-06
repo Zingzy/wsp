@@ -40,10 +40,10 @@ export interface HarnessAdapterContext {
    * harness at its store there. On the person's own computer it is their shell's, so a store variable is set only
    * where their shell sets it, and their login is the turn's login. */
   env: Readonly<Record<string, string>>;
-  /** What this agent keys its sessions and its auto memory to on this workspace, where the kind has an answer: on
-   * a computer whose workspaces are copies of a project folder, the original folder's own key, so every copy and
-   * the person's own agent in that folder share one memory. Absent leaves the agent keying off the folder each
-   * turn runs in, which is every machine wsp makes. */
+  /** What this agent keys its sessions and its auto memory to on this workspace, where the kind has an answer: the
+   * project's own key on a machine, a worktree's own key in a worktree wsp made here, and for any other folder here
+   * the key the person's own agent gives it, so the two share its memory. Absent leaves the agent keying off the
+   * folder each turn runs in. */
   projectKey?: string;
   /** wsp's half of a turn this workspace's agent refuses for want of a sign-in, from the one rule every door reads
    * for how it is signed in: it differs between the person's own computer and a machine, which the adapter cannot

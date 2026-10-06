@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import { CARRIED_DIR_NAMES } from "@wsp/catalog";
 import {
+  claudeProjectKey,
   cwdOutsideLine,
   DAEMON_VERSION,
   noBranchesLine,
@@ -30,6 +31,7 @@ import {
   type DaemonResponse,
   type TurnResult,
 } from "@wsp/protocol";
+import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { createRuntime, NO_COPIER_HERE, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import type { DaemonChannel } from "../src/daemon-channel.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -116,7 +118,7 @@ function fakeDaemon() {
   return { frames, answers, open };
 }
 
-function here(wire: Partial<LocalWiring> = {}, served = true) {
+function here(wire: Partial<LocalWiring> = {}, served = true, adapters: Record<string, HarnessAdapterFactory> = {}) {
   const root = scratch();
   const state = join(root, "state");
   mkdirSync(state);
@@ -138,12 +140,12 @@ function here(wire: Partial<LocalWiring> = {}, served = true) {
   rt = createRuntime({
     backend: stubBackend(),
     store: memoryStore(),
-    adapters: { claude: harness(starts), codex: harness(starts) },
+    adapters: { claude: harness(starts), codex: harness(starts), ...adapters },
     local,
     ...(served ? { statePath: join(state, "state.json") } : {}),
     daemonChannel: daemon.open,
   });
-  return { rt, copier, starts, daemon, home: state, worktrees: join(state, "worktrees"), roots: join(root, "roots") };
+  return { rt, copier, starts, daemon, home: state, worktrees: join(state, "worktrees"), roots: join(root, "roots"), claudeHome: join(root, ".claude") };
 }
 
 describe("a thread on a project on this computer", () => {
@@ -308,6 +310,61 @@ describe("a subfolder of a repo added as a project", () => {
     const home = await rt.workspaces.folderFor({ project: project.id });
     await (await rt.sessions.start(home.workspace.id, { prompt: "hi" })).finished;
     expect(starts[0]!.cwd).toBe(join(top, "apps", "web"));
+  });
+});
+
+describe("the folder Claude Code keys a thread's memory to", () => {
+  /** The Claude adapter as the runtime wires it, over an exec that records each turn's launch and answers it at once.
+   * The roads the runtime hands the machine's own exec go, since they would run the real binary. */
+  const recordingClaude = (launches: { command: string; env: Record<string, string> }[]): HarnessAdapterFactory => ctx => {
+    const { probeCatalog: _probe, sessionTitle: _title, renameSession: _rename, titleFor: _make, draftFor: _draft, ...adapter } = HARNESS_ADAPTERS.claude({
+      ...ctx,
+      execStream: (command, { env }) => {
+        if (command.includes("--session-id")) launches.push({ command, env });
+        const session = /--session-id (\S+)/.exec(command)?.[1] ?? "";
+        return {
+          run: "/tmp/run",
+          lines: (async function* () {
+            yield JSON.stringify({ type: "system", subtype: "init", session_id: session, tools: [] });
+            yield JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "ok", session_id: session, usage: { input_tokens: 1, output_tokens: 1 } });
+          })(),
+          teardown: () => {},
+          kill: () => {},
+          write: async () => "written" as const,
+          closeInput: () => {},
+          exited: Promise.resolve(0),
+        };
+      },
+    });
+    return adapter;
+  };
+
+  it("is a worktree's own for a thread in one wsp made, and the person's own for any other folder of the project", async () => {
+    const launches: { command: string; env: Record<string, string> }[] = [];
+    const { rt, worktrees, claudeHome } = here({}, true, { claude: recordingClaude(launches) });
+    const top = repo();
+    mkdirSync(join(top, "apps", "web"), { recursive: true });
+    const folder = await rt.projects.add({ source: top });
+    const sub = await rt.projects.add({ source: join(top, "apps", "web") });
+    /** The key a launch names, read off its line and checked against its environment. */
+    const launched = async (o: { project: string; branch?: string; cwd?: string }): Promise<string> => {
+      const at = await rt.workspaces.folderFor(o);
+      await (await rt.sessions.start(at.workspace.id, { prompt: "hi", harness: "claude", ...(o.cwd !== undefined ? { cwd: o.cwd } : {}) })).finished;
+      const { command, env } = launches.at(-1)!;
+      const key = env["CLAUDE_CODE_PROJECT_DIR_NAME"]!;
+      expect(command).toContain(`--settings '{"autoMemoryDirectory":"${claudeHome}/projects/${key}/memory"}'`);
+      return key;
+    };
+    // A builder's worktree: its own key, never the one the person's sessions in the project folder keep.
+    expect(await launched({ project: folder.id, branch: "feat/builder" })).toBe(claudeProjectKey(join(worktrees, folder.id, "feat-builder")));
+    expect(await launched({ project: sub.id, branch: "feat/web" })).toBe(claudeProjectKey(join(worktrees, sub.id, "feat-web")));
+    // The project folder, a subfolder project's own folder and a worktree the person made: the key Claude Code gives
+    // those folders in the person's own terminal, its repo's main checkout.
+    expect(await launched({ project: folder.id })).toBe(claudeProjectKey(top));
+    expect(await launched({ project: sub.id })).toBe(claudeProjectKey(top));
+    const theirs = join(scratch(), "by-hand");
+    git(top, "worktree", "add", "-q", "-b", "by-hand", theirs);
+    expect(await launched({ project: folder.id, cwd: theirs })).toBe(claudeProjectKey(top));
   });
 });
 

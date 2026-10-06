@@ -164,6 +164,47 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(exec.calls[0]?.command).toContain("--permission-mode 'acceptEdits'");
   });
 
+  it("keeps its auto memory in the folder it was keyed to, named on the launch line where no CLAUDE_CONFIG_DIR is set", async () => {
+    // 2.1.280 reads CLAUDE_CODE_PROJECT_DIR_NAME only beside CLAUDE_CONFIG_DIR, which a Mac leaves unset, and files a
+    // worktree's memory under its repo's main checkout; the autoMemoryDirectory setting is read either way.
+    const exec = scriptedExec([...fixtureLines(), ...fixtureLines()]);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/Users/z/.claude", baseEnv: { PATH: "/usr/bin", HOME: "/Users/z" }, projectDirName: "-Users-z-wt" });
+    await adapter.start({ prompt: "go", onEvent: () => {} }).finished;
+    expect(exec.calls[0]?.command).toContain(`--settings '{"autoMemoryDirectory":"/Users/z/.claude/projects/-Users-z-wt/memory"}'`);
+    expect(exec.calls[0]?.env["CLAUDE_CODE_PROJECT_DIR_NAME"]).toBe("-Users-z-wt");
+    expect(exec.calls[0]?.env["CLAUDE_CONFIG_DIR"]).toBeUndefined();
+    // A fast turn carries both settings in the one flag.
+    await adapter.start({ prompt: "go", fast: true, onEvent: () => {} }).finished;
+    expect(exec.calls[1]?.command.match(/--settings/g)).toHaveLength(1);
+    expect(exec.calls[1]?.command).toContain(`--settings '{"fastMode":true,"autoMemoryDirectory":"/Users/z/.claude/projects/-Users-z-wt/memory"}'`);
+    // Told no key, it names no folder and the CLI keys off the folder the turn runs in.
+    const bare = scriptedExec(fixtureLines());
+    await createClaudeAdapter({ exec: bare.factory, configDir: "/Users/z/.claude" }).start({ prompt: "go", onEvent: () => {} }).finished;
+    expect(bare.calls[0]?.command).not.toContain("autoMemoryDirectory");
+  });
+
+  it("folds the person's own --settings into its one flag, their keys winning, and never drops a settings file of theirs", async () => {
+    // 2.1.280 keeps the last --settings whole, so a second flag of wsp's would drop the person's.
+    const memory = "/Users/z/.claude/projects/-Users-z-wt/memory";
+    const launched = async (args: string[]): Promise<string> => {
+      const exec = scriptedExec(fixtureLines());
+      const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/Users/z/.claude", projectDirName: "-Users-z-wt", launch: { args } });
+      await adapter.start({ prompt: "go", fast: true, onEvent: () => {} }).finished;
+      return exec.calls[0]!.command;
+    };
+    const inline = await launched(["--debug", "--settings", JSON.stringify({ fastMode: false, theme: "dark" })]);
+    expect(inline.match(/--settings/g)).toHaveLength(1);
+    expect(inline).toContain(`--settings '{"fastMode":false,"autoMemoryDirectory":"${memory}","theme":"dark"}'`);
+    expect(inline).toContain("-p '--debug' --input-format");
+    const joined = await launched([`--settings=${JSON.stringify({ autoMemoryDirectory: "/mine" })}`]);
+    expect(joined.match(/--settings/g)).toHaveLength(1);
+    expect(joined).toContain(`--settings '{"fastMode":true,"autoMemoryDirectory":"/mine"}'`);
+    // A file is the CLI's to read: it stays as the person wrote it, and wsp adds no flag that would replace it.
+    const file = await launched(["--settings", "/Users/z/mine.json"]);
+    expect(file.match(/--settings/g)).toHaveLength(1);
+    expect(file).toContain("-p '--settings' '/Users/z/mine.json' --input-format");
+  });
+
   it("a launched session carries the run its stream reported, so a later host can re-open it", async () => {
     const exec = scriptedExec(fixtureLines());
     const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });

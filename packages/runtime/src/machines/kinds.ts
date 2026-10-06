@@ -275,10 +275,17 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
             // browses: a host on another state file has its own, and neither rewrites the other's.
             roots: (entry, dests) => writeRoots(entry, dests, local.rootsPath),
             landProject: async () => {},
-            // The original folder's key, which is the one the person's own terminal already writes under: every
-            // copy of that folder and their own agent in it share one memory directory and one sessions list,
-            // with nothing seeded and nothing moved.
-            memoryKey: (entry, agentId) => projectMemoryKey(agentId, ctx.projectHeld(entry.record.project)),
+            // A worktree wsp made keys off its own top, so a builder there never loads the notes the person and the
+            // thread leading it keep. Every other folder of the project, the project folder with no branch, a
+            // subfolder project's own and a worktree the person made, takes the key Claude Code gives it in the
+            // person's own terminal, which is its repo's main checkout, so the thread shares their memory.
+            memoryKey: (entry, agentId) => {
+              const project = ctx.projectHeld(entry.record.project);
+              const tree = entry.record.worktree;
+              if (tree?.made === true && tree.gone !== true) return projectStateKey(agentId, tree.path);
+              const top = project.git?.top;
+              return top !== undefined && top !== project.path ? projectStateKey(agentId, top) : projectMemoryKey(agentId, project);
+            },
           },
   };
   const moduleOf = (kind: WorkspaceKind): KindModule => {
