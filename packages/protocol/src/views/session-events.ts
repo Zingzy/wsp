@@ -204,6 +204,30 @@ export const SessionHeldEvent = z.object({
 });
 export type SessionHeldEvent = z.infer<typeof SessionHeldEvent>;
 
+/** Pushed once when a start has waited AGENT_STARTING_MS on its agent with no session from it yet, so a client says
+ * the agent is starting rather than showing a bare wait; not a session event, never in history. */
+export const SessionStartingEvent = z.object({
+  type: z.literal("session.starting"),
+  workspaceId: z.string(),
+  threadId: z.string(),
+  harness: z.string(),
+  /** The agent's command there is a script that installs it on its first run, and that run is this one. */
+  installs: z.literal(true).optional(),
+  /** The id the client minted for the sessions.start that waits. */
+  requestId: z.string().optional(),
+});
+export type SessionStartingEvent = z.infer<typeof SessionStartingEvent>;
+
+/** How long a start waits on its agent before it says the agent is starting: a normal start measured 1.5 to 7 s, the
+ * first run of a wrapper that installs the agent 97 s (Omarchy, 2026-10-05). */
+export const AGENT_STARTING_MS = 4_000;
+
+/** The word an agent's row takes in place of its version where its command installs it on its first run. */
+export const FIRST_RUN_WORD = "installs on first run";
+
+/** What a thread says while that start waits: short enough to stand whole on a phone's one line. */
+export const agentStartingLine = (agent: string, installs: boolean): string => (installs ? `${agent} ${FIRST_RUN_WORD}` : `Starting ${agent}`);
+
 /** The word a start's notify carries to mean the caller: the thread the request came out of when it came out of one,
  * and otherwise the person who ran it. */
 export const NOTIFY_ME = "me";

@@ -8,7 +8,7 @@ import { UsageAlertEvent } from "../plan-alerts.js";
 import { SessionSlateEvent, SlateRunEvent, SlateValuesEvent } from "../slate/wire.js";
 import { ReleaseChangedEvent } from "../release.js";
 import { sequenced } from "./helpers.js";
-import { SessionBehindEvent, SessionChangesEvent, SessionCheckpointEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent, SessionHeldEvent, SessionMovedEvent, SessionNotifyEvent, SessionPermissionClosedEvent, SessionPermissionEvent, SessionPlanEvent, SessionQueuedEvent, SessionRunEvent, SessionStartEvent, SessionSteerEvent, SessionSubagentEvent } from "../views/session-events.js";
+import { SessionBehindEvent, SessionChangesEvent, SessionCheckpointEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent, SessionHeldEvent, SessionMovedEvent, SessionNotifyEvent, SessionPermissionClosedEvent, SessionPermissionEvent, SessionPlanEvent, SessionQueuedEvent, SessionRunEvent, SessionStartEvent, SessionStartingEvent, SessionSteerEvent, SessionSubagentEvent } from "../views/session-events.js";
 import { InboxFileEvent, PortCloseEvent, PortOpenEvent, WorkspaceAgentsEvent, WorkspaceCostEvent, WorkspaceCreatedEvent, WorkspaceCreatingEvent, WorkspaceDeletedEvent, WorkspaceGoneEvent, WorkspaceLookEvent, WorkspaceNappedEvent, WorkspaceRenamedEvent, WorkspaceReviewEvent, WorkspaceStatusEvent, WorkspaceUpgradedEvent, WorkspaceViewedEvent, WorkspaceWokenEvent } from "../views/workspace-events.js";
 import { ProjectExportEvent, ProjectImportEvent } from "../views/project-bundle.js";
 import { PreferencesChangedEvent, ThreadHeadEvent, ThreadMarkedEvent, ThreadRewoundEvent } from "../views/preferences.js";
@@ -51,6 +51,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   UsageAccountEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   SessionHeldEvent.extend(sequenced),
+  SessionStartingEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
   ThreadHeadEvent.extend(sequenced),
   ThreadRewoundEvent.extend(sequenced),

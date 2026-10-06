@@ -300,7 +300,7 @@
         slot.className = "slot";
         const state = document.createElement("span");
         state.className = "state";
-        state.textContent = agent.found ? "installed" : "not installed";
+        state.textContent = agent.installs ? "installs on first run" : agent.found ? "installed" : "not installed";
         slot.append(state);
         row.append(check, markOf(agent), name, slot);
         return row;

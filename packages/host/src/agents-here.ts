@@ -3,7 +3,7 @@
 // computer by the recipe scan's own detector, so the app and wsp recipe scan
 // agree on what is here; whether its MCP config already names wsp; and the
 // version its command answers with.
-import { CATALOG_AGENTS, MCP_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, installsOnFirstRun } from "@wsp/catalog";
 import { agentRowId, detectAgents, expand, firstLine, nodeHost, type Host } from "@wsp/collect";
 import { MCP_SERVER_NAME } from "./mcp-install.js";
 
@@ -16,6 +16,8 @@ export interface AgentHere {
   configured: boolean;
   /** The number its command answers `--version` with, when the command is on PATH and answers with one. */
   version?: string;
+  /** Its command is a script that installs it on its first run, still to come, so nothing here ran it. */
+  installs?: true;
 }
 
 /** Whether any of the agent's MCP config files names the server; a file that is not its format names nothing. */
@@ -52,10 +54,11 @@ async function versionOf(host: Host, bin: string): Promise<string | undefined> {
 /** `versions` off skips the `--version` runs, for a reader that only needs to know what is here. */
 export async function agentsHere(host: Host = nodeHost(), opts: { versions?: boolean } = {}): Promise<AgentHere[]> {
   const found = new Set((await detectAgents(host)).map(r => r.id));
+  const installs = await installsOnFirstRun(script => host.exec.run("sh", ["-c", script]), CATALOG_AGENTS.map(a => a.bin));
   return Promise.all(
-    CATALOG_AGENTS.map(async a => {
-      const version = opts.versions === false ? undefined : await versionOf(host, a.bin);
-      return { id: a.id, name: a.name, found: found.has(agentRowId(a.id)), configured: await configured(host, a.id), ...(version !== undefined ? { version } : {}) };
+    CATALOG_AGENTS.map(async (a, i) => {
+      const version = opts.versions === false || installs[i] ? undefined : await versionOf(host, a.bin);
+      return { id: a.id, name: a.name, found: found.has(agentRowId(a.id)), configured: await configured(host, a.id), ...(version !== undefined ? { version } : {}), ...(installs[i] ? { installs: true as const } : {}) };
     }),
   );
 }

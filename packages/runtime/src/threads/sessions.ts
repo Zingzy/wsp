@@ -15,7 +15,7 @@ import {
   REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine,
   attachmentRecord, attachmentKey, filesBlocked, isImage, sendFilesDir, attachedFilesPrompt, threadMessages,
   threadSeed, taskStopRefusedLine, taskStopUnsupportedLine, agentOffLine, HEAD_BYTES, HISTORY_PAGE_BYTES,
-  HISTORY_PAGE_EVENTS,
+  HISTORY_PAGE_EVENTS, AGENT_STARTING_MS,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { headShape } from "../transcript-reader.js";
@@ -224,6 +224,25 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       };
       hold();
       let outcome: SessionStartOutcome = "started";
+      // A start still waiting on its agent past AGENT_STARTING_MS says so once, with whether the agent's command is a
+      // wrapper whose first run installs it; nothing goes out once the turn's session started or the start left.
+      let quiet = false;
+      const sayStarting = async (): Promise<void> => {
+        if (quiet || outcome === "queued") return hush();
+        const installs = await ctx.firstRunHere(entry, harness);
+        if (quiet) return;
+        hush();
+        bus.emit({ type: "session.starting", workspaceId, threadId, harness, ...(installs ? { installs: true as const } : {}), ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
+      };
+      const slow = setTimeout(() => void sayStarting(), AGENT_STARTING_MS);
+      const offStarted = bus.on("*", e => {
+        if ((e.type === "session.start" || e.type === "session.end") && e.turnId === turnId) hush();
+      });
+      function hush(): void {
+        quiet = true;
+        clearTimeout(slow);
+        offStarted();
+      }
       let images: TurnImage[] = [];
       let imagesDir: string | undefined;
       let filePaths: string[] = [];
@@ -430,6 +449,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         throw e;
       } finally {
         if (!handedOver) {
+          hush();
           // The turn never reached a machine, so nothing out there is holding this token: it goes now rather than
           // standing until a host restart.
           dropScope();

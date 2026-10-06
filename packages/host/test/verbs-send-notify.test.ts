@@ -2,13 +2,17 @@
 // The wsp verbs against a host over the fake runtime: each one a client of
 // the protocol on localhost, authenticated with the token the host wrote,
 // reading the same session index the sidebar reads.
-import { childStartedLine, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, notifyLine, threadStateWord, ThreadView, TURN_TOKEN_ENV, NOT_DELIVERED_LINE } from "@wsp/protocol";
+import { childStartedLine, EXIT_CODES, HERE_PLACE_ID, HOST_STOPPING_LINE, NO_SUCH_TURN, notifyLine, threadStateWord, ThreadView, TURN_TOKEN_ENV, NOT_DELIVERED_LINE } from "@wsp/protocol";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { HarnessAdapterFactory } from "@wsp/runtime";
 import { describe, expect, it, vi } from "vitest";
 import { cli } from "../src/cli.js";
 import { dialHost, threadRows } from "../src/verbs.js";
 import { THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { withDaemonRoads } from "./stub-backend.js";
-import { UNREACHED_LINE, bornDeadAgent, captured, heldAgent, scriptedAgent } from "./verbs-fixture.js";
+import { UNREACHED_LINE, bornDeadAgent, captured, heldAgent, projectOn, scriptedAgent } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { CLOUD_ON } from "../src/cloud.js";
 import { verbsHost } from "./verbs-host.js";
@@ -202,6 +206,54 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(await sent).toBe(0);
     await first;
   });
+
+  it("run whose agent is slow to start says the agent is starting on stderr while it waits, and the reply alone on stdout", async () => {
+    const held = heldAgent(false);
+    let answer: () => void = () => {};
+    const slowly: HarnessAdapterFactory = ctx => ({ ...held.adapter(ctx), probeCatalog: () => new Promise(resolve => (answer = () => resolve(null))) });
+    await h.restartHost({ claude: slowly });
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-repo-")));
+    try {
+      await projectOn(h.rt, HERE_PLACE_ID, folder, { name: "spoo" });
+      const io = captured();
+      const ran = cli(["run", "spoo", "hello", "--state", h.statePath], io, undefined, h.env);
+      await vi.waitFor(() => expect(io.errors).toEqual(["Starting Claude Code"]), { timeout: 7_000, interval: 50 });
+      answer();
+      await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+      held.release(0, "hi");
+      expect(await ran).toBe(0);
+      expect(io.lines.at(-1)).toBe("hi");
+    } finally {
+      answer();
+      rmSync(folder, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("run whose agent's launch is the slow part says the agent is starting too, after the start was answered", async () => {
+    const held = heldAgent(false);
+    let launch: () => void = () => {};
+    const launched = new Promise<void>(resolve => (launch = resolve));
+    const slowly: HarnessAdapterFactory = ctx => {
+      const agent = held.adapter(ctx);
+      return { ...agent, start: o => agent.start({ ...o, onEvent: e => (e.type === "session.start" ? void launched.then(() => o.onEvent(e)) : o.onEvent(e)) }) };
+    };
+    await h.restartHost({ claude: slowly });
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-repo-")));
+    try {
+      await projectOn(h.rt, HERE_PLACE_ID, folder, { name: "spoo" });
+      const io = captured();
+      const ran = cli(["run", "spoo", "hello", "--state", h.statePath], io, undefined, h.env);
+      await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+      await vi.waitFor(() => expect(io.errors).toEqual(["Starting Claude Code"]), { timeout: 7_000, interval: 50 });
+      launch();
+      held.release(0, "hi");
+      expect(await ran).toBe(0);
+      expect(io.lines.at(-1)).toBe("hi");
+    } finally {
+      launch();
+      rmSync(folder, { recursive: true, force: true });
+    }
+  }, 20_000);
 
   it("send into a thread whose turn runs on an agent that cannot steer waits for that turn, then starts its own: one stderr line, the second start after the first done", async () => {
     const held = heldAgent(false);

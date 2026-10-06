@@ -511,6 +511,7 @@ export interface WorkspacesArea {
 
 export interface AgentsArea {
   readonly catalogOn: (table: HarnessCatalog, entry: LiveWorkspace, adapter: HarnessAdapter) => Promise<HarnessCatalog>;
+  readonly firstRunHere: (entry: LiveWorkspace, harness: string) => Promise<boolean>;
   readonly refreshTitle: (view: SessionView, force: boolean) => Promise<void>;
   readonly sourceOf: (view: SessionView) => TitleSource;
   readonly rowsOn: (threadId: string) => SessionView[];
