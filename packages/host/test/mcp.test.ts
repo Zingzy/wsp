@@ -13,15 +13,15 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { worktreeRemovedLine, type ProjectView, childStartedLine, cloneIntoTakenLine, HERE_PLACE_ID, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, addedProjectLine, goneRoadRefusal, EMPTY_MESSAGE_LINE, EXIT_CODES, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, type ExitClass, NOT_DELIVERED_LINE } from "@wsp/protocol";
+import { worktreeRemovedLine, type ProjectView, childStartedLine, cloneIntoTakenLine, HERE_PLACE_ID, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, addedProjectLine, goneRoadRefusal, EMPTY_MESSAGE_LINE, EXIT_CODES, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, type ExitClass, NOT_DELIVERED_LINE, BUILT_IN_LIST_CLAUSE } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, serve } from "../src/cli.js";
-import { BUILT_IN_LIST_CLAUSE, c1Escaped, hostPlatform, noHostServingLine } from "../src/verbs.js";
+import { c1Escaped, hostPlatform, noHostServingLine } from "../src/verbs.js";
 import { placeWiring } from "../src/places.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
 import { RecipeAnswer, RecipeScan, allRows, recipePrintout, scanPrintout } from "../src/recipe-answer.js";
-import { wspSkill, instructionsOf } from "../src/skill.js";
+import { instructionsOf, wspSkill } from "../src/skill.js";
 import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { HERE } from "./recipe-fixture.js";
@@ -184,7 +184,7 @@ describe("the MCP server over the host", () => {
   it.runIf(CLOUD_ON)("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["add", "agents", "agents_addtools", "agents_default", "agents_set", "agents_setup", "commit", "computers", "computers_set", "delete", "discard", "exec", "export", "fix", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "merge", "merge_in", "pause", "projects", "projects_add", "projects_remove", "projects_set", "rebuild", "recipe", "recipe_scan", "recipes", "recipes_remove", "recipes_save", "recipes_show", "rename", "restart", "review", "review_post", "run", "send", "servers", "servers_add", "servers_disable", "servers_enable", "servers_remove", "servers_tools", "setup", "skills", "skills_add", "skills_disable", "skills_enable", "skills_remove", "skills_search", "skills_show", "snapshot", "start", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "update", "usage", "wake", "workspaces_agents", "worktree", "worktree_remove"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["add", "agents", "agents_addtools", "agents_default", "agents_set", "agents_setup", "commit", "computers", "computers_set", "delete", "discard", "exec", "export", "fix", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "merge", "merge_in", "pause", "projects", "projects_add", "projects_remove", "projects_set", "rebuild", "recipe", "recipe_scan", "recipes", "recipes_remove", "recipes_save", "recipes_show", "rename", "restart", "review", "review_post", "run", "send", "servers", "servers_add", "servers_disable", "servers_enable", "servers_remove", "servers_tools", "setup", "skills", "skills_add", "skills_disable", "skills_enable", "skills_remove", "skills_search", "skills_show", "slate_catalog", "slate_read", "slate_state", "slate_write", "snapshot", "start", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_head", "thread_read", "thread_rename", "threads", "threads_wait", "update", "usage", "wake", "workspaces_agents", "worktree", "worktree_remove"]);
     for (const name of ["agents", "skills", "servers"]) expect(Object.keys((tools.find(t => t.name === name)!.inputSchema as { properties: Record<string, unknown> }).properties).sort(), name).toEqual(["on", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "servers_tools")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "name", "on", "project", "refresh", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden", "on", "repos"]);
@@ -204,13 +204,10 @@ describe("the MCP server over the host", () => {
     expect(tools.find(t => t.name === "image")!.description).toContain("The project images taken off workspaces are listed under it, each with its snapshot id, the workspace it was taken off, its size where the provider lists one and its date.");
     expect(Object.keys((tools.find(t => t.name === "recipe")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["add", "add_check", "engine", "out", "project", "set", "signin", "tick", "why"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
-    expect(c.getInstructions()).toBe(instructionsOf(wspSkill(), THREAD_AGENTS));
+    expect(c.getInstructions()).toBe(instructionsOf(THREAD_AGENTS));
     expect(c.getInstructions()).toContain("run");
-    // The setup sequence an agent follows the first time, so it never has to guess at the order.
-    expect(c.getInstructions()).toContain("then `recipe_scan`, which writes nothing");
-    expect(c.getInstructions()).toContain("then `recipe` with their answers");
-    expect(c.getInstructions()).toContain("wsp init --recipe <path>");
-    expect(c.getInstructions()).toContain("snapshot");
+    // The setup sequence is the skill's, which the instructions name: Claude Code keeps 2,048 characters of them.
+    expect(c.getInstructions()).toContain("Setup, every verb and the rules are in the wsp skill");
     // The instructions and the agent input promise only agents the host has adapters for, from the one list.
     expect(c.getInstructions()).toContain(`take as agent: ${THREAD_AGENTS.join(", ")}.`);
     for (const a of CATALOG.filter(e => e.kind === "agent")) expect(new RegExp(`\\b${a.id}\\b`).test(c.getInstructions()!), a.id).toBe(THREAD_AGENTS.some(id => id === a.id));
@@ -700,7 +697,8 @@ describe("the MCP server over the host", () => {
     expect(claude.starts.at(-1)!.resume).toBeDefined();
     const kept = await call("send", { thread: threadId, message: "go on" });
     expect(kept.isError).toBe(false);
-    expect(claude.starts.at(-1)!.model).toBeUndefined();
+    // A send that names neither runs on the thread's last picks, not the CLI's default.
+    expect(claude.starts.at(-1)).toMatchObject({ model: "claude-fable-5-1", effort: "max" });
     // The send tool takes no access, so one named here is not read and the turn runs at the thread's own.
     const own = claude.starts.at(-1)!.permissionMode;
     const named = await call("send", { thread: threadId, message: "and now", access: "acceptEdits" });

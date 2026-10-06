@@ -26,7 +26,8 @@ import {
   AccessChoice,
   AgentSetupView,
   ThreadDefaults,
-  accessRefusal,
+  accessWordRefusal,
+  pickRefusal,
   accessWordsLine,
   agentEnvRefusal,
   ENV_REFUSED_FIX,
@@ -130,6 +131,7 @@ import {
   TerminalConfig,
   TerminalScheme,
   ThreadMessage,
+  ThreadHead,
   ThreadView,
   TurnStatus,
   UpgradeResult,
@@ -214,6 +216,7 @@ import {
   usageRefusal,
   validatorRefusal,
   verbFailure,
+  problemListsOf,
   waitTimedOutLine,
   workspaceAsleepAgainLine,
   workspaceKind,
@@ -274,6 +277,7 @@ import {
   sourceWord,
   HERE_PLACE_ID,
   isLocalWorkspace,
+  threadOnMachineLine,
   turnSpendWord,
   agentsCell,
   placeDaemonBehind,
@@ -350,6 +354,7 @@ import {
   usedPrice,
   windowCell,
   type LimitKind,
+  SLATE_TOOLS,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
@@ -536,7 +541,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
       const text = JSON.stringify({ ...params, id, op });
       ws.send(seal === undefined ? text : seal.seal(text));
     });
-    if (frame.ok !== true) throw Object.assign(new Error(typeof frame["error"] === "string" ? frame["error"] : `${op} failed`), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {});
+    if (frame.ok !== true) throw Object.assign(new Error(typeof frame["error"] === "string" ? frame["error"] : `${op} failed`), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {}, problemListsOf(frame));
     return frame as T;
   };
   let timer: NodeJS.Timeout | undefined;
@@ -2101,18 +2106,13 @@ export function pickFlags(flags: Flags): Picks {
   return { ...Object.fromEntries(PICK_FLAGS.map(name => [name, flag(flags, name)])), ...(flags["fast"] === true ? { fast: true } : {}) };
 }
 
-/** What a refusal adds when the list it quotes is wsp's own table rather than the machine's own answer: a person
- * reading a model they know their agent takes has to be told the list is not that agent's. */
-export const BUILT_IN_LIST_CLAUSE = "; that list is wsp's built-in one, since no agent there described itself, and the agent on that computer may take more";
-/** The same for a refusal that quotes no list, a model the table says takes no effort: "that list" would point at nothing. */
-export const BUILT_IN_TABLE_CLAUSE = "; wsp's built-in table says so, since no agent there described itself";
-
 /** Refuses, in the runtime's own words and before a machine is minted or woken for it, what the runtime would refuse
  * once the machine was there: an empty task or message, an agent the host has no adapter for, a pick the agent's
  * catalog does not list. Named a workspace, this asks that workspace's own machine, the same lists the app's composer
  * shows and the start itself will check against, so a model only that machine's config knows (a provider the agent is
- * routed to) is not refused here for being absent from a table. Without one, or on a workspace that is not running,
- * the table answers, and the start on the machine checks the rest. */
+ * routed to) is not refused here for being absent from a table. On a workspace that is not running the table answers,
+ * and the start on the machine checks the rest. A start on this computer mints and wakes nothing, so its picks are
+ * left to the start, which reads them against the agent's own lists here before it makes a folder. */
 export async function checkedStart(client: HostClient, task: string, harness: string | undefined, picks: Picks, workspaceId?: string): Promise<void> {
   if (task.trim() === "") throw usageRefusal(EMPTY_MESSAGE_LINE, "Put it in quotes after the flags.");
   const { harnesses } = await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list", workspaceId === undefined ? undefined : { workspaceId });
@@ -2123,16 +2123,15 @@ export async function checkedStart(client: HostClient, task: string, harness: st
     if (all.some(c => c.harness === harness)) return;
     throw usageRefusal(noAdapterLine(harness, all.map(c => c.harness)), "Name one of those with --agent.");
   }
+  if (workspaceId === undefined) return;
   const asked = picksOf(picks);
   try {
     startPicks(table, asked, true);
   } catch (e) {
-    const said = e instanceof Error ? e.message : String(e);
-    const clause = (e as { offered?: number }).offered === 0 ? BUILT_IN_TABLE_CLAUSE : BUILT_IN_LIST_CLAUSE;
-    throw usageRefusal(table?.source === "table" ? `${said}${clause}` : said, "Drop the flag, or give it a value the agent offers.");
+    throw pickRefusal(e, table);
   }
-  const refused = asked.access === undefined || table === undefined ? null : accessRefusal(table, asked.access);
-  if (refused !== null) throw usageRefusal(`${refused}.`, "Name one it takes, or drop --access.");
+  const refused = asked.access === undefined || table === undefined ? null : accessWordRefusal(table, asked.access);
+  if (refused !== null) throw refused;
 }
 
 /** The person's view preferences as the host keeps them: the last project per workspace and the last target. */
@@ -2198,6 +2197,15 @@ async function threadHere(client: HostClient, ref: string): Promise<{ id: string
   const at = (await workspaces(client)).find(w => w.id === thread.workspaceId);
   if (at === undefined || !isLocalWorkspace(at)) return undefined;
   return { id: threadIdOf(thread), workspaceId: at.id, ...(at.worktree?.made === true && at.worktree.gone !== true ? { worktree: at.worktree.path } : {}) };
+}
+
+/** Refuses a thread on a box's machine, which goes with its machine, in the runtime's own words; nothing for any
+ * other ref, so the caller's own refusal stands. */
+async function refuseMachineThread(client: HostClient, ref: string): Promise<void> {
+  const thread = await threadOf(client, ref).catch(() => undefined);
+  if (thread === undefined) return;
+  const at = (await workspaces(client)).find(w => w.id === thread.workspaceId);
+  if (at !== undefined && !isLocalWorkspace(at)) throw Object.assign(new Error(threadOnMachineLine(at.name)), { kind: "usage" });
 }
 
 /** What the host took with a thread it deleted: the record's id, the worktree that went with it, and how many threads. */
@@ -2503,6 +2511,21 @@ async function readThread(client: HostClient, thread: ThreadView, last: boolean)
 const readLine = (read: { threadId: string; messages: readonly ThreadMessage[] }, last: boolean): string =>
   read.messages.length === 0 ? (last ? noReplyLine(read.threadId) : noMessagesLine(read.threadId)) : threadReadText(read.messages);
 
+/** A thread's head as the host answers it, by its fold key, its facts and events passed on as the host wrote them. */
+const threadHead = async (client: HostClient, thread: ThreadView): Promise<ThreadHead> => {
+  const { facts, events, pos, total } = await client.request<ThreadHead>("sessions.head", { threadId: thread.id });
+  return { facts, events, pos, total };
+};
+
+/** What a head prints: the title, what the thread runs on and where it stands, how much of it the head carries, and
+ * those newest events as a read lists them. */
+const headLine = (head: ThreadHead): string => {
+  const f = head.facts;
+  const runs = [f.model === undefined ? f.harness : `${f.harness} on ${f.model}`, ...(f.permissionMode !== undefined ? [f.permissionMode] : []), f.status].join(", ");
+  const rows = threadMessages(head.events, f.threadId ?? f.id);
+  return [f.title, runs, ...(f.cwd !== undefined ? [f.cwd] : []), `the newest ${head.events.length} of ${head.total} events`, ...(rows.length > 0 ? ["", threadReadText(rows)] : [])].join("\n");
+};
+
 /** The runtime's thread id of a row, the one its events carry; a row from before threads had ids is its own. */
 const threadIdOf = (t: ThreadView): string => t.threadId ?? t.id;
 
@@ -2636,12 +2659,13 @@ export interface AnswerRoad {
   key: string;
   effect: PermissionEffect;
   does?: string;
-  answer?: { verb: string; about: string; said: string };
+  /** `reasons` is a road whose verb takes the person's words on what to do instead, as the app's deny does. */
+  answer?: { verb: string; about: string; said: string; reasons?: true };
 }
 
 export const ANSWER_ROADS: readonly AnswerRoad[] = [
   { key: "y", effect: "allow", does: "run it", answer: { verb: "allow", about: "answers the prompt the thread is stopped on and lets the call run", said: "allowed" } },
-  { key: "n", effect: "deny", does: "refuse it", answer: { verb: "deny", about: "answers the prompt the thread is stopped on and refuses the call", said: "denied" } },
+  { key: "n", effect: "deny", does: "refuse it", answer: { verb: "deny", about: "answers the prompt the thread is stopped on and refuses the call", said: "denied", reasons: true } },
   { key: "a", effect: "mode" },
 ];
 
@@ -2701,21 +2725,21 @@ export const ANSWER_WORDS: Readonly<Record<Exclude<SessionAnswerOutcome, "answer
 
 /** Picks one option on a prompt the runtime holds open, the op the app's own buttons send; anything but a pick the
  * harness took is the caller's failure, in the words of the outcome. */
-async function answerAsk(client: HostClient, sessionId: string, askId: string, optionId: string): Promise<void> {
-  const { outcome } = SessionAnswerResult.parse(await client.request("sessions.answer", { sessionId, askId, optionId }));
+async function answerAsk(client: HostClient, sessionId: string, askId: string, optionId: string, reason?: string): Promise<void> {
+  const { outcome } = SessionAnswerResult.parse(await client.request("sessions.answer", { sessionId, askId, optionId, ...(reason === undefined ? {} : { reason }) }));
   if (outcome !== "answered") throw new Error(ANSWER_WORDS[outcome]);
 }
 
 /** What a thread's open prompt answered by one of the roads above came to, for a terminal that is not watching the
  * turn: the prompt is read off the transcript the host holds, so a thread anybody opened is answerable from here. */
-async function answerOpenAsk(client: HostClient, ref: string, road: AnswerRoad & { answer: NonNullable<AnswerRoad["answer"]> }): Promise<{ threadId: string; askId: string; optionId: string; line: string }> {
+async function answerOpenAsk(client: HostClient, ref: string, road: AnswerRoad & { answer: NonNullable<AnswerRoad["answer"]> }, reason?: string): Promise<{ threadId: string; askId: string; optionId: string; line: string }> {
   const thread = await threadOf(client, ref);
   const threadId = threadIdOf(thread);
   const ask = openAsk(await history(client, thread.workspaceId), threadId);
   if (ask === undefined) throw new Error(noOpenAskLine(threadId));
   const option = ask.options.find((o: PermissionOption) => o.effect === road.effect);
   if (option === undefined) throw new Error(noSuchAnswerLine(threadId, road.answer.verb));
-  await answerAsk(client, ask.sessionId, ask.askId, option.id);
+  await answerAsk(client, ask.sessionId, ask.askId, option.id, reason);
   return { threadId, askId: ask.askId, optionId: option.id, line: answeredLine(threadId, ask, road.answer.said) };
 }
 
@@ -3241,27 +3265,32 @@ function folderLines(listing: HostFolderListing): string[] {
   ];
 }
 
+const REASON_FLAG: FlagTable = { reason: { type: "string" } };
+
 /** The lines another terminal answers a thread's open prompt with, one per road that carries a verb: the same op the
  * app's buttons send, by thread id, so a person or an agent watching a thread from anywhere can unstick it. */
 const ANSWER_VERBS: readonly CliVerb[] = ANSWER_ROADS.filter((road): road is AnswerRoad & { answer: NonNullable<AnswerRoad["answer"]> } => road.answer !== undefined).map(road => ({
   name: `thread ${road.answer.verb}`,
-  usage: `wsp thread ${road.answer.verb} <thread>`,
+  usage: `wsp thread ${road.answer.verb} <thread>${road.answer.reasons === true ? ' [--reason "<words>"]' : ""}`,
   about: road.answer.about,
   page: "agent" as const,
-  options: {},
+  options: road.answer.reasons === true ? REASON_FLAG : {},
   run: async (ctx: VerbContext) => {
     const [ref] = ctx.args;
     if (ref === undefined || ctx.args.length !== 1) throw usageRefusal(`wsp thread ${road.answer.verb} takes one thread.`, usageIs(ctx));
-    const answered = await answerOpenAsk(await ctx.client(), ref, road);
+    const answered = await answerOpenAsk(await ctx.client(), ref, road, flag(ctx.flags, "reason"));
     ctx.out.emit({ threadId: answered.threadId, askId: answered.askId, optionId: answered.optionId }, answered.line);
     return 0;
   },
   tool: tool({
     description: `${road.answer.about[0]!.toUpperCase()}${road.answer.about.slice(1)}, by thread id or a prefix of it. A thread stopped on a prompt reads Needs you in threads and runs nothing until somebody picks, so this is how a thread you did not open is unstuck; the prompt itself is on the thread's own rows, which thread_read prints. Refused in one line when the thread is waiting on no prompt and when the prompt it is stopped on carries no such answer, which is what a call that asks the person something rather than for consent does.`,
-    input: { thread: z.string().describe("the thread's id, or a prefix of it that names one, as threads lists them") },
+    input: {
+      thread: z.string().describe("the thread's id, or a prefix of it that names one, as threads lists them"),
+      ...(road.answer.reasons === true ? { reason: z.string().optional().describe("what the agent should do instead, in your words; the agent reads it with the refusal, as it reads the reason a person types in the app") } : {}),
+    },
     output: { threadId: z.string(), askId: z.string(), optionId: z.string() },
-    call: async ({ thread: ref }, deps: VerbDeps) => {
-      const answered = await answerOpenAsk(await deps.client(), ref, road);
+    call: async ({ thread: ref, reason }: { thread: string; reason?: string }, deps: VerbDeps) => {
+      const answered = await answerOpenAsk(await deps.client(), ref, road, reason);
       return asText(answered.line, { threadId: answered.threadId, askId: answered.askId, optionId: answered.optionId });
     },
   }),
@@ -3748,6 +3777,227 @@ const AgentsWorkspaceIn = z.string().optional().describe("the workspace to read,
 const AgentsOnIn = z.string().optional().describe("the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on");
 const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
 const AGENTS_READ_WORDS = "Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.";
+
+// --- the slate: a live panel per thread the agent builds and the person reads, presses and fills in ---
+
+const SlateThreadIn = z.string().optional().describe("another thread's id");
+const SlateIfVersionIn = z.number().int().optional().describe("only at this version");
+/** What every slate tool answers: the version and the sketch as text, the rest an open record the text already says. */
+const slateOut = <K extends string>(...rest: K[]) => ({ version: z.number().int(), text: z.string(), ...(Object.fromEntries(rest.map(k => [k, z.unknown()])) as Record<K, z.ZodUnknown>) });
+
+/** The thread a slate line names, as the host takes it: one named by id or prefix, else the turn this line runs
+ * inside, else nothing, which the host reads off the caller's own token. */
+async function slateTarget(client: HostClient, ref: string | undefined, env: VerbDeps["env"]): Promise<{ threadId?: string; turnToken?: string }> {
+  if (ref !== undefined) {
+    const thread = await threadOf(client, ref);
+    return { threadId: thread.threadId ?? thread.id };
+  }
+  const token = turnTokenOf(env);
+  return token !== undefined ? { turnToken: token } : {};
+}
+
+/** A slate op's answer without the reply frame's own id and ok, so both doors print the answer alone. */
+async function slateAsk<T extends { text: string }>(client: HostClient, op: string, params: Record<string, unknown>): Promise<T> {
+  const { id: _id, ok: _ok, ...answer } = await client.request<Record<string, unknown>>(op, params);
+  return answer as T;
+}
+
+/** The sketch as the one frame ahead of the result, and the result without it. */
+function emitSlate(ctx: VerbContext, answer: { text: string }): void {
+  const { text, ...rest } = answer;
+  ctx.out.emit({ text }, text);
+  ctx.out.emit(rest);
+}
+
+/** A slate file as a write sends it: the JSX-like form for .slate, the stored document for .json. */
+function slateFile(ctx: VerbContext, path: string): { text: string } | { document: Record<string, unknown> } {
+  if (ctx.elsewhere === true) throw usageRefusal(`${path} is a file on your machine, which this host cannot read.`, "Pass the slate to slate_write as text instead.");
+  const at = resolve(ctx.cwd ?? process.cwd(), path);
+  if (!path.endsWith(".slate") && !path.endsWith(".json")) throw usageRefusal(`${path} is neither a .slate nor a .json file.`, "Write the JSX-like form to a .slate file or the stored form to a .json file.");
+  let text: string;
+  try {
+    text = readFileSync(at, "utf8");
+  } catch {
+    throw usageRefusal(`there is no file at ${at}.`, "Name a .slate or .json file that is there.");
+  }
+  if (path.endsWith(".slate")) return { text };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw usageRefusal(`${path} does not parse as JSON (${e instanceof Error ? e.message : String(e)}).`, "Fix the JSON or write the JSX-like form to a .slate file.");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw usageRefusal(`${path} holds no JSON object.`, "Write the stored document, an object with schema, root and pieces.");
+  return { document: parsed as Record<string, unknown> };
+}
+
+const ifVersionOf = (ctx: VerbContext): number | undefined => {
+  const raw = ctx.flags["if-version"];
+  if (typeof raw !== "string") return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) throw usageRefusal(`--if-version takes a version number, and ${raw} is not one.`, usageIs(ctx));
+  return n;
+};
+
+/** A $path=json word of a state line: the value parsed as JSON, else taken as the text it is. */
+function stateValue(word: string): [string, unknown] | undefined {
+  const at = word.indexOf("=");
+  if (at <= 0) return undefined;
+  const raw = word.slice(at + 1);
+  try {
+    return [word.slice(0, at), JSON.parse(raw)];
+  } catch {
+    return [word.slice(0, at), raw];
+  }
+}
+
+const SLATE_VERBS: readonly Verb[] = [
+  {
+    name: "slate catalog",
+    usage: "wsp slate catalog [<name>]",
+    about: "what a slate can hold: the index of pieces, sources, steps, functions and rules, or one entry in full",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length > 1) throw usageRefusal("wsp slate catalog takes one name at most.", usageIs(ctx));
+      const client = await ctx.client();
+      const read = await slateAsk<{ text: string }>(client, "slates.catalog", { ...(await slateTarget(client, undefined, ctx.env)), ...pick({ name: ctx.args[0] }) });
+      ctx.out.emit(read, read.text);
+      return 0;
+    },
+    tool: tool({
+      description: "What a slate, the live panel beside the chat, can hold: every piece, and the runs that keep it fresh. Call it first whenever the person wants to see, watch, monitor or keep an eye on something, tick things off as they go, or see what's unread, even when another tool fetches the data.",
+      input: { name: z.string().optional().describe("leave out first: the index of every piece; then an entry, like runs") },
+      output: { text: z.string() },
+      call: async ({ name }, deps) => {
+        const client = await deps.client();
+        const read = await slateAsk<{ text: string }>(client, "slates.catalog", { ...(await slateTarget(client, undefined, deps.env)), ...pick({ name }) });
+        return asText(read.text, read);
+      },
+    }),
+  },
+  {
+    name: "slate write",
+    usage: "wsp slate write [<thread>] [<file>] [--check] [--set <path>=<json>]... [--press <piece>] [--row <n>] [--action <n>] [--if-version <n>]",
+    about: "writes the thread's slate from a .slate file (a whole <slate> or a patch) or a .json document and prints its sketch; --check stores nothing, and with --set or --press rehearses values and a press on a copy, the file optional",
+    page: "agent",
+    options: { check: { type: "boolean" }, set: { type: "string", multiple: true }, press: { type: "string" }, row: { type: "string" }, action: { type: "string" }, "if-version": { type: "string" } },
+    run: async ctx => {
+      const values: Record<string, unknown> = {};
+      for (const word of flagList(ctx.flags, "set")) {
+        const pair = stateValue(word);
+        if (pair === undefined) throw usageRefusal(`--set ${word} is not <path>=<json>.`, "Write it like --set '$i=2'.");
+        values[pair[0]] = pair[1];
+      }
+      const piece = typeof ctx.flags["press"] === "string" ? ctx.flags["press"] : undefined;
+      const row = typeof ctx.flags["row"] === "string" ? Number(ctx.flags["row"]) : undefined;
+      const action = typeof ctx.flags["action"] === "string" ? Number(ctx.flags["action"]) : undefined;
+      for (const [flag, n] of [["row", row], ["action", action]] as const) if (n !== undefined && (piece === undefined || !Number.isInteger(n) || n < 0)) throw usageRefusal(`--${flag} goes with --press, a whole number from 0:`, usageIs(ctx));
+      const rehearsal = Object.keys(values).length > 0 || piece !== undefined;
+      const [a, b] = ctx.args;
+      if ((a === undefined && !rehearsal) || ctx.args.length > 2) throw usageRefusal("wsp slate write takes a file, after a thread where it is not yours.", usageIs(ctx));
+      const [ref, file] = b !== undefined ? [a, b] : a !== undefined && /\.(slate|json)$/.test(a) ? [undefined, a] : [a, undefined];
+      if (file === undefined && !rehearsal) throw usageRefusal("wsp slate write takes a .slate or .json file, after a thread where it is not yours.", usageIs(ctx));
+      const client = await ctx.client();
+      const ifVersion = ifVersionOf(ctx);
+      const rehearse = { ...(Object.keys(values).length > 0 ? { values } : {}), ...(piece !== undefined ? { press: { piece, ...(row !== undefined ? { index: row } : {}), ...(action !== undefined ? { action } : {}) } } : {}) };
+      const wrote = await slateAsk<{ text: string }>(client, "slates.write", { ...(await slateTarget(client, ref, ctx.env)), ...(file !== undefined ? slateFile(ctx, file) : {}), ...(ctx.flags["check"] === true ? { check: true } : {}), ...rehearse, ...(ifVersion !== undefined ? { ifVersion } : {}) });
+      emitSlate(ctx, wrote);
+      return 0;
+    },
+    tool: tool({
+      description: "Writes this thread's slate, the live panel shown here beside the chat. Use it to show the person anything they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), or a dashboard, a form to fill in or a checklist. A run with every= refreshes itself on a timer with no turns, so nothing polls.",
+      input: {
+        thread: SlateThreadIn,
+        text: z.string().optional().describe("JSX-like text: a <slate>, or a patch"),
+        document: z.record(z.string(), z.unknown()).optional().describe("JSON form from slate_read; not for writing"),
+        check: z.boolean().optional().describe("validate, write nothing"),
+        values: z.record(z.string(), z.unknown()).optional().describe("with check: $path: value"),
+        press: z.string().optional().describe("with check: piece id to press"),
+        row: z.number().int().optional().describe("pressed row, from 0"),
+        action: z.number().int().optional().describe("row action, from 0"),
+        if_version: SlateIfVersionIn,
+      },
+      output: slateOut("warnings", "problems", "waiting"),
+      stream: ["text"],
+      call: async ({ thread, text, document, check, values, press, row, action, if_version }, deps) => {
+        const client = await deps.client();
+        const pressed = press === undefined ? undefined : { piece: press, ...pick({ index: row, action }) };
+        const wrote = await slateAsk<{ text: string }>(client, "slates.write", { ...(await slateTarget(client, thread, deps.env)), ...pick({ text, document, check, values, press: pressed, ifVersion: if_version }) });
+        return asText(wrote.text, wrote);
+      },
+    }),
+  },
+  {
+    name: "slate state",
+    usage: "wsp slate state [<thread>] [<path>=<json>...] [--start <run>]... [--if-version <n>]",
+    about: "sets the slate's $values by path, like '$steps[2].done=true' or 'i=2', starts runs the person let run every time, and prints its sketch",
+    page: "agent",
+    options: { "if-version": { type: "string" }, start: { type: "string", multiple: true } },
+    run: async ctx => {
+      const values: Record<string, unknown> = {};
+      const rest: string[] = [];
+      for (const word of ctx.args) {
+        const pair = stateValue(word);
+        if (pair === undefined) rest.push(word);
+        else values[pair[0]] = pair[1];
+      }
+      const start = flagList(ctx.flags, "start");
+      if (rest.length > 1 || (Object.keys(values).length === 0 && start.length === 0)) throw usageRefusal("wsp slate state takes $path=<json> words or --start <run>, after a thread where it is not yours.", usageIs(ctx));
+      const client = await ctx.client();
+      const ifVersion = ifVersionOf(ctx);
+      const wrote = await slateAsk<{ text: string }>(client, "slates.state", { ...(await slateTarget(client, rest[0], ctx.env)), ...(Object.keys(values).length > 0 ? { values } : {}), ...(start.length > 0 ? { start } : {}), ...(ifVersion !== undefined ? { ifVersion } : {}) });
+      emitSlate(ctx, wrote);
+      return 0;
+    },
+    tool: tool({
+      description: "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire. start starts a run the person allowed to run always.",
+      input: { thread: SlateThreadIn, values: z.record(z.string(), z.unknown()).optional().describe("$path: new value"), start: z.array(z.string()).optional().describe("runs allowed always"), if_version: SlateIfVersionIn },
+      output: slateOut("problems", "waiting", "notStarted"),
+      stream: ["text"],
+      call: async ({ thread, values, start, if_version }, deps) => {
+        const client = await deps.client();
+        const wrote = await slateAsk<{ text: string }>(client, "slates.state", { ...(await slateTarget(client, thread, deps.env)), ...pick({ values, start, ifVersion: if_version }) });
+        return asText(wrote.text, wrote);
+      },
+    }),
+  },
+  {
+    name: "slate read",
+    usage: "wsp slate read [<thread>] [--values <path>]... [--no-text] [--no-sketch] [--document]",
+    about: "the slate as it stands: the sketch, then the JSX-like form, the values, derived values, runs, problems and the paths named; --no-text leaves out the JSX-like form, --document adds the stored JSON",
+    page: "agent",
+    options: { values: { type: "string", multiple: true }, "no-text": { type: "boolean" }, "no-sketch": { type: "boolean" }, document: { type: "boolean" } },
+    run: async ctx => {
+      if (ctx.args.length > 1) throw usageRefusal("wsp slate read takes one thread at most.", usageIs(ctx));
+      const client = await ctx.client();
+      const values = flagList(ctx.flags, "values");
+      const read = await slateAsk<{ text: string }>(client, "slates.read", { ...(await slateTarget(client, ctx.args[0], ctx.env)), ...(values.length > 0 ? { values } : {}), ...(ctx.flags["no-text"] === true ? { text: false } : {}), ...(ctx.flags["no-sketch"] === true ? { sketch: false } : {}), ...(ctx.flags["document"] === true ? { document: true } : {}) });
+      emitSlate(ctx, read);
+      return 0;
+    },
+    tool: tool({
+      description: "Reads this thread's slate: what the person filled in or pressed, live values, run output and logs, and the sketch: the panel's words as the person sees them.",
+      input: { thread: SlateThreadIn, values: z.array(z.string()).optional().describe("$run.json, $value, source path, or *"), text: z.boolean().optional().describe("false: no JSX-like form"), sketch: z.boolean().optional().describe("false: no sketch"), document: z.boolean().optional().describe("true: add stored JSON") },
+      output: slateOut("document", "values", "derived", "runs", "state", "problems", "waiting", "comments", "approvals"),
+      stream: ["text"],
+      call: async ({ thread, values, text, sketch, document }, deps) => {
+        const client = await deps.client();
+        const read = await slateAsk<{ text: string }>(client, "slates.read", { ...(await slateTarget(client, thread, deps.env)), ...pick({ values, text, sketch, document }) });
+        return asText(read.text, read);
+      },
+    }),
+  },
+];
+
+/** The slate's tools: loaded up front by a client that defers tools behind a search, since a model that never searched
+ * never found them, and left off a server for a thread that has no slate. */
+export const SLATE_TOOL_NAMES: ReadonlySet<string> = new Set<string>(SLATE_TOOLS);
+
+/** The fields given, without the ones left out, so an absent input never rides the wire as undefined. */
+function pick<T extends Record<string, unknown>>(o: T): Partial<T> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
 
 /** Every verb, the cloud's among them; VERBS below is the table this process answers. */
 export const ALL_VERBS: readonly Verb[] = [
@@ -5518,7 +5768,12 @@ export const ALL_VERBS: readonly Verb[] = [
         ctx.out.emit({ threadId: here.id, ...gone }, threadDeletedLine(here.id, gone));
         return 0;
       }
-      const d = await deleting(client, ref);
+      // A workspace by that name comes first; a ref that names none but is a thread on a box's machine says how that
+      // thread goes, rather than that no workspace has its id.
+      const d = await deleting(client, ref).catch(async (e: unknown) => {
+        await refuseMachineThread(client, ref);
+        throw e;
+      });
       if (!(await confirmed(ctx, deleteQuestion(d), d.workspace.name))) return 1;
       await deleteWorkspace(client, d);
       ctx.out.emit({ workspaceId: d.workspace.id, name: d.workspace.name, machineId: d.workspace.machineId, threads: d.threads }, deletedLine(d));
@@ -5533,7 +5788,10 @@ export const ALL_VERBS: readonly Verb[] = [
         const client = await deps.client();
         if (threadRef !== undefined) {
           const here = await threadHere(client, threadRef);
-          if (here === undefined) throw usageRefusal(`no thread ${threadRef} on this computer`, "Name a thread wsp threads lists.");
+          if (here === undefined) {
+            await refuseMachineThread(client, threadRef);
+            throw usageRefusal(`no thread ${threadRef} on this computer`, "Name a thread wsp threads lists.");
+          }
           if (confirm !== true) return { ...asText(`thread ${here.id} kept. ${threadDeleteQuestion(here.id, here.worktree).split("\n")[1]} Ask the person, then call delete again with confirm true.`, { threadId: here.id, workspaceId: here.workspaceId, threads: 1 }), isError: true };
           const gone = await threadDeleted(client, here.id);
           return asText(threadDeletedLine(here.id, gone), { threadId: here.id, ...gone });
@@ -5688,6 +5946,33 @@ export const ALL_VERBS: readonly Verb[] = [
     }),
   },
   {
+    name: "thread head",
+    usage: "wsp thread head <thread>",
+    about:
+      "the thread's facts and its newest events, what the app draws first on opening it: the title, the agent, model and access it runs on, where it stands and its folder, then as many of its newest events as fit in 64 KB, each tool result past 2 KB cut and marked with its whole length. Reading a head marks nothing",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp thread head takes one thread.", usageIs(ctx));
+      const client = await ctx.client();
+      const head = await threadHead(client, await threadOf(client, ref));
+      ctx.out.emit(head, headLine(head));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "The thread's head (by id, or a prefix of it): facts, the thread as threads lists it with the model, effort and context window its latest turn runs on and turnId while a turn runs; events, as many of the thread's newest transcript events as fit in 64 KB, oldest first, each tool result past 2 KB cut with cut set to its whole length; pos, the newest position the transcript has issued, which every event carries as its own pos; and total, how many events of the thread the transcript holds. It is the cheap look at a thread: read the whole conversation with thread_read. Nothing on a machine is touched and the thread is not marked read.",
+      input: { thread: z.string().describe("the thread's id, or a prefix of it that names one, as threads lists them") },
+      output: ThreadHead.shape,
+      call: async ({ thread: ref }, deps) => {
+        const client = await deps.client();
+        const head = await threadHead(client, await threadOf(client, ref));
+        return asText(headLine(head), head);
+      },
+    }),
+  },
+  {
     name: "thread rename",
     usage: 'wsp thread rename <thread> "<title>"',
     about: "names the thread inside the agent's own store, so the agent shows the same name",
@@ -5746,6 +6031,7 @@ export const ALL_VERBS: readonly Verb[] = [
     }),
   },
   ...ANSWER_VERBS,
+  ...SLATE_VERBS,
   {
     name: "send",
     usage: 'wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"',
@@ -6085,6 +6371,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   access: "how far the agent may go without asking: ask, auto-edit, full or plan, refused where the agent has no such mode; without it, the project's, else the agent's default, else full",
   cwd: "the folder on the machine to work in; the project's folder without it",
   detach: "print the thread's id and return, leaving the reply to the thread's finished line",
+  "thread deny reason": "what the agent should do instead, in your words; it reads them with the refusal, as it reads the reason typed in the app",
   "stop task": "stop one of the agent's own subagents alone, by its TASK id off wsp threads; the turn and its other subagents run on",
   effort: "how hard the agent thinks, by its own word (low, medium, high, xhigh, max); its default without it",
   engine: "give it the place's Docker or podman through a socket that sees its own containers alone",
@@ -6144,6 +6431,17 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   fast: "run the turn in the agent's fast mode, on a model that offers one; refused naming the model otherwise",
   file: "a file on this computer to send with the message: an image goes as an image, any other file lands in the thread's folder and the message names its path; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",
+  "slate write check": "validate and sketch the slate, storing nothing",
+  "slate write set": "with --check, a value to rehearse against, like '$i=2' or 'picked=1'; repeats",
+  "slate write press": "with --check, a piece to rehearse a press on, after the --set values",
+  "slate write row": "the row index of the --press piece inside a list, from 0",
+  "slate write action": "which row action of a --press table to rehearse, from 0",
+  "if-version": "the version a read printed; refused with V750 when the document moved past it",
+  "slate state start": "a run to start now that the person said \"Always in this thread\" to; any other answers held; repeats",
+  "slate read values": "a path to resolve now, like '$check.exit' or usage.week.percent, or * for every bound one; repeats",
+  "slate read no-text": "leave out the slate in the JSX-like form a patch is written against",
+  "slate read document": "also print the stored JSON document",
+  "slate read no-sketch": "leave the sketch out",
   threads: "how many threads may run on that computer at once; a new one waits past it",
   machines: "how many machines may run on that cloud at once",
   spend: "the dollars a day that cloud may spend before it starts no new machine",
@@ -6223,15 +6521,18 @@ const aboutLines = (verb: CliVerb | CliOnlyVerb, indent: string): string[] => wr
  * value. `lead` is what the first line opens with, so a page that opens it with `usage: ` is wrapped to the columns
  * it will actually stand in rather than to two spaces and then widened by five. */
 export function usageLines(usage: string, indent: string, lead = "  "): string[] {
-  let depth = 0;
-  const grouped = [...usage]
-    .map(c => {
-      if (c === "[") depth++;
-      if (c === "]") depth--;
-      return c === " " && depth > 0 ? "\u00a0" : c;
-    })
-    .join("");
-  return wrap(`${lead}${grouped}`, HELP_WIDTH, indent).map(line => line.replaceAll("\u00a0", " "));
+  // Each line of a usage that has more than one is wrapped on its own: wrap reads a newline as one more character.
+  return usage.split("\n").flatMap((line, at) => {
+    let depth = 0;
+    const grouped = [...line]
+      .map(c => {
+        if (c === "[") depth++;
+        if (c === "]") depth--;
+        return c === " " && depth > 0 ? "\u00a0" : c;
+      })
+      .join("");
+    return wrap(`${at === 0 ? lead : ""}${grouped}`, HELP_WIDTH, indent).map(l => l.replaceAll("\u00a0", " "));
+  });
 }
 
 /** The lines of one page: each usage, then what it does indented under it, so no line runs wide. */

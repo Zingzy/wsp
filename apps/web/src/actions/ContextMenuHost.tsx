@@ -19,7 +19,7 @@ export function ContextMenuHost() {
   return menu === null ? null : <InAppContextMenu key={menu.seq} menu={menu} />;
 }
 
-const ROW_CLASS = "flex min-h-7 w-full cursor-pointer select-none items-center gap-3 rounded-sm px-2 py-1 text-left text-xs text-popover-foreground outline-none focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground";
+const ROW_CLASS = "flex min-h-7 w-full cursor-pointer items-center gap-3 rounded-sm px-2 py-1 text-left text-xs text-popover-foreground outline-none focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground";
 
 function InAppContextMenu({ menu }: { menu: OpenMenu }) {
   const ref = useRef<HTMLDivElement>(null);

@@ -82,7 +82,6 @@ import {
   PlaceDoorView,
   JoinMint,
   SshHostSuggestion,
-  PlaceSpend,
   AccountsAnswer,
   ResetAnswer,
   ReadingsAnswer,
@@ -127,6 +126,7 @@ import {
   WorkspaceSysEvent,
   type WorkspaceView,
 } from "@wsp/protocol";
+import { slateApi, type SlateApi } from "../slate/wire.js";
 
 export type ProtocolEvent = EventUnion;
 type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void };
@@ -188,10 +188,41 @@ export class RequestError extends Error {
 
 export const defaultBackoffMs = (attempt: number): number => Math.min(5_000, 250 * 2 ** (attempt - 1));
 
+/** Reads two callers may ask with the same words while the first is in flight, which then share one request: a
+ * development build's second mount, two panes opening together. A list, so an op added later is never shared by
+ * having been forgotten; an act is never on it, since two asks of one are two acts. */
+const SHARED_READS: ReadonlySet<string> = new Set([
+  "workspaces.list",
+  "workspaces.get",
+  "workspaces.checkout",
+  "workspaces.landing",
+  "workspaces.pullRequestView",
+  "workspaces.pullRequestDiff",
+  "agents.read",
+  "harnesses.list",
+  "editor.list",
+  "host.terminalConfig",
+  "capabilities.get",
+  "forwards.list",
+  "init.get",
+  "account.get",
+  "devices.list",
+  "image.get",
+  "usage.used",
+  "usage.accounts",
+  "places.list",
+  "projects.list",
+  "golden.get",
+  "release.get",
+  "preferences.get",
+]);
+
 export class ProtocolClient {
   #ws: WebSocket | null = null;
   #seq = 0;
   #pending = new Map<number, Pending>();
+  /** Each shared read in flight by its op and words, until it settles. */
+  #inFlight = new Map<string, Promise<unknown>>();
   #listeners = new Set<(e: ProtocolEvent) => void>();
   /** Per-channel listeners for the frames the host relays from a daemon. Kept off #listeners on purpose: a pty
    * chunk is not history, and the store folds everything that reaches an event listener. */
@@ -234,7 +265,17 @@ export class ProtocolClient {
     });
   }
 
-  async request<T = Record<string, unknown>>(op: string, params: Record<string, unknown> = {}): Promise<T> {
+  request<T = Record<string, unknown>>(op: string, params: Record<string, unknown> = {}): Promise<T> {
+    if (!SHARED_READS.has(op)) return this.#send(op, params);
+    const key = `${op} ${JSON.stringify(params)}`;
+    const held = this.#inFlight.get(key);
+    if (held !== undefined) return held as Promise<T>;
+    const asking = this.#send<T>(op, params).finally(() => this.#inFlight.delete(key));
+    this.#inFlight.set(key, asking);
+    return asking;
+  }
+
+  async #send<T>(op: string, params: Record<string, unknown>): Promise<T> {
     if (this.status !== "live") throw new DisconnectedError(this.#dead ?? "lost");
     const id = this.#next();
     return new Promise<T>((resolve, reject) => {
@@ -439,6 +480,9 @@ export interface Api {
   updateImage?(id: string): Promise<UpgradeResult>;
   /** Replaces a zombie's machine with a fresh golden fork carrying the vault; id and name stay. Optional so fixtures without a zombie need not fake it. */
   rebuild?(id: string): Promise<WorkspaceView>;
+  /** The record of a project's folder on this computer, made where no thread has made it yet. Optional so a fixture
+   * whose projects have all run need not fake it; without it a project never run offers no folder acts. */
+  projectFolder?(projectId: string): Promise<WorkspaceView>;
   /** Pushes the branch the agent made and opens its pull request through the git host's own command line, and
    * answers what both did. Optional so a fixture with no remote need not fake it. */
   bringBack?(id: string): Promise<BringBackResult>;
@@ -453,8 +497,9 @@ export interface Api {
   commitDraft?(id: string, paths?: readonly string[]): Promise<CommitDraft>;
   /** The workspace's viewed marks; with a path, sets the mark on that file against the blob, or takes it off at null. */
   viewed?(id: string, mark?: { path: string; blob: string | null }): Promise<ViewedMarks>;
-  /** The workspace's pull request page, read anew on every ask, with the merge methods the repository allows. */
-  pullRequestView?(id: string): Promise<PullRequestPage>;
+  /** The workspace's pull request page, with the merge methods the repository allows; the host holds a read a minute,
+   * and fresh reads it anew. */
+  pullRequestView?(id: string, fresh?: boolean): Promise<PullRequestPage>;
   /** The workspace's pull request's diff against its base as the git host holds it, cut on a file's boundary. */
   pullRequestDiff?(id: string): Promise<GitPrDiffReply>;
   /** Sends items of the pull request's page to the workspace's agent as one message, as a fix is sent. */
@@ -588,8 +633,9 @@ export interface Api {
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
    * options; takes the runtime's session id, as interruptSession does. answered means the tool call it blocks ran or
    * was refused and the closing event is on the wire; every other outcome closed nothing here. Optional so fixtures
-   * whose harness raises no prompt need not fake it; without it a prompt row's options do nothing. */
-  answerPermission?(sessionId: string, askId: string, optionId: string): Promise<SessionAnswerOutcome>;
+   * whose harness raises no prompt need not fake it; without it a prompt row's options do nothing. A deny may carry the
+   * person's reason, what the agent should do instead. */
+  answerPermission?(sessionId: string, askId: string, optionId: string, reason?: string): Promise<SessionAnswerOutcome>;
   /** Moves the session's running turn to another access mode, from its next tool call on; takes the runtime's session
    * id, as interruptSession does. set means the turn in front of the person now runs at the picked mode; every other
    * outcome moved nothing, and the pick reaches the agent with the next message instead. Optional so fixtures without
@@ -774,10 +820,6 @@ export interface Api {
   /** The workspace's cost ticks since the runtime began metering it, folded to the rate changes and the newest. Optional
    * so fixtures without a usage chart need not fake it; without it the chart starts with the next tick. */
   costHistory?(workspaceId: string): Promise<WorkspaceCostEvent[]>;
-  /** What each place has cost since the first of the month and what it burns now, one row per place anything was
-   * metered on. Optional so fixtures without the settings table need not fake it; without it the table says no
-   * money at all rather than guessing at one. */
-  spend?(): Promise<PlaceSpend[]>;
   /** What the person's turns used over a range, split one way. Optional so fixtures without the Usage page need not
    * fake it. */
   usageUsed?(range: UsageRange, split: UsageSplit): Promise<UsedAnswer>;
@@ -802,6 +844,8 @@ export interface Api {
   /** Builds the image's copy at a place, by its id; `force` copies a record that holds no sign-ins. Progress rides
    * golden.stage frames carrying the place. Optional so a fixture that presses no Copy need not fake it. */
   imageBuild?(place: string, force?: boolean): Promise<SealedImageBuilt>;
+  /** A thread's slate, the window's own ops. Optional so a fixture with no slate need not fake it. */
+  slates?: SlateApi;
 }
 
 /** Which daemon a channel is to: a workspace's, or a computer's own by its place, HERE_PLACE_ID for this one. */
@@ -879,6 +923,7 @@ export function makeApi(c: ProtocolClient): Api {
     restartDaemon: async id => void (await c.request("workspaces.restartDaemon", { workspaceId: id })),
     updateImage: async id => await c.request<UpgradeResult>("workspaces.updateImage", { workspaceId: id }),
     rebuild: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: id })).workspace,
+    projectFolder: async project => (await c.request<{ workspace: WorkspaceView }>("folder.make", { project })).workspace,
     forget: async id => void (await c.request("workspaces.forget", { workspaceId: id })),
     deleteWorkspace: async id => void (await c.request("workspaces.delete", { workspaceId: id })),
     // Parsed, not trusted: the row's line is built from these fields and a reply short of them must not become one.
@@ -888,7 +933,7 @@ export function makeApi(c: ProtocolClient): Api {
     commit: async (id, message, paths) => GitCommitReply.parse(await c.request("workspaces.commit", { workspaceId: id, message, ...(paths !== undefined ? { paths: [...paths] } : {}) })),
     commitDraft: async (id, paths) => CommitDraft.parse(await c.request("workspaces.commitDraft", { workspaceId: id, ...(paths !== undefined ? { paths: [...paths] } : {}) })),
     viewed: async (id, mark) => ViewedMarks.parse(await c.request("workspaces.viewed", { workspaceId: id, ...(mark ?? {}) })),
-    pullRequestView: async id => PullRequestPage.parse(await c.request("workspaces.pullRequestView", { workspaceId: id })),
+    pullRequestView: async (id, fresh) => PullRequestPage.parse(await c.request("workspaces.pullRequestView", { workspaceId: id, ...(fresh === true ? { fresh } : {}) })),
     pullRequestDiff: async id => GitPrDiffReply.parse(await c.request("workspaces.pullRequestDiff", { workspaceId: id })),
     pullRequestReply: async (id, o) => GitPrReplyReply.parse(await c.request("workspaces.pullRequestReply", { workspaceId: id, ...o })),
     pullRequestResolve: async (id, threadId, resolved) => GitPrResolveReply.parse(await c.request("workspaces.pullRequestResolve", { workspaceId: id, threadId, resolved })),
@@ -932,8 +977,8 @@ export function makeApi(c: ProtocolClient): Api {
       SessionInterruptOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.interrupt", { sessionId })).outcome),
     steerSession: async (sessionId, prompt, requestId) =>
       SessionSteerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.steer", { sessionId, prompt, requestId })).outcome),
-    answerPermission: async (sessionId, askId, optionId) =>
-      SessionAnswerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.answer", { sessionId, askId, optionId })).outcome),
+    answerPermission: async (sessionId, askId, optionId, reason) =>
+      SessionAnswerOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.answer", { sessionId, askId, optionId, ...(reason === undefined ? {} : { reason }) })).outcome),
     setSessionAccess: async (sessionId, permissionMode) =>
       SessionAccessOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.access", { sessionId, permissionMode })).outcome),
     // Parsed, not trusted: an outcome outside the enum must not read as renamed.
@@ -1093,9 +1138,9 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the chart interpolates whatever numbers it is handed.
     costHistory: async workspaceId => WorkspaceCostEvent.array().parse((await c.request<{ points?: unknown }>("cost.history", { workspaceId })).points),
     // Parsed, not trusted: a figure a person reads as money is a figure the wire type vouched for.
-    spend: async () => PlaceSpend.array().parse((await c.request<{ places?: unknown }>("cost.spend")).places),
     usageUsed: async (range, split) => UsedAnswer.parse((await c.request<{ used?: unknown }>("usage.used", { range, split, outside: true })).used),
     usageAccounts: async () => AccountsAnswer.parse(await c.request<unknown>("usage.accounts")),
+    slates: slateApi(c),
     usageReset: async account => ResetAnswer.parse(await c.request<unknown>("usage.reset", { account })),
     placesReadings: async (placeId, range) => ReadingsAnswer.parse(await c.request<unknown>("places.readings", { placeId, range })),
     // Parsed, not trusted: the lineage renders and forks only snapshots the wire type vouches for.

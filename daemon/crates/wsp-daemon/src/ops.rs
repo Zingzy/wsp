@@ -12,10 +12,9 @@ use base64::Engine;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, GitPrReadReply, GuestOpen, GuestOpenReply,
-    InboxRescanReply, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply,
-    PortsWatchReply, PtyAttachReply, PtyCreateReply, PtyListReply, Reply, RequestId, DAEMON_OPS, GUEST_OPS, MACHINE_OPS,
-    MACHINE_OPS_ON_ANY_ROAD,
+    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, GuestOpen, GuestOpenReply, InboxRescanReply,
+    ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, PtyAttachReply,
+    PtyCreateReply, PtyListReply, Reply, RequestId, DAEMON_OPS, GUEST_OPS, MACHINE_OPS, MACHINE_OPS_ON_ANY_ROAD,
 };
 
 use crate::exec::{run_exec, ExecOptions};
@@ -71,7 +70,7 @@ pub(crate) struct Conn {
     /// op still being answered when the socket went undoes itself at once instead of outliving it.
     detaches: Mutex<Option<Vec<Detach>>>,
     /// This socket's proc.watch, so proc.unwatch can end it before the socket does and a second watch on the same
-    /// socket is not a second subscription.
+    /// socket asks for a whole snapshot rather than a second subscription.
     proc_watch: Mutex<Option<(u64, Arc<ProcSampler>)>>,
     /// The one guest session this socket opened, which ends with it.
     guest: Mutex<Option<String>>,
@@ -232,6 +231,7 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
             Some("place.leave") => {
                 let home = crate::place::place_home(ctx.options.home.as_deref());
                 let profile = ctx.options.apparmor_profile.clone().unwrap_or_else(|| wsp_frames::numbers::WORKSPACE_APPARMOR_PATH.into());
+                let install = ctx.options.install_root.as_deref().map(|root| root.to_string_lossy().into_owned()).unwrap_or_default();
                 let swept = fs::blocking(move || {
                     let mut swept = crate::place::sweep_place_home(&home, &crate::place::sh_stdout);
                     // Only root's install loaded the profile and only root's jobs install under the prefix, and only
@@ -239,10 +239,10 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
                     if nix::unistd::geteuid().is_root() {
                         swept.extend(crate::place::sweep_workspace_profile(&profile, &crate::place::sh_stdout));
                         // The list naming what the setup wrote outside the home sits in the prefix, so it is read first.
-                        swept.extend(crate::place::sweep_outside_home(""));
+                        swept.extend(crate::place::sweep_outside_home(&install));
                         swept.extend(crate::place::sweep_tool_prefix(
-                            std::path::Path::new(wsp_frames::numbers::TOOL_PREFIX),
-                            std::path::Path::new(wsp_frames::numbers::TOOL_LINKS_DIR),
+                            std::path::Path::new(&format!("{install}{}", wsp_frames::numbers::TOOL_PREFIX)),
+                            std::path::Path::new(&format!("{install}{}", wsp_frames::numbers::TOOL_LINKS_DIR)),
                         ));
                     }
                     Ok(swept)
@@ -978,7 +978,7 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
         // The reads and the merge below name the repository by the remote the frame carries, which the host took off
         // the project's own record: the folder is only where gh runs, and nothing in it is read, so an agent writing
         // its copy's configuration cannot point a read, and still less a merge, at another repository.
-        DaemonOp::GitPrRead { cwd, remote, branch, number, machine_id } => {
+        DaemonOp::GitPrRead { cwd, remote, branch, number, seen, machine_id } => {
             let read = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
                 let pick = match (number, branch.as_deref()) {
@@ -988,7 +988,7 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                         return Err(OpError::coded(DaemonErrorCode::BadRequest, "git.prRead names a branch or a number".to_owned()))
                     }
                 };
-                Ok(GitPrReadReply { pr: hosts::read(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, &pick).await? })
+                hosts::read(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, &pick, seen.as_deref()).await
             };
             answer(id, read.await)
         }
@@ -1115,20 +1115,19 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, read.await)
         }
-        DaemonOp::PortsWatch => {
-            let key = ctx.next_key();
-            ctx.ports.subscribe(Listener { key, out: conn.out.clone() });
-            let ctx2 = Arc::clone(ctx);
-            conn.on_close(Box::new(move || ctx2.ports.unsubscribe(key)));
-            ctx.ports.start(ctx);
-            // The poll and the reading of what it left are one held lock, so the reply carries the seed and not a
-            // state a later poll has already moved on from.
-            let (events, ports) = {
-                let mut watcher = ctx.ports.watcher.lock().await;
-                let events = watcher.poll().await;
-                (events, watcher.current())
-            };
-            ctx.ports.deliver(ctx, events);
+        DaemonOp::PortsWatch { roots, folder } => {
+            let held = Arc::downgrade(ctx);
+            let spot: crate::ports::OnChanges = Arc::new(move |events| {
+                if let Some(ctx) = held.upgrade() {
+                    crate::relay::note_opens(&ctx, events);
+                }
+            });
+            let key = conn.key;
+            let (ports, fresh) = ctx.ports.watch(key, conn.out.clone(), roots, folder, spot).await;
+            if fresh {
+                let ctx2 = Arc::clone(ctx);
+                conn.on_close(Box::new(move || ctx2.ports.unsubscribe(key)));
+            }
             text(&Reply::new(id, PortsWatchReply { ports }))
         }
         DaemonOp::ManifestGet => {
@@ -1229,7 +1228,9 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                 let key = ctx.next_key();
                 conn.while_open(|| {
                     let mut watch = conn.proc_watch.lock().unwrap_or_else(|e| e.into_inner());
-                    if watch.is_some() {
+                    // A socket already watching that watches again missed a frame: its next one is whole.
+                    if let Some((held, sampler)) = watch.as_ref() {
+                        sampler.resend(*held);
                         return None;
                     }
                     sampler.subscribe(key, conn.out.clone());
@@ -1647,24 +1648,43 @@ mod tests {
         let profile = home.path().join("apparmor.d").join("wsp-workspace");
         std::fs::create_dir_all(profile.parent().unwrap()).unwrap();
         std::fs::write(&profile, "not a profile\n").unwrap();
+        // wsp's install a root leave takes is this case's too: a prefix under its home, one link into it and one of
+        // the computer's own beside it, so the real sweep runs as root and the machine's /opt/wsp is never its to take.
+        let prefix = home.path().join("opt/wsp");
+        let links = home.path().join("usr/local/bin");
+        let tool = links.join("tool");
+        std::fs::create_dir_all(prefix.join("bin")).unwrap();
+        std::fs::create_dir_all(&links).unwrap();
+        std::fs::write(prefix.join("bin/tool"), "tool\n").unwrap();
+        std::os::unix::fs::symlink("../../../opt/wsp/bin/tool", &tool).unwrap();
+        std::os::unix::fs::symlink("/usr/bin/env", links.join("env")).unwrap();
         let machines = std::path::Path::new(wsp_frames::numbers::WORKSPACE_APPARMOR_PATH);
         let machines_before = std::fs::read(machines).ok();
         let mut options = Options::new(b._token.path());
         options.home = Some(home.path().to_path_buf());
         options.apparmor_profile = Some(profile.clone());
+        options.install_root = Some(home.path().to_path_buf());
         let ctx = Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap());
         let out = handle(&link, &ctx, &json!({"id": 21, "op": "place.leave"}).to_string()).await;
         let Outgoing::Leave(text) = &out else { panic!("a leave stops the daemon after its reply") };
         // Each part of wsp's own folder is named for the line it puts in front of a person, and the folder itself
-        // goes last, so nothing under it is left on a computer the person joined; a root leave then takes the profile.
+        // goes last, so nothing under it is left on a computer the person joined; a root leave then takes the profile,
+        // the link into the prefix and the prefix.
+        let said: Value = serde_json::from_str(text).unwrap();
+        for path in said["swept"].as_array().unwrap() {
+            assert!(std::path::Path::new(path.as_str().unwrap()).starts_with(home.path()), "the leave took {path}, outside its temp root");
+        }
         let root = nix::unistd::geteuid().is_root();
         let mut swept = vec![at.place_file.to_string_lossy(), at.token_path.to_string_lossy(), at.wsp.to_string_lossy()];
         if root {
-            swept.push(profile.to_string_lossy());
+            swept.extend([profile.to_string_lossy(), tool.to_string_lossy(), prefix.to_string_lossy()]);
         }
-        assert_eq!(serde_json::from_str::<Value>(text).unwrap(), json!({"id": 21, "ok": true, "swept": swept}));
+        assert_eq!(said, json!({"id": 21, "ok": true, "swept": swept}));
         assert!(!at.place_file.exists() && !at.token_path.exists() && !at.wsp.exists());
         assert_eq!(profile.exists(), !root);
+        assert_eq!(prefix.exists(), !root);
+        assert_eq!(tool.symlink_metadata().is_ok(), !root);
+        assert!(links.join("env").symlink_metadata().is_ok(), "the leave took a link that is not into wsp's prefix");
         assert_eq!(std::fs::read(machines).ok(), machines_before, "the leave touched this machine's own profile");
     }
 

@@ -58,15 +58,25 @@ function halves(slot: Element): { happened: string; fix: string } {
 
 /** The page with the shell's answers in place, opened and left until its scan has landed. `refusedScan` makes the
  * scan reject that many times before it answers, which is how a computer whose agents cannot be read is driven. */
-async function open(agents: unknown[] = AGENTS, opts: { refusedScan?: number; refusedTools?: string[]; unnamed?: true } = {}): Promise<Screen> {
+async function open(agents: unknown[] = AGENTS, opts: { refusedScan?: number; refusedTools?: string[]; unnamed?: true; titleBar?: { dark: boolean; colors: unknown[]; flip?: () => void } } = {}): Promise<Screen> {
   const asks: Asks = { install: [], finish: 0, scans: 0 };
   const dom = new JSDOM(PAGE, {
     runScripts: "dangerously",
     pretendToBeVisual: true,
     beforeParse(window) {
       // jsdom has no matchMedia; the page reads it once to follow the computer's appearance, which Chromium answers.
-      (window as unknown as { matchMedia: unknown }).matchMedia = () => ({ matches: false, addEventListener: () => {} });
+      const bar = opts.titleBar;
+      const scheme = {
+        get matches() {
+          return bar?.dark ?? false;
+        },
+        addEventListener: (_type: string, listen: () => void) => {
+          if (bar !== undefined) bar.flip = listen;
+        },
+      };
+      (window as unknown as { matchMedia: unknown }).matchMedia = () => scheme;
       (window as unknown as { wsp: unknown }).wsp = {
+        ...(bar === undefined ? {} : { setTitleBar: () => bar.colors.push(window.document.documentElement.classList.contains("dark")) }),
         here: () => (opts.unnamed === true ? Promise.reject(new Error("scutil: no ComputerName")) : Promise.resolve(HERE)),
         agents: () => {
           asks.scans += 1;
@@ -133,6 +143,16 @@ describe("the first launch", () => {
     expect(doc.querySelectorAll("#agents button.primary")).toHaveLength(1);
   });
 
+  it("tells the shell its theme moved once the computer's side is on, as it opens and as the side flips, and drags the window by its top band", async () => {
+    const bar: { dark: boolean; colors: unknown[]; flip?: () => void } = { dark: true, colors: [] };
+    await open(AGENTS, { titleBar: bar });
+    expect(bar.colors).toEqual([true]);
+    bar.dark = false;
+    bar.flip!();
+    expect(bar.colors).toEqual([true, false]);
+    expect(PAGE).toMatch(/body::before \{[^}]*height: var\(--workspace-topbar-height\); -webkit-app-region: drag; \}/);
+  });
+
   it("draws one row per catalog agent, the found ones first and ticked, the missing ones held, and Open wsp gives the ticked ones the tools and then asks the shell to open the app", async () => {
     const screen = await open();
     expect(rows(screen)).toEqual([
@@ -167,20 +187,22 @@ describe("the first launch", () => {
     expect(named.text("#agents .sentence")).toBe(`Each ticked agent gets the wsp tools and skill, so it can open threads and tasks on ${HERE}.`);
     const unnamed = await open(AGENTS.map(a => ({ ...a, found: false })), { unnamed: true });
     expect(unnamed.text("#agents .sentence")).toBe("Each ticked agent gets the wsp tools and skill, so it can open threads and tasks.");
-    expect(unnamed.text("#line")).toBe("No agent found. Install Claude Code or Codex, then press Check again.");
+    expect(unnamed.text("#line")).toBe("No agent found. Threads start once you install one. Settings then gives it the tools.");
     expect(`${unnamed.text("#welcome")} ${unnamed.text("#agents")}`).not.toMatch(/this Mac|this computer/);
   });
 
-  it("on a computer with no agent holds every row and reads Check again, which reads the agents again and opens nothing", async () => {
+  it("on a computer with no agent holds every row and still lets the person in: Open wsp stays live, the line says threads wait for an agent, and the press installs nothing and opens the app", async () => {
     const screen = await open(AGENTS.map(a => ({ ...a, found: false })));
     expect(rows(screen).every(r => !r.checked && r.disabled)).toBe(true);
-    expect(screen.text("#line")).toBe(`No agent found on ${HERE}. Install Claude Code or Codex, then press Check again.`);
-    expect(keycap(screen)).toBe("Check again");
+    expect(screen.text("#line")).toBe(`No agent found on ${HERE}. Threads start once you install one. Settings then gives it the tools.`);
+    // The list offers every catalog agent, so the line names none of them in particular.
+    for (const a of AGENTS) expect(screen.text("#line")).not.toContain(a.name);
+    expect(keycap(screen)).toBe("Open wsp");
     expect((screen.at("#open") as HTMLButtonElement).disabled).toBe(false);
     await screen.press("#open");
-    expect(screen.asks.scans).toBe(2);
     expect(screen.asks.install).toEqual([]);
-    expect(screen.asks.finish).toBe(0);
+    expect(screen.asks.finish).toBe(1);
+    expect(screen.asks.scans).toBe(1);
   });
 
   it("draws a refusal as two halves, what happened then what to do, and keeps the keycap live after one", async () => {

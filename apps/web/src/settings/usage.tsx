@@ -14,6 +14,7 @@ import { Button, NEUTRAL_RING } from "../components/ui/button.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { cn } from "../lib/utils.js";
+import { keepHeld, useHeld } from "../protocol/held.js";
 import { useStore } from "../protocol/store.js";
 import { PROJECT_HUES, ProjectGlyph } from "../projects/look.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
@@ -55,68 +56,37 @@ export function usageCards(ctx: SettingsContext): SettingsCardData[] {
   return [{ id: "usage", items: [], body: <UsagePage ctx={ctx} /> }];
 }
 
+/** How long a Usage read stands: both tabs and a second visit inside it draw the one answer. */
+const USAGE_HOLD_MS = 60_000;
+const ACCOUNTS_KEY = "usage:accounts";
+
 function UsagePage({ ctx }: { ctx: SettingsContext }) {
   const { api } = ctx;
   const tab = useSettingsStore(state => state.usageTab);
   const [range, setRange] = useState<UsageRange>("week");
   const [split, setSplit] = useState<UsageSplit>("agent");
-  const [accounts, setAccounts] = useState<AccountsAnswer | null>(null);
-  const [used, setUsed] = useState<UsedAnswer | null>(null);
-  const [accountsRefused, setAccountsRefused] = useState<string | null>(null);
-  const [usedRefused, setUsedRefused] = useState<string | null>(null);
-
+  const readAccounts = api?.usageAccounts;
+  const readUsed = api?.usageUsed;
+  const accounts = useHeld<AccountsAnswer>(ACCOUNTS_KEY, readAccounts === undefined ? undefined : () => readAccounts(), { holdMs: USAGE_HOLD_MS });
+  const asked = useHeld<UsedAnswer>(`usage:used:${range}:${split}`, readUsed === undefined ? undefined : () => readUsed(range, split), { holdMs: USAGE_HOLD_MS });
+  // The last range's figures stand while the next range is read, so the digits roll from them rather than a skeleton.
+  const [used, setUsed] = useState<UsedAnswer | null>(asked.value ?? null);
   useEffect(() => {
-    let live = true;
-    void api?.usageAccounts?.().then(
-      answer => {
-        if (!live) return;
-        setAccountsRefused(null);
-        setAccounts(answer);
-      },
-      (e: unknown) => live && setAccountsRefused(saidOf(e)),
-    );
-    return () => {
-      live = false;
-    };
-  }, [api]);
-
-  useEffect(() => {
-    let live = true;
-    void api?.usageUsed?.(range, split).then(
-      answer => {
-        if (!live) return;
-        setUsedRefused(null);
-        setUsed(answer);
-      },
-      (e: unknown) => {
-        if (!live) return;
-        setUsed(null);
-        setUsedRefused(saidOf(e));
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [api, range, split]);
+    if (asked.value !== undefined) setUsed(asked.value);
+    else if (asked.error !== undefined) setUsed(null);
+  }, [asked.value, asked.error]);
 
   // By agent, each agent's models stand under it, read as the model split of the same range.
-  const [models, setModels] = useState<readonly UsedRow[]>([]);
   const nested = split === "agent";
-  useEffect(() => {
-    if (!nested) return setModels([]);
-    let live = true;
-    void api?.usageUsed?.(range, "model").then(
-      answer => live && setModels(answer.rows),
-      () => live && setModels([]),
-    );
-    return () => {
-      live = false;
-    };
-  }, [api, range, nested]);
+  const models = useHeld<UsedAnswer>(nested ? `usage:used:${range}:model` : null, readUsed === undefined ? undefined : () => readUsed(range, "model"), { holdMs: USAGE_HOLD_MS });
 
   return (
     <div key={tab} className="flex animate-settle-in flex-col gap-8 motion-reduce:animate-none">
-      {tab === "limits" ? <Limits accounts={accounts?.accounts ?? null} refused={accountsRefused} now={ctx.now} onAccount={row => setAccounts(held => (held === null ? held : { ...held, accounts: held.accounts.map(a => (a.key === row.key ? row : a)) }))} /> : <Used used={used} refused={usedRefused} models={models} range={range} split={split} onRange={setRange} onSplit={setSplit} ctx={ctx} />}
+      {tab === "limits" ? (
+        <Limits accounts={accounts.value?.accounts ?? null} refused={accounts.error === undefined ? null : saidOf(accounts.error)} now={ctx.now} onAccount={row => keepHeld<AccountsAnswer | undefined>(ACCOUNTS_KEY, held => (held === undefined ? held : { ...held, accounts: held.accounts.map(a => (a.key === row.key ? row : a)) }))} />
+      ) : (
+        <Used used={used} refused={asked.error === undefined || asked.value !== undefined ? null : saidOf(asked.error)} models={nested && models.error === undefined ? (models.value?.rows ?? []) : []} range={range} split={split} onRange={setRange} onSplit={setSplit} ctx={ctx} />
+      )}
     </div>
   );
 }
@@ -173,7 +143,7 @@ function PoolWindow({ kind, segments, now }: { kind: LimitKind; segments: readon
           {W.windows[kind] ?? kind}
         </span>
         <span className="flex items-baseline gap-2">
-          <DigitRoll value={`${Math.max(0, 100 - used)}%`} className="font-mono text-2xl leading-8 font-medium text-foreground" data-k="left" />
+          <DigitRoll rollIn value={`${Math.max(0, 100 - used)}%`} className="font-mono text-2xl leading-8 font-medium text-foreground" data-k="left" />
           <span className="text-[12.5px] text-muted-foreground">{W.left}</span>
         </span>
         <span data-k="verdict" className={cn("truncate text-[12.5px] leading-5", verdict.tone === "warn" ? "text-warning-foreground" : verdict.tone === "quiet" ? "text-muted-foreground" : "text-foreground/80")}>
@@ -443,12 +413,17 @@ const sumOf = (rows: readonly UsedRow[], pick: (row: UsedRow) => number | undefi
 const estimateOf = (row: UsedRow): number | undefined => row.estimate ?? (row.costReported === undefined && row.costList === undefined ? undefined : (row.costReported ?? 0) + (row.costList ?? 0));
 const percent = (part: number, whole: number): string => (whole === 0 ? "0%" : `${((part / whole) * 100).toFixed(1)}%`);
 
+/** One cell of the stat strip: a label, a big figure and a quiet note, the strip's cells split by hairlines. */
+export const STAT = { cell: "flex min-w-0 flex-col gap-1.5", label: "text-[13px] text-muted-foreground", figure: "font-mono text-[26px] leading-8 font-medium text-foreground", note: "truncate text-xs text-muted-foreground" } as const;
+/** A chart's legend: each line's swatch before its name. */
+export const LEGEND = { row: "flex flex-wrap gap-x-6 gap-y-2 text-[13.5px] text-muted-foreground", item: "flex items-center gap-2", swatch: "h-0.5 w-3.5 rounded-full bg-current" } as const;
+
 function Stat({ k, label, value, note }: { k: string; label: string; value: string; note?: string }) {
   return (
-    <div data-k={k} className="flex min-w-0 flex-col gap-1.5 px-5 py-5">
-      <span className="text-[13px] text-muted-foreground">{label}</span>
-      <DigitRoll value={value} className="font-mono text-[26px] leading-8 font-medium text-foreground" />
-      {note === undefined ? null : <span className="truncate text-xs text-muted-foreground">{note}</span>}
+    <div data-k={k} className={cn(STAT.cell, "px-5 py-5")}>
+      <span className={STAT.label}>{label}</span>
+      <DigitRoll rollIn value={value} className={STAT.figure} />
+      {note === undefined ? null : <span className={STAT.note}>{note}</span>}
     </div>
   );
 }
@@ -692,19 +667,19 @@ function Used({ used, refused, models, range, split, onRange, onSplit, ctx }: { 
             head={W.chartHead[used.range]}
             body={<div className="flex flex-col gap-4">
               {used.lines === undefined ? (
-                <div data-k="usage-legend" className="flex flex-wrap gap-x-6 gap-y-2 text-[13.5px] text-muted-foreground">
-                  <span className="flex items-center gap-2">
-                    <span aria-hidden className="h-0.5 w-3.5 rounded-full bg-foreground" />
+                <div data-k="usage-legend" className={LEGEND.row}>
+                  <span className={LEGEND.item}>
+                    <span aria-hidden className={cn(LEGEND.swatch, "text-foreground")} />
                     {W.allOf[used.split]}
                   </span>
                 </div>
               ) : (
-                <div data-k="usage-legend" className="flex flex-wrap gap-x-6 gap-y-2 text-[13.5px] text-muted-foreground">
+                <div data-k="usage-legend" className={LEGEND.row}>
                   {lines.map(line => {
                     const agent = agentByKey.get(line.key);
                     return (
-                      <span key={line.key} className="flex items-center gap-2">
-                        <span aria-hidden className={cn("h-0.5 w-3.5 rounded-full bg-current", line.ink.className)} style={line.ink.style} />
+                      <span key={line.key} className={LEGEND.item}>
+                        <span aria-hidden className={cn(LEGEND.swatch, line.ink.className)} style={line.ink.style} />
                         {agent === undefined || agentMark(agent) === undefined ? null : <HarnessMark harness={agent} label={agentName(agent)} className="size-3" />}
                         {line.label}
                       </span>

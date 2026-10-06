@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The workspace-level words for a daemon link, read from the one state table:
-// what a pane says over its frame, and the word and sentence a resting tile
-// carries while the link is down. Both come from the same pane state, so the sidebar
-// and a pane can never say two things about one link. Beside them, the one
+// what a pane says over its frame, and the word and line the Files and Diff
+// panes say while the link is down. Both come from the same pane state, so two
+// surfaces can never say two things about one link. Beside them, the one
 // read of a folder's branch over the link, keyed on the link's word.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { isLocalWorkspace, workspaceStateOf, type DaemonLinkStatus, type PlaceView, type RepoStateWord, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
@@ -13,10 +13,10 @@ import { useCapabilities, usePlaces, useStatus, useStore, useWorkspace } from ".
 import { absenceOf } from "../settings/places.js";
 import { computerName } from "../sidebar/workspaceRows.js";
 import { gitStatus } from "./daemon-fs.js";
-import { everyTerminals, getTerminals, NOT_OPENED_YET, onTerminals, type TerminalWire } from "./link.js";
+import { getTerminals, NOT_OPENED_YET, onTerminals, type TerminalWire } from "./link.js";
 
-/** A link's pane state off the store's record of its workspace: the one reading useTerminalPane and the sidebar's
- * link words both take, so a tile and a pane cannot say two things about one link. */
+/** A link's pane state off the store's record of its workspace: the one reading useTerminalPane and useLinkDown
+ * both take, so two surfaces cannot say two things about one link. */
 function paneOf(input: { workspace: WorkspaceView | null; status: WorkspaceStatus | null; places: readonly PlaceView[]; socket: DaemonLinkStatus; refusal: string | null; outOfMemory?: Parameters<typeof terminalPaneState>[0]["outOfMemory"] }): TerminalPaneState {
   const { workspace, status } = input;
   const view = status ?? workspace;
@@ -127,56 +127,24 @@ export function useBranch(wire: TerminalWire | null, folder: string | null, ask:
   return state.folder === folder ? state.branch : UNKNOWN;
 }
 
-/** A workspace's link being down, as a resting tile shows it: one word in its slot and the pane's sentence on its
- * hover. */
+/** A workspace's link being down, as a surface that needs it says so: the word for how it is down and the line
+ * that says why. */
 export interface LinkDown {
   readonly word: string;
-  readonly sentence: string;
+  readonly line: string;
 }
 
-const NO_LINKS_DOWN: Readonly<Record<string, LinkDown>> = {};
-
-const sameDowns = (a: Readonly<Record<string, LinkDown>>, b: Readonly<Record<string, LinkDown>>): boolean => {
-  const keys = Object.keys(a);
-  return keys.length === Object.keys(b).length && keys.every(k => a[k]!.word === b[k]?.word && a[k]!.sentence === b[k]?.sentence);
-};
-
-/** Every workspace whose link is down, for the sidebar's tiles: one subscription over the links there are, and the
- * same object while nothing changes. A workspace with no link open is not down. */
-export function useLinkDowns(): Readonly<Record<string, LinkDown>> {
-  const workspaces = useStore(s => s.workspaces);
-  const statuses = useStore(s => s.statuses);
+/** This workspace's link while it is down, for a surface that reads over it and draws no pane of its own; null while
+ * it is up, still inside its first-answer bound, or the workspace itself is what is not there. */
+export function useLinkDown(workspaceId: string): LinkDown | null {
+  const { socket, refusal } = useLinkSocket(workspaceId);
+  const workspace = useWorkspace(workspaceId);
+  const status = useStatus(workspaceId);
   const places = usePlaces();
-  const last = useRef(NO_LINKS_DOWN);
-  const subscribe = useCallback((fn: () => void) => {
-    let offs: Array<() => void> = [];
-    const watch = () => {
-      offs.forEach(off => off());
-      offs = [...everyTerminals()].map(([, terms]) => terms.onStatus(fn));
-    };
-    watch();
-    const offRegistry = onTerminals(() => {
-      watch();
-      fn();
-    });
-    return () => {
-      offRegistry();
-      offs.forEach(off => off());
-    };
-  }, []);
-  const snapshot = useCallback(() => {
-    const next: Record<string, LinkDown> = {};
-    for (const [id, terms] of everyTerminals()) {
-      const workspace = workspaces.find(w => w.id === id) ?? null;
-      const status = statuses[id] ?? null;
-      if (workspace === null && status === null) continue;
-      const pane = paneOf({ workspace, status, places, socket: terms.status(), refusal: terms.refusal() });
-      const sentence = linkDownLine(pane);
-      const word = linkDownWord(pane);
-      if (sentence !== null && word !== null) next[id] = { word, sentence };
-    }
-    if (!sameDowns(last.current, next)) last.current = Object.keys(next).length === 0 ? NO_LINKS_DOWN : next;
-    return last.current;
-  }, [places, statuses, workspaces]);
-  return useSyncExternalStore(subscribe, snapshot);
+  return useMemo(() => {
+    const pane = paneOf({ workspace, status, places, socket, refusal });
+    const word = linkDownWord(pane);
+    const line = linkDownLine(pane);
+    return word === null || line === null ? null : { word, line };
+  }, [workspace, status, places, socket, refusal]);
 }

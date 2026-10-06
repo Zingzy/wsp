@@ -5,14 +5,16 @@
 // a chart of one line per split value with no fill, the split as a table
 // and the token mix. No computer's load stands
 // on the page.
-import { cleanup, fireEvent } from "@testing-library/react";
+import { act, cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { agentMark } from "@wsp/catalog";
 import type { AccountRow, PlaceView, UsageRange, UsageSplit, UsedAnswer, UsedRow } from "@wsp/protocol";
 import { creditsWord, logsLine, resetQuestion, RESET_WORDS, USAGE_WORDS } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
+import { forgetHeld } from "../src/protocol/held.js";
 import { useStore } from "../src/protocol/store.js";
 import { ABOUT_WORDS, PRIVACY_WORDS, USAGE_PAGE_WORDS } from "../src/settings/format.js";
+import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { mountSettings, resetSettings, rowOf, settingsApi, settle } from "./settings-harness.js";
 
 const here: PlaceView = { id: "here", kind: "computer", name: "zingzys-macbook-pro.local", label: "zingzy's MacBook Pro", default: true, present: true, takesForks: false, shape: { cpu: 10, memMb: 32_768 } };
@@ -125,6 +127,42 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+describe("Usage and Settings reads", () => {
+  it("asks nothing on a second visit inside a minute, both tabs drawing the one read, and asks again past it", async () => {
+    let accountAsks = 0;
+    let settingsAsks = 0;
+    const { asks } = await mount({
+      usageAccounts: async () => (accountAsks++, { accounts: accounts() }),
+      editorList: async () => (settingsAsks++, []),
+    } as Partial<Api>);
+    expect([asks.length, accountAsks, settingsAsks]).toEqual([2, 1, 1]);
+    fireEvent.click(document.querySelector("[data-k=usage-tabs] [data-segment=limits]")!);
+    await settle();
+    cleanup();
+    useStore.setState({ settingsOpen: false });
+    mountSettings({ api: useStore.getState().api!, at: { kind: "group", group: "usage" } });
+    await settle();
+    expect([asks.length, accountAsks, settingsAsks]).toEqual([2, 1, 1]);
+    cleanup();
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + 60_001);
+    mountSettings({ api: useStore.getState().api!, at: { kind: "group", group: "usage" } });
+    await settle();
+    expect([asks.length, accountAsks, settingsAsks]).toEqual([4, 2, 2]);
+  });
+
+  it("keeps what an act wrote inside the hold, rather than drawing the older answer again on the next opening", async () => {
+    await mount({ sshInclude: async () => false } as Partial<Api>);
+    expect(useSettingsStore.getState().reads.sshInclude).toBe(false);
+    cleanup();
+    act(() => useSettingsStore.getState().setReads({ sshInclude: true }));
+    useStore.setState({ settingsOpen: false });
+    mountSettings({ api: useStore.getState().api!, at: { kind: "group", group: "usage" } });
+    await settle();
+    expect(useSettingsStore.getState().reads.sshInclude).toBe(true);
+  });
+});
+
 describe("Usage: limits", () => {
   it("says a Codex account's banked resets under its pool, and spends one only after the person says yes to the shared question", async () => {
     const day = 24 * HOUR;
@@ -155,6 +193,7 @@ describe("Usage: limits", () => {
     expect(text($("[data-usage-resets='codex:acct-1'] [data-k=banked]"))).toBe("none banked");
     expect($("[data-usage-resets='codex:acct-1'] [data-k=use-reset]")).toBeNull();
     cleanup();
+    forgetHeld();
     await mountLimits();
     expect($("[data-usage-resets]")).toBeNull();
   });

@@ -32,7 +32,6 @@ import { RowNameInput } from "./RowNameInput.js";
 import { tileCardLines, tilePrIcon, type TileCardLine } from "./tileCard.js";
 import type { TileCheckout } from "./tileCheckout.js";
 import { SNOOZE_WORDS } from "./words.js";
-import type { LinkDown } from "../terminal/paneWords.js";
 import { LINK_DOWN_WORDS } from "../adapt/terminal-pane.js";
 import { ONE_LINE_ROW_CLASS, TILE_CLASS, TILE_ROW_ONE_CLASS, TILE_ROW_TWO_CLASS, TILE_TITLE_CLASS, threadRowId } from "./rowGrammar.js";
 
@@ -163,7 +162,6 @@ export function ThreadTile({
   active,
   settled = false,
   snoozedWorking,
-  linkDown,
   renaming,
   saving,
   onSelect,
@@ -191,8 +189,6 @@ export function ThreadTile({
   settled?: boolean;
   /** The tile stands for a snoozed tree while threads of it run: how many, said quietly in place of the status. */
   snoozedWorking?: number | undefined;
-  /** The workspace's link is down: a resting tile says so in its slot in place of its age. */
-  linkDown?: LinkDown | undefined;
   /** The name is being typed on this tile: row two holds the input instead of the title. */
   renaming: boolean;
   /** That name is on its way to the machine: the field stays exactly as it is and takes no second Enter. */
@@ -225,9 +221,8 @@ export function ThreadTile({
     changed: checkout.changed,
     notes: [snoozed ? SNOOZE_WORDS.workingHover(snoozedWorking) : thread.asking, thread.setupRefusal ?? null, ...checkout.counts, checkout.why ?? null],
   });
-  // An agent the host refuses to start there speaks in the link-down slot, under any state of the thread's own.
-  const down: LinkDown | undefined =
-    status === RESTING && linkDown !== undefined ? linkDown : thread.setupRefusal !== undefined && (status === RESTING || status.id === FAILED.id) ? { word: LINK_DOWN_WORDS.refused, sentence: thread.setupRefusal } : undefined;
+  // An agent the host refuses to start there says so in the slot, over a resting or failed thread's own status.
+  const setupRefused = thread.setupRefusal !== undefined && (status === RESTING || status.id === FAILED.id) ? thread.setupRefusal : undefined;
   const frame = {
     card,
     place,
@@ -263,9 +258,9 @@ export function ThreadTile({
         status={
           snoozed ? (
             <SnoozedWorking count={snoozedWorking} />
-          ) : down !== undefined ? (
-            <span data-thread-status={down === linkDown ? "link-down" : "setup-refused"} title={down.sentence} className="inline-flex shrink-0 items-center whitespace-nowrap">
-              {down.word}
+          ) : setupRefused !== undefined ? (
+            <span data-thread-status="setup-refused" title={setupRefused} className="inline-flex shrink-0 items-center whitespace-nowrap">
+              {LINK_DOWN_WORDS.refused}
             </span>
           ) : (
             <ThreadStatus thread={thread} age={time} settled={settled} />

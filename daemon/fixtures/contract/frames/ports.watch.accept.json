@@ -2,5 +2,26 @@
   {
     "id": 1,
     "op": "ports.watch"
+  },
+  {
+    "id": 2,
+    "op": "ports.watch",
+    "roots": [
+      200,
+      4242
+    ]
+  },
+  {
+    "id": 3,
+    "op": "ports.watch",
+    "roots": []
+  },
+  {
+    "id": 6,
+    "op": "ports.watch",
+    "roots": [
+      200
+    ],
+    "folder": "/Users/zingzy/wsp/landing"
   }
 ]

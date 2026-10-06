@@ -201,7 +201,7 @@ function ThreadCode({ hunk }: { hunk: string }) {
   const lines = hunkTail(hunk);
   if (lines.length === 0) return null;
   return (
-    <div data-pr-thread-code className="border-t border-border/50 bg-[var(--code-background)] py-1 font-mono text-xs leading-[18px]">
+    <div data-pr-thread-code className="border-t border-border/50 bg-[var(--code-background)] py-1 font-mono text-xs leading-[18px] select-text">
       {lines.map((l, i) => (
         <div key={i} data-line={l.kind} className={cn("grid grid-cols-[34px_34px_minmax(0,1fr)]", LINE_INK[l.kind], i === lines.length - 1 && "shadow-[inset_0_0_0_100vmax_color-mix(in_srgb,var(--primary)_9%,transparent)]")}>
           <em className="pr-2 text-right text-muted-foreground not-italic select-none">{l.old ?? ""}</em>

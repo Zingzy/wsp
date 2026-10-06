@@ -509,19 +509,23 @@ describe("the sidebar's list of thread tiles", () => {
 
   it("a live root's menu settles its whole tree, and the Settled row's own menu settles every read tree while an unseen one stays", async () => {
     const { settleThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const live = [
+      { ws: "ws_a", id: "th_lead", prompt: "the lead", status: "completed", startedAgo: 20 * 60_000, endedAgo: 10 * 60_000 },
+      { ws: "ws_a", id: "th_builder", prompt: "its builder", parent: "th_lead", status: "completed", startedAgo: 15 * 60_000, endedAgo: 12 * 60_000 },
+      { ws: "ws_a", id: "th_unseen", prompt: "nobody looked", status: "completed", startedAgo: 9 * 60_000, endedAgo: 8 * 60_000, readAgo: HOUR },
+    ];
     await act(async () => {
-      useStore.setState({
-        sessions: sessions([
-          { ws: "ws_a", id: "th_lead", prompt: "the lead", status: "completed", startedAgo: 20 * 60_000, endedAgo: 10 * 60_000 },
-          { ws: "ws_a", id: "th_builder", prompt: "its builder", parent: "th_lead", status: "completed", startedAgo: 15 * 60_000, endedAgo: 12 * 60_000 },
-          { ws: "ws_a", id: "th_unseen", prompt: "nobody looked", status: "completed", startedAgo: 9 * 60_000, endedAgo: 8 * 60_000, readAgo: HOUR },
-        ]),
-      } as never);
+      useStore.setState({ sessions: sessions(live) } as never);
     });
     await waitFor(() => expect(screen.getByText("the lead")).toBeDefined());
-    // Nothing has settled yet, but there is a read tree to settle, so the row that settles it is there.
+    // Nothing has settled yet: no Settled row, though a read tree could settle.
+    expect(document.querySelector("[data-row-id=settled]")).toBeNull();
+    await act(async () => {
+      useStore.setState({ sessions: sessions([...live, { ws: "ws_a", id: "th_old", prompt: "settled last week", status: "completed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR, readAgo: 28 * HOUR, settledAgo: HOUR }]) } as never);
+    });
+    await waitFor(() => expect(document.querySelector("[data-row-id=settled]")).not.toBeNull());
     const fold = document.querySelector<HTMLElement>("[data-row-id=settled]")!;
-    expect(fold.querySelector("[data-group-count]")!.textContent).toBe("(0)");
+    expect(fold.querySelector("[data-group-count]")!.textContent).toBe("(1)");
     const picked: string[][] = [];
     const choose = (id: string) => (window.wsp = { contextMenu: async (items: Array<{ id: string; enabled?: boolean }>) => (picked.push(items.map(item => item.id)), id) } as never);
     try {
@@ -537,6 +541,30 @@ describe("the sidebar's list of thread tiles", () => {
       choose("settle-read");
       fireEvent.contextMenu(fold);
       await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_lead", "th_builder"]));
+    } finally {
+      delete (window as { wsp?: unknown }).wsp;
+    }
+  });
+
+  it("the list's own menu holds Settle all read, so it is there with nothing settled and read trees to settle", async () => {
+    const { settleThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    await act(async () => {
+      useStore.setState({
+        sessions: sessions([
+          { ws: "ws_a", id: "th_read", prompt: "read already", status: "completed", startedAgo: 20 * 60_000, endedAgo: 10 * 60_000 },
+          { ws: "ws_a", id: "th_unseen", prompt: "nobody looked", status: "completed", startedAgo: 9 * 60_000, endedAgo: 8 * 60_000, readAgo: HOUR },
+        ]),
+      } as never);
+    });
+    await waitFor(() => expect(screen.getByText("read already")).toBeDefined());
+    expect(rowIds()).toEqual(expect.arrayContaining(["thread:th_read", "thread:th_unseen"]));
+    expect(rowIds().filter(id => id.startsWith("thread:"))).toHaveLength(2);
+    const picked: string[][] = [];
+    window.wsp = { contextMenu: async (items: Array<{ id: string }>) => (picked.push(items.map(item => item.id)), "settle-read") } as never;
+    try {
+      fireEvent.contextMenu(document.querySelector<HTMLElement>("[data-sidebar-tree]")!);
+      await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_read"]));
+      expect(picked).toEqual([["settle-read"]]);
     } finally {
       delete (window as { wsp?: unknown }).wsp;
     }
@@ -627,7 +655,7 @@ describe("the sidebar's list of thread tiles", () => {
     mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
     const failed = { ws: "ws_a", id: "th_broke", prompt: "it broke", status: "failed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR, readAgo: 28 * HOUR };
     await act(async () => useStore.setState({ sessions: sessions([failed]) } as never));
-    await waitFor(() => expect(rowIds()).toEqual(["thread:th_broke", "settled"]));
+    await waitFor(() => expect(rowIds()).toEqual(["thread:th_broke"]));
     expect(rowOf("it broke").querySelector("[data-thread-status]")!.textContent).toBe("Failed");
     await act(async () => useStore.setState({ sessions: sessions([{ ...failed, settledAgo: HOUR }]) } as never));
     await waitFor(() => expect(rowIds()).toEqual(["settled"]));
@@ -681,12 +709,14 @@ describe("the sidebar's list of thread tiles", () => {
 
   describe("the sections, the marks and the drag", () => {
     const heads = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-section-head]")].map(head => head.dataset["sectionHead"] ?? "");
-    const drag = (tile: HTMLElement, onto: HTMLElement): void => {
+    /** `onto` as a function is found once the drag has started, for a place that stands only while a tile is dragged. */
+    const drag = (tile: HTMLElement, onto: HTMLElement | (() => HTMLElement)): void => {
       const data = new Map<string, string>();
       const dataTransfer = { setData: (type: string, value: string) => void data.set(type, value), getData: (type: string) => data.get(type) ?? "", types: ["text/plain"], effectAllowed: "move", dropEffect: "move" };
       fireEvent.dragStart(tile, { dataTransfer });
-      fireEvent.dragOver(onto, { dataTransfer });
-      fireEvent.drop(onto, { dataTransfer });
+      const place = typeof onto === "function" ? onto() : onto;
+      fireEvent.dragOver(place, { dataTransfer });
+      fireEvent.drop(place, { dataTransfer });
       fireEvent.dragEnd(tile, { dataTransfer });
     };
     const all = [
@@ -703,9 +733,11 @@ describe("the sidebar's list of thread tiles", () => {
       await act(async () => useStore.setState({ sessions: sessions(all) } as never));
       await waitFor(() => expect(screen.getByText("kept on top")).toBeDefined());
       expect(heads()).toEqual(["pinned", "needs-you"]);
+      // Every head names its section in words, Needs you as Pinned and Settled do; the state glyph is the tiles' alone.
       expect([...document.querySelectorAll("[data-section-head]")].map(head => head.textContent)).toEqual(["Pinned (1)", "Needs you (1)"]);
-      expect(rowIds()).toEqual(["thread:th_pinned", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle", "settled"]);
-      expect(walkIds()).toEqual(["section:pinned", "thread:th_pinned", "section:needs-you", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle", "settled"]);
+      expect(document.querySelector("[data-section-head=needs-you] svg.lucide-message-circle-question")).toBeNull();
+      expect(rowIds()).toEqual(["thread:th_pinned", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle"]);
+      expect(walkIds()).toEqual(["section:pinned", "thread:th_pinned", "section:needs-you", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle"]);
       expect(screen.queryByText("snoozed away")).toBeNull();
       const slot = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-status]")!;
       // A working row's word is for a screen reader; the time ticking is what it shows.
@@ -730,8 +762,8 @@ describe("the sidebar's list of thread tiles", () => {
       await act(async () => useStore.setState({ sessions: sessions(all) } as never));
       await waitFor(() => expect(screen.getByText("kept on top")).toBeDefined());
       const head = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-section-head=${id}]`)!;
-      for (const id of ["pinned", "needs-you", "settled"]) {
-        const at = id === "settled" ? document.querySelector<HTMLElement>("[data-row-id=settled]")! : head(id);
+      for (const id of ["pinned", "needs-you"]) {
+        const at = head(id);
         expect(at.tagName, id).toBe("BUTTON");
         expect(at.className, id).toContain("h-7");
         expect(at.querySelector("[data-section-rule]"), id).not.toBeNull();
@@ -805,7 +837,7 @@ describe("the sidebar's list of thread tiles", () => {
       const calls = markThreads.mock.calls.length;
       drag(rowOf("finished unseen"), section("threads"));
       expect(markThreads.mock.calls).toHaveLength(calls);
-      drag(rowOf("read already"), document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+      drag(rowOf("read already"), () => document.querySelector<HTMLElement>("[data-row-id=settled]")!);
       await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_idle"]));
     });
 
@@ -816,7 +848,7 @@ describe("the sidebar's list of thread tiles", () => {
       );
       await waitFor(() => expect(screen.getByText("its builder")).toBeDefined());
       clearNotices();
-      drag(rowOf("read already"), document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+      drag(rowOf("read already"), () => document.querySelector<HTMLElement>("[data-row-id=settled]")!);
       await waitFor(() => expect(lastNotice()).toBe(THREAD_TREE_WORKING));
       expect(settleThreads).not.toHaveBeenCalled();
     });
@@ -827,11 +859,14 @@ describe("the sidebar's list of thread tiles", () => {
       const places = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-section]")].map(section => section.dataset["section"] ?? "");
       await waitFor(() => expect(places()).toEqual(["threads"]));
       expect(heads()).toEqual([]);
+      expect(document.querySelector("[data-row-id=settled]")).toBeNull();
       fireEvent.dragStart(rowOf("still going"), { dataTransfer: { setData: () => {}, effectAllowed: "move" } });
       expect(places()).toEqual(["pinned", "needs-you", "threads"]);
       expect(heads()).toEqual(["pinned", "needs-you"]);
+      expect(document.querySelector("[data-row-id=settled]")).not.toBeNull();
       fireEvent.dragEnd(rowOf("still going"));
       expect(places()).toEqual(["threads"]);
+      expect(document.querySelector("[data-row-id=settled]")).toBeNull();
     });
   });
 

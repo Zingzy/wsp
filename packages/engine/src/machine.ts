@@ -49,6 +49,9 @@ export interface RunOptions {
    * it ran and what it exited with, never what it printed. The caller reads the output itself; the backend does
    * nothing differently for it. */
   unlogged?: boolean;
+  /** The caller's cancel: the command's session is killed, pid and group, as the deadline kills it, and the result is
+   * exit 130 with the output so far. A backend whose run cannot reach the session leaves it to its deadline. */
+  signal?: AbortSignal;
 }
 
 

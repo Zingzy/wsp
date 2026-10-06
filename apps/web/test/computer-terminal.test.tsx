@@ -111,8 +111,8 @@ describe("the right panel chord with no workspace", () => {
     act(() => runShellCommand("rightPanel.toggle", target(null), []));
     await waitFor(() => expect(document.querySelector("[data-right-panel-tabbar]")).not.toBeNull());
     const cards = [...document.querySelectorAll("[data-surface-launch]")];
-    expect(cards.map(c => c.getAttribute("data-surface-launch"))).toEqual(["preview", "terminal", "diff", "files", "machine", "processes", "agents"]);
-    expect(cards.map(c => c.tagName)).toEqual(["BUTTON", "BUTTON", "DIV", "DIV", "BUTTON", "BUTTON", "DIV"]);
+    expect(cards.map(c => c.getAttribute("data-surface-launch"))).toEqual(["preview", "terminal", "diff", "files", "machine", "processes", "agents", "slate"]);
+    expect(cards.map(c => c.tagName)).toEqual(["BUTTON", "BUTTON", "DIV", "DIV", "BUTTON", "BUTTON", "DIV", "DIV"]);
     screen.getByText("Pick a project to review its changes.");
 
     act(() => runShellCommand("rightPanel.toggle", target(null), []));
@@ -200,7 +200,7 @@ describe("the wiring", () => {
       const release = getProcs(HERE_KEY).watch();
       await waitFor(() => expect(ops).toContain("proc.watch"));
       const event = (e: Record<string, unknown>) => act(() => push!({ type: "daemon.event", channel: "c1", event: e as { type: string } }));
-      event({ type: "proc.snapshot", at: 1, daemon: 9, total: 1, procs: [{ pid: 9, ppid: 1, user: "dev", state: "S", comm: "wspd", cmdline: "wspd", cpu: 0, rss: 0, startedAt: 0 }] });
+      event({ type: "proc.snapshot", at: 1, daemon: 9, total: 1, seq: 1, procs: [{ pid: 9, ppid: 1, user: "dev", state: "S", comm: "wspd", cmdline: "wspd", cpu: 0, rss: 0, startedAt: 0 }] });
       event({ type: "sys.sample", cpu: 5, load1: 1.5, mem: { used: 1, total: 2 }, disk: { used: 3, total: 4 }, at: 1 });
       await waitFor(() => expect(getProcs(HERE_KEY).snapshot().snapshot?.procs.map(p => p.pid)).toEqual([9]));
       expect(getLive(HERE_KEY).snapshot().samples.map(s => s.load1)).toEqual([1.5]);

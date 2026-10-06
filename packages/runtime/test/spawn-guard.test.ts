@@ -16,6 +16,7 @@ import { HERE_PLACE_ID,
   RUNTIME_OPS,
   LAUNCH_ENV,
   SCOPED_MCP_ARG,
+  NO_SLATE_MCP_ARG,
   SCOPED_TOKEN_ROAD_REFUSAL,
   THREAD_OPS,
   threadOpRefusal,
@@ -519,6 +520,61 @@ describe("agents spawning agents", () => {
     await onLead.finished;
     await gone(rt);
     expect(await rt.devices.list()).toEqual([]);
+    await rt.close();
+  });
+
+  it("a thread another thread started on this computer runs its wsp tools marked as having no slate, and its lead does not", async () => {
+    const held = heldAdapter({ takesMcpServers: true });
+    const wspMcp = { command: "node", args: ["/opt/wsp/dist/bin.js", "mcp"] };
+    const rt = runtimeWith({ claude: held.factory }, { here: { url: "http://127.0.0.1:4801" }, wspMcp });
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: AGENTS_ON });
+    const lead = await rt.sessions.start(mac.id, { prompt: "lead" });
+    const leadThread = lead.view().threadId!;
+    const child = await rt.sessions.start(mac.id, { prompt: "builder" }, asThread({ kind: "thread", threadId: leadThread, workspaceId: mac.id, rootThreadId: leadThread }));
+    expect(child.view().parentThreadId).toBe(leadThread);
+    const [leadLaunch, childLaunch] = held.launches;
+    expect(leadLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ ...wspMcp, args: [...wspMcp.args, SCOPED_MCP_ARG] });
+    expect(childLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ ...wspMcp, args: [...wspMcp.args, SCOPED_MCP_ARG, NO_SLATE_MCP_ARG], noSlate: true });
+    held.end(1);
+    held.end(0);
+    await child.finished;
+    await lead.finished;
+    await rt.close();
+  });
+
+  it("a thread another thread started on a box is marked as having no slate with its line left as the box's wsp takes it", async () => {
+    const held = heldAdapter({ takesMcpServers: true });
+    const rt = runtimeWith({ claude: held.factory }, { here: { url: "http://127.0.0.1:4801" } });
+    const box = await createOn(rt, { golden: "snap_g", name: "box", agents: AGENTS_ON });
+    const lead = await rt.sessions.start(box.id, { prompt: "lead" });
+    const leadThread = lead.view().threadId!;
+    const child = await rt.sessions.start(box.id, { prompt: "builder" }, asThread({ kind: "thread", threadId: leadThread, workspaceId: box.id, rootThreadId: leadThread }));
+    expect(child.view().parentThreadId).toBe(leadThread);
+    const [leadLaunch, childLaunch] = held.launches;
+    expect(leadLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ command: "wsp", args: ["mcp"] });
+    // An older wsp on the box refuses a word it does not know, so the mark rides beside the line, never on it.
+    expect(childLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ command: "wsp", args: ["mcp"], noSlate: true });
+    held.end(1);
+    held.end(0);
+    await child.finished;
+    await lead.finished;
+    await rt.close();
+  });
+
+  it("deleting a workspace on a machine forgets the slate of every thread it drops, its always timer with it", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory });
+    const box = await createOn(rt, { golden: "snap_g", name: "box", agents: AGENTS_ON });
+    const lead = await rt.sessions.start(box.id, { prompt: "lead" });
+    const threadId = lead.view().threadId!;
+    await rt.slates.write({ text: `<slate title="Box"><run name="tick" cmd="true" every={10} always /><column><output run={$tick} /></column></slate>` }, asThread({ kind: "thread", threadId, workspaceId: box.id, rootThreadId: threadId }));
+    expect(await rt.slates.get(threadId)).not.toBeNull();
+    expect(await store.get("slates", threadId)).toBeDefined();
+    held.end(0);
+    await lead.finished;
+    await rt.workspaces.delete(box.id);
+    expect(await rt.slates.get(threadId)).toBeNull();
+    expect(await store.get("slates", threadId)).toBeUndefined();
     await rt.close();
   });
 

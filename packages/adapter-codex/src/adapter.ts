@@ -132,7 +132,7 @@ export interface CodexSession {
    * turns the message down. */
   steer(prompt: string): Promise<"accepted" | "not-running">;
   /** Answers an approval the server asked for with accept or decline; gone when no such request is open. */
-  answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<"answered" | "gone">;
+  answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string; reason?: string }): Promise<"answered" | "gone">;
   /** turn/interrupt on one subagent's own thread, by that thread's id, the lead and its other subagents running on. */
   stopTask(task: string): Promise<TaskStop>;
 }
@@ -182,7 +182,7 @@ export interface CodexAdapter {
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */
   sessionTitle: SessionTitleReader;
-  /** Names the thread in that same index, in the column the CLI's own rename writes. */
+  /** Names the thread through the app server's own rename, which writes the column that read takes. */
   renameSession: SessionRenamer;
   /** Asks the CLI itself, in one read-only turn, for a name for a thread it has just replied in. */
   titleFor: SessionTitleMaker;
@@ -386,7 +386,10 @@ function itemDeltas(done: boolean, item: Item, sessionId: string): AdapterEvent[
         : [delta({ kind: "tool_use", text: JSON.stringify({ changes: changesOf(item.changes) }), toolName: "file_change", toolUseId: item.id })];
     case "mcpToolCall": {
       if (!done) return [delta({ kind: "tool_use", text: JSON.stringify(item.arguments ?? {}), toolName: `${str(item.server) ?? "mcp"}.${str(item.tool) ?? "tool"}`, toolUseId: item.id })];
-      const text = failed() ? (str(rec(item.error)?.message) ?? "") : JSON.stringify(rec(item.result)?.content ?? []);
+      // A tool that answers isError fails the call with its words in the result and no error message.
+      const said = str(rec(item.error)?.message);
+      const content = rec(item.result)?.content;
+      const text = failed() && said !== undefined && said !== "" ? said : failed() && content === undefined ? "" : JSON.stringify(content ?? []);
       return [delta({ kind: "tool_result", text, toolUseId: item.id, isError: failed() })];
     }
     case "collabAgentToolCall":
@@ -1054,6 +1057,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         const wrote = await stream.write(decisionLine(open.id, answer.optionId === PERMISSION_ALLOW ? "accept" : "decline")).catch(() => "gone" as const);
         if (wrote !== "written") return "gone";
         emit({ type: "permission.close", sessionId: threadId, askId, outcome: answer.outcome, optionId: answer.optionId });
+        // A decline carries no words on this server, so the person's reason goes to the turn as their own message.
+        if (answer.outcome === "denied" && answer.reason !== undefined) void session.steer(answer.reason);
         return "answered";
       },
       stopTask: async task => {
@@ -1256,7 +1261,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     revert,
     probeCatalog,
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
-    renameSession: (threadId, title, exec) => exec(renameCommand({ home: deps.home, threadId, title })).then(parseRename),
+    renameSession: (threadId, title, exec) =>
+      exec(renameCommand({ home: deps.home, threadId, title, baseEnv: deps.baseEnv, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) })).then(parseRename),
     titleFor: (turn, exec) =>
       exec(
         titleForCommand({

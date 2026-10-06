@@ -5,8 +5,8 @@
 // mark alone over Get started, the tilde a flat stroke with one thin light
 // along its top edge and one thin shade along its bottom, drawn by CSS alone;
 // then the agents screen, one row per catalog agent, the found ones ticked and
-// the missing ones held, Open wsp held until one is ticked, and Check again
-// where none was found. Each is frozen and photographed in both appearances,
+// the missing ones held, Open wsp held until one is ticked and live where
+// none was found, and Check again where the agents could not be read. Each is frozen and photographed in both appearances,
 // and no focus ring sits at rest however a screen was reached. Like the web's
 // render tests it runs only when asked for (WSP_RENDER=1) and skips without
 // Playwright's Chromium.
@@ -49,7 +49,7 @@ const HERE = "zingzy's MacBook Pro";
 const LINES = {
   some: "Agents you install later get the tools from Settings.",
   noneTicked: "Tick at least one agent. wsp works through the agents you give it.",
-  noneFound: `No agent found on ${HERE}. Install Claude Code or Codex, then press Check again.`,
+  noneFound: `No agent found on ${HERE}. Threads start once you install one. Settings then gives it the tools.`,
 };
 const TOOLS_FIX = "Take the tick off that agent, or fix its config and press again.";
 
@@ -73,11 +73,9 @@ const bridge = (agents: ReadonlyArray<{ id: string; name: string; found: boolean
   finish: async () => { window.__opened = true; },
 };`;
 const NO_AGENTS = bridge(AGENTS.map(a => ({ ...a, found: false })));
-/** None found on the first read, then the two installed while the screen waited: what Check again is for. */
-const FOUND_ON_SECOND_READ = `${bridge()}
-let reads = 0;
-const later = window.wsp.agents;
-window.wsp.agents = async () => (++reads === 1 ? ${JSON.stringify(AGENTS.map(a => ({ ...a, found: false })))} : later());`;
+/** The catalog's six agents as the Linux VM had them, none installed, in a window too short to hold them all. */
+const SIX_MISSING = bridge(["Claude Code", "Codex", "Gemini CLI", "OpenCode", "Pi", "Hermes Agent"].map((name, i) => ({ id: ["claude", "codex", "gemini", "opencode", "pi", "hermes"][i]!, name, found: false, configured: false })));
+const SHORT = { width: 1280, height: 600 };
 /** A read of this computer's agents that throws. */
 const UNREAD = `${bridge()}\nwindow.wsp.agents = async () => { throw new Error("Error invoking remote method 'agents': Error: EACCES: permission denied"); };`;
 /** The catalog's six agents, every one here: the most names one refusal can ever have to carry. */
@@ -332,6 +330,43 @@ describe.skipIf(renderSkipped !== undefined)("the first launch laid out in Chrom
     await page!.screenshot({ path: join(SHOTS, `onboarding-agents-${theme}.png`) });
   });
 
+  it("asks the shell to read its title bar colours, and under the class a Linux window carries they paint its own ground and the pane toggles' ink, in both appearances", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(theme, "reduce", `${bridge()}\nwindow.__asked = 0; window.wsp.setTitleBar = () => { window.__asked += 1; };\ndocument.addEventListener("DOMContentLoaded", () => document.documentElement.classList.add("wco"));`);
+      const read = await page!.evaluate(() => {
+        const pen = document.createElement("canvas").getContext("2d")!;
+        const rgba = (color: string): number[] => {
+          pen.clearRect(0, 0, 1, 1);
+          pen.fillStyle = color;
+          pen.fillRect(0, 0, 1, 1);
+          return [...pen.getImageData(0, 0, 1, 1).data];
+        };
+        const resolve = (css: string): number[] => {
+          const probe = document.createElement("span");
+          probe.style.color = css;
+          document.documentElement.append(probe);
+          const color = getComputedStyle(probe).color;
+          probe.remove();
+          return rgba(color);
+        };
+        return {
+          asked: (window as unknown as { __asked: number }).__asked,
+          ground: resolve("var(--titlebar-ground, transparent)"),
+          page: rgba(getComputedStyle(document.querySelector(".ground")!).backgroundColor),
+          ink: resolve("var(--titlebar-ink, transparent)"),
+          mixed: resolve("color-mix(in srgb, var(--foreground) 80%, var(--background))"),
+        };
+      });
+      expect(read.asked).toBeGreaterThan(0);
+      expect(read.ground).toEqual(read.page);
+      expect(read.ink).toEqual(read.mixed);
+      expect(read.ink[3]).toBe(255);
+      expect(read.ink).not.toEqual(read.ground);
+      await page!.close();
+      page = undefined;
+    }
+  });
+
   it("holds Open wsp while no agent is ticked and says why, and a tick frees it; the press installs into the ticked ones and opens wsp", async () => {
     await agents("light");
     await page!.click("#rows .row:nth-child(1)");
@@ -350,24 +385,37 @@ describe.skipIf(renderSkipped !== undefined)("the first launch laid out in Chrom
     expect(await page!.evaluate(() => (window as unknown as { __installed?: string[] }).__installed)).toEqual(["codex"]);
   });
 
-  it.each(["dark", "light"] as const)("in the %s appearance a computer with no agents holds every row, says what to install, and the keycap reads Check again", async theme => {
+  it.each(["dark", "light"] as const)("in the %s appearance a computer with no agents holds every row, says threads wait for one, and Open wsp stays live", async theme => {
     await agents(theme, "reduce", NO_AGENTS);
     expect((await rows()).map(r => [r.checked, r.disabled, r.state])).toEqual(AGENTS.map(() => [false, true, "not installed"]));
     expect(await page!.textContent("#line")).toBe(LINES.noneFound);
-    expect(await keycap()).toBe("Check again");
+    expect(await keycap()).toBe("Open wsp");
     expect(await page!.isEnabled("#open")).toBe(true);
     await page!.screenshot({ path: join(SHOTS, `onboarding-agents-none-${theme}.png`) });
   });
 
-  it("Check again reads the agents again, and the screen becomes the one with them found", async () => {
-    await agents("light", "reduce", FOUND_ON_SECOND_READ);
-    expect(await keycap()).toBe("Check again");
+  it("with no agent the press opens wsp and installs into nothing", async () => {
+    await agents("light", "reduce", NO_AGENTS);
     await page!.click("#open");
-    await page!.waitForFunction(() => (document.querySelector("#open")?.textContent ?? "").includes("Open wsp"));
-    expect((await rows()).filter(r => r.checked).map(r => r.name)).toEqual(["Claude Code", "Codex"]);
-    expect(await page!.textContent("#line")).toBe(LINES.some);
-    // It only read again: nothing was installed and wsp did not open.
-    expect(await page!.evaluate(() => (window as unknown as { __opened?: boolean }).__opened)).toBeUndefined();
+    await page!.waitForFunction(() => (window as unknown as { __opened?: boolean }).__opened === true);
+    expect(await page!.evaluate(() => (window as unknown as { __installed?: string[] }).__installed)).toBeUndefined();
+  });
+
+  it("in a window too short for the screen no row is cut: the card keeps every row whole and the page scrolls to the last one at the window's edge, not the column", async () => {
+    await agents("light", "reduce", SIX_MISSING, SHORT);
+    const card = await box("#rows");
+    const last = await box("#rows .row:last-child");
+    expect(card.h).toBe(6 * 48 + 2);
+    expect(card.w).toBe(560);
+    expect(last.y + last.h).toBeLessThanOrEqual(card.y + card.h);
+    // A classic Linux scrollbar on the 560 px column would stand mid-window and narrow the card; the page's stands at the edge.
+    expect(await page!.$eval("#agents", el => getComputedStyle(el).overflowY)).toBe("visible");
+    await page!.$eval("#open", el => el.scrollIntoView({ block: "end" }));
+    expect(await page!.$eval("#agents", el => el.scrollTop)).toBe(0);
+    expect(await page!.evaluate(() => document.body.scrollTop + document.documentElement.scrollTop)).toBeGreaterThan(0);
+    const key = await box("#open");
+    expect(Math.floor(key.y + key.h)).toBeLessThanOrEqual(SHORT.height);
+    await page!.screenshot({ path: join(SHOTS, "onboarding-agents-short-light.png") });
   });
 
   it("a read of the agents that fails says so in the refusal slot, with the shell's words on its title, and offers Check again", async () => {

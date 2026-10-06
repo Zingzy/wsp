@@ -6,9 +6,12 @@
 // the store at a turn's end and on a refresh, names the session on the machine
 // when a client renames the thread, and keeps the answer on the rows a thread
 // is folded from.
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
-import { createCodexAdapter } from "@wsp/adapter-codex";
+import { createCodexAdapter, parseSessionTitle } from "@wsp/adapter-codex";
 import { THREAD_AGENTS, type ThreadAgent } from "@wsp/catalog";
 import { ExecFailedError, MachineUnreachableError, type Machine } from "@wsp/engine";
 import { EMPTY_TITLE_LINE, foldThreads, keepsRename, machineUnreachableLine, signInRefusalLine, type AdapterEvent, type TitleTurn, type TurnResult } from "@wsp/protocol";
@@ -20,6 +23,9 @@ import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
+import { fakeAppServer } from "../../adapter-codex/test/fake-app-server.js";
+
+const run = promisify(execFile);
 
 const SESSION = "33333333-3333-4333-8333-333333333333";
 const TITLE_COMMAND = "wsp-title-read";
@@ -44,6 +50,8 @@ function titledAdapter(
     maker?: HarnessAdapter["titleFor"];
     /** What the turn replies; the title question is asked of it. */
     reply?: string;
+    /** How the turn ends; completed when absent. */
+    status?: TurnResult["status"];
     /** Held open, the turn runs until the test lets it end. */
     hold?: () => Promise<void>;
     /** What an interrupt does to a turn held open. A real harness ends the turn when the host interrupts it, which
@@ -51,6 +59,8 @@ function titledAdapter(
     endsOnInterrupt?: boolean;
     /** Every start's options, so a test can read what the launch carried. */
     starts?: HarnessStartOptions[];
+    /** A real adapter's store write in place of the stand-in one keepsNames gives. */
+    writer?: HarnessAdapter["renameSession"];
   } = {},
 ): HarnessAdapterFactory {
   const reader: HarnessAdapter["sessionTitle"] =
@@ -68,11 +78,11 @@ function titledAdapter(
     steers: false,
     ...(options.keepsTitles === false ? {} : { sessionTitle: reader }),
     ...(options.maker !== undefined ? { titleFor: options.maker } : {}),
-    ...(options.keepsNames === true ? { renameSession: writer } : {}),
+    ...(options.writer !== undefined ? { renameSession: options.writer } : options.keepsNames === true ? { renameSession: writer } : {}),
     start: o => {
       options.starts?.push(o);
       const sessionId = o.resume ?? options.sessionOf?.(o.prompt) ?? SESSION;
-      const result: TurnResult = { status: "completed", text: options.reply ?? "ok" };
+      const result: TurnResult = { status: options.status ?? "completed", text: options.reply ?? "ok" };
       const emit = (e: AdapterEvent): void => o.onEvent(e);
       let interrupted!: () => void;
       const ended = new Promise<void>(resolve => {
@@ -588,6 +598,69 @@ describe("the title the harness makes for a thread", () => {
     await new Promise(r => setTimeout(r, 5));
     expect(asked).toEqual([]);
     expect(await titleOf(rt, ws.id)).toBe("Ticket 411 review");
+  });
+
+  it("writes the name again at the turn's end when codex had not written the thread when it was given", async () => {
+    // Codex inserts a thread's index row with ON CONFLICT DO NOTHING, so a name given before its first turn is written
+    // has nowhere to land: the app server refuses it then and takes it once the turn has written the thread.
+    const server = fakeAppServer({ "thread/name/set": [{ error: { code: -32600, message: `no rollout found for thread id ${SESSION}` } }, { result: {} }] });
+    const codex = createCodexAdapter({ exec: () => { throw new Error("no turns here"); }, home: server.home, login: "codex login", baseEnv: { PATH: server.path } });
+    const named = () => server.requests().filter(r => r["method"] === "thread/name/set");
+    const turn = gate<void>();
+    const { backend } = titledBackend(() => OPENING);
+    const inner = backend.execImpl;
+    backend.execImpl = async (m, cmd) => (cmd.includes("thread/name/set") ? { exitCode: 0, stdout: (await run("bash", ["-c", cmd], { env: { PATH: "/usr/bin:/bin", HOME: tmpdir() } })).stdout, stderr: "" } : inner(m, cmd));
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ writer: codex.renameSession, hold: () => turn.wait }) } });
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      const handle = await rt.sessions.start(ws.id, { prompt: OPENING, title: "Ticket 411 review" });
+      await until(() => named().length === 1);
+      turn.open();
+      await handle.finished;
+      await until(() => named().length === 2);
+      expect(named().map(r => r["params"])).toEqual([
+        { threadId: SESSION, name: "Ticket 411 review" },
+        { threadId: SESSION, name: "Ticket 411 review" },
+      ]);
+      expect(await titleOf(rt, ws.id)).toBe("Ticket 411 review");
+    } finally {
+      server.remove();
+    }
+  });
+
+  it("keeps the name a start gave on a codex thread whose store titles it with the whole brief, whether its turn answers or fails", async () => {
+    // Codex fills its title column with the opening message whole, every line of it, and leaves the name column empty
+    // until a rename lands there; that title is the opening words, never a person's name.
+    const brief = "You are the cold reviewer for wsp-map #1671: the desktop app\nupdating itself in place.\n\nRead the diff first.";
+    for (const status of ["completed", "failed"] as const) {
+      const { backend, reads } = titledBackend(() => JSON.stringify({ name: null, title: brief }));
+      const reader: HarnessAdapter["sessionTitle"] = (sessionId, exec) => exec(`${TITLE_COMMAND} ${sessionId}`).then(parseSessionTitle);
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { codex: titledAdapter({ reader, status, rekeys: true }) } });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      await (await rt.sessions.start(ws.id, { prompt: brief, harness: "codex", title: "Review 1671 self update" })).finished;
+      await until(() => reads.length > 0);
+      await new Promise(r => setTimeout(r, 5));
+      expect(await titleOf(rt, ws.id), status).toBe("Review 1671 self update");
+      expect((await rt.sessions.list(ws.id))[0]?.titleSource, status).toBe("person");
+    }
+  });
+
+  it("keeps the name a start gave on a codex thread started with a file, whose store titles it with the prompt the files were handed in", async () => {
+    // A message with files reaches the agent as its words and then the block naming every landed path, and Codex
+    // titles the thread with that whole prompt.
+    const brief = "You are the cold reviewer for wsp-map #1671.\nRead the diff first.";
+    const starts: HarnessStartOptions[] = [];
+    const { backend } = titledBackend(() => (starts[0] === undefined ? null : JSON.stringify({ name: null, title: starts[0].prompt })));
+    const reader: HarnessAdapter["sessionTitle"] = (sessionId, exec) => exec(`${TITLE_COMMAND} ${sessionId}`).then(parseSessionTitle);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { codex: titledAdapter({ reader, starts, rekeys: true }) } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const notes = { mediaType: "text/plain", bytes: Buffer.from("notes").toString("base64"), name: "notes.txt" };
+    await (await rt.sessions.start(ws.id, { prompt: brief, harness: "codex", title: "Review 1671 self update", attachments: [notes], requestId: "req_a" })).finished;
+    expect(starts[0]?.prompt).toContain("Attached files:");
+    await until(async () => (await rt.sessions.list(ws.id))[0]?.status !== "running");
+    await new Promise(r => setTimeout(r, 5));
+    expect(await titleOf(rt, ws.id)).toBe("Review 1671 self update");
+    expect((await rt.sessions.list(ws.id))[0]?.titleSource).toBe("person");
   });
 
   it("refuses a start named with nothing at all", async () => {

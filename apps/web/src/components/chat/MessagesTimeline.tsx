@@ -96,6 +96,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
 import { formatChatTimestamp } from "../../lib/timestampFormat";
+import { SlateUpdatedLine } from "../../slate/SlateUpdatedLine";
 import { formatWorkspaceRelativePath } from "../../lib/filePathDisplay";
 import { AssistantSelectionToolbar, QUOTE_SOURCE_ATTRIBUTE, type QuotedSelection } from "./AssistantSelectionToolbar";
 
@@ -107,6 +108,7 @@ const NOOP_IS_AT_END_CHANGE = (_isAtEnd: boolean) => {};
 const NOOP_MANUAL_NAVIGATION = () => {};
 const EMPTY_TURN_DIFF_SUMMARIES: ReadonlyMap<MessageId, TurnDiffSummary> = new Map();
 const EMPTY_REWINDABLE: ReadonlySet<MessageId> = new Set();
+const EMPTY_SLATED: ReadonlySet<MessageId> = new Set();
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -125,6 +127,8 @@ interface TimelineRowSharedState {
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   /** The replies Rewind to here stands on: the last reply of each earlier turn that kept something to rewind to. */
   rewindableMessageIds: ReadonlySet<MessageId>;
+  /** The last replies of the turns the agent wrote the slate in. */
+  slatedMessageIds: ReadonlySet<MessageId>;
   onRewind: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenFile: ((path: string, line?: number) => void) | undefined;
@@ -133,6 +137,7 @@ interface TimelineRowSharedState {
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   onToggleWorkEntry: (anchorKey: string) => void;
   onAnswerPermission: (sessionId: string, askId: string, optionId: string) => void;
+  dockedAskId: string | null;
   workGroupViewState: WorkGroupViewState;
   replyRuns: ReplyRuns | null;
 }
@@ -207,9 +212,13 @@ export interface MessagesTimelineProps {
   threadKey: string;
   onOpenTurnDiff?: (turnId: TurnId, filePath?: string) => void;
   rewindableMessageIds?: ReadonlySet<MessageId>;
+  slatedMessageIds?: ReadonlySet<MessageId>;
   onRewind?: (messageId: MessageId) => void;
   /** Answers a relayed permission prompt; the turn it blocks runs or is refused as the option says. */
   onAnswerPermission?: (sessionId: string, askId: string, optionId: string) => void;
+  /** The prompt answered where the composer stands, by its ask id: its row here keeps the record and offers
+   * nothing, while every other open prompt (another thread's, a subagent's) keeps its own buttons. */
+  dockedAskId?: string | null;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenFile?: (path: string, line?: number) => void;
   markdownCwd: string | undefined;
@@ -256,8 +265,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   threadKey,
   onOpenTurnDiff = NOOP_OPEN_TURN_DIFF,
   rewindableMessageIds = EMPTY_REWINDABLE,
+  slatedMessageIds = EMPTY_SLATED,
   onRewind = NOOP_REWIND,
   onAnswerPermission = NOOP_ANSWER_PERMISSION,
+  dockedAskId = null,
   onImageExpand,
   onOpenFile,
   markdownCwd,
@@ -520,6 +531,39 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [timelineViewportElement, rows.length]);
 
+  // Chromium leaves select-all's range empty when the composer is the last selectable thing; select-all starts at
+  // body with no button held, which a drag from the chrome does not, so it takes the text last pressed in instead.
+  useEffect(() => {
+    if (!timelineViewportElement) return;
+    let pressed = false;
+    let pressedOn: Element | null = null;
+    const press = (event: PointerEvent) => {
+      pressed = event.type === "pointerdown";
+      if (pressed) pressedOn = event.target instanceof Element ? event.target : null;
+    };
+    /** The outermost selectable text around the last press, outside the transcript: a PR body, a file, a diff. */
+    const paneText = (): Element | null => {
+      if (pressedOn === null || timelineViewportElement.contains(pressedOn)) return null;
+      let text: Element | null = null;
+      for (let node: Element | null = pressedOn; node !== null && node !== document.body; node = node.parentElement) {
+        if (getComputedStyle(node).userSelect === "text") text = node;
+      }
+      return text;
+    };
+    const onSelectStart = (event: Event) => {
+      if (pressed || event.target !== document.body) return;
+      event.preventDefault();
+      window.getSelection()?.selectAllChildren(paneText() ?? timelineViewportElement);
+    };
+    const presses = ["pointerdown", "pointerup", "pointercancel"] as const;
+    for (const type of presses) document.addEventListener(type, press, true);
+    document.addEventListener("selectstart", onSelectStart);
+    return () => {
+      for (const type of presses) document.removeEventListener(type, press, true);
+      document.removeEventListener("selectstart", onSelectStart);
+    };
+  }, [timelineViewportElement]);
+
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       timestampFormat,
@@ -530,8 +574,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       turnDiffSummaryByAssistantMessageId,
       rewindableMessageIds,
+      slatedMessageIds,
       onRewind,
       onAnswerPermission,
+      dockedAskId,
       onImageExpand,
       onOpenFile,
       onOpenTurnDiff,
@@ -550,8 +596,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       turnDiffSummaryByAssistantMessageId,
       rewindableMessageIds,
+      slatedMessageIds,
       onRewind,
       onAnswerPermission,
+      dockedAskId,
       onImageExpand,
       onOpenFile,
       onOpenTurnDiff,
@@ -575,7 +623,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip select-text" data-timeline-root="true">
         <TimelineRowContent row={item} />
       </div>
     ),
@@ -810,7 +858,7 @@ function TimelineMinimap({
       data-testid="timeline-minimap"
       data-persistent-gutter={hasPersistentGutter ? "true" : "false"}
     >
-      <div className="relative h-full w-full select-none">
+      <div className="relative h-full w-full">
         <button
           aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
           className={cn(
@@ -1099,6 +1147,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           resolvedTheme={ctx.resolvedTheme}
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
+        {ctx.slatedMessageIds.has(row.message.id) ? <SlateUpdatedLine /> : null}
         {row.showAssistantMeta ? (
           <div data-reply-meta className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
             <span className="flex items-center gap-0.5">
@@ -1152,7 +1201,7 @@ function ProposedPlanTimelineRow({
 
 function PermissionTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "permission" }> }) {
   const ctx = use(TimelineRowCtx);
-  return <PermissionPromptRow asker={row.asker} permission={row.permission} onAnswer={ctx.onAnswerPermission} />;
+  return <PermissionPromptRow asker={row.asker} permission={row.permission} onAnswer={ctx.onAnswerPermission} docked={ctx.dockedAskId === row.permission.askId} />;
 }
 
 function SubagentTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "subagent" }> }) {

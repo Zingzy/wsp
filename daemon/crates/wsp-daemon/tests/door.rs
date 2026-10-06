@@ -97,6 +97,25 @@ impl FakeProc {
         std::fs::rename(next, self.root.path().join("net/tcp")).unwrap();
     }
 
+    /// A process of the fake machine with its parent and its process group, as /proc/[pid]/stat prints them.
+    fn process(&self, pid: u32, ppid: u32, pgid: u32) {
+        let dir = self.root.path().join(pid.to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        let tail = vec!["0"; 28].join(" ");
+        std::fs::write(
+            dir.join("stat"),
+            format!("{pid} (p{pid}) S {ppid} {pgid} {pgid} 0 -1 4194560 10 0 0 0 0 0 0 0 20 0 1 0 100 1000000 10 {tail}\n"),
+        )
+        .unwrap();
+    }
+
+    /// Where a process of the fake machine runs, as /proc/[pid]/cwd links to it.
+    fn cwd(&self, pid: u32, folder: &Path) {
+        let link = self.root.path().join(pid.to_string()).join("cwd");
+        let _ = std::fs::remove_file(&link);
+        symlink(folder, link).unwrap();
+    }
+
     fn comm(&self, pid: u32, comm: &str) {
         let dir = self.root.path().join(pid.to_string());
         std::fs::create_dir_all(&dir).unwrap();
@@ -1061,6 +1080,73 @@ async fn ports_watch_replies_with_current_ports_and_pushes_open_and_close_events
         json!([{ "port": 3000, "pid": 51, "inode": 103000, "uid": 0, "process": "p51", "command": "p51", "loopback": true }])
     );
     c.every_event_parses();
+}
+
+#[tokio::test]
+async fn two_workspaces_under_one_host_a_listener_in_b_never_reaches_a() {
+    let proc_root = FakeProc::new();
+    // One host (100) running a turn for each workspace, each turn leading its own process group as the runtime starts
+    // it; A's dev server made a group of its own under its turn, and B's stayed in its turn's group.
+    for (pid, ppid, pgid) in [(100, 1, 100), (200, 100, 200), (201, 200, 201), (300, 100, 300), (301, 300, 300)] {
+        proc_root.process(pid, ppid, pgid);
+    }
+    proc_root.set_listeners(&[(4000, 100, true), (4001, 201, true)]);
+    let d = start_with(|o| {
+        o.kind = "local".to_owned();
+        o.proc_root = Some(proc_root.path());
+        o.ports_interval_ms = Some(25);
+    })
+    .await;
+    let mut a = authed(&d).await;
+    let mut b = authed(&d).await;
+    let mut bare = authed(&d).await;
+    let ports = |reply: &Value| reply["ports"].as_array().unwrap().iter().map(|p| p["port"].as_u64().unwrap()).collect::<Vec<_>>();
+    assert_eq!(ports(&a.request("ports.watch", json!({ "roots": [200] })).await), [4001]);
+    assert_eq!(ports(&b.request("ports.watch", json!({ "roots": [300] })).await), Vec::<u64>::new());
+    // A watch that names no roots is the host's own, a place's held link or the relay's, and sees the whole machine.
+    assert_eq!(ports(&bare.request("ports.watch", json!({})).await), [4000, 4001]);
+    proc_root.set_listeners(&[(4000, 100, true), (4001, 201, true), (4002, 301, true)]);
+    assert!(b.wait_event("port.open", WAIT, |e| e["port"] == 4002).await);
+    assert!(bare.wait_event("port.open", WAIT, |e| e["port"] == 4002).await);
+    a.listen(Duration::from_millis(200)).await;
+    assert_eq!(a.events("port.open"), Vec::<Value>::new(), "B's listener reached A");
+    let opened: Vec<u64> = b.events("port.open").iter().map(|e| e["port"].as_u64().unwrap()).collect();
+    assert_eq!(opened, [4002]);
+    // A's roots move as its turns and terminals do: a second watch on the socket names the new set, and what that
+    // set holds arrives as the opens and closes against what the socket was told.
+    assert_eq!(ports(&a.request("ports.watch", json!({ "roots": [200, 300] })).await), [4001, 4002]);
+    assert!(a.wait_event("port.open", WAIT, |e| e["port"] == 4002).await);
+    a.every_event_parses();
+    b.every_event_parses();
+}
+
+#[tokio::test]
+async fn a_server_that_left_its_turns_tree_is_still_the_workspaces_by_its_group_or_by_the_folder_it_runs_in() {
+    let proc_root = FakeProc::new();
+    let folder = proc_root.path().join("work/landing");
+    std::fs::create_dir_all(folder.join("app")).unwrap();
+    let elsewhere = proc_root.path().join("work/other");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    // The turn (200) has ended. Its nohup server (202) stayed in the turn's group, reparented to init; a setsid one
+    // (400) is in a group and session of its own, running in the workspace's folder; another (500) runs elsewhere.
+    for (pid, ppid, pgid) in [(100, 1, 100), (202, 1, 200), (400, 1, 400), (500, 1, 500)] {
+        proc_root.process(pid, ppid, pgid);
+    }
+    proc_root.cwd(202, &folder);
+    proc_root.cwd(400, &folder.join("app"));
+    proc_root.cwd(500, &elsewhere);
+    proc_root.set_listeners(&[(4202, 202, true), (4400, 400, true), (4500, 500, true)]);
+    let d = start_with(|o| {
+        o.kind = "local".to_owned();
+        o.proc_root = Some(proc_root.path());
+        o.ports_interval_ms = Some(25);
+    })
+    .await;
+    let mut a = authed(&d).await;
+    let ports = |reply: &Value| reply["ports"].as_array().unwrap().iter().map(|p| p["port"].as_u64().unwrap()).collect::<Vec<_>>();
+    let watched = a.request("ports.watch", json!({ "roots": [200], "folder": folder.to_string_lossy() })).await;
+    assert_eq!(ports(&watched), [4202, 4400]);
+    a.every_event_parses();
 }
 
 #[tokio::test]

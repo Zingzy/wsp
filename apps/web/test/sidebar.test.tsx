@@ -158,7 +158,7 @@ const statusSlot = (row: HTMLElement): HTMLElement | null => row.querySelector<H
  * null on a row at rest. */
 const threadState = (row: HTMLElement): string | null => {
   const slot = statusSlot(row);
-  return slot?.dataset["tone"] === undefined ? null : (slot.querySelector("span")?.textContent ?? null);
+  return slot?.dataset["tone"] === undefined ? null : (slot.querySelector("[data-status-word]")?.textContent ?? null);
 };
 /** A thread row's age, which stands in the slot only once the thread rests; null while a state holds it. */
 const threadTime = (row: HTMLElement): string | null => {
@@ -221,15 +221,15 @@ describe("tiles from the fixture wire", () => {
       "fix the port list",
     );
     // The failure waits on the person, so it heads the list over the working thread, and the read one rests last.
-    expect(rowIds()).toEqual(["thread:s3", "thread:s1", "thread:s2", "settled"]);
+    expect(rowIds()).toEqual(["thread:s3", "thread:s1", "thread:s2"]);
     expect(rowOf("fix the port list").querySelector("[data-tile-where]")!.textContent).toBe(`the-project @ ${BOX_NAME}`);
     // The one slot at row one's right edge: the state word while a thread is one a person acts on, the age once it rests.
     expect(threadState(rowOf("fix the port list"))).toBe("Working");
     expect(threadTime(rowOf("upgrade node"))).toBe("50m");
     // A session without a prompt falls back to the harness session id.
     expect(threadState(rowOf("59094224-bb3d"))).toBe("Failed");
-    // Nothing has been quiet long enough to fold, but the read thread can be settled, so the fold's row is there at 0.
-    expect(screen.getByRole("button", { name: "Settled 0" })).toBeDefined();
+    // Nothing has been quiet long enough to fold, so there is no Settled row, though the read thread could settle.
+    expect(screen.queryByRole("button", { name: /^Settled/ })).toBeNull();
     expect(document.querySelector("[data-sidebar-tree]")!.textContent).not.toMatch(/[·•]/);
   });
 
@@ -478,19 +478,18 @@ describe("a probe that never left this computer", () => {
 });
 
 describe("a workspace's link that is down, on its tiles", () => {
-  it("a resting tile says the link is down in its slot with the pane's sentence on its hover, and its age once the link is up", async () => {
-    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "fix the port list", status: "completed", startedAt: iso(-60 * 60_000), endedAt: iso(-50 * 60_000), readAt: iso(-50 * 60_000) }), session("s2", "ws_b", { prompt: "upgrade node", status: "completed", startedAt: iso(-60 * 60_000), endedAt: iso(-50 * 60_000), readAt: iso(-50 * 60_000) })]), "fix the port list");
+  it("a thread whose turns answer keeps its own status on its tile while the page's own link to its machine is down, in every way it goes down", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "fix the port list", status: "completed", startedAt: iso(-60 * 60_000), endedAt: iso(-50 * 60_000), readAt: iso(-50 * 60_000) })]), "fix the port list");
+    const age = statusSlot(rowOf("fix the port list"))?.textContent;
+    expect(age).toBe("50m");
     const wt = new WorkspaceTerminals({ request: async () => ({ ok: true }) });
-    act(() => {
-      wt.feedStatus("connecting");
-      provideTerminals(API.id, wt);
-    });
-    await waitFor(() => expect(statusSlot(rowOf("fix the port list"))?.textContent).toBe(LINK_DOWN_WORDS.reconnecting));
-    expect(statusSlot(rowOf("fix the port list"))!.getAttribute("title")).toBe("Reconnecting to the task");
-    // A workspace with no link open is not down.
-    expect(statusSlot(rowOf("upgrade node"))?.textContent).not.toBe(LINK_DOWN_WORDS.reconnecting);
-    act(() => wt.feedStatus("live"));
-    await waitFor(() => expect(statusSlot(rowOf("fix the port list"))?.textContent).not.toBe(LINK_DOWN_WORDS.reconnecting));
+    act(() => provideTerminals(API.id, wt));
+    for (const down of ["unanswered", "connecting", "refused", "reauth-needed"] as const) {
+      act(() => wt.feedStatus(down, down === "refused" ? "the connection was refused with 403" : undefined));
+      expect(statusSlot(rowOf("fix the port list"))?.textContent).toBe(age);
+      expect(statusSlot(rowOf("fix the port list"))?.dataset["threadStatus"]).not.toBe("link-down");
+    }
+    expect(rowOf("fix the port list").textContent).not.toContain(LINK_DOWN_WORDS.unanswered);
     act(() => provideTerminals(API.id, null));
   });
 });

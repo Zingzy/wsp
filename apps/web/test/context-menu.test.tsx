@@ -360,6 +360,25 @@ describe("a project's menu", () => {
     await waitFor(() => expect(useTerminalDrawerStore.getState().byWorkspaceId["ws_f"]?.terminalOpen).toBe(true));
     expect(useStore.getState().selectedId).toBe("ws_f");
   });
+
+  it("on a project added and never run, lists the same folder acts, and the record they act on is made only once one is chosen", async () => {
+    window.localStorage.setItem("wsp:sidebar-project", JSON.stringify("pr_1"));
+    const folder: WorkspaceView = { ...view("ws_f", "the-project"), kind: "local" };
+    const project: ProjectView = { id: "pr_1", name: "the-project", computer: "here", source: { kind: "folder", path: "/root" }, path: "/root", createdAt: "2026-09-01T00:00:00Z" } as ProjectView;
+    const projectFolder = vi.fn(async (_project: string) => folder);
+    await mountSidebar({ ...fakeApi([], []), projectsList: async () => [project], projectFolder }, "the-project");
+    rightClick(Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-search] button")).find(b => b.textContent?.startsWith("the-project"))!);
+    await screen.findByRole("menu");
+    expect(labels().slice(0, 3)).toEqual([NEW_WORKSPACE, PROJECT_WORDS.settings, PROJECT_WORDS.remove]);
+    expect(labels()).toContain(WORKSPACE_WORDS.openTerminal);
+    expect(labels()).toContain(WORKSPACE_WORDS.openBrowser);
+    expect(labels().filter(label => label === NEW_WORKSPACE)).toHaveLength(1);
+    expect(projectFolder).not.toHaveBeenCalled();
+    fireEvent.click(item(WORKSPACE_WORDS.openTerminal));
+    await waitFor(() => expect(useTerminalDrawerStore.getState().byWorkspaceId["ws_f"]?.terminalOpen).toBe(true));
+    expect(projectFolder).toHaveBeenCalledWith("pr_1");
+    expect(useStore.getState().selectedId).toBe("ws_f");
+  });
 });
 
 describe("a thread row's menu", () => {

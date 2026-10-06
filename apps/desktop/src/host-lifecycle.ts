@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { STARTED_BY_ENV, accountAim, claudeKeyOnlyInThisShell, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, downCommand, homeNamed, hostLogPath, hostTokenFor, httpProbe, installService, keyOnlyInThisShell, lockPathFor, logTail, noManagerLine, ownPid, readHost, runAll, runFailureLine, serviceAddressHere, serviceEnv, serviceStartsAtLogin, servingHost, severalAccountHostsLine, stopService, type CliIO, type HostLock, type HostRecord, type HostProbe, type RunFailure, type ServiceDeps, type ServicePlan } from "@wsp/host";
+import { STARTED_BY_ENV, accountAim, claudeKeyOnlyInThisShell, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, downCommand, homeNamed, hostLogPath, hostTokenFor, httpProbe, installService, keyOnlyInThisShell, lockPathFor, logTail, noManagerLine, ownPid, readHost, runAll, runFailureLine, serviceAddressHere, serviceEnv, serviceStartsAtLogin, servingHost, severalAccountHostsLine, stopService, vanishedHost, type CliIO, type HostLock, type HostRecord, type HostProbe, type RunFailure, type ServiceDeps, type ServicePlan } from "@wsp/host";
 import { LOOPBACK, authority, bootLineOf, fmtDuration, holdsNothing, isLocalWorkspace, isLoopback, type BootPayload, type GoldenManifest, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { safeEqual, tokenDigest } from "@wsp/runtime";
 
@@ -193,8 +193,9 @@ const answersAsOwn =
 /** Makes this computer's own manager serve the state file with the shim, and waits until wsp answers. A unit that
  * runs another program (another app's shim, the node a terminal's wsp up --service named) is stopped and written
  * again; one that runs this shim is kept as it stands, whatever words a terminal gave it, and loaded where the
- * manager has let it go. A unit the person set not to start at login is loaded all the same and left that way.
- * Read only when nothing serves, so a rewrite never restarts wsp under a window on it. */
+ * manager has let it go, or where what it runs is a host whose program has gone, which the manager reads as up.
+ * A unit the person set not to start at login is loaded all the same and left that way. Read only when nothing
+ * serves, so a rewrite never restarts wsp under a window on it. */
 export async function ensureService(opts: Pick<OpenHostOptions, "statePath" | "home" | "shim" | "service" | "io">): Promise<void> {
   const { manager, run } = opts.service;
   if (manager === undefined) throw new Error(noManagerLine(opts.service.platform));
@@ -221,7 +222,7 @@ export async function ensureService(opts: Pick<OpenHostOptions, "statePath" | "h
       if (!(await held())) throw refused(failure);
       if (!existsSync(unit.path)) writeFileSync(unit.path, manager.text(plan), { mode: 0o600 });
     }
-  } else if (!(await held())) {
+  } else if (!(await held()) || vanishedHost(opts.statePath) !== undefined) {
     const failure = await runAll(manager.load(plan), run);
     if (failure !== undefined && !(await held())) throw refused(failure);
   }

@@ -14,6 +14,8 @@ import { useDiffStore } from "../src/diffs/store.js";
 import { PanelStripSlot } from "../src/components/PanelStripSlot.js";
 import { GitSplit } from "../src/pull-request/GitSplit.js";
 import { PullRequestSurface } from "../src/pull-request/PullRequestSurface.js";
+import { Face } from "../src/pull-request/parts.js";
+import { forgetHeld } from "../src/protocol/held.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { resetSurfaces, view, WS } from "./surface-harness.js";
 
@@ -159,10 +161,10 @@ afterEach(() => {
 describe("the Pull request pane's head", () => {
   it("names the title, who opened it with their face and when, the number as a quiet link out, the word, the branches, the labels and who was asked", async () => {
     const { container, api } = await pane();
-    expect(api.pullRequestView).toHaveBeenCalledWith(WS);
+    expect(api.pullRequestView).toHaveBeenCalledWith(WS, false);
     const head = q(container, "[data-pr-head]");
     expect(said(q(head, "[data-pr-by]"))).toMatch(/^cass opened \d+ d ago$/);
-    expect(q(head, "[data-pr-by] [data-pr-face='cass'] img").getAttribute("src")).toBe("https://github.com/cass.png?size=32");
+    expect(q(head, "[data-pr-by] [data-pr-face='cass'] img").getAttribute("src")).toBe("https://avatars.githubusercontent.com/cass?s=48");
     const number = q<HTMLAnchorElement>(head, "[data-pr-number]");
     expect([number.textContent, number.getAttribute("href")]).toEqual(["#12", "https://github.com/o/r/pull/12"]);
     expect(number.className).toContain("text-muted-foreground");
@@ -208,11 +210,47 @@ describe("the Pull request pane's head", () => {
     expect(document.querySelector("[data-pr-tabs] [data-pr-refresh]")).toBeNull();
     fireEvent.click(q(strip, "[data-pr-refresh]"));
     await waitFor(() => expect(api.pullRequestView).toHaveBeenCalledTimes(2));
+    // The refresh asks past the minute the host holds a page for.
+    expect(api.pullRequestView).toHaveBeenLastCalledWith(WS, true);
+  });
+
+  it("keeps the page five minutes: a reopen draws it with no read, and a status that moved, the refresh or a reopen past the hold reads again", async () => {
+    const { api, unmount } = await pane();
+    expect(api.pullRequestView).toHaveBeenCalledTimes(1);
+    unmount();
+    const reopened = render(<PullRequestSurface workspaceId={WS} />);
+    expect(reopened.container.querySelector("[data-pr-title]")?.textContent).toBe(PAGE.title);
+    await act(async () => new Promise(r => setTimeout(r, 0)));
+    expect(api.pullRequestView).toHaveBeenCalledTimes(1);
+    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ headOid: "f00dfeed" })) } }));
+    await waitFor(() => expect(api.pullRequestView).toHaveBeenCalledTimes(2));
+    expect(reopened.container.querySelector("[data-pr-title]")?.textContent).toBe(PAGE.title);
+    reopened.unmount();
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + 5 * 60_000 + 1);
+    render(<PullRequestSurface workspaceId={WS} />);
+    await waitFor(() => expect(api.pullRequestView).toHaveBeenCalledTimes(3));
   });
 
   it("counts each tab: the comments and reviews, the commits, the files", async () => {
     const { container } = await pane();
     expect([...container.querySelectorAll("[data-segment]")].map(s => s.textContent)).toEqual(["Conversation3", "Commits2", "Files1"]);
+  });
+});
+
+describe("a face", () => {
+  it("keeps one address per person across a remount and every size, off the avatar host rather than GitHub's redirect", () => {
+    const first = render(<Face login="face-a" size={24} src="https://avatars.githubusercontent.com/u/90309290?v=4" />);
+    const at = first.container.querySelector("img")?.getAttribute("src");
+    expect(at).toBe("https://avatars.githubusercontent.com/u/90309290?v=4&s=48");
+    first.unmount();
+    for (const size of [16, 18, 20] as const) {
+      const again = render(<Face login="face-a" size={size} />);
+      expect(again.container.querySelector("img")?.getAttribute("src")).toBe(at);
+      again.unmount();
+    }
+    const login = render(<Face login="face-b" size={16} />);
+    expect(login.container.querySelector("img")?.getAttribute("src")).toBe("https://avatars.githubusercontent.com/face-b?s=48");
   });
 });
 
@@ -250,7 +288,7 @@ describe("the Conversation tab", () => {
     expect(bot.textContent).toContain("vercel");
     expect(bot.textContent).toContain("left a notice");
     expect(bot.textContent).not.toContain("Deployed");
-    expect(q(bot, "[data-pr-face='vercel'] img").getAttribute("src")).toBe("https://avatars.githubusercontent.com/in/8329");
+    expect(q(bot, "[data-pr-face='vercel'] img").getAttribute("src")).toBe("https://avatars.githubusercontent.com/in/8329?s=48");
     fireEvent.click(q(bot, "[data-pr-notice-toggle]"));
     expect(bot.textContent).toContain("Deployed");
   });
@@ -261,16 +299,18 @@ describe("the Conversation tab", () => {
     expect(q(entry, "[data-pr-entry-head] b").textContent).toBe("a deleted account");
     const face = q(entry, "[data-pr-face]");
     expect(face.querySelector("img")).toBeNull();
-    expect(container.querySelector("img[src='https://github.com/.png?size=48']")).toBeNull();
+    expect(container.querySelector("img[src='https://avatars.githubusercontent.com/?s=48']")).toBeNull();
     cleanup();
+    forgetHeld();
     const app = await pane(fact(), { ...PAGE, comments: [{ id: 4, author: "renovate[bot]", bot: false, body: "bump", url: "u4", at: "2026-09-28T12:00:00Z" }] });
     expect(q(app.container, "[data-pr-face='renovate[bot]']").querySelector("img")).toBeNull();
   });
 
-  it("says once where the host read only the latest reviews and review threads, and not where it read them all", async () => {
-    const { container } = await pane(fact(), { ...PAGE, cut: { reviews: true, threads: true } });
-    expect([...container.querySelectorAll("[data-pr-cut]")].map(n => n.textContent)).toEqual(["Showing the latest 100 reviews", "Showing the latest 100 review threads"]);
+  it("says once where the host read only the latest reviews, review threads and comments, and not where it read them all", async () => {
+    const { container } = await pane(fact(), { ...PAGE, cut: { reviews: true, threads: true, comments: true } });
+    expect([...container.querySelectorAll("[data-pr-cut]")].map(n => n.textContent)).toEqual(["Showing the latest 100 reviews", "Showing the latest 100 review threads", "Showing the latest 100 comments"]);
     cleanup();
+    forgetHeld();
     const whole = await pane();
     expect(whole.container.querySelector("[data-pr-cut]")).toBeNull();
   });

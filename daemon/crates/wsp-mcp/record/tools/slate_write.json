@@ -1,0 +1,152 @@
+{
+  "cloudOff": {
+    "name": "slate_write",
+    "description": "Writes this thread's slate, the live panel shown here beside the chat. Use it to show the person anything they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), or a dashboard, a form to fill in or a checklist. A run with every= refreshes itself on a timer with no turns, so nothing polls.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "another thread's id"
+        },
+        "text": {
+          "type": "string",
+          "description": "JSX-like text: a <slate>, or a patch"
+        },
+        "document": {
+          "type": "object",
+          "additionalProperties": {},
+          "description": "JSON form from slate_read; not for writing"
+        },
+        "check": {
+          "type": "boolean",
+          "description": "validate, write nothing"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {},
+          "description": "with check: $path: value"
+        },
+        "press": {
+          "type": "string",
+          "description": "with check: piece id to press"
+        },
+        "row": {
+          "type": "integer",
+          "description": "pressed row, from 0"
+        },
+        "action": {
+          "type": "integer",
+          "description": "row action, from 0"
+        },
+        "if_version": {
+          "type": "integer",
+          "description": "only at this version"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "warnings": {},
+        "problems": {},
+        "waiting": {}
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  },
+  "cloudOn": {
+    "name": "slate_write",
+    "description": "Writes this thread's slate, the live panel shown here beside the chat. Use it to show the person anything they want to see, watch, monitor or keep an eye on while you work (live data, traffic, metrics, a price, logs, a PR, progress, status), or a dashboard, a form to fill in or a checklist. A run with every= refreshes itself on a timer with no turns, so nothing polls.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "another thread's id"
+        },
+        "text": {
+          "type": "string",
+          "description": "JSX-like text: a <slate>, or a patch"
+        },
+        "document": {
+          "type": "object",
+          "additionalProperties": {},
+          "description": "JSON form from slate_read; not for writing"
+        },
+        "check": {
+          "type": "boolean",
+          "description": "validate, write nothing"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {},
+          "description": "with check: $path: value"
+        },
+        "press": {
+          "type": "string",
+          "description": "with check: piece id to press"
+        },
+        "row": {
+          "type": "integer",
+          "description": "pressed row, from 0"
+        },
+        "action": {
+          "type": "integer",
+          "description": "row action, from 0"
+        },
+        "if_version": {
+          "type": "integer",
+          "description": "only at this version"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "warnings": {},
+        "problems": {},
+        "waiting": {}
+      },
+      "required": [
+        "version",
+        "text"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  }
+}

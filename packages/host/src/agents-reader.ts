@@ -13,7 +13,7 @@ import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLog
 import { MCP_SERVER_NAME, agentVersionWord, compareVersions, controlNameRefusal, hasControlChar, shellQuote, strictVersion, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow } from "@wsp/protocol";
 import { projectOf, vaultSignIn, type AgentsOn, type AgentsRead, type AgentsReader } from "@wsp/runtime";
 import { machineHost, type MachineHost } from "./machine-host.js";
-import { serverTools } from "./server-tools.js";
+import { resolveServer, serverTools } from "./server-tools.js";
 
 const READ_MS = 20_000;
 /** How long one agent's own version or status command is given where the computer has a timeout command. */
@@ -292,6 +292,16 @@ export function agentsReader(o: {
       // A turn gets the servers' values under its own environment, so a reference reads them the same way here.
       const values = { ...serverValuesOf(o.vault()), ...env };
       return kept.tools(host, ask, { values, ...(project !== undefined ? { project } : {}), ...(env !== undefined ? { env } : {}) });
+    },
+    server: async (on, ask) => {
+      refuseClosed();
+      const project = projectOf(on);
+      const env = (await o.loginEnv?.()) ?? {};
+      const values = { ...serverValuesOf(o.vault()), ...env };
+      const found = await resolveServer(here(), ask.agent, ask.name, { values, ...(project !== undefined ? { project } : {}) });
+      // A turn hands its servers the vault's values under the login's own; nothing of wsp's own reaches them.
+      const base = Object.fromEntries(Object.entries(values).filter(([k]) => !k.startsWith("WSP_")));
+      return { ...found, env: base };
     },
     forget: key => kept.forget(key),
     close: () => closing.abort(),
