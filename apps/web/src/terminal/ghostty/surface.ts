@@ -583,7 +583,7 @@ export interface GhosttyTerminalSurfaceOptions {
   /**
    * A right-click the running application did not claim through mouse
    * reporting. The host owns the menu, so it also owns preventing the browser
-   * default — whose Paste entry can never reach a canvas terminal.
+   * default, whose Paste entry can never reach a canvas terminal.
    */
   readonly onContextMenu?: (event: MouseEvent) => void;
 }
@@ -980,7 +980,7 @@ export class GhosttyTerminalSurface {
   /**
    * Pastes clipboard text read by the host (context menu) with the same
    * bracketed-paste encoding as a native paste event. The read joins the same
-   * race the paste shortcut uses — the token is claimed before it starts — so
+   * race the paste shortcut uses (the token is claimed before it starts), so
    * a shortcut or native paste arriving during the read supersedes this one
    * instead of both reaching the shell.
    */
@@ -1225,7 +1225,7 @@ export class GhosttyTerminalSurface {
     this.refreshHoveredLink();
     // Suppressions survive blur deliberately: a shortcut that moves focus (for
     // example terminal-toggle) must still swallow its own keyup if focus comes
-    // back before release. Stale entries are harmless — an encoding keydown
+    // back before release. Stale entries are harmless: an encoding keydown
     // always removes its code first.
     // The steady unfocused hollow cursor must not inherit an off blink phase.
     this.cursorOn = true;
@@ -1258,7 +1258,7 @@ export class GhosttyTerminalSurface {
   private readonly onCopyEvent = (event: ClipboardEvent) => {
     const selection = this.hasSelection() ? this.getSelection() : this.input.value;
     // Menu-role Copy never hits the keydown primer. The native action reads
-    // this.input, so park the current selection first — including when
+    // this.input, so park the current selection first, including when
     // clipboardData is missing and we must not preventDefault.
     this.primeCopy(selection);
     const result = applyTerminalCopyEvent(selection, event.clipboardData);
