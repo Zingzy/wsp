@@ -6089,6 +6089,13 @@ export const sentPairCode = (shown: string): string => shown.replace(/-/g, "").t
  * random byte masked to five bits is uniform. */
 export const PAIR_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
+/** Whether a code as the host takes it could be one a host is holding: the alphabet's characters at the length a code
+ * is. What tells a code from a paste that caught a label, a space for the dash or a character too many. */
+export const isPairCode = (code: string): boolean => code.length === PAIR_CODE_LENGTH && [...code].every(c => PAIR_CODE_ALPHABET.includes(c));
+
+/** What a field that takes a pairing code says for a paste that is none, before any host is asked. */
+export const PAIR_CODE_SHAPE_REFUSAL = `that is not a pairing code, which is ${PAIR_CODE_LENGTH} letters and digits like ABCD-EFGH; paste only the code wsp host pair printed`;
+
 /** What this wsp knows about the account it is on, read off this computer's own records alone: the relay is never
  * asked for it, so the row draws at once and draws the same whether or not the relay is up. Signed in is a record
  * on disk; the name beside it is the one the relay gave when the sign-in was approved, which a relay that names

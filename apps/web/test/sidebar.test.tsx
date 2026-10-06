@@ -915,7 +915,10 @@ describe("one send to several models", () => {
     await waitFor(() => expect(useContextMenuStore.getState().menu).not.toBeNull());
     act(() => useContextMenuStore.getState().choose("keep"));
     dialog = await screen.findByRole("alertdialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    // Delete stands disabled until the dialog has read what each copy holds.
+    const confirm = within(dialog).getByRole<HTMLButtonElement>("button", { name: "Delete" });
+    await waitFor(() => expect(confirm.disabled).toBe(false));
+    fireEvent.click(confirm);
     await waitFor(() => expect(deleteWorkspace).toHaveBeenCalledTimes(2));
     expect(deleteWorkspace.mock.calls.map(call => call[0]).sort()).toEqual(["ws_astra", "ws_opus"]);
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());

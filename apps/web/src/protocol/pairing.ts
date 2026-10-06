@@ -4,7 +4,7 @@
 // browser redeems a one time code for a token of its own, the one wsp init put
 // in the address of the page it opened or one read off wsp host pair, and
 // keeps it in this browser under that host's origin.
-import type { BootPayload } from "@wsp/protocol";
+import { isPairCode, PAIR_CODE_SHAPE_REFUSAL, readJoinToken, type BootPayload } from "@wsp/protocol";
 
 /** Where the device token this browser was handed lives. Local storage is already scoped to the host's origin, so
  * two hosts a person reaches from one browser keep their own without a key that names them. */
@@ -51,15 +51,19 @@ export function forgetDeviceToken(storage: Pick<Storage, "removeItem">): void {
 }
 
 /** Spends a pairing code over a socket of its own: the redeem is the first frame an unauthed socket may send, and
- * the reply carries the token this browser keeps. The socket is dropped afterwards; the app dials its own. */
-export function redeemPairingCode(url: string, code: string, name: string, Ctor: typeof WebSocket = globalThis.WebSocket): Promise<string> {
+ * the reply carries the token this browser keeps. The socket is dropped afterwards; the app dials its own. A paste
+ * that is no code is refused here, before any host is dialled, since the host's own refusal sends the person for a
+ * fresh code they would paste the same way. */
+export function redeemPairingCode(url: string, typed: string, name: string, Ctor: typeof WebSocket = globalThis.WebSocket): Promise<string> {
+  const { code } = readJoinToken(typed);
+  if (!isPairCode(code)) return Promise.reject(new Error(PAIR_CODE_SHAPE_REFUSAL));
   return new Promise((resolve, reject) => {
     const ws = new Ctor(url);
     const fail = (message: string): void => {
       ws.close();
       reject(new Error(message));
     };
-    ws.onopen = () => ws.send(JSON.stringify({ id: 1, op: "pair.redeem", code: code.trim().toUpperCase(), name }));
+    ws.onopen = () => ws.send(JSON.stringify({ id: 1, op: "pair.redeem", code, name }));
     ws.onerror = () => {}; // a close always follows, and it carries the reason
     ws.onmessage = e => {
       const frame = JSON.parse(String((e as MessageEvent).data)) as { ok?: boolean; error?: string; deviceToken?: string };

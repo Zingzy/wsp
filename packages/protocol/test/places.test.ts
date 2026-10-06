@@ -53,6 +53,8 @@ import {
   sentPairCode,
   shownPairCode,
   joinToken,
+  isPairCode,
+  PAIR_CODE_SHAPE_REFUSAL,
   readJoinToken,
   JOIN_NO_KEY_REFUSAL,
   WORKSPACE_KIND_WORDS,
@@ -333,6 +335,19 @@ describe("the one token a join line carries", () => {
 
   it("splits at the first mark, so a key holding one is read whole", () => {
     expect(readJoinToken(`QW4K-7PZX.SHA256:a.b`).hostKey).toBe("SHA256:a.b");
+  });
+});
+
+describe("a paste that is a pairing code, and one that is not", () => {
+  const KEY = `SHA256:${"a".repeat(43)}`;
+
+  it("reads a code out of every way a person copies one off wsp host pair, and no code out of a paste that caught more or less", () => {
+    const codes = [`QW4K-7PZX.${KEY}`, `  QW4K-7PZX.${KEY}\n`, "QW4K7PZX", "QW4K-7PZX", " qw4k-7pzx ", `QW4K-7PZX.${KEY}\r\n`, "QW4K-7PZX.SHA256:aB", `QW4K-7PZX.${KEY}\nexpires     in 10m`];
+    expect(codes.filter(paste => !isPairCode(readJoinToken(paste).code))).toEqual([]);
+    // A terminal's triple click takes the label too; a space for the dash and a ninth letter are typing slips.
+    const none = [`code        QW4K-7PZX.${KEY}`, "QW4K 7PZX", "QW4K-7PZXA", "QW4K-7PZ", "QW4K-7PZO", ""];
+    expect(none.filter(paste => isPairCode(readJoinToken(paste).code))).toEqual([]);
+    expect(PAIR_CODE_SHAPE_REFUSAL).toContain("wsp host pair");
   });
 });
 
