@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { CLOUD_ENV, DAEMON_TOKEN_PATH, noSuchAccountLine, pushedForChildLine, EXIT_CODES, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { CLOUD_ENV, DAEMON_TOKEN_PATH, deniedLine, noSuchAccountLine, PERMISSION_DENY, pushedForChildLine, EXIT_CODES, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, localExecStream, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { fakeCopier, LocalBackend } from "@wsp/engine";
@@ -152,6 +152,7 @@ describe("the agent contract on the command line and the tool door", () => {
   let dir: string;
   let statePath: string;
   let backend: StubBackend;
+  let answers: ReturnType<typeof scriptedAgent>["answers"];
   let store: Store;
   let rt: Runtime;
   let handle: HostHandle | undefined;
@@ -173,10 +174,12 @@ describe("the agent contract on the command line and the tool door", () => {
     store = memoryStore();
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     const claude = scriptedAgent(prompt => (prompt === "die" ? "" : prompt.startsWith("Review pull request") ? REVIEW_BLOCK : `re: ${prompt}`), () => ({ kind: "written" }));
+    answers = claude.answers;
     // The confirming read a gone verdict waits for runs on the same tick: this backend's 404 is the whole truth, so
     // the wait only buys the contract a five second pause on the road to a rebuild.
     const agents = agentHome(join(dir, "agents"));
     const runtime = (): Runtime => createRuntime({
+      statePath,
       backend,
       store,
       adapters: { claude: claude.adapter, codex: bornDeadAgent(prompt => `re: ${prompt}`).adapter },
@@ -284,6 +287,7 @@ describe("the agent contract on the command line and the tool door", () => {
     return VerbFailure.parse(JSON.parse(io.errors[0]!));
   };
 
+  // It starts the command line once per verb in turn, so its time grows with the verb count; at a load near 30 it runs 3 to 5 s.
   it("with --json every command-line verb prints JSON alone on stdout and its last object is the one its MCP tool answers with", async () => {
     const covered = new Map<string, unknown>();
     const last = async (verb: string, ...argv: string[]): Promise<unknown> => {
@@ -452,8 +456,11 @@ describe("the agent contract on the command line and the tool door", () => {
       if (verb === "thread allow") {
         expect(await last("stop", "stop", asking.threadId, "--task", "a1b2")).toEqual({ threadId: asking.threadId, task: "a1b2", outcome: "unsupported", error: "Stop is not available for Claude Code subagents; stop the thread to stop them all" });
       }
-      expect(await last(verb, "thread", task, asking.threadId)).toEqual({ threadId: asking.threadId, askId: SCRIPTED_ASK.askId, optionId: expect.any(String) });
+      const reason = verb === "thread deny" ? ["--reason", "count the lines with awk instead"] : [];
+      expect(await last(verb, "thread", task, asking.threadId, ...reason)).toEqual({ threadId: asking.threadId, askId: SCRIPTED_ASK.askId, optionId: expect.any(String) });
     }
+    // The deny's reason reaches the agent as the question panel's does: the refusal it reads, and the words beside it.
+    expect(answers.at(-1)).toEqual({ optionId: PERMISSION_DENY, outcome: "denied", denyMessage: deniedLine("count the lines with awk instead"), reason: "count the lines with awk instead" });
     await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");
     // The thread's slate from a person's shell, named by the thread's id: every slate verb once.
     const tracker = join(dir, "tracker.slate");

@@ -858,6 +858,23 @@ describe("a place's cap and what runs there", () => {
     expect(await store.get("caps", HERE_PLACE_ID)).toBeUndefined();
   });
 
+  it("tells every socket the row a set made, so a page another window holds open reads it at once", async () => {
+    const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
+    const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 2, memMb: 7885 } }) });
+    sockets.push(joined.client.ws);
+    const watcher = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect((await watcher.request("events.subscribe")).ok).toBe(true);
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const answered = (await capOf(host, joined.placeId, { threads: 1 })) as { place: PlaceView };
+    await capOf(host, HERE_PLACE_ID, { threads: 2 });
+    await until(() => watcher.events.filter(e => e.type === "place.changed").length === 2);
+    const changed = watcher.events.filter(e => e.type === "place.changed").map(e => e["place"] as PlaceView);
+    expect(changed[0]).toEqual(answered.place);
+    expect(changed[1]).toMatchObject({ id: HERE_PLACE_ID, cap: { threads: 2 } });
+    host.close();
+    watcher.close();
+  });
+
   it("says on every row its kind's default beside the cap and what the person set, and a reset takes a number back to the default", async () => {
     const { hostKey, store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
     const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 4, memMb: 8192 } }) });
@@ -3485,7 +3502,7 @@ describe("a fork on a computer you joined", () => {
   });
 
   /** A workspace forked on a computer this host holds a link to, whose daemon answers that workspace's frames. */
-  const servedFork = async (): Promise<{ place: ForkingPlace; placeId: string; machineId: string; id: string }> => {
+  const servedFork = async (daemonVersion = DAEMON_VERSION): Promise<{ place: ForkingPlace; placeId: string; machineId: string; id: string }> => {
     const hostKey = newPlaceKeyPair();
     runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
@@ -3493,7 +3510,7 @@ describe("a fork on a computer you joined", () => {
     const { client, placeId } = await join(hostKey, {
       code: await code(),
       name: "srv",
-      report: report("srv", { daemonVersion: DAEMON_VERSION }),
+      report: report("srv", { daemonVersion }),
       answers: c => (place = forks(c)),
     });
     sockets.push(client.ws);
@@ -3663,7 +3680,21 @@ describe("a fork on a computer you joined", () => {
     road.close();
   });
 
-  it("opens no channel at all on a computer whose daemon is older than the one this wsp deploys", async () => {
+  it.each([
+    { road: "a client's", open: (id: string) => runtime!.workspaces.daemonChannel(id, () => {}) },
+    { road: "the host's guest road's", open: (id: string) => runtime!.workspaces.guestChannel(id, () => {}) },
+  ])("opens $road channel into a fork on a computer one daemon behind this wsp's, with the fork named on every frame", async ({ open }) => {
+    // A daemon too old to name the fork on a frame cannot seal the link this channel rides, so a computer that is
+    // only behind is one whose terminal, files and guests all still answer.
+    const { place, machineId, id } = await servedFork(DAEMON_VERSION - 1);
+    const channel = await open(id);
+    expect(await channel.send({ op: "ping" })).toMatchObject({ ok: true });
+    expect(await channel.send({ op: "pty.create", cols: 80, rows: 24 })).toMatchObject({ ok: true });
+    expect(place.frames.at(-1)).toMatchObject({ op: "pty.create", machineId });
+    channel.close();
+  });
+
+  it("takes the bring back on a computer one daemon behind this wsp's, and carries a pull request refusal as the note beside the landed push", async () => {
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
     runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
@@ -3677,38 +3708,6 @@ describe("a fork on a computer you joined", () => {
     });
     sockets.push(client.ws);
     const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
-    // A daemon that reads no workspace name on a pane's frame would open a shell on the computer itself, so the
-    // road is refused in the word the computers table already shows rather than opened and used.
-    const behind = placeBehindLine("srv", placeDaemonBehind({ daemonVersion: DAEMON_VERSION - 1 })!);
-    await expect(runtime.workspaces.daemonChannel(made.id, () => {})).rejects.toThrow(behind);
-    expect(place.frames).toEqual([]);
-  });
-
-  it("refuses the bring back on a computer whose daemon is older than the one this wsp deploys, and carries a pull request refusal as the note beside the landed push", async () => {
-    const backend = stubBackend();
-    const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    let place!: ForkingPlace;
-    const { client, placeId, pair } = await join(hostKey, {
-      code: await code(),
-      name: "srv",
-      report: report("srv", { daemonVersion: DAEMON_VERSION - 1 }),
-      answers: c => (place = forks(c)),
-    });
-    sockets.push(client.ws);
-    const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
-    // A daemon that reads no workspace name on a files or git frame would resolve the checkout's path against its
-    // own home, so the frames are not sent at all: the row's own word for a computer that is behind, and the line
-    // that moves it on.
-    const behind = placeBehindLine("srv", placeDaemonBehind({ daemonVersion: DAEMON_VERSION - 1 })!);
-    await expect(runtime.workspaces.bringBack({ workspaceId: made.id })).rejects.toThrow(behind);
-    expect(place.frames).toEqual([]);
-
-    // The same computer on this wsp's daemon takes the frames; a pull request it cannot open is the note beside a
-    // push that landed, never a failed bring back.
-    const { client: fresh } = await relink(hostKey, placeId, pair, report("srv", { daemonVersion: DAEMON_VERSION }), c => (place = forks(c)));
-    sockets.push(fresh.ws);
     place.refuseGitPr = { error: noHostCliLine("github.com"), code: "no-host-cli" };
     const back = await runtime.workspaces.bringBack({ workspaceId: made.id });
     expect(back.note).toBe(noHostCliLine("github.com"));

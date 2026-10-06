@@ -2659,12 +2659,13 @@ export interface AnswerRoad {
   key: string;
   effect: PermissionEffect;
   does?: string;
-  answer?: { verb: string; about: string; said: string };
+  /** `reasons` is a road whose verb takes the person's words on what to do instead, as the app's deny does. */
+  answer?: { verb: string; about: string; said: string; reasons?: true };
 }
 
 export const ANSWER_ROADS: readonly AnswerRoad[] = [
   { key: "y", effect: "allow", does: "run it", answer: { verb: "allow", about: "answers the prompt the thread is stopped on and lets the call run", said: "allowed" } },
-  { key: "n", effect: "deny", does: "refuse it", answer: { verb: "deny", about: "answers the prompt the thread is stopped on and refuses the call", said: "denied" } },
+  { key: "n", effect: "deny", does: "refuse it", answer: { verb: "deny", about: "answers the prompt the thread is stopped on and refuses the call", said: "denied", reasons: true } },
   { key: "a", effect: "mode" },
 ];
 
@@ -2724,21 +2725,21 @@ export const ANSWER_WORDS: Readonly<Record<Exclude<SessionAnswerOutcome, "answer
 
 /** Picks one option on a prompt the runtime holds open, the op the app's own buttons send; anything but a pick the
  * harness took is the caller's failure, in the words of the outcome. */
-async function answerAsk(client: HostClient, sessionId: string, askId: string, optionId: string): Promise<void> {
-  const { outcome } = SessionAnswerResult.parse(await client.request("sessions.answer", { sessionId, askId, optionId }));
+async function answerAsk(client: HostClient, sessionId: string, askId: string, optionId: string, reason?: string): Promise<void> {
+  const { outcome } = SessionAnswerResult.parse(await client.request("sessions.answer", { sessionId, askId, optionId, ...(reason === undefined ? {} : { reason }) }));
   if (outcome !== "answered") throw new Error(ANSWER_WORDS[outcome]);
 }
 
 /** What a thread's open prompt answered by one of the roads above came to, for a terminal that is not watching the
  * turn: the prompt is read off the transcript the host holds, so a thread anybody opened is answerable from here. */
-async function answerOpenAsk(client: HostClient, ref: string, road: AnswerRoad & { answer: NonNullable<AnswerRoad["answer"]> }): Promise<{ threadId: string; askId: string; optionId: string; line: string }> {
+async function answerOpenAsk(client: HostClient, ref: string, road: AnswerRoad & { answer: NonNullable<AnswerRoad["answer"]> }, reason?: string): Promise<{ threadId: string; askId: string; optionId: string; line: string }> {
   const thread = await threadOf(client, ref);
   const threadId = threadIdOf(thread);
   const ask = openAsk(await history(client, thread.workspaceId), threadId);
   if (ask === undefined) throw new Error(noOpenAskLine(threadId));
   const option = ask.options.find((o: PermissionOption) => o.effect === road.effect);
   if (option === undefined) throw new Error(noSuchAnswerLine(threadId, road.answer.verb));
-  await answerAsk(client, ask.sessionId, ask.askId, option.id);
+  await answerAsk(client, ask.sessionId, ask.askId, option.id, reason);
   return { threadId, askId: ask.askId, optionId: option.id, line: answeredLine(threadId, ask, road.answer.said) };
 }
 
@@ -3264,27 +3265,32 @@ function folderLines(listing: HostFolderListing): string[] {
   ];
 }
 
+const REASON_FLAG: FlagTable = { reason: { type: "string" } };
+
 /** The lines another terminal answers a thread's open prompt with, one per road that carries a verb: the same op the
  * app's buttons send, by thread id, so a person or an agent watching a thread from anywhere can unstick it. */
 const ANSWER_VERBS: readonly CliVerb[] = ANSWER_ROADS.filter((road): road is AnswerRoad & { answer: NonNullable<AnswerRoad["answer"]> } => road.answer !== undefined).map(road => ({
   name: `thread ${road.answer.verb}`,
-  usage: `wsp thread ${road.answer.verb} <thread>`,
+  usage: `wsp thread ${road.answer.verb} <thread>${road.answer.reasons === true ? ' [--reason "<words>"]' : ""}`,
   about: road.answer.about,
   page: "agent" as const,
-  options: {},
+  options: road.answer.reasons === true ? REASON_FLAG : {},
   run: async (ctx: VerbContext) => {
     const [ref] = ctx.args;
     if (ref === undefined || ctx.args.length !== 1) throw usageRefusal(`wsp thread ${road.answer.verb} takes one thread.`, usageIs(ctx));
-    const answered = await answerOpenAsk(await ctx.client(), ref, road);
+    const answered = await answerOpenAsk(await ctx.client(), ref, road, flag(ctx.flags, "reason"));
     ctx.out.emit({ threadId: answered.threadId, askId: answered.askId, optionId: answered.optionId }, answered.line);
     return 0;
   },
   tool: tool({
     description: `${road.answer.about[0]!.toUpperCase()}${road.answer.about.slice(1)}, by thread id or a prefix of it. A thread stopped on a prompt reads Needs you in threads and runs nothing until somebody picks, so this is how a thread you did not open is unstuck; the prompt itself is on the thread's own rows, which thread_read prints. Refused in one line when the thread is waiting on no prompt and when the prompt it is stopped on carries no such answer, which is what a call that asks the person something rather than for consent does.`,
-    input: { thread: z.string().describe("the thread's id, or a prefix of it that names one, as threads lists them") },
+    input: {
+      thread: z.string().describe("the thread's id, or a prefix of it that names one, as threads lists them"),
+      ...(road.answer.reasons === true ? { reason: z.string().optional().describe("what the agent should do instead, in your words; the agent reads it with the refusal, as it reads the reason a person types in the app") } : {}),
+    },
     output: { threadId: z.string(), askId: z.string(), optionId: z.string() },
-    call: async ({ thread: ref }, deps: VerbDeps) => {
-      const answered = await answerOpenAsk(await deps.client(), ref, road);
+    call: async ({ thread: ref, reason }: { thread: string; reason?: string }, deps: VerbDeps) => {
+      const answered = await answerOpenAsk(await deps.client(), ref, road, reason);
       return asText(answered.line, { threadId: answered.threadId, askId: answered.askId, optionId: answered.optionId });
     },
   }),
@@ -6365,6 +6371,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   access: "how far the agent may go without asking: ask, auto-edit, full or plan, refused where the agent has no such mode; without it, the project's, else the agent's default, else full",
   cwd: "the folder on the machine to work in; the project's folder without it",
   detach: "print the thread's id and return, leaving the reply to the thread's finished line",
+  "thread deny reason": "what the agent should do instead, in your words; it reads them with the refusal, as it reads the reason typed in the app",
   "stop task": "stop one of the agent's own subagents alone, by its TASK id off wsp threads; the turn and its other subagents run on",
   effort: "how hard the agent thinks, by its own word (low, medium, high, xhigh, max); its default without it",
   engine: "give it the place's Docker or podman through a socket that sees its own containers alone",

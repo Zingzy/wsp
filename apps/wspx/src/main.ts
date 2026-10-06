@@ -64,12 +64,14 @@ export function claudeEnvs(anthropicKey: string, golden?: { browserShim?: boolea
 export function makeRuntime(root = repoRoot()): { rt: Runtime; envs: Record<string, string> } {
   const env = loadEnv(root);
   const backend = new SolariBackend({ apiKey: env.SOLARI_API_KEY });
+  const statePath = join(root, ".wsp", "state.json");
   const rt = createRuntime({
     backend,
+    statePath,
     // Who wrote this state file, for a host that later meets a record it cannot read: this is the dev command
     // line over an embedded runtime and prints no version of its own, so it says its name and the binary it ran
     // from, which is what a person would have to run again.
-    store: jsonFileStore(join(root, ".wsp", "state.json"), { wsp: "wspx", daemon: DAEMON_VERSION, bin: process.argv[1] ?? process.execPath }),
+    store: jsonFileStore(statePath, { wsp: "wspx", daemon: DAEMON_VERSION, bin: process.argv[1] ?? process.execPath }),
     adapters: HARNESS_ADAPTERS,
     hostId: hostIdentity(),
   });

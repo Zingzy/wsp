@@ -24,7 +24,7 @@ const PROSE =
 
 export function FileMarkdownPreview(props: { readonly text: string; readonly className?: string }) {
   return (
-    <div className={cn("mx-auto w-full max-w-4xl px-6 py-5", PROSE, props.className)} data-markdown-preview>
+    <div className={cn("mx-auto w-full max-w-4xl px-6 py-5 select-text", PROSE, props.className)} data-markdown-preview>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeSanitize]}

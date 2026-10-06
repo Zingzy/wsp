@@ -45,7 +45,7 @@ describe("the bundle and the landing on a host", () => {
     // A road that reads the login's own home finds this one rather than the real one.
     vi.stubEnv("HOME", user);
     vi.stubEnv("CLAUDE_CONFIG_DIR", undefined);
-    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: HARNESS_ADAPTERS.claude }, local: localWiring(user, { PATH: "/usr/bin:/bin" }), agentsReader: READER, seed: hostSeed() });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: HARNESS_ADAPTERS.claude }, local: localWiring(user, { PATH: "/usr/bin:/bin" }, undefined, join(user, ".wsp", "state.json")), agentsReader: READER, seed: hostSeed() });
     runtimes.push(rt);
     return { user, source, rt };
   }

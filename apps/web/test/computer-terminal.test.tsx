@@ -200,7 +200,7 @@ describe("the wiring", () => {
       const release = getProcs(HERE_KEY).watch();
       await waitFor(() => expect(ops).toContain("proc.watch"));
       const event = (e: Record<string, unknown>) => act(() => push!({ type: "daemon.event", channel: "c1", event: e as { type: string } }));
-      event({ type: "proc.snapshot", at: 1, daemon: 9, total: 1, procs: [{ pid: 9, ppid: 1, user: "dev", state: "S", comm: "wspd", cmdline: "wspd", cpu: 0, rss: 0, startedAt: 0 }] });
+      event({ type: "proc.snapshot", at: 1, daemon: 9, total: 1, seq: 1, procs: [{ pid: 9, ppid: 1, user: "dev", state: "S", comm: "wspd", cmdline: "wspd", cpu: 0, rss: 0, startedAt: 0 }] });
       event({ type: "sys.sample", cpu: 5, load1: 1.5, mem: { used: 1, total: 2 }, disk: { used: 3, total: 4 }, at: 1 });
       await waitFor(() => expect(getProcs(HERE_KEY).snapshot().snapshot?.procs.map(p => p.pid)).toEqual([9]));
       expect(getLive(HERE_KEY).snapshot().samples.map(s => s.load1)).toEqual([1.5]);

@@ -6,7 +6,8 @@
 // Done, Idle), newest first inside each across every workspace, the threads
 // its agents opened under it on the rail, and at the foot the Settled fold
 // holding every root whose whole tree is settled, by hand or by quiet after a
-// read, with "Settle all read" on its own row's menu. A root tile is dragged
+// read, with "Settle all read" on its own row's menu and on the list's own, which
+// stands while no Settled row is drawn. A root tile is dragged
 // onto another section to hold it there, onto Pinned to pin it and onto the
 // fold to settle it; while one is dragged every section stands to take it. A machine
 // with no thread yet is a tile of its own, a folder's record with none is no tile,
@@ -21,7 +22,7 @@
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { HOST_ASLEEP_LINE, SETTLE_MS, copiesFolder, modelOf, workspaceKind, workspaceState, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, SETTLE_MS, copiesFolder, kindForComputer, modelOf, workspaceKind, workspaceState, type WorkspaceState, type WorkspaceView } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
 import { CREATE_ASKED, CREATE_STEP_WORDS, currentStep, stepWords, stoppedStep } from "../shell/creationLog.js";
@@ -34,6 +35,7 @@ import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
 import { modelPicks } from "../components/chat/composerPicks.js";
 import { SidebarContent, SidebarGroupAction, SidebarMenuButton } from "../components/ui/sidebar.js";
+import { useWarmTiles } from "../components/chat/warmTiles.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
@@ -128,6 +130,9 @@ function AttemptGroup({ title, copies, children }: { title: string; copies: numb
 /** The workspace entries a project's row leaves off its folder's: renaming and removing a record no row shows. */
 const FOLDER_LEFT_OFF = new Set(["edit", "remove"]);
 
+/** The record the host makes for a project's folder here at its first thread, as the folder's entries read it before. */
+const unmadeFolder = (id: string, name: string, computer: string): WorkspaceView => ({ id: "", name, machineId: "", kind: "local", phase: "running", golden: "", createdAt: "", project: { id, name, path: "", computer } });
+
 export function WorkspaceSidebar() {
   const api = useStore(s => s.api);
   const conn = useStore(s => s.conn);
@@ -175,6 +180,7 @@ export function WorkspaceSidebar() {
    * tile at a time, the tile is the only editor, and the field stays until the store has the name. */
   const [renaming, setRenaming] = useState<{ rowId: string; saving: boolean } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  useWarmTiles(rootRef);
   const renameThread = useStore(s => s.renameThread);
   const renameWorkspace = useStore(s => s.renameWorkspace);
   const canRename = useStore(s => s.api?.renameSession !== undefined);
@@ -278,14 +284,30 @@ export function WorkspaceSidebar() {
   };
   /** One project's actions, as the switcher's rows offer them, then its folder's own, the entries a tile offers for the
    * copy it runs on: a folder no thread runs in draws no tile, so this row is the one way to them. The edit and remove
-   * entries stay off, since they act on a record no row shows. An act that opens something puts the folder on screen
-   * first, since a pane opened on a workspace nobody looks at shows nothing. */
+   * entries stay off, since they act on a record no row shows. A project here that never ran has no record yet, so its
+   * entries read off the one the host would make, and the host makes it once one is chosen. An act that opens
+   * something puts the folder on screen first, since a pane opened on a workspace nobody looks at shows nothing. */
   const projectActionsOf = (group: ProjectGroup): ResolvedAction[] => {
-    const own = resolveActions(projectActions, { id: group.project.id, name: group.project.name, workspaces: group.workspaces.map(w => w.displayName) }, projectVerbs);
-    const folder = workspaces.find(w => w.project.id === group.project.id && w.worktree === undefined && copiesFolder(workspaceKind(w)));
+    const { project } = group;
+    const own = resolveActions(projectActions, { id: project.id, name: project.name, workspaces: group.workspaces.map(w => w.displayName) }, projectVerbs);
+    const held = workspaces.find(w => w.project.id === project.id && w.worktree === undefined && copiesFolder(workspaceKind(w)));
+    const make = api?.projectFolder;
+    const here = project.computer !== undefined && copiesFolder(kindForComputer(project.computer));
+    const folder = held ?? (make !== undefined && here ? unmadeFolder(project.id, project.name, project.computer!) : undefined);
     if (folder === undefined) return own;
-    const acts = resolveActions(workspaceActions, workspaceTarget(folder, statuses[folder.id] ?? null, places), verbs).filter(action => action.id !== "new-thread" && !FOLDER_LEFT_OFF.has(action.group));
-    return [...own, ...acts.map(action => (action.group !== "open" ? action : { ...action, run: async () => { select(folder.id); await action.run(); } }))];
+    const actsOn = (record: WorkspaceView): ResolvedAction[] =>
+      resolveActions(workspaceActions, workspaceTarget(record, statuses[record.id] ?? null, places), verbs).filter(action => action.id !== "new-thread" && !FOLDER_LEFT_OFF.has(action.group));
+    return [
+      ...own,
+      ...actsOn(folder).map(action => ({
+        ...action,
+        run: async () => {
+          const at = held ?? (await make!(project.id));
+          if (action.group === "open") select(at.id);
+          await (at === held ? action : actsOn(at).find(made => made.id === action.id))?.run();
+        },
+      })),
+    ];
   };
 
   /** The name a person typed on a tile: the store takes it while the field stays as it is, and the field closes only
@@ -556,7 +578,7 @@ export function WorkspaceSidebar() {
         <CheckoutAsk key={runs.id} workspaceId={runs.id} />
       ))}
       <div ref={rootRef} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col">
-        <SidebarContent fixedHeader={header}>
+        <SidebarContent fixedHeader={header} className="min-h-full" onContextMenu={event => void openContextMenu(event, settledRowActions.filter(action => action.id === "settle-read"))}>
           <ul data-sidebar-tree className="flex w-full min-w-0 flex-col px-[var(--sidebar-content-inset)]">
             {launchItems}
             {sections.map((section, index) => (
@@ -586,7 +608,7 @@ export function WorkspaceSidebar() {
                 )}
               </li>
             ))}
-            {tiles.settled.length > 0 || settleable.length > 0 || dragging !== null ? (
+            {tiles.settled.length > 0 || dragging !== null ? (
               <li data-thread-selection-safe className={cn("mt-3 rounded-[var(--control-radius)] transition-colors duration-150", over === "settled" && "bg-sidebar-row-hover")} {...dropZone("settled")}>
                 <SectionRow
                   label={SECTION_WORDS.settled}

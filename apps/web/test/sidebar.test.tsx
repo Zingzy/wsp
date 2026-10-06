@@ -221,15 +221,15 @@ describe("tiles from the fixture wire", () => {
       "fix the port list",
     );
     // The failure waits on the person, so it heads the list over the working thread, and the read one rests last.
-    expect(rowIds()).toEqual(["thread:s3", "thread:s1", "thread:s2", "settled"]);
+    expect(rowIds()).toEqual(["thread:s3", "thread:s1", "thread:s2"]);
     expect(rowOf("fix the port list").querySelector("[data-tile-where]")!.textContent).toBe(`the-project @ ${BOX_NAME}`);
     // The one slot at row one's right edge: the state word while a thread is one a person acts on, the age once it rests.
     expect(threadState(rowOf("fix the port list"))).toBe("Working");
     expect(threadTime(rowOf("upgrade node"))).toBe("50m");
     // A session without a prompt falls back to the harness session id.
     expect(threadState(rowOf("59094224-bb3d"))).toBe("Failed");
-    // Nothing has been quiet long enough to fold, but the read thread can be settled, so the fold's row is there at 0.
-    expect(screen.getByRole("button", { name: "Settled 0" })).toBeDefined();
+    // Nothing has been quiet long enough to fold, so there is no Settled row, though the read thread could settle.
+    expect(screen.queryByRole("button", { name: /^Settled/ })).toBeNull();
     expect(document.querySelector("[data-sidebar-tree]")!.textContent).not.toMatch(/[·•]/);
   });
 
@@ -1030,5 +1030,17 @@ describe("the creation tile", () => {
     // Refused before any step, the card says so alone; refused on a step, it names that step.
     expect(gamma.dataset["creationLine"]).toBe(CREATE_STEP_WORDS.failed);
     expect(rowOf("delta").dataset["creationLine"]).toBe(CREATE_STEP_WORDS["fork-requested"]);
+  });
+
+  it("says what the step waits for in its own words, once, the newest ask in place of the last", async () => {
+    await mount(fakeApi([COPIED], [status(COPIED)]), "api");
+    const wait = "waiting for Solari to serve the image; asking again in 15s";
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), project: "pr_1", workspaceId: "ws_beta", lines: [{ stage: "fork-requested", message: "starting beta on solari", at: "t", elapsedMs: 0 }], failed: null }] } as never));
+    const poll = (elapsedMs: number) => act(() => useStore.getState().applyEvent({ type: "workspace.creating", workspaceId: "ws_beta", name: "beta", stage: "fork-requested", message: wait, elapsedMs, waiting: true }));
+    poll(1_000);
+    poll(16_000);
+    const beta = rowOf("beta");
+    expect(beta.dataset["creationLine"]).toBe(`W${wait.slice(1)}`);
+    expect(useStore.getState().creations[0]!.lines).toHaveLength(1);
   });
 });

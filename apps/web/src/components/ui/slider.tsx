@@ -7,7 +7,7 @@ import { cn } from "../../lib/utils.js";
 
 export function Slider({ className, "aria-label": label, ...props }: SliderPrimitive.Root.Props<number> & { "aria-label": string }) {
   return (
-    <SliderPrimitive.Root className={cn("flex w-full touch-none items-center select-none", className)} data-slot="slider" {...props}>
+    <SliderPrimitive.Root className={cn("flex w-full touch-none items-center", className)} data-slot="slider" {...props}>
       <SliderPrimitive.Control className="flex h-5 w-full items-center">
         <SliderPrimitive.Track className="relative h-px w-full bg-border">
           <SliderPrimitive.Indicator className="absolute h-full bg-foreground/60" />

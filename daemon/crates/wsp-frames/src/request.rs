@@ -121,7 +121,19 @@ pub enum DaemonOp {
         machine_id: Option<String>,
     },
     #[serde(rename = "ports.watch")]
-    PortsWatch,
+    PortsWatch {
+        /// The processes whose listeners are this socket's: each one's process group, and every process under it.
+        /// A watch that names none sees every listener on the machine, which is what the host's own watchers ask
+        /// for. A second watch on the socket names the set again.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        roots: Option<Vec<u32>>,
+        /// With roots, the workspace's folder: a process running in it is the workspace's too, a server started
+        /// with setsid among them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        folder: Option<String>,
+    },
     #[serde(rename = "manifest.get")]
     ManifestGet,
     #[serde(rename = "manifest.record", rename_all = "camelCase")]

@@ -255,6 +255,38 @@ async fn sys_watch_streams_one_samplers_samples_to_every_subscriber_and_stops_it
 }
 
 #[tokio::test]
+async fn every_proc_frame_names_its_seq_and_a_watch_again_after_a_gap_makes_the_next_frame_a_whole_snapshot() {
+    let t = tree();
+    let d = start(with_tree(&t)).await;
+    let mut a = Client::connect(d.addr).await;
+    assert_eq!(a.request("proc.watch", json!({})).await["ok"], true);
+    let first = a.wait_event("proc.snapshot", Duration::from_secs(5), |_| true).await.expect("a whole snapshot first");
+    let seq = first["seq"].as_u64().expect("a snapshot names its seq");
+    let next = a.wait_event("proc.changes", Duration::from_secs(5), |_| true).await.expect("changes after it");
+    assert_eq!((next["base"].as_u64(), next["seq"].as_u64()), (Some(seq), Some(seq + 1)), "changes name the frame they apply to");
+    // The page missed a frame: it asks again on the socket it watches from, and the next frame it gets is whole.
+    let after = a.wait_event("proc.changes", Duration::from_secs(5), |e| e["seq"].as_u64() > Some(seq + 1)).await.expect("more changes");
+    let held = a.of("proc.snapshot").len();
+    assert_eq!(a.request("proc.watch", json!({})).await["ok"], true);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let again = loop {
+        a.listen(Duration::from_millis(10)).await;
+        let later = a
+            .events
+            .iter()
+            .find(|f| (f["type"] == "proc.snapshot" || f["type"] == "proc.changes") && f["seq"].as_u64() > after["seq"].as_u64());
+        if let Some(f) = later {
+            break f.clone();
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no frame came after the watch again");
+    };
+    assert_eq!(again["type"], "proc.snapshot", "the frame after a watch again is whole");
+    assert_eq!(a.of("proc.snapshot").len(), held + 1);
+    assert_eq!(again["procs"].as_array().unwrap().len(), 3);
+    a.close().await;
+}
+
+#[tokio::test]
 async fn proc_watch_streams_snapshots_until_proc_unwatch_proc_inspect_reads_one_pid_proc_kill_refuses_the_protected_ones() {
     let t = tree();
     let d = start(with_tree(&t)).await;
@@ -274,11 +306,13 @@ async fn proc_watch_streams_snapshots_until_proc_unwatch_proc_inspect_reads_one_
         },
     );
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while a.of("proc.snapshot").len() < 2 && tokio::time::Instant::now() < deadline {
+    while a.of("proc.changes").is_empty() && tokio::time::Instant::now() < deadline {
         a.listen(Duration::from_millis(10)).await;
     }
+    // One whole list for the socket, then only what moved after it.
     let snaps = a.of("proc.snapshot");
-    assert!(snaps.len() >= 2, "{}", snaps.len());
+    assert_eq!(snaps.len(), 1);
+    assert!(!a.of("proc.changes").is_empty());
     assert_eq!((&snaps[0]["daemon"], &snaps[0]["total"]), (&json!(d.pid), &json!(3)));
     let pids: Vec<u64> = snaps[0]["procs"].as_array().unwrap().iter().map(|p| p["pid"].as_u64().unwrap()).collect();
     assert_eq!(pids, vec![1, 50, 51]);
@@ -308,9 +342,9 @@ async fn proc_watch_streams_snapshots_until_proc_unwatch_proc_inspect_reads_one_
     assert_eq!(a.request("proc.unwatch", json!({})).await["ok"], true);
     tokio::time::sleep(Duration::from_millis(60)).await;
     a.listen(Duration::from_millis(10)).await;
-    let after = a.of("proc.snapshot").len();
+    let after = a.of("proc.changes").len();
     a.listen(Duration::from_millis(100)).await;
-    assert_eq!(a.of("proc.snapshot").len(), after);
+    assert_eq!(a.of("proc.changes").len(), after);
     assert_eq!(d.logged(words::PROC_SAMPLER_STOPPED), 1);
     // An unwatch with no watch on the socket is still ok, and the close after it undoes nothing twice.
     assert_eq!(a.request("proc.unwatch", json!({})).await["ok"], true);
@@ -346,10 +380,10 @@ async fn an_exited_pty_stops_labelling_its_pid_so_a_stranger_who_reuses_it_carri
         assert!(tokio::time::Instant::now() < deadline, "the shell never exited: {listed}");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    // The snapshot after the exit can be one the sampler had already built, so the wait is on a snapshot that dropped
-    // the label rather than on the next one to arrive.
+    // The frame after the exit can be one the sampler had already built, so the wait is on the change that dropped
+    // the label rather than on the next frame to arrive.
     let after = a
-        .wait_event("proc.snapshot", Duration::from_secs(10), |s| row_of(s).is_some_and(|row| row.get("pty").is_none()))
+        .wait_event("proc.changes", Duration::from_secs(10), |s| row_of(s).is_some_and(|row| row.get("pty").is_none()))
         .await
         .expect("a snapshot without the label");
     assert_eq!(row_of(&after).unwrap()["pid"], json!(pid));

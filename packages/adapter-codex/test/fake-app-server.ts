@@ -3,7 +3,7 @@
 // reads it, by the answer its CODEX_HOME holds for that method, logs every line it read with how many answers it had
 // sent by then, and exits the moment its stdin closes, dropping whatever it had not answered yet, as the real one
 // does: a script that let go of stdin early loses its answers here too.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeStub } from "../../protocol/test/stub-script.js";
@@ -60,7 +60,7 @@ export function fakeAppServer(answers: Json): { home: string; path: string; requ
     home,
     path: `${bin}:/usr/bin:/bin`,
     requests: () =>
-      readFileSync(join(home, "requests.log"), "utf8")
+      (existsSync(join(home, "requests.log")) ? readFileSync(join(home, "requests.log"), "utf8") : "")
         .split("\n")
         .filter(l => l !== "")
         .map(l => JSON.parse(l) as Json),
