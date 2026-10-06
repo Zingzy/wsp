@@ -193,6 +193,7 @@ import type {
   SessionInterruptOutcome,
   SessionInterruptResult,
   SessionRenameResult,
+  SessionRenameWrite,
   SessionRenamer,
   SessionStartOutcome,
   SessionSteerResult,
@@ -6207,9 +6208,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     pendingBytes.delete(id);
     transcriptIndex.delete(id);
     daemonNotes.delete(id);
+    // Every thread this workspace drops takes its slate with it, as a thread's own delete does: its record, its
+    // timers (an always one would tick on for a thread nobody can reach) and its folder.
+    const dropped = new Set<string>();
+    for (const [threadId, held] of threadRecords) if (held.workspaceId === id) dropped.add(threadId);
+    for (const s of sessions.values()) if (s.view.workspaceId === id && s.view.threadId !== undefined) dropped.add(s.view.threadId);
     for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
     for (const [threadId, kept] of keptAgents) if (kept.workspaceId === id) reapKept(threadId);
     for (const [threadId, held] of threadRecords) if (held.workspaceId === id) threadRecords.delete(threadId);
+    for (const threadId of dropped) await slates.forget(threadId);
     viewedMarks.delete(id);
     live.get(id)?.prPoll?.();
     cancelFlush(id);
@@ -9093,10 +9100,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // Started inside a promise and never on this stack, as the store read is: an adapter that refuses the id throws
     // where it builds its command, and naming a thread may never cost the turn that asked for it.
     return confineSetup(entry, view.harness)
-      .then(() => write(sessionId, title, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)))
+      .then(() => writeSession(sessionId, () => write(sessionId, title, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout))))
       .then(
         wrote => {
-          if (wrote.kind === "written") restampKept(sessionId);
           if (wrote.kind === "failed") console.warn(noNameWriteLogLine(sessionId, entry.record.id, wrote.error));
         },
         (e: unknown) => console.warn(noNameWriteLogLine(sessionId, entry.record.id, e instanceof Error ? e.message : String(e))),
@@ -9403,14 +9409,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     void kept.agent.close(o).catch((e: unknown) => console.warn(`the kept agent of thread ${threadWord(threadId)} did not end: ${e instanceof Error ? e.message : String(e)}`));
   };
 
-  /** This host wrote into a harness session's own file (a title, a rename): the processes kept on that session stamp
-   * the file again, or the next send would read the host's own write as the person resuming the session elsewhere. */
-  const restampKept = (harnessSessionId: string): void => {
-    for (const kept of keptAgents.values()) {
-      if (kept.session !== harnessSessionId) continue;
-      const file = stampSessionFile(kept.agent.sessionFile, kept.file?.path);
-      if (file !== undefined) kept.file = file;
-    }
+  /** The host's own writes into a harness session's file still going, by session. Their bytes land before the write
+   * answers, so a send waits them out before it reads the file against a kept process's stamp. */
+  const hostWrites = new Map<string, Promise<void>>();
+  /** This host writes into a harness session's own file (a title, a rename): the processes kept on that session stamp
+   * the file again once it is in, or the next send would read the host's own write as the person resuming the session
+   * elsewhere. */
+  const writeSession = (harnessSessionId: string, write: () => Promise<SessionRenameWrite>): Promise<SessionRenameWrite> => {
+    const wrote = write().then(w => {
+      if (w.kind !== "written") return w;
+      for (const kept of keptAgents.values()) {
+        if (kept.session !== harnessSessionId) continue;
+        const file = stampSessionFile(kept.agent.sessionFile, kept.file?.path);
+        if (file !== undefined) kept.file = file;
+      }
+      return w;
+    });
+    const settled: Promise<void> = Promise.all([hostWrites.get(harnessSessionId), wrote.catch(() => {})]).then(() => {
+      if (hostWrites.get(harnessSessionId) === settled) hostWrites.delete(harnessSessionId);
+    });
+    hostWrites.set(harnessSessionId, settled);
+    return wrote;
   };
 
   /** The process a thread's next turn runs on, taken out of the keep: only where it was launched exactly as this turn
@@ -10774,6 +10793,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               await copyBlocked(entry);
               continue;
             }
+            const writing = resume === undefined ? undefined : hostWrites.get(resume);
+            if (writing !== undefined) {
+              await writing;
+              refuse();
+              continue;
+            }
             hold();
             if (landed) break;
             landed = true;
@@ -11098,11 +11123,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (write === undefined) return { outcome: "unsupported" };
       // The store is keyed by the harness's own id, so a thread whose harness never announced one has nothing to name.
       if (harnessSessionId === undefined) return { outcome: "no-session" };
-      const wrote = await write(harnessSessionId, named, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout));
+      const wrote = await writeSession(harnessSessionId, () => write(harnessSessionId, named, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)));
       // A store that refused the write says nothing about which sessions it has, so its own line travels as the answer.
       if (wrote.kind === "failed") return { outcome: "failed", error: wrote.error };
       if (wrote.kind === "no-session") return { outcome: "no-session" };
-      restampKept(harnessSessionId);
       // Every turn of the thread shares the harness's session, and the fold reads the latest turn's title. The name
       // is the person's, so a title the harness is still thinking about is thrown away when it lands.
       for (const row of sessions.values()) {

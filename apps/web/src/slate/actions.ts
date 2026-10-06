@@ -166,8 +166,8 @@ export class ActionRunner {
       }
       case "copy": {
         const text = engine.resolve(step.text, options.row);
-        await navigator.clipboard?.writeText(typeof text === "string" ? text : JSON.stringify(text ?? ""));
-        return { said: "Copied" };
+        if (navigator.clipboard === undefined) return { refused: "This window cannot copy." };
+        return navigator.clipboard.writeText(typeof text === "string" ? text : JSON.stringify(text ?? "")).then(() => ({ said: "Copied" }), () => ({ refused: "Could not copy; click the window and press it again." }));
       }
       default:
         return {};
