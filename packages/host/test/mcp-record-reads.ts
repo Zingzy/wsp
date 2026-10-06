@@ -5,8 +5,6 @@
 // with. The frames carry what a byte compare has to survive, and fields out
 // of the order a parsed reply is answered in, with a field no schema names.
 
-import { DEFAULT_PREFERENCES } from "@wsp/protocol";
-
 /** One recorded call: its name, the tool's arguments, and the frame the host answers each op with. */
 interface Case {
   case: string;
@@ -171,8 +169,42 @@ const LISTING = {
 };
 
 /** The person's record as preferences.get and preferences.set answer it, with one agent's defaults in it, its keys
- * out of the schema's order. */
-const PREFS = (agentDefaults: Record<string, unknown>): Record<string, unknown> => ({ ...DEFAULT_PREFERENCES, agentDefaults, unknownTop: 1 });
+ * out of the schema's order. Written out rather than spread from the protocol's defaults: a preference the app adds
+ * changes no tool's answer, and would otherwise put every builder's record behind. */
+const PREFS = (agentDefaults: Record<string, unknown>): Record<string, unknown> => ({
+  theme: "system",
+  lightTheme: "paper",
+  darkTheme: "graphite",
+  sidebarMode: "list",
+  terminalSize: "app",
+  terminalZoom: {},
+  access: {},
+  projectLook: {},
+  computerLook: {},
+  serverIcons: true,
+  agentVersions: true,
+  usageLogs: true,
+  productUsage: true,
+  keepAwake: true,
+  transparency: true,
+  projectOrder: [],
+  keybindings: {},
+  appFont: "",
+  codeFont: "",
+  agentDefaults,
+  projectDefaults: {},
+  sendWith: "enter",
+  midTurn: "queue",
+  notifyNeeds: "notify-sound",
+  notifyDone: "notify",
+  planAlerts: true,
+  settleAfter: "2h",
+  askDelete: true,
+  onQuit: "ask",
+  newThreadIn: "ask",
+  labs: false,
+  unknownTop: 1,
+});
 const SET_ROW = { ...REPORT.agents[0], setup: { envNames: ["FOO", "BAR"], on: false, args: ["--debug", "a \u0085 b"], configDir: "/Users/x/claude wsp", program: "/opt/🧪/claude" } };
 const PROJECT_REF = { id: "proj-1", name: AWKWARD, computer: "here", source: { kind: "folder", path: "/w" }, path: "/w", remote: "", defaultBranch: "main", memoryKey: "-w", memoryDir: "/m/-w", createdAt: "2026-09-27T00:00:00.000Z" };
 const RESOLVED = { "proj-1": { access: { from: "project", mode: "bypass", value: "full" }, agent: { from: "project", value: "codex", extra: 1 }, model: { value: "gpt \u0085", from: "default" }, effort: { value: "low", from: "catalog" } } };

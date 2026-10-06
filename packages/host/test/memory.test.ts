@@ -18,11 +18,11 @@ import { DIST, describeWithDists, distOf } from "./built-bin.js";
  * page goes red until it says the same thing. */
 const HOST_MEMORY_BUDGET_MB = 40;
 
-/** What the run is held to, under the promise so a regression is caught while the promise still holds. Main read
- * 35.5 MB on Linux under Node 24 on 2026-10-05, most of it zod binding 24 methods onto every schema the protocol
- * builds at load; bound on first read instead, it reads 26.5 there and 25.7 under Node 22. With the Slate's parser,
- * kit, runs and tools merged in it read 26.9 on a Mac on 2026-10-06. */
-const HOST_MEMORY_CAP_MB = 28.5;
+/** What a day of turns may add to what the host holds once it has started. Start-up is the code and the schemas every
+ * feature loads, so a cap on the whole moved with each one and failed branches that never touched what a turn keeps:
+ * under Node 22 on Linux the day added 3.7 MB on 2026-10-06 before the Slate landed (31.2 MB at start-up), with it
+ * (33.3) and once start-up shed 9 MB (23.4), and 3.9 under Node 24. Start-up answers to the budget alone. */
+const HOST_DAY_CAP_MB = 5;
 
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");
@@ -39,6 +39,8 @@ const SUBAGENT_DELTAS = 10;
 
 interface Reading {
   heldMb: number;
+  /** What the host held once started, with its project, workspace and worktree made and no turn run yet. */
+  startMb?: number;
   rssMb: number;
   turns: number;
   /** Each collection's figure from the last turn until one freed nothing more. */
@@ -110,6 +112,31 @@ const project = await host.addProject(folder);
 const workspace = await host.createWorkspace("here", undefined, project.id);
 const worktree = (await runtime.workspaces.folderFor({ project: project.id, branch: "feat/side" })).workspace;
 
+// The host writes its index and its transcripts behind a queue. What it holds is only known once it has been left
+// alone the way an idle minute leaves it, so this reads until a collection frees nothing more: the drain falls from
+// about 41 MB to the floor, and stopping at two reads within a megabyte could stop on the way down.
+// external covers the buffers a socket frame and a queued write live in, arrayBuffers among them, which the heap
+// alone does not count.
+const held = () => {
+  global.gc();
+  global.gc();
+  const m = process.memoryUsage();
+  return (m.heapUsed + m.external) / 1048576;
+};
+const quiet = async () => {
+  let before = Infinity;
+  let after = held();
+  const readings = [after];
+  for (let i = 0; i < 60 && Math.abs(before - after) > 0.1; i++) {
+    await sleep(250);
+    before = after;
+    after = held();
+    readings.push(after);
+  }
+  return readings;
+};
+const start = (await quiet()).at(-1);
+
 const turn = async (at, thread) => {
   const handle = await runtime.sessions.start(at.id, { prompt: "go", harness: "claude", ...(thread === undefined ? {} : { thread }) });
   await handle.finished?.catch(() => {});
@@ -135,27 +162,9 @@ await shelf.save(picks);
 await shelf.list();
 await store.put("pending-computers", "a_mem", { id: "a_mem", address: "root@10.0.0.9", step: "choosing", choices: picks, recipe: "laptop", startedAt: new Date().toISOString(), placeId: "p_mem" });
 
-// The host writes its index and its transcripts behind a queue. What it holds is only known once it has been left
-// alone the way an idle minute leaves it, so this reads until a collection frees nothing more: the drain falls from
-// about 41 MB to the floor, and stopping at two reads within a megabyte could stop on the way down.
-// external covers the buffers a socket frame and a queued write live in, arrayBuffers among them, which the heap
-// alone does not count.
-const held = () => {
-  global.gc();
-  global.gc();
-  const m = process.memoryUsage();
-  return (m.heapUsed + m.external) / 1048576;
-};
-let before = Infinity;
-let after = held();
-const readings = [after];
-for (let i = 0; i < 60 && Math.abs(before - after) > 0.1; i++) {
-  await sleep(250);
-  before = after;
-  after = held();
-  readings.push(after);
-}
-console.log(\`measured \${JSON.stringify({ heldMb: +after.toFixed(1), rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: ${THREADS * TURNS_PER_THREAD + 1}, readings: readings.map(r => +r.toFixed(1)) })}\`);
+const readings = await quiet();
+const after = readings.at(-1);
+console.log(\`measured \${JSON.stringify({ heldMb: +after.toFixed(1), startMb: +start.toFixed(1), rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: ${THREADS * TURNS_PER_THREAD + 1}, readings: readings.map(r => +r.toFixed(1)) })}\`);
 await host.close();
 process.exit(0);
 `;
@@ -236,17 +245,18 @@ describeWithDists("what the host holds after a day of agents", ["host", "runtime
     rmSync(home, { recursive: true, force: true });
   });
 
-  it(`stays under ${HOST_MEMORY_CAP_MB} MB with ${THREADS * TURNS_PER_THREAD + 1} turns through it, the last in a worktree`, async () => {
+  it(`stays under ${HOST_MEMORY_BUDGET_MB} MB and gains under ${HOST_DAY_CAP_MB} MB with ${THREADS * TURNS_PER_THREAD + 1} turns through it, the last in a worktree`, async () => {
     const empty = await ran('global.gc(); console.log(`measured ${JSON.stringify({ heldMb: 0, rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: 0 })}`)', home);
     expect(empty.code, `an empty node on this runner said: ${empty.out}`).toBe(0);
     const floor = reading(empty.out, "an empty node");
     const run = await ran(hostScript(home), home);
     expect(run.code, run.out).toBe(0);
     const held = reading(run.out, "the host");
-    const said = `the host held ${held.heldMb} MB after ${held.turns} turns (resident ${held.rssMb} MB, an empty node on this runner ${floor.rssMb} MB; read ${(held.readings ?? []).join(", ")})`;
+    const day = +(held.heldMb - held.startMb!).toFixed(1);
+    const said = `the host held ${held.heldMb} MB after ${held.turns} turns, ${held.startMb} MB of it at start-up and ${day} MB from the day (resident ${held.rssMb} MB, an empty node on this runner ${floor.rssMb} MB; read ${(held.readings ?? []).join(", ")})`;
     // Printed on a pass too, so the margin a run kept can be read off CI before it is gone.
     console.log(said);
-    expect(HOST_MEMORY_CAP_MB).toBeLessThanOrEqual(HOST_MEMORY_BUDGET_MB);
-    expect(held.heldMb, said).toBeLessThanOrEqual(HOST_MEMORY_CAP_MB);
+    expect(held.heldMb, said).toBeLessThanOrEqual(HOST_MEMORY_BUDGET_MB);
+    expect(day, said).toBeLessThanOrEqual(HOST_DAY_CAP_MB);
   }, 300_000);
 });

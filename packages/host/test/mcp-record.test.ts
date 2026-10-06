@@ -8,7 +8,7 @@
 // this package, so a verb's
 // description or a refusal keeps one home, here, and a change to either fails
 // this suite until the record is written again.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { PassThrough } from "node:stream";
@@ -40,6 +40,8 @@ import { READS } from "./mcp-record-reads.js";
 const CRATE = fileURLToPath(new URL("../../../daemon/crates/wsp-mcp/", import.meta.url));
 const RECORD = join(CRATE, "record");
 const ANSWERS = join(CRATE, "tests", "answers");
+/** The record's files beside the answers. */
+const RECORDED_FILES = ["refusals.json", "sealed.json"];
 
 /** Every file the record holds, by its path under the crate, with the text it must hold. */
 type Files = Map<string, string>;
@@ -731,13 +733,15 @@ describe("the record the daemon binary's tool server serves from", () => {
   }, 60_000);
 
   it("equals its regeneration: the handshake, every listed tool, the sentences, the exit classes and each recorded answer", async () => {
-    const out = mkdtempSync(join(tmpdir(), "wsp-mcp-record-"));
-    for (const [rel, text] of files) {
-      mkdirSync(join(out, rel, ".."), { recursive: true });
-      writeFileSync(join(out, rel), text);
+    if (process.env["WSP_WRITE_RECORD"] === "1") {
+      for (const stale of [RECORD, ANSWERS, ...RECORDED_FILES.map(name => join(CRATE, "tests", name))]) rmSync(stale, { recursive: true, force: true });
+      for (const [rel, text] of files) {
+        mkdirSync(join(CRATE, rel, ".."), { recursive: true });
+        writeFileSync(join(CRATE, rel), text);
+      }
     }
-    const ask = `daemon/crates/wsp-mcp is behind this package. The regenerated files are under ${out}: rm -rf daemon/crates/wsp-mcp/record daemon/crates/wsp-mcp/tests/answers daemon/crates/wsp-mcp/tests/refusals.json daemon/crates/wsp-mcp/tests/sealed.json && cp -R ${out}/. daemon/crates/wsp-mcp/ and commit them`;
-    expect([...committedUnder(RECORD, "record/"), ...committedUnder(ANSWERS, "tests/answers/"), ...["refusals.json", "sealed.json"].filter(name => existsSync(join(CRATE, "tests", name))).map(name => `tests/${name}`)].sort(), ask).toEqual([...files.keys()].sort());
+    const ask = `daemon/crates/wsp-mcp is behind this package. Write it again with WSP_WRITE_RECORD=1 pnpm exec vitest run packages/host/test/mcp-record.test.ts and commit what changed under daemon/crates/wsp-mcp`;
+    expect([...committedUnder(RECORD, "record/"), ...committedUnder(ANSWERS, "tests/answers/"), ...RECORDED_FILES.filter(name => existsSync(join(CRATE, "tests", name))).map(name => `tests/${name}`)].sort(), ask).toEqual([...files.keys()].sort());
     for (const [rel, text] of files) expect(readFileSync(join(CRATE, rel), "utf8"), `${rel}: ${ask}`).toBe(text);
   });
 
