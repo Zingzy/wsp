@@ -171,7 +171,7 @@ import { recipeChanges, stepsFor, type RecipeChange } from "./recipe-sync.js";
 import { freshEphemeral, makeSeal, newPlaceKeyPair, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type PlaceKeyPair, type Seal } from "@wsp/keys";
 import type { Store } from "./store.js";
 import {
-  PLACES, CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, madeBySetup, isPlaceRecord, type PlaceLogin,
+  PLACES, CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, madeBySetup, isPlaceRecord, type PlaceLogin, type PlaceWiring, type PlaceRecording,
   type PlaceStaging, type PlaceDoorOptions, type RecipeResolver, type PlaceChallenge, type PlaceDoor, NO_PLACE_UPDATER,
   placeUpdateSlowLine, placeSweptOverSshLine, placeLoginRoadLine, placeSweptOverLinkLine, PlaceLoginRefusedError,
   PlaceForksNowhereError, PlaceAddTakenBackError, PlaceProvisioningError,
@@ -201,7 +201,31 @@ export {
   placeHomeRefusal, takenReport, signInsOf, vaultSignIn, ADD_STOPPED_LINE, ADD_STOPPED_FIX, ADD_NOT_TAKEN_BACK_LINE,
 } from "./places/helpers.js";
 
-export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
+/** What every area of the place door reads: the options it was made with and what the whole door shares. */
+interface PlaceDoorContext {
+  opts: PlaceDoorOptions;
+  store: Store;
+  devices: DeviceDoor;
+  wiring: PlaceWiring;
+  recording: PlaceRecording;
+  clockNow: () => number;
+  seenEveryMs: number;
+  dialWaitMs: number;
+  frameWaitMs: number;
+  relinkWaitMs: number;
+  live: Map<string, Live>;
+  kept: Map<string, PlaceRecord>;
+  signInsHere: (placeId: string) => Record<string, AgentSignInState> | undefined;
+  backends: Map<string, MachineBackend>;
+  forwards: Map<string, Forward>;
+  asking: Map<string, Promise<MachineBackend>>;
+  watchers: Set<(e: PlaceEvent) => void>;
+  emit: (e: PlaceEvent) => void;
+  /** Set once every area is built, so an area reads it inside a call and never while it is being built. */
+  door: PlaceDoor;
+}
+
+function placeDoorContext(opts: PlaceDoorOptions): PlaceDoorContext {
   const { store, devices, wiring, recording } = opts;
   const clockNow = opts.now ?? Date.now;
   const seenEveryMs = opts.seenEveryMs ?? SEEN_EVERY_MS;
@@ -225,10 +249,18 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   /** The read of one place's backend facts that is in flight, so two roads asking at once send one frame. */
   const asking = new Map<string, Promise<MachineBackend>>();
   const watchers = new Set<(e: PlaceEvent) => void>();
-  let tunnelSeq = 0;
   const emit = (e: PlaceEvent): void => {
     for (const fn of watchers) fn(e);
   };
+  return {
+    opts, store, devices, wiring, recording, clockNow, seenEveryMs, dialWaitMs, frameWaitMs, relinkWaitMs, live, kept,
+    signInsHere, backends, forwards, asking, watchers, emit, door: undefined as unknown as PlaceDoor,
+  };
+}
+
+/** The place records as the store keeps them, the providers beside them, and the turns every write of one takes. */
+function placeRecords(ctx: PlaceDoorContext) {
+  const { opts, store, wiring, recording, clockNow, dialWaitMs, kept } = ctx;
 
   const records = async (): Promise<PlaceRecord[]> => (await store.list(PLACES)).filter(isPlaceRecord).sort((a, b) => a.joinedAt.localeCompare(b.joinedAt));
   /** The provider this host forks on when nobody names a place: the place a record with no place word stands on.
@@ -467,6 +499,42 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     await change(placeId, now => ({ ...now, lastSeenAt: new Date(at).toISOString() }));
   };
 
+  /** The read-then-write of a computer's record, one at a time per computer: every write that starts from the
+   * record as it stands reads it and writes it in here, or it lands over a field another write set meanwhile. */
+  const recordTurns = new Map<string, Promise<unknown>>();
+  const inRecordTurn = <T>(placeId: string, write: () => Promise<T>): Promise<T> => {
+    const run = (recordTurns.get(placeId) ?? Promise.resolve()).then(write);
+    const settled = run.catch(() => undefined);
+    recordTurns.set(placeId, settled);
+    void settled.then(() => {
+      if (recordTurns.get(placeId) === settled) recordTurns.delete(placeId);
+    });
+    return run;
+  };
+
+  /** One change of a computer's record as it stands, in its turn: what was written, or nothing where `move` left it
+   * as it was or a remove took the record first, which takes it in the same turn. */
+  const change = (placeId: string, move: (now: PlaceRecord) => PlaceRecord | undefined): Promise<PlaceRecord | undefined> =>
+    inRecordTurn(placeId, async () => {
+      const now = await recordOf(placeId);
+      const next = now === undefined ? undefined : move(now);
+      return next === undefined ? undefined : keep(next);
+    });
+
+  return {
+    records, wiredProvider, providerIds, providerBackend, providerRate, providerSizes, imageFacts, recordOf,
+    settingsOf, settingsHeld, rowIds, withCap, untilDaemonVersion, awaiting, adds, putAdd, loginOf, rootOver,
+    loginAnswers, holdBack, keep, defaultId, inTurn, markDefault, markHeld, challenge, signedRefusal, writeSeen,
+    inRecordTurn, change,
+  };
+}
+type PlaceRecordsArea = ReturnType<typeof placeRecords>;
+
+/** The links' waits, the setup and the sync of a computer to its recipe, and the link a machine there is driven over. */
+function placeSetup(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea) {
+  const { opts, wiring, recording, clockNow, frameWaitMs, relinkWaitMs, live, kept, signInsHere } = ctx;
+  const { recordOf, change } = recordArea;
+
   /** Who is reading one computer's daemon events, by place id: the channels a road on this host opened over that
    * computer's link. A channel is the one road the events it asked for come back on, so a pty on one computer is
    * never pushed at a reader of another. */
@@ -532,28 +600,6 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * own work rather than a fork landing on a half set up computer, so the gate lets that call alone through. Every
    * call reached from the folder add carries the pass, so nothing reached from it may fork a workspace there. */
   const foldersOf = new AsyncLocalStorage<string>();
-
-  /** The read-then-write of a computer's record, one at a time per computer: every write that starts from the
-   * record as it stands reads it and writes it in here, or it lands over a field another write set meanwhile. */
-  const recordTurns = new Map<string, Promise<unknown>>();
-  const inRecordTurn = <T>(placeId: string, write: () => Promise<T>): Promise<T> => {
-    const run = (recordTurns.get(placeId) ?? Promise.resolve()).then(write);
-    const settled = run.catch(() => undefined);
-    recordTurns.set(placeId, settled);
-    void settled.then(() => {
-      if (recordTurns.get(placeId) === settled) recordTurns.delete(placeId);
-    });
-    return run;
-  };
-
-  /** One change of a computer's record as it stands, in its turn: what was written, or nothing where `move` left it
-   * as it was or a remove took the record first, which takes it in the same turn. */
-  const change = (placeId: string, move: (now: PlaceRecord) => PlaceRecord | undefined): Promise<PlaceRecord | undefined> =>
-    inRecordTurn(placeId, async () => {
-      const now = await recordOf(placeId);
-      const next = now === undefined ? undefined : move(now);
-      return next === undefined ? undefined : keep(next);
-    });
 
   /** One write of a setup's state onto the record as it stands. */
   const writeSetup = async (placeId: string, patch: Partial<Pick<PlaceRecord, "setup" | "applied" | "picks" | "recipe" | "sync">>): Promise<void> => {
@@ -1145,6 +1191,65 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const startedOrSaid = (placeId: string, addId: string, given?: { picks: RecipeFile; recipe?: string }): Promise<{ setup?: PlaceSetup; said?: string }> =>
     startSetup(placeId, addId, given).catch((e: unknown) => ({ said: firstLineOf(e) }));
 
+  /** The road the engine drives one place's machines over: one frame and its answer, and the loopback forward a
+   * route into a machine there is taken by. A place that is not connected is PlaceAbsentError on every call, which
+   * is the one answer every road on an absent place reads.
+   *
+   * A frame the caller named an idempotency key for is the one thing that outlives a gap: the socket under it going
+   * away is waited out for `relinkWaitMs` from the first gap and the frame is sent again on the socket that computer
+   * opens next. Nothing else is, since the far side runs what it is sent; a frame with no key fails on the gap as it
+   * always has, and so does one whose wait ran out, with the sentence it failed with. */
+  const linkTo = (placeId: string): MachineLink => ({
+    request: async (op, params, o) => {
+      // The bound runs from the gap, not from the ask: a frame may be in flight for minutes before the link under
+      // it goes, and a frame asked into a gap that is already open has however much of the wait is left. Read once,
+      // at the first gap this request meets.
+      let until = 0;
+      const waitingFrom = (from: number): number => (until === 0 ? (until = from + relinkWaitMs) : until);
+      for (;;) {
+        const held = live.get(placeId);
+        if (held === undefined) {
+          const absent = new PlaceAbsentError(absentComputer(kept.get(placeId)?.name ?? placeId, null).sentence);
+          // A computer whose socket closed inside the wait is between sockets; one this host holds no closed socket
+          // for is off, or was never here, and nothing is coming that waiting would catch.
+          const closed = closedAt.get(placeId);
+          if (o?.idempotencyKey === undefined || closed === undefined || !(await dialsBack(placeId, waitingFrom(closed)))) throw absent;
+          continue;
+        }
+        try {
+          return await bounded(held.reach.request(op, params), o?.timeoutMs ?? frameWaitMs, `${op} on ${kept.get(placeId)?.name ?? placeId}`);
+        } catch (e) {
+          // The socket this frame rode is still the one this host holds and is still open, so the place answered
+          // for itself: a refusal, or a silence the frame's own bound ended. Neither is a gap to wait out. A socket
+          // that is closing is already a gap, and is read as one before its close event lands.
+          const now = live.get(placeId);
+          if (o?.idempotencyKey === undefined || (now?.reach === held.reach && now.socket.readyState === now.socket.OPEN)) throw e;
+          // A computer that dialled back while the frame was failing is here already; the rest wait for it.
+          if (now !== undefined && now.reach !== held.reach && Date.now() < waitingFrom(Date.now())) continue;
+          if (!(await dialsBack(placeId, waitingFrom(Date.now())))) throw e;
+        }
+      }
+    },
+    dialsBack: () => dialsBack(placeId, Date.now() + relinkWaitMs),
+    forward: placePort => ctx.door.forward(placeId, placePort),
+  });
+
+  return {
+    channels, waiting, closedAt, woken, setting, syncing, skippers, settingNow, foldersOf, recipesMoved, syncFrame,
+    setupFrame, startSetup, syncTimers, syncOf, markSync, syncSoon, startedOrSaid, linkTo,
+  };
+}
+type PlaceSetupArea = ReturnType<typeof placeSetup>;
+
+/** Pending adds, what a remove takes off a computer, the link's tunnels, and the rows a client reads. */
+function placeViews(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea) {
+  const { opts, store, devices, wiring, live, kept, backends, forwards, emit } = ctx;
+  const {
+    providerIds, providerBackend, providerRate, providerSizes, imageFacts, recordOf, settingsHeld, withCap, awaiting,
+    keep, defaultId, inTurn, markDefault, markHeld, inRecordTurn,
+  } = recordArea;
+  const { waiting, closedAt, woken, linkTo } = setupArea;
+
   /** The adds that have not reached Set up, by id, as the store keeps them: each with what the installer left to
    * take an install back, which no client reads. */
   const pendingRecords = async (): Promise<PendingRecord[]> =>
@@ -1252,7 +1357,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * that is joined, or updated, all the same and its row fills in at the read after. Where the facts are already
    * on the record this answers at once, since the read is dropped for a computer that has said. */
   const factsOn = async (placeId: string, held: PlaceRecord): Promise<PlaceRecord> => {
-    const read = door
+    const read = ctx.door
       .forkingBackend(placeId)
       .then(async () => (await recordOf(placeId)) ?? held)
       .catch(() => held);
@@ -1264,49 +1369,6 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }),
     ]);
   };
-
-  /** The road the engine drives one place's machines over: one frame and its answer, and the loopback forward a
-   * route into a machine there is taken by. A place that is not connected is PlaceAbsentError on every call, which
-   * is the one answer every road on an absent place reads.
-   *
-   * A frame the caller named an idempotency key for is the one thing that outlives a gap: the socket under it going
-   * away is waited out for `relinkWaitMs` from the first gap and the frame is sent again on the socket that computer
-   * opens next. Nothing else is, since the far side runs what it is sent; a frame with no key fails on the gap as it
-   * always has, and so does one whose wait ran out, with the sentence it failed with. */
-  const linkTo = (placeId: string): MachineLink => ({
-    request: async (op, params, o) => {
-      // The bound runs from the gap, not from the ask: a frame may be in flight for minutes before the link under
-      // it goes, and a frame asked into a gap that is already open has however much of the wait is left. Read once,
-      // at the first gap this request meets.
-      let until = 0;
-      const waitingFrom = (from: number): number => (until === 0 ? (until = from + relinkWaitMs) : until);
-      for (;;) {
-        const held = live.get(placeId);
-        if (held === undefined) {
-          const absent = new PlaceAbsentError(absentComputer(kept.get(placeId)?.name ?? placeId, null).sentence);
-          // A computer whose socket closed inside the wait is between sockets; one this host holds no closed socket
-          // for is off, or was never here, and nothing is coming that waiting would catch.
-          const closed = closedAt.get(placeId);
-          if (o?.idempotencyKey === undefined || closed === undefined || !(await dialsBack(placeId, waitingFrom(closed)))) throw absent;
-          continue;
-        }
-        try {
-          return await bounded(held.reach.request(op, params), o?.timeoutMs ?? frameWaitMs, `${op} on ${kept.get(placeId)?.name ?? placeId}`);
-        } catch (e) {
-          // The socket this frame rode is still the one this host holds and is still open, so the place answered
-          // for itself: a refusal, or a silence the frame's own bound ended. Neither is a gap to wait out. A socket
-          // that is closing is already a gap, and is read as one before its close event lands.
-          const now = live.get(placeId);
-          if (o?.idempotencyKey === undefined || (now?.reach === held.reach && now.socket.readyState === now.socket.OPEN)) throw e;
-          // A computer that dialled back while the frame was failing is here already; the rest wait for it.
-          if (now !== undefined && now.reach !== held.reach && Date.now() < waitingFrom(Date.now())) continue;
-          if (!(await dialsBack(placeId, waitingFrom(Date.now())))) throw e;
-        }
-      }
-    },
-    dialsBack: () => dialsBack(placeId, Date.now() + relinkWaitMs),
-    forward: placePort => door.forward(placeId, placePort),
-  });
 
   /** The backend a place offers, off the facts it last sent. Built once per place and kept: the link under it reads
    * the live socket at every call, so one backend serves a computer that comes and goes. */
@@ -1353,9 +1415,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * one that does not answer in time shows nothing rather than a guess. */
   const forksOf = async (record: PlaceRecord): Promise<{ running: number; room: number } | undefined> => {
     const linked = live.has(record.id);
-    const backend = linked ? door.backendOf(record.id) : undefined;
+    const backend = linked ? ctx.door.backendOf(record.id) : undefined;
     if (backend === undefined) {
-      if (linked) void door.forkingBackend(record.id).catch(() => undefined);
+      if (linked) void ctx.door.forkingBackend(record.id).catch(() => undefined);
       return undefined;
     }
     if (backend.capacity === undefined) return undefined;
@@ -1523,7 +1585,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     return Promise.all(rows.map(row => withCap(row, rows)));
   };
   /** A joined computer's row off its record, less the fork room, which asks the computer itself. */
-  const joinedRow = (record: PlaceRecord, marked: string): PlaceView => ({ ...viewOf(record, marked), ...imageFacts(record.id, door.backendOf(record.id)) });
+  const joinedRow = (record: PlaceRecord, marked: string): PlaceView => ({ ...viewOf(record, marked), ...imageFacts(record.id, ctx.door.backendOf(record.id)) });
   const providerRow = (id: string, marked: string): PlaceView => {
     const rate = providerRate(id);
     const sizes = providerSizes(id);
@@ -1539,7 +1601,25 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     };
   };
 
-  const door: PlaceDoor = {
+  return {
+    pendingRecords, putPending, dropPending, flooring, floorOnce, takenBack, unmergedOver, pluginsOff, factsOn,
+    backendFrom, tunnelled, cut, forksOf, viewOf, joining, joined, forget, hereRow, rowsOf, joinedRow, providerRow,
+  };
+}
+type PlaceViewsArea = ReturnType<typeof placeViews>;
+
+/** The door's half that joins, proves and holds each computer's link, and answers what a link and a place say. */
+function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "signInsAt" | "loginLanded" | "offerOf" | "backendOf" | "forkingBackend" | "forward" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
+  const { opts, store, wiring, clockNow, seenEveryMs, live, kept, signInsHere, backends, forwards, asking, emit } = ctx;
+  const {
+    records, wiredProvider, providerIds, providerBackend, recordOf, settingsOf, settingsHeld, awaiting, holdBack,
+    defaultId, inTurn, markDefault, markHeld, challenge, signedRefusal, writeSeen, change,
+  } = recordArea;
+  const { channels, waiting, closedAt, woken, setting, settingNow, foldersOf, syncSoon, startedOrSaid, linkTo } = setupArea;
+  const { pendingRecords, putPending, flooring, floorOnce, takenBack, backendFrom, tunnelled, cut, joining, joined, forget } = viewArea;
+  let tunnelSeq = 0;
+
+  return {
     answerChallenge: challenge,
 
     async join(req, _from, at) {
@@ -1654,7 +1734,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // or not that answer comes and the first listing after a join carries the room it has left.
       // A computer whose recipe is running has said nothing wrong: that job's own end asks again, so the read is
       // quiet about it rather than logging a computer that would not say.
-      void door.forkingBackend(placeId).catch((e: unknown) => {
+      void ctx.door.forkingBackend(placeId).catch((e: unknown) => {
         if (e instanceof PlaceProvisioningError) return;
         console.warn(`${moved.name} did not say what it forks with: ${e instanceof Error ? e.message : String(e)}`);
       });
@@ -1800,7 +1880,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // backendOf and not this.
       const busy = foldersOf.getStore() === placeId ? undefined : settingNow(record);
       if (busy !== undefined) throw new PlaceProvisioningError(busy);
-      const made = door.backendOf(placeId);
+      const made = ctx.door.backendOf(placeId);
       if (made !== undefined) return made;
       // The first fork on this computer is where the host learns what it forks with; every road after it reads the
       // answer off the record, so this frame is sent once per computer and not once per fork.
@@ -1898,7 +1978,26 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if ((await markHeld()) === undefined) await store.put(DEFAULT_COLLECTION, DEFAULT_ID, { placeId });
       });
     },
+  };
+}
 
+/** The door's half a person drives: add, dial, update, remove, set up, follow a recipe and list the places. */
+function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "add" | "dial" | "road" | "exec" | "adds" | "reportOf" | "homeOf" | "list" | "rows" | "set" | "update" | "remove" | "find" | "pending" | "choose" | "setUp" | "follow" | "recipeChanged" | "followers" | "skip" | "estimate" | "setupLog" | "unfollow" | "picksOf" | "on" | "close"> {
+  const { opts, store, devices, wiring, recording, clockNow, dialWaitMs, live, kept, forwards, watchers, emit } = ctx;
+  const {
+    records, providerIds, recordOf, settingsOf, settingsHeld, rowIds, withCap, untilDaemonVersion, awaiting, adds,
+    putAdd, loginOf, rootOver, loginAnswers, holdBack, defaultId, inTurn, markHeld, change,
+  } = recordArea;
+  const {
+    waiting, woken, setting, syncing, skippers, settingNow, recipesMoved, syncFrame, setupFrame, startSetup,
+    syncTimers, syncOf, markSync, syncSoon, startedOrSaid, linkTo,
+  } = setupArea;
+  const {
+    pendingRecords, putPending, dropPending, floorOnce, unmergedOver, pluginsOff, factsOn, cut, forksOf, viewOf,
+    joining, joined, forget, hereRow, rowsOf, joinedRow, providerRow,
+  } = viewArea;
+
+  return {
     async add(req, at) {
       const install = wiring.install;
       if (install === undefined) throw new Error(NO_PLACE_INSTALLER);
@@ -2462,5 +2561,14 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       awaiting.clear();
     },
   };
+}
+
+export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
+  const ctx = placeDoorContext(opts);
+  const recordArea = placeRecords(ctx);
+  const setupArea = placeSetup(ctx, recordArea);
+  const viewArea = placeViews(ctx, recordArea, setupArea);
+  const door: PlaceDoor = { ...linkDoor(ctx, recordArea, setupArea, viewArea), ...manageDoor(ctx, recordArea, setupArea, viewArea) };
+  ctx.door = door;
   return door;
 }
