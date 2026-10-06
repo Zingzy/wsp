@@ -6211,9 +6211,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     pendingBytes.delete(id);
     transcriptIndex.delete(id);
     daemonNotes.delete(id);
+    // Every thread this workspace drops takes its slate with it, as a thread's own delete does: its record, its
+    // timers (an always one would tick on for a thread nobody can reach) and its folder.
+    const dropped = new Set<string>();
+    for (const [threadId, held] of threadRecords) if (held.workspaceId === id) dropped.add(threadId);
+    for (const s of sessions.values()) if (s.view.workspaceId === id && s.view.threadId !== undefined) dropped.add(s.view.threadId);
     for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
     for (const [threadId, kept] of keptAgents) if (kept.workspaceId === id) reapKept(threadId);
     for (const [threadId, held] of threadRecords) if (held.workspaceId === id) threadRecords.delete(threadId);
+    for (const threadId of dropped) await slates.forget(threadId);
     viewedMarks.delete(id);
     live.get(id)?.prPoll?.();
     cancelFlush(id);
