@@ -22,6 +22,9 @@ export const RENDER_CASES: Readonly<Record<string, { text: string; values?: Reco
   "row-figure": {
     text: `<slate><value name="go" start={0} /><column><section title="Inbox"><row id="figure-row"><number id="unread" label="Unread" value={12} /><text id="ago">32s ago</text><button id="refresh" label="Refresh" onPress={set($go, 1)} /></row><row id="ring-row"><ring id="tests" label="Tests run" value={3} max={10} /><facts id="state"><fact label="State" value="idle" /></facts></row></section></column></slate>`,
   },
+  "open-row": {
+    text: `<slate><value name="procs" start={[{ name: "node server", pid: 4120 }]} /><column><section id="procs" title="Processes" note="checked 4s" collapsible><table id="rows" items={$procs}><col title="Name" value={item.name} /><col title="PID" value={item.pid} /><action label="Inspect" onPress={send("Inspect", item.pid)} /></table></section></column></slate>`,
+  },
   "six-strip": {
     text: `<slate><column><section title="Last 5 minutes"><row id="six"><number label="Requests per min" value={246} note="1,230 in 5 min" /><number label="Redirects" value={712} note="in 5 min" /><number label="Links created" value={35} note="in 5 min" /><number label="Unique visitors" value={472} note="by IP hash, 5 min" /><number label="p95 latency" value={22} unit="ms" note="5 min" /><number label="5xx errors" value={0} note="0% of requests" /></row></section></column></slate>`,
   },

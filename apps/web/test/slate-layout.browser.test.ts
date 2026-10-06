@@ -45,6 +45,22 @@ describe.skipIf(renderSkipped !== undefined)("the slate's layout in Chromium", (
     await page.close();
   });
 
+  it("presses a folding section's whole head and an opening row's whole width, though only its title and chevron are buttons", async () => {
+    const page = await open("open-row");
+    const hits = await page.evaluate(() => {
+      const at = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      };
+      const toggle = document.querySelector('[data-slate-piece="procs"] [role=heading] button');
+      const open = document.querySelector('[data-slate-piece="rows"] [data-slate-row-open]');
+      const name = [...document.querySelectorAll('[data-slate-piece="rows"] [role=cell]')].find(c => c.textContent === "node server")!;
+      return { note: toggle !== null && at(document.querySelector('[data-slate-piece="procs"] [data-slate-section-note]')!) === toggle, name: open !== null && at(name) === open };
+    });
+    expect(hits).toEqual({ note: true, name: true });
+    await page.close();
+  });
+
   it("opens a chart's hover beside its line inside the plot, never over the legend or past the panel's edge", async () => {
     const page = await open("rate-chart");
     const points = page.locator('[data-slate-piece="rate"] [data-k=point]');
