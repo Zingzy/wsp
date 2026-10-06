@@ -193,6 +193,7 @@ import type {
   SessionInterruptOutcome,
   SessionInterruptResult,
   SessionRenameResult,
+  SessionRenameWrite,
   SessionRenamer,
   SessionStartOutcome,
   SessionSteerResult,
@@ -234,7 +235,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent, NO_SLATE_MCP_ARG, PR_POLL_IDLE_MS } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, everyModel, effortsFor, modelOf, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noCwdLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, attachmentKey, type KeptAttachment, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine, PERMISSION_DENIED_LINE } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, everyModel, effortsFor, modelOf, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noCwdLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, attachmentKey, type KeptAttachment, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine, PERMISSION_DENIED_LINE, deniedLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -243,7 +244,7 @@ import { GITHUB_TOKEN_ENV, isNoProvider, isPlaceAbsent, projectStateKey, putFile
 import { baseModel, boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
 import { holdsRepo, ownerRepoOf, projectForRepo, seedChoiceFrom } from "@wsp/protocol";
 import { taskStopRefusedLine, taskStopUnsupportedLine, type SubagentView, type TaskStop } from "@wsp/protocol";
-import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, modelIdRefusal, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
+import { accessMode, accessRefusal, accessWordRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, modelIdRefusal, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, pickRefusal, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
 import { agentSetups, keyOf, realFolderHere, realFolderScript } from "./agent-setup.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -417,7 +418,7 @@ export interface HarnessSession {
   /** Answers a permission prompt this turn raised; absent on a harness that raises none this host can answer. The
    * caller names the outcome, since only it knows whether the answer is the person's or its own for a prompt nobody
    * came to, and the adapter emits the permission.close that carries it. `gone` when no such prompt is open. */
-  answer?(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<"answered" | "gone">;
+  answer?(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string; reason?: string }): Promise<"answered" | "gone">;
   /** Puts this running turn into another access mode from its next tool call on, and to the prompt it is stopped on
    * where the mode answers one; absent on a harness whose CLI takes no such change once a turn is under way, and the
    * person's pick then waits for their next message. `refused` is the CLI's own no to that mode with no road left to
@@ -487,6 +488,8 @@ export interface HarnessAdapter {
 
 /** Called per session start with the workspace's CURRENT machine (it can change on wake/upgrade). */
 export type HarnessAdapterFactory = (ctx: HarnessAdapterContext) => HarnessAdapter;
+/** What a start names of its agent and picks, read against that agent's lists before a folder is made for it. */
+export type StartPicksAsked = { harness?: string; model?: string; effort?: string; access?: AccessChoice; permissionMode?: string; fast?: boolean };
 
 // --- events -------------------------------------------------------------------
 
@@ -917,7 +920,7 @@ export interface SessionHandle {
   steer?(prompt: string): Promise<"accepted" | "not-running">;
   /** Answers a permission prompt this turn raised, by the prompt's id and one of its options. Only a person answers
    * one: the prompt stands for as long as the turn does. Absent on a harness that raises none. */
-  answer?(askId: string, opts: { optionId: string }): Promise<SessionAnswerResult["outcome"]>;
+  answer?(askId: string, opts: { optionId: string; reason?: string }): Promise<SessionAnswerResult["outcome"]>;
   /** Moves this running turn to another access mode, the prompt it is stopped on included; absent on a harness that
    * takes none mid-turn. */
   setAccess?(mode: string): Promise<"set" | "refused" | "gone">;
@@ -1590,8 +1593,9 @@ export interface Runtime {
     bringBack(o: { workspaceId: string; title?: string; body?: string }, origin?: Caller): Promise<BringBackResult>;
     /** The record of the folder a thread on this computer runs in, made at its first thread: the project folder, the
      * caller's own folder when a thread asks naming nothing, the worktree holding a branch, or the folder a cwd
-     * names inside the project or a worktree of its repo. cwd is the folder the start runs in where it named one. */
-    folderFor(o: { project?: string; branch?: string; cwd?: string }, origin?: Caller): Promise<{ workspace: WorkspaceView; cwd?: string }>;
+     * names inside the project or a worktree of its repo. cwd is the folder the start runs in where it named one.
+     * picks, where given, are read against the agent's lists on this computer before any folder is made or found. */
+    folderFor(o: { project?: string; branch?: string; cwd?: string; picks?: StartPicksAsked }, origin?: Caller): Promise<{ workspace: WorkspaceView; cwd?: string }>;
     /** The worktree holding a branch of a project's repo on this computer, made under the host's folder where none
      * holds it. */
     worktree(o: { project: string; branch: string }, origin?: Caller): Promise<WorktreeMade>;
@@ -1799,7 +1803,7 @@ export interface Runtime {
      * of the options it carried; the tool call it blocks then runs or is refused, and a session.permission.closed
      * event records which option did it. A prompt already answered, one the harness withdrew and an unknown id
      * answer rather than throw, since two clients may reach one prompt. */
-    answer(sessionId: string, opts: { askId: string; optionId: string }, origin?: Caller): Promise<SessionAnswerResult>;
+    answer(sessionId: string, opts: { askId: string; optionId: string; reason?: string }, origin?: Caller): Promise<SessionAnswerResult>;
     /** Puts the session's thread at another access mode: the one road that changes a thread's access, since a send
      * into a thread names none. The thread's record takes the mode and its next turn runs at it; where a turn is
      * running and its harness takes such a change, the turn in front of the person follows it from its next tool
@@ -3387,10 +3391,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * refuses. Only where the workspace has a road to this host, since a token with nowhere to go is one more secret
    * for nothing.
    */
-  const threadLaunch = async (entry: LiveWorkspace, threadId: string, rootThreadId: string): Promise<{ scoped?: Awaited<ReturnType<typeof deviceDoor.mint>>; env: Record<string, string>; wsp?: McpServerSpec }> => {
+  const threadLaunch = async (entry: LiveWorkspace, threadId: string, rootThreadId: string, o: { aside?: true } = {}): Promise<{ scoped?: Awaited<ReturnType<typeof deviceDoor.mint>>; env: Record<string, string>; wsp?: McpServerSpec }> => {
     const reach = agentsReach(entry);
     if (reach === undefined) return { env: {} };
-    const scoped = await deviceDoor.mint(`thread ${threadWord(threadId)}`, { kind: "thread", threadId, workspaceId: entry.record.id, rootThreadId }, Date.now(), moduleOf(entry.record.kind).turnRoad);
+    const scoped = await deviceDoor.mint(`thread ${threadWord(threadId)}`, { kind: "thread", threadId, workspaceId: entry.record.id, rootThreadId }, Date.now(), { road: moduleOf(entry.record.kind).turnRoad, ...o });
     return {
       scoped,
       env: {
@@ -6865,6 +6869,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const thread = device.scope?.threadId;
         if (thread !== undefined && !threadRuns(thread)) await deviceDoor.revoke(device.id);
       }
+      await deviceDoor.revokeAsides();
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
       // Not waited on: a fetch of a big copy's branches takes seconds, and the records it drops leave as they go.
       copiesMoving = moveOldCopies().catch((e: unknown) => console.warn(`the move off old copies stopped: ${e instanceof Error ? e.message : String(e)}`));
@@ -7382,12 +7387,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * named one. Nothing named runs in the project folder, or beside the thread asking; a branch runs in the worktree
    * holding it, the project folder when it is that folder's own branch; a cwd runs where it is, inside the project
    * folder or a worktree of its repo and nowhere else. */
-  const folderFor = async (o: { project?: string; branch?: string; cwd?: string }, origin: Caller | undefined): Promise<{ entry: LiveWorkspace; cwd?: string }> => {
+  const folderFor = async (o: { project?: string; branch?: string; cwd?: string; picks?: StartPicksAsked }, origin: Caller | undefined): Promise<{ entry: LiveWorkspace; cwd?: string }> => {
     const scope = scopeOf(origin);
     const asking = scope === undefined ? undefined : live.get(scope.workspaceId);
     const project = o.project !== undefined ? await projectsDoor.resolve(o.project, origin) : asking !== undefined ? projectHeld(asking.record.project) : undefined;
     if (project === undefined) throw Object.assign(new Error(NAME_A_PROJECT_LINE), { kind: "usage" });
     if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
+    if (o.picks !== undefined) await picksHold(project, o.picks);
     const beside = asking !== undefined && copiesFolder(asking.record.kind) && asking.record.project === project.id ? asking : undefined;
     if (o.branch !== undefined && o.cwd !== undefined) throw Object.assign(new Error(BRANCH_OR_CWD_LINE), { kind: "usage" });
     const top = project.git?.top;
@@ -7763,7 +7769,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** A start's picks read against the agent's lists before a folder is made or moved for it, by the rule the start
    * itself refuses them with, so a pick the agent does not take costs no git work. */
-  const picksHold = async (project: ProjectView, o: { harness?: string; model?: string; effort?: string; access?: AccessChoice; permissionMode?: string }): Promise<void> => {
+  const picksHold = async (project: ProjectView, o: StartPicksAsked): Promise<void> => {
     if (!copiesFolder(kindForComputer(project.computer))) return;
     const home = await projectFolder(project);
     const prefs = preferencesHeld ?? (await preferences.get());
@@ -7772,10 +7778,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (table === undefined) return;
     const { adapter } = await launchAdapterFor(home, harness);
     const resolved = defaultsOn(await catalogOn(table, home, adapter), prefs, prefs.projectDefaults[home.record.project]);
+    // This road is the command line's and the tools', so it names the flag to drop; namedMode speaks for the app too.
+    const refused = o.access === undefined ? null : accessWordRefusal(resolved.catalog, o.access);
+    if (refused !== null) throw refused;
     const named = o.permissionMode ?? (o.access === undefined ? undefined : namedMode(resolved.catalog, harness, o.access));
     const model = o.model ?? resolved.open.model;
     const effort = o.effort ?? resolved.open.effort;
-    startPicks(resolved.catalog, { ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(named !== undefined ? { permissionMode: named } : {}) }, true);
+    try {
+      startPicks(resolved.catalog, { ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(named !== undefined ? { permissionMode: named } : {}), ...(o.fast === true ? { fast: true } : {}) }, true);
+    } catch (e) {
+      throw pickRefusal(e, resolved.catalog);
+    }
   };
 
   /** The line a start on a pull request leaves for its thread, by the record of the folder that was left behind. */
@@ -9085,10 +9098,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // Started inside a promise and never on this stack, as the store read is: an adapter that refuses the id throws
     // where it builds its command, and naming a thread may never cost the turn that asked for it.
     return confineSetup(entry, view.harness)
-      .then(() => write(sessionId, title, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)))
+      .then(() => writeSession(sessionId, () => write(sessionId, title, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout))))
       .then(
         wrote => {
-          if (wrote.kind === "written") restampKept(sessionId);
           if (wrote.kind === "failed") console.warn(noNameWriteLogLine(sessionId, entry.record.id, wrote.error));
         },
         (e: unknown) => console.warn(noNameWriteLogLine(sessionId, entry.record.id, e instanceof Error ? e.message : String(e))),
@@ -9395,14 +9407,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     void kept.agent.close(o).catch((e: unknown) => console.warn(`the kept agent of thread ${threadWord(threadId)} did not end: ${e instanceof Error ? e.message : String(e)}`));
   };
 
-  /** This host wrote into a harness session's own file (a title, a rename): the processes kept on that session stamp
-   * the file again, or the next send would read the host's own write as the person resuming the session elsewhere. */
-  const restampKept = (harnessSessionId: string): void => {
-    for (const kept of keptAgents.values()) {
-      if (kept.session !== harnessSessionId) continue;
-      const file = stampSessionFile(kept.agent.sessionFile, kept.file?.path);
-      if (file !== undefined) kept.file = file;
-    }
+  /** The host's own writes into a harness session's file still going, by session. Their bytes land before the write
+   * answers, so a send waits them out before it reads the file against a kept process's stamp. */
+  const hostWrites = new Map<string, Promise<void>>();
+  /** This host writes into a harness session's own file (a title, a rename): the processes kept on that session stamp
+   * the file again once it is in, or the next send would read the host's own write as the person resuming the session
+   * elsewhere. */
+  const writeSession = (harnessSessionId: string, write: () => Promise<SessionRenameWrite>): Promise<SessionRenameWrite> => {
+    const wrote = write().then(w => {
+      if (w.kind !== "written") return w;
+      for (const kept of keptAgents.values()) {
+        if (kept.session !== harnessSessionId) continue;
+        const file = stampSessionFile(kept.agent.sessionFile, kept.file?.path);
+        if (file !== undefined) kept.file = file;
+      }
+      return w;
+    });
+    const settled: Promise<void> = Promise.all([hostWrites.get(harnessSessionId), wrote.catch(() => {})]).then(() => {
+      if (hostWrites.get(harnessSessionId) === settled) hostWrites.delete(harnessSessionId);
+    });
+    hostWrites.set(harnessSessionId, settled);
+    return wrote;
   };
 
   /** The process a thread's next turn runs on, taken out of the keep: only where it was launched exactly as this turn
@@ -10006,7 +10031,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     /** The one place a pick becomes an outcome and the line the agent reads as the call's result. Only a person picks,
      * so a deny is always the person's and says so. */
-    const answer = async (askId: string, o: { optionId: string }): Promise<SessionAnswerResult["outcome"]> => {
+    const answer = async (askId: string, o: { optionId: string; reason?: string }): Promise<SessionAnswerResult["outcome"]> => {
       const held = open.get(askId);
       if (held === undefined) return "gone";
       // One pick may name several options: a question that takes more than one answer sends them as one id.
@@ -10015,7 +10040,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A turn that raised a prompt has the road that raised it; with none there is nothing left to answer it.
       if (answerAsk === undefined) return "gone";
       const outcome: PermissionOutcome = option.effect === "deny" ? "denied" : "allowed";
-      return (await answerAsk(askId, { optionId: o.optionId, outcome, denyMessage: PERMISSION_DENIED_LINE })) === "answered" ? "answered" : "gone";
+      // A reason rides a deny alone: it is what the person wants done instead of the call they refused.
+      const reason = option.effect === "deny" && o.reason !== undefined && o.reason.trim() !== "" ? o.reason.trim() : undefined;
+      return (await answerAsk(askId, { optionId: o.optionId, outcome, denyMessage: deniedLine(reason), ...(reason === undefined ? {} : { reason }) })) === "answered" ? "answered" : "gone";
     };
 
     const forward = (event: AdapterEvent): void => {
@@ -10764,6 +10791,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               await copyBlocked(entry);
               continue;
             }
+            const writing = resume === undefined ? undefined : hostWrites.get(resume);
+            if (writing !== undefined) {
+              await writing;
+              refuse();
+              continue;
+            }
             hold();
             if (landed) break;
             landed = true;
@@ -11030,7 +11063,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
       if (s.handle?.answer === undefined) return { outcome: s.handle === undefined ? "gone" : "unsupported" };
-      return { outcome: await s.handle.answer(o.askId, { optionId: o.optionId }) };
+      return { outcome: await s.handle.answer(o.askId, { optionId: o.optionId, ...(o.reason === undefined ? {} : { reason: o.reason }) }) };
     },
 
     async access(sessionId, permissionMode, origin) {
@@ -11088,11 +11121,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (write === undefined) return { outcome: "unsupported" };
       // The store is keyed by the harness's own id, so a thread whose harness never announced one has nothing to name.
       if (harnessSessionId === undefined) return { outcome: "no-session" };
-      const wrote = await write(harnessSessionId, named, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout));
+      const wrote = await writeSession(harnessSessionId, () => write(harnessSessionId, named, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)));
       // A store that refused the write says nothing about which sessions it has, so its own line travels as the answer.
       if (wrote.kind === "failed") return { outcome: "failed", error: wrote.error };
       if (wrote.kind === "no-session") return { outcome: "no-session" };
-      restampKept(harnessSessionId);
       // Every turn of the thread shares the harness's session, and the fold reads the latest turn's title. The name
       // is the person's, so a title the harness is still thinking about is thrown away when it lands.
       for (const row of sessions.values()) {
@@ -11170,7 +11202,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // with, since a harness resuming a session that announced a server it no longer has tells the model so, and the
       // answer opens on it. The harness keeps every tool off; the token goes back the moment the answer is in.
       const threadId = threadKeyOf(latest);
-      const { scoped, env: launchEnv, wsp } = await threadLaunch(entry, threadId, rootOf(threadId));
+      const { scoped, env: launchEnv, wsp } = await threadLaunch(entry, threadId, rootOf(threadId), { aside: true });
       try {
         const { adapter } = adapterFor(entry, harness, launchEnv, undefined, servers);
         if (adapter.aside === undefined) throw new Error(asideUnsupportedLine(harness));

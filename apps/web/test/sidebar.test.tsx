@@ -158,7 +158,7 @@ const statusSlot = (row: HTMLElement): HTMLElement | null => row.querySelector<H
  * null on a row at rest. */
 const threadState = (row: HTMLElement): string | null => {
   const slot = statusSlot(row);
-  return slot?.dataset["tone"] === undefined ? null : (slot.querySelector("span")?.textContent ?? null);
+  return slot?.dataset["tone"] === undefined ? null : (slot.querySelector("[data-status-word]")?.textContent ?? null);
 };
 /** A thread row's age, which stands in the slot only once the thread rests; null while a state holds it. */
 const threadTime = (row: HTMLElement): string | null => {
