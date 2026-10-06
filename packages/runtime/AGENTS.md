@@ -26,10 +26,10 @@ An agent writes everything in its copy, the gh on its PATH included, and the dae
 - `ls-remote --exit-code` exits 2 for a branch never pushed and for one deleted: ask `branchGoneAtRemote()` (#1607).
 - A daemon op on a folder outside the home needs it in the roots file: `writeDaemonRoots()` writes it whole from every live checkout, the import via `kind.roots` with its two paths alone (#1607, #1645, #1774).
 - A folder record no thread names stands on nothing: count with `bareFolder()` (`packages/protocol/src/projects.ts`); the recipe's `removeFolder` still counts every record (#1634).
-- A new kind of turn row is counted in `turnWritten()` and skipped on replay, or a restart writes it twice (#1577, #1613, #1644).
 - A prompt held back at launch goes in the seed file on disk, not memory alone (#1620, #1665).
+- A turn's rows carry the agent's session id (`claudeSessionId`), while `sessions` is keyed by the launch's id, which a Codex thread's first process does not share: look up both, as `answer()` does (#1776).
 - `end()` hands `settleCut()` a fresh literal: change the row through its entry in `sessions` (#1646).
-- `sharedFolder()` compares the cwd exactly, so two threads in subfolders of one repo read as not sharing it (#1664).
+- `sharedFolder()` compares checkout tops, not cwds: threads in two subfolders of one repo share it (#1664).
 - Trim a transcript with `dropOldest()`, and set aside any blob that does not parse or the table refuses (#1520, #1666, #1722).
 - An undo is wsp's only when its owner row reads installed, never when any id of its group does (#1481).
 - A vault value reaches an owned computer on stdin with `withEnvFromInput()` (`packages/engine/src/run-env.ts`); a clone there runs no setup-git (#1482).
