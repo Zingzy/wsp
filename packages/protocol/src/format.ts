@@ -11,6 +11,8 @@ import { compareVersions } from "./semver.mjs";
 import { folderName, parentFolderName } from "./project-path.js";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
+import { cutLine, ELLIPSIS, fmtThreads, lastLine, listedName, lowerFirst, marked, nameList, plural, wordsWithin } from "./words/base.js";
+export * from "./words/base.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
 const GIB = MIB * 1024;
@@ -951,13 +953,6 @@ export const subagentAskerLine = (task: string): string => `${task} asks`;
  * question, named, since the thread reading this one is only held up until somebody answers it. */
 export const waitingAskerLine = (title: string): string => `${title} asks; this thread waits on the answer`;
 
-/** A count with its noun, the noun pluralised by an s: the one rule every line that counts rows, sessions, calls,
- * threads or a plan's files reads, so none of them says "1 sessions". A noun that does not take an s is spelled by
- * its caller. */
-export function plural(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? "" : "s"}`;
-}
-
 // --- the image and its copies, as `wsp image` and Settings > Image read them ---
 
 /** What a record with no vault says: its copies ask for every sign-in again until the next version holds them. */
@@ -1007,9 +1002,6 @@ export function sealedImageLine(image: SealedImage): string {
   const size = image.usedBytes === undefined ? [] : [fmtBytes(image.usedBytes)];
   return [`${image.name} v${image.version}`, image.hash, held, ...size, `sealed on ${image.sealedFrom}`].join("  ");
 }
-
-/** A sentence opening read mid-line: its first letter lowered, the rest as written. */
-export const lowerFirst = (words: string): string => `${words.charAt(0).toLowerCase()}${words.slice(1)}`;
 
 /** What a place's row says while a copy of the image is built there: the stage in the seal's own words, so the row
  * and the init sheet name one stage one way. */
@@ -1098,17 +1090,6 @@ export function sealedExportLine(exported: SealedImageExport): string {
   return `${exported.path}  ${fmtBytes(exported.bytes)}  opens with the passphrase you typed and nothing else`;
 }
 
-/** One name inside a comma-joined list of names: quoted when the name carries that comma itself, so a free-text
- * label an agent wrote reads as one entry and not as two nameless ones. */
-export function listedName(name: string): string {
-  return name.includes(",") ? JSON.stringify(name) : name;
-}
-
-/** A list of names as every tally that names its rows prints it, each name by the rule above. */
-export function nameList(names: readonly string[]): string {
-  return names.map(listedName).join(", ");
-}
-
 /** What the copy answer reads as on the row of a tool signed in as one account at a time: the answer's own words and
  * the login a copy would carry, so the row says whose sign-in lands on the machine before anyone answers it. */
 export const copyNamesLogin = (copy: string, login: string): string => `${copy} (${login})`;
@@ -1117,11 +1098,6 @@ export const copyNamesLogin = (copy: string, login: string): string => `${copy} 
  * since the machine is signed in as one of them and a file naming the rest would hold no token for them. */
 export const loginsHereLine = (login: string, left: readonly string[]): string =>
   left.length === 0 ? `signed in here as ${login}` : `signed in here as ${login}; ${nameList(left)} ${left.length === 1 ? "stays" : "stay"} on this computer`;
-
-/** A thread count with its noun, as the sidebar's counts and the verbs' lines say it. */
-export function fmtThreads(n: number): string {
-  return plural(n, "thread");
-}
 
 /** What forgetting a workspace takes off this computer, the one sentence every client's confirmation shows. */
 export function forgetNotice(threads: number): string {
@@ -1137,7 +1113,6 @@ export function titleLine(text: string): string {
 
 /** The most characters a thread title made from its opening turn takes, the ellipsis counted. */
 const OPENING_TITLE_MAX = 48;
-const ELLIPSIS = "\u2026";
 
 /** A thread's title from its opening turn when the harness has no name for it: the turn's first sentence, cut at a
  * word boundary to at most 48 characters with an ellipsis only when cut, so a brief-shaped turn never titles the row,
@@ -1152,26 +1127,6 @@ export function openingTitle(text: string): string {
  * Here rather than in the app because the lines written for that slot are written here too, and the cut is what
  * takes the half that says what to do off a line nobody measured. */
 export const ROW_LINE_MAX = 30;
-
-/** Text cut to at most room characters, at a word boundary where one fits, with the ellipsis counted inside the
- * room and drawn only where something was taken off. One rule for every line a surface cuts itself: a thread's
- * title from its opening turn, a sidebar row's third line. */
-export function cutLine(text: string, room: number): string {
-  if (text.length <= room) return text;
-  const head = room - ELLIPSIS.length;
-  return `${wordsWithin(text, head) ?? text.slice(0, head).replace(SEPARATOR_TAIL, "")}${ELLIPSIS}`;
-}
-
-/** What a cut leaves dangling at its edge: the space it broke on and the punctuation that hung off the word before. */
-const SEPARATOR_TAIL = /[\s,;:]+$/;
-
-/** The whole words of a line that fit in the room, the separator they ended on taken off; nothing when the line's
- * first word alone overruns it. A word that ends exactly at the room's edge is kept whole. */
-export function wordsWithin(line: string, room: number): string | undefined {
-  const head = line.slice(0, room + 1);
-  const boundary = head.lastIndexOf(" ");
-  return boundary > 0 ? head.slice(0, boundary).replace(SEPARATOR_TAIL, "") : undefined;
-}
 
 /** The line that opens the block of landed paths after a message's words in the prompt an agent is handed. */
 export const ATTACHED_FILES_HEAD = "Attached files:";
@@ -1233,14 +1188,6 @@ export function generatedTitle(answer: string): string | null {
   const title = unquoted.replace(/[.]+$/, "").trim();
   if (title === "") return null;
   return title.length <= GENERATED_TITLE_MAX ? title : (wordsWithin(title, GENERATED_TITLE_MAX) ?? null);
-}
-
-/** Text cut to its last line: the last non-empty line with the whitespace collapsed, or nothing when the text has
- * none. The notify line ends with it and a switcher card shows it under the thread's title, so both read one rule. */
-export function lastLine(text: string): string | undefined {
-  const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
-  const last = lines[lines.length - 1];
-  return last === undefined ? undefined : last.replace(/\s+/g, " ").trim();
 }
 
 /** A limit as one unit: whole hours when it is hours, else whole minutes. */
@@ -3043,8 +2990,6 @@ export function machineLacksLine(e: unknown): string | undefined {
 export function machineNeverAnswered(e: unknown): boolean {
   return marked(e, MACHINE_UNANSWERED);
 }
-
-const marked = (e: unknown, mark: string): e is Error => e instanceof Error && (e as unknown as Record<string, unknown>)[mark] === true;
 
 /** A refusal cut to its first clause, which is what the machine has not got. Every sentence above is written in
  * that order, what is wrong, then why it matters, then what to do, and its head is short enough for a row about
