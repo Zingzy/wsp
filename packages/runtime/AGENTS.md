@@ -29,7 +29,6 @@ An agent writes everything in its copy, the gh on its PATH included, and the dae
 - A new kind of turn row is counted in `turnWritten()` and skipped while replaying, or a restart writes it twice (#1577, #1613, #1644).
 - A prompt held back at launch goes in the seed file on disk, never in memory alone (#1620, #1665).
 - `end()` hands `settleCut()` a fresh literal: change the row through its entry in `sessions` (#1646).
-- A turn's rows carry the agent's session id (`claudeSessionId`) while `sessions` is keyed by the id the launch was given, which a Codex thread's first process does not share: an op that takes an id off a row looks up both, as `answer()` does (#1776).
 - `sharedFolder()` compares the cwd exactly, so two threads in subfolders of one repo read as not sharing it (#1664).
 - Trim a transcript with `dropOldest()`, and set aside any blob that does not parse or that the table refuses (#1520, #1666, #1722).
 - An undo is wsp's only when its owner row reads installed, never when any id of its group does (#1481).
