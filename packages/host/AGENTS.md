@@ -6,7 +6,7 @@ The `wsp` command, its MCP tool server and the host process. Paths are under pac
 
 A verb is a socket client of the running host (`dialHost()`); only the host holds keys and the runtime, one host per state file.
 Each host start rewrites the MCP configs and skill copies naming its state, so a shape already written there must be moved (`refreshServers()`, `refreshSkills()`).
-The daemon binary carries a Rust tool server that answers byte for byte like `src/mcp.ts`; `test/mcp-record.test.ts` regenerates its record in a temp folder and prints the line that copies it in.
+The daemon binary carries a Rust tool server that answers byte for byte like `src/mcp.ts`; `test/mcp-record.test.ts` run with `WSP_WRITE_RECORD=1` writes its record.
 A box's agent is root there and can go around anything its daemon enforces, so a limit belongs on the host too.
 
 ## Invariants
@@ -29,7 +29,7 @@ A box's agent is root there and can go around anything its daemon enforces, so a
 - Read free disk on a computer you own on the install folder's volume, never df on the home or /root (#1679).
 - `test/memory.test.ts` runs the built dists, so rebuild them on the base commit for a before reading; every bus event sits in a 5000-event ring (#1694).
 - Cloud-only words go inside `<!-- cloud -->` spans; `test/cloud.test.ts` is outside the parity check command, so run it too (#1700).
-- A change to a tool's words, input or answer moves the Rust record: rerun `test/mcp-record.test.ts`, run the copy line it prints, read the diff line by line, build words from their functions (#1297, #1585, #1623).
+- A change to a tool's words, input or answer moves the Rust record: rerun `test/mcp-record.test.ts`, run the `WSP_WRITE_RECORD=1` line it prints, read the diff line by line, build words from their functions (#1297, #1585, #1623).
 - A test gated on an env variable skips quietly in CI: name the file in a CI step and the variable in `GATES` (`vitest.env.ts`) (#1297).
 
 ## One home for

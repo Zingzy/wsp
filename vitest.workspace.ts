@@ -42,6 +42,9 @@ export default [
       environment: "node",
       // Anything a test writes to the OS-local config dir (the install id) lands here, never in the developer's own.
       env: { XDG_CONFIG_HOME: join(RUN_TMPDIR, "wsp-test-config"), ...TEST_ENV },
+      // A budget, not a retry, as apps/web's: a case that starts a git, a node or a stub waits on the scheduler, and a
+      // gate at a load near 30 stretched cases of 1.4 s idle past vitest's 5 s default.
+      testTimeout: 20_000,
     },
   },
   {
@@ -75,6 +78,7 @@ export default [
       exclude: ["packages/host/test/places-add.test.ts"],
       environment: "node",
       env: { XDG_CONFIG_HOME: join(RUN_TMPDIR, "wsp-test-config"), ...TEST_ENV, [CLOUD_ENV]: "1" },
+      testTimeout: 20_000,
     },
   },
   here("./apps/web/vite.config.ts"),
