@@ -11,10 +11,10 @@ import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, expect } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { joinToken, MCP_ID_PREFIX, placeLinkTranscript, placeProvisionPaths, wsUrlOf } from "@wsp/protocol";
+import { joinToken, MCP_ID_PREFIX, placeDaemonPaths, placeLinkTranscript, placeProvisionPaths, wsUrlOf } from "@wsp/protocol";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret, type Seal } from "@wsp/runtime";
 import { keyFingerprint, sshWordReach, type SshLocalRun } from "@wsp/engine";
-import { WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { PLACE_FOUND_END, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { addCommand, joinCommand, leaveCommand as leaveCommandHere } from "../src/places.js";
 import { sweepPlace as sweepPlaceHere, type PlaceSweepOptions } from "../src/place-report.js";
 import { SERVICE_MANAGERS, type RunResult, type ServiceManager, type ServiceRunner, type ServiceUnit } from "../src/service.js";
@@ -34,6 +34,12 @@ const toolsUnder = (home: string): { prefix: string; links: string } => ({ prefi
 /** `wsp leave` as a case runs it, with the same profile under the case's own home. */
 const leaveCommand = (io: Parameters<typeof leaveCommandHere>[0], args: readonly string[], deps: NonNullable<Parameters<typeof leaveCommandHere>[2]>): ReturnType<typeof leaveCommandHere> =>
   leaveCommandHere(io, args, { apparmorProfile: join(deps.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(deps.home), systemRoot: join(deps.home, "system"), ...deps });
+
+/** The record an add leaves where nothing it would take stood before it: whole, and naming nothing. */
+function addFoundNothing(home: string): void {
+  mkdirSync(placeDaemonPaths(home).wsp, { recursive: true });
+  writeFileSync(placeDaemonPaths(home).placeFound, `${PLACE_FOUND_END}\0`);
+}
 
 /** The machine's own profile as the file found it, which every case leaves exactly as it was. */
 const MACHINES_PROFILE = existsSync(WSP_WORKSPACE_APPARMOR_PATH) ? readFileSync(WSP_WORKSPACE_APPARMOR_PATH) : undefined;
@@ -259,5 +265,5 @@ const opts = (home: string, env: Record<string, string | undefined> = {}): Param
   providerEnv: env,
 });
 
-export { sweepPlace, toolsUnder, leaveCommand, MACHINES_PROFILE, dirs, servers, tmp, LEDGER_FIXTURE, LANDED_BYTES, ledgerRows, homeWithLandedFiles, shWithSha256sum, fakeRunner, fakeHost, unitsUnder, codeFor, NOWHERE_CODE, joinDepsFor, spooConfig, noBoxSignIn, systemPlaceDeps, opts };
+export { sweepPlace, toolsUnder, leaveCommand, addFoundNothing, MACHINES_PROFILE, dirs, servers, tmp, LEDGER_FIXTURE, LANDED_BYTES, ledgerRows, homeWithLandedFiles, shWithSha256sum, fakeRunner, fakeHost, unitsUnder, codeFor, NOWHERE_CODE, joinDepsFor, spooConfig, noBoxSignIn, systemPlaceDeps, opts };
 export type { FakeHost };

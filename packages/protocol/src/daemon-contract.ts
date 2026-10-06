@@ -28,14 +28,21 @@ export const GUEST_MANIFEST_PATH = `${GUEST_WSP_HOME}/manifest.json`;
 export const OPEN_SHIM_PATH = "/usr/local/bin/wsp-open";
 export const XDG_OPEN_PATH = "/usr/local/bin/xdg-open";
 /** Where a root install keeps the AppArmor profile its workspaces run under: written and loaded by the host's
- * deploy, unloaded by a remove, a leave and the daemon's own sweep. */
+ * deploy, unloaded by a remove, a leave and the daemon's own sweep, except where a joined add found one standing,
+ * which every one of those leaves as it was. */
 export const WSP_WORKSPACE_APPARMOR_PATH = "/etc/apparmor.d/wsp-workspace";
 /** The folder of wsp's own every manager installs under on a computer somebody owns, and the folder each command
- * installed there is linked into. Nothing but wsp's own jobs writes under the prefix and no workspace writes either
- * on the computer itself, so a leave run as root takes every link in that folder pointing under the prefix, then
- * the prefix whole, and nothing else of either. */
+ * installed there is linked into. Once wsp is on a computer nothing but its own jobs writes under the prefix and no
+ * workspace writes either on the computer itself, so a leave run as root takes every link in that folder pointing
+ * under the prefix, then the prefix whole, and nothing else of either; a prefix the add found standing keeps every
+ * entry it held then, with the links into those. */
 export const TOOL_PREFIX = "/opt/wsp";
 export const TOOL_LINKS_DIR = "/usr/local/bin";
+/** The last entry of the record a joined add writes of what stood before it outside the home, and the most bytes
+ * that record may hold. A record that does not end on this entry was cut short and a leave reads it as none; a box
+ * whose listing passes the cap gets no record at all, and its leave takes nothing outside the home. */
+export const PLACE_FOUND_END = "wsp-found-end";
+export const PLACE_FOUND_MAX_BYTES = 32 * 1024 * 1024;
 /** Where the shim posts in the guest; root-only through the daemon's umask, unreachable from the edge. */
 export const OPEN_SOCKET_PATH = `${GUEST_WSP_HOME}/open.sock`;
 /** The socket a process inside a workspace on a computer somebody owns reaches its host over. The daemon of that
@@ -260,6 +267,15 @@ export const placeKeptForLinkLine = (path: string): string => `nothing was remov
  * still has lines, which only a leave cut short leaves, and the folder holds that list for a leave that finishes.
  * Said on both roads a leave runs on, and pinned to one text by the contract fixture. */
 export const placeOutsideLeftLine = (prefix: string): string => `nothing was removed at ${prefix}: the leave did not finish taking what the setup wrote outside the home, which ${prefix}/landed still lists`;
+/** Why a path outside the home a leave would have taken is still there: it stood before wsp was added, as the add
+ * wrote down, so it is the computer's own. Said on both roads a leave runs on, and pinned to one text by the
+ * contract fixture. */
+export const placeStoodBeforeLine = (path: string): string => `${path} stays: it was there before wsp was added`;
+/** Why a leave took nothing at the paths outside the home it would have: no whole record says what stood there before
+ * wsp was added, so they may be the computer's own. Said on both roads a leave runs on, and pinned to one text by the
+ * contract fixture. */
+export const placeOwnersUnknownLine = (paths: readonly string[]): string =>
+  `nothing was removed at ${paths.join(" or ")}: no whole record says what stood there before wsp was added, so it may be this computer's own; remove what wsp put there by hand`;
 /** What a line reads when the host's socket went while it was waiting on an answer, and what the wsp command's
  * forwarder answers each request still waiting then. */
 export const HOST_CLOSED_LINE = "the host closed the connection";

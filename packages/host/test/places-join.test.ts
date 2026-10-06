@@ -13,14 +13,16 @@ import { ALREADY_JOINED_LINE, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_CODE_
 import { CODEX_TOML } from "@wsp/catalog";
 import { OWN_MARK, outsideAfterScript, outsideBeforeScript, keyFingerprint } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
-import { placeOutsideLeftLine, TOOL_PREFIX } from "@wsp/protocol";
+import { GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
+import { apparmorStep, apparmorStoodLine, joinedPlace, placeFoundSkippedLine, placeFoundStep, sshDaemonPlace } from "../src/doctor.js";
+import { PLACE_FOUND_END, placeOutsideLeftLine, placeOwnersUnknownLine, TOOL_PREFIX } from "@wsp/protocol";
 import { pinnedDroppingPort } from "../../runtime/test/held-port.js";
 import { NOTHING_TO_LEAVE_LINE, brokenJoinLine, brokenPlaceLeftLine, joinCutByLeaveLine, joinCommand } from "../src/places.js";
 import { placeFilePath, placeKeyPath, placeLogPath, readPlaceFile, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type ServiceAddress, type ServiceRunner } from "../src/service.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
-import { codeFor, fakeHost, fakeRunner, homeWithLandedFiles, joinDepsFor, leaveCommand, NOWHERE_CODE, shWithSha256sum, sweepPlace, tmp, toolsUnder, unitsUnder } from "./places-fixture.js";
+import { addFoundNothing, codeFor, fakeHost, fakeRunner, homeWithLandedFiles, joinDepsFor, leaveCommand, NOWHERE_CODE, shWithSha256sum, sweepPlace, tmp, toolsUnder, unitsUnder } from "./places-fixture.js";
 /** A seam between a join's key and its place file, where another process's leave or a crash would land. */
 const fsHooks = vi.hoisted(() => ({ beforeLink: undefined as (() => void) | undefined }));
 vi.mock("node:fs", async importOriginal => {
@@ -512,6 +514,7 @@ describe("taking wsp off the computer it is typed on", () => {
 
   it("unloads the workspace profile and takes its file where the leave runs as root, and leaves it for any other login", async () => {
     const home = tmp("leave-apparmor");
+    addFoundNothing(home);
     // A space in the folder: the path is one word to the shell or the removal takes two files that are not it.
     const profile = join(tmp("leave-apparmor-etc"), "apparmor d", "wsp-workspace");
     mkdirSync(dirname(profile));
@@ -525,6 +528,8 @@ describe("taking wsp off the computer it is typed on", () => {
     const other = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 1000, apparmorProfile: profile });
     expect(existsSync(profile)).toBe(true);
     expect(other.removed).not.toContain(profile);
+    // The leave as another login took wsp's folder here, and the record with it.
+    addFoundNothing(home);
     const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 0, apparmorProfile: profile });
     expect(ran.some(script => script.includes(`apparmor_parser -R ${shellQuote(profile)}`))).toBe(true);
     expect(existsSync(profile)).toBe(false);
@@ -533,6 +538,7 @@ describe("taking wsp off the computer it is typed on", () => {
 
   it("takes wsp's install folder and every command linked out of it where the leave runs as root, and nothing else there", async () => {
     const home = tmp("leave-tools");
+    addFoundNothing(home);
     const tools = toolsUnder(home);
     mkdirSync(join(tools.prefix, "uv", "tools", "ruff", "bin"), { recursive: true });
     writeFileSync(join(tools.prefix, "uv", "tools", "ruff", "bin", "ruff"), "#!/bin/sh\n");
@@ -549,6 +555,8 @@ describe("taking wsp off the computer it is typed on", () => {
     const other = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, uid: 1000 });
     expect(existsSync(tools.prefix)).toBe(true);
     expect(other.removed).not.toContain(tools.prefix);
+    // The leave as another login took wsp's folder here, and the record with it.
+    addFoundNothing(home);
     const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, uid: 0 });
     expect(swept.removed).toEqual(expect.arrayContaining([join(tools.links, "ruff"), join(tools.links, "tsc"), tools.prefix]));
     expect(existsSync(tools.prefix)).toBe(false);
@@ -556,8 +564,173 @@ describe("taking wsp off the computer it is typed on", () => {
     expect(existsSync(`${tools.prefix}-old`)).toBe(true);
   });
 
+  /** A box as it stood before a joined add: a profile of its own and an install folder holding a file and a toolchain. */
+  function boxOfItsOwn(name: string): { home: string; tools: { prefix: string; links: string }; profile: string; place: ReturnType<typeof joinedPlace> } {
+    const home = tmp(name);
+    const tools = toolsUnder(home);
+    const profile = join(home, "etc-apparmor.d", "wsp-workspace");
+    mkdirSync(dirname(profile));
+    writeFileSync(profile, "profile theirs-never-loaded {}\n");
+    mkdirSync(join(tools.prefix, "rustup", "toolchains", "theirs", "bin"), { recursive: true });
+    writeFileSync(join(tools.prefix, "rustup", "settings.toml"), "theirs\n");
+    writeFileSync(join(tools.prefix, "rustup", "toolchains", "theirs", "bin", "rustc"), "theirs\n");
+    writeFileSync(join(tools.prefix, "keep"), "theirs");
+    // A name holding a newline, which a record split on lines would read as two names neither of which is it.
+    writeFileSync(join(tools.prefix, "two\nlines"), "theirs");
+    mkdirSync(tools.links);
+    symlinkSync(join(tools.prefix, "rustup", "toolchains", "theirs", "bin", "rustc"), join(tools.links, "rustc-theirs"));
+    mkdirSync(placeDaemonPaths(home).wsp);
+    const place = joinedPlace({ home, path: "/usr/bin:/bin" }, { hostUrls: [], codeFile: `${placeDaemonPaths(home).wsp}/join-code`, name: "box" });
+    return { home, tools, profile, place };
+  }
+
+  /** What the setup does after the add on such a box: a toolchain of its own inside the rustup it found, a command
+   * linked out of it, and a manager's folder of its own. */
+  function setupInstalled(tools: { prefix: string; links: string }): void {
+    mkdirSync(join(tools.prefix, "rustup", "toolchains", "stable", "bin"), { recursive: true });
+    writeFileSync(join(tools.prefix, "rustup", "toolchains", "stable", "bin", "rustc"), "wsp's\n");
+    symlinkSync(join(tools.prefix, "rustup", "toolchains", "stable", "bin", "rustc"), join(tools.links, "rustc"));
+    mkdirSync(join(tools.prefix, "uv", "bin"), { recursive: true });
+    writeFileSync(join(tools.prefix, "uv", "bin", "uv"), "wsp's\n");
+  }
+
+  /** Everything under a folder, each path relative to it, read without following a link. */
+  const tree = (root: string): string[] => execFileSync("/usr/bin/find", [".", "-mindepth", "1"], { cwd: root, encoding: "utf8" }).split("\n").filter(line => line !== "").sort();
+
+  it("takes nothing outside the home where the add left no record, and names what stays", async () => {
+    const { home, tools, profile } = boxOfItsOwn("leave-no-record");
+    setupInstalled(tools);
+    const before = tree(tools.prefix);
+    const ran: string[] = [];
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: script => (ran.push(script), ""), uid: 0, apparmorProfile: profile, tools });
+    expect(tree(tools.prefix)).toEqual(before);
+    expect(readFileSync(profile, "utf8")).toBe("profile theirs-never-loaded {}\n");
+    expect(readdirSync(tools.links).sort()).toEqual(["rustc", "rustc-theirs"]);
+    expect(ran.some(script => script.includes("apparmor_parser"))).toBe(false);
+    expect(swept.removed).toContain(placeOwnersUnknownLine([profile, tools.prefix]));
+  });
+
+  it("takes nothing outside the home where the record was cut short, as a deploy killed while writing it leaves it", async () => {
+    const { home, tools, profile, place } = boxOfItsOwn("leave-cut-record");
+    execFileSync("/bin/sh", ["-c", placeFoundStep(place, { profile, prefix: tools.prefix, links: tools.links }).join("\n")]);
+    const record = placeDaemonPaths(home).placeFound;
+    const whole = readFileSync(record);
+    // Cut after the prefix's own line: every entry it held unnamed, as a kill in the middle of the listing leaves it.
+    writeFileSync(record, whole.subarray(0, whole.indexOf(`${tools.prefix}\0`) + tools.prefix.length + 1));
+    setupInstalled(tools);
+    const before = tree(tools.prefix);
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: () => "", uid: 0, apparmorProfile: profile, tools });
+    expect(tree(tools.prefix)).toEqual(before);
+    expect(existsSync(profile)).toBe(true);
+    expect(swept.removed).toContain(placeOwnersUnknownLine([profile, tools.prefix]));
+  });
+
+  it("writes no record where the listing did not finish, so the leave takes nothing, and the deploy says so", () => {
+    const { home, tools, profile, place } = boxOfItsOwn("found-unfinished");
+    // A find that names one path and dies, as one stopped part way through a tree does.
+    const bin = tmp("found-unfinished-bin");
+    writeStub(join(bin, "find"), `#!/bin/sh\nprintf '%s\\0' ${shellQuote(tools.prefix)}\nexit 1\n`);
+    const said = execFileSync("/bin/sh", ["-c", [`PATH=${shellQuote(bin)}:$PATH`, ...placeFoundStep(place, { profile, prefix: tools.prefix, links: tools.links })].join("\n")], { encoding: "utf8" });
+    expect(said.trim()).toBe(placeFoundSkippedLine(tools.prefix));
+    expect(readdirSync(placeDaemonPaths(home).wsp)).toEqual([]);
+    // The same box where find runs to its end: one whole record, nothing left beside it.
+    execFileSync("/bin/sh", ["-c", placeFoundStep(place, { profile, prefix: tools.prefix, links: tools.links }).join("\n")]);
+    expect(readdirSync(placeDaemonPaths(home).wsp)).toEqual([basename(placeDaemonPaths(home).placeFound)]);
+    expect(readFileSync(placeDaemonPaths(home).placeFound, "utf8").endsWith(`\0${PLACE_FOUND_END}\0`)).toBe(true);
+  });
+
+  it("keeps the first add's record through a second add of the same box, so a remove still ends with neither", async () => {
+    const home = tmp("found-twice");
+    const tools = toolsUnder(home);
+    const profile = join(home, "etc-apparmor.d", "wsp-workspace");
+    mkdirSync(dirname(profile));
+    mkdirSync(tools.links);
+    mkdirSync(placeDaemonPaths(home).wsp);
+    const place = joinedPlace({ home, path: "/usr/bin:/bin" }, { hostUrls: [], codeFile: `${placeDaemonPaths(home).wsp}/join-code`, name: "box" });
+    const step = placeFoundStep(place, { profile, prefix: tools.prefix, links: tools.links }).join("\n");
+    execFileSync("/bin/sh", ["-c", step]);
+    const first = readFileSync(placeDaemonPaths(home).placeFound);
+    // What the first add and its setup put there, then a second add of the same box, whose join is refused after
+    // its files step has run.
+    writeFileSync(profile, "profile wsp-test-never-loaded {}\n");
+    mkdirSync(join(tools.prefix, "uv", "bin"), { recursive: true });
+    symlinkSync(join(tools.prefix, "uv", "bin", "uv"), join(tools.links, "uv"));
+    execFileSync("/bin/sh", ["-c", step]);
+    expect(readFileSync(placeDaemonPaths(home).placeFound)).toEqual(first);
+    const sh = (script: string): string => execFileSync("/bin/sh", ["-c", script], { encoding: "utf8" });
+    await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 0, apparmorProfile: profile, tools });
+    expect(existsSync(profile)).toBe(false);
+    expect(existsSync(tools.prefix)).toBe(false);
+    expect(readdirSync(tools.links)).toEqual([]);
+  });
+
+  it("writes the record again where the one standing was cut short", () => {
+    const { home, tools, profile, place } = boxOfItsOwn("found-cut-again");
+    const step = placeFoundStep(place, { profile, prefix: tools.prefix, links: tools.links }).join("\n");
+    execFileSync("/bin/sh", ["-c", step]);
+    const record = placeDaemonPaths(home).placeFound;
+    const whole = readFileSync(record);
+    // Cut one byte short, and as a path that only ends in the end entry's name: neither is whole.
+    for (const cut of [whole.subarray(0, whole.length - 1), Buffer.from(`/opt/x${PLACE_FOUND_END}\0`)]) {
+      writeFileSync(record, cut);
+      execFileSync("/bin/sh", ["-c", step]);
+      expect(readFileSync(record)).toEqual(whole);
+    }
+  });
+
+  it("takes what the setup wrote inside a folder that stood before the add, and every path from before stays", async () => {
+    const { home, tools, profile, place } = boxOfItsOwn("leave-deep");
+    const before = tree(tools.prefix);
+    execFileSync("/bin/sh", ["-c", placeFoundStep(place, { profile, prefix: tools.prefix, links: tools.links }).join("\n")]);
+    setupInstalled(tools);
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: () => "", uid: 0, apparmorProfile: profile, tools });
+    expect(tree(tools.prefix)).toEqual(before);
+    expect(readFileSync(join(tools.prefix, "rustup", "settings.toml"), "utf8")).toBe("theirs\n");
+    expect(readdirSync(tools.links)).toEqual(["rustc-theirs"]);
+    expect(swept.removed).toEqual(expect.arrayContaining([join(tools.links, "rustc"), join(tools.prefix, "rustup", "toolchains", "stable"), join(tools.prefix, "uv")]));
+    // The topmost path that went stands for everything under it.
+    expect(swept.removed).not.toContain(join(tools.prefix, "uv", "bin"));
+  });
+
+
+  it("takes the profile and the install folder whole where the add found neither", async () => {
+    const home = tmp("leave-made");
+    const tools = toolsUnder(home);
+    const profile = join(home, "etc-apparmor.d", "wsp-workspace");
+    mkdirSync(dirname(profile));
+    const place = joinedPlace({ home, path: "/usr/bin:/bin" }, { hostUrls: [], codeFile: `${placeDaemonPaths(home).wsp}/join-code`, name: "box" });
+    mkdirSync(placeDaemonPaths(home).wsp);
+    execFileSync("/bin/sh", ["-c", placeFoundStep(place, { profile, prefix: tools.prefix, links: tools.links }).join("\n")]);
+    expect(readFileSync(placeDaemonPaths(home).placeFound, "utf8")).toBe(`${PLACE_FOUND_END}\0`);
+    writeFileSync(profile, "profile wsp-test-never-loaded {}\n");
+    mkdirSync(join(tools.prefix, "uv"), { recursive: true });
+    // A name no kernel holds: the unload runs for real as root, and the machine's own wsp-workspace must stay loaded.
+    const sh = (script: string): string => execFileSync("/bin/sh", ["-c", script], { encoding: "utf8" });
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 0, apparmorProfile: profile, tools });
+    expect(swept.removed).toEqual(expect.arrayContaining([profile, tools.prefix]));
+    expect(existsSync(profile)).toBe(false);
+    expect(existsSync(tools.prefix)).toBe(false);
+  });
+
+  it("leaves a profile that stood before a joined add as it is and says so, and a fork's deploy asks nothing of one", () => {
+    const home = tmp("deploy-stood");
+    const profile = join(home, "etc apparmor.d", "wsp-workspace");
+    mkdirSync(dirname(profile));
+    writeFileSync(profile, "profile theirs {}\n");
+    // A parser that would load anything it is given, so a profile written over would read as loaded.
+    const bin = tmp("deploy-stood-bin");
+    writeStub(join(bin, "apparmor_parser"), "#!/bin/sh\nexit 0\n");
+    const place = joinedPlace({ home, path: "/usr/bin:/bin" }, { hostUrls: [], codeFile: `${placeDaemonPaths(home).wsp}/join-code`, name: "box" });
+    const step = apparmorStep(place, GUEST_DAEMON_TARGETS[0]!, profile);
+    const said = execFileSync("/bin/sh", ["-c", [`PATH=${shellQuote(bin)}:$PATH`, ...step].join("\n")], { encoding: "utf8" });
+    expect(said.trim()).toBe(apparmorStoodLine(profile));
+    expect(readFileSync(profile, "utf8")).toBe("profile theirs {}\n");
+    expect(apparmorStep(sshDaemonPlace({ home, path: "/usr/bin:/bin" }), GUEST_DAEMON_TARGETS[0]!, profile)[0]).toMatch(/^if command -v apparmor_parser/);
+  });
+
   it("leaves wsp's install folder where it is a link, and says so", async () => {
     const home = tmp("leave-tools-link");
+    addFoundNothing(home);
     const tools = toolsUnder(home);
     const elsewhere = tmp("leave-tools-elsewhere");
     writeFileSync(join(elsewhere, "keep"), "theirs");
@@ -569,6 +742,7 @@ describe("taking wsp off the computer it is typed on", () => {
 
   it("takes the binaries the setup wrote outside the home where the leave runs as root, and keeps the box's own", async () => {
     const home = tmp("leave-outside");
+    addFoundNothing(home);
     const system = realpathSync(tmp("leave-outside-root"));
     const sh = shWithSha256sum();
     mkdirSync(join(system, "usr/local/bin"), { recursive: true });
@@ -582,6 +756,8 @@ describe("taking wsp off the computer it is typed on", () => {
     const other = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 1000, tools, systemRoot: system });
     expect(other.removed).not.toContain(join(system, "usr/local/bin/claude"));
     expect(existsSync(join(system, "usr/local/bin/claude"))).toBe(true);
+    // The leave before this one took wsp's folder here, and the record with it.
+    addFoundNothing(home);
     const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh, uid: 0, tools, systemRoot: system });
     expect(swept.removed).toEqual(expect.arrayContaining([join(system, "usr/local/bin/claude"), join(system, "usr/local/bin/gopls"), tools.prefix]));
     expect(readdirSync(join(system, "usr/local/bin"))).toEqual(["jq"]);
@@ -590,6 +766,7 @@ describe("taking wsp off the computer it is typed on", () => {
 
   it("keeps wsp's install folder and its list when the leave outside the home was cut short, and says so", async () => {
     const home = tmp("leave-outside-cut");
+    addFoundNothing(home);
     const system = realpathSync(tmp("leave-outside-cut-root"));
     const whole = shWithSha256sum();
     mkdirSync(join(system, "usr/local/bin"), { recursive: true });
@@ -611,6 +788,8 @@ describe("taking wsp off the computer it is typed on", () => {
     expect(swept.removed).toContain(placeOutsideLeftLine(tools.prefix));
     expect(existsSync(join(tools.prefix, "landed"))).toBe(true);
     expect(existsSync(join(system, "usr/local/bin/claude"))).toBe(true);
+    // The leave before this one took wsp's folder here, and the record with it.
+    addFoundNothing(home);
     const again = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: whole, uid: 0, tools, systemRoot: system });
     expect(again.removed).toEqual(expect.arrayContaining([join(system, "usr/local/bin/claude"), tools.prefix]));
     expect(existsSync(tools.prefix)).toBe(false);

@@ -21,10 +21,10 @@ import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSea
 import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, outsideAfterScript, outsideBeforeScript, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_SUDO_READ, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshRiding, type SshSudo, type SshSudoRoad, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine, noPlaceSystemLine } from "../src/daemon-binary.js";
-import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
+import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, apparmorStep, apparmorStoodLine, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, placeFoundSkippedLine, placeFoundStep, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { computerLines, hostPlatform, placeLines, placeNames } from "../src/verbs.js";
-import { namesPlace, placeOutsideLeftLine, TOOL_PREFIX, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { namesPlace, PLACE_FOUND_END, placeOutsideLeftLine, placeOwnersUnknownLine, placeStoodBeforeLine, TOOL_PREFIX, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { pinnedDroppingPort, refusedPort } from "../../runtime/test/held-port.js";
 import {
   ADD_FLAGS_REFUSAL,
@@ -106,7 +106,7 @@ import { sha256sumBin } from "../../engine/test/sha256sum-bin.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 import { CLOUD_ON } from "../src/cloud.js";
-import { codeFor, dirs, fakeHost, fakeRunner, homeWithLandedFiles, joinDepsFor, leaveCommand, noBoxSignIn, NOWHERE_CODE, opts, shWithSha256sum, spooConfig, sweepPlace, systemPlaceDeps, tmp, toolsUnder, unitsUnder } from "./places-fixture.js";
+import { addFoundNothing, codeFor, dirs, fakeHost, fakeRunner, homeWithLandedFiles, joinDepsFor, leaveCommand, noBoxSignIn, NOWHERE_CODE, opts, shWithSha256sum, spooConfig, sweepPlace, systemPlaceDeps, tmp, toolsUnder, unitsUnder } from "./places-fixture.js";
 
 describe("a join the host never answered", () => {
   it("names the address and the wait, then what to do, and reads whole behind the app's install sentence", () => {

@@ -39,6 +39,7 @@ describe("what a failed add takes back off a box, run by a real shell", () => {
     writeFileSync(at.placeFile, "{}");
     writeFileSync(at.placeKey, "k");
     writeFileSync(at.placeLog, "");
+    writeFileSync(at.placeFound, "");
     mkdirSync(workFolderIn(home), { recursive: true });
   }
 
