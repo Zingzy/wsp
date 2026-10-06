@@ -371,6 +371,44 @@ describe("serveRuntime session history", () => {
     expect(missing.ok).toBe(false);
     c.close();
   });
+
+  it("answers a page of one thread with threadId, a thread's head with sessions.head, and refuses a window with no thread as usage", async () => {
+    const replying: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: o => {
+        const result: TurnResult = { status: "completed", text: "done" };
+        const finished = Promise.resolve().then(() => {
+          o.onEvent({ type: "session.start", sessionId: "s1" });
+          for (let n = 0; n < 5; n++) o.onEvent({ type: "turn.delta", sessionId: "s1", kind: "text", text: `piece ${n}`, messageId: "m1" });
+          o.onEvent({ type: "turn.done", sessionId: "s1", result });
+          o.onEvent({ type: "session.end", sessionId: "s1", exitCode: 0, sawResult: true });
+          return result;
+        });
+        return { localId: "s1", finished, interrupt: async () => {} };
+      },
+    });
+    const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: replying } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const workspaceId = ((await createOverWire(c, "x", { golden: "snap_g" }))["workspace"] as { id: string }).id;
+    const handle = await runtime.sessions.start(workspaceId, { prompt: "go" });
+    await handle.finished;
+    const threadId = handle.view().threadId!;
+    const whole = (await c.request("sessions.history", { workspaceId }))["events"] as { pos: number }[];
+    expect(whole.map(e => e.pos)).toEqual(whole.map((_, i) => i + 1));
+
+    const page = await c.request("sessions.history", { workspaceId, threadId, before: whole.at(-1)!.pos, limit: 3 });
+    expect(page).toMatchObject({ ok: true, pos: whole.length, total: whole.length });
+    expect((page["events"] as { pos: number }[]).map(e => e.pos)).toEqual([whole.length - 3, whole.length - 2, whole.length - 1]);
+
+    const head = await c.request("sessions.head", { threadId });
+    expect(head).toMatchObject({ ok: true, pos: whole.length, total: whole.length, facts: { id: threadId, status: "completed", harness: "claude" } });
+    expect((head["events"] as unknown[]).length).toBe(whole.length);
+    expect(await c.request("sessions.head", { threadId: "no-such-thread" })).toMatchObject({ ok: false, kind: "not-found" });
+
+    expect(await c.request("sessions.history", { workspaceId, limit: 3 })).toMatchObject({ ok: false, kind: "usage", error: "before and limit page one thread's events. Name the thread with threadId." });
+    c.close();
+  });
 });
 
 // A harness that cannot stop the process it owns is not a harness; the port refuses one at compile time.
@@ -487,7 +525,7 @@ describe("serveRuntime session interrupt", () => {
       expect(history[1]).toMatchObject({ type: "session.done", result: { status: row.status } });
       expect(c.events.filter(e => e.type === "session.done")).toMatchObject([{ result: { status: row.status } }]);
       const reply = `reply:${String(res.id)}`;
-      if (row.outcome === "accepted") expect(arrived.slice(0, arrived.indexOf(reply) + 1)).toEqual(["session.done", "session.end", reply]);
+      if (row.outcome === "accepted") expect(arrived.slice(0, arrived.indexOf(reply) + 1)).toEqual(["session.done", "session.end", "thread.head", reply]);
     }
     c.close();
   });

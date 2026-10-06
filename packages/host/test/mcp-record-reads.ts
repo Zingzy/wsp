@@ -214,6 +214,12 @@ const DEFAULTS_CASES: Record<string, Case[]> = {
   ],
 };
 
+/** A head's facts as the host writes them: out of the order a parse would put them in, with a field no schema names. */
+const HEAD_FACTS = { title: "Parser\n fix 🧪 \u0085", id: "t-1111aaaa", threadId: "t-1111aaaa", workspaceId: "ws-1", harness: "claude", startedBy: "agent", status: "completed", sessionId: "s-3", cwd: "/w/é", model: "claude-opus-4-5", permissionMode: "acceptEdits", turnId: "u1", turns: 2, ran: true, later: "kept" };
+
+/** The newest events of that thread as a head carries them, each with the workspace and session the host stamps. */
+const HEAD_EVENTS = EVENTS.slice(0, 11).map((e, i) => ({ workspaceId: "ws-1", sessionId: "s-3", ...e, pos: 30 + i }));
+
 export const READS: Record<string, Case[]> = {
   ...DEFAULTS_CASES,
   agents: reportCases("agents"),
@@ -257,6 +263,12 @@ export const READS: Record<string, Case[]> = {
     { case: "no such thread", arguments: { thread: "zz" }, replies: { "sessions.list": reply({ sessions: SESSIONS }) } },
     { case: "a prefix of two", arguments: { thread: "s-" }, replies: { "sessions.list": reply({ sessions: SESSIONS.slice(1, 2).concat([{ ...SESSIONS[1]!, id: "s-5" }]) }) } },
     { case: "refused", arguments: { thread: "t-1111aaaa" }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": refused("sessions.history failed") } },
+  ],
+  thread_head: [
+    { case: "head", arguments: { thread: "t-1111" }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.head": reply({ total: 31, facts: HEAD_FACTS, unnamed: true, events: HEAD_EVENTS, pos: 40 }) } },
+    { case: "no model, access or folder, and no events", arguments: { thread: "t-1111aaaa" }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.head": reply({ facts: { id: "t-1111aaaa", workspaceId: "ws-1", harness: "codex", startedBy: "person", status: "running", title: "look", sessionId: "s-3", turns: 1, ran: true }, events: [], pos: 0, total: 0 }) } },
+    { case: "no such thread", arguments: { thread: "zz" }, replies: { "sessions.list": reply({ sessions: SESSIONS }) } },
+    { case: "refused", arguments: { thread: "t-1111aaaa" }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.head": refused("no thread t-1111aa", "not-found") } },
   ],
   folders: [
     { case: "home", arguments: {}, replies: { "host.folders": reply({ listing: LISTING }) } },

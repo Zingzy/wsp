@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
-import { ANALYTICS_ENV, authority, CLOUD_ENV, fmtDuration, LABS_ENV, shellQuote, UPDATE_CHECK_ENV } from "@wsp/protocol";
+import { ANALYTICS_ENV, authority, CLOUD_ENV, fmtDuration, LABS_ENV, shellQuote, STATE_STORE_ENV, UPDATE_CHECK_ENV } from "@wsp/protocol";
 import { addressLines, dialAddress, POLL_MS, servingHost, stateLine, type HostLock } from "./host-lock.js";
 import { providerEnvNames } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
@@ -127,22 +127,21 @@ export function serviceTag(statePath: string): string {
   return createHash("sha256").update(statePath).digest("hex").slice(0, 8);
 }
 
-/** A service inherits almost no environment, so a PATH the install never saw is the one it would get. */
-const FALLBACK_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
-
-/** The envs the service starts with: the PATH the install ran with, WSP_HOME when it moved the state folder, and
- * whichever provider variables the installing shell held, since a host that picks its provider out of an
- * environment naming none forks nothing. The keys stay out: the host reads them off the `.env` it would read at a
- * terminal, so a rotated key needs no new unit file and nothing secret is copied into the manager's own folder. */
+/** The envs the service starts with: WSP_HOME when it moved the state folder, and whichever provider variables the
+ * installing shell held, since a host that picks its provider out of an environment naming none forks nothing. The
+ * keys stay out: the host reads them off the `.env` it would read at a terminal, so a rotated key needs no new unit
+ * file and nothing secret is copied into the manager's own folder. No PATH either: the host reads the person's login
+ * shell at its start, and the installing process's PATH can name folders that last only as long as it does, the
+ * mount an AppImage runs from among them. */
 export function serviceEnv(env: Record<string, string | undefined>): Record<string, string> {
   const home = homeNamed(env["WSP_HOME"]);
   // Every variable the installing shell holds that the service would be without: the provider ones, since a host
   // that picks its provider out of an environment naming none forks nothing, labs, since a service installed
-  // from a shell holding it would come up without the rows that shell was using, and the release check's and the
-  // usage counts' switches, which that shell turned off. One list, copied by one rule.
-  const carried = [CLOUD_ENV, LABS_ENV, UPDATE_CHECK_ENV, ANALYTICS_ENV, ...providerEnvNames()];
+  // from a shell holding it would come up without the rows that shell was using, the release check's and the usage
+  // counts' switches, which that shell turned off, and the state store's, which it set back to JSON. One list, copied
+  // by one rule.
+  const carried = [CLOUD_ENV, LABS_ENV, UPDATE_CHECK_ENV, ANALYTICS_ENV, STATE_STORE_ENV, ...providerEnvNames()];
   return {
-    PATH: env["PATH"] ?? FALLBACK_PATH,
     ...(home !== undefined ? { WSP_HOME: home } : {}),
     ...Object.fromEntries(carried.flatMap(name => ((env[name] ?? "") === "" ? [] : [[name, env[name]!]]))),
   };

@@ -127,6 +127,7 @@ import {
   WorkspaceSysEvent,
   type WorkspaceView,
 } from "@wsp/protocol";
+import { slateApi, type SlateApi } from "../slate/wire.js";
 
 export type ProtocolEvent = EventUnion;
 type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void };
@@ -453,8 +454,9 @@ export interface Api {
   commitDraft?(id: string, paths?: readonly string[]): Promise<CommitDraft>;
   /** The workspace's viewed marks; with a path, sets the mark on that file against the blob, or takes it off at null. */
   viewed?(id: string, mark?: { path: string; blob: string | null }): Promise<ViewedMarks>;
-  /** The workspace's pull request page, read anew on every ask, with the merge methods the repository allows. */
-  pullRequestView?(id: string): Promise<PullRequestPage>;
+  /** The workspace's pull request page, with the merge methods the repository allows; the host holds a read a minute,
+   * and fresh reads it anew. */
+  pullRequestView?(id: string, fresh?: boolean): Promise<PullRequestPage>;
   /** The workspace's pull request's diff against its base as the git host holds it, cut on a file's boundary. */
   pullRequestDiff?(id: string): Promise<GitPrDiffReply>;
   /** Sends items of the pull request's page to the workspace's agent as one message, as a fix is sent. */
@@ -803,6 +805,8 @@ export interface Api {
   /** Builds the image's copy at a place, by its id; `force` copies a record that holds no sign-ins. Progress rides
    * golden.stage frames carrying the place. Optional so a fixture that presses no Copy need not fake it. */
   imageBuild?(place: string, force?: boolean): Promise<SealedImageBuilt>;
+  /** A thread's slate, the window's own ops. Optional so a fixture with no slate need not fake it. */
+  slates?: SlateApi;
 }
 
 /** Which daemon a channel is to: a workspace's, or a computer's own by its place, HERE_PLACE_ID for this one. */
@@ -889,7 +893,7 @@ export function makeApi(c: ProtocolClient): Api {
     commit: async (id, message, paths) => GitCommitReply.parse(await c.request("workspaces.commit", { workspaceId: id, message, ...(paths !== undefined ? { paths: [...paths] } : {}) })),
     commitDraft: async (id, paths) => CommitDraft.parse(await c.request("workspaces.commitDraft", { workspaceId: id, ...(paths !== undefined ? { paths: [...paths] } : {}) })),
     viewed: async (id, mark) => ViewedMarks.parse(await c.request("workspaces.viewed", { workspaceId: id, ...(mark ?? {}) })),
-    pullRequestView: async id => PullRequestPage.parse(await c.request("workspaces.pullRequestView", { workspaceId: id })),
+    pullRequestView: async (id, fresh) => PullRequestPage.parse(await c.request("workspaces.pullRequestView", { workspaceId: id, ...(fresh === true ? { fresh } : {}) })),
     pullRequestDiff: async id => GitPrDiffReply.parse(await c.request("workspaces.pullRequestDiff", { workspaceId: id })),
     pullRequestReply: async (id, o) => GitPrReplyReply.parse(await c.request("workspaces.pullRequestReply", { workspaceId: id, ...o })),
     pullRequestResolve: async (id, threadId, resolved) => GitPrResolveReply.parse(await c.request("workspaces.pullRequestResolve", { workspaceId: id, threadId, resolved })),
@@ -1097,6 +1101,7 @@ export function makeApi(c: ProtocolClient): Api {
     spend: async () => PlaceSpend.array().parse((await c.request<{ places?: unknown }>("cost.spend")).places),
     usageUsed: async (range, split) => UsedAnswer.parse((await c.request<{ used?: unknown }>("usage.used", { range, split, outside: true })).used),
     usageAccounts: async () => AccountsAnswer.parse(await c.request<unknown>("usage.accounts")),
+    slates: slateApi(c),
     usageReset: async account => ResetAnswer.parse(await c.request<unknown>("usage.reset", { account })),
     placesReadings: async (placeId, range) => ReadingsAnswer.parse(await c.request<unknown>("places.readings", { placeId, range })),
     // Parsed, not trusted: the lineage renders and forks only snapshots the wire type vouches for.

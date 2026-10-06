@@ -1,0 +1,70 @@
+{
+  "tool": "slate_read",
+  "cases": [
+    {
+      "case": "values and the text",
+      "arguments": {
+        "values": [
+          "$env.state",
+          "usage.week.percent"
+        ],
+        "text": true,
+        "document": true
+      },
+      "env": {
+        "WSP_TURN": "turn-token-1"
+      },
+      "replies": {
+        "slates.read": "{\"id\":1,\"ok\":true,\"version\":23,\"text\":\"slate v3 \\\"Vercel \u0085 setup 🧪\\\", 4 pieces, 2 bound, 0 problems\\nToken  ••••  [token input]\\n\\\"Next\\\" held: paste the project  [next button]\",\"document\":{\"schema\":2,\"root\":\"r\"},\"values\":{\"$env.state\":\"done\",\"usage.week.percent\":46.5},\"runs\":{\"env\":{\"state\":\"done\",\"exit\":0,\"out\":\"wrote .env [secret:token]\"}},\"problems\":[],\"approvals\":{\"run:env\":\"allowed\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"slate v3 \\\"Vercel \\u0085 setup 🧪\\\", 4 pieces, 2 bound, 0 problems\\nToken  ••••  [token input]\\n\\\"Next\\\" held: paste the project  [next button]\"}],\"structuredContent\":{\"version\":23,\"text\":\"slate v3 \\\"Vercel \\u0085 setup 🧪\\\", 4 pieces, 2 bound, 0 problems\\nToken  ••••  [token input]\\n\\\"Next\\\" held: paste the project  [next button]\",\"document\":{\"schema\":2,\"root\":\"r\"},\"values\":{\"$env.state\":\"done\",\"usage.week.percent\":46.5},\"runs\":{\"env\":{\"state\":\"done\",\"exit\":0,\"out\":\"wrote .env [secret:token]\"}},\"problems\":[],\"approvals\":{\"run:env\":\"allowed\"}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "slates.read",
+          "turnToken": "turn-token-1",
+          "values": [
+            "$env.state",
+            "usage.week.percent"
+          ],
+          "text": true,
+          "document": true
+        }
+      ]
+    },
+    {
+      "case": "a child without its sketch",
+      "arguments": {
+        "thread": "t-child-1",
+        "sketch": false
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"threadId\":\"t-child-1\",\"workspaceId\":\"w\",\"harness\":\"claude\",\"status\":\"completed\"},{\"id\":\"s-2\",\"workspaceId\":\"w\",\"harness\":\"codex\",\"status\":\"running\"}]}",
+        "slates.read": "{\"id\":1,\"ok\":true,\"version\":1,\"text\":\"\",\"values\":{}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"\"}],\"structuredContent\":{\"version\":1,\"text\":\"\",\"values\":{}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "slates.read",
+          "threadId": "t-child-1",
+          "sketch": false
+        }
+      ]
+    },
+    {
+      "case": "no slate",
+      "arguments": {},
+      "replies": {
+        "slates.read": "{\"id\":1,\"ok\":true,\"version\":0,\"text\":\"slate v0, empty: write one with slate_write\",\"values\":{},\"problems\":[]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"slate v0, empty: write one with slate_write\"}],\"structuredContent\":{\"version\":0,\"text\":\"slate v0, empty: write one with slate_write\",\"values\":{},\"problems\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "slates.read"
+        }
+      ]
+    }
+  ]
+}

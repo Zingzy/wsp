@@ -442,6 +442,7 @@ describe("the agent contract on the command line and the tool door", () => {
     // The read is off the transcript the host holds: the same turn, its rows, and its reply whole under --last.
     expect(await last("thread read", "thread", "read", opened.threadId, "--last")).toEqual({ threadId: opened.threadId, messages: [{ who: "agent", at: expect.any(Number), text: "re: again" }] });
     await last("thread read", "thread", "read", opened.threadId);
+    expect(await last("thread head", "thread", "head", opened.threadId)).toMatchObject({ facts: { id: opened.threadId, status: "completed" }, pos: expect.any(Number), total: expect.any(Number) });
     await last("stop", "stop", opened.threadId);
     // One subagent of a turn that is over: nothing to stop, which is an answer, and it names the task.
     expect(await last("stop", "stop", opened.threadId, "--task", "a1b2")).toEqual({ threadId: opened.threadId, task: "a1b2", outcome: "not-running" });
@@ -459,6 +460,24 @@ describe("the agent contract on the command line and the tool door", () => {
     // The deny's reason reaches the agent as the question panel's does: the refusal it reads, and the words beside it.
     expect(answers.at(-1)).toEqual({ optionId: PERMISSION_DENY, outcome: "denied", denyMessage: deniedLine("count the lines with awk instead"), reason: "count the lines with awk instead" });
     await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");
+    // The thread's slate from a person's shell, named by the thread's id: every slate verb once.
+    const tracker = join(dir, "tracker.slate");
+    writeFileSync(tracker, '<slate title="Steps">\n  <value name="done" start={1} />\n  <column>\n    <meter id="progress" label="Steps" value={$done} max={3} />\n  </column>\n</slate>\n');
+    const change = join(dir, "change.slate");
+    writeFileSync(change, '<props id="progress" label="Steps done" />\n');
+    await last("slate catalog", "slate", "catalog");
+    expect(await last("slate write", "slate", "write", opened.threadId, tracker, "--check")).toMatchObject({ version: 0 });
+    expect(await last("slate write", "slate", "write", opened.threadId, tracker)).toMatchObject({ version: 1 });
+    expect(await last("slate write", "slate", "write", opened.threadId, change, "--if-version", "1")).toMatchObject({ version: 2 });
+    // A version behind is the host's refusal, exit 1, on stderr alone.
+    const behind = await run("slate", "write", opened.threadId, change, "--if-version", "1", "--json");
+    expect(behind.code).toBe(EXIT_CODES.provider);
+    expect(failure(behind.io).error).toContain("V750");
+    // A value is data: it moves the revision, never the document's version.
+    expect(await last("slate state", "slate", "state", opened.threadId, "$done=2")).toMatchObject({ version: 2 });
+    // A rehearsal with no file: the sketch as it would read, the live slate left as it was.
+    expect(await last("slate write", "slate", "write", opened.threadId, "--check", "--set", "done=1")).toMatchObject({ version: 2, problems: [] });
+    expect(await last("slate read", "slate", "read", opened.threadId, "--values", "$done", "--document")).toMatchObject({ version: 2, values: { $done: 2 }, document: { schema: 2 } });
     // A project on this computer: its worktree for a branch, the worktree taken away, and a thread in its folder
     // deleted by its id, the folder left as it stands.
     const here = join(dir, "here-proj");
@@ -534,7 +553,7 @@ describe("the agent contract on the command line and the tool door", () => {
     }
     expect(await last("restart", "restart")).toEqual({ running: [] });
     const served = CLI_VERBS.filter(hasTool);
-    expect(served.filter(v => v.tool.stream !== undefined).map(v => [v.name, v.tool.stream])).toEqual([...(CLOUD_ON ? [["fork", ["workspace", "notice"]]] : []), ["exec", ["output"]]]);
+    expect(served.filter(v => v.tool.stream !== undefined).map(v => [v.name, v.tool.stream])).toEqual([...(CLOUD_ON ? [["fork", ["workspace", "notice"]]] : []), ["slate write", ["text"]], ["slate state", ["text"]], ["slate read", ["text"]], ["exec", ["output"]]]);
 
     for (const verb of served) {
       const value = covered.get(verb.name);
@@ -544,7 +563,7 @@ describe("the agent contract on the command line and the tool door", () => {
       expect(parsed.success, `wsp ${verb.name} --json ends with ${JSON.stringify(value)}\n${parsed.success ? "" : parsed.error.message}`).toBe(true);
     }
     expect([...covered.keys()].sort()).toEqual(served.map(v => v.name).sort());
-  });
+  }, 60_000);
 
   it("the lists of what stands on a computer refuse a workspace and a computer together, and a computer nobody holds, as usage", async () => {
     await run("new", "alpha");
@@ -779,6 +798,21 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(await cli(["mcp", SCOPED_MCP_ARG, "--json", "--state", statePath], json, undefined, inTurn, false)).toBe(EXIT_CODES.auth);
     expect(json.errors.map(line => JSON.parse(line) as unknown)).toEqual([{ error: scopedNoPairLine, class: "auth", exit: EXIT_CODES.auth }]);
     expect(json.lines).toEqual([]);
+  });
+
+  it("refuses wsp slate write with no file or rehearsal in the command line's own words, before it dials", async () => {
+    for (const args of [["notes.txt"], ["thread-1"]]) {
+      const io = captured();
+      expect(await cli(["slate", "write", ...args, "--state", statePath], io, undefined, ownEnv(), false)).toBe(EXIT_CODES.usage);
+      expect(io.errors.join("\n")).toContain("wsp slate write takes a .slate or .json file");
+    }
+  });
+
+  it("refuses --no-slate without --scoped as a usage error, as the binary's flag table does", async () => {
+    const io = captured();
+    expect(await cli(["mcp", "--no-slate", "--state", statePath], io, undefined, ownEnv(), false)).toBe(EXIT_CODES.usage);
+    expect(io.errors.join("\n")).toContain(`--no-slate goes with ${SCOPED_MCP_ARG}`);
+    expect(io.lines).toEqual([]);
   });
 
   it("the tool server answers through the forwarder in the same bytes as on stdio, served by the binary where it carries the tool server", async () => {

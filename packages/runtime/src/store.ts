@@ -2,6 +2,7 @@ import { readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { STATE_SHAPE, StateShape, stateWriterWords } from "@wsp/protocol";
 import { writeOwn } from "@wsp/own-file";
+import type { TranscriptRows } from "./sqlite-transcripts.js";
 
 /** Persistence port. Hosted Postgres impl is Plan 2's problem. Blobs are
  * bytes too large for the JSON document (vault archives); one per id. */
@@ -18,6 +19,8 @@ export interface Store {
   /** Which write a blob is: its size and the moment it was written, nothing where there is no blob. A blob that is
    * there and cannot be read answers here where getBlob answers nothing, which is how a reader tells them apart. */
   statBlob(collection: string, id: string): Promise<BlobMark | undefined>;
+  /** The transcripts as rows, one per event, where the store keeps them so; elsewhere each is a blob by workspace. */
+  transcripts?: TranscriptRows;
 }
 
 export interface BlobMark {
@@ -25,7 +28,7 @@ export interface BlobMark {
   at: number;
 }
 
-type Data = Record<string, Record<string, unknown>>;
+export type Data = Record<string, Record<string, unknown>>;
 
 /** The top-level name the shape document sits under. Every other key of a state file is a collection of documents
  * by id, so the document's own fields would read as ids: a collection read never sees this name and a save always
@@ -37,7 +40,7 @@ export const STATE_SHAPE_KEY = "$shape";
  * could name would tell the next host to run a build with no name. */
 export type StateWriter = Omit<StateShape, "shape" | "at">;
 
-const shapeNow = (writer: StateWriter): StateShape => ({ shape: STATE_SHAPE, ...writer, at: new Date().toISOString() });
+export const shapeNow = (writer: StateWriter): StateShape => ({ shape: STATE_SHAPE, ...writer, at: new Date().toISOString() });
 
 /** Why a host will not read a state file a newer wsp wrote: the records in it may be in a form this build does not
  * know, and reading them and writing them back in this build's shape is what left another host refusing its own
@@ -108,41 +111,49 @@ export function memoryStore(): Store {
   };
 }
 
+/** A state file as it stands: its collections, and the shape document apart from them. A file that is not there is
+ * nothing, which is the first wsp up on a fresh home; a file that is there and is no state this build can read, its
+ * bytes, what they parse to or its shape document, is refused here, before a read answers anything and before a save
+ * could write one record and this build's document over records nothing read. */
+function readJson(path: string): { data: Data; wrote?: StateShape } | undefined {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    if ((e as { code?: string }).code === "ENOENT") return undefined;
+    throw e;
+  }
+  let held: unknown;
+  try {
+    held = JSON.parse(text);
+  } catch (e) {
+    throw new Error(stateUnreadableLine(path, e instanceof Error ? e.message : String(e)));
+  }
+  if (typeof held !== "object" || held === null || Array.isArray(held)) throw new Error(stateNotAnObjectLine(path, held));
+  const { [STATE_SHAPE_KEY]: document, ...collections } = held as Record<string, unknown>;
+  if (document === undefined) return { data: collections as Data };
+  const wrote = StateShape.safeParse(document);
+  if (!wrote.success) throw new Error(stateShapeUnreadableLine(path, document));
+  return { data: collections as Data, wrote: wrote.data };
+}
+
+/** The shape a store was written in, refused unless it is this build's: an older shape, or none recorded, and a
+ * newer one each have their sentence naming the file. */
+export function refuseOtherShape(path: string, wrote: StateShape | undefined): void {
+  if (wrote === undefined || wrote.shape < STATE_SHAPE) throw new Error(stateWrittenByOlderLine(path, wrote));
+  if (wrote.shape > STATE_SHAPE) throw new Error(stateWrittenByNewerLine(path, wrote));
+}
+
+/** One state file, one shape: a file in any other is refused here, before a read answers anything and before a write
+ * could put this build's shape over it. A file that is not there reads as nothing. */
+export function readStateFile(path: string): Data | undefined {
+  const read = readJson(path);
+  if (read !== undefined) refuseOtherShape(path, read.wrote);
+  return read?.data;
+}
+
 export function jsonFileStore(path: string, writer: StateWriter): Store {
-  /** The file as it stands: its collections, and the shape document apart from them. A file that is not there is
-   * an empty store, which is the first wsp up on a fresh home; a file that is there and is no state this build can
-   * read, its bytes, what they parse to or its shape document, is refused here, before a read answers anything and
-   * before a save could write one record and this build's document over records nothing read. */
-  const read = (): { data: Data; wrote?: StateShape; fresh?: true } => {
-    let text: string;
-    try {
-      text = readFileSync(path, "utf8");
-    } catch (e) {
-      if ((e as { code?: string }).code === "ENOENT") return { data: {}, fresh: true };
-      throw e;
-    }
-    let held: unknown;
-    try {
-      held = JSON.parse(text);
-    } catch (e) {
-      throw new Error(stateUnreadableLine(path, e instanceof Error ? e.message : String(e)));
-    }
-    if (typeof held !== "object" || held === null || Array.isArray(held)) throw new Error(stateNotAnObjectLine(path, held));
-    const { [STATE_SHAPE_KEY]: document, ...collections } = held as Record<string, unknown>;
-    if (document === undefined) return { data: collections as Data };
-    const wrote = StateShape.safeParse(document);
-    if (!wrote.success) throw new Error(stateShapeUnreadableLine(path, document));
-    return { data: collections as Data, wrote: wrote.data };
-  };
-  /** One state file, one shape: a file in any other is refused here, before a read answers anything and before a
-   * write could put this build's shape over it. A file that is not there is a fresh home and reads empty. */
-  const loadFile = (): Data => {
-    const { data, wrote, fresh } = read();
-    if (fresh) return data;
-    if (wrote === undefined || wrote.shape < STATE_SHAPE) throw new Error(stateWrittenByOlderLine(path, wrote));
-    if (wrote.shape > STATE_SHAPE) throw new Error(stateWrittenByNewerLine(path, wrote));
-    return data;
-  };
+  const loadFile = (): Data => readStateFile(path) ?? {};
   // The file as this process last read or wrote it, and which file that was. Parsing it whole on every read held a
   // host's loop for seconds at a time once its transcripts made it hundreds of megabytes; a stat is what tells a
   // write from another process on this file (the doctor runs a runtime of its own over it) from none.

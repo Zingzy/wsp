@@ -45,7 +45,15 @@ export const jsonLine = (value: unknown, space?: number): string => escapeC1(JSO
 
 export function verbFailure(e: unknown): VerbFailure {
   const cls = exitClassOf(e);
-  return { error: e instanceof Error ? e.message : String(e), class: cls, exit: EXIT_CODES[cls] };
+  return { error: e instanceof Error ? e.message : String(e), class: cls, exit: EXIT_CODES[cls], ...problemListsOf(e) };
+}
+
+/** The problem lists a refusal of a slate write carries beside its sentence (11-agent-toolchain): every error the
+ * validator found and the warnings with them, so a shell and a tool read the same object. */
+export function problemListsOf(e: unknown): { errors?: unknown[]; warnings?: unknown[] } {
+  if (typeof e !== "object" || e === null) return {};
+  const { errors, warnings } = e as { errors?: unknown; warnings?: unknown };
+  return { ...(Array.isArray(errors) ? { errors } : {}), ...(Array.isArray(warnings) ? { warnings } : {}) };
 }
 
 /** A refusal in both halves, what happened and then what to do about it, because one that only names the fault

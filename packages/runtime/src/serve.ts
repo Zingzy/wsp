@@ -12,6 +12,7 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
   ACCOUNT_TICKET_REFUSAL,
+  usageRefusal,
   absentComputer,
   ACCOUNT_UNSERVED,
   AUTH_DEADLINE_MS,
@@ -25,6 +26,7 @@ import {
   HOST_STOPPING_CLOSE,
   isJoinedComputer,
   HostFolderListing,
+  FS_FOLDERS_DAEMON_VERSION,
   placeBehindLine,
   placeDaemonBehind,
   providerFoldersRefusal,
@@ -112,6 +114,7 @@ import {
   type ThreadScope,
   type WorkspaceOrigin,
   type WorkspaceView,
+  problemListsOf,
 } from "@wsp/protocol";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, threadOf, type DeviceDoor, type HeldDevice } from "./devices.js";
@@ -222,6 +225,8 @@ export interface GuestOpening {
   cwd: string;
   /** The pair a verb reads its host and its token off, as a turn's own launch leaves them, plus the turn's token. */
   env: Record<string, string>;
+  /** The token is a thread another thread started, which has no slate: its tool server says nothing of one. */
+  noSlate?: true;
   reply(message: unknown): void;
   close(error?: string): void;
 }
@@ -471,9 +476,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     const row = rows.find(place => place.id === placeId);
     if (row === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, rows.map(place => place.name))), { kind: "usage" });
     if (!isJoinedComputer(row)) throw Object.assign(new Error(providerFoldersRefusal(row.name)), { kind: "usage" });
-    const report = await places().reportOf(row.id);
-    const behind = report === undefined ? undefined : placeDaemonBehind(report);
-    if (behind !== undefined) throw new Error(placeBehindLine(row.name, behind));
+    // A daemon older than 60 cannot seal the link this rides, so only one from 60 to 72 is here without fs.folders.
+    const version = (await places().reportOf(row.id))?.daemonVersion;
+    if (version !== undefined && version < FS_FOLDERS_DAEMON_VERSION) throw new Error(placeBehindLine(row.name, placeDaemonBehind({ daemonVersion: version })!));
     const link = places().channel(row.id, () => {});
     if (link === undefined) throw new Error(absentComputer(row.name, null).sentence);
     try {
@@ -602,6 +607,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     let sealExpect: Uint8Array | undefined;
 
     const detaches: (() => void)[] = [];
+    /** The slate holds this socket took, by thread and sources, so an unsubscribe lets go of one of them. */
+    const slateHolds = new Map<string, (() => void)[]>();
     /** The daemon links this socket holds open, by the id it was answered with. A channel is never reachable from
      * another socket, so a page cannot drive a machine by guessing an id another page was given. */
     const channels = new Map<string, DaemonChannel>();
@@ -1363,7 +1370,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               });
               return;
             case "workspaces.pullRequestView":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestView({ workspaceId: msg.workspaceId }, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestView({ workspaceId: msg.workspaceId, ...(msg.fresh === true ? { fresh: true } : {}) }, origin)) });
               return;
             case "workspaces.pullRequestDiff":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestDiff({ workspaceId: msg.workspaceId }, origin)) });
@@ -1656,7 +1663,16 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, sessions: await rt.sessions.list(msg.workspaceId, origin) });
               return;
             case "sessions.history":
+              if (msg.threadId !== undefined) {
+                const window = { threadId: msg.threadId, ...(msg.before !== undefined ? { before: msg.before } : {}), ...(msg.limit !== undefined ? { limit: msg.limit } : {}) };
+                send({ id: msg.id, ok: true, ...(await rt.sessions.page(msg.workspaceId, window, origin)) });
+                return;
+              }
+              if (msg.before !== undefined || msg.limit !== undefined) throw usageRefusal("before and limit page one thread's events.", "Name the thread with threadId.");
               send({ id: msg.id, ok: true, events: await rt.sessions.history(msg.workspaceId, origin) });
+              return;
+            case "sessions.head":
+              send({ id: msg.id, ok: true, ...(await rt.sessions.head(msg.threadId, origin)) });
               return;
             case "sessions.attachment":
               send({ id: msg.id, ok: true, attachment: await rt.sessions.attachment(msg.workspaceId, msg.threadId, msg.requestId, msg.index, origin) });
@@ -1709,6 +1725,70 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "sessions.rewind":
               send({ id: msg.id, ok: true, ...(await rt.sessions.rewind(msg.threadId, { ...(msg.turnId !== undefined ? { turnId: msg.turnId } : {}), ...(msg.files !== undefined ? { files: msg.files } : {}), ...(msg.undo !== undefined ? { undo: msg.undo } : {}) }, origin)) });
+              return;
+            case "slates.get":
+              send({ id: msg.id, ok: true, slate: await rt.slates.get(msg.threadId) });
+              return;
+            case "slates.write": {
+              const { id, op: _op, origin: _sent, ...params } = msg;
+              send({ id, ok: true, ...(await rt.slates.write(params, origin)) });
+              return;
+            }
+            case "slates.state": {
+              const { id, op: _op, origin: _sent, ...params } = msg;
+              send({ id, ok: true, ...(await rt.slates.state(params, origin)) });
+              return;
+            }
+            case "slates.read": {
+              const { id, op: _op, origin: _sent, ...params } = msg;
+              send({ id, ok: true, ...(await rt.slates.read(params, origin)) });
+              return;
+            }
+            case "slates.catalog": {
+              const { id, op: _op, origin: _sent, ...params } = msg;
+              send({ id, ok: true, ...(await rt.slates.catalog(params, origin)) });
+              return;
+            }
+            case "slates.shown":
+              await rt.slates.shown(msg.threadId);
+              send({ id: msg.id, ok: true });
+              return;
+            case "slates.event": {
+              const { id, op: _op, origin: _sent, ...params } = msg;
+              send({ id, ok: true, ...(await rt.slates.event(params)) });
+              return;
+            }
+            case "slates.approve":
+              await rt.slates.approve({ threadId: msg.threadId, key: msg.key, scope: msg.scope });
+              send({ id: msg.id, ok: true });
+              return;
+            case "slates.cancel":
+              await rt.slates.cancel({ threadId: msg.threadId, run: msg.run });
+              send({ id: msg.id, ok: true });
+              return;
+            case "slates.revoke":
+              await rt.slates.revoke({ threadId: msg.threadId, key: msg.key });
+              send({ id: msg.id, ok: true });
+              return;
+            case "slates.subscribe": {
+              // Held until the window lets go, or its socket closes and every hold it took goes with it.
+              const release = rt.slates.subscribe({ threadId: msg.threadId, sources: msg.sources });
+              const key = `${msg.threadId}\u0000${[...msg.sources].sort().join(",")}`;
+              slateHolds.set(key, [...(slateHolds.get(key) ?? []), release]);
+              detaches.push(release);
+              send({ id: msg.id, ok: true });
+              return;
+            }
+            case "slates.unsubscribe": {
+              const key = `${msg.threadId}\u0000${[...msg.sources].sort().join(",")}`;
+              const held = slateHolds.get(key) ?? [];
+              held.shift()?.();
+              if (held.length === 0) slateHolds.delete(key);
+              send({ id: msg.id, ok: true });
+              return;
+            }
+            case "slates.resolve":
+              send({ id: msg.id, ok: true, ...(await rt.slates.resolve({ threadId: msg.threadId, paths: msg.paths })) });
               return;
             case "sessions.steer":
               send({ id: msg.id, ok: true, ...(await rt.sessions.steer(msg.sessionId, { prompt: msg.prompt, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) }, origin)) });
@@ -2160,6 +2240,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             error: e instanceof Error ? e.message : String(e),
             ...(typeof kind === "string" ? { kind } : {}),
             ...(typeof fix === "string" ? { fix } : {}),
+            ...problemListsOf(e),
           });
           opts.failed?.(msg.op, e);
         }

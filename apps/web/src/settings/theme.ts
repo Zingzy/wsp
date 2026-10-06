@@ -5,7 +5,7 @@
 // each side draws the theme picked for it. One rule per value says which side
 // it draws, and the desktop shell is told the value so its frame and glass
 // draw the same side.
-import type { Preferences, ThemePreference } from "@wsp/protocol";
+import { DESKTOP_WCO_CLASS, type Preferences, type ThemePreference } from "@wsp/protocol";
 import { useLayoutEffect, useSyncExternalStore } from "react";
 import { applyFonts } from "../appearanceFonts.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
@@ -49,6 +49,7 @@ export function useThemeEffect(): void {
   useLayoutEffect(() => {
     applyTheme({ theme, lightTheme, darkTheme }, systemDark);
     desktopBridge()?.setTheme?.(theme);
+    if (document.documentElement.classList.contains(DESKTOP_WCO_CLASS)) desktopBridge()?.setTitleBar?.();
   }, [theme, lightTheme, darkTheme, systemDark]);
 }
 

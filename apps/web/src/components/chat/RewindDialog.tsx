@@ -118,14 +118,20 @@ export interface RewindableReply {
  * turn's last reply, where the turn is over and kept something to rewind to (the files' checkpoint, or its anchor on
  * an agent that cuts its own history, or any reply on an agent the host cuts by count). A thread its agent said it
  * cannot cut offers the files alone. The latest turn has nothing after it to cut. */
+/** Each turn's last reply, by turn id: where a turn's marks hang under it. */
+export function lastReplies(entries: ReadonlyArray<{ readonly kind: string; readonly message?: { readonly id: string; readonly role: string; readonly turnId: string | null } }>): Map<string, string> {
+  const last = new Map<string, string>();
+  for (const entry of entries) if (entry.kind === "message" && entry.message?.role === "assistant" && entry.message.turnId !== null) last.set(entry.message.turnId, entry.message.id);
+  return last;
+}
+
 export function rewindableReplies(
   turns: ReadonlyArray<{ readonly turnId: string; readonly state: string; readonly checkpoint: { readonly ref: string | null; readonly anchor: string | null; readonly kept?: string } | null }>,
   entries: ReadonlyArray<{ readonly kind: string; readonly message?: { readonly id: string; readonly role: string; readonly turnId: string | null } }>,
   cutsConversation: boolean,
   byCount = false,
 ): ReadonlyMap<string, RewindableReply> {
-  const lastReply = new Map<string, string>();
-  for (const entry of entries) if (entry.kind === "message" && entry.message?.role === "assistant" && entry.message.turnId !== null) lastReply.set(entry.message.turnId, entry.message.id);
+  const lastReply = lastReplies(entries);
   const kept = turns.find(t => t.checkpoint?.kept !== undefined)?.checkpoint?.kept;
   const out = new Map<string, RewindableReply>();
   turns.forEach((turn, at) => {

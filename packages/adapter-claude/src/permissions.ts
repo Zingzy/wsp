@@ -165,6 +165,13 @@ export function stopTaskLine(requestId: string, task: string): string {
   return JSON.stringify({ type: "control_request", request_id: requestId, request: { subtype: "stop_task", task_id: task } });
 }
 
+/** The request that stops the turn the CLI is running and leaves its process up for the next message: it answers with
+ * the turn's result, stamped aborted (measured on 2.1.289 at 4 to 19 ms). To an idle process it answers success and
+ * prints no result, so it goes only to a turn that is running. */
+export function interruptLine(requestId: string): string {
+  return JSON.stringify({ type: "control_request", request_id: requestId, request: { subtype: "interrupt" } });
+}
+
 /** The answer to a control_request this adapter cannot serve: the CLI stops waiting on it and says why in its log. */
 export function controlErrorLine(requestId: string, subtype: string): string {
   return JSON.stringify({
