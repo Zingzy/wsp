@@ -49,16 +49,20 @@ jobs:
         run: |
           rustup toolchain install
           rustup show
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # The daemon workflow's x86_64 musl cache, read only, as ci.yml reads it: the daemon gate's holds every profile.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             daemon/target
-          key: daemon-rust-${{ runner.os }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
+          key: daemon-artifacts-x86_64-unknown-linux-musl-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
           restore-keys: |
-            daemon-rust-${{ runner.os }}-
+            daemon-artifacts-x86_64-unknown-linux-musl-
+      # Cargo rebuilds what is older than its sources, so a cache saved after this checkout never passes for this build.
+      - name: The daemon's sources newer than anything restored
+        run: git ls-files -z daemon | xargs -0 touch
       - name: C compiler for the musl target, and libseccomp built against musl
         working-directory: daemon
         run: |

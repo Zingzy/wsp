@@ -11,11 +11,10 @@ import { fileURLToPath } from "node:url";
 import { LAUNCH_ENV, WEB_DIR_ENV, type ThreadView } from "@wsp/protocol";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { writeStub } from "../../../packages/protocol/test/stub-script.js";
 import { COMPOSER_STATE_WORDS } from "../../web/src/composer-state-words.js";
 import { TRANSCRIPT_LOADING } from "../../web/src/transcript-words.js";
 import { threadRowId } from "../../web/src/sidebar/rowGrammar.js";
-import { builtExecutableHere } from "./packaged.js";
+import { alive, APP_URL, builtApp, loginShell, windowAt } from "./launched-app.js";
 import { FLOW_WORDS, gateIn, pidsIn, writeFlowAgents } from "./flow-agents.js";
 
 const FLOWS = process.env["WSP_DESKTOP_FLOWS"] === "1";
@@ -26,18 +25,8 @@ for (const name of [...LAUNCH_ENV, "ELECTRON_RUN_AS_NODE"]) delete process.env[n
 const WSP_BIN = fileURLToPath(new URL("../../../packages/host/dist/bin.js", import.meta.url));
 const WEB_ROOT = fileURLToPath(new URL("../../web/", import.meta.url));
 const PROJECT = "flows";
-const APP_URL = /^http:\/\/127\.0\.0\.1:\d+\/$/;
-const DEVTOOLS_URL = /^devtools:\/\//;
 /** The system folders a stand-in's PATH keeps after its own bin, for git, sh and node's neighbours. */
 const SYSTEM_PATH = ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(":");
-
-function builtApp(): string {
-  const fromEnv = process.env["WSP_DESKTOP_APP"];
-  if (fromEnv !== undefined) return fromEnv;
-  const built = builtExecutableHere();
-  if (built === undefined) throw new Error(`no packaged tree for ${process.platform}-${process.arch}`);
-  return built;
-}
 
 interface Flow {
   dir: string;
@@ -66,15 +55,6 @@ const threadIdOf = (out: string): string => {
   return id;
 };
 
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** A temp home with a project folder on main, both agents on the PATH, a host serving it in the foreground and the
  * app attached to that host by the lock beside its state. */
 async function openFlow(webDir: string | undefined): Promise<Flow> {
@@ -94,33 +74,30 @@ async function openFlow(webDir: string | undefined): Promise<Flow> {
   const out: string[] = [];
   host.stdout!.on("data", (d: Buffer) => out.push(d.toString()));
   host.stderr!.on("data", (d: Buffer) => out.push(d.toString()));
-  await vi.waitFor(() => expect(existsSync(join(home, "host.lock")), out.join("")).toBe(true), { timeout: 30_000, interval: 100 });
-  wsp({ env, dir }, "add", folder, "--name", PROJECT);
-  // The folder's history holds what a window in use holds, a thread stopped before its agent said anything among
-  // them, whose rows carry no start. A host holding a workspace opens the app on it rather than on the welcome.
-  const silent = threadIdOf(wsp({ env, dir }, "run", PROJECT, "--agent", "claude", "--detach", "stay silent"));
-  wsp({ env, dir }, "stop", silent);
+  let app: ElectronApplication | undefined;
+  try {
+    await vi.waitFor(() => expect(existsSync(join(home, "host.lock")), out.join("")).toBe(true), { timeout: 30_000, interval: 100 });
+    wsp({ env, dir }, "add", folder, "--name", PROJECT);
+    // The folder's history holds what a window in use holds, a thread stopped before its agent said anything among
+    // them, whose rows carry no start. A host holding a workspace opens the app on it rather than on the welcome.
+    const silent = threadIdOf(wsp({ env, dir }, "run", PROJECT, "--agent", "claude", "--detach", "stay silent"));
+    wsp({ env, dir }, "stop", silent);
 
-  // The login shell the app reads its PATH from prints the flow's own, so the agents it finds are the stand-ins.
-  const shell = join(dir, "login-shell");
-  writeStub(shell, `#!/bin/sh\nprintf %s ${JSON.stringify(path)}\n`);
-  const launchEnv: Record<string, string> = { ...env, WSP_DESKTOP_SMOKE: "1", SHELL: shell };
-  for (const name of ["DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"]) if (process.env[name] !== undefined) launchEnv[name] = process.env[name]!;
-  const app = await electron.launch({ executablePath: builtApp(), cwd: dir, env: launchEnv, colorScheme: null });
-  const said: string[] = [];
-  const keep = (chunk: Buffer): void => void said.push(...chunk.toString().split("\n").filter(line => line.trim() !== ""));
-  app.process().stdout?.on("data", keep);
-  app.process().stderr?.on("data", keep);
-  const win = await vi.waitFor(
-    () => {
-      const page = app.windows().find(w => !DEVTOOLS_URL.test(w.url()) && APP_URL.test(w.url()));
-      if (page === undefined) throw new Error(`no app window, saw ${JSON.stringify(app.windows().map(w => w.url()))}`);
-      return page;
-    },
-    { timeout: 30_000, interval: 100 },
-  );
-  await win.waitForLoadState("domcontentloaded");
-  return { dir, home, folder, env, host, hostSaid: out, app, win, said };
+    const launchEnv: Record<string, string> = { ...env, WSP_DESKTOP_SMOKE: "1", SHELL: loginShell(join(dir, "login-shell"), path) };
+    for (const name of ["DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"]) if (process.env[name] !== undefined) launchEnv[name] = process.env[name]!;
+    app = await electron.launch({ executablePath: builtApp(), cwd: dir, env: launchEnv, colorScheme: null });
+    const said: string[] = [];
+    const keep = (chunk: Buffer): void => void said.push(...chunk.toString().split("\n").filter(line => line.trim() !== ""));
+    app.process().stdout?.on("data", keep);
+    app.process().stderr?.on("data", keep);
+    const win = await windowAt(app, APP_URL);
+    await win.waitForLoadState("domcontentloaded");
+    return { dir, home, folder, env, host, hostSaid: out, app, win, said };
+  } catch (e) {
+    // A launch that failed after the host started leaves no flow for afterAll to close.
+    await closeFlow({ dir, env, host, ...(app !== undefined ? { app } : {}) });
+    throw e;
+  }
 }
 
 /** The processes still naming the flow's folder, by either spelling of it (a Mac's temp folder is a link), read and
@@ -144,10 +121,12 @@ function runningThreads(flow: Pick<Flow, "env" | "dir">): string[] {
 
 /** Stops the app, the host this file started and every stand-in session by the pid each wrote, then holds that
  * nothing of the flow is left. */
-async function closeFlow(flow: Flow): Promise<void> {
-  const child = flow.app.process();
-  await Promise.race([flow.app.close().catch(() => {}), new Promise(resolve => setTimeout(resolve, 10_000))]);
-  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+async function closeFlow(flow: Pick<Flow, "dir" | "env" | "host"> & { app?: ElectronApplication }): Promise<void> {
+  if (flow.app !== undefined) {
+    const child = flow.app.process();
+    await Promise.race([flow.app.close().catch(() => {}), new Promise(resolve => setTimeout(resolve, 10_000))]);
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  }
   // A turn still running when its host goes keeps the input its host feeds it open for the next host, so each one is
   // stopped first, a case that failed on an open prompt among them.
   for (const thread of runningThreads(flow)) spawnSync(process.execPath, [WSP_BIN, "stop", thread], { env: flow.env, cwd: flow.dir, timeout: 30_000 });
@@ -171,11 +150,9 @@ async function openNewThread(win: Page): Promise<void> {
   await win.locator("[data-k=project-home]").waitFor({ timeout: 10_000 });
 }
 
-/** The one word the footer under a turn that ended any way but completed says, or nothing while it reads none. */
-async function settledWord(win: Page): Promise<string | null> {
-  const footer = win.locator("main [data-testid=settled-footer]");
-  return (await footer.count()) === 0 ? null : (await footer.last().innerText()).trim();
-}
+/** The one word the footer under a turn that ended any way but completed says, or nothing while it reads none, in
+ * one read that never waits. */
+const settledWord = (win: Page): Promise<string | null> => win.locator("main [data-testid=settled-footer]").evaluateAll(footers => (footers.at(-1) as HTMLElement | undefined)?.innerText.trim() ?? null);
 
 /** Waits until the thread's composer takes a message again, which is the turn over in the window. */
 const settles = (win: Page): Promise<void> => win.locator("[data-chat-composer]").getByRole("button", { name: COMPOSER_STATE_WORDS.send }).waitFor({ timeout: 20_000 });
@@ -208,6 +185,10 @@ function watchForLoading(win: Page): Promise<void> {
 
 const sawLoading = (win: Page): Promise<boolean> => win.evaluate(() => (window as unknown as { __sawLoading: boolean }).__sawLoading);
 
+/** The ask the prompt dock is open on, or nothing, in one read that never waits: a dock that closes between a count
+ * and a read would leave the read waiting for it. */
+const openAsk = async (win: Page): Promise<string | null> => (await win.locator("[data-prompt-dock]").evaluateAll(docks => docks.map(d => d.getAttribute("data-prompt-dock"))))[0] ?? null;
+
 /** Types into the composer that has focus and sends it with Enter. */
 async function send(win: Page, text: string): Promise<void> {
   const editor = win.locator("[data-chat-composer] [contenteditable=true]").first();
@@ -236,6 +217,10 @@ function devPage(): string {
 }
 
 const suite = FLOWS ? describe.each(PAGES) : describe.skip.each(PAGES);
+
+afterAll(() => {
+  if (devBuilt !== undefined) rmSync(devBuilt, { recursive: true, force: true });
+});
 
 suite("the everyday flows in the packaged app, on $page", { timeout: 90_000 }, ({ web }) => {
   let flow: Flow;
@@ -298,19 +283,19 @@ suite("the everyday flows in the packaged app, on $page", { timeout: 90_000 }, (
     const answer = async (word: "Allow" | "Deny"): Promise<void> => {
       const dock = win.locator("[data-prompt-dock]");
       await dock.waitFor({ timeout: 20_000 });
-      const ask = await dock.getAttribute("data-prompt-dock");
+      const ask = await openAsk(win);
       if (road === "app") {
         await dock.locator("[data-prompt-option]").filter({ has: win.getByText(word, { exact: true }) }).first().click();
         await dock.locator("[data-prompt-answer]").click();
       } else {
         wsp(flow, "thread", word === "Allow" ? "allow" : "deny", thread);
       }
-      await expect.poll(async () => ((await dock.count()) === 0 ? null : await dock.getAttribute("data-prompt-dock")), { timeout: 20_000 }).not.toBe(ask);
+      await expect.poll(() => openAsk(win), { timeout: 20_000 }).not.toBe(ask);
     };
     await answer("Allow");
     await answer("Deny");
     await expect.poll(() => paneText(win), { timeout: 20_000 }).toContain(FLOW_WORDS.answered("allowed", "denied"));
-    expect(await win.locator("[data-prompt-dock]").count()).toBe(0);
+    expect(await openAsk(win)).toBeNull();
   });
 
   it("switching threads and going to Settings and back shows each transcript again with no loading line", async () => {
@@ -337,7 +322,7 @@ suite("the everyday flows in the packaged app, on $page", { timeout: 90_000 }, (
   it("a thread opened from the sidebar while its turn runs shows the turn live, and one opened after its turn ended shows its reply", async () => {
     const { win, dir } = flow;
     const running = threadIdOf(wsp(flow, "run", PROJECT, "--agent", "claude", "--detach", "hang sidebar-gate while I watch"));
-    await expect.poll(() => win.locator(`[data-row-id='${threadRowId(running)}'] [data-thread-status]`).getAttribute("data-thread-status"), { timeout: 20_000 }).toBe("working");
+    await expect.poll(async () => (await win.locator(`[data-row-id='${threadRowId(running)}'] [data-thread-status]`).evaluateAll(marks => marks.map(m => m.getAttribute("data-thread-status"))))[0] ?? null, { timeout: 20_000 }).toBe("working");
     await openFromSidebar(win, running);
     await expect.poll(() => paneText(win), { timeout: 20_000 }).toContain(FLOW_WORDS.working);
     await win.getByRole("button", { name: "Stop generation" }).waitFor({ timeout: 10_000 });

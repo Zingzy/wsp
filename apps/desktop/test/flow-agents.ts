@@ -3,7 +3,7 @@
 // channel, kept between turns, and Codex as an app server. Each acts on the words of the message it is sent, so a
 // flow says what the turn does in the message it types:
 //   fail     the turn ends failed with FLOW_WORDS.failed
-//   limit    the turn ends failed with the agent's usage limit words, FLOW_WORDS.limit
+//   limit    the turn ends failed with Codex's usage limit words, FLOW_WORDS.limit (the Codex stand-in alone)
 //   hang     says FLOW_WORDS.working, then waits until the case writes the gate file the message names after it
 //   ask      asks to run a command twice, waits on each answer, and says what each answer was
 //   silent   says nothing at all, not even its start, until it is stopped
@@ -89,7 +89,6 @@ lines(m => {
   if (!inited) { inited = true; say({ type: "system", subtype: "init", cwd: process.cwd(), session_id: sid, tools: [], mcp_servers: [], model: "claude-sonnet-5", permissionMode: mode, slash_commands: [], apiKeySource: "none", uuid: "init" }); }
   turn = { answers: [] };
   if (/\\bfail\\b/.test(text)) { message("trying"); result({ subtype: "error_during_execution", is_error: true, errors: [WORDS.failed] }); return; }
-  if (/\\blimit\\b/.test(text)) { result({ subtype: "success", is_error: true, result: WORDS.limit }); return; }
   if (/\\bask\\b/.test(text)) { turn.asks = true; message("I need to run a command"); ask("ask_1"); return; }
   const gate = gateOf(text);
   if (gate !== undefined) { message(WORDS.working); const t = turn; t.stopGate = waitGate(gate, () => { if (turn === t) reply(WORDS.reply + " " + text); }); return; }
