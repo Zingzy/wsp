@@ -276,6 +276,7 @@ import {
   sourceWord,
   HERE_PLACE_ID,
   isLocalWorkspace,
+  threadOnMachineLine,
   turnSpendWord,
   agentsCell,
   placeDaemonBehind,
@@ -2201,6 +2202,15 @@ async function threadHere(client: HostClient, ref: string): Promise<{ id: string
   const at = (await workspaces(client)).find(w => w.id === thread.workspaceId);
   if (at === undefined || !isLocalWorkspace(at)) return undefined;
   return { id: threadIdOf(thread), workspaceId: at.id, ...(at.worktree?.made === true && at.worktree.gone !== true ? { worktree: at.worktree.path } : {}) };
+}
+
+/** Refuses a thread on a box's machine, which goes with its machine, in the runtime's own words; nothing for any
+ * other ref, so the caller's own refusal stands. */
+async function refuseMachineThread(client: HostClient, ref: string): Promise<void> {
+  const thread = await threadOf(client, ref).catch(() => undefined);
+  if (thread === undefined) return;
+  const at = (await workspaces(client)).find(w => w.id === thread.workspaceId);
+  if (at !== undefined && !isLocalWorkspace(at)) throw Object.assign(new Error(threadOnMachineLine(at.name)), { kind: "usage" });
 }
 
 /** What the host took with a thread it deleted: the record's id, the worktree that went with it, and how many threads. */
@@ -5757,7 +5767,12 @@ export const ALL_VERBS: readonly Verb[] = [
         ctx.out.emit({ threadId: here.id, ...gone }, threadDeletedLine(here.id, gone));
         return 0;
       }
-      const d = await deleting(client, ref);
+      // A workspace by that name comes first; a ref that names none but is a thread on a box's machine says how that
+      // thread goes, rather than that no workspace has its id.
+      const d = await deleting(client, ref).catch(async (e: unknown) => {
+        await refuseMachineThread(client, ref);
+        throw e;
+      });
       if (!(await confirmed(ctx, deleteQuestion(d), d.workspace.name))) return 1;
       await deleteWorkspace(client, d);
       ctx.out.emit({ workspaceId: d.workspace.id, name: d.workspace.name, machineId: d.workspace.machineId, threads: d.threads }, deletedLine(d));
@@ -5772,7 +5787,10 @@ export const ALL_VERBS: readonly Verb[] = [
         const client = await deps.client();
         if (threadRef !== undefined) {
           const here = await threadHere(client, threadRef);
-          if (here === undefined) throw usageRefusal(`no thread ${threadRef} on this computer`, "Name a thread wsp threads lists.");
+          if (here === undefined) {
+            await refuseMachineThread(client, threadRef);
+            throw usageRefusal(`no thread ${threadRef} on this computer`, "Name a thread wsp threads lists.");
+          }
           if (confirm !== true) return { ...asText(`thread ${here.id} kept. ${threadDeleteQuestion(here.id, here.worktree).split("\n")[1]} Ask the person, then call delete again with confirm true.`, { threadId: here.id, workspaceId: here.workspaceId, threads: 1 }), isError: true };
           const gone = await threadDeleted(client, here.id);
           return asText(threadDeletedLine(here.id, gone), { threadId: here.id, ...gone });

@@ -1066,6 +1066,13 @@ describe("wsp verbs over the host", () => {
     await run("run", "alpha", "build it");
     const alpha = (await rt.workspaces.list()).find(w => w.name === "alpha")!;
 
+    // A thread on the machine, by a prefix of its id, goes with its machine, and the line says so.
+    const threadId = (await rt.sessions.list(alpha.id))[0]!.threadId!;
+    const byThread = await run("delete", threadId.slice(0, 8), "--yes");
+    expect(byThread.code).toBe(EXIT_CODES.usage);
+    expect(byThread.io.errors).toEqual(["wsp delete: a thread on alpha goes with its machine; wsp delete alpha takes both"]);
+    expect(backend.machines[0]!.killed).toBe(false);
+
     const kept = await answer("no", "delete", "alpha");
     expect(kept.code).toBe(1);
     expect(kept.io.errors).toEqual(["alpha kept"]);
