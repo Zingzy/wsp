@@ -156,6 +156,28 @@ describe("the window's sources", () => {
     expect(screen.getByRole("meter", { name: "Context" }).getAttribute("aria-valuenow")).toBe("164000");
   });
 
+  it("asks for the turn figures again only when its own workspace's rows move, never for another workspace's", async () => {
+    const app = fakeApp();
+    const api = fakeHost({ "thread.context.used": 164_000 });
+    const doc = slate({ root: "m", pieces: { m: { type: "meter", props: { label: "Context", value: { bind: "thread.context.used" }, max: 1_000_000 } } } });
+    const { engine } = drawBound(doc, app, api);
+    const redrawn = async () => {
+      act(() => engine.flush());
+      await act(async () => {});
+    };
+    await redrawn();
+    expect(api.resolve).toHaveBeenCalledTimes(1);
+    const other = { ...ROW, id: "s2", workspaceId: "other", threadId: "t2" } as SessionView;
+    for (const status of ["running", "completed", "running"] as const) {
+      act(() => app.set({ sessions: { ...app.get().sessions, other: [{ ...other, status }] } }));
+      await redrawn();
+    }
+    expect(api.resolve).toHaveBeenCalledTimes(1);
+    act(() => app.set({ sessions: { ...app.get().sessions, ws: [{ ...ROW, status: "running" }] } }));
+    await redrawn();
+    expect(api.resolve).toHaveBeenCalledTimes(2);
+  });
+
   it("reads usage off the account the host names, and moves with a usage.account push", async () => {
     const app = fakeApp();
     const api = fakeHost({ "usage.account.key": "acct-1" });
