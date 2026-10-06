@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
 import { dirname, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, installsOnFirstRun } from "@wsp/catalog";
 import { INLINE_EXEC_MS, landBytes, agentHomes } from "@wsp/engine";
 import {
   type AttachmentRoad, type HarnessCatalog, type Preferences, type SessionView, type TitleSource, type Attachment,
@@ -16,7 +16,7 @@ import { providerSaid } from "../status.js";
 import { catalogFromProbe, harnessCatalog, smallestModel } from "../harness-catalog.js";
 import type { HarnessAdapter } from "../types/harness.js";
 import {
-  CATALOG_TTL_MS, CATALOG_PROBE_TIMEOUT_MS, SESSION_TITLE_TTL_MS, SESSION_TITLE_TIMEOUT_MS, SESSION_TITLE_REFRESH_MAX,
+  CATALOG_TTL_MS, CATALOG_PROBE_TIMEOUT_MS, FIRST_RUN_READ_MS, SESSION_TITLE_TTL_MS, SESSION_TITLE_TIMEOUT_MS, SESSION_TITLE_REFRESH_MAX,
   TITLE_MAKE_TIMEOUT_MS,
 } from "../types/events.js";
 import type { LiveWorkspace } from "../types/wiring.js";
@@ -29,6 +29,14 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
    * not answer costs one exec, not one per composer mount. Past the TTL the lists held answer while the binary is
    * asked again, so a send waits on a probe only the first time a machine is asked. */
   const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
+  /** Whether the agent's command on the workspace's machine is a wrapper whose first run, still to come, installs it;
+   * read without running anything of the agent's. */
+  const firstRunHere = (entry: LiveWorkspace, harness: string): Promise<boolean> => {
+    const bin = CATALOG_AGENTS.find(a => a.id === harness)?.bin;
+    if (bin === undefined) return Promise.resolve(false);
+    const run = (script: string): Promise<string | undefined> => entry.machine.exec(script, { timeoutMs: FIRST_RUN_READ_MS }).then(r => (r.exitCode === 0 ? r.stdout : undefined), () => undefined);
+    return installsOnFirstRun(run, [bin]).then(([installs]) => installs === true);
+  };
   const catalogOn = (table: HarnessCatalog, entry: LiveWorkspace, adapter: HarnessAdapter): Promise<HarnessCatalog> => {
     const machine = entry.machine;
     const known: HarnessCatalog = {
@@ -49,8 +57,15 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     const hit = catalogs.get(key);
     const now = clock.now();
     if (hit !== undefined && now - hit.at < CATALOG_TTL_MS) return hit.catalog;
-    const catalog = adapter
-      .probeCatalog(command => machine.exec(command, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS }).then(res => res.stdout))
+    // A command whose first run installs its agent is not asked: the probe would start the download and its cut at
+    // the deadline would leave it running. The table answers, and the next ask looks again.
+    let skipped = false;
+    const probe = adapter.probeCatalog;
+    const catalog = firstRunHere(entry, table.harness)
+      .then(installs => {
+        skipped = installs;
+        return installs ? null : probe(command => machine.exec(command, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS }).then(res => res.stdout));
+      })
       // A binary that named why it described nothing keeps the table's lists and lends the footer its words.
       .then(
         answer => (answer === null ? known : catalogRefused(answer) ? { ...known, refusal: answer.refused } : catalogFromProbe(known, answer)),
@@ -60,6 +75,9 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
           return known;
         },
       );
+    void catalog.then(() => {
+      if (skipped) catalogs.delete(key);
+    });
     if (hit === undefined) {
       catalogs.set(key, { at: now, catalog });
       return catalog;
@@ -441,7 +459,7 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     };
   };
   return {
-    catalogOn, refreshTitle, sourceOf, rowsOn, carriedTitle, nameInHarness, makeTitle, titleRows, setupPlace, agentOff,
+    catalogOn, firstRunHere, refreshTitle, sourceOf, rowsOn, carriedTitle, nameInHarness, makeTitle, titleRows, setupPlace, agentOff,
     agentLabel, configFolderOn, setupRefusals, setupRefusal, homesHere, confineSetup, launchAdapterFor, defaultAgentOf,
     defaultsOn, namedMode, landImages, landFiles, dropThreadFiles, dropImages, adapterFor,
   };

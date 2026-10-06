@@ -16,8 +16,9 @@
 // each to one turn, so a fresh view owes the left one nothing.
 import { isProjectHomeKey } from "../../protocol/store";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { isSessionEvent } from "@wsp/protocol";
-import type { AttachmentRecord, SessionEvent, SessionHarness, SessionRunEvent, SessionView } from "@wsp/protocol";
+import { agentName } from "@wsp/catalog";
+import { agentStartingLine, isSessionEvent } from "@wsp/protocol";
+import type { AttachmentRecord, SessionEvent, SessionHarness, SessionStartingEvent, SessionRunEvent, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { Api, ProtocolEvent } from "../../protocol/client";
 import { createSessionFold } from "../../adapt/session";
@@ -109,6 +110,8 @@ export interface Kept extends Sent {
   readonly at: string;
   readonly attachments?: ReadonlyArray<AttachmentRecord>;
   readonly turnId?: string;
+  /** What the runtime said while this send waited on its agent with no session from it yet. */
+  readonly starting?: string;
 }
 
 export interface ThreadState {
@@ -484,6 +487,14 @@ function sentEntry(sent: Kept): TimelineEntry {
   };
 }
 
+/** A start that has waited on its agent: the line goes under the send it is for, and only that one, and leaves with
+ * it when its session starts. */
+export function startingSaid(state: ThreadState, e: SessionStartingEvent): ThreadState {
+  const sent = state.pendingPrompt;
+  if (sent === null || sent.requestId !== e.requestId) return state;
+  return { ...state, pendingPrompt: { ...sent, starting: agentStartingLine(agentName(e.harness), e.installs === true) } };
+}
+
 /** Whether a fold already holds the first of these events, the same objects in the same places, so only the rest are
  * folded on. A row the wire left unstamped is placed by when this client took it, so that has to match too. */
 function foldHolds(held: HeldFold, events: ReadonlyArray<SessionEvent>, arrivals: ReadonlyArray<string>): boolean {
@@ -521,7 +532,14 @@ export function deriveChatView(state: ThreadState, previous: ReadonlyArray<Timel
     const first = one.turnId === undefined ? -1 : entries.findIndex(e => entryTurnId(e) === one.turnId);
     entries.splice(first === -1 ? entries.length : first, 0, sentEntry(one));
   }
-  if (state.pendingPrompt !== null) entries.push(sentEntry(state.pendingPrompt));
+  if (state.pendingPrompt !== null) {
+    const { starting, requestId, at } = state.pendingPrompt;
+    entries.push(sentEntry(state.pendingPrompt));
+    if (starting !== undefined) {
+      const id = `starting:${requestId}`;
+      entries.push({ id, kind: "work", createdAt: at, entry: { id, createdAt: at, turnId: null, label: starting, tone: "notice", sourceActivityKind: "runtime.starting" } });
+    }
+  }
   state.localErrors.forEach(({ message, at }, index) => {
     const id = `local-error:${index}`;
     entries.push({
@@ -736,6 +754,10 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
         return;
       }
       if (hydratedRef.current !== viewKey) return;
+      if (e.type === "session.starting" && e.workspaceId === workspaceId) {
+        setState(s => startingSaid(s, e));
+        return;
+      }
       if (!isSessionEvent(e) || e.workspaceId !== workspaceId) return;
       if (heldRef.current && transcripts.dropped(e)) return;
       const at = (heldRef.current ? transcripts.arrivedAt(e) : undefined) ?? now();

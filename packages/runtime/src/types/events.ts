@@ -27,6 +27,8 @@ export const CATALOG_TTL_MS = 5 * 60_000;
 /** The probe measured 1 to 3 s on a Mac; a guest that takes longer than this is answered from the table. Under the
  * provider's 26 s exec cap, so the probe is one call and not a detached run on every fork. */
 export const CATALOG_PROBE_TIMEOUT_MS = 25_000;
+/** A look at the agent's command and its installer's record, which runs nothing; past this the agent is just starting. */
+export const FIRST_RUN_READ_MS = 3_000;
 
 /** How long a harness's title for a session stands before its store is read again on a refresh. Clients reload the
  * index on every session event, and a person renaming a session in the harness waits at most this long to see it. */

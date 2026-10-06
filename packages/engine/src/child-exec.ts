@@ -24,6 +24,20 @@ export interface ChildOptions {
  * command with. */
 export const CHILD_UNSTARTABLE = 127;
 export const CHILD_TIMED_OUT = 124;
+/** How long the pipes may stay quiet after a command exits before its answer goes without their close. */
+const DRAIN_MS = 200;
+/** How long after a command exits its answer waits on pipes something it left running keeps writing to. */
+const DRAIN_CAP_MS = 1_000;
+
+/** Kills a child's whole process group, which it leads since it was spawned detached. */
+function killGroup(pid: number | undefined): void {
+  if (pid === undefined) return;
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    // The group is already gone.
+  }
+}
 
 /** A stream's chunks as lines, the last partial one held until its newline or the flush; past `keep` characters
  * only its tail is held, so a writer that never ends a line cannot grow the reader. */
@@ -48,7 +62,11 @@ export function lineFeed(onLine: (line: string) => void, keep = Infinity): { fee
 
 export function runChild(file: string, args: readonly string[], opts: ChildOptions = {}): Promise<ExecResult> {
   return new Promise<ExecResult>(resolve => {
+    // Its own process group, so the deadline ends the group, not bash alone: an installer wrapper's download held the
+    // pipes open past a SIGKILL of bash and ran on as an orphan (97 s on Omarchy, 2026-10-05). A descendant that made
+    // a session of its own is outside the group and runs on.
     const child = spawn(file, [...args], {
+      detached: true,
       ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
       ...(opts.env !== undefined ? { env: opts.env as NodeJS.ProcessEnv } : {}),
     });
@@ -64,7 +82,7 @@ export function runChild(file: string, args: readonly string[], opts: ChildOptio
     let timedOut = false;
     const timer = opts.timeoutMs === undefined ? undefined : setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killGroup(child.pid);
     }, opts.timeoutMs);
     const text = (b: Buffer): string => b.toString("utf8");
     child.stdout.on("data", (b: Buffer) => {
@@ -75,18 +93,48 @@ export function runChild(file: string, args: readonly string[], opts: ChildOptio
     child.stderr.on("data", (b: Buffer) => {
       stderr += text(b);
     });
+    let answered = false;
+    let drain: NodeJS.Timeout | undefined;
     const done = (exitCode: number): void => {
+      if (answered) return;
+      answered = true;
       if (timer !== undefined) clearTimeout(timer);
+      if (drain !== undefined) clearTimeout(drain);
       lines?.flush();
       resolve({ exitCode, stdout, stderr });
     };
+    const codeOf = (code: number | null, signal: NodeJS.Signals | null): number => (timedOut ? CHILD_TIMED_OUT : (code ?? (signal !== null ? -1 : 0)));
     child.on("error", e => {
       stderr += `${e instanceof Error ? e.message : String(e)}\n`;
       done(CHILD_UNSTARTABLE);
     });
+    // The command's exit is its answer, its code read then and its deadline over: its output is read until the pipes
+    // close, go quiet for DRAIN_MS, or DRAIN_CAP_MS has passed, so a child it left running that still holds them does
+    // not hold the answer with them, writing or not.
+    let exited: (() => void) | undefined;
+    let cap: NodeJS.Timeout | undefined;
+    const quiet = (): void => {
+      if (exited === undefined) return;
+      if (drain !== undefined) clearTimeout(drain);
+      drain = setTimeout(exited, DRAIN_MS);
+    };
+    child.stdout.on("data", quiet);
+    child.stderr.on("data", quiet);
+    child.on("exit", (code, signal) => {
+      if (timer !== undefined) clearTimeout(timer);
+      const answer = codeOf(code, signal);
+      exited = () => {
+        if (cap !== undefined) clearTimeout(cap);
+        child.stdout.destroy();
+        child.stderr.destroy();
+        done(answer);
+      };
+      cap = setTimeout(exited, DRAIN_CAP_MS);
+      quiet();
+    });
     child.on("close", (code, signal) => {
-      if (timedOut) return done(CHILD_TIMED_OUT);
-      done(code ?? (signal !== null ? -1 : 0));
+      if (cap !== undefined) clearTimeout(cap);
+      done(codeOf(code, signal));
     });
   });
 }
