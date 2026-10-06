@@ -2,13 +2,15 @@
 // The shapes of a test that passes alone and fails on a loaded computer, read
 // off every test file: a fixed TCP port another run can hold, the home every
 // worker of a run shares, an assertion on how long the real clock ran, and a
-// limit under 10 s on a test that starts a process. A file that needs one
-// names it in its rule's table with the reason, and a reason whose file no
-// longer does it goes, so the tables only ever shrink.
+// limit under 10 s on a test that starts a process. A line that needs one is
+// named in its rule's table by its text and how many times, with the reason,
+// wherever it sits, and an entry no file still holds goes, so the tables only
+// ever shrink.
 import { globSync, readFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+import { type Allowed, holdTo } from "./allowed.js";
 import { ROOT, testFiles } from "./source-files.js";
 
 /** One finding: where, and the words it was found in. */
@@ -21,7 +23,10 @@ const SPAWN_LIMIT_MS = 10_000;
 const FIRST_FREE_PORT = 1024;
 
 const parsed = (rel: string, text: string): ts.SourceFile => ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true, rel.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-const hit = (rel: string, sf: ts.SourceFile, node: ts.Node): Hit => `${rel}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1} ${node.getText(sf).split("\n")[0]!.trim().slice(0, 100)}`;
+const hit = (rel: string, sf: ts.SourceFile, node: ts.Node): Hit => {
+  const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
+  return `${rel}:${line + 1} ${sf.text.split("\n")[line]!.trim().slice(0, 100)}`;
+};
 const calleeName = (e: ts.Expression): string => (ts.isIdentifier(e) ? e.text : ts.isPropertyAccessExpression(e) ? e.name.text : "");
 const msOf = (n: ts.Node): number | undefined => (ts.isNumericLiteral(n) ? Number(n.text.replaceAll("_", "")) : undefined);
 const walk = (node: ts.Node, visit: (n: ts.Node) => void): void => {
@@ -56,15 +61,14 @@ function fixedPorts(rel: string, text: string): Hit[] {
 }
 
 /** A read of the home: every worker of a run shares the one vitest.env.ts names, so a file that writes under it races
- * every other that does, unless it gives itself one. Read per file: a file that hands HOME to a child, or stubs it in
- * one case, passes whole, even where another of its lines writes under homedir(). */
+ * every other that does, unless it gives itself one. Every line that reads it is a hit, so each allowed line is named
+ * on its own; a file that hands HOME to a child, or stubs it in one case, passes whole. */
 const READS_HOME = /process\.env\.HOME\b|process\.env\[\s*["']HOME["']\s*\]|\bhomedir\(\)/;
 const SETS_HOME = /stubEnv\(\s*["']HOME["']|process\.env\.HOME\s*=[^=]|process\.env\[\s*["']HOME["']\s*\]\s*=[^=]|\bHOME:\s*(?!["'`])/;
 
 function sharedHome(rel: string, text: string): Hit[] {
   if (SETS_HOME.test(text)) return [];
-  const at = text.split("\n").findIndex(line => READS_HOME.test(line));
-  return at === -1 ? [] : [`${rel}:${at + 1} ${text.split("\n")[at]!.trim().slice(0, 100)}`];
+  return text.split("\n").flatMap<Hit>((line, at) => (READS_HOME.test(line) ? [`${rel}:${at + 1} ${line.trim().slice(0, 100)}`] : []));
 }
 
 /** An expect on a difference of two real-clock readings, written there or kept in a name first, in a file whose
@@ -210,63 +214,71 @@ function exportedStarters(rel: string, text: string): string[] {
 const RULES = { fixedPorts, sharedHome, realClock, shortSpawns } as const;
 type Rule = keyof typeof RULES;
 
-/** The files each rule lets through, each with why. */
-const EXEMPT: Record<Rule, Record<string, string>> = {
-  fixedPorts: {
-    "packages/daemon/test/exec.test.ts": "the port is the guest port a socket is scoped to, sent as data; nothing binds or dials it",
-    "packages/host/test/callback-relay.live.test.ts": "dials wrangler's own callback port, which wrangler fixes, on a live run only",
-  },
-  sharedHome: {
-    "apps/web/test/terminal-wiring.test.ts": "compares a root the code reports with the home's path; nothing is read or written there",
-    "packages/daemon/test/daemon-ws.test.ts": "compares the root the daemon's hello reports with the home's path; nothing is written there",
-    "packages/host/test/golden-import.live.test.ts": "a live import reads the person's own home on purpose",
-    "packages/host/test/init-first.test.ts": "expands ~ in a string and compares the paths; nothing is read or written there",
-    "packages/host/test/keys.test.ts": "names a folder under the home in a question's words; nothing is read or written there",
-    "packages/host/test/launch-pair.test.ts": "checks the default wsp home's path; nothing is read or written there",
-    "packages/host/test/ssh-files.test.ts": "puts a state path under the home into a ProxyCommand line; nothing is read or written there",
-    "packages/host/test/verbs-threads.test.ts": "shortens a folder against the home's path in an expected line; nothing is read or written there",
-    "packages/protocol/test/test-env.test.ts": "asserts the home is the run's own, which is what makes the shared home safe at all",
-    "packages/runtime/test/idle.live.test.ts": "a live run reads the live state under the person's home on purpose",
-    "packages/runtime/test/preferences.test.ts": "an icons folder whose removal is faked; nothing is read or written there",
-    "packages/runtime/test/serve-daemon.test.ts": "compares the root the daemon reports with the home's path; nothing is written there",
-    "packages/runtime/test/wake.live.test.ts": "a live run reads the live state under the person's home on purpose",
-  },
-  realClock: {
-    "apps/desktop/test/host-lifecycle.test.ts": "a refusal answers under 1 to 2 s where the road it skips waits seconds more",
-    "apps/desktop/test/page-session.test.ts": "a sweep that never settles holds the load for its 50 ms bound, under 1 s, not for ever",
-    "apps/desktop/test/self-update.test.ts": "the swap gives up under 45 s where its patience is 60 s",
-    "apps/web/test/vite-child.test.ts": "a child that swallows SIGTERM is killed no sooner than the 2 s grace; a lower bound, which load only lengthens",
-    "packages/adapter-codex/test/catalog.test.ts": "the probe ends inside the one line wait it is allowed, not at it",
-    "packages/catalog/test/jsonc.test.ts": "a 10 MB config reads in one pass under 5 s; a quadratic read takes minutes",
-    "packages/engine/test/exec-detached.test.ts": "a kill or a cancel answers under 1 to 2 s where the deadline or the poll is a minute or more",
-    "packages/engine/test/machine-context.test.ts": "a bounded command ends near its 1 s bound and a held output does not hold the probe's 20 s sleep",
-    "packages/engine/test/provision-outside.test.ts": "a sweep of 4041 marks under 20 s; a quadratic sweep takes minutes",
-    "packages/host/test/agent-latest.test.ts": "a hung vendor is not waited on: under 1 s where its timeout is 60 s",
-    "packages/host/test/analytics.test.ts": "tight: the close waits its 300 ms on a real timer and is held to 200 ms past it, and a record to 50 us",
-    "packages/host/test/doctor.test.ts": "an op on a closed socket refuses under 500 ms rather than dialling again",
-    "packages/host/test/init-handoff.test.ts": "a settled row answers under 2 to 5 s where its deadline is 10 to 30 s",
-    "packages/host/test/login-path.test.ts": "a shell whose job holds its output is read under 5 s, not at the job's 300 s",
-    "packages/host/test/mcp.test.ts": "tight: a turn whose host went waits at least its 300 ms window before it fails",
-    "packages/host/test/place-here.test.ts": "a status with a dead or hung daemon prints under 2 s rather than never",
-    "packages/host/test/places.test.ts": "a report on a computer whose shell hangs answers under 5 s",
-    "packages/host/test/relay-places.test.ts": "an oversized callback is refused under 5 s rather than read whole",
-    "packages/host/test/server-tools.test.ts": "an answer under 7 to 10 s where the deadline it must not reach is 20 s",
-    "packages/host/test/skills-acts.test.ts": "a line past its 300 ms is killed under 5 s, not at its child's 30 s",
-    "packages/host/test/ssh-hosts.test.ts": "tight: a config of hostile names reads under 250 ms; the fault it guards takes seconds",
-    "packages/host/test/stdio-session.test.ts": "a server that exits or never answers is given up on under 3 to 6 s rather than at the suite's budget",
-    "packages/host/test/verbs-exec-host.test.ts": "tight: a redial waits its whole 300 ms window and ends within 600 ms to 1 s of it",
-    "packages/protocol/test/slate/hostile.test.ts": "tight: hostile slate input is refused under 100 to 500 ms; the faults it guards take seconds and gigabytes",
-    "packages/runtime/test/folder-threads.test.ts": "tight: a start in the project folder answers under 50 ms, which a worktree's copy would not",
-    "packages/runtime/test/kept-agent.test.ts": "an interrupt of a kept agent ends its turn under 1 s rather than at the stop's grace",
-    "packages/runtime/test/local-exec.test.ts": "a cut at the idle or wall limit lands under 5 s or before the wall, not at the child's 30 s",
-    "packages/runtime/test/places-fork.test.ts": "tight: a frame at an absent computer is refused under 50 ms where the relink wait is 400 ms or 50 s",
-    "packages/runtime/test/places-image.test.ts": "a lost link waits out its 300 ms relink wait first; a lower bound with 10 ms for the clocks' drift, which load only lengthens",
-    "packages/runtime/test/places-remove.test.ts": "a remove whose login does not answer takes the link road under 2 s rather than waiting out the leave",
-    "packages/runtime/test/serve-refusal.test.ts": "an 8 MB frame is refused under 1.5 s rather than parsed whole",
-    "packages/runtime/test/session-search.test.ts": "a search answers under 1 s; a scan of every transcript takes longer",
-    "packages/runtime/test/slate-box.test.ts": "a killed run ends under 10 s, not at its command's 30 s",
-  },
-  shortSpawns: {},
+/** The lines each rule lets through, in whichever file, as many times as count says, each with why. */
+const ALLOWED: Record<Rule, readonly Allowed[]> = {
+  fixedPorts: [
+    { text: "const client = await connect(handle.port, { port: 8123 });", count: 1, why: "the port is the guest port a socket is scoped to, sent as data; nothing binds or dials it" },
+    { text: "const cb = await fetch(\"http://localhost:8976/oauth/callback?code=not-a-real-code&state=not-the-stat", count: 1, why: "dials wrangler's own callback port, which wrangler fixes, on a live run only" },
+  ],
+  sharedHome: [
+    { text: "{ type: \"daemon.hello\", root: resolve(process.env[\"HOME\"] ?? homedir()), version: DAEMON_VERSION },", count: 1, why: "compares the root the daemon's hello reports with the home's path; nothing is written there" },
+    { text: "const imp = importFor(BRING, { home: homedir(), secrets: new Map(), platform: \"darwin\", onResult: r ", count: 1, why: "a live import reads the person's own home on purpose" },
+    { text: "expect(folderOf(\"~/code/proj\")).toBe(join(homedir(), \"code/proj\"));", count: 1, why: "expands ~ in a string and compares the paths; nothing is read or written there" },
+    { text: "expect(folderOf(\"  ~/code/proj  \")).toBe(join(homedir(), \"code/proj\"));", count: 1, why: "expands ~ in a string and compares the paths; nothing is read or written there" },
+    { text: "expect(folderOf(\"~\")).toBe(homedir());", count: 1, why: "expands ~ in a string and compares the paths; nothing is read or written there" },
+    { text: "expect(saveQuestion(join(homedir(), \".wsp\"), 1)).toBe(\"Save the key so wsp stops asking?\");", count: 1, why: "names a folder under the home in a question's words; nothing is read or written there" },
+    { text: "expect(saveQuestion(join(homedir(), \".wsp\"), 2)).toBe(\"Save the keys so wsp stops asking?\");", count: 1, why: "names a folder under the home in a question's words; nothing is read or written there" },
+    { text: "expect(wspHome()).toBe(join(homedir(), \".wsp\"));", count: 1, why: "checks the default wsp home's path; nothing is read or written there" },
+    { text: "const served = join(homedir(), \".wsp\", \"state.json\");", count: 1, why: "puts a state path under the home into a ProxyCommand line; nothing is read or written there" },
+    { text: "expect(named.io.lines[0]!.startsWith(threadOpenedLine((await h.rt.sessions.list()).find(t => t.promp", count: 1, why: "shortens a folder against the home's path in an expected line; nothing is read or written there" },
+    { text: "expect(homedir()).toBe(RUN_HOME);", count: 1, why: "asserts the home is the run's own, which is what makes the shared home safe at all" },
+    { text: "expect(existsSync(homedir())).toBe(true);", count: 1, why: "asserts the home is the run's own, which is what makes the shared home safe at all" },
+    { text: "expect(process.env[\"HISTFILE\"]!.startsWith(`${homedir()}/`)).toBe(false);", count: 1, why: "asserts the home is the run's own, which is what makes the shared home safe at all" },
+    { text: "const statePath = process.env.WSP_LIVE_STATE ?? join(homedir(), \"wsp-live\", \".home\", \"state.json\");", count: 2, why: "a live run reads the live state under the person's home on purpose" },
+    { text: "const folder = join(homedir(), \".wsp\", \"icons\");", count: 1, why: "an icons folder whose removal is faked; nothing is read or written there" },
+    { text: "const home = process.env[\"HOME\"] ?? homedir();", count: 1, why: "compares the root the daemon reports with the home's path; nothing is written there" },
+    { text: "expect(getDaemonRoot(\"ws_run\")).toBe(process.env[\"HOME\"] ?? homedir());", count: 1, why: "compares a root the code reports with the home's path; nothing is read or written there" },
+    { text: "expect(getDaemonRoot(\"ws_here\")).toBe(process.env[\"HOME\"] ?? homedir());", count: 1, why: "compares a root the code reports with the home's path; nothing is read or written there" },
+  ],
+  realClock: [
+    { text: "expect(Date.now() - started).toBeLessThan(LINE_WAIT_MS);", count: 1, why: "the probe ends inside the one line wait it is allowed, not at it" },
+    { text: "expect(Date.now() - started).toBeLessThan(5000);", count: 1, why: "a 10 MB config reads in one pass under 5 s; a quadratic read takes minutes" },
+    { text: "expect(Date.now() - t0).toBeLessThan(2_000);", count: 4, why: "a kill, a cancel or a refusal answers under 2 s where the deadline, the poll or the road it skips waits far longer" },
+    { text: "expect(Date.now() - t0).toBeLessThan(1_000);", count: 5, why: "a kill, a cancel or a refusal answers under 1 s where the deadline, the poll or the road it skips waits far longer" },
+    { text: "expect(Date.now() - started).toBeLessThan(6_000);", count: 2, why: "a held output or a server that never answers is given up on under 6 s, not at the probe's 20 s sleep or the suite's budget" },
+    { text: "expect(Date.now() - started).toBeLessThan(8_000);", count: 1, why: "a bounded command ends near its 1 s bound and a held output does not hold the probe's 20 s sleep" },
+    { text: "expect(recorded, `the record took ${recorded} ms`).toBeLessThan(20_000);", count: 1, why: "a sweep of 4041 marks under 20 s; a quadratic sweep takes minutes" },
+    { text: "expect(took, `the sweep took ${took} ms`).toBeLessThan(20_000);", count: 1, why: "a sweep of 4041 marks under 20 s; a quadratic sweep takes minutes" },
+    { text: "expect(Date.now() - started).toBeLessThan(1_000);", count: 3, why: "a hung vendor, a redial past its window or a sweep that never settles ends under 1 s, where its own wait is 60 s or for ever" },
+    { text: "expect(perRecordUs).toBeLessThan(50);", count: 1, why: "tight: the close waits its 300 ms on a real timer and is held to 200 ms past it, and a record to 50 us" },
+    { text: "expect(performance.now() - t1).toBeLessThan(1_000);", count: 1, why: "tight: the close waits its 300 ms on a real timer and is held to 200 ms past it, and a record to 50 us" },
+    { text: "expect(took).toBeGreaterThanOrEqual(ANALYTICS_CLOSE_MS - 5);", count: 1, why: "tight: the close waits its 300 ms on a real timer and is held to 200 ms past it, and a record to 50 us" },
+    { text: "expect(took).toBeLessThan(ANALYTICS_CLOSE_MS + 200);", count: 1, why: "tight: the close waits its 300 ms on a real timer and is held to 200 ms past it, and a record to 50 us" },
+    { text: "expect(Date.now() - t0).toBeLessThan(500);", count: 1, why: "an op on a closed socket refuses under 500 ms rather than dialling again" },
+    { text: "expect(Date.now() - started).toBeLessThan(2_000);", count: 4, why: "a settled row, a status with a dead daemon or a remove whose login does not answer ends under 2 s, where its deadline is 10 s or more" },
+    { text: "expect(Date.now() - t0).toBeLessThan(5_000);", count: 1, why: "a settled row answers under 2 to 5 s where its deadline is 10 to 30 s" },
+    { text: "expect(Date.now() - started).toBeLessThan(5_000);", count: 8, why: "a held shell, a hung computer, an oversized callback, a killed line, a cut child or a turn whose host went ends under 5 s, where its own wait is 30 s or more" },
+    { text: "expect(Date.now() - started).toBeGreaterThanOrEqual(300);", count: 2, why: "a lower bound: a turn whose host went, or a redial, waits out its whole 300 ms window first, which load only lengthens" },
+    { text: "expect(Date.now() - began).toBeLessThan(10_000);", count: 1, why: "an answer under 7 to 10 s where the deadline it must not reach is 20 s" },
+    { text: "expect(Date.now() - started).toBeLessThan(7_000);", count: 1, why: "an answer under 7 to 10 s where the deadline it must not reach is 20 s" },
+    { text: "expect(performance.now() - started).toBeLessThan(250);", count: 1, why: "tight: a config of hostile names reads under 250 ms; the fault it guards takes seconds" },
+    { text: "expect(Date.now() - started).toBeLessThan(3_000);", count: 1, why: "a server that exits or never answers is given up on under 3 to 6 s rather than at the suite's budget" },
+    { text: "expect(Date.now() - started).toBeLessThan(600);", count: 1, why: "tight: a redial waits its whole 300 ms window and ends within 600 ms to 1 s of it" },
+    { text: "expect(Date.now() - started).toBeLessThan(100);", count: 1, why: "tight: hostile slate input is refused under 100 to 500 ms; the faults it guards take seconds and gigabytes" },
+    { text: "expect(performance.now() - started).toBeLessThan(200);", count: 1, why: "tight: hostile slate input is refused under 100 to 500 ms; the faults it guards take seconds and gigabytes" },
+    { text: "expect(performance.now() - started).toBeLessThan(500);", count: 1, why: "tight: hostile slate input is refused under 100 to 500 ms; the faults it guards take seconds and gigabytes" },
+    { text: "expect(took).toBeLessThan(50);", count: 1, why: "tight: a start in the project folder answers under 50 ms, which a worktree's copy would not" },
+    { text: "expect(Date.now() - asked).toBeLessThan(1_000);", count: 2, why: "an interrupt of a kept agent ends its turn under 1 s rather than at the stop's grace" },
+    { text: "expect(Date.now() - attachedAt).toBeLessThan(WALL_MS * 0.9);", count: 1, why: "a cut at the idle or wall limit lands under 5 s or before the wall, not at the child's 30 s" },
+    { text: "expect(Date.now() - asked).toBeLessThan(50);", count: 2, why: "tight: a frame at an absent computer is refused under 50 ms where the relink wait is 400 ms or 50 s" },
+    { text: "expect(Date.now() - at).toBeGreaterThanOrEqual(300 - 10);", count: 1, why: "a lost link waits out its 300 ms relink wait first; a lower bound with 10 ms for the clocks' drift, which load only lengthens" },
+    { text: "expect(took).toBeLessThan(1_500);", count: 1, why: "an 8 MB frame is refused under 1.5 s rather than parsed whole" },
+    { text: "expect(took).toBeLessThan(1000);", count: 1, why: "a search answers under 1 s; a scan of every transcript takes longer" },
+    { text: "expect(Date.now() - t0).toBeLessThan(10_000);", count: 1, why: "a killed run ends under 10 s, not at its command's 30 s" },
+    { text: "expect(Date.now() - started).toBeLessThan(45_000);", count: 1, why: "the swap gives up under 45 s where its patience is 60 s" },
+    { text: "expect(Date.now() - t0).toBeGreaterThanOrEqual(1_900);", count: 1, why: "a child that swallows SIGTERM is killed no sooner than the 2 s grace; a lower bound, which load only lengthens" },
+  ],
+  shortSpawns: [],
 };
 
 /** Vitest's own default limit, and the files it takes where a project names none. */
@@ -301,12 +313,12 @@ async function workspaceProjects(): Promise<Project[]> {
 
 const files = testFiles().filter(rel => !rel.endsWith("test-hygiene.test.ts"));
 const found = (rule: Rule): Hit[] => files.flatMap(rel => RULES[rule](rel, readFileSync(join(ROOT, rel), "utf8")));
-const fileOf = (h: Hit): string => h.slice(0, h.indexOf(":"));
 
 describe("a test holds nothing a loaded computer takes away", () => {
   it("catches each shape it names, so a scan that matched nothing cannot pass", () => {
     expect(fixedPorts("a.test.ts", "server.listen(4400);\nnew WebSocketServer({ port: 8123 });\nawait fetch(`http://127.0.0.1:5173/x`);\nserver.listen(0);\nfetch('http://127.0.0.1:9/');\nconst e = { port: 4400 };")).toHaveLength(3);
     expect(sharedHome("a.test.ts", 'const h = join(homedir(), ".wsp");')).toHaveLength(1);
+    expect(sharedHome("a.test.ts", 'const h = join(homedir(), ".wsp");\nconst k = process.env.HOME;')).toHaveLength(2);
     expect(sharedHome("a.test.ts", 'vi.stubEnv("HOME", dir);\nconst h = homedir();')).toEqual([]);
     expect(realClock("a.test.ts", "const took = Date.now() - t0;\nexpect(took).toBeLessThan(5);\nexpect(performance.now() - t).toBeLessThan(9);")).toHaveLength(2);
     expect(realClock("a.test.ts", "vi.useFakeTimers();\nexpect(Date.now() - t0).toBe(5);")).toEqual([]);
@@ -322,10 +334,10 @@ describe("a test holds nothing a loaded computer takes away", () => {
   });
 
   for (const rule of Object.keys(RULES) as Rule[]) {
-    it(`finds no ${rule} outside its table, and no file in its table without one`, () => {
-      const hits = found(rule);
-      expect(hits.filter(h => EXEMPT[rule][fileOf(h)] === undefined)).toEqual([]);
-      expect(Object.keys(EXEMPT[rule]).filter(file => !hits.some(h => fileOf(h) === file))).toEqual([]);
+    it(`finds no ${rule} outside its table, and no entry in its table it no longer finds`, () => {
+      const held = holdTo(found(rule).map(h => ({ text: h.slice(h.indexOf(" ") + 1), where: h.slice(0, h.indexOf(" ")) })), ALLOWED[rule]);
+      expect([...held.refused, ...held.over]).toEqual([]);
+      expect(held.stale).toEqual([]);
     });
   }
 

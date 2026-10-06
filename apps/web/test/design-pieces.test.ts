@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A screen is built from the shared pieces, never drawn beside them. Read off the sources, so a card, a glyph frame,
 // a head, a grid, a status dot or a keycap drawn by hand fails here before any screen shows it. A hit that is not
-// in ALLOWED fails, and an ALLOWED entry that no longer meets its hit fails too, so the list only shrinks.
+// in ALLOWED fails, and an ALLOWED entry that no longer meets its hits fails too, so the list only shrinks.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { type Allowed, holdTo } from "../../../packages/protocol/test/allowed.js";
 import { sourceStrings } from "./source-strings.js";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
@@ -78,114 +79,92 @@ const BANS: readonly Ban[] = [
   },
 ];
 
-/** Every hand-drawn piece the sources may still carry. Each entry covers one hit, so a second copy in the same file
- * fails, and each says which piece the hit moves to. */
+/** Every hand-drawn piece the sources may still carry, in whichever file, as many times as count says, each with the
+ * piece it moves to. A hit is read by its first 80 characters, cut at a space, or hard at 80 where none is. */
 const BEFORE = (piece: string): string => `before 2026-10-06, move to ${piece}`;
-const ALLOWED: ReadonlyArray<{ file: string; text: string; why: string }> = [
-  { file: "components/RightPanelTabs.tsx", text: "overflow-hidden rounded-[10px] border border-border bg-card", why: BEFORE("Card") },
-  { file: "components/RightPanelTabs.tsx", text: "<h3 className=\"font-medium text-foreground text-sm\">", why: BEFORE("SECTION_HEAD") },
-  { file: "components/RightPanelTabs.tsx", text: "<Kbd className={head}>", why: BEFORE("a tooltip") },
-  { file: "components/agents/SkillPreview.tsx", text: "max-h-[480px] min-h-[168px] overflow-y-auto rounded-lg border", why: BEFORE("Card") },
-  { file: "components/chat/ChangedFilesTree.tsx", text: "const ROW", why: BEFORE("Row") },
-  { file: "components/chat/ChatFiles.tsx", text: "-end-1.5 -top-1.5 absolute size-5 rounded-full border", why: BEFORE("Button") },
-  { file: "components/chat/ChatFiles.tsx", text: "block size-14 overflow-hidden rounded-lg border", why: BEFORE("Card") },
-  { file: "components/chat/ChatFiles.tsx", text: "flex h-14 max-w-48 items-center gap-2 rounded-lg border", why: BEFORE("Card") },
-  { file: "components/chat/ChatFiles.tsx", text: "<DialogPopup className=\"w-auto max-w-[90vw] p-2\">", why: BEFORE("a named DialogPopup width") },
-  { file: "components/chat/ChatView.tsx", text: "<button type=\"button\" data-scroll-to-end aria-hidden={hidden ||", why: BEFORE("Button") },
-  { file: "components/chat/ComposerBanner.tsx", text: "size-1.5 flex-none rounded-full bg-current", why: BEFORE("StateMark") },
-  { file: "components/chat/ComposerBanner.tsx", text: "<button type=\"button\" data-slot=\"composer-banner-peek\"", why: BEFORE("Button") },
-  { file: "components/chat/ComposerModelPicker.tsx", text: "<Kbd className=\"h-6 min-w-0 rounded-md px-1.5 font-mono", why: BEFORE("a tooltip") },
-  { file: "components/chat/ComposerPrimaryActions.tsx", text: "<button type=\"submit\" className={cn( \"relative isolate flex h-9", why: BEFORE("Button") },
-  { file: "components/chat/ComposerTasks.tsx", text: "relative inline-flex size-2 rounded-full bg-foreground", why: BEFORE("StateMark") },
-  { file: "components/chat/PromptDock.tsx", text: "<h2 data-prompt-title className={cn(TITLE_CLASS, \"flex min-w-0", why: BEFORE("DialogTitle") },
-  { file: "components/chat/ProposedPlanCard.tsx", text: "rounded-xl border border-border/80 bg-card/70 p-4 sm:p-5", why: BEFORE("Card") },
-  { file: "components/machine/MachineSurface.tsx", text: "absolute size-1.5 -translate-x-1/2 -translate-y-1/2", why: BEFORE("StateMark") },
-  { file: "components/machine/MachineSurface.tsx", text: "absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full", why: BEFORE("StateMark") },
-  { file: "components/palette/CommandPaletteContent.tsx", text: "<Kbd>", why: BEFORE("a tooltip") },
-  { file: "components/palette/CommandPaletteContent.tsx", text: "<Kbd>", why: BEFORE("a tooltip") },
-  { file: "components/palette/CommandPaletteContent.tsx", text: "<Kbd>", why: BEFORE("a tooltip") },
-  { file: "components/palette/CommandPaletteContent.tsx", text: "<Kbd>", why: BEFORE("a tooltip") },
-  { file: "components/preview/BrowserMockup.tsx", text: "relative flex flex-col gap-0.5 overflow-hidden rounded-[5px]", why: BEFORE("Card") },
-  { file: "components/preview/PreviewEmptyState.tsx", text: "<h2 className={HEADING}>", why: BEFORE("Empty") },
-  { file: "components/preview/PreviewEmptyState.tsx", text: "<h2 className={HEADING}>", why: BEFORE("Empty") },
-  { file: "components/procs/ProcessesSurface.tsx", text: "<button type=\"button\" disabled={disabled} onClick={onPress}", why: BEFORE("Button") },
-  { file: "dev/MaterialTuner.tsx", text: "<button type=\"button\" onClick={copy} className=\"inline-flex h-8", why: BEFORE("Button") },
-  { file: "dev/MaterialTuner.tsx", text: "<button type=\"button\" onClick={reset} className=\"inline-flex", why: BEFORE("Button") },
-  { file: "files/OpenSplit.tsx", text: "<Kbd className=\"ms-auto font-sans\">", why: BEFORE("MenuShortcut") },
-  { file: "gallery/Gallery.tsx", text: "bg-card min-w-0 rounded-lg border p-4", why: BEFORE("Card") },
-  { file: "gallery/Gallery.tsx", text: "<h2 id={`gallery-${id}`} className=\"text-muted-foreground mb-3", why: BEFORE("GROUP_LABEL") },
-  { file: "gallery/Gallery.tsx", text: "<Kbd>", why: BEFORE("the pieces page") },
-  { file: "gallery/Gallery.tsx", text: "<Kbd>", why: BEFORE("the pieces page") },
-  { file: "gallery/Gallery.tsx", text: "<Kbd>", why: BEFORE("the pieces page") },
-  { file: "gallery/Gallery.tsx", text: "<Kbd>", why: BEFORE("the pieces page") },
-  { file: "gallery/Gallery.tsx", text: "<Kbd>", why: BEFORE("the pieces page") },
-  { file: "gallery/Gallery.tsx", text: "<Kbd>", why: BEFORE("the pieces page") },
-  { file: "pull-request/Commits.tsx", text: "<h3 className=\"text-[13px] text-muted-foreground\">", why: BEFORE("SECTION_HEAD") },
-  { file: "pull-request/Commits.tsx", text: "block size-1.5 rounded-full bg-muted-foreground", why: BEFORE("StateMark") },
-  { file: "pull-request/Conversation.tsx", text: "mt-2.5 overflow-hidden rounded-lg border border-border bg-card", why: BEFORE("Card") },
-  { file: "pull-request/Files.tsx", text: "mt-1.5 mb-1 overflow-clip rounded-lg border border-border", why: BEFORE("Card") },
-  { file: "pull-request/PullRequestSurface.tsx", text: "<h2 data-pr-title className=\"text-[15px] leading-[22px]", why: BEFORE("HeadRow") },
-  { file: "pull-request/ReviewDraftSection.tsx", text: "const ROW", why: BEFORE("Row") },
-  { file: "pull-request/ReviewDraftSection.tsx", text: "const NOTE", why: BEFORE("NOTE") },
-  { file: "pull-request/ReviewDraftSection.tsx", text: "const QUIET", why: BEFORE("NOTE") },
-  { file: "pull-request/ThreadActs.tsx", text: "<Kbd className=\"mr-auto h-auto rounded border border-border", why: BEFORE("a tooltip") },
-  { file: "pull-request/parts.tsx", text: "block size-1.5 rounded-full bg-border", why: BEFORE("StateMark") },
-  { file: "settings/ThemePicker.tsx", text: "grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-3", why: BEFORE("a column set in grid.tsx") },
-  { file: "settings/add/AddComputerDialog.tsx", text: "<h2 data-k=\"ready-title\" className=\"mt-5 text-2xl/8 font-medium", why: BEFORE("DialogTitle") },
-  { file: "settings/add/AddComputerDialog.tsx", text: "pointer-events-none absolute inset-x-0 top-0 -z-10 h-1/2", why: BEFORE("a named wash in index.css") },
-  { file: "settings/add/PickLists.tsx", text: "flex cursor-pointer flex-col justify-center gap-3 py-3 sm:grid", why: BEFORE("a column set in grid.tsx") },
-  { file: "settings/add/PickLists.tsx", text: "const GLYPH", why: BEFORE("GLYPH") },
-  { file: "settings/recipe/BuildRows.tsx", text: "size-2 rounded-full bg-foreground", why: BEFORE("StateMark") },
-  { file: "settings/recipe/BuildRows.tsx", text: "size-2 rounded-full bg-foreground", why: BEFORE("StateMark") },
-  { file: "settings/recipe/RecipeStep.tsx", text: "<h3 data-k={`${root}-title`} className=\"text-sm leading-5", why: BEFORE("SECTION_HEAD") },
-  { file: "settings/recipe/rows.tsx", text: "const ROW", why: BEFORE("Row") },
-  { file: "settings/recipes.tsx", text: "grid-cols-[minmax(0,1fr)_140px_14px]", why: BEFORE("a column set in grid.tsx") },
-  { file: "settings/recipes.tsx", text: "const GLYPH", why: BEFORE("GLYPH") },
-  { file: "settings/usage.tsx", text: "grid grid-cols-[minmax(11rem,14rem)_minmax(0,1fr)] items-center", why: BEFORE("a column set in grid.tsx") },
-  { file: "settings/usage.tsx", text: "grid grid-cols-[minmax(0,1fr)_104px_96px_80px_120px] gap-x-6", why: BEFORE("a column set in grid.tsx") },
-  { file: "settings/usage.tsx", text: "grid grid-cols-[minmax(0,1fr)_104px_96px_120px] gap-x-6", why: BEFORE("a column set in grid.tsx") },
-  { file: "settings/usage.tsx", text: "grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-3 gap-y-3", why: BEFORE("a column set in grid.tsx") },
-  { file: "settings/usage.tsx", text: "grid grid-cols-[5.5rem_minmax(0,1fr)_3rem_minmax(0,10rem)]", why: BEFORE("a column set in grid.tsx") },
-  { file: "settings/usage.tsx", text: "const QUIET", why: BEFORE("NOTE") },
-  { file: "settings/usage.tsx", text: "const CARD_PAD", why: BEFORE("CARD_INSET") },
-  { file: "settings/usageChart.tsx", text: "grid grid-cols-[auto_minmax(0,1fr)] gap-y-3", why: BEFORE("a column set in grid.tsx") },
-  { file: "settings/usageChart.tsx", text: "absolute size-1.5 -translate-x-1/2 -translate-y-1/2", why: BEFORE("StateMark") },
-  { file: "sidebar/AddProjectDialog.tsx", text: "<Kbd>", why: BEFORE("a tooltip") },
-  { file: "sidebar/AddProjectDialog.tsx", text: "<Kbd>", why: BEFORE("a tooltip") },
-  { file: "sidebar/FolderBrowser.tsx", text: "const ROW", why: BEFORE("Row") },
-  { file: "slate/SlateSurface.tsx", text: "<h2 className=\"min-w-0 flex-1 truncate text-[13px] leading-5", why: BEFORE("SECTION_HEAD") },
-  { file: "slate/pieces/diagram.tsx", text: "<DialogPopup ref={popup} initialFocus={popup}", why: BEFORE("a named DialogPopup width") },
-  { file: "slate/pieces/input.tsx", text: "<Kbd>", why: BEFORE("a tooltip") },
-  { file: "slate/pieces/look.ts", text: "const NOTE", why: BEFORE("NOTE") },
-  { file: "slate/pieces/table.tsx", text: "const ROW", why: BEFORE("Row") },
+const ALLOWED: readonly Allowed[] = [
+  { text: "-end-1.5 -top-1.5 absolute size-5 rounded-full border border-border/60 bg-card", count: 1, why: BEFORE("Button") },
+  { text: "<DialogPopup className=\"w-auto max-w-[90vw] p-2\">", count: 1, why: BEFORE("a named DialogPopup width") },
+  { text: "<DialogPopup ref={popup} initialFocus={popup} data-slate-diagram-expanded", count: 1, why: BEFORE("a named DialogPopup width") },
+  { text: "<Kbd className=\"h-6 min-w-0 rounded-md px-1.5 font-mono text-xs\">", count: 1, why: BEFORE("a tooltip") },
+  { text: "<Kbd className=\"mr-auto h-auto rounded border border-border bg-transparent", count: 1, why: BEFORE("a tooltip") },
+  { text: "<Kbd className=\"ms-auto font-sans\">", count: 1, why: BEFORE("MenuShortcut") },
+  { text: "<Kbd className={head}>", count: 1, why: BEFORE("a tooltip") },
+  { text: "<Kbd>", count: 13, why: BEFORE("a tooltip, or the pieces page in the gallery") },
+  { text: "<button type=\"button\" data-scroll-to-end aria-hidden={hidden || undefined}", count: 1, why: BEFORE("Button") },
+  { text: "<button type=\"button\" data-slot=\"composer-banner-peek\" className={cn(", count: 1, why: BEFORE("Button") },
+  { text: "<button type=\"button\" disabled={disabled} onClick={onPress}", count: 1, why: BEFORE("Button") },
+  { text: "<button type=\"button\" onClick={copy} className=\"inline-flex h-8 flex-1", count: 1, why: BEFORE("Button") },
+  { text: "<button type=\"button\" onClick={reset} className=\"inline-flex h-8 items-center", count: 1, why: BEFORE("Button") },
+  { text: "<button type=\"submit\" className={cn( \"relative isolate flex h-9 items-center", count: 1, why: BEFORE("Button") },
+  { text: "<h2 className=\"min-w-0 flex-1 truncate text-[13px] leading-5 font-normal", count: 1, why: BEFORE("SECTION_HEAD") },
+  { text: "<h2 className={HEADING}>", count: 2, why: BEFORE("Empty") },
+  { text: "<h2 data-k=\"ready-title\" className=\"mt-5 text-2xl/8 font-medium", count: 1, why: BEFORE("DialogTitle") },
+  { text: "<h2 data-pr-title className=\"text-[15px] leading-[22px] font-medium text-pretty", count: 1, why: BEFORE("HeadRow") },
+  { text: "<h2 data-prompt-title className={cn(TITLE_CLASS, \"flex min-w-0 items-center", count: 1, why: BEFORE("DialogTitle") },
+  { text: "<h2 id={`gallery-${id}`} className=\"text-muted-foreground mb-3 font-mono", count: 1, why: BEFORE("GROUP_LABEL") },
+  { text: "<h3 className=\"font-medium text-foreground text-sm\">", count: 1, why: BEFORE("SECTION_HEAD") },
+  { text: "<h3 className=\"text-[13px] text-muted-foreground\">", count: 1, why: BEFORE("SECTION_HEAD") },
+  { text: "<h3 data-k={`${root}-title`} className=\"text-sm leading-5 font-medium", count: 1, why: BEFORE("SECTION_HEAD") },
+  { text: "absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current", count: 2, why: BEFORE("StateMark") },
+  { text: "absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current ring-2", count: 1, why: BEFORE("StateMark") },
+  { text: "bg-card min-w-0 rounded-lg border p-4", count: 1, why: BEFORE("Card") },
+  { text: "block size-1.5 rounded-full bg-border", count: 1, why: BEFORE("StateMark") },
+  { text: "block size-1.5 rounded-full bg-muted-foreground", count: 1, why: BEFORE("StateMark") },
+  { text: "block size-14 overflow-hidden rounded-lg border border-border/60 bg-card/50", count: 1, why: BEFORE("Card") },
+  { text: "const CARD_PAD", count: 1, why: BEFORE("CARD_INSET") },
+  { text: "const GLYPH", count: 2, why: BEFORE("GLYPH") },
+  { text: "const NOTE", count: 2, why: BEFORE("NOTE") },
+  { text: "const QUIET", count: 2, why: BEFORE("NOTE") },
+  { text: "const ROW", count: 5, why: BEFORE("Row") },
+  { text: "flex cursor-pointer flex-col justify-center gap-3 py-3 sm:grid", count: 1, why: BEFORE("a column set in grid.tsx") },
+  { text: "flex h-14 max-w-48 items-center gap-2 rounded-lg border border-border/60", count: 1, why: BEFORE("Card") },
+  { text: "grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-3 gap-y-3", count: 1, why: BEFORE("a column set in grid.tsx") },
+  { text: "grid grid-cols-[5.5rem_minmax(0,1fr)_3rem_minmax(0,10rem)] items-center gap-x-4", count: 1, why: BEFORE("a column set in grid.tsx") },
+  { text: "grid grid-cols-[auto_minmax(0,1fr)] gap-y-3", count: 1, why: BEFORE("a column set in grid.tsx") },
+  { text: "grid grid-cols-[minmax(0,1fr)_104px_96px_120px] gap-x-6", count: 1, why: BEFORE("a column set in grid.tsx") },
+  { text: "grid grid-cols-[minmax(0,1fr)_104px_96px_80px_120px] gap-x-6", count: 1, why: BEFORE("a column set in grid.tsx") },
+  { text: "grid grid-cols-[minmax(11rem,14rem)_minmax(0,1fr)] items-center gap-x-10 py-4", count: 1, why: BEFORE("a column set in grid.tsx") },
+  { text: "grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-3 max-sm:grid-cols-2", count: 1, why: BEFORE("a column set in grid.tsx") },
+  { text: "grid-cols-[minmax(0,1fr)_140px_14px] max-md:grid-cols-[minmax(0,1fr)_auto_14px]", count: 1, why: BEFORE("a column set in grid.tsx") },
+  { text: "max-h-[480px] min-h-[168px] overflow-y-auto rounded-lg border border-border", count: 1, why: BEFORE("Card") },
+  { text: "mt-1.5 mb-1 overflow-clip rounded-lg border border-border bg-card", count: 1, why: BEFORE("Card") },
+  { text: "mt-2.5 overflow-hidden rounded-lg border border-border bg-card", count: 1, why: BEFORE("Card") },
+  { text: "overflow-hidden rounded-[10px] border border-border bg-card", count: 1, why: BEFORE("Card") },
+  { text: "pointer-events-none absolute inset-x-0 top-0 -z-10 h-1/2", count: 1, why: BEFORE("a named wash in index.css") },
+  { text: "relative flex flex-col gap-0.5 overflow-hidden rounded-[5px] border", count: 1, why: BEFORE("Card") },
+  { text: "relative inline-flex size-2 rounded-full bg-foreground", count: 1, why: BEFORE("StateMark") },
+  { text: "rounded-xl border border-border/80 bg-card/70 p-4 sm:p-5", count: 1, why: BEFORE("Card") },
+  { text: "size-1.5 flex-none rounded-full bg-current", count: 1, why: BEFORE("StateMark") },
+  { text: "size-2 rounded-full bg-foreground", count: 2, why: BEFORE("StateMark") },
 ];
+
+function cut(text: string): string {
+  if (text.length <= 80) return text;
+  const at = text.lastIndexOf(" ", 80);
+  return at > 0 ? text.slice(0, at) : text.slice(0, 80);
+}
 
 const hits = sources(SRC).flatMap(path => {
   const file = relative(SRC, path).split("\\").join("/");
   if (PIECES.some(piece => piece.test(file))) return [];
   const text = readFileSync(path, "utf8");
-  return BANS.flatMap(ban => ban.find(text, file).map(found => ({ file, text: found, ban: ban.why })));
+  return BANS.flatMap(ban => ban.find(text, file).map(found => ({ text: cut(found), where: `${file}: ${ban.why}` })));
 });
 
-/** Pairs each hit with the first unclaimed entry for its file whose text it holds; what is left over on either side
- * is a hit with no entry or an entry with no hit. */
-function claim() {
-  const free = ALLOWED.map(() => true);
-  const loose = hits.filter(hit => {
-    const at = ALLOWED.findIndex((ok, i) => free[i] && ok.file === hit.file && hit.text.includes(ok.text));
-    if (at < 0) return true;
-    free[at] = false;
-    return false;
-  });
-  return { loose, stale: ALLOWED.filter((_, i) => free[i]) };
-}
-
 describe("screens are built from the shared pieces", () => {
+  const held = holdTo(hits, ALLOWED);
+
+  it("reads a hit by its first 80 characters, cut at a space, or hard at 80 where none is", () => {
+    expect(cut(`${"a".repeat(70)} ${"b".repeat(30)}`)).toBe("a".repeat(70));
+    expect(cut("grid-cols-[" + "x".repeat(89))).toBe(("grid-cols-[" + "x".repeat(89)).slice(0, 80));
+  });
+
   it("finds no piece drawn by hand beyond the allowed list", () => {
-    expect(claim().loose.map(hit => `${hit.file}: ${hit.ban}: ${hit.text}`)).toEqual([]);
+    expect([...held.refused, ...held.over]).toEqual([]);
   });
 
   it("keeps no allowed entry that no longer meets a hit", () => {
-    expect(claim().stale).toEqual([]);
+    expect(held.stale).toEqual([]);
   });
 });
