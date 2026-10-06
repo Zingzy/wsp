@@ -12,6 +12,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js
 import { useDiffStore } from "../diffs/store.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { useStatus, useStore, useWorkspace } from "../protocol/store.js";
+import { useCheckoutOf } from "../sidebar/tileCheckout.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
 import { GIT_WORDS, gitMenu, gitQuickAction, type GitAct, type GitMenuItem } from "./gitAction.logic.js";
 
@@ -26,6 +27,7 @@ export function GitSplit({ workspaceId }: { workspaceId: string }) {
   const open = useRightPanelStore(s => s.open);
   const setScope = useDiffStore(s => s.setScope);
   const [busy, setBusy] = useState(false);
+  useCheckoutOf(workspaceId);
   if (workspace === null || status?.checkout === undefined || api?.bringBack === undefined) return null;
   const state = { checkout: status.checkout, pr: status.pr, base, opensPr: workspace.parentThreadId === undefined, busy };
   const quick = gitQuickAction(state);

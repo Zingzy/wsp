@@ -138,9 +138,10 @@ export function serviceEnv(env: Record<string, string | undefined>): Record<stri
   // Every variable the installing shell holds that the service would be without: the provider ones, since a host
   // that picks its provider out of an environment naming none forks nothing, labs, since a service installed
   // from a shell holding it would come up without the rows that shell was using, the release check's and the usage
-  // counts' switches, which that shell turned off, and the state store's, which it set back to JSON. One list, copied
-  // by one rule.
-  const carried = [CLOUD_ENV, LABS_ENV, UPDATE_CHECK_ENV, ANALYTICS_ENV, STATE_STORE_ENV, ...providerEnvNames()];
+  // counts' switches, which that shell turned off, the state store's, which it set back to JSON, and the login shell,
+  // whose PATH the host reads at its start, so it reads the one the installing process named. One list, copied by
+  // one rule.
+  const carried = [CLOUD_ENV, LABS_ENV, UPDATE_CHECK_ENV, ANALYTICS_ENV, STATE_STORE_ENV, "SHELL", ...providerEnvNames()];
   return {
     ...(home !== undefined ? { WSP_HOME: home } : {}),
     ...Object.fromEntries(carried.flatMap(name => ((env[name] ?? "") === "" ? [] : [[name, env[name]!]]))),

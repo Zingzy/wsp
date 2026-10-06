@@ -8,6 +8,7 @@ import { createRuntime, jsonFileStore, STATE_SHAPE_KEY } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { up, type CliIO } from "../src/cli.js";
 import { STARTED_BY_ENV } from "../src/host-lock.js";
+import { cliSource } from "./cli-source.js";
 import { stateWriterHere } from "../src/version.js";
 import { LAUNCHD_PATH, loginEnvOf, needsLoginPath, takeLoginPath } from "../src/login-path.js";
 import type { HostHandle } from "../src/server.js";
@@ -200,8 +201,8 @@ describe("the login shell PATH", () => {
   // The order law src/login-path.ts states, held road by road. The read is once per process, so saying it on each
   // road is free.
   it("every road that builds a runtime awaits the read before it", () => {
-    const source = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
-    // Each top level declaration of cli.ts, so a road is judged on its own body and not on the file's order.
+    const source = cliSource();
+    // Each top level declaration of cli.ts and cli/, so a road is judged on its own body and not on the file's order.
     const roads = source.split(/\n(?=(?:export )?(?:async )?function |(?:export )?const [A-Za-z]+: )/);
     const builders = roads.filter(road => road.includes("makeRuntime(") && !road.includes("export function makeRuntime("));
     expect(builders.length).toBeGreaterThan(0);

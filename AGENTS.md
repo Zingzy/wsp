@@ -1,5 +1,29 @@
 # Working on wsp
 
+## Map
+
+- `packages/protocol`: the wire shapes, the words a person reads and the daemon's version record. Every package reads it.
+- `packages/runtime`: the host's core, the records of workspaces, threads, turns, transcripts and joined computers.
+- `packages/host`: the `wsp` command line, the MCP tools, and the host process that serves the app.
+- `packages/engine`: the roads that build, fork and run machines. `packages/catalog`: the agents and tools wsp knows.
+- `packages/collect`: what a computer holds, read for a recipe. `packages/adapter-claude` and its siblings: one agent each.
+- `packages/keys` and `packages/own-file`: link keys, and the one writer under the owner's state folder.
+- `apps/web`: the React app. `apps/desktop`: the shell around it. `daemon`: the Rust daemon and tool server.
+- `packages/wspx`: the npm package that installs `wsp`. `packages/daemon`: node tests of the daemon's wire.
+- `skills/wsp/SKILL.md`: what an agent reads about the command line and the tools.
+
+## Notes
+
+Read the note of the area you change before you change it; each lists its traps and the one home for each rule.
+A fix for a fault that came from a rule nobody knew, a regression, or knowledge only the code held adds one line
+to that area's note in the same commit.
+
+- `packages/runtime/AGENTS.md`
+- `packages/host/AGENTS.md`
+- `packages/protocol/AGENTS.md`
+- `apps/web/AGENTS.md`
+- `daemon/AGENTS.md`
+
 ## The command line, the MCP tools and the skill are one contract
 
 Every capability exists in all three or in none. The command line's verbs
@@ -37,22 +61,41 @@ pnpm exec vitest run --minWorkers=1 --maxWorkers=2 packages/host/test/parity.tes
 
 ## Before a branch is called ready
 
-`scripts/test-files.sh <file>...` runs the named test files with
-`packages/host/test/memory.test.ts` and
-`packages/protocol/test/stub-script.test.ts` at two workers, and refuses a run
-naming no file or a folder, since either starts the whole suite. `--tools`
-adds `packages/host/test/mcp-record.test.ts`, which a change to what a tool
-lists or answers needs. `pnpm check:laws` runs the tests that read the whole
-tree (the words, parity, skill, contract and record tests and their kin) and
-`cargo fmt --check` when daemon/ changed. `scripts/pre-review.sh [<ticket>]`
-is the last command before a branch is called ready: it checks that the branch
-holds origin/main and is one commit ahead of it, the commit message, the diff
-against the pre-commit hook's rules and for pattern kills, the laws, the size
-check and the touched tests, and exits nonzero on any failure. It also runs
-the branch's test files on the merge-base and says which go red there, and
-given a ticket number prints each acceptance item and ruling the report has to
-answer. `--build` builds `@wsp/host` and the packages it loads first, which a
-fresh checkout needs before the laws can pass. `scripts/heavy.sh <command>`
-runs a command in one of two slots on a Mac, so builders working at once queue
-their tsc, `tsup --dts`, builds and test runs instead of swapping; both
-scripts put their own vitest and cargo runs through it.
+`scripts/test-files.sh <file>...` runs the named tests with memory and
+stub-script at two workers and refuses a run naming no file; `--tools` adds
+the tool record. `pnpm check:laws` runs the tests that read the whole tree.
+`scripts/pre-review.sh [<ticket>]` is the last command before a branch is
+called ready: one commit on origin/main, the hooks' rules, the laws, the
+touched tests and their red proof on the merge-base, and the ticket's lines
+to answer; `--build` builds the packages first. `scripts/heavy.sh <command>`
+queues heavy runs into two slots on a Mac.
+
+## Glossary
+
+The words to use in code and to people. This list is the target; `packages/protocol/test/person-words.test.ts`
+holds the app to the subset it names (golden, vault, lineage, volatile, head, Reach, upgrade, machine, this Mac).
+Shipped exceptions: the locked Computers copy says machine for a cloud's machines, the wsp skill says coordinator
+thread, and `wsp snapshot` is a verb.
+
+- **host**: the process that holds a state file and serves the app, the command line and the tools. One per state file. Avoid: server, backend.
+- **computer**: a real computer a person owns or sits at, named in the app by its own name. Avoid: machine, device, this Mac.
+- **place**: the code's word for a computer as a row of `wsp places` (`PlaceView`). The app says computer. Avoid: node.
+- **box**: a Linux computer of the person's own, added over ssh or joined, its daemon running as root. Avoid: VM, server.
+- **machine**: what wsp makes for a workspace on a box or at a cloud provider. The app says computer. Avoid: container, sandbox.
+- **daemon**: the Rust binary on every computer serving files, git, terminals and ports to the host. Avoid: agent.
+- **project**: a repo or folder on one computer that threads run in. Avoid: repo, workspace.
+- **workspace**: the record a thread runs on, `local` or `cloud` (`WorkspaceKind`). A project folder's threads share one. Avoid: environment.
+- **thread**: one conversation in the sidebar, the turns that share a thread id (`ThreadView`). Avoid: chat, task, session.
+- **turn**: one run of the agent's process for one message. Avoid: job, run.
+- **session**: the runtime's row for a turn and the harness's own id it resumes (`SessionView`). Never a word a person reads. Avoid: thread.
+- **lead**: the thread at the top of a tree, which started the others. Avoid: parent, coordinator.
+- **agent**: a coding agent a thread runs: claude, codex, opencode, cursor. Avoid: model, bot, AI.
+- **harness**: an agent's own command line and session files, driven by an adapter (`HarnessCatalog`). Avoid: provider.
+- **image**: the person's tools and sign-ins, sealed by `wsp init`, that a machine boots from. Avoid: golden, snapshot.
+- **recipe**: the tools, configs, skills and folders a computer follows, minted from what the agents used. Avoid: manifest, dotfiles.
+- **worktree**: a git worktree a thread started with `--branch` runs in. Avoid: branch folder, copy.
+- **checkpoint**: what the daemon keeps per turn so a thread can rewind. Avoid: snapshot, undo.
+- **sign-in**: an agent's or a tool's own login, run by the person at a terminal. Avoid: auth, credentials.
+- **update**: moving a computer's daemon or the app to a newer build. Avoid: upgrade.
+- **slate**: a thread's live panel beside the chat. Avoid: canvas, artifact.
+- **relay**: the service that gives a host no one can reach inbound an https address. Avoid: tunnel, proxy.

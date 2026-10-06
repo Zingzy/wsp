@@ -154,9 +154,22 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
 @theme {
   --font-sans: var(--font-sans-system);
   --font-mono: var(--font-mono-system);
+  /* The type scale by the role each size plays: a meta word, a note or a fact, a card's head, a named thing's title. */
+  --text-meta: 11px;
+  --text-note: 13px;
+  --text-head: 13.5px;
+  --text-title: 15px;
+  /* The corner radii by the role each plays. */
+  --radius-field: 7px;
+  --radius-card: 11px;
+  --radius-popover: 12px;
+  --radius-composer: 22px;
+  --shadow-composer: 0 12px 28px -18px rgb(0 0 0 / 40%);
 }
 
 @theme inline {
+  /* Inline, so the keycap's top edge is read off the theme where the keycap stands. */
+  --shadow-keycap: inset 0 1px 0 var(--keycap-top);
   --color-zinc-25: oklch(99.2% 0 0);
   --animate-skeleton: skeleton 2s infinite linear;
   --animate-settle-in: settle-in 180ms cubic-bezier(0.23, 1, 0.32, 1) both;

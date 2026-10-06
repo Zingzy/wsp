@@ -3,9 +3,9 @@
 // preference value where a value has words of its own.
 import { fmtPx, listWords, offlineFor, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type ProductUsageOff, type SendKey, type ServerSignIn, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
-/** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
- * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
- * run all draw with, so one type ladder holds across them. */
+/** The muted sans with tabular figures a state word or a description of machine words wears, and the foreground one
+ * a value a person reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet
+ * and the first run all draw with, so one type ladder holds across them. */
 export const FACT = "text-[13px] tabular-nums text-muted-foreground";
 export const VALUE = "text-sm tabular-nums text-foreground";
 

@@ -1,15 +1,20 @@
 name: ci
 
-# Every pull request and every push to main runs what the merge gate runs on a
-# clean machine: the daemon binary this runner runs, then install, build every
-# package but the landing site and the desktop bundle, the unit suite, and the
-# type check per package. The Chromium cases and the Electron smoke need a
+# One run decides a landing. The landing script squashes a change onto current main, pushes that commit to
+# land/<name>, and fast-forwards main to it once this run passes. On land/** the unit suite runs the tests the change
+# can reach, which scripts/affected-tests.mjs picks off the change from main, and the test files the change added or
+# modified run five times over. The whole suite runs every night on main and on a run started by hand. A push to main
+# carries a commit a land/** run already tested, so it only checks that such a run passed on the same sha. The
+# install, the build and the type check run on every run that tests; the Chromium cases and the Electron smoke need a
 # screen and stay behind their own flags.
 on:
-  pull_request:
   push:
     branches:
       - main
+      - "land/**"
+  schedule:
+    - cron: "7 2 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,16 +24,61 @@ env:
   PNPM_VERSION: "11.9.0"
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/heads/land/') }}
 
 jobs:
+  # The landing script fast-forwards main only to a commit whose land/** runs all passed, so a push to main that fails
+  # here reached main some other way, or with a workflow red at its sha.
+  landed:
+    name: This commit passed on a land branch
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Every land/** run at this sha passed, ci among them
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SHA&per_page=100" \
+            --jq '[.workflow_runs[] | select(.head_branch | startswith("land/"))]')
+          jq -r '.[] | "\(.name): \(.conclusion // .status) \(.html_url)"' <<< "$runs"
+          red=$(jq -r '.[] | select(.conclusion != "success" and .conclusion != "skipped") | "\(.name) \(.conclusion // .status) on \(.head_branch)"' <<< "$runs")
+          if [ -n "$red" ]; then
+            while IFS= read -r line; do echo "::error::$SHA reached main with a land/** run that did not pass: $line"; done <<< "$red"
+            exit 1
+          fi
+          if [ "$(jq '[.[] | select(.path == ".github/workflows/ci.yml" and .conclusion == "success")] | length' <<< "$runs")" -eq 0 ]; then
+            echo "::error::$SHA reached main with no passing ci run on a land/** branch"
+            exit 1
+          fi
+
+  sizes:
+    name: No source file past 1,500 lines
+    if: github.event_name != 'push' || github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: node scripts/file-size-check.mjs
+
   gate:
     name: Install, build, test, types
+    if: github.event_name != 'push' || github.ref != 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
+      # Every commit and tree and no blob beyond the checkout's, so the change is read against main's history cheaply.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -36,6 +86,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - name: The pull request's body names its ticket and carries no footer
+        if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/land/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/pr-body-check.mjs
       # The host spawns the daemon for this computer's own workspace and the command line package carries it, so the
       # build and the suite both want the one Linux binary this runner runs before anything of node's is built.
       - name: Toolchain from rust-toolchain.toml
@@ -67,17 +122,45 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
+      - name: The tests this change can reach
+        if: startsWith(github.ref, 'refs/heads/land/')
+        run: |
+          base=$(git merge-base origin/main HEAD)
+          node scripts/affected-tests.mjs "$base" > "$RUNNER_TEMP/affected.txt"
+          node scripts/affected-tests.mjs "$base" --changed-tests > "$RUNNER_TEMP/changed-tests.txt"
       - name: Tests
         # The Build step staged this runner's daemon binary, so the case that reads its version against the
         # protocol's runs here rather than skipping: a checkout with no binary staged is a developer's machine.
+        # No list, as on the nightly and a run by hand, and an empty one, for a change to the root config, are both
+        # the whole suite.
         env:
           WSP_REQUIRE_DAEMON: "1"
-        run: pnpm exec vitest run --minWorkers=1 --maxWorkers=2
+        run: |
+          affected=()
+          if [ -f "$RUNNER_TEMP/affected.txt" ]; then mapfile -t affected < "$RUNNER_TEMP/affected.txt"; fi
+          pnpm exec vitest run --minWorkers=1 --maxWorkers=2 "${affected[@]}"
+      - name: The test files this change added or modified, five times over
+        if: startsWith(github.ref, 'refs/heads/land/')
+        env:
+          WSP_REQUIRE_DAEMON: "1"
+        run: |
+          mapfile -t files < "$RUNNER_TEMP/changed-tests.txt"
+          if [ "${#files[@]}" -eq 0 ]; then echo "no test file added or modified"; exit 0; fi
+          if [ "${#files[@]}" -gt 30 ]; then echo "${#files[@]} test files changed, over 30, so they run once"; exit 0; fi
+          for run in 1 2 3 4 5; do
+            report="$RUNNER_TEMP/repeat-$run.json"
+            if ! pnpm exec vitest run --minWorkers=1 --maxWorkers=2 --reporter=default --reporter=json --outputFile.json="$report" "${files[@]}"; then
+              failed=$(jq -r --arg top "$GITHUB_WORKSPACE/" '[.testResults[] | select(.status == "failed") | .name | ltrimstr($top)] | unique | join(", ")' "$report")
+              echo "::error::run $run of 5 failed: ${failed:-no file reported}"
+              exit 1
+            fi
+          done
       - name: Types
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' exec tsc --noEmit
 
   desktop:
     name: Stage the desktop app
+    if: github.event_name != 'push' || github.ref != 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

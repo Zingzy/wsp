@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { ASSET_KINDS, DAEMON_TARGETS, daemonArtifactName, workspaceAsset } from "@wsp/host";
-import { bundleEnv, bundleNames, STABLE_NAMES } from "../scripts/bundles.mjs";
+import { bundleEnv, bundleNames, STABLE_NAMES } from "../../protocol/src/bundles.mjs";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
@@ -60,7 +60,7 @@ function runStep(script: string, gh: string): { status: number; said: string; ed
   writeStub(join(dir, "gh"), gh);
   cpSync(join(repo, "packages", "wspx", "scripts"), join(dir, "packages", "wspx", "scripts"), { recursive: true });
   mkdirSync(join(dir, "packages", "protocol", "src"), { recursive: true });
-  cpSync(join(repo, "packages", "protocol", "src", "semver.mjs"), join(dir, "packages", "protocol", "src", "semver.mjs"));
+  for (const shared of ["semver.mjs", "bundles.mjs"]) cpSync(join(repo, "packages", "protocol", "src", shared), join(dir, "packages", "protocol", "src", shared));
   writeFileSync(join(dir, "step.sh"), script);
   const ran = spawnSync("bash", ["-e", "step.sh"], {
     cwd: dir,
