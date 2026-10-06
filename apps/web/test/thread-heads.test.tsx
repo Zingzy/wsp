@@ -79,6 +79,10 @@ function hostApi() {
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listSessions: async () => ROWS,
     listHarnesses: async () => [TABLE_CATALOG],
+    workspaceCheckout: async id => {
+      asked.push(`checkout ${id}`);
+      return { checkout: { branch: "main", ahead: 0, behind: 0, changed: 0, readAt: 1 } };
+    },
     subscribe: fn => {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -96,6 +100,16 @@ function hostApi() {
     return placed;
   };
   return { api, asked, emit, history };
+}
+
+/** No tile observed is ever in view, as a sidebar scrolled away from the thread on screen has it. */
+class NoneInView {
+  constructor(private readonly fn: IntersectionObserverCallback) {}
+  observe(target: Element): void {
+    queueMicrotask(() => this.fn([{ target, isIntersecting: false } as IntersectionObserverEntry], this as unknown as IntersectionObserver));
+  }
+  unobserve(): void {}
+  disconnect(): void {}
 }
 
 /** Every tile observed is in view the moment it is observed, as a sidebar shorter than the window has it. */
@@ -142,6 +156,7 @@ describe("a thread the page holds", () => {
     const { asked, center, threadRow } = await mount();
     fireEvent.click(threadRow("do you have access"));
     await waitFor(() => expect(asked).toContain("page thr_b"));
+    await waitFor(() => expect(asked).toContain(`checkout ${WS}`));
     const before = asked.length;
     act(() => useStore.getState().openSettings());
     expect(center().queryByText("Checking the keychain.")).toBeNull();
@@ -150,6 +165,21 @@ describe("a thread the page holds", () => {
     expect(center().queryByText(TRANSCRIPT_LOADING)).toBeNull();
     await act(async () => await new Promise(r => setTimeout(r, 50)));
     expect(asked.slice(before)).toEqual([]);
+  });
+
+  it("a thread on screen whose workspace has no checkout and no tile in view asks for its checkout once", async () => {
+    Object.assign(globalThis, { IntersectionObserver: NoneInView });
+    try {
+      const { asked, threadRow } = await mount();
+      fireEvent.click(threadRow("do you have access"));
+      await waitFor(() => expect(asked).toContain(`checkout ${WS}`));
+      act(() => useStore.getState().openSettings());
+      act(() => useStore.getState().closeSettings());
+      await act(async () => await new Promise(r => setTimeout(r, 50)));
+      expect(asked.filter(a => a.startsWith("checkout "))).toEqual([`checkout ${WS}`]);
+    } finally {
+      Object.assign(globalThis, { IntersectionObserver: AllInView });
+    }
   });
 
   it("a click on a tile whose head was read in view draws that thread at once, with no loading line", async () => {

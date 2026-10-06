@@ -126,6 +126,43 @@ describe("a thread read from its head and its newest window", () => {
   });
 });
 
+describe("warming tiles", () => {
+  it("reads two heads at a time, and a thread opened meanwhile is asked for at once with no head of warming ahead of it", async () => {
+    const tiles = Array.from({ length: 12 }, (_, i) => `w${i}`);
+    const host = fakeHost([...tiles.map(id => delta(id, `words of ${id}`)), delta("open", "the thread clicked")]);
+    const store = createTranscripts();
+    store.bind(host.api);
+    host.hold();
+    for (const id of tiles) store.warm(id);
+    expect(host.asked.map(a => `${a.op} ${a.threadId}`)).toEqual(["head w0", "head w1"]);
+    const opening = store.open(WS, "open");
+    expect(host.asked.slice(2).map(a => `${a.op} ${a.threadId}`).sort()).toEqual(["head open", "page open"]);
+    host.release();
+    await opening;
+    // Warming held while the open read was out; it goes on once the thread is drawn.
+    expect(host.asked.slice(0, 4).filter(a => a.threadId.startsWith("w")).map(a => a.threadId)).toEqual(["w0", "w1"]);
+    await new Promise(r => setTimeout(r, 0));
+    for (let i = 0; i < 12 && store.weight().threads < 13; i++) await new Promise(r => setTimeout(r, 0));
+    expect(store.weight().threads).toBe(13);
+    expect(host.asked.filter(a => a.op === "head" && a.threadId.startsWith("w")).map(a => a.threadId)).toEqual(tiles);
+  });
+
+  it("a tile that leaves view before its head is read is not read", async () => {
+    const host = fakeHost([delta("w0", "a"), delta("w1", "b"), delta("w2", "c")]);
+    const store = createTranscripts();
+    store.bind(host.api);
+    host.hold();
+    for (const id of ["w0", "w1", "w2"]) {
+      store.see(id, true);
+      store.warm(id);
+    }
+    store.see("w2", false);
+    host.release();
+    for (let i = 0; i < 10; i++) await new Promise(r => setTimeout(r, 0));
+    expect(host.asked.map(a => a.threadId)).toEqual(["w0", "w1"]);
+  });
+});
+
 describe("freshness by position", () => {
   it("an event past the next position marks that workspace's threads stale and no other's; the shown one reads one head and one window", async () => {
     const host = fakeHost([delta("a", "a1"), delta("b", "b1"), delta("x", "x1", "t_x", "ws_other")]);
