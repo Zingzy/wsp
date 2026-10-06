@@ -7,7 +7,7 @@
 import { loginSignIn } from "@wsp/catalog";
 import { lastLine, ptyBareOn, SIGN_IN_WAIT_MS, type AgentsTarget, type SignInLine } from "@wsp/protocol";
 import { relayPty, runQuiet, type PtyLink, type RelayTerminal } from "./signin-relay.js";
-import type { HostClient } from "./verbs.js";
+import type { HostClient } from "./verbs/client.js";
 
 /** The whole wait a sign-in on a computer you own gets: a person opens a page and types a code in it, which is
  * minutes rather than the two the build's own sign-ins are held to. */
