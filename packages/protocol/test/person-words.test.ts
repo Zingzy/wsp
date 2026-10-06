@@ -30,7 +30,7 @@ const read = (text: string): boolean => /\s/.test(text) || /^[A-Z]/.test(text);
 /** Every string a person can read in one file, with the template literals kept in the pieces they are written in.
  * Comments are not strings and never reach here, which is the whole reason this parses rather than greps. */
 function saidIn(file: string): Said[] {
-  const source = ts.createSourceFile(file, readFileSync(join(ROOT, file), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const source = ts.createSourceFile(file, readFileSync(join(ROOT, file), "utf8"), ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const out: Said[] = [];
   const at = (node: ts.Node): string => `${file}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}`;
   const add = (node: ts.Node, text: string): void => {
@@ -62,7 +62,7 @@ function saidIn(file: string): Said[] {
  * into one line with an id among them, which is the shape a palette row's meta had. A join on a control character
  * builds a key rather than a line, and is not one. */
 function idsInSentences(file: string): Said[] {
-  const source = ts.createSourceFile(file, readFileSync(join(ROOT, file), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const source = ts.createSourceFile(file, readFileSync(join(ROOT, file), "utf8"), ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const out: Said[] = [];
   const at = (node: ts.Node): string => `${file}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}`;
   // The lists this file declares, so a join of one by its name reads the elements it was given.
@@ -126,7 +126,7 @@ const HERE_WORDS = new Set(["hereWord", "thisComputer", "computerWord", "compute
 
 /** Every import of one of those words into a file, as `file:line` and the name. */
 function hereWordsIn(file: string): string[] {
-  const source = ts.createSourceFile(file, readFileSync(join(ROOT, file), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const source = ts.createSourceFile(file, readFileSync(join(ROOT, file), "utf8"), ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const out: string[] = [];
   source.forEachChild(node => {
     if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier) || node.moduleSpecifier.text !== "@wsp/protocol") return;

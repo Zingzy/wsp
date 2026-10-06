@@ -16,7 +16,7 @@ import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { SettingsPage } from "../src/settings/SettingsPage.js";
 import { FIRST_PAGE, NO_READS, useSettingsStore, type SettingsAt } from "../src/settings/settingsStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
-import { forgetAgentsReports } from "../src/components/agents/useAgentsReport.js";
+import { forgetHeld } from "../src/protocol/held.js";
 import { TooltipProvider } from "../src/components/ui/tooltip.js";
 import { ImageCardHost } from "./image-card-host.js";
 
@@ -57,7 +57,7 @@ export const settle = async (): Promise<void> => {
 /** Every store back to a first window: nothing remembered, Settings shut, the record at its defaults. */
 export function resetSettings(): void {
   window.localStorage.clear();
-  forgetAgentsReports();
+  forgetHeld();
   useSettingsStore.setState({ at: FIRST_PAGE, search: "", reads: NO_READS, addProjectAt: null, devicesAsked: 0, buildShown: null, recipeAsked: null, addAsked: null, usageTab: "used", agentsTab: "agents", agentsPlace: null, agentsLevel: null });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useNotices.getState().clear();

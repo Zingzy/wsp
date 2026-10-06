@@ -108,6 +108,7 @@ const NOOP_IS_AT_END_CHANGE = (_isAtEnd: boolean) => {};
 const NOOP_MANUAL_NAVIGATION = () => {};
 const EMPTY_TURN_DIFF_SUMMARIES: ReadonlyMap<MessageId, TurnDiffSummary> = new Map();
 const EMPTY_REWINDABLE: ReadonlySet<MessageId> = new Set();
+const EMPTY_SLATED: ReadonlySet<MessageId> = new Set();
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -264,7 +265,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   threadKey,
   onOpenTurnDiff = NOOP_OPEN_TURN_DIFF,
   rewindableMessageIds = EMPTY_REWINDABLE,
-  slatedMessageIds = EMPTY_REWINDABLE,
+  slatedMessageIds = EMPTY_SLATED,
   onRewind = NOOP_REWIND,
   onAnswerPermission = NOOP_ANSWER_PERMISSION,
   dockedAskId = null,
