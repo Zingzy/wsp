@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "fixture": "tiles",
+  "steps": [
+    "row-id=thread:cart",
+    "row-id=settled"
+  ],
+  "wait": "row-id=thread:coupons",
+  "widths": [
+    1440
+  ],
+  "reason": "The sidebar is 256px at every desktop width, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections.",
+  "height": 1100
+}

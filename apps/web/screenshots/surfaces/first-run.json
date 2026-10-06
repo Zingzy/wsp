@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "fixture": "mac-only",
+  "steps": [
+    "390:key:Escape"
+  ],
+  "wait": "k=first-run",
+  "settleMs": 700,
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The first run is one centred column, so 1280 draws it as 1440 does; 390 is where it reflows, which is shot here."
+}

@@ -1,0 +1,18 @@
+{
+  "fixture": "ascii-only",
+  "at": "/",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "A 440px dialog over Settings, whose content is capped at 760px, so 1280 draws it as 1440 does; 390 is where both reflow, which is shot here.",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-computers",
+    "k=add-cloud-button"
+  ],
+  "wait": "k=road-cloud",
+  "settleMs": 700
+}

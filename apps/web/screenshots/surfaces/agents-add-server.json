@@ -1,0 +1,11 @@
+{
+  "at": "/",
+  "steps": [
+    "1440:row-id=thread:redirect",
+    "surface-launch=agents",
+    "segment=servers",
+    "k=kind-add"
+  ],
+  "wait": "k=add-server-go",
+  "settleMs": 700
+}

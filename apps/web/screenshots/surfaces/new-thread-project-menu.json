@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "steps": [
+    "row-id=thread:redirect",
+    "key:ControlOrMeta+n",
+    "new-thread-project=pr_spoo"
+  ],
+  "wait": "new-thread-project-row=pr_wsp",
+  "settleMs": 700,
+  "widths": [
+    1440
+  ],
+  "reason": "The menu is 256px wide under the heading at every width; the heading and composer themselves are shot at 1280 and 390 in workspace."
+}

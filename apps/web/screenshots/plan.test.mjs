@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { fixtureCloud, fixtureState, threadId } from "./fixture-state.mjs";
-import { indexMarkdown, readSurfaces, selectorFor, shotName, shotPlan, stepFor } from "./plan.mjs";
+import { indexMarkdown, readSurfaces, selectorFor, shippedSurfaces, shotName, shotPlan, stepFor } from "./plan.mjs";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
 const list = (surfaces, rest = {}) => readSurfaces({ surfaces, ...rest });
 
 describe("a click or wait word", () => {
@@ -163,7 +162,7 @@ describe("the folder a run leaves", () => {
 });
 
 describe("every row the surfaces list aims at", () => {
-  const SURFACES = JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")).surfaces;
+  const SURFACES = shippedSurfaces().surfaces;
   /** The rows the host draws for itself, by the id their rows carry: this computer's own, and the clouds once it
    * holds their key. */
   const HOST_ROWS = new Set(["here", "solari", "box"]);
@@ -194,7 +193,7 @@ describe("every row the surfaces list aims at", () => {
 
 describe("a surface that presses New thread on a project", () => {
   it("picks one of its fixture's projects first, since the sidebar draws the control only while a project is picked", () => {
-    const SURFACES = JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")).surfaces;
+    const SURFACES = shippedSurfaces().surfaces;
     const press = steps => steps.findIndex(step => step === "k=new-workspace" || step === "menu-item=new-workspace");
     const pressing = SURFACES.filter(s => press(s.steps ?? []) >= 0);
     expect(pressing.length).toBeGreaterThan(0);
@@ -235,10 +234,10 @@ describe("a surface that names its own fixture", () => {
 });
 
 describe("the surfaces list this repo ships", () => {
-  // Every rule here is read off surfaces.json, so a surface added there is the whole of adding it: no list of names,
+  // Every rule here is read off the surfaces folder, so a surface's file is the whole of adding it: no list of names,
   // fixtures or widths is kept in this file for two branches to both edit.
   it("reads, and asks for one file per surface, width and theme", () => {
-    const listed = JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8"));
+    const listed = shippedSurfaces();
     // Reading it holds each surface to a name no other takes and to widths the list shoots.
     const read = readSurfaces(listed);
     expect(shotPlan(read)).toHaveLength(read.surfaces.reduce((n, s) => n + s.widths.length, 0) * 2);
@@ -250,5 +249,35 @@ describe("the surfaces list this repo ships", () => {
     // The app's own default window is one of them, so a row that only breaks at 1280 is photographed.
     expect(read.widths).toContain(1280);
     expect(read.heights[1280]).toBe(800);
+  });
+});
+
+describe("the surfaces folder", () => {
+  const folder = () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-surfaces-"));
+    mkdirSync(join(root, "surfaces"));
+    writeFileSync(join(root, "widths.json"), JSON.stringify({ widths: [1440] }));
+    return root;
+  };
+
+  it("names each surface by its file and reads them in file order", () => {
+    const root = folder();
+    try {
+      writeFileSync(join(root, "surfaces", "zeta.json"), JSON.stringify({ at: "/" }));
+      writeFileSync(join(root, "surfaces", "alpha.json"), JSON.stringify({ at: "/x" }));
+      expect(shippedSurfaces(join(root, "surfaces"))).toEqual({ widths: [1440], surfaces: [{ name: "alpha", at: "/x" }, { name: "zeta", at: "/" }] });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a file that names itself, which could disagree with its file name", () => {
+    const root = folder();
+    try {
+      writeFileSync(join(root, "surfaces", "alpha.json"), JSON.stringify({ name: "beta", at: "/" }));
+      expect(() => shippedSurfaces(join(root, "surfaces"))).toThrow(/alpha.json: .*carries no "name"/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -1,0 +1,14 @@
+{
+  "at": "/",
+  "fixture": "rewind",
+  "steps": [
+    "row-id=thread:rounding",
+    "hover:message-role=assistant"
+  ],
+  "wait": "k=rewind-to-here",
+  "widths": [
+    1440
+  ],
+  "reason": "A hover over a reply in the transcript, which a touch at 390 has no form of; the transcript at 1280 and 390 is shot in composer-thread.",
+  "settleMs": 700
+}

@@ -1,0 +1,16 @@
+{
+  "at": "/",
+  "fixture": "ascii-only",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=ws:ws_api",
+    "390:key:Escape"
+  ],
+  "wait": "testid=composer-editor",
+  "widths": [
+    1440,
+    390
+  ],
+  "reason": "The Open button sits at the right of the page header at its own width, so 1280 draws it as 1440 does; 390 is where the header narrows, which is shot here."
+}
