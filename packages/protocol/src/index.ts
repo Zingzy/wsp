@@ -5259,6 +5259,7 @@ const DAEMON_CONTENTS = [
   "9dc9610fb0581804589fcf952e0f5df34b029bbae2034ea135f420867b5b4c5c",
   "089d2b84fb314ca0fb7361046e327978a243aee796789f72cd5e2e8f8a71c191",
   "f9b9aedecc0b89b12571cea110ff89f317df4472af13de32ef2f5681334f46a7",
+  "a9a90585446c8bd453c888fc716b3097631dbd87d7116d7f65a8a9a436df7352",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5613,7 +5614,8 @@ const DAEMON_CONTENTS = [
  * listens as a close marked left, and a second watch names its roots again. A browser.open with no port hurries the
  * watch to a read a second through the spotter's window. proc.watch sends one whole proc.snapshot two seconds after the
  * watch and then a proc.changes every five seconds; every frame carries a seq and each proc.changes the base it applies
- * to, and a socket that watches again is sent a whole snapshot next. */
+ * to, and a socket that watches again is sent a whole snapshot next.
+ * Version 126: six small host and test faults. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
