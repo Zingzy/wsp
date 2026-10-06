@@ -1943,6 +1943,9 @@ export const WorkspaceCreatingEvent = z.object({
   /** What the machine answered this step with, for the line's title: a guest's refusal is evidence a person may
    * need and never a sentence written at them, so no surface draws it as one. */
   detail: z.string().optional(),
+  /** Set on a line saying what the step the create is on waits for, in the message's words. It comes once per ask,
+   * so a surface showing the step draws the newest in the step's place and never as a step of its own. */
+  waiting: z.literal(true).optional(),
   /** The thread this fork was asked for by, from the first stage: a create streams stages before the workspace has
    * a record, so the stream's tree rule reads who asked off the event rather than off a record that is not there
    * yet. Absent where a person asked for the machine. */
@@ -3790,13 +3793,15 @@ export const PlacePresentEvent = z.object({ type: z.literal("place.present"), pl
 /** `said` is the runtime's own reason where it has one, as for a box whose kernel can no longer boot the image. */
 export const PlaceAbsentEvent = z.object({ type: z.literal("place.absent"), placeId: z.string(), said: z.string().optional() });
 export const PlaceRemovedEvent = z.object({ type: z.literal("place.removed"), placeId: z.string() });
+/** A setting of a computer changed, from any window or the command line: the row as it now reads. */
+export const PlaceChangedEvent = z.object({ type: z.literal("place.changed"), place: PlaceView });
 /** An add that has not reached Set up moved, or went: `pending` as it now stands, absent once it became a computer
  * or was taken away. */
 export const PlacePendingEvent = z.object({ type: z.literal("place.pending"), id: z.string(), pending: PendingComputer.optional() });
 export type PlacePendingEvent = z.infer<typeof PlacePendingEvent>;
 
-/** The four as one type, so the host's door and the app's fold read one shape. */
-export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent>;
+/** The five as one type, so the host's door and the app's fold read one shape. */
+export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent> | z.infer<typeof PlaceChangedEvent>;
 
 /** A project was recorded, so every client's list follows without a refetch. */
 export const ProjectAddedEvent = z.object({ type: z.literal("project.added"), project: ProjectView });
@@ -3885,6 +3890,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   PlacePresentEvent.extend(sequenced),
   PlaceAbsentEvent.extend(sequenced),
   PlaceRemovedEvent.extend(sequenced),
+  PlaceChangedEvent.extend(sequenced),
   AgentsChangedEvent.extend(sequenced),
   UsageAlertEvent.extend(sequenced),
   HostNoticeEvent.extend(sequenced),
@@ -5253,6 +5259,7 @@ const DAEMON_CONTENTS = [
   "9dc9610fb0581804589fcf952e0f5df34b029bbae2034ea135f420867b5b4c5c",
   "089d2b84fb314ca0fb7361046e327978a243aee796789f72cd5e2e8f8a71c191",
   "f9b9aedecc0b89b12571cea110ff89f317df4472af13de32ef2f5681334f46a7",
+  "a9a90585446c8bd453c888fc716b3097631dbd87d7116d7f65a8a9a436df7352",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5607,7 +5614,8 @@ const DAEMON_CONTENTS = [
  * listens as a close marked left, and a second watch names its roots again. A browser.open with no port hurries the
  * watch to a read a second through the spotter's window. proc.watch sends one whole proc.snapshot two seconds after the
  * watch and then a proc.changes every five seconds; every frame carries a seq and each proc.changes the base it applies
- * to, and a socket that watches again is sent a whole snapshot next. */
+ * to, and a socket that watches again is sent a whole snapshot next.
+ * Version 126: six small host and test faults. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
