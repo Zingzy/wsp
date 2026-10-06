@@ -358,7 +358,7 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
         backend: stubBackend(),
         store,
         adapters: {},
-        local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()),
+        local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, join(dir, "user", ".wsp", "state.json"), copyingFake()),
         // This computer's row read once: its free disk moves between the verb's read and the tool server's.
         placeLinks: ((wiring: PlaceWiring): PlaceWiring => {
           const here = wiring.here();

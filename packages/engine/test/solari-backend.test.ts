@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { execFailedLine, machineUnreachableLine, napRefusedLine, offeredSize, RESUME_UNANSWERED, sizeRefusal, snapshotListedRefusedLine, snapshotListedWaitLine } from "@wsp/protocol";
+import { execFailedLine, imageServedWaitLine, machineUnreachableLine, napRefusedLine, offeredSize, RESUME_UNANSWERED, sizeRefusal, snapshotListedRefusedLine, snapshotListedWaitLine } from "@wsp/protocol";
 import { ExecFailedError, fetchCapMs, isCapped, isMissing, MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, type RetryClock } from "../src/errors.js";
 import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_INLINE_MAX_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend, type MoveBudgets } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
@@ -409,12 +409,15 @@ describe("SolariBackend create from a snapshot the provider answers not found", 
     const clock = movingClock();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const m = await new SolariBackend({ apiKey: "k", fetch: f, clock }).create(spec);
+      const said: string[] = [];
+      const m = await new SolariBackend({ apiKey: "k", fetch: f, clock }).create(spec, line => said.push(line));
       expect(m.id).toBe("sbx_1");
       expect(keys[0]).toBe("ws/1:k");
       expect(new Set(keys).size).toBe(3);
       const [every] = clock.waits;
       expect(warn.mock.calls.map(c => String(c[0]))).toEqual([snapshotListedWaitLine("snap_1", every!, 0), snapshotListedWaitLine("snap_1", every!, every!)]);
+      // The person waiting on the fork hears each wait too, in the create's own words rather than the log's.
+      expect(said).toEqual([imageServedWaitLine("Solari", every!), imageServedWaitLine("Solari", every!)]);
     } finally {
       warn.mockRestore();
     }

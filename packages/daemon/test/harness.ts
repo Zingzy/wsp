@@ -9,7 +9,8 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { daemonListeningLine } from "@wsp/protocol";
+import { DAEMON_VERSION, daemonListeningLine } from "@wsp/protocol";
+import WebSocket from "ws";
 import { daemonBinaryHere } from "../../host/src/assets.js";
 import { daemonTokenFor } from "../../runtime/src/daemon-token.js";
 
@@ -147,8 +148,47 @@ export function daemonBin(): string {
   }
 }
 
+/** Why a staged binary is the wrong one to test: built before this checkout's daemon sources moved, it greets with its
+ * own older version, and every case on it passes or fails for the wrong reason. */
+export const staleDaemonLine = (bin: string, greeted: unknown): string =>
+  `${bin} is daemon ${String(greeted)} and this checkout's is ${DAEMON_VERSION}: build it again and place it with node packages/wspx/scripts/daemon-binary.mjs`;
+
+/** Each binary's version, asked once a process off a daemon of its own, so no case's daemon carries the extra dial. */
+const versions = new Map<string, Promise<void>>();
+function sameVersion(bin: string): Promise<void> {
+  const held = versions.get(bin);
+  if (held !== undefined) return held;
+  const asked = (async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-daemon-version-"));
+    const tokenPath = join(dir, "token");
+    writeFileSync(tokenPath, "version\n");
+    const daemon = await spawnDaemon(bin, { host: "127.0.0.1", port: 0, tokenPath });
+    try {
+      const ws = new WebSocket(`ws://127.0.0.1:${daemon.port}/`);
+      const greeted = await new Promise<unknown>((done, fail) => {
+        const timer = setTimeout(() => fail(new Error(`${bin} sent no greeting within ${START_MS} ms`)), START_MS);
+        ws.once("error", fail);
+        ws.once("open", () => ws.send(JSON.stringify({ id: 1, op: "auth", token: "version" })));
+        ws.on("message", raw => {
+          const frame = JSON.parse(String(raw)) as { type?: string; version?: unknown };
+          if (frame.type !== "daemon.hello") return;
+          clearTimeout(timer);
+          done(frame.version);
+        });
+      }).finally(() => ws.close());
+      if (greeted !== DAEMON_VERSION) throw new Error(staleDaemonLine(bin, greeted));
+    } finally {
+      await daemon.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  })();
+  versions.set(bin, asked);
+  return asked;
+}
+
 export async function daemonUnderTest(given: DaemonUnderTestArgs): Promise<DaemonUnderTest> {
   const { token, ...args } = given;
+  await sameVersion(daemonBin());
   if (token === undefined) return spawnDaemon(daemonBin(), args);
   const tokenDir = mkdtempSync(join(tmpdir(), "wsp-daemon-token-"));
   args.tokenPath = join(tokenDir, "token");

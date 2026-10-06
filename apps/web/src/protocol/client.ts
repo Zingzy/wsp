@@ -111,9 +111,11 @@ import {
   ReleaseView,
   SealedImageBuilt,
   SealedImageView,
+  type HistoryPage,
   type KeptAttachment,
   type SessionEvent,
   type SessionView,
+  type ThreadHead,
   type SnapshotLineage,
   type SnapshotRollbackResult,
   type SnapshotStorage,
@@ -454,6 +456,8 @@ export interface SshLogin {
   port?: number;
   /** The host key the person confirmed for a computer this one has never dialled. */
   hostKey?: string;
+  /** The password the login's sudo asks for, typed for this add alone. */
+  sudoPassword?: string;
 }
 
 export interface Api {
@@ -546,7 +550,7 @@ export interface Api {
   stopForward?(workspaceId: string, port: number): Promise<void>;
   /** Takes a computer or a provider back out: the host sweeps wsp off it over its link where it is connected, drops
    * the workspaces standing on it and the record. */
-  removePlace?(placeId: string): Promise<PlaceRemoved>;
+  removePlace?(placeId: string, sudoPassword?: string): Promise<PlaceRemoved>;
   /** Puts this wsp's daemon on the computer where that computer runs an older one; what it was set up with stays.
    * Answers what the daemon half came to where it ran. A client without it holds Update rather than offering one
    * that asks nobody. */
@@ -619,6 +623,11 @@ export interface Api {
   listSessions(id?: string): Promise<SessionView[]>;
   /** The workspace's persisted session events, oldest first: what a chat replays on mount. */
   sessionHistory(id: string): Promise<SessionEvent[]>;
+  /** One thread's facts and newest events, cut to a first paint. Optional so fixtures that draw a thread off the
+   * workspace's whole history need not fake it; a page without it reads the whole history, as before. */
+  sessionHead?(threadId: string): Promise<ThreadHead>;
+  /** One thread's newest events under `before`, at most `limit` of them. Optional with sessionHead. */
+  sessionPage?(workspaceId: string, threadId: string, window?: { before?: number; limit?: number }): Promise<HistoryPage>;
   /** One image a person's message carried, as the host kept it. Optional so fixtures that draw no image need not fake
    * it; a row then draws the record's words. */
   sessionAttachment?(workspaceId: string, threadId: string, requestId: string, index: number): Promise<KeptAttachment>;
@@ -969,6 +978,14 @@ export function makeApi(c: ProtocolClient): Api {
     portProbe: async (id, port) => (await c.request<{ probe: PortProbeView }>("workspaces.portProbe", { workspaceId: id, port })).probe,
     startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,
     sessionHistory: async id => (await c.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId: id })).events,
+    sessionHead: async threadId => {
+      const { facts, events, pos, total } = await c.request<ThreadHead>("sessions.head", { threadId });
+      return { facts, events, pos, total };
+    },
+    sessionPage: async (workspaceId, threadId, window = {}) => {
+      const { events, pos, total } = await c.request<HistoryPage>("sessions.history", { workspaceId, threadId, ...window });
+      return { events, pos, total };
+    },
     sessionAttachment: async (workspaceId, threadId, requestId, index) => (await c.request<{ attachment: KeptAttachment }>("sessions.attachment", { workspaceId, threadId, requestId, index })).attachment,
     listSessions: async id =>
       (await c.request<{ sessions: SessionView[] }>("sessions.list", id !== undefined ? { workspaceId: id } : {})).sessions,
@@ -1008,7 +1025,7 @@ export function makeApi(c: ProtocolClient): Api {
       EditorId.parse((await c.request<{ editor?: unknown }>("editor.open", { workspaceId, path, ...(line !== undefined ? { line } : {}), ...(editor !== undefined ? { editor } : {}) })).editor),
     sshInclude: async on => (await c.request<{ sshInclude?: unknown }>("ssh.include", on !== undefined ? { on } : {})).sshInclude === true,
     addComputerOverSsh: async (login, addId) =>
-      PlaceView.parse((await c.request<{ place?: unknown }>("places.add", { addId, address: login.address, ...(login.port === undefined ? {} : { sshPort: login.port }), ...(login.hostKey === undefined ? {} : { hostKey: login.hostKey }) })).place),
+      PlaceView.parse((await c.request<{ place?: unknown }>("places.add", { addId, address: login.address, ...(login.port === undefined ? {} : { sshPort: login.port }), ...(login.hostKey === undefined ? {} : { hostKey: login.hostKey }), ...(login.sudoPassword === undefined ? {} : { sudoPassword: login.sudoPassword }) })).place),
     // Parsed, not trusted: the sheet draws only steps and states the wire type vouches for.
     placesList: async () => {
       const read = await c.request<{ places?: unknown; adds?: unknown; pending?: unknown }>("places.list");
@@ -1072,7 +1089,7 @@ export function makeApi(c: ProtocolClient): Api {
     initBuild: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.build", { ...o })).job),
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
-    removePlace: async placeId => await c.request<PlaceRemoved>("places.remove", { placeId }),
+    removePlace: async (placeId, sudoPassword) => await c.request<PlaceRemoved>("places.remove", { placeId, ...(sudoPassword === undefined ? {} : { sudoPassword }) }),
     // Parsed, not trusted: the row the answer lands on is redrawn off it, so only what the wire type vouches for
     // reaches the table.
     dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),

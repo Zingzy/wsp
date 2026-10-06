@@ -17,6 +17,7 @@ import { lineFeed, runChild } from "./child-exec.js";
 import { keyFingerprint } from "./key-fingerprint.js";
 import { ARCH_READ, HOME_READ, MEM_READ, OS_READ, SHELL_READ, SYSTEM_READ, UPTIME_READ, archOf, memMbOf, osNameOf, readLists, readValues, systemOf, uptimeMsOf } from "./machine-facts.js";
 import type { ExecResult, Machine, MachineShape, MachineState, RunOptions } from "./machine.js";
+import { DROP_SUDO_MARKS } from "./run-env.js";
 
 /** How the ssh client is dialled: who to log in as, where, on which port, and the person's own key when they named
  * one (absent leaves ssh its own config and agent, which is how most people already reach their machines). */
@@ -75,8 +76,13 @@ export function sshMachineName(reach: SshReach): string {
 }
 
 /** How a script reaches the machine. The client below is the only implementation that leaves this computer; a test
- * hands its own and reads what the machine was asked to run. */
-export type SshTransport = (reach: SshReach, script: string, opts: { timeoutMs?: number; onLine?: (line: string) => void; stdin?: Uint8Array }) => Promise<ExecResult>;
+ * hands its own and reads what the machine was asked to run. A script runs as root: as the login where it is root,
+ * else through sudo, which `sudoPassword` answers and which `asLogin` skips for the reads that ask about the login
+ * itself. */
+export type SshTransport = (reach: SshReach, script: string, opts: SshTransportOptions) => Promise<ExecResult>;
+
+/** What one script rides with. A read as the login never carries the password, so the type has no room for both. */
+export type SshTransportOptions = { timeoutMs?: number; onLine?: (line: string) => void; stdin?: Uint8Array } & ({ asLogin?: false; sudoPassword?: string } | { asLogin: true; sudoPassword?: undefined });
 
 /** How long the ssh client waits for the machine to answer the dial itself, before the script's own deadline starts
  * mattering: a machine that is off must fail rather than hang a turn. */
@@ -120,10 +126,20 @@ export function sshControlPath(reach: SshReach, dir: string = sshControlDir()): 
   return join(dir, `wsp-ssh-${createHash("sha256").update(`${reach.user}@${reach.host}:${reach.port}`).digest("hex").slice(0, 16)}.sock`);
 }
 
+/** How a script reaches root over a login that is not root: sudo told never to ask, which is the whole of
+ * passwordless sudo, or told to read one password line off stdin and to ignore any credential it cached, so that
+ * line is always sudo's and never the script's input. A root login runs the script as it is. The script is the
+ * outer bash's $1, so it is quoted once on the way and never parsed again. */
+const rootRoad = (sudo: string): string => `if [ "$(id -u)" -eq 0 ]; then exec bash -c "$1"; fi\nexec sudo ${sudo} bash -c "${DROP_SUDO_MARKS}\n$1"`;
+
+/** Who a script runs as: root by whichever road the login has, or the login itself. */
+export type SshAs = "root" | "root-by-password" | "login";
+
 /** The ssh client's argv for one script. The script runs under `bash -c` as it does on a guest, never a login
  * shell, which would reset PATH. Every command rides one master connection per machine, so a turn's polls are one
  * login rather than one each. */
-export function sshArgs(reach: SshReach, script: string, opts: { controlDir?: string; stdin?: boolean } = {}): string[] {
+export function sshArgs(reach: SshReach, script: string, opts: { controlDir?: string; stdin?: boolean; as?: SshAs } = {}): string[] {
+  const as = opts.as ?? "root";
   return [
     // -n hands the script /dev/null for stdin; the one road that carries a file's bytes writes them there instead.
     ...(opts.stdin === true ? [] : ["-n"]),
@@ -138,7 +154,7 @@ export function sshArgs(reach: SshReach, script: string, opts: { controlDir?: st
     `${reach.user}@${reach.host}`,
     "bash",
     "-c",
-    shellQuote(script),
+    ...(as === "login" ? [shellQuote(script)] : [shellQuote(rootRoad(as === "root" ? "-n" : "-S -k -p ''")), "wsp", shellQuote(script)]),
   ];
 }
 
@@ -343,14 +359,20 @@ export function holdBackForward(carried: SshCarried, boxPort: number, doorPort: 
 }
 
 /** The ssh client on this computer, carrying one script to the machine. The folder its master socket lives in is
- * made here, on the way out, so no dial can be the first thing to need it. */
-export const sshClient: SshTransport = (reach, script, opts) =>
-  runChild("ssh", sshArgs(reach, script, { controlDir: makeSshControlDir(), ...(opts.stdin !== undefined ? { stdin: true } : {}) }), {
+ * made here, on the way out, so no dial can be the first thing to need it. A sudo password rides the connection's
+ * own stdin as the line before the script's input, which is the one channel that never prints it: a pty would echo
+ * it before sudo turns echo off, put the script's stderr into its stdout and cook the bytes a landing sends, and a
+ * command line sits in a world readable /proc/<pid>/cmdline. */
+export const sshClient: SshTransport = (reach, script, opts) => {
+  const as: SshAs = opts.asLogin === true ? "login" : opts.sudoPassword !== undefined ? "root-by-password" : "root";
+  const stdin = as === "root-by-password" ? Buffer.concat([Buffer.from(`${opts.sudoPassword}\n`), opts.stdin ?? new Uint8Array()]) : opts.stdin;
+  return runChild("ssh", sshArgs(reach, script, { controlDir: makeSshControlDir(), as, ...(stdin !== undefined ? { stdin: true } : {}) }), {
     env: process.env,
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
     ...(opts.onLine !== undefined ? { onLine: opts.onLine } : {}),
-    ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}),
+    ...(stdin !== undefined ? { stdin } : {}),
   });
+};
 
 /** How the key a machine holds is read: the one road to an identity, so every caller asks the same question the
  * same way. It is not the dial's to answer, since a dial that rides a warm master exchanges no key and the client
@@ -583,7 +605,7 @@ export function sshRefusalLine(said: { stderr: string; exitCode: number }, reach
  * connection's own verdict and not a reading of the machine. Answers when the login stands; throws ssh's own line
  * when it does not. Nothing is installed and nothing is left running. */
 export async function sshDial(reach: SshReach, transport: SshTransport = sshClient): Promise<void> {
-  const said = await transport(reach, "exit 0", { timeoutMs: SSH_DIAL_MS });
+  const said = await transport(reach, "exit 0", { timeoutMs: SSH_DIAL_MS, asLogin: true });
   if (said.exitCode === 0) return;
   throw new Error(sshRefusalLine(said, reach));
 }
@@ -591,6 +613,53 @@ export async function sshDial(reach: SshReach, transport: SshTransport = sshClie
 /** How long one dial waits: the client's own connect timeout and a moment for the login, since a person is
  * watching the button they pressed. */
 export const SSH_DIAL_MS = 15_000;
+
+/** How a login reaches root there: it is root, its sudo asks for nothing, its sudo took the password it was given,
+ * its sudo asks for a password nobody gave or took a wrong one, or it has no sudo that will run anything as root. */
+export type SshSudo = "root" | "free" | "taken" | "asks" | "wrong" | "tty" | "none";
+
+/** What the read of a login answers before any password is in play: everything but a password's outcome. */
+export type SshSudoRoad = Exclude<SshSudo, "taken" | "wrong">;
+
+const SUDO_MARK = "WSP_SUDO";
+
+/** What sudo says, in the C locale, where its policy wants a terminal (Defaults requiretty): a command over ssh never
+ * has one, so neither a password nor passwordless sudo gets past it. */
+const SUDO_WANTS_TTY = "must have a tty";
+
+/** What the login answers about root, run as the login with no password in play, and running nothing as root: a read
+ * made before the box's key is compared must open no session there. sudo -v follows verifypw, which wants every
+ * entry for the login passwordless, so a sudoers mixing one NOPASSWD command with password ones reads as asking,
+ * where -l alone follows listpw and reads it as free (measured on sudo 1.9.15). The list behind it is of the exact
+ * command every later script runs, so a login allowed something but not bash asks too. A login sudo refuses outright
+ * reads as one that asks: sudo says the same to both until a password is typed. */
+export const SSH_SUDO_READ = [
+  `if [ "$(id -u)" -eq 0 ]; then echo ${SUDO_MARK} root`,
+  `elif ! command -v sudo >/dev/null 2>&1; then echo ${SUDO_MARK} none`,
+  `elif said=$(LC_ALL=C sudo -n -v 2>&1 && LC_ALL=C sudo -n -l bash -c true 2>&1); then echo ${SUDO_MARK} free`,
+  `else case "$said" in *"${SUDO_WANTS_TTY}"*) echo ${SUDO_MARK} tty ;; *) echo ${SUDO_MARK} asks ;; esac; fi`,
+].join("\n");
+
+/** The one try of a password, run as the login with the password as its only input line. sudo speaks the C locale
+ * here so its line about a wrong password is the one read below on every box. */
+export const SSH_SUDO_TRY = `LC_ALL=C sudo -S -k -p '' bash -c 'echo ${SUDO_MARK} taken'`;
+
+/** How the login reaches root, read as the login and carrying nothing of the person's: the read an add makes before
+ * it holds the box's key against the one the person pinned. Throws ssh's own line where the login does not stand. */
+export async function readSshSudo(reach: SshReach, transport: SshTransport = sshClient): Promise<SshSudoRoad> {
+  const read = await transport(reach, SSH_SUDO_READ, { timeoutMs: SSH_DIAL_MS, asLogin: true });
+  const said = new RegExp(`^${SUDO_MARK} (root|free|asks|tty|none)$`, "m").exec(read.stdout)?.[1] as SshSudoRoad | undefined;
+  if (said === undefined) throw new Error(read.exitCode === 255 ? sshRefusalLine(read, reach) : `${reach.user}@${reach.host} did not answer over ssh: ${(clientWords(read.stderr) || read.stdout.trim()).slice(-SSH_LINE_CAP)}`);
+  return said;
+}
+
+/** One try of the password the person typed, on a login whose sudo asks for one, run as the login. */
+export async function trySshSudo(reach: SshReach, password: string, transport: SshTransport = sshClient): Promise<Extract<SshSudo, "taken" | "wrong" | "tty" | "none">> {
+  const tried = await transport(reach, SSH_SUDO_TRY, { timeoutMs: SSH_DIAL_MS, asLogin: true, stdin: Buffer.from(`${password}\n`) });
+  if (tried.stdout.includes(`${SUDO_MARK} taken`)) return "taken";
+  if (tried.stderr.includes(SUDO_WANTS_TTY)) return "tty";
+  return /incorrect password attempt/.test(tried.stderr) ? "wrong" : "none";
+}
 
 /** The store variable each harness reads, by name, as the catalog gives them. The shape rule is what keeps a
  * catalog entry out of the read as shell: the name is interpolated into a printf inside the login shell, so a name
@@ -820,6 +889,9 @@ export interface SshBackendOptions {
   hostName?: (reach: SshReach) => Promise<string | undefined>;
 }
 
+/** What every script one backend carries rides with: the login's sudo password, or the login itself. */
+export type SshRiding = { sudoPassword: string } | { asLogin: true };
+
 /** The reads a host makes of a computer over ssh before it joins it: the machine itself, the key it answers with and
  * where this computer's client keeps that key. */
 export class SshBackend {
@@ -835,6 +907,24 @@ export class SshBackend {
     this.knownHosts = opts.knownHosts ?? knownHostsWritten;
     this.offered = opts.offeredKey ?? offeredHostKey;
     this.hostName = opts.hostName ?? sshHostName;
+  }
+
+  /** How the login reaches root there, read as the login with nothing of the person's sent. */
+  async sudoFor(reach: SshReach): Promise<SshSudoRoad> {
+    return readSshSudo(reach, this.transport);
+  }
+
+  /** One try of the person's password on a login whose sudo asks for one. */
+  async sudoTry(reach: SshReach, password: string): Promise<SshSudo> {
+    return trySshSudo(reach, password, this.transport);
+  }
+
+  /** The same backend with every script it carries, and every machine it adopts, riding with `riding`. Held for
+   * as long as the caller holds what it returns, and by nothing else. */
+  riding(riding: SshRiding): SshBackend {
+    const base = this.transport;
+    // A read as the login keeps to itself: the password rides only the scripts that run under sudo.
+    return new SshBackend({ transport: (reach, script, opts) => base(reach, script, opts.asLogin === true ? opts : "asLogin" in riding ? { ...opts, asLogin: true, sudoPassword: undefined } : { ...opts, sudoPassword: riding.sudoPassword }), hostKey: this.hostKey, knownHosts: this.knownHosts, offeredKey: this.offered, hostName: this.hostName });
   }
 
   /** Reads a machine over ssh and hands back the handle its record stands on, so the one call that records a

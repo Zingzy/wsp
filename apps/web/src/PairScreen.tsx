@@ -4,7 +4,6 @@
 // the token it buys, kept in this browser. One input, one button and one error
 // line: nothing here has a host to read a theme, a font or a workspace from.
 import { useState, type FormEvent } from "react";
-import { PAIR_CODE_LENGTH } from "@wsp/protocol";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
@@ -38,7 +37,6 @@ export function PairScreen({ onRedeem }: { onRedeem: (code: string) => Promise<v
           autoFocus
           autoComplete="off"
           spellCheck={false}
-          maxLength={PAIR_CODE_LENGTH}
           value={code}
           onChange={event => setCode(event.target.value)}
         />

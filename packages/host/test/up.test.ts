@@ -174,7 +174,7 @@ describe("wsp up", () => {
     stateFile({ goldens: { default: { ...SEALED_GOLDEN, head: 2 } } });
     const lines: string[] = [];
     const errors: string[] = [];
-    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home) });
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home, undefined, undefined, statePath) });
     const handle = await up(quietIO(lines, errors), { port: 0, statePath, webDir, runtime: rt });
     handles.push(handle);
     expect(errors).toEqual([]);
@@ -191,7 +191,7 @@ describe("wsp up", () => {
       },
     });
     const lines: string[] = [];
-    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home, undefined, startDaemon) });
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home, undefined, startDaemon, statePath) });
     const handle = await up(quietIO(lines), { port: 0, statePath, webDir, runtime: rt });
     if (handle === undefined) throw new Error("up refused a state with a local workspace");
     handles.push(handle);
@@ -209,7 +209,7 @@ describe("wsp up", () => {
     });
     // Not made by building the wiring: a host that only asks whether it has anything to serve builds one too, and a
     // computer that was never set up is left as it was.
-    const wiring = localWiring(home);
+    const wiring = localWiring(home, undefined, undefined, join(home, ".wsp", "state.json"));
     expect(existsSync(work)).toBe(false);
     // The exec road asks for the default agent's adapter, for the environment a command runs under; nothing here
     // starts a turn through it.
@@ -241,14 +241,14 @@ describe("wsp up", () => {
     // The harness's own store stays the person's, wherever their store variable puts it: a sign-in they made is the
     // one a turn uses, so nothing of it moved under the work folder.
     expect(wiring.home("claude").startsWith(work)).toBe(false);
-    expect(localWiring(home, { HOME: home }).home("claude")).toBe(join(home, ".claude"));
+    expect(localWiring(home, { HOME: home }, undefined, join(home, ".wsp", "state.json")).home("claude")).toBe(join(home, ".claude"));
     await rt.close();
   });
 
   it("runs a turn under the person's own home when the host serves a home that is not theirs", () => {
     const lab = join(dir, "lab");
     const person = join(dir, "person");
-    const wiring = localWiring(lab, { HOME: lab, [PERSON_HOME_ENV]: person });
+    const wiring = localWiring(lab, { HOME: lab, [PERSON_HOME_ENV]: person }, undefined, join(lab, ".wsp", "state.json"));
     // The stores a turn reads are the person's, so the sign-in they made is the one the agent finds, and so is the
     // home the turn runs under: a sign-in on this kind of computer is keyed to the home a person logs in to.
     expect(wiring.home("claude")).toBe(join(person, ".claude"));
@@ -257,13 +257,13 @@ describe("wsp up", () => {
     expect(wiring.homeDir).toBe(lab);
     expect(wiring.backend.folder.startsWith(lab)).toBe(true);
     // Unnamed, the process's home is the person's, which is every host but a harness's.
-    const plain = localWiring(lab, { HOME: lab });
+    const plain = localWiring(lab, { HOME: lab }, undefined, join(lab, ".wsp", "state.json"));
     expect([plain.home("claude"), plain.env()["HOME"]]).toEqual([join(lab, ".claude"), lab]);
   });
 
   it("the wiring answers this computer's environment as it is when it is asked, not as it was when the wiring was made", async () => {
     vi.stubEnv("WSP_LOGIN_PROBE", "before");
-    const wiring = localWiring(home);
+    const wiring = localWiring(home, undefined, undefined, join(home, ".wsp", "state.json"));
     expect(wiring.env()["WSP_LOGIN_PROBE"]).toBe("before");
     vi.stubEnv("WSP_LOGIN_PROBE", "after");
     expect(wiring.env()["WSP_LOGIN_PROBE"]).toBe("after");
@@ -273,7 +273,7 @@ describe("wsp up", () => {
   });
 
   it("closing the wiring leaves the turns running on this computer, with the run the next host re-opens them by", async () => {
-    const wiring = localWiring(home);
+    const wiring = localWiring(home, undefined, undefined, join(home, ".wsp", "state.json"));
     // Launched off the wiring alone, with no workspace record loaded: the road makes the folder the turn starts in.
     const pidFile = join(home, "child.pid");
     const stream = wiring.execStream()(`sleep 300 & echo $! > ${pidFile}; sleep 300`, { env: {} });
@@ -286,7 +286,7 @@ describe("wsp up", () => {
     // The turn and its whole tree outlive the host: what the close frees is what this host was holding open.
     expect(() => process.kill(child, 0)).not.toThrow();
     expect(stream.run).toBeDefined();
-    expect(await localWiring(home).execStream().attach!(stream.run!, { input: false, startedAt: Date.now() })).not.toBe("gone");
+    expect(await localWiring(home, undefined, undefined, join(home, ".wsp", "state.json")).execStream().attach!(stream.run!, { input: false, startedAt: Date.now() })).not.toBe("gone");
     // What the close freed is the reading: this process stopped polling that run, so the stream it handed out
     // settles no more and the timer that read it is no longer holding this process open.
     const quiet = await Promise.race([stream.exited.then(() => "settled"), new Promise(resolve => setTimeout(() => resolve("still running"), 500))]);
@@ -303,7 +303,7 @@ describe("wsp up", () => {
         ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), project: "pr_l", spec: {}, firstLife: false, idleWindowMs: null },
       },
     });
-    const wiring = localWiring(home, undefined, startDaemon);
+    const wiring = localWiring(home, undefined, startDaemon, join(home, ".wsp", "state.json"));
     const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: wiring });
     runtimes.push(rt);
     // Nothing is bound before a pane asks: the road is what starts the daemon.

@@ -915,7 +915,10 @@ describe("one send to several models", () => {
     await waitFor(() => expect(useContextMenuStore.getState().menu).not.toBeNull());
     act(() => useContextMenuStore.getState().choose("keep"));
     dialog = await screen.findByRole("alertdialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    // Delete stands disabled until the dialog has read what each copy holds.
+    const confirm = within(dialog).getByRole<HTMLButtonElement>("button", { name: "Delete" });
+    await waitFor(() => expect(confirm.disabled).toBe(false));
+    fireEvent.click(confirm);
     await waitFor(() => expect(deleteWorkspace).toHaveBeenCalledTimes(2));
     expect(deleteWorkspace.mock.calls.map(call => call[0]).sort()).toEqual(["ws_astra", "ws_opus"]);
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
@@ -1030,5 +1033,17 @@ describe("the creation tile", () => {
     // Refused before any step, the card says so alone; refused on a step, it names that step.
     expect(gamma.dataset["creationLine"]).toBe(CREATE_STEP_WORDS.failed);
     expect(rowOf("delta").dataset["creationLine"]).toBe(CREATE_STEP_WORDS["fork-requested"]);
+  });
+
+  it("says what the step waits for in its own words, once, the newest ask in place of the last", async () => {
+    await mount(fakeApi([COPIED], [status(COPIED)]), "api");
+    const wait = "waiting for Solari to serve the image; asking again in 15s";
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), project: "pr_1", workspaceId: "ws_beta", lines: [{ stage: "fork-requested", message: "starting beta on solari", at: "t", elapsedMs: 0 }], failed: null }] } as never));
+    const poll = (elapsedMs: number) => act(() => useStore.getState().applyEvent({ type: "workspace.creating", workspaceId: "ws_beta", name: "beta", stage: "fork-requested", message: wait, elapsedMs, waiting: true }));
+    poll(1_000);
+    poll(16_000);
+    const beta = rowOf("beta");
+    expect(beta.dataset["creationLine"]).toBe(`W${wait.slice(1)}`);
+    expect(useStore.getState().creations[0]!.lines).toHaveLength(1);
   });
 });

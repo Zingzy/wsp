@@ -90,6 +90,7 @@ import {
   type TurnResult,
   TURN_WALL_MS,
   turnCutLine,
+  PLACE_SUDO_KIND,
 } from "@wsp/protocol";
 import { CODEX_TOML, MCP_SERVERS_JSON, TOOL_PREFIX, installEnv, installHomes } from "@wsp/catalog";
 import type { MachineExecOptions } from "../src/machine-exec.js";
@@ -98,7 +99,7 @@ import { removeScript } from "../src/project-landing.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
-import { NO_PLACE_UPDATER, PlaceAddTakenBackError, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceBackHolder, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
+import { NO_PLACE_UPDATER, PlaceAddTakenBackError, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceBackHolder, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { NO_AGENTS_READER, type AgentsActs, type AgentsOn, type AgentsReader, type ServerIcons, type ServersActs, type SkillsActs } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -857,6 +858,23 @@ describe("a place's cap and what runs there", () => {
     expect(await store.get("caps", HERE_PLACE_ID)).toBeUndefined();
   });
 
+  it("tells every socket the row a set made, so a page another window holds open reads it at once", async () => {
+    const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
+    const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 2, memMb: 7885 } }) });
+    sockets.push(joined.client.ws);
+    const watcher = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect((await watcher.request("events.subscribe")).ok).toBe(true);
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    const answered = (await capOf(host, joined.placeId, { threads: 1 })) as { place: PlaceView };
+    await capOf(host, HERE_PLACE_ID, { threads: 2 });
+    await until(() => watcher.events.filter(e => e.type === "place.changed").length === 2);
+    const changed = watcher.events.filter(e => e.type === "place.changed").map(e => e["place"] as PlaceView);
+    expect(changed[0]).toEqual(answered.place);
+    expect(changed[1]).toMatchObject({ id: HERE_PLACE_ID, cap: { threads: 2 } });
+    host.close();
+    watcher.close();
+  });
+
   it("says on every row its kind's default beside the cap and what the person set, and a reset takes a number back to the default", async () => {
     const { hostKey, store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
     const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 4, memMb: 8192 } }) });
@@ -1542,7 +1560,7 @@ describe("taking a place back out", () => {
 describe("taking a place back out over the login the install used", () => {
   /** A computer this host put the agent on over ssh and then stopped hearing from: its record carries that login
    * and no link, which is the box a remove has to reach itself. */
-  const installedAndSilent = async (leave?: PlaceLeaver): Promise<{ placeId: string; store: Store }> => {
+  const installedAndSilent = async (leave?: PlaceLeaver, more: Partial<PlaceWiring> = {}, boxKey?: string): Promise<{ placeId: string; store: Store }> => {
     const hostKey = newPlaceKeyPair();
     const store = memoryStore();
     let joined = "";
@@ -1560,11 +1578,13 @@ describe("taking a place back out over the login the install used", () => {
           await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === true));
           client.close();
           await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === false));
-          return { name: "vps", ssh: "root@65.21.4.12", sshKeyPath: "/Users/lena/.ssh/hetzner" };
+          return { name: "vps", ssh: "root@65.21.4.12", sshKeyPath: "/Users/lena/.ssh/hetzner", ...(boxKey === undefined ? {} : { hostKey: boxKey }) };
         },
         ...(leave === undefined ? {} : { leave }),
+        ...more,
       },
       placeJoinWaitMs: 60,
+      placeUpdateWaitMs: 60,
     });
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     await expect(runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now())).rejects.toThrow(placeNoLinkLine("vps"));
@@ -1594,6 +1614,59 @@ describe("taking a place back out over the login the install used", () => {
     expect(removed.swept).toEqual(took);
     expect(removed.note).toBe("wsp and the service that kept it running are removed from vps");
     expect(await store.get("places", placeId)).toBeUndefined();
+  });
+
+  it("asks for the sudo password before anything touches that computer, and rides it on the leave once sudo took it", async () => {
+    const asked: PlaceLeaveRequest[] = [];
+    const tried: (string | undefined)[] = [];
+    const acts: string[] = [];
+    const logins: PlaceLogin[] = [];
+    const { placeId, store } = await installedAndSilent(async req => (asked.push(req), ["/home/maya/.wsp"]), {
+      sudoOver: async (login, sudoPassword, act) => {
+        logins.push(login);
+        tried.push(sudoPassword);
+        acts.push(`${act.verb} ${act.name}`);
+        if (sudoPassword !== "right") throw Object.assign(new Error("maya@65.21.4.12 runs sudo only with maya's password. Type it at wsp remove vps in a terminal."), { kind: PLACE_SUDO_KIND });
+        return "taken";
+      },
+    }, "ssh-ed25519 SHA256:kept");
+    // Refused with the add's own kind, before the leave and with the record kept, so the person types it and removes again.
+    await expect(runtime!.places!.remove(placeId)).rejects.toMatchObject({ kind: PLACE_SUDO_KIND });
+    expect(asked).toEqual([]);
+    // The key the box's ssh answered the add with is kept on the record's road and handed to the read, which holds
+    // the box against it before any password goes there; the view a client reads carries none of the road's own.
+    expect(((await store.get("places", placeId)) as { road?: { hostKey?: string } }).road?.hostKey).toBe("ssh-ed25519 SHA256:kept");
+    expect(logins[0]).toEqual({ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostKey: "ssh-ed25519 SHA256:kept" });
+    expect(JSON.stringify((await placesOf()).find(p => p.id === placeId))).not.toContain("SHA256:kept");
+    const removed = await runtime!.places!.remove(placeId, { sudoPassword: "right" });
+    expect(tried).toEqual([undefined, "right"]);
+    expect(acts).toEqual(["remove vps", "remove vps"]);
+    expect(asked.map(r => r.sudoPassword)).toEqual(["right"]);
+    expect(removed.note).toBe(placeSweptOverSshLine("vps"));
+    expect(await store.get("places", placeId)).toBeUndefined();
+  });
+
+  it("rides no password on a login that reaches root without one, whatever came with the remove", async () => {
+    const asked: PlaceLeaveRequest[] = [];
+    const { placeId } = await installedAndSilent(async req => (asked.push(req), []), { sudoOver: async () => "free" });
+    await runtime!.places!.remove(placeId, { sudoPassword: "stray" });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.sudoPassword).toBeUndefined();
+  });
+
+  it("asks for the sudo password before an update over the login, and rides it on the update once sudo took it", async () => {
+    const updates: PlaceUpdateRequest[] = [];
+    const { placeId } = await installedAndSilent(undefined, {
+      sudoOver: async (_login, sudoPassword, act) => {
+        if (sudoPassword !== "right") throw Object.assign(new Error(`maya@65.21.4.12 runs sudo only with maya's password. Type it at wsp add ${act.name} --update in a terminal.`), { kind: PLACE_SUDO_KIND });
+        return "taken";
+      },
+      update: async req => (updates.push(req), { road: "ssh", at: "/root/.wsp/daemon/wsp-daemon" }),
+    });
+    await expect(runtime!.places!.update(placeId)).rejects.toThrow("wsp add vps --update");
+    expect(updates).toEqual([]);
+    await runtime!.places!.update(placeId, { sudoPassword: "right" });
+    expect(updates.map(r => r.sudoPassword)).toEqual(["right"]);
   });
 
   it("keeps the sentence a person has always read where the box will not answer the login, and still lets it go", async () => {
@@ -2127,6 +2200,27 @@ describe("putting the agent on a computer over ssh", () => {
     expect(stages.at(-1)?.note).toContain("publickey");
     // The code went to the box as a file, so the add that failed has spent it and nobody can join with it after.
     expect(await runtime.devices.spend(minted, Date.now())).toBe(false);
+  });
+
+  it("says a step the installer already marked failed once, not a second time as the add ends", async () => {
+    const stages: PlaceStageEvent[] = [];
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(newPlaceKeyPair()),
+        install: async (_req, stage) => {
+          stage("check", "running");
+          stage("root", "running");
+          stage("root", "failed", "sudo on dev@spoo asks for dev's password");
+          throw new Error("sudo on dev@spoo asks for dev's password");
+        },
+      },
+    });
+    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(runtime.places!.add({ address: "dev@spoo", hostUrls: DOOR }, Date.now())).rejects.toThrow("asks for");
+    expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["check running", "root running", "root failed"]);
   });
 
   it("draws a failure on the step that was under way, not on a step that only said what it had done", async () => {

@@ -179,6 +179,7 @@ describe("the agent contract on the command line and the tool door", () => {
     // the wait only buys the contract a five second pause on the road to a rebuild.
     const agents = agentHome(join(dir, "agents"));
     const runtime = (): Runtime => createRuntime({
+      statePath,
       backend,
       store,
       adapters: { claude: claude.adapter, codex: bornDeadAgent(prompt => `re: ${prompt}`).adapter },
@@ -286,6 +287,7 @@ describe("the agent contract on the command line and the tool door", () => {
     return VerbFailure.parse(JSON.parse(io.errors[0]!));
   };
 
+  // It starts the command line once per verb in turn, so its time grows with the verb count; at a load near 30 it runs 3 to 5 s.
   it("with --json every command-line verb prints JSON alone on stdout and its last object is the one its MCP tool answers with", async () => {
     const covered = new Map<string, unknown>();
     const last = async (verb: string, ...argv: string[]): Promise<unknown> => {

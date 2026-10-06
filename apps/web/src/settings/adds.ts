@@ -6,7 +6,7 @@
 // finished add ended stays on the form only in a window that watched it run,
 // and the computer's row keeps the fact everywhere else.
 import { create } from "zustand";
-import { PLACE_HOST_KEY_KIND, PLACE_LOGIN_REFUSED_KIND, withPlaceStage, type PlaceAddJob, type PlaceStageEvent } from "@wsp/protocol";
+import { PLACE_HOST_KEY_KIND, PLACE_LOGIN_REFUSED_KIND, PLACE_SUDO_KIND, withPlaceStage, type PlaceAddJob, type PlaceStageEvent } from "@wsp/protocol";
 import type { Api, SshLogin } from "../protocol/client.js";
 import { failureOf } from "../protocol/failure.js";
 import { ADD_COMPUTER_WORDS } from "./format.js";
@@ -100,4 +100,5 @@ export function addOverSsh(api: Api, login: SshLogin): string | null {
 }
 
 /** The fix under a failed add: the host's own, else the login fix for a login ssh refused, else none. */
-export const addFix = (job: PlaceAddJob): string | undefined => job.fix ?? (job.kind === PLACE_LOGIN_REFUSED_KIND ? ADD_COMPUTER_WORDS.refusedFix : undefined);
+export const addFix = (job: PlaceAddJob): string | undefined =>
+  job.kind === PLACE_SUDO_KIND ? ADD_COMPUTER_WORDS.sudoFix : (job.fix ?? (job.kind === PLACE_LOGIN_REFUSED_KIND ? ADD_COMPUTER_WORDS.refusedFix : undefined));
