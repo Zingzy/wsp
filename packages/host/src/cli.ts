@@ -3,143 +3,37 @@
 // on loopback. There is no control plane; the Solari key is read here
 // and used only for direct calls from this process to the machine API.
 
-import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, platform } from "node:os";
-import { basename, delimiter, dirname, join, resolve } from "node:path";
-import type { Readable, Writable } from "node:stream";
-import { parseArgs, type ParseArgsConfig } from "node:util";
-import { isCancel } from "@clack/prompts";
-import { collect, computeRecipe, expand, fileUsageCache, nodeHost, readLogUsage, scanProject, seedMenu, type Manifest, type Platform, type Rung } from "@wsp/collect";
-import {
-  HARNESS_ADAPTERS,
-  createRuntime,
-  hostIdentity,
-  jsonFileStore,
-  localExecStream,
-  sqliteStore,
-  stateDbPath,
-  type GoldenRecipe,
-  type GoldenVersion,
-  type HarnessAdapterFactory,
-  type HostSsh,
-  type LocalWiring,
-  type Machine,
-  type PlaceWiring,
-  type RestartDoor,
-  type Runtime,
-  type SeedWiring,
-  type Store,
-} from "@wsp/runtime";
-import { writeOwn } from "@wsp/own-file";
-import { CATALOG_AGENTS, GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, serverValuesOf } from "@wsp/catalog";
-import { authRefusal, cloudOffRefusal, PRICES_URL, STATE_STORE_ENV, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
-import { agentHome, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, verbCopier } from "@wsp/engine";
+import { parseArgs } from "node:util";
+import { cloudOffRefusal, runForTheList, unknownWordLine, usageRefusal, foreignFlagLine } from "@wsp/protocol";
 import { CLOUD_ON } from "./cloud.js";
-import { noMachinesLine, PROVIDER_MODULES, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv, type ProviderModule } from "./providers.js";
-import { daemonBinaryHere, webDirFor } from "./assets.js";
-import { DAEMON_DEPLOYED_LINE, cappedLine, claudeEnvs, deployDaemon, doctor, doctorOverHost, hostDoctor, missingBundleFile } from "./doctor.js";
-import { daemonFixLine, releaseUpdateLine } from "./daemon-fix.js";
-import { agentsHere } from "./agents-here.js";
-import { InitJobs } from "./init-job.js";
-import { ANTHROPIC_KEY, KEY_LAYER_WORDS, envFileFor, keyIn, parseEnvFile, savedEnv, serverEnvFileFor, serverVault, vaultOf, writeEnvFile, type Keys } from "./env-keys.js";
 // The writer of a host's own .env now sits beside its reader; the name stays exported here for every caller
 // that already had it from this module.
 export { writeEnvFile } from "./env-keys.js";
-import { keychainReader } from "./init-import.js";
-import { adoptLoginPath, loginEnv } from "./login-path.js";
-import { CACHE_RULE } from "./project-bundle.js";
-import { packSeed } from "./project-seed.js";
-import { readBrewTable } from "./init-brew.js";
-import { copyGoldenRecipe } from "./image-recipe.js";
-import { exitCodeOf, runInit, type InitIO, type InitPricing, type InitResult } from "./init.js";
-import { runMintHere } from "./init-vault.js";
-import { recipePath } from "./init-recipe.js";
-import { historyCache } from "./recipe-file.js";
 import { alsoHere } from "./scan.js";
-import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, widthOf, wrap, type PromptOptions } from "./init-layout.js";
-import { TAGLINE, builtOn, opening } from "./init-opening.js";
-import { runLocalInit } from "./init-local.js";
-import type { ServedAt } from "./init-serve.js";
-import { askFirst } from "./init-first.js";
-import { buildBesideHost } from "./init-beside.js";
-import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
-import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
-import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, hostInboxDir, hostLogPath, hostReadingsDir, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, heldOrStarted, programGone, refuseIfServed, releaseLock, rewriteLock, SERVICE_WAIT_MS, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
-import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
-import { startOnce } from "./start-once.js";
-import {
-  hostThereLines,
-  httpProbe,
-  installService,
-  logTail,
-  noManagerLine,
-  registeredService,
-  runFailureLine,
-  serviceAddressHere,
-  serviceEnv,
-  serviceManagerFor,
-  serviceReading,
-  statusLines,
-  stopService,
-  systemRunner,
-  untilLock,
-  untilServing,
-  type HostProbe,
-  type ServiceManager,
-  type ServiceRunner,
-} from "./service.js";
-import { serviceServesState, starterFor, type HostStarter } from "./host-start.js";
-import { restartRoads, type RestartingHost, type RestartRoad } from "./restart.js";
-import { stopRecordedConnector } from "./connector.js";
-import { admittedDevices, hostsCommand, loginCommand, logoutCommand, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
-import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
-import { homeNamed, realState, servingHome } from "./serving-home.js";
-import { advertiseWord, devicesCommand, hereUrl, pairCommand, type HereAt } from "./pairing.js";
-import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
-import { agentsReader } from "./agents-reader.js";
-import { skillsActs } from "./skills-acts.js";
-import { serverIcons } from "./server-icons.js";
-import { agentLatest } from "./agent-latest.js";
-import { keptTools, recipeShelf } from "./recipes.js";
-import { recipeWatch, type WatchFn } from "./recipe-watch.js";
-import { serversActs } from "./servers-acts.js";
-import { hostActs } from "./agents-signin.js";
-import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
-import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
-import { writeThreadWsp } from "./shim.js";
-import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, serversRefreshedLine, refreshServers, skillsRefreshedLine, toolServerLine, wspCommand, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, cloudLineOf, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
-import { installedVersion, stateWriterHere, VERSION } from "./version.js";
-import { latestWords, releaseReading, releaseWatch } from "./release.js";
-import { analyticsOff, hostAnalytics } from "./analytics.js";
-import { followUsage } from "./analytics-events.js";
-import { type CliIO, terminalIO, jsonCliIO } from "./cli/io.js";
+import { systemOpener } from "./relay.js";
+import { starterFor, type HostStarter } from "./host-start.js";
+import { wspHome } from "./hosts.js";
+import { runningWsp, type RunningWsp } from "./mcp-install.js";
+import { cloudLineOf, failed, findVerb, jsonAsked, runVerb, takeCommon, verbUsage } from "./verbs.js";
+import { VERSION } from "./version.js";
+import { type CliIO, terminalIO } from "./cli/io.js";
 export { type CliIO, terminalIO, jsonCliIO } from "./cli/io.js";
-import { type KeySources, keyLayers, keySources, providerEnvNow, loadKeys, keysFound, vaultNow } from "./cli/keys.js";
 export { type KeySources, keySources, type NoProviderKey, type LoadedKeys, loadKeys, keysFound, vaultNow, saveQuestion } from "./cli/keys.js";
-import { statePathFrom, statesHere, stateStore } from "./cli/state.js";
+import { statePathFrom } from "./cli/state.js";
 export { devCheckoutState, type StatePick, statePick, defaultStatePath, statesHere, stateStore } from "./cli/state.js";
-import { type ServeAsked, SERVE_FLAGS, type SharedOpts, optsFor, type SharedFlags, type Options, SHARED_OPTIONS } from "./cli/flags.js";
+import { SERVE_FLAGS, optsFor, type SharedFlags, SHARED_OPTIONS } from "./cli/flags.js";
 export { type ServeAsked, SERVE_FLAGS, type SharedOpts, optsFor, SHARED_OPTIONS } from "./cli/flags.js";
-import { goldenRecipe, localWiring, hostRecipeWatch, swapProvider, makeRuntime, collectThisComputer, projectFolder, workspaceEnvsFor } from "./cli/wiring.js";
 export { goldenRecipe, localWorkFolder, type LocalDaemonStart, localWiring, hostRecipeWatch, providerSlotOf, swapProvider, servingWiring, makeRuntime, hostSeed, projectFolder } from "./cli/wiring.js";
-import { stopOnSignals, stayOnUncaught, type ServeOptions, serve, hostFor } from "./cli/serve.js";
 export { type StopProcess, OWN_FILES_POLL_MS, stopOnSignals, type UncaughtProcess, stayOnUncaught, type ServeOptions, serve, noClaudeKeyNote, hostDoctorReaders } from "./cli/serve.js";
-import { upCommandFor, init } from "./cli/init.js";
 export { terminalInitIO, providerBesideRefusal, upCommandFor } from "./cli/init.js";
-import { up, systemService, upServiceCommand, downCommand, latestHere, statusCommand, pickUpPorts } from "./cli/service.js";
 export { up, type ServiceDeps, hostRoadWord, hostStoppedLine, systemService, serviceArgv, keyOnlyInThisShell, claudeKeyOnlyInThisShell, upServiceCommand, downCommand, statusCommand, pickUpPorts } from "./cli/service.js";
-import { HOST_STARTS_ITSELF, type Command, type CommandDeps, SYSTEM_COMMAND_DEPS, HOST_COMMANDS, HOST_WORD, HOST_LINES, findCommand, JSON_COMMANDS, MCP_COMMAND, MCP_OPTIONS, mcpInstallUsage, mcpUsage, COMMAND_LINES, SHARED_FLAGS, readers } from "./cli/commands.js";
+import { type CommandDeps, SYSTEM_COMMAND_DEPS, HOST_COMMANDS, HOST_WORD, HOST_LINES, findCommand, JSON_COMMANDS, MCP_COMMAND, mcpUsage, SHARED_FLAGS, readers } from "./cli/commands.js";
 export { HOST_STARTS_ITSELF, type HostFlag, type CommandDeps, SYSTEM_COMMAND_DEPS, DOCTOR_HANDLES_ENV, doctorKeyAsk, doctorRow, HOST_FLAG, HOST_COMMANDS, SHARED_WORDS, COMMANDS_FOR_HELP, HOST_WORD, HOST_LINES, JSON_COMMANDS, PROSE_COMMANDS, MCP_OPTIONS, type CommandLine, COMMAND_LINES, type SharedFlag, SHARED_FLAGS, readers } from "./cli/commands.js";
 import { HELP, HELP_PAGES, agentPage, hostPage, devPage, commandPage } from "./cli/help.js";
 export { HELP, HELP_PAGES, agentPage, hostPage, devPage, commandPage } from "./cli/help.js";
-
+import { mcp } from "./cli/mcp.js";
 
 export type { Keys } from "./env-keys.js";
-import { mcp } from "./cli/mcp.js";
 
 // The hosts file sits under the same home, so where that home is lives beside it and is re-exported here for every
 // reader that already had it from the command line.
