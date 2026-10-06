@@ -60,7 +60,7 @@ import { SidebarCorner } from "./SidebarCorner.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { CreationTile, ThreadLaunchTile, ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
 import { newThreadTitle, computerName, computerOf, copyName, placeNames } from "./workspaceRows.js";
-import { CheckoutAsk, tileCheckout } from "./tileCheckout.js";
+import { tileCheckout, useCheckoutAsks } from "./tileCheckout.js";
 import { restingAge } from "../components/status/restingAge.js";
 import { PROJECT_WORDS, SECTION_WORDS } from "./words.js";
 import { SectionRow } from "./SectionRow.js";
@@ -181,6 +181,7 @@ export function WorkspaceSidebar() {
   const [renaming, setRenaming] = useState<{ rowId: string; saving: boolean } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   useWarmTiles(rootRef);
+  useCheckoutAsks(rootRef);
   const renameThread = useStore(s => s.renameThread);
   const renameWorkspace = useStore(s => s.renameWorkspace);
   const canRename = useStore(s => s.api?.renameSession !== undefined);
@@ -406,7 +407,7 @@ export function WorkspaceSidebar() {
       );
     }
     return (
-      <li key={item.id} data-thread-item className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS)}>
+      <li key={item.id} data-thread-item data-workspace-id={runs.id} className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS)}>
         {tile}
         {children.length > 0 ? <ul className={CHILD_LIST_CLASS}>{children.map(child => tileItem(child, depth + 1, runs.id, settled))}</ul> : null}
       </li>
@@ -574,9 +575,6 @@ export function WorkspaceSidebar() {
   return (
     <>
       <SidebarChromeHeader />
-      {projects.map(runs => (
-        <CheckoutAsk key={runs.id} workspaceId={runs.id} />
-      ))}
       <div ref={rootRef} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col">
         <SidebarContent fixedHeader={header} className="min-h-full" onContextMenu={event => void openContextMenu(event, settledRowActions.filter(action => action.id === "settle-read"))}>
           <ul data-sidebar-tree className="flex w-full min-w-0 flex-col px-[var(--sidebar-content-inset)]">

@@ -13,6 +13,7 @@ import { stateWriterHere } from "../src/version.js";
 import { cli, localWiring, SYSTEM_COMMAND_DEPS, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO, type LocalDaemonStart } from "../src/cli.js";
 import { LocalDaemon } from "../src/local-daemon.js";
 import { spawnedDaemons } from "./spawned-daemons.js";
+import { cliSource } from "./cli-source.js";
 import { noProviderStorageLine } from "../src/storage.js";
 import { hostPlaceKeyPath } from "../src/places.js";
 import { serviceAddressHere, serviceManagerFor } from "../src/service.js";
@@ -630,9 +631,9 @@ describe("wsp up", () => {
   });
 
   it("starts the server in one place that init's tail and up both call", () => {
-    const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
+    const source = cliSource();
     const initSource = readFileSync(new URL("../src/init.ts", import.meta.url), "utf8");
-    expect(cliSource.match(/startHost\(/g)).toHaveLength(1);
+    expect(source.match(/startHost\(/g)).toHaveLength(1);
     expect(initSource).not.toMatch(/startHost\(/);
   });
 
@@ -641,10 +642,10 @@ describe("wsp up", () => {
     expect(optsFor({ state: statePath })).toMatchObject({ port: 4400, named: false });
     // wsp up, wsp init and the rest read their port from this one call, so neither can derive it its own way: the
     // parse calls optsFor once (the second hit is its own declaration) and optsFor is the only reader of the rule.
-    const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
-    expect(cliSource.match(/optsFor\(/g)).toHaveLength(2);
-    expect(cliSource.match(/portsAsked\(/g)).toHaveLength(1);
-    expect(cliSource).not.toMatch(/\b4400\b/);
+    const source = cliSource();
+    expect(source.match(/optsFor\(/g)).toHaveLength(2);
+    expect(source.match(/portsAsked\(/g)).toHaveLength(1);
+    expect(source).not.toMatch(/\b4400\b/);
   });
 
   it("the state files a taken port is asked about are this run's and this computer's default, each once", () => {
