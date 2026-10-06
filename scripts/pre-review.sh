@@ -3,8 +3,9 @@
 # What a review keeps finding on a branch, checked before anyone says it is
 # ready. Each check prints PASS, FAIL, WARN or SKIP with its reason, every
 # check runs even after one fails, and any FAIL exits 1. --laws runs only the
-# tests that read the whole tree, and --build builds the packages they load
-# first. A ticket number prints the lines a report on it has to answer.
+# tests that read the whole tree, on the branch merged with origin/main, and
+# --build builds the packages they load first. A ticket number prints the
+# lines a report on it has to answer.
 set -u
 
 usage='usage: scripts/pre-review.sh [--laws] [--build] [<ticket number>]'
@@ -39,6 +40,8 @@ LAWS=(
   apps/web/test/no-caps.test.ts
   apps/web/test/no-separator-dots.test.ts
   packages/protocol/test/daemon-contract.test.ts
+  packages/protocol/test/area-notes.test.ts
+  packages/protocol/test/test-hygiene.test.ts
 )
 
 failed=0
@@ -70,6 +73,11 @@ build_cause() {
   printf '%s' "$causes"
 }
 
+# A commit no ref holds, by an author that needs no git config.
+throwaway_commit() {
+  GIT_AUTHOR_NAME=pre-review GIT_AUTHOR_EMAIL=pre-review@invalid GIT_COMMITTER_NAME=pre-review GIT_COMMITTER_EMAIL=pre-review@invalid git commit-tree "$@"
+}
+
 # Each line the diff adds in the paths named, as file:line:text.
 added_lines() {
   git diff -U0 "$base" "$head" -- "$@" | awk '
@@ -78,13 +86,10 @@ added_lines() {
     /^\+/ { print file ":" line ":" substr($0, 2); line++ }'
 }
 
-if [ $laws_only -eq 1 ]; then
-  main=$(git rev-parse -q --verify origin/main)
-else
-  fetched=1
-  git fetch -q origin main 2>/dev/null || fetched=0
-  main=$(git rev-parse -q --verify origin/main) || { echo "refused: this checkout has no origin/main" >&2; exit 2; }
-fi
+fetched=1
+git fetch -q origin main 2>/dev/null || fetched=0
+main=$(git rev-parse -q --verify origin/main)
+if [ -z "$main" ] && [ $laws_only -eq 0 ]; then echo "refused: this checkout has no origin/main" >&2; exit 2; fi
 head=$(git rev-parse HEAD)
 base=${main:+$(git merge-base "$main" "$head")}
 
@@ -185,8 +190,54 @@ if [ $build -eq 1 ]; then
   fi
 fi
 
+# The laws judge the tree that lands: this folder as it stands merged with origin/main, which a branch holding
+# origin/main already is. Any other branch gets a throwaway merge commit in a worktree of its own, with what this
+# checkout ignores (its installs and builds) linked in, and pnpm told not to reinstall into those links.
+laws_at=$root
+laws_env=()
+if [ -z "$main" ]; then
+  echo "the laws run on this folder alone: this checkout has no origin/main"
+elif [ "$base" = "$main" ]; then
+  echo "the laws run on this folder, which holds origin/main $(git rev-parse --short "$main")"
+else
+  folder=""
+  cp "$(git rev-parse --git-path index)" "$work/index" &&
+    folder=$(GIT_INDEX_FILE=$work/index sh -c 'git add -A && git write-tree') &&
+    folder=$(throwaway_commit "$folder" -p "$head" -m "this folder as it stands")
+  said=$(git merge-tree --write-tree --name-only --no-messages "$main" "$folder" 2>&1)
+  case $? in
+    0)
+      merged=$work/merged
+      merge=$(throwaway_commit "${said%%$'\n'*}" -p "$folder" -p "$main" -m "this folder merged with origin/main")
+      if git worktree add -q --detach "$merged" "$merge" >/dev/null 2>&1; then
+        trees+=("$merged")
+        while IFS= read -r p; do
+          p=${p%/}
+          [ -d "$merged/$(dirname "$p")" ] && [ ! -e "$merged/$p" ] && ln -s "$root/$p" "$merged/$p"
+        done < <(git ls-files --others --ignored --exclude-standard --directory)
+        laws_at=$merged
+        laws_env=(pnpm_config_verify_deps_before_run=false)
+        echo "the laws run on this folder merged with origin/main $(git rev-parse --short "$main"), a throwaway merge commit $(git rev-parse --short "$merge") in $merged"
+      else
+        laws_at=""
+        fail "the laws" "a worktree at the merge with origin/main could not be made"
+      fi
+      ;;
+    1)
+      laws_at=""
+      fail "the laws" "this folder conflicts with origin/main $(git rev-parse --short "$main") in $(printf '%s\n' "$said" | tail -n +2 | grep -v '^$' | sort -u | joined), so no tree of it can land; merge origin/main in and resolve them"
+      ;;
+    *)
+      laws_at=""
+      fail "the laws" "git could not merge this folder with origin/main (git merge-tree --write-tree needs git 2.38): $(printf '%s' "$said" | tail -n 1)"
+      ;;
+  esac
+fi
+
 law_log=$work/laws.log
-if scripts/test-files.sh --tools "${LAWS[@]}" >"$law_log" 2>&1; then
+if [ -z "$laws_at" ]; then
+  :
+elif (cd "$laws_at" && env ${laws_env[@]+"${laws_env[@]}"} scripts/test-files.sh --tools "${LAWS[@]}") >"$law_log" 2>&1; then
   pass "the laws: $(grep -E '^ *Test Files' "$law_log" | sed 's/^ *Test Files *//')"
 else
   reason=$(grep -o 'daemon/crates/wsp-mcp is behind this package.*commit them' "$law_log" | head -n 1)
