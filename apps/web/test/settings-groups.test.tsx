@@ -602,7 +602,7 @@ describe("Keybindings", () => {
   });
 
   it("draws one line per default rule with the chord's keycaps per platform, both where a command has two, the nine jumps as one line, and drops in a tab what the tab keeps", () => {
-    expect(label("commandPalette.toggle")).toEqual([["⌘K"]]);
+    expect(label("commandPalette.toggle")).toEqual([["⇧⌘P"], ["⌘K"]]);
     expect(label("settings.toggle")).toEqual([["⌘,"]]);
     expect(label("editor.open")).toEqual([["⌘O"]]);
     expect(label("chat.new")).toEqual([["⌘N"], ["⌘T"]]);
@@ -612,7 +612,7 @@ describe("Keybindings", () => {
     expect(label("terminal.zoomIn")).toEqual([["⌘="], ["⇧⌘="]]);
     expect(label("workspace.select.1")).toEqual([["⌘1"], ["⌘9"]]);
     // On another platform the same rules read Ctrl.
-    expect(label("commandPalette.toggle", { platform: "Linux x86_64", desktopShell: true })).toEqual([["Ctrl+K"]]);
+    expect(label("commandPalette.toggle", { platform: "Linux x86_64", desktopShell: true })).toEqual([["Ctrl+Shift+P"], ["Ctrl+K"]]);
     // In a browser tab the chords the tab keeps are not drawn: New thread reads its one remaining chord, the
     // workspace switch on a Mac has none left and the thread switch keeps its arrows.
     const tab = { platform: "MacIntel", desktopShell: false };

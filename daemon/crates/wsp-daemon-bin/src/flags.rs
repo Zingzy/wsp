@@ -166,6 +166,8 @@ impl Flags {
             ssh_programs: None,
             ssh_idle_ms: None,
             apparmor_profile: self.apparmor_profile,
+            // The computer's own /; only a case names another.
+            install_root: None,
             readings_dir: self.readings_dir,
             readings_interval_ms: None,
         }

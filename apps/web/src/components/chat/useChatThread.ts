@@ -183,6 +183,8 @@ function ownPlace(e: SessionEvent): string | undefined {
       return `session.run:${e.runId}:${e.state}`;
     case "session.subagent":
       return e.line === undefined ? undefined : `session.subagent:${e.turnId}:${e.line}`;
+    case "session.slate":
+      return `session.slate:${e.threadId}:${e.version}`;
     default: {
       const _exhaustive: never = e;
       return undefined;

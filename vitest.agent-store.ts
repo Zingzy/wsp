@@ -9,30 +9,56 @@
 // doing. The person's own agents start sessions in other temp folders while a
 // suite runs, and those are not looked at. The teardown runs once for each
 // workspace project; each reads the same folder's keys.
+//
+// A run leaves nothing in the person's home either: every case runs with HOME
+// under the run's own folder (RUN_HOME), so a case that writes under
+// homedir(), as a host serving a temp state file once wrote its device key
+// into the real ~/.wsp, writes there, and anything left there fails the run.
 import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { claudeProjectKey } from "./packages/protocol/src/project-path.js";
-import { RUN_TMPDIR } from "./vitest.env.js";
+import { RUN_HOME, RUN_TMPDIR } from "./vitest.env.js";
 
 const PROJECTS = join(process.env["CLAUDE_CONFIG_DIR"] || join(homedir(), ".claude"), "projects");
 
+/** Every file and empty folder under dir, relative to it. */
+function leftIn(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter(e => !e.isDirectory() || readdirSync(join(e.parentPath, e.name)).length === 0)
+    .map(e => join(e.parentPath, e.name).slice(dir.length + 1))
+    .sort();
+}
+
 export default function setup(): () => void {
-  mkdirSync(RUN_TMPDIR, { recursive: true });
+  mkdirSync(RUN_HOME, { recursive: true });
   // Both spellings, as Claude Code keys a folder: macOS hands out /var and resolves it to /private/var.
   const runKeys = [...new Set([RUN_TMPDIR, realpathSync(RUN_TMPDIR)])].map(claudeProjectKey);
   return () => {
     const left = existsSync(PROJECTS) ? readdirSync(PROJECTS).filter(k => runKeys.some(r => k === r || k.startsWith(`${r}-`))) : [];
-    if (left.length === 0) {
+    const home = leftIn(RUN_HOME);
+    if (left.length === 0 && home.length === 0) {
       // A failed run keeps its folder for the goldens it regenerates; a render or smoke run keeps the screenshots in it.
       if (!process.exitCode && !process.env["WSP_RENDER"] && !process.env["WSP_DESKTOP_SMOKE"]) rmSync(RUN_TMPDIR, { recursive: true, force: true });
       return;
     }
     throw new Error(
       [
-        `this run left ${left.length} folder${left.length === 1 ? "" : "s"} of its own temp folder in the person's own Claude Code store, ${PROJECTS}:`,
-        ...left.map(k => `  ${k}`),
-        "A case that lands agent state hands the road homes under its own temp folder, never the ones under this computer's home.",
+        ...(left.length === 0
+          ? []
+          : [
+              `this run left ${left.length} folder${left.length === 1 ? "" : "s"} of its own temp folder in the person's own Claude Code store, ${PROJECTS}:`,
+              ...left.map(k => `  ${k}`),
+              "A case that lands agent state hands the road homes under its own temp folder, never the ones under this computer's home.",
+            ]),
+        ...(home.length === 0
+          ? []
+          : [
+              `this run left ${home.length} file${home.length === 1 ? "" : "s"} in the home its cases run with, ${RUN_HOME}; outside a test run they land in the person's own home:`,
+              ...home.map(f => `  ~/${f}`),
+              "A case whose code writes under the home hands that code a home of its own under its temp folder.",
+            ]),
       ].join("\n"),
     );
   };

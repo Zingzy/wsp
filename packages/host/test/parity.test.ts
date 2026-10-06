@@ -243,6 +243,8 @@ const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
   "agents setup unset_env": "--unset-env",
   "agents setup reset": "--reset",
   "projects set reset": "--reset",
+  "slate read values": "--values",
+  "slate state start": "--start",
 };
 
 describe("the command line, the MCP tools and the skill are one contract", () => {
@@ -357,6 +359,50 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     };
     expect(RUNTIME_OPS.filter(op => op.startsWith("sessions.") && !verbs.includes(`"${op}"`)).sort()).toEqual(Object.keys(WINDOW_ONLY).sort());
     for (const [op, why] of Object.entries(WINDOW_ONLY)) expect(why, `${op} says why it has no verb`).toMatch(/\S/);
+  });
+
+  it("every slate op no verb sends is the window's own and says why: an agent reaches the slate through the slate verbs", () => {
+    const verbs = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
+    const WINDOW_ONLY: Record<string, string> = {
+      "slates.get": "the window's fetch of the record it draws; an agent reads its slate with slate read, which answers the sketch too",
+      "slates.shown": "the window saying it opened the Slate tab on the first write, a fact about one person's window",
+      "slates.event": "a press is the person's act in the window; an agent hears it as the message the press sends",
+      "slates.approve": "the person's answer to the consent sheet; an agent never approves a command it declared",
+      "slates.cancel": "the person stopping a run from the window; an agent never starts or stops a run",
+      "slates.revoke": "the person withdrawing an approval from the window; an agent never revokes for the person",
+      "slates.subscribe": "a window's hold on the sources its drawn pieces read; an agent's read resolves what it names at once",
+      "slates.unsubscribe": "a window letting go of a hold it took",
+      "slates.resolve": "the window's read of a path it cannot resolve itself; an agent names paths in slate read",
+    };
+    expect(RUNTIME_OPS.filter(op => op.startsWith("slates.") && !verbs.includes(`"${op}"`)).sort()).toEqual(Object.keys(WINDOW_ONLY).sort());
+  });
+
+  it("the four slate tools' entries in tools/list total under 4,300 characters, the budget every session pays, and every input says what it takes (10)", async () => {
+    const server = mcpServer("/nonexistent/state.json", { env: {} });
+    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "parity", version: "0" });
+    await server.connect(toServer);
+    await client.connect(toClient);
+    try {
+      const slate = (await client.listTools()).tools.filter(t => t.name.startsWith("slate_"));
+      expect(slate.map(t => t.name).sort()).toEqual(["slate_catalog", "slate_read", "slate_state", "slate_write"]);
+      // Every session with a slate pays these schemas each turn; _meta is read by the client and never reaches the model.
+      expect(slate.reduce((n, t) => n + JSON.stringify({ ...t, _meta: undefined }).length, 0)).toBeLessThan(4300);
+      for (const t of slate) for (const [name, input] of Object.entries(t.inputSchema.properties ?? {})) expect((input as { description?: string }).description, `${t.name}.${name}`).toBeTruthy();
+      // A Claude Code launch loads the server's tools up front, and every tool but the slate's opts back out of that.
+      for (const t of slate) expect(t._meta, t.name).toEqual({ "anthropic/alwaysLoad": true });
+      for (const t of (await client.listTools()).tools.filter(t => !t.name.startsWith("slate_"))) expect(t._meta, t.name).toEqual({ "anthropic/alwaysLoad": false });
+      // Small models sent JSON of their own as document; the inputs say which one takes the slate.
+      const write = slate.find(t => t.name === "slate_write")!.inputSchema.properties as Record<string, { description?: string }>;
+      expect(write["text"]!.description).toContain("JSX-like text");
+      expect(write["document"]!.description).toContain("not for writing");
+      expect((slate.find(t => t.name === "slate_catalog")!.inputSchema.properties as Record<string, { description?: string }>)["name"]!.description).toBe("leave out first: the index of every piece; then an entry, like runs");
+      expect(write["check"]!.description).toBe("validate, write nothing");
+      expect(slate.find(t => t.name === "slate_read")!.description).toContain("the panel's words as the person sees them");
+      expect(slate.find(t => t.name === "slate_catalog")!.description).toContain("Call it first whenever the person wants to see, watch, monitor or keep an eye on something, tick things off as they go, or see what's unread, even when another tool fetches the data.");
+    } finally {
+      await client.close();
+    }
   });
 
   it("every readings op a window sends stays with the windows and says why, so a new one sits nowhere only by failing here", () => {

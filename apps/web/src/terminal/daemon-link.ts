@@ -63,6 +63,10 @@ const DEFAULT_FIRST_ANSWER_MS = 20_000;
 /** What a refused link waits: no retry at the usual pace opens a door that answered with a status, so every dial
  * after one is spaced at the backoff's ceiling until something past the door answers. */
 const REFUSED_ATTEMPT = 32;
+/** The kinds an open fails with that a dial at the usual pace can mend: the provider's passing answers. Any other
+ * kind is an answer the door or the host gave, which the link holds with its sentence; a failure with no kind is one
+ * nothing answered. */
+const PASSING_KINDS: ReadonlySet<string> = new Set(["transient", "concurrency", "unknown"]);
 
 interface Waiting {
   reject: (e: Error) => void;
@@ -216,15 +220,15 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
     } catch (e) {
       if (closed) return;
       const kind = (e as { kind?: unknown }).kind;
-      if (kind === "refused") {
-        setStatus("refused", errorText(e));
-        scheduleRetry(REFUSED_ATTEMPT);
-        return;
-      }
       // A 4401 means the dial got through and the daemon answered, so a refusal is over even when one was held.
       if (kind === "reauth") {
         setStatus("reauth-needed");
         scheduleRetry();
+        return;
+      }
+      if (typeof kind === "string" && !PASSING_KINDS.has(kind)) {
+        setStatus("refused", errorText(e));
+        scheduleRetry(REFUSED_ATTEMPT);
         return;
       }
       // Nothing got past the door, so a dial that failed for a reason of the host's own does not turn a refusal

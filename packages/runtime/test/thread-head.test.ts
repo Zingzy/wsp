@@ -3,9 +3,13 @@
 // the tail of one thread, and older events page in by position, without the
 // whole workspace's transcript crossing the socket.
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
-import { HEAD_BYTES, HEAD_RESULT_CHARS, HISTORY_PAGE_BYTES, isSessionEvent, type AdapterEvent, type EventUnion, type SessionEvent, type ThreadHeadEvent, type TurnResult } from "@wsp/protocol";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { DAEMON_VERSION, HEAD_BYTES, HEAD_RESULT_CHARS, HISTORY_PAGE_BYTES, isSessionEvent, type AdapterEvent, type EventUnion, type SessionEvent, type ThreadHeadEvent, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
+import { sqliteStore } from "../src/sqlite-store.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { createOn, stubBackend } from "./stub-backend.js";
 
@@ -52,6 +56,22 @@ const refused: HarnessAdapterFactory = () => ({
   },
 });
 
+const homes: string[] = [];
+const home = (): string => {
+  const h = mkdtempSync(join(tmpdir(), "wsp-head-"));
+  homes.push(h);
+  return h;
+};
+afterAll(() => {
+  for (const h of homes) rmSync(h, { recursive: true, force: true });
+});
+
+/** Each store the transcripts are kept in: blobs by workspace in memory, and rows in the state database. */
+const STORES: [string, () => Store][] = [
+  ["blobs", memoryStore],
+  ["rows", () => sqliteStore(join(home(), "state.json"), { wsp: "test", daemon: DAEMON_VERSION, bin: "/usr/local/bin/wsp" })],
+];
+
 const texts = (n: number, word = "line"): Line[] => Array.from({ length: n }, (_, i) => ({ kind: "text", text: `${word} ${i}` }));
 
 async function seeded(store: Store, lines: (prompt: string) => Line[]) {
@@ -61,9 +81,9 @@ async function seeded(store: Store, lines: (prompt: string) => Line[]) {
   return { rt, ws, backend };
 }
 
-describe("positions on the transcript", () => {
+describe.each(STORES)("positions on the transcript, kept as %s", (_, fresh) => {
   it("stamps every recorded event with its place in the workspace's transcript, the same on the bus and in history", async () => {
-    const { rt, ws } = await seeded(memoryStore(), () => texts(3));
+    const { rt, ws } = await seeded(fresh(), () => texts(3));
     const heard: EventUnion[] = [];
     rt.events.on("*", e => void heard.push(e));
     const one = await rt.sessions.start(ws.id, { prompt: "one" });
@@ -77,7 +97,7 @@ describe("positions on the transcript", () => {
   });
 
   it("never issues a position twice: a restart goes on after the newest, and a forgotten thread's are not issued again", async () => {
-    const store = memoryStore();
+    const store = fresh();
     const { rt, ws, backend } = await seeded(store, () => texts(2));
     const first = await rt.sessions.start(ws.id, { prompt: "one" });
     await first.finished;
@@ -104,7 +124,9 @@ describe("positions on the transcript", () => {
     expect(last.map(e => e.pos)).toEqual(last.map((_, i) => dropped.pos! + 1 + i));
     await again.close();
   });
+});
 
+describe("positions on a transcript an older build wrote", () => {
   it("numbers a transcript an older build wrote from one, and records the next event after them", async () => {
     const store = memoryStore();
     const { rt, ws, backend } = await seeded(store, () => texts(2));
@@ -127,11 +149,11 @@ describe("positions on the transcript", () => {
   });
 });
 
-describe("a thread's head", () => {
+describe.each(STORES)("a thread's head, kept as %s", (_, fresh) => {
   it("answers the thread's facts and its newest events under the head's bytes, tool results cut and marked", async () => {
     const long = "x".repeat(HEAD_RESULT_CHARS * 3);
     const lines: Line[] = Array.from({ length: 300 }, (_, i) => (i % 3 === 2 ? { kind: "tool_result", text: long } : i % 3 === 1 ? { kind: "tool_use", text: `{"command":"ls ${i}"}` } : { kind: "text", text: `step ${i}` }));
-    const { rt, ws } = await seeded(memoryStore(), p => (p === "busy" ? lines : texts(2, "other")));
+    const { rt, ws } = await seeded(fresh(), p => (p === "busy" ? lines : texts(2, "other")));
     const busy = await rt.sessions.start(ws.id, { prompt: "busy", permissionMode: "acceptEdits" });
     await busy.finished;
     await (await rt.sessions.start(ws.id, { prompt: "quiet" })).finished;
@@ -160,7 +182,7 @@ describe("a thread's head", () => {
   it("names the running turn while one runs", async () => {
     let release!: () => void;
     const held = new Promise<void>(resolve => (release = resolve));
-    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: scripted(() => texts(2), () => held) } });
+    const rt = createRuntime({ backend: stubBackend(), store: fresh(), adapters: { claude: scripted(() => texts(2), () => held) } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -173,7 +195,7 @@ describe("a thread's head", () => {
   });
 
   it("stays under the head's bytes on the wire, multi-byte text and the commas between events counted", async () => {
-    const { rt, ws } = await seeded(memoryStore(), () => Array.from({ length: 2000 }, (_, i) => ({ kind: "text" as const, text: `${i} ✓ réponse: ` + "日本語".repeat(20) })));
+    const { rt, ws } = await seeded(fresh(), () => Array.from({ length: 2000 }, (_, i) => ({ kind: "text" as const, text: `${i} ✓ réponse: ` + "日本語".repeat(20) })));
     const handle = await rt.sessions.start(ws.id, { prompt: "wide" });
     await handle.finished;
     const head = await rt.sessions.head(handle.view().threadId!);
@@ -185,13 +207,13 @@ describe("a thread's head", () => {
   });
 
   it("is not found for a thread the host holds no row of", async () => {
-    const { rt } = await seeded(memoryStore(), () => texts(1));
+    const { rt } = await seeded(fresh(), () => texts(1));
     await expect(rt.sessions.head("no-such-thread")).rejects.toMatchObject({ kind: "not-found" });
     await rt.close();
   });
 
   it("goes out on the bus when a turn starts and ends, on a rename and on an access change", async () => {
-    const { rt, ws } = await seeded(memoryStore(), () => texts(2));
+    const { rt, ws } = await seeded(fresh(), () => texts(2));
     const heads: ThreadHeadEvent[] = [];
     rt.events.on("thread.head", e => void heads.push(e as ThreadHeadEvent));
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
@@ -213,9 +235,9 @@ describe("a thread's head", () => {
   });
 });
 
-describe("a history page", () => {
+describe.each(STORES)("a history page, kept as %s", (_, fresh) => {
   it("pages one thread back by position, newest page first, and the pages put together are the thread", async () => {
-    const { rt, ws } = await seeded(memoryStore(), p => texts(p === "long" ? 4900 : 40, p));
+    const { rt, ws } = await seeded(fresh(), p => texts(p === "long" ? 4900 : 40, p));
     await (await rt.sessions.start(ws.id, { prompt: "short" })).finished;
     const long = await rt.sessions.start(ws.id, { prompt: "long" });
     await long.finished;
@@ -243,7 +265,7 @@ describe("a history page", () => {
 
   it("stops at the page's bytes past its first event", async () => {
     const big = "y".repeat(12 * 1024);
-    const { rt, ws } = await seeded(memoryStore(), () => Array.from({ length: 100 }, () => ({ kind: "tool_result" as const, text: big })));
+    const { rt, ws } = await seeded(fresh(), () => Array.from({ length: 100 }, () => ({ kind: "tool_result" as const, text: big })));
     const handle = await rt.sessions.start(ws.id, { prompt: "big" });
     await handle.finished;
     const page = await rt.sessions.page(ws.id, { threadId: handle.view().threadId!, limit: 200 });
@@ -254,7 +276,7 @@ describe("a history page", () => {
   });
 
   it("answers a thread the caller reaches no row of with nothing", async () => {
-    const { rt, ws } = await seeded(memoryStore(), () => texts(1));
+    const { rt, ws } = await seeded(fresh(), () => texts(1));
     await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
     expect(await rt.sessions.page(ws.id, { threadId: "elsewhere" })).toMatchObject({ events: [], total: 0 });
     await rt.close();

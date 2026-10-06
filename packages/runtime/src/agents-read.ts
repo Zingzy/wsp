@@ -7,6 +7,7 @@ import { randomBytes } from "node:crypto";
 import { AgentsReport, HERE_PLACE_ID, ptyBareOn, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import type { DaemonChannel } from "./daemon-channel.js";
+import type { McpServerSpec } from "./slate-mcp.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 
 /** What the host reads off a target: the report less what the runtime stamps on it, and the login its lines are handed
@@ -49,6 +50,8 @@ export interface AgentsReader {
   /** Drops what was kept for the target, which a sign-in there has just changed. */
   forget?(key: string): void;
   tools(on: AgentsOn, ask: ServerToolsAsk): Promise<ServerToolsAnswer>;
+  /** One server of the agent's config on this computer, resolved for a client that keeps it running. */
+  server?(on: Extract<AgentsOn, { kind: "here" }>, ask: { agent: string; name: string }): Promise<McpServerSpec>;
   /** Ends every command a read or a tools ask started on this computer and is still waiting on. */
   close?(): void;
 }

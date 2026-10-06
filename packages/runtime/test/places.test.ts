@@ -32,6 +32,7 @@ import {
   placeRefusalTranscript,
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
+  FS_FOLDERS_DAEMON_VERSION,
   PLACE_WORKSPACE_PATH,
   placeBehindLine,
   agentsCell,
@@ -4482,7 +4483,7 @@ describe("the folders of a computer you own", () => {
     ]);
   });
 
-  it("carry that daemon's own refusal, and a daemon too old to list folders is named behind rather than asked", async () => {
+  it("carry that daemon's own refusal, and are read by a daemon one behind this host's", async () => {
     const { hostKey } = await serving();
     const refusal = "/etc is outside the folders wsp browses on that computer: /home/maya";
     const asked: Record<string, unknown>[] = [];
@@ -4490,11 +4491,18 @@ describe("the folders of a computer you own", () => {
     sockets.push(client.ws);
     const c = await mine();
     expect(await c.request("host.folders", { on: placeId, dir: "/etc" })).toMatchObject({ ok: false, error: refusal });
-    const old = report("old-box", { daemonVersion: DAEMON_VERSION - 1 });
-    const behind = await join(hostKey, { code: await code(), name: "old-box", report: old, answers: listsFolders(asked) });
+    const behind = await join(hostKey, { code: await code(), name: "old-box", report: report("old-box", { daemonVersion: DAEMON_VERSION - 1 }), answers: listsFolders(asked) });
     sockets.push(behind.client.ws);
-    expect(await c.request("host.folders", { on: behind.placeId })).toMatchObject({ ok: false, error: placeBehindLine("old-box", placeDaemonBehind(old)!) });
-    expect(asked.map(f => f["dir"])).toEqual(["/etc"]);
+    const listed = await c.request("host.folders", { on: behind.placeId, dir: "/home/maya" });
+    expect(listed.ok, String(listed["error"])).toBe(true);
+    expect(listed["listing"]).toEqual(LISTING);
+    expect(asked.map(f => f["dir"])).toEqual(["/etc", "/home/maya"]);
+    // One too old to list folders at all is named behind rather than asked.
+    const old = report("older-box", { daemonVersion: FS_FOLDERS_DAEMON_VERSION - 1 });
+    const older = await join(hostKey, { code: await code(), name: "older-box", report: old, answers: listsFolders(asked) });
+    sockets.push(older.client.ws);
+    expect(await c.request("host.folders", { on: older.placeId })).toMatchObject({ ok: false, error: placeBehindLine("older-box", placeDaemonBehind(old)!) });
+    expect(asked).toHaveLength(2);
   });
 
   it("are refused on a provider in one sentence saying what to do instead, on a place nobody holds by the places there are, and on a computer that is not connected by its absent sentence", async () => {
