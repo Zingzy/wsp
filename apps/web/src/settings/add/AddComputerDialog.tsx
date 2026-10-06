@@ -29,7 +29,7 @@ import { useAdds } from "../adds.js";
 import { ComputerGlyph } from "../ComputerGlyph.js";
 import { ADD_COMPUTER_WORDS, FACT } from "../format.js";
 import { Grid, GridHead } from "../grid.js";
-import { NOTE, ROW_FIELD } from "../layout.js";
+import { GLYPH, NOTE, ROW_FIELD } from "../layout.js";
 import { placeName } from "../places.js";
 import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
@@ -39,10 +39,8 @@ import { everything, folderKey, githubPick, noPicks, tickUsedClis } from "./choi
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
 import { checkRows, opensLog, runningMs, setupCount, setupRows, setupStanding, stepLogs, type StepLine } from "./setup.js";
+import { STEP_BODY, STEP_HEAD, STEP_WIDTH, StepFoot } from "./StepDialog.js";
 import { RetryActs, SkipAct, StepRow, useNow } from "./StepRow.js";
-
-const GLYPH = "size-4 text-foreground/80";
-
 
 const sshLogin = (host: SshHostSuggestion): string => [host.user, host.hostName ?? host.alias].filter(Boolean).join("@");
 
@@ -428,17 +426,6 @@ function SavedLine() {
   );
 }
 
-/** The dialog's foot: the saved line at the left once a choice is kept, the acts at the right. Under 640 px the acts
- * stack with the primary on top and the line stands under them. */
-function Foot({ left, children }: { left: ReactNode; children: ReactNode }) {
-  return (
-    <div data-slot="dialog-footer" className="flex flex-col-reverse gap-2 px-5 pt-3 pb-4 sm:flex-row sm:items-center sm:justify-end">
-      <span className="flex min-h-5 items-center max-sm:justify-center sm:me-auto">{left}</span>
-      {children}
-    </div>
-  );
-}
-
 const PICK_STEPS: ReadonlySet<AddStep> = new Set(["startfrom", "agents", "mcp", "clis", "skills", "plugins", "github", "projects", "other", "summary"]);
 
 /** Whether picks hold nothing at all, which is where a first pick step fills them with everything. */
@@ -700,7 +687,7 @@ export function AddComputerDialog() {
 
   return (
     <Dialog open onOpenChange={open => (open ? undefined : close())}>
-      <DialogPopup data-add-computer={view} initialFocus={view === "where" || view === "hostkey" ? undefined : false} className="max-w-[560px] [--settings-inset:16px] sm:h-[640px]">
+      <DialogPopup data-add-computer={view} initialFocus={view === "where" || view === "hostkey" ? undefined : false} className={cn(STEP_WIDTH, "[--settings-inset:16px] sm:h-[640px]")}>
         {view === "ready" && place !== undefined ? (
           <>
             <DialogTitle className="sr-only">{head.title}</DialogTitle>
@@ -708,7 +695,7 @@ export function AddComputerDialog() {
           </>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            <DialogHeader className="flex-row items-start justify-between gap-6 pb-3">
+            <DialogHeader className={STEP_HEAD}>
               <div className="flex min-w-0 flex-col gap-1">
                 <DialogTitle>{head.title}</DialogTitle>
                 {head.line === undefined ? null : <DialogDescription>{head.line}</DialogDescription>}
@@ -717,8 +704,8 @@ export function AddComputerDialog() {
                 {figure.words}
               </span>
             </DialogHeader>
-            <DialogPanel className="flex flex-col gap-5 pt-2 pb-5">{body()}</DialogPanel>
-            <Foot left={saved ? <SavedLine /> : null}>{foot}</Foot>
+            <DialogPanel className={STEP_BODY}>{body()}</DialogPanel>
+            <StepFoot left={saved ? <SavedLine /> : null}>{foot}</StepFoot>
           </div>
         )}
       </DialogPopup>

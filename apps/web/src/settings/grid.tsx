@@ -10,7 +10,7 @@ import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode } from "r
 import type { RowAct } from "../components/agents/agentsRows.js";
 import { cn } from "../lib/utils.js";
 import { FACT, VALUE } from "./format.js";
-import { CARD_INSET, LINE_FLOOR, LIST_TITLE, NOTE, ROW_FLOOR } from "./layout.js";
+import { CARD_INSET, GLYPH_FRAME, LINE_FLOOR, LIST_TITLE, NOTE, ROW_FLOOR } from "./layout.js";
 import { CARD_SURFACE } from "./rows.js";
 
 /** An act as its word alone, as every act on the settings grid is: the plus is Add's and no other button wears a glyph. */
@@ -94,9 +94,6 @@ export function GridRow({ columns, tight = false, open, onContextMenu, title, at
 
 /** Whether a press landed on a control of its own inside the row, which the row's open leaves to it. */
 const insideControl = (target: EventTarget, row: Element): boolean => target instanceof Element && target.closest("button, a, input") !== null && row.contains(target);
-
-/** The 32 px frame a row's mark stands in. */
-export const GLYPH_FRAME = "flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-foreground/[0.04]";
 
 export function GlyphFrame({ children }: { children: ReactNode }) {
   return <span className={GLYPH_FRAME}>{children}</span>;
