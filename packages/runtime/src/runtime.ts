@@ -2708,9 +2708,6 @@ class DaemonRefusal extends Error {
 const isNoHostCli = (e: unknown): boolean => e instanceof DaemonRefusal && e.code === "no-host-cli";
 const isNoGitCredential = (e: unknown): boolean => e instanceof DaemonRefusal && e.code === "no-git-credential";
 
-/** How long this computer's sign-ins, read off every agent's own commands, answer a usage read before they are read again. */
-const SIGN_INS_HELD_MS = 60_000;
-
 export function createRuntime(opts: RuntimeOptions): Runtime {
   const { backend, store, adapters } = opts;
   const local = opts.local;
@@ -13211,19 +13208,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** This computer's own sign-ins, read off its agents since no report carries them; a read that fails lists none. */
-  /** This computer's sign-ins, held a minute and shared while a read is out: each read runs every agent's own version and
-   * status command, and a usage read per live slate ran one each, about forty a minute (2026-10-06). */
-  let heldSignIns: { at: number; value: Promise<Record<string, AgentSignInState>> } | undefined;
-  const hereSignIns = (): Promise<Record<string, AgentSignInState>> => {
-    const now = clock.now();
-    if (heldSignIns !== undefined && now - heldSignIns.at < SIGN_INS_HELD_MS) return heldSignIns.value;
-    const value = (opts.agentsReader?.read({ kind: "here" }, { latest: false }) ?? Promise.resolve(undefined)).then(
+  const hereSignIns = (): Promise<Record<string, AgentSignInState>> =>
+    (opts.agentsReader?.read({ kind: "here" }, { latest: false }) ?? Promise.resolve(undefined)).then(
       read => (read === undefined ? {} : Object.fromEntries(read.agents.flatMap(a => (a.signIn === "signed-in" || a.signIn === "vault-key" ? [[a.id, a.signIn]] : [])))),
       () => ({}),
     );
-    heldSignIns = { at: now, value };
-    return value;
-  };
 
   const usageAccounts = async (): Promise<AccountsAnswer> => {
     const places = (await placeDoor?.list(clock.now())) ?? [];
