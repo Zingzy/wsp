@@ -37,14 +37,20 @@ export const section: PieceView = {
     const timed = slate.timedUnder(id);
     // An open the agent set, literal or two-way, makes the section fold even where it did not say collapsible.
     const folds = props["collapsible"] === true || piece.props?.["open"] !== undefined;
+    // A fold's toggle is the title's own button, inside the heading; its hit area stretches over the whole head.
+    const toggle = folds ? (
+      <CollapsibleTrigger className="text-left outline-none after:absolute after:inset-0 after:rounded-md focus-visible:after:ring-2 focus-visible:after:ring-ring">{title}</CollapsibleTrigger>
+    ) : (
+      title
+    );
     const head = (
       <>
         {/* Neither is cut for want of room: the title keeps its words, wrapping past two thirds of the row, and the note
             wraps in the rest, at the row's end unless a chevron folds the section. */}
-        <span className={cn("min-w-0 break-words", note !== undefined && "max-w-[65%] shrink-0")} role="heading" aria-level={3}>{title}</span>
+        <span className={cn("min-w-0 break-words", note !== undefined && "max-w-[65%] shrink-0")} role="heading" aria-level={3}>{toggle}</span>
         {note === undefined ? <span className="flex-1" /> : <span data-slate-section-note className={cn(NOTE, "min-w-0 flex-1 break-words", !folds && "text-right")}>{note}</span>}
         {timed.length > 0 || refreshing ? (
-          <span data-slate-refresh {...(refreshing ? { "data-slate-refreshing": "" } : {})} title={timed.map(run => cadenceOf(slate.document, run)).join("\n") || undefined} className="-my-0.5 grid size-6 shrink-0 place-items-center rounded-lg text-muted-foreground">
+          <span data-slate-refresh {...(refreshing ? { "data-slate-refreshing": "" } : {})} title={timed.map(run => cadenceOf(slate.document, run)).join("\n") || undefined} className="relative -my-0.5 grid size-6 shrink-0 place-items-center rounded-lg text-muted-foreground">
             <RefreshCw aria-hidden className={cn("size-3.5", refreshing && "animate-spin motion-reduce:animate-none")} />
             {refreshing ? <span className="sr-only">Refreshing</span> : null}
           </span>
@@ -74,10 +80,10 @@ export const section: PieceView = {
     };
     return (
       <Collapsible data-slate-section open={open} onOpenChange={change} className="flex min-w-0 flex-col">
-        <CollapsibleTrigger className={cn(HEAD, "w-full rounded-md text-left outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring")}>
+        <div className={cn(HEAD, "relative w-full hover:text-foreground")}>
           {head}
           <ChevronRight aria-hidden className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 motion-reduce:transition-none", open && "rotate-90")} />
-        </CollapsibleTrigger>
+        </div>
         <CollapsiblePanel>
           <div className="mt-2.5">{body}</div>
         </CollapsiblePanel>

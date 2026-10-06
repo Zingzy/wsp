@@ -222,6 +222,22 @@ describe("the Slate tab", () => {
     // The handle unlocks the step, as the host's push would.
     expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
   });
+
+  it("sends a secret once when Enter is followed by a blur before the host answers, and again after a refusal", async () => {
+    let answer: (ok: boolean) => void = () => {};
+    const slates = host(record(DEPLOY_SLATE), { state: vi.fn(() => new Promise<{ version: number }>((resolve, reject) => (answer = ok => (ok ? resolve({ version: 2 }) : reject(new Error("refused")))))) });
+    openThread(slates);
+    const field = (await screen.findByLabelText("Vercel token")) as HTMLInputElement;
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: TOKEN } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    fireEvent.blur(field);
+    expect(slates.state).toHaveBeenCalledTimes(1);
+    await act(async () => answer(false));
+    fireEvent.focus(field);
+    fireEvent.blur(field);
+    expect(slates.state).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("held runs ask on their own, held buttons say why, submit is Enter", () => {

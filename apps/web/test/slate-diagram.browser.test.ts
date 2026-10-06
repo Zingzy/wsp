@@ -125,6 +125,28 @@ describe.skipIf(renderSkipped !== undefined)("the slate's diagram drawn in Chrom
     await page.close();
   });
 
+  it("keeps the person's zoom when the panel resizes rather than fitting the drawing again", async () => {
+    const page = await open("diagram");
+    await page.waitForSelector(`${WIDE} svg`, { timeout: 30_000 });
+    const opened = await read(page, WIDE);
+    await page.mouse.move(opened.proxy.x, opened.proxy.y);
+    await page.keyboard.down("Control");
+    await page.mouse.wheel(0, -40);
+    await page.keyboard.up("Control");
+    await page.waitForFunction(sel => Number(document.querySelector<HTMLElement>(sel)!.dataset["slateZoom"]) > 1, WIDE);
+    const zoomed = (await read(page, WIDE)).k;
+    const end = () => page.evaluate(sel => document.querySelector<HTMLElement>(sel)!.style.getPropertyValue("--scroll-area-overflow-x-end"), WIDE);
+    const before = await end();
+    await page.evaluate(() => (document.querySelector<HTMLElement>("[data-panel]")!.style.width = "360px"));
+    // The frame drew for the narrower panel; two frames later every effect that follows a draw has run.
+    await page.waitForFunction(([sel, was]) => document.querySelector<HTMLElement>(sel)!.style.getPropertyValue("--scroll-area-overflow-x-end") !== was, [WIDE, before] as const);
+    await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+    expect((await read(page, WIDE)).k).toBe(zoomed);
+    await page.mouse.dblclick(opened.proxy.x, opened.proxy.y);
+    await page.waitForFunction(sel => document.querySelector<HTMLElement>(sel)!.dataset["slateZoom"] === "1", WIDE);
+    await page.close();
+  });
+
   it("opens the expanded view fitted whole, below the inline floor down to 0.4, with the dialog itself holding focus", async () => {
     const page = await open("diagram");
     await page.waitForSelector(`${WIDE} svg`, { timeout: 30_000 });

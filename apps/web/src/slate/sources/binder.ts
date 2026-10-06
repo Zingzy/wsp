@@ -31,12 +31,14 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
   let pending = new Set<string>();
   let disposed = false;
 
-  let threadCache: { sessions: unknown; out: { workspaceId: string | null; thread: ThreadView | null } } | null = null;
+  let threadCache: { key: unknown; out: { workspaceId: string | null; thread: ThreadView | null } } | null = null;
   const threadOf = (app: AppState) => {
-    if (threadCache !== null && threadCache.sessions === app.sessions) return threadCache.out;
+    // Keyed on the rows of the thread's own workspace once found, so another workspace's reload keeps the answer.
+    const keyOf = (workspaceId: string | null) => (workspaceId === null ? app.sessions : app.sessions[workspaceId]);
+    if (threadCache !== null && threadCache.key === keyOf(threadCache.out.workspaceId)) return threadCache.out;
     const workspaceId = threadWorkspaceIn(app.sessions, threadId);
     const out = { workspaceId, thread: workspaceId === null ? null : (foldThreads(app.sessions[workspaceId] ?? []).find(t => (t.threadId ?? t.id) === threadId) ?? null) };
-    threadCache = { sessions: app.sessions, out };
+    threadCache = { key: keyOf(workspaceId), out };
     return out;
   };
 
