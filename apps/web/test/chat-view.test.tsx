@@ -227,8 +227,31 @@ describe("ChatView", () => {
     expect(screen.getByText(/Working/)).toBeDefined();
     emit({ type: "session.end", ...scope, exitCode: 137, sawResult: false });
     expect(screen.queryByText(/Working for/)).toBeNull();
-    expect(screen.getByTestId("settled-footer").textContent).toContain("failed");
     expect(screen.getByText(/session exited without a result \(exit code 137\)/i)).toBeDefined();
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
+  });
+
+  it("a turn that fails in the agent's own words says them once, whole, with no failed under them", async () => {
+    const words = "Not logged in · Please run /login; sign in from a terminal on this computer, then send again";
+    const { api, emit } = fixtureApi([workspace]);
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "hi" });
+    emit({ type: "session.done", ...scope, result: { status: "failed", error: words, durationMs: 300 } });
+    emit({ type: "session.end", ...scope, exitCode: 1, sawResult: true });
+    const rows = [...document.querySelectorAll<HTMLElement>("[data-timeline-row-id]")];
+    expect(rows.filter(row => row.textContent?.includes(words))).toHaveLength(1);
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
+    expect(document.querySelector("[data-chat-view]")!.textContent).not.toMatch(/\bfailed\b/);
+  });
+
+  it("a turn that fails with no words of its own says failed once, and no row stands in for the words", async () => {
+    const { api, emit } = fixtureApi([workspace]);
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "hi" });
+    emit({ type: "session.done", ...scope, result: { status: "failed", durationMs: 300 } });
+    emit({ type: "session.end", ...scope, exitCode: 1, sawResult: true });
+    expect(screen.getByTestId("settled-footer").textContent).toBe("failed");
+    expect(document.querySelector("[data-chat-view]")!.textContent!.match(/failed/g)).toEqual(["failed"]);
   });
 
   it("a session the runtime ended for a nap shows its reason as the last row and settles the thread", async () => {
@@ -241,7 +264,7 @@ describe("ChatView", () => {
     expect(screen.queryByText(/Working for/)).toBeNull();
     const rows = [...document.querySelectorAll<HTMLElement>("[data-timeline-row-id]")];
     expect(rows.at(-1)?.textContent).toMatch(/machine paused while the agent was working/i);
-    expect(screen.getByTestId("settled-footer").textContent).toContain("failed");
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
   });
 
   it("a turn in flight on a paused workspace waits for the machine with a Wake that calls the wake op; unreachable waits without one", async () => {

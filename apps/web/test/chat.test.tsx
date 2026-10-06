@@ -213,8 +213,8 @@ describe("chat tab rendering", () => {
     emit({ type: "session.start", ...scope, prompt: "hi" });
     expect(screen.getByText(/Working/)).toBeDefined();
     emit({ type: "session.end", ...scope, exitCode: 137, sawResult: false });
-    expect(screen.getByTestId("settled-footer").textContent).toContain("failed");
     expect(screen.getByText(/session exited without a result \(exit code 137\)/i)).toBeDefined();
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
     expect(screen.queryByText(/Working for/)).toBeNull();
   });
 });

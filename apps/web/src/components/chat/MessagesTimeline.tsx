@@ -1997,7 +1997,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       )}
       {...rowToggleProps}
     >
-      <div className="flex select-none items-center gap-1.5 transition-[opacity,translate] duration-200">
+      <div className={cn("flex select-none gap-1.5 transition-[opacity,translate] duration-200", showDestructiveRowStyle ? "items-start" : "items-center")}>
         <span
           className={iconWrapperClass}
           role={showFailedIndicator ? "img" : undefined}
@@ -2008,7 +2008,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <div className="min-w-0 flex-1 overflow-hidden">
             <p className="flex min-w-0 w-full items-baseline gap-1.5 text-sm leading-relaxed">
-              <span className={cn("min-w-0 flex-1 truncate", headingClass)}><WorkEntryLabelText label={display} /></span>
+              <span className={cn("min-w-0 flex-1", showDestructiveRowStyle ? "break-words" : "truncate", headingClass)}><WorkEntryLabelText label={display} /></span>
             </p>
           </div>
           <span

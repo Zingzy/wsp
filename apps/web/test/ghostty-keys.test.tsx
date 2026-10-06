@@ -11,6 +11,7 @@ import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { TerminalViewport } from "../src/components/ThreadTerminalDrawer.js";
 import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
 import { isTerminalAppShortcut } from "../src/keybindings.js";
+import { keybindingsFor } from "../src/keybindingOverrides.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
@@ -102,6 +103,67 @@ describe("isTerminalAppShortcut", () => {
   it("hands the terminal toggle and the palette back to the app where mod is Control", () => {
     expect(isTerminalAppShortcut(event("j", { ctrlKey: true }), undefined, LINUX)).toBe(true);
     expect(isTerminalAppShortcut(event("P", { code: "KeyP", ctrlKey: true, shiftKey: true }), undefined, LINUX)).toBe(true);
+  });
+
+  // Each app-wide chord as a focused terminal sees it where mod is Control. A Control letter alone is a shell's or a
+  // terminal program's, so the app takes it back only with Shift or Alt, or on a key no shell reads: the comma and
+  // the digits.
+  const passes: Array<[string, ReturnType<typeof event>]> = [
+    ["Settings on Ctrl+,", event(",", { code: "Comma", ctrlKey: true })],
+    ["the sidebar on Ctrl+Shift+B", event("B", { code: "KeyB", ctrlKey: true, shiftKey: true })],
+    ["the preview on Ctrl+Shift+J", event("J", { code: "KeyJ", ctrlKey: true, shiftKey: true })],
+    ["search in files on Ctrl+Shift+F", event("F", { code: "KeyF", ctrlKey: true, shiftKey: true })],
+    ["the terminal's zoom in on Ctrl+=", event("=", { code: "Equal", ctrlKey: true })],
+    ["the terminal's zoom in on Ctrl+Shift+=", event("+", { code: "Equal", ctrlKey: true, shiftKey: true })],
+    ["the terminal's zoom out on Ctrl+-", event("-", { code: "Minus", ctrlKey: true })],
+    ["the terminal's zoom reset on Ctrl+0", event("0", { code: "Digit0", ctrlKey: true })],
+  ];
+
+  it.each(passes)("hands %s back to the app where mod is Control", (_name, chord) => {
+    expect(isTerminalAppShortcut(chord, undefined, LINUX)).toBe(true);
+  });
+
+  // A browser tab keeps Control and a digit for its own tabs, so the jump reaches the page in the desktop app alone.
+  it.each(["1", "5", "9"])("hands the jump to workspace %s back to the app in the desktop app where mod is Control", digit => {
+    window.wsp = {};
+    try {
+      expect(isTerminalAppShortcut(event(digit, { code: `Digit${digit}`, ctrlKey: true }), undefined, LINUX)).toBe(true);
+    } finally {
+      delete window.wsp;
+    }
+  });
+
+  // The ticket's shell chords, then the four app chords that are a shell's or an editor's too: Ctrl+B is readline's
+  // back one character and tmux's prefix, Ctrl+P and Ctrl+N walk the history, Ctrl+O is nano's write out.
+  const shell = ["c", "d", "r", "k", "l", "a", "e", "w", "u", "z", "b", "p", "n", "o"];
+
+  it.each(shell)("leaves Ctrl+%s to the shell where mod is Control", letter => {
+    expect(isTerminalAppShortcut(event(letter, { ctrlKey: true }), undefined, LINUX)).toBe(false);
+  });
+
+  it("leaves Ctrl+Shift+- to the shell where mod is Control: it is Ctrl+_, readline's undo, and no zoom rule holds Shift on it", () => {
+    expect(isTerminalAppShortcut(event("_", { code: "Minus", ctrlKey: true, shiftKey: true }), undefined, LINUX)).toBe(false);
+  });
+
+  it("leaves Ctrl+Alt+B to the shell where mod is Control, bash's shell-backward-word, though the right panel binds it", () => {
+    expect(isTerminalAppShortcut(event("b", { code: "KeyB", ctrlKey: true, altKey: true }), undefined, LINUX)).toBe(false);
+  });
+
+  it("leaves a shell's chord to it even where the person moved an app command onto it", () => {
+    const moved = keybindingsFor({ "settings.toggle": "mod+c", "sidebar.toggle": "mod+r" });
+    expect(isTerminalAppShortcut(event("c", { ctrlKey: true }), moved, LINUX)).toBe(false);
+    expect(isTerminalAppShortcut(event("r", { ctrlKey: true }), moved, LINUX)).toBe(false);
+  });
+
+  // Enter, Tab, Backspace and Escape as a terminal's Control letters.
+  it.each([
+    ["m", "settings.toggle", "KeyM"],
+    ["i", "sidebar.toggle", "KeyI"],
+    ["h", "preview.toggle", "KeyH"],
+    ["[", "files.search", "BracketLeft"],
+  ])("leaves Ctrl+%s to the shell even where the person moved %s onto it", (key, command, code) => {
+    const moved = keybindingsFor({ [command]: `mod+${key}` });
+    expect(isTerminalAppShortcut(event(key, { code, ctrlKey: true }), moved, LINUX)).toBe(false);
   });
 });
 
@@ -251,6 +313,44 @@ describe("the drawer's viewport under the keybinding dispatcher", () => {
     off();
     expect(event.defaultPrevented).toBe(true);
     expect(data).toEqual([]);
+  });
+
+  it("opens Settings on Ctrl+, from a focused terminal where mod is Control, pty untouched", async () => {
+    const { data, press } = await mountViewport(LINUX);
+    useStore.setState({ settingsOpen: false });
+    const event = press({ key: ",", code: "Comma", ctrlKey: true });
+    await vi.waitFor(() => expect(useStore.getState().settingsOpen).toBe(true));
+    expect(event.defaultPrevented).toBe(true);
+    expect(data).toEqual([]);
+    useStore.setState({ settingsOpen: false });
+  });
+
+  it("moves the sidebar on Ctrl+Shift+B from a focused terminal where mod is Control, and leaves Ctrl+B to the shell", async () => {
+    const { data, press, sidebarOpen } = await mountViewport(LINUX);
+    press({ key: "b", code: "KeyB", ctrlKey: true });
+    await vi.waitFor(() => expect(data).toEqual(["\x02"]));
+    expect(sidebarOpen()).toBe("true");
+    const event = press({ key: "B", code: "KeyB", ctrlKey: true, shiftKey: true });
+    await vi.waitFor(() => expect(sidebarOpen()).toBe("false"));
+    expect(event.defaultPrevented).toBe(true);
+    expect(data).toEqual(["\x02"]);
+  });
+
+  it("zooms the focused terminal's text on Ctrl+= and puts it back on Ctrl+0 where mod is Control, pty untouched", async () => {
+    const { data, press } = await mountViewport(LINUX);
+    const zooms: unknown[] = [];
+    const { setPreferences, preferences } = useStore.getState();
+    useStore.setState({ setPreferences: async patch => void zooms.push(patch.terminalZoom), preferences: { ...preferences, terminalZoom: { ws_a: 2 } } });
+    try {
+      const zoomIn = press({ key: "=", code: "Equal", ctrlKey: true });
+      const reset = press({ key: "0", code: "Digit0", ctrlKey: true });
+      await vi.waitFor(() => expect(zooms).toHaveLength(2));
+      expect(zooms[1]).toEqual({ ws_a: null });
+      expect([zoomIn.defaultPrevented, reset.defaultPrevented]).toEqual([true, true]);
+      expect(data).toEqual([]);
+    } finally {
+      useStore.setState({ setPreferences, preferences });
+    }
   });
 
   it("leaves the shell its Control chords where mod is Control: interrupt, end of input, history search, kill line", async () => {
