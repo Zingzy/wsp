@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { type Allowed, holdTo } from "./allowed.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -43,151 +44,63 @@ const PLACEHOLDER_HOMES: ReadonlyArray<{ names: readonly string[]; why: string }
 ];
 const placeholder = (value: string) => PLACEHOLDER_HOMES.some(group => group.names.includes(value.split("/")[2] ?? ""));
 
-/** Every recorded id or real home a fixture still carries, each with why it stays. Each file is a path or a folder ending in /. */
-const EXEMPT: ReadonlyArray<{ files: readonly string[]; values: readonly string[]; why: string }> = [
-  {
-    files: ["packages/adapter-claude/test/fixtures/stream-session.jsonl"],
-    values: [
-      "e16ed170-8257-4668-879e-fe836341633c",
-      "0f0d5872-9c1a-4e56-8a3b-7d2c4f6e9b01",
-      "1a2b3c4d-0001-4aaa-8bbb-000000000001",
-      "1a2b3c4d-0002-4aaa-8bbb-000000000002",
-      "1a2b3c4d-0003-4aaa-8bbb-000000000003",
-      "1a2b3c4d-0004-4aaa-8bbb-000000000004",
-      "1a2b3c4d-0005-4aaa-8bbb-000000000005",
-      "1a2b3c4d-0006-4aaa-8bbb-000000000006",
-      "61535293-2b18-4aed-a9ac-a020ba962615",
-      "toolu_01WspFixBash1",
-    ],
-    why: "a recorded Claude Code stream whose session and message ids the adapter tests match on",
-  },
-  {
-    files: ["packages/adapter-claude/test/fixtures/subagent-stream.jsonl"],
-    values: [
-      "e16ed170-8257-4668-879e-fe836341633c",
-      "7c1f0f2a-2d4e-4d54-9d0f-0b1b5f2d7a10",
-      "toolu_01WspFixAgentA",
-      "toolu_01WspFixAgentB",
-      "toolu_01WspFixBashA",
-      "toolu_01WspFixBashB",
-    ],
-    why: "the same recorded session with subagents; the tool ids are synthetic and pair each call with its result",
-  },
-  {
-    files: ["packages/adapter-claude/test/fixtures/compact-turn.jsonl"],
-    values: ["e16ed170-8257-4668-879e-fe836341633c"],
-    why: "the same recorded session's id",
-  },
-  {
-    files: ["packages/adapter-claude/test/fixtures/session-titles.jsonl"],
-    values: ["5b3d3ddb-86d6-47ba-b216-0a510284d8b6", "11111111-1111-4111-8111-111111111111"],
-    why: "session ids the title reader keys its titles by",
-  },
-  {
-    files: ["packages/adapter-claude/test/fixtures/catalog-probe-2.1.280.txt"],
-    values: ["7c6f56dc-c585-42a0-b6e8-783665c45546", "8ba9226e-a816-4937-8929-ee0272a7c498"],
-    why: "message ids in a captured catalog probe",
-  },
-  {
-    files: ["packages/adapter-codex/test/fixtures/app-server-subagent.jsonl"],
-    values: [
-      "01a100dc-e1f0-7183-94f1-048611cff500",
-      "01a100dc-e29f-7942-9ad4-1f2da918b6e2",
-      "01a100dc-ecc5-7b02-9cee-319037d6a218",
-      "c2242f64-3c99-4c9b-be0d-2132497b24ef",
-      "01a100dd-0379-7f91-bd7d-76a0d1bcb962",
-      "01a100dd-03bf-7493-9c23-3f6f10160415",
-      "01a100dd-0af8-70f3-b7c6-96732089b6a8",
-    ],
-    why: "a recorded Codex app server run whose thread and turn ids the adapter tests match on",
-  },
-  {
-    files: ["packages/adapter-codex/test/fixtures/app-server-turn.jsonl"],
-    values: [
-      "00000000-0000-4000-8000-000000000000",
-      "01a0e365-72f3-77e3-ba3a-3d18e12e9b95",
-      "01a0e365-73b9-7e10-8045-3ff9e93753f9",
-      "01a0e365-814e-75c3-9fb3-25454f5905d9",
-      "267f4a9f-3715-4cb1-b8fc-14f9a57ec2f9",
-      "01a0e365-94bf-7232-8f36-4b49c7931ae7",
-    ],
-    why: "a recorded Codex app server turn whose thread and turn ids the adapter tests match on",
-  },
-  {
-    files: ["packages/adapter-codex/test/fixtures/no-login-app-server.jsonl"],
-    values: [
-      "aa3474b0-578b-4ee3-a6df-2de799e87f82",
-      "01a0e2b2-493b-7c53-ae59-446697cb28db",
-      "01a0e2b2-4aa8-7b03-b71e-d5308c3d2407",
-      "01a0e2b2-4e56-7703-b395-81797e74e2a5",
-    ],
-    why: "a recorded Codex app server run with no sign-in",
-  },
-  {
-    files: ["packages/adapter-codex/test/fixtures/catalog-probe-route.jsonl"],
-    values: ["9a1713a7-49a1-492e-8010-ce79c930410b"],
-    why: "an id in a captured catalog probe",
-  },
-  {
-    files: ["packages/adapter-codex/test/fixtures/catalog-probe.txt"],
-    values: ["01cade2b-3da6-453d-bf6b-22f2a5df1db2"],
-    why: "an MCP server's installation id in a captured catalog probe",
-  },
-  {
-    files: ["packages/adapter-cursor/test/fixtures/turn.jsonl"],
-    values: ["c6b62c6f-7ead-4fd6-9922-e952131177ff", "10e11780-df2f-45dc-a1ff-4540af32e9c0", "toolu_vrtx_01Nn"],
-    why: "a recorded Cursor turn; the call id is cut short",
-  },
-  {
-    files: ["apps/web/test/fixtures/live-run-1.ts"],
-    values: ["59094224-bb3d-43b6-b054-322aa849fa00"],
-    why: "the session id of a recorded live run, which the replay keys its events by",
-  },
-  {
-    files: ["apps/web/test/fixtures/chat-stream.ts"],
-    values: ["toolu_01WspFixBash1"],
-    why: "a synthetic tool id shared with the Claude adapter's stream fixture",
-  },
-  {
-    files: ["apps/web/test/fixtures/agents-report.ts"],
-    values: ["/Users/zingzy"],
-    why: "an absolute link in a report, which the renderer must leave unlinked",
-  },
-  {
-    files: ["daemon/crates/wsp-mcp/tests/answers/", "packages/host/test/mcp-record-reads.ts"],
-    values: ["/Users/zingzy"],
-    why: "the MCP record's sample folder listings and the reads that write them; a new home means regenerating the record",
-  },
-  {
-    files: ["apps/web/test/hitl/main.tsx", "apps/web/test/onboarding/main.tsx", "apps/web/test/recipe/main.tsx", "apps/web/test/shell/main.tsx"],
-    values: ["/Users/zingzy"],
-    why: "the sample computer the dev harness pages draw, written before this scan",
-  },
-  {
-    files: [
-      "apps/web/src/sidebar/tileCard.test.ts",
-      "apps/web/src/slate/slate-tab.test.tsx",
-      "apps/web/test/add-computer-dialog.test.tsx",
-      "apps/web/test/image-recipe-layout.browser.test.ts",
-      "apps/web/test/skill-preview.browser.test.ts",
-      "daemon/crates/wsp-daemon-bin/tests/runtime_live.rs",
-      "packages/engine/test/machine-facts.test.ts",
-      "packages/host/test/place-machines.runtime.test.ts",
-      "packages/host/test/verbs-threads.test.ts",
-      "packages/protocol/test/machine-link.test.ts",
-    ],
-    values: ["/Users/zingzy"],
-    why: "a sample path copied from a real computer before this scan, which the test reads only as text",
-  },
-  {
-    files: ["daemon/fixtures/contract/frames/"],
-    values: ["/Users/zingzy"],
-    why: "the daemon contract's sample paths, written before this scan",
-  },
+const CLAUDE_STREAM = "a recorded Claude Code stream whose session and message ids the adapter tests match on";
+const SUBAGENTS = "the same recorded session with subagents; the tool ids are synthetic and pair each call with its result";
+const TITLES = "session ids the title reader keys its titles by";
+const CLAUDE_PROBE = "message ids in a captured catalog probe";
+const CODEX_RUN = "a recorded Codex app server run whose thread and turn ids the adapter tests match on";
+const CODEX_TURN = "a recorded Codex app server turn whose thread and turn ids the adapter tests match on";
+const NO_SIGN_IN = "a recorded Codex app server run with no sign-in";
+const SAMPLE_HOME =
+  "a sample path copied from a real computer before this scan and read only as text: the MCP record's folder listings and the reads that write them, where a new home means regenerating the record, the dev harness pages, the daemon contract's frames, a report link the renderer must leave unlinked, and test text";
+const CURSOR = "a recorded Cursor turn; the call id is cut short";
+/** Every recorded id or real home the fixtures and test sources still carry, in whichever file, as many times as count
+ * says, each with why it stays. */
+const ALLOWED: readonly Allowed[] = [
+  { text: "e16ed170-8257-4668-879e-fe836341633c", count: 33, why: "the session id of a recorded Claude Code stream, shared by its subagent and compact turns, which the adapter tests match on" },
+  { text: "0f0d5872-9c1a-4e56-8a3b-7d2c4f6e9b01", count: 1, why: CLAUDE_STREAM },
+  { text: "1a2b3c4d-0001-4aaa-8bbb-000000000001", count: 1, why: CLAUDE_STREAM },
+  { text: "1a2b3c4d-0002-4aaa-8bbb-000000000002", count: 1, why: CLAUDE_STREAM },
+  { text: "1a2b3c4d-0003-4aaa-8bbb-000000000003", count: 1, why: CLAUDE_STREAM },
+  { text: "1a2b3c4d-0004-4aaa-8bbb-000000000004", count: 1, why: CLAUDE_STREAM },
+  { text: "1a2b3c4d-0005-4aaa-8bbb-000000000005", count: 1, why: CLAUDE_STREAM },
+  { text: "1a2b3c4d-0006-4aaa-8bbb-000000000006", count: 1, why: CLAUDE_STREAM },
+  { text: "61535293-2b18-4aed-a9ac-a020ba962615", count: 1, why: CLAUDE_STREAM },
+  { text: "toolu_01WspFixBash1", count: 4, why: "a synthetic tool id in the Claude adapter's recorded stream, shared with the web app's chat stream fixture" },
+  { text: "7c1f0f2a-2d4e-4d54-9d0f-0b1b5f2d7a10", count: 1, why: SUBAGENTS },
+  { text: "toolu_01WspFixAgentA", count: 8, why: SUBAGENTS },
+  { text: "toolu_01WspFixAgentB", count: 8, why: SUBAGENTS },
+  { text: "toolu_01WspFixBashA", count: 3, why: SUBAGENTS },
+  { text: "toolu_01WspFixBashB", count: 2, why: SUBAGENTS },
+  { text: "5b3d3ddb-86d6-47ba-b216-0a510284d8b6", count: 5, why: TITLES },
+  { text: "11111111-1111-4111-8111-111111111111", count: 2, why: TITLES },
+  { text: "7c6f56dc-c585-42a0-b6e8-783665c45546", count: 1, why: CLAUDE_PROBE },
+  { text: "8ba9226e-a816-4937-8929-ee0272a7c498", count: 1, why: CLAUDE_PROBE },
+  { text: "01a100dc-e1f0-7183-94f1-048611cff500", count: 28, why: CODEX_RUN },
+  { text: "01a100dc-e29f-7942-9ad4-1f2da918b6e2", count: 18, why: CODEX_RUN },
+  { text: "01a100dc-ecc5-7b02-9cee-319037d6a218", count: 2, why: CODEX_RUN },
+  { text: "c2242f64-3c99-4c9b-be0d-2132497b24ef", count: 2, why: CODEX_RUN },
+  { text: "01a100dd-0379-7f91-bd7d-76a0d1bcb962", count: 15, why: CODEX_RUN },
+  { text: "01a100dd-03bf-7493-9c23-3f6f10160415", count: 8, why: CODEX_RUN },
+  { text: "01a100dd-0af8-70f3-b7c6-96732089b6a8", count: 2, why: CODEX_RUN },
+  { text: "00000000-0000-4000-8000-000000000000", count: 1, why: CODEX_TURN },
+  { text: "01a0e365-72f3-77e3-ba3a-3d18e12e9b95", count: 104, why: CODEX_TURN },
+  { text: "01a0e365-73b9-7e10-8045-3ff9e93753f9", count: 60, why: CODEX_TURN },
+  { text: "01a0e365-814e-75c3-9fb3-25454f5905d9", count: 2, why: CODEX_TURN },
+  { text: "267f4a9f-3715-4cb1-b8fc-14f9a57ec2f9", count: 7, why: CODEX_TURN },
+  { text: "01a0e365-94bf-7232-8f36-4b49c7931ae7", count: 2, why: CODEX_TURN },
+  { text: "aa3474b0-578b-4ee3-a6df-2de799e87f82", count: 1, why: NO_SIGN_IN },
+  { text: "01a0e2b2-493b-7c53-ae59-446697cb28db", count: 23, why: NO_SIGN_IN },
+  { text: "01a0e2b2-4aa8-7b03-b71e-d5308c3d2407", count: 15, why: NO_SIGN_IN },
+  { text: "01a0e2b2-4e56-7703-b395-81797e74e2a5", count: 2, why: NO_SIGN_IN },
+  { text: "9a1713a7-49a1-492e-8010-ce79c930410b", count: 1, why: "an id in a captured catalog probe" },
+  { text: "01cade2b-3da6-453d-bf6b-22f2a5df1db2", count: 1, why: "an MCP server's installation id in a captured catalog probe" },
+  { text: "c6b62c6f-7ead-4fd6-9922-e952131177ff", count: 10, why: CURSOR },
+  { text: "10e11780-df2f-45dc-a1ff-4540af32e9c0", count: 1, why: CURSOR },
+  { text: "toolu_vrtx_01Nn", count: 2, why: CURSOR },
+  { text: "59094224-bb3d-43b6-b054-322aa849fa00", count: 1, why: "the session id of a recorded live run, which the replay keys its events by" },
+  { text: "/Users/zingzy", count: 100, why: SAMPLE_HOME },
 ];
-
-const holds = (entry: { files: readonly string[] }, file: string) => entry.files.some(path => (path.endsWith("/") ? file.startsWith(path) : file === path));
-const exemptIn = (file: string, value: string) => EXEMPT.some(entry => entry.values.includes(value) && holds(entry, file));
 
 interface Hit {
   file: string;
@@ -214,25 +127,18 @@ describe("committed fixtures and test sources", () => {
     expect(sources.some(({ file }) => file === "packages/host/test/verbs.test.ts")).toBe(true);
   });
 
-  it("carry no UUID, toolu_ id, home path or real-looking tool id that is not exempt by name", () => {
-    const found = [
-      ...fixtures.flatMap(({ file, text }) => hitsIn(file, text, FIXTURE_PATTERNS)),
-      ...sources.flatMap(({ file, text }) => hitsIn(file, text, SOURCE_PATTERNS)),
-    ]
-      .filter(hit => !(hit.kind === HOME.kind && placeholder(hit.value)) && !exemptIn(hit.file, hit.value))
-      .map(hit => `${hit.file}:${hit.line} carries ${hit.kind}, ${hit.value}`);
-    expect(found).toEqual([]);
+  const held = holdTo(
+    [...fixtures.flatMap(({ file, text }) => hitsIn(file, text, FIXTURE_PATTERNS)), ...sources.flatMap(({ file, text }) => hitsIn(file, text, SOURCE_PATTERNS))]
+      .filter(hit => !(hit.kind === HOME.kind && placeholder(hit.value)))
+      .map(hit => ({ text: hit.value, where: `${hit.file}:${hit.line} carries ${hit.kind}` })),
+    ALLOWED,
+  );
+
+  it("carry no UUID, toolu_ id, home path or real-looking tool id the allowed list does not name, nor more of one", () => {
+    expect([...held.refused, ...held.over]).toEqual([]);
   });
 
-  it("exempt only values still there", () => {
-    const scanned = [...fixtures, ...sources];
-    const stale = EXEMPT.flatMap(entry =>
-      entry.files.flatMap(path =>
-        entry.values
-          .filter(value => !scanned.some(({ file, text }) => holds({ files: [path] }, file) && text.includes(value)))
-          .map(value => `${path} no longer holds ${value}`),
-      ),
-    );
-    expect(stale).toEqual([]);
+  it("allow only values still there, as many times as allowed", () => {
+    expect(held.stale).toEqual([]);
   });
 });

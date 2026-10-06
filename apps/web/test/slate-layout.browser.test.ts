@@ -5,6 +5,7 @@
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
+import { LONG } from "./slate-render/cases";
 import { serveHarness, type Harness } from "./slate-render/serve";
 
 if (renderSkipped !== undefined) console.info(`slate layout render test skipped: ${renderSkipped}`);
@@ -42,6 +43,36 @@ describe.skipIf(renderSkipped !== undefined)("the slate's layout in Chromium", (
     expect(heads[0]).toMatchObject({ title: "Bengaluru retail", titleCut: false, noteCut: false });
     expect(heads[0]!.noteLines).toBeGreaterThan(1);
     expect(heads[1]).toMatchObject({ title: "Sources and how each is read", titleCut: false, noteCut: false });
+    await page.close();
+  });
+
+  it("presses a folding section's whole head and an opening row's whole width, though only its title and chevron are buttons", async () => {
+    const page = await open("open-row");
+    const hits = await page.evaluate(() => {
+      const at = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      };
+      const toggle = document.querySelector('[data-slate-piece="procs"] [role=heading] button');
+      const open = document.querySelector('[data-slate-piece="rows"] [data-slate-row-open]');
+      const name = [...document.querySelectorAll('[data-slate-piece="rows"] [role=cell]')].find(c => c.textContent === "node server")!;
+      return { note: toggle !== null && at(document.querySelector('[data-slate-piece="procs"] [data-slate-section-note]')!) === toggle, name: open !== null && at(name) === open };
+    });
+    expect(hits).toEqual({ note: true, name: true });
+    await page.close();
+  });
+
+  it("cuts nothing in a bar's name, a status, a chip or an output's label: each wraps and keeps every word", async () => {
+    const page = await open("long-words");
+    const shown = await page.evaluate(long =>
+      ["bars", "status", "chip", "output"].map(id => {
+        const text = [...document.querySelectorAll(`[data-slate-piece="${id}"] *`)].filter(e => e.textContent === long).at(-1) as HTMLElement | undefined;
+        if (text === undefined) return { id, found: false };
+        const line = parseFloat(getComputedStyle(text).lineHeight);
+        return { id, found: true, cut: text.scrollWidth > text.clientWidth + 1, wraps: text.getBoundingClientRect().height > line * 1.5 };
+      }),
+    LONG);
+    expect(shown).toEqual(["bars", "status", "chip", "output"].map(id => ({ id, found: true, cut: false, wraps: true })));
     await page.close();
   });
 

@@ -87,17 +87,24 @@ const WORD = "text-[13px] leading-5 text-muted-foreground";
 const MONO = "font-mono text-xs leading-5 tabular-nums";
 const INSET = "px-(--settings-inset,20px)";
 const ROW = "min-h-11 py-3 transition-colors duration-150";
-const OPENS = "w-full cursor-pointer text-left hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-default";
+/** The chevron's button reaches over the whole row it stands in, so the row presses without its cells in a button. */
+const OPENS = "grid cursor-pointer place-items-center outline-none after:absolute after:inset-0 focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset disabled:cursor-default";
 
-/** A row that opens: the whole row presses the one action every row takes. */
-function OpenRow({ id, template, row, raise, className, label, children }: Pick<PieceViewProps, "id" | "raise"> & { template: Template; row: Row; className: string; label: string; children: ReactNode }) {
+/** A row that opens: the whole row presses the one action every row takes, through the chevron's button in its last
+ * cell, which `children` places. */
+function OpenRow({ id, template, row, raise, className, label, children }: Pick<PieceViewProps, "id" | "raise"> & { template: Template; row: Row; className: string; label: string; children: (opener: ReactNode) => ReactNode }) {
   const on = template["on"] as unknown as { press?: SlateStep | SlateStep[] } | undefined;
   const { busy, said, refused, press } = usePress(() => raise("press", { row, rowAction: 0, ...(on?.press !== undefined ? { actions: on.press } : {}) }));
+  const opener = (
+    <span role="cell" className="self-center">
+      <button type="button" data-slate-row-open={`${id}:${row.index}`} disabled={busy} title={pressTitle(on?.press)} aria-label={label} onClick={press} className={OPENS}>
+        <ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      </button>
+    </span>
+  );
   return (
     <div role="row" className="col-span-full grid grid-cols-subgrid">
-      <button type="button" data-slate-row-open={`${id}:${row.index}`} disabled={busy} title={pressTitle(on?.press)} aria-label={label} onClick={press} className={cn(className, OPENS)}>
-        {children}
-      </button>
+      <div className={cn(className, "relative hover:bg-accent/60")}>{children(opener)}</div>
       {said === undefined && refused === undefined ? null : <span className={cn("col-span-full pb-2", INSET)}><Outcome said={said} refused={refused} /></span>}
     </div>
   );
@@ -132,9 +139,9 @@ export const table: PieceView = {
       const named = slate.resolve(column["tone"], row);
       return named === undefined ? undefined : TONE_INK[toneOf(named, slate, id)];
     };
-    const actionCell = (row: Row) =>
+    const actionCell = (row: Row, opener: ReactNode) =>
       opens ? (
-        <ChevronRight aria-hidden className="size-3.5 shrink-0 self-center text-muted-foreground" />
+        opener
       ) : actions.length === 0 ? null : (
         <span role="cell" className="inline-flex justify-end gap-1 self-center">
           {actions.map((template, at) =>
@@ -161,7 +168,7 @@ export const table: PieceView = {
               {shown.map((item, index) => {
                 const row = { item, index };
                 const name = str(slate.resolve(columns[title]?.["value"], row)) ?? "";
-                const body = (
+                const body = (opener: ReactNode) => (
                   <>
                     <span role="cell" className="flex min-w-0 flex-col gap-1">
                       <span className={cn(NAME, "break-words", tone(columns[title]!, row))}>{name}</span>
@@ -181,7 +188,7 @@ export const table: PieceView = {
                         })}
                       </span>
                     </span>
-                    {actionCell(row)}
+                    {actionCell(row, opener)}
                   </>
                 );
                 const className = cn("col-span-full grid grid-cols-subgrid items-start gap-x-4", ROW, inset);
@@ -191,7 +198,7 @@ export const table: PieceView = {
                   </OpenRow>
                 ) : (
                   <div key={keys[index]} role="row" className={className}>
-                    {body}
+                    {body(null)}
                   </div>
                 );
               })}
@@ -235,7 +242,7 @@ export const table: PieceView = {
           <div className={cn("col-span-full grid grid-cols-subgrid [&>*+*]:border-t [&>*+*]:border-border/50", card)}>
             {shown.map((item, index) => {
               const row = { item, index };
-              const body = (
+              const body = (opener: ReactNode) => (
                 <>
                   {rim}
                   {columns.map((column, at) => {
@@ -257,7 +264,7 @@ export const table: PieceView = {
                       </span>
                     );
                   })}
-                  {actionCell(row)}
+                  {actionCell(row, opener)}
                   {rim}
                 </>
               );
@@ -268,7 +275,7 @@ export const table: PieceView = {
                 </OpenRow>
               ) : (
                 <div key={keys[index]} role="row" className={className}>
-                  {body}
+                  {body(null)}
                 </div>
               );
             })}

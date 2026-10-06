@@ -87,7 +87,7 @@ describe("the networking quiz and the Zoho inbox", () => {
     expect(c.querySelector("[data-slot=segmented-control]")!.textContent).toBe("AllUnread");
     const open = [...c.querySelectorAll("[data-slate-row-open]")];
     expect(open).toHaveLength(8);
-    expect(open[0]!.textContent).toBe("Your order has shippedAcme Storeunread2026-10-03 22:21");
+    expect(open[0]!.closest("[role=row]")!.textContent).toBe("Your order has shippedAcme Storeunread2026-10-03 22:21");
   });
 });
 

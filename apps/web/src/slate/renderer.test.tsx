@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The renderer: a refreshing run keeps what it drew and says so quietly, and the layout defaults that
 // make a good slate without the agent asking.
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseSlate, slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
 import { ActionRunner, StateSender } from "./actions";
@@ -402,5 +402,15 @@ describe("the kit's syntax, parsed and drawn", () => {
     push({ $pro: true });
     expect(piece(c, "f").textContent).toMatch(/Seats\s*4/);
     expect([...piece(c, "t").querySelectorAll("[role=columnheader]")].map(th => th.textContent)).toEqual(["Name", "Cost"]);
+  });
+
+  it("puts a folding section's toggle inside its heading, never the heading inside a button, and folds by it", () => {
+    const { view } = draw(compiled(`<slate><column><section id="sec" title="Logs" note="last hour" collapsible><text>inside</text></section></column></slate>`));
+    const c = view.container;
+    expect(c.querySelector("button [role=heading]")).toBeNull();
+    const toggle = within(within(c).getByRole("heading", { name: "Logs" })).getByRole("button", { name: "Logs" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(toggle);
+    expect(piece(c, "sec").querySelector("[data-slate-section]")!.hasAttribute("data-open")).toBe(false);
   });
 });

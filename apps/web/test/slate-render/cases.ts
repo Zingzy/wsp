@@ -2,6 +2,9 @@
 // Slates the render tests open by name with ?doc=, each the smallest that shows one layout fault the matrix found.
 import type { SlateJson } from "@wsp/protocol/slate";
 
+/** Longer than any slot in a 400 px panel holds on one line. */
+export const LONG = "Requests from the Bengaluru edge to the origin over the last five minutes, by country and path";
+
 export const RENDER_CASES: Readonly<Record<string, { text: string; values?: Record<string, SlateJson> }>> = {
   "long-head": {
     text: `<slate><column>
@@ -21,6 +24,17 @@ export const RENDER_CASES: Readonly<Record<string, { text: string; values?: Reco
   },
   "row-figure": {
     text: `<slate><value name="go" start={0} /><column><section title="Inbox"><row id="figure-row"><number id="unread" label="Unread" value={12} /><text id="ago">32s ago</text><button id="refresh" label="Refresh" onPress={set($go, 1)} /></row><row id="ring-row"><ring id="tests" label="Tests run" value={3} max={10} /><facts id="state"><fact label="State" value="idle" /></facts></row></section></column></slate>`,
+  },
+  "open-row": {
+    text: `<slate><value name="procs" start={[{ name: "node server", pid: 4120 }]} /><column><section id="procs" title="Processes" note="checked 4s" collapsible><table id="rows" items={$procs}><col title="Name" value={item.name} /><col title="PID" value={item.pid} /><action label="Inspect" onPress={send("Inspect", item.pid)} /></table></section></column></slate>`,
+  },
+  "long-words": {
+    text: `<slate><run name="build" cmd="echo built" /><column><section title="Edge">
+  <bars id="bars" label="Busiest" items={[{ n: "${LONG}", v: 4 }]} name={item.n} value={item.v} />
+  <status id="status" tone="good">${LONG}</status>
+  <chip id="chip">${LONG}</chip>
+  <output id="output" run={$build} label="${LONG}" />
+</section></column></slate>`,
   },
   "six-strip": {
     text: `<slate><column><section title="Last 5 minutes"><row id="six"><number label="Requests per min" value={246} note="1,230 in 5 min" /><number label="Redirects" value={712} note="in 5 min" /><number label="Links created" value={35} note="in 5 min" /><number label="Unique visitors" value={472} note="by IP hash, 5 min" /><number label="p95 latency" value={22} unit="ms" note="5 min" /><number label="5xx errors" value={0} note="0% of requests" /></row></section></column></slate>`,

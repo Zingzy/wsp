@@ -68,7 +68,7 @@ function themeVariables(): Record<string, string | boolean> | null {
 }
 
 /** A host's own look for its diagrams, over the page's: theme variables (a size Mermaid lays out by), CSS for the SVG it
- * draws, and the flowchart's spacing. Mermaid's config is one for the page, so the last look asked for is the one set. */
+ * draws, and the flowchart's spacing. Mermaid's config is one for the page, so each draw sets its own look first. */
 export interface MermaidLook {
   readonly variables?: Readonly<Record<string, string>>;
   readonly css?: string;
@@ -99,6 +99,15 @@ function configure(theme: "light" | "dark", look: MermaidLook | undefined): void
   configuredFor = key;
 }
 
+let turns: Promise<unknown> = Promise.resolve();
+
+/** Mermaid draws under whatever config is set when it renders, so each block configures and renders in turn. */
+function inTurn<T>(draw: () => Promise<T>): Promise<T> {
+  const turn = turns.then(draw);
+  turns = turn.catch(() => undefined);
+  return turn;
+}
+
 /** `drawing`, when given, stands in while the diagram draws; the chat leaves it out and shows the source meanwhile. */
 export default function MermaidBlock({ code, resolvedTheme, source, look, drawing }: { code: string; resolvedTheme: "light" | "dark"; source: ReactNode; look?: MermaidLook; drawing?: ReactNode }) {
   const id = `mermaid-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
@@ -111,21 +120,26 @@ export default function MermaidBlock({ code, resolvedTheme, source, look, drawin
         if (live) setDrawn({ kind: "refused" });
         return;
       }
-      configure(resolvedTheme, look);
+      // Parsing reads no look, so a source that does not parse says so without waiting for another block's turn.
       try {
         await mermaid.parse(code);
       } catch (e) {
         if (live) setDrawn({ kind: "error", message: said(e) });
         return;
       }
-      try {
-        const { svg } = await mermaid.render(id, code);
-        const clean = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, FORBID_TAGS: ["foreignObject", "script", "a"] });
-        const natural = /max-width:\s*([\d.]+)px/.exec(clean)?.[1];
-        if (live) setDrawn({ kind: "svg", svg: clean, width: natural === undefined ? null : Math.min(Number(natural), LEGIBLE_WIDTH) });
-      } catch (e) {
-        if (live) setDrawn({ kind: "error", message: said(e) });
-      }
+      const next = await inTurn(async (): Promise<Drawn | undefined> => {
+        if (!live) return undefined;
+        configure(resolvedTheme, look);
+        try {
+          const { svg } = await mermaid.render(id, code);
+          const clean = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, FORBID_TAGS: ["foreignObject", "script", "a"] });
+          const natural = /max-width:\s*([\d.]+)px/.exec(clean)?.[1];
+          return { kind: "svg", svg: clean, width: natural === undefined ? null : Math.min(Number(natural), LEGIBLE_WIDTH) };
+        } catch (e) {
+          return { kind: "error", message: said(e) };
+        }
+      });
+      if (live && next !== undefined) setDrawn(next);
     })();
     return () => {
       live = false;

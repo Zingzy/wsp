@@ -13,7 +13,7 @@ export const chip: PieceView = {
     return (
       <span data-slate-chip className="inline-flex min-w-0 items-center gap-1.5 text-[13px] leading-5 text-foreground">
         {props["icon"] === "git-branch" ? <GitBranch aria-hidden className="size-3 shrink-0 text-muted-foreground" /> : null}
-        <span className="truncate">{text}</span>
+        <span className="min-w-0 break-words">{text}</span>
       </span>
     );
   },

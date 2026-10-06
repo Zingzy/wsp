@@ -3,7 +3,7 @@
 // keystroke and at once on blur, Enter or a submit. A focused field keeps its text against a write from elsewhere
 // and offers the choice once it loses focus.
 import type { SlateJson } from "@wsp/protocol/slate";
-import { useId, useState, type KeyboardEvent } from "react";
+import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
 import { Kbd } from "../../components/ui/kbd.js";
@@ -35,22 +35,26 @@ const fieldFor = (placeholder: string | undefined, mono: boolean): string => ((p
 function SecretInput({ path, label, props, slate, sender }: { path: string; label: string } & Pick<PieceViewProps, "props" | "slate" | "sender">) {
   const fieldId = useId();
   const [draft, setDraft] = useState("");
-  const [touched, setTouched] = useState(false);
+  // A ref, not state: Enter and the blur after it run in one tick, before a state update would show the second one.
+  const touched = useRef(false);
   const [refused, setRefused] = useState<string | undefined>(undefined);
   const handle = getOwn(slate.values, path);
   const filled = isSecretHandle(handle) && handle.set;
   const dots = filled ? "•".repeat(Math.min(24, Math.max(4, typeof handle.len === "number" ? handle.len : 8))) : undefined;
   const held = heldBy(props["held"]);
   const send = () => {
-    if (!touched || (draft === "" && !filled)) return;
+    if (!touched.current || (draft === "" && !filled)) return;
+    touched.current = false;
     const text = draft;
     void sender.secret(path, text).then(
       () => {
         setDraft(current => (current === text ? "" : current));
-        setTouched(false);
         setRefused(undefined);
       },
-      (error: unknown) => setRefused(error instanceof Error ? error.message : String(error)),
+      (error: unknown) => {
+        touched.current = true;
+        setRefused(error instanceof Error ? error.message : String(error));
+      },
     );
   };
   return (
@@ -72,7 +76,7 @@ function SecretInput({ path, label, props, slate, sender }: { path: string; labe
         title={held}
         onChange={event => {
           setDraft(event.target.value);
-          setTouched(true);
+          touched.current = true;
         }}
         onBlur={send}
         onKeyDown={event => {

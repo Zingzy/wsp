@@ -224,34 +224,39 @@ function clearDeadBuilds(dbPath: string): void {
   }
 }
 
-/** The state file's records and blobs, moved into a new database in one transaction. The database is built under a
- * name of this process's own and linked into place only once it is whole, so a crash anywhere before leaves the state
- * file as the state and no database; a second start importing at the same time links nothing over the first's. The
- * state file is moved aside after, never deleted. A state file this build cannot read is refused before anything is
- * made, in the JSON store's own words. */
-function importStateFile(statePath: string, writer: StateWriter, modules: readonly StoreModule[] = STORE_MODULES): void {
+/** A new database, with the state file's records and blobs moved into it in one transaction where there is one. The
+ * database is built under a name of this process's own and linked into place only once it is whole and in WAL, so a
+ * crash anywhere before leaves the state file as the state and no database; a second start building at the same time
+ * links nothing over the first's. The state file is moved aside after, never deleted. A state file this build cannot
+ * read is refused before anything is made, in the JSON store's own words. */
+function buildDatabase(statePath: string, writer: StateWriter, modules: readonly StoreModule[] = STORE_MODULES): void {
   const data = readStateFile(statePath);
-  if (data === undefined) return;
   const dbPath = stateDbPath(statePath);
   const building = `${dbPath}.importing-${process.pid}`;
+  ownFolder(dirname(dbPath));
   clearDeadBuilds(dbPath);
   ownEmpty(building);
   try {
     const d = open(building);
     try {
-      d.exec("begin");
-      migrate(d, building, modules);
-      d.prepare("insert into shape (one, json) values (1, ?)").run(JSON.stringify(shapeNow(writer)));
-      const put = d.prepare("insert into collections (collection, id, json) values (?, ?, ?)");
-      for (const [collection, records] of Object.entries(data)) {
-        for (const [id, value] of Object.entries(records ?? {})) {
-          const json = JSON.stringify(value);
-          if (json !== undefined) put.run(collection, id, json);
+      if (data !== undefined) {
+        d.exec("begin");
+        migrate(d, building, modules);
+        d.prepare("insert into shape (one, json) values (1, ?)").run(JSON.stringify(shapeNow(writer)));
+        const put = d.prepare("insert into collections (collection, id, json) values (?, ?, ?)");
+        for (const [collection, records] of Object.entries(data)) {
+          for (const [id, value] of Object.entries(records ?? {})) {
+            const json = JSON.stringify(value);
+            if (json !== undefined) put.run(collection, id, json);
+          }
         }
+        const blob = d.prepare("insert into blobs (collection, id, bytes, at) values (?, ?, ?, ?)");
+        for (const b of fileBlobs(statePath)) blob.run(b.collection, b.id, readFileSync(b.path), statSync(b.path).mtimeMs);
+        d.exec("commit");
       }
-      const blob = d.prepare("insert into blobs (collection, id, bytes, at) values (?, ?, ?, ?)");
-      for (const b of fileBlobs(statePath)) blob.run(b.collection, b.id, readFileSync(b.path), statSync(b.path).mtimeMs);
-      d.exec("commit");
+      // Here, where no other process opens it: two that switch one database to WAL at once each hold a read lock the
+      // other's switch waits on, and SQLite fails one of them at once rather than call its busy handler.
+      d.exec("pragma journal_mode = wal");
     } finally {
       d.close();
     }
@@ -261,7 +266,7 @@ function importStateFile(statePath: string, writer: StateWriter, modules: readon
       if ((e as { code?: string }).code === "EEXIST") return;
       throw e;
     }
-    moveAside(statePath);
+    if (data !== undefined) moveAside(statePath);
   } finally {
     rmSync(building, { force: true });
   }
@@ -290,8 +295,7 @@ export function sqliteStore(statePath: string, writer: StateWriter, modules: rea
       }
       return held;
     }
-    if (!existsSync(dbPath)) importStateFile(statePath, writer, modules);
-    ownEmpty(dbPath);
+    if (!existsSync(dbPath)) buildDatabase(statePath, writer, modules);
     let d: DatabaseSync;
     try {
       d = open(dbPath);

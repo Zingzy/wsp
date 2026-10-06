@@ -113,9 +113,9 @@ console.log(JSON.stringify(await store.keys("workspaces")));
       child.stderr!.on("data", (b: Buffer) => (out += b.toString()));
       child.once("exit", code => done({ out, code }));
     });
-  /** What a store left beside the state once its process ended, less the WAL files SQLite may or may not have
-   * folded back by then. */
-  const stateFiles = (): string[] => readdirSync(home).filter(f => f.startsWith("state.") && !/-(wal|shm)$/.test(f)).sort();
+  /** What a store left beside the state once its process ended, less the database's WAL files SQLite may or may not
+   * have folded back by then. */
+  const stateFiles = (): string[] => readdirSync(home).filter(f => f.startsWith("state.") && !/^state\.db-(wal|shm)$/.test(f)).sort();
   const until = async (ok: () => boolean, what: string): Promise<void> => {
     for (let i = 0; i < 200; i++) {
       if (ok()) return;
@@ -151,6 +151,18 @@ console.log(JSON.stringify(await store.keys("workspaces")));
     expect(one.out).toBe(two.out);
     expect((JSON.parse(one.out) as string[]).length).toBe(400);
     expect(stateFiles()).toEqual(["state.db", "state.json.imported"]);
+  });
+
+  it("run by two starts at once over no state file makes one database, ten times in ten", async () => {
+    for (let i = 0; i < 10; i++) {
+      for (const f of readdirSync(home)) rmSync(join(home, f), { force: true });
+      const [one, two] = await Promise.all([said(importer()), said(importer())]);
+      expect([one, two]).toEqual([
+        { out: "[]\n", code: 0 },
+        { out: "[]\n", code: 0 },
+      ]);
+      expect(stateFiles()).toEqual(["state.db"]);
+    }
   });
 });
 

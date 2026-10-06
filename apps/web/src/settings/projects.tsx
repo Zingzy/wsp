@@ -177,7 +177,7 @@ function ProjectNewThreads({ project, ctx }: { project: ProjectView; ctx: Settin
   const resolved = useProjectDefaults(ctx)?.[project.id];
   const own = ctx.preferences.projectDefaults[project.id] ?? {};
   const set = (patch: ProjectOverridesPatch): void => ctx.setPreferences({ projectDefaults: { [project.id]: patch } });
-  const globalAgent = defaultAgentOf(ctx.harnesses);
+  const globalAgent = defaultAgentOf(ctx);
   const agentId = resolved?.agent.value ?? own.agent ?? globalAgent?.harness;
   const catalog = ctx.harnesses.find(c => c.harness === agentId);
   if (globalAgent === undefined || catalog === undefined) return null;

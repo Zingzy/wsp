@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PLACES_TICKET_REFUSAL, deviceHeldRefusal, noSignInRefusal, SIGN_IN_LINE_REFUSAL, AGENTS_KEY_REFUSAL, DAEMON_VERSION, absentComputer, HERE_PLACE_ID, noSuchPlaceRefusal, providerAgentsRefusal, type AgentsSignInEvent, type TurnResult } from "@wsp/protocol";
+import { PLACES_TICKET_REFUSAL, deviceHeldRefusal, noSignInRefusal, SIGN_IN_LINE_REFUSAL, AGENTS_KEY_REFUSAL, DAEMON_VERSION, HERE_PLACE_ID, noSuchPlaceRefusal, providerAgentsRefusal, type AgentsSignInEvent, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { newPlaceKeyPair } from "../src/places.js";
 import { serveRuntime } from "../src/serve.js";
@@ -174,10 +174,13 @@ describe("the agents on a computer you own", () => {
       // The box answering that it could not read the folder is its own word, kept as it said it.
       flaky = true;
       expect((await ctx.runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toBe(`srv did not say where ${kept} is: realpath: no such folder`);
-      // A link that drops under the check is the computer's state, never the agent's refusal.
+      // A link that drops under the check is the computer's state, never the agent's refusal: the row answers wsp's own
+      // lists and the app says the computer from its own reading of it.
       client.ws.close();
       await until(async () => (await placesOf()).find(p => p.id === placeId)?.present === false);
-      expect((await ctx.runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toBe(absentComputer("srv", null).said);
+      const unread = (await ctx.runtime.harnesses.list(ws.id)).find(c => c.harness === "claude");
+      expect(unread?.refusal).toBeUndefined();
+      expect(unread?.source).toBe("table");
     } finally {
       rmSync(boxHome, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });

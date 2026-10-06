@@ -20,6 +20,7 @@ import { assetDir, assetName, assetProof, copyAsset, stagedAsset } from "./asset
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, type DaemonTarget } from "./daemon-binary.js";
 import { ANTHROPIC_KEY, KEY_LAYER_WORDS } from "./env-keys.js";
 import { describeDeleted, describeOrphanOffer, describeOrphans, describeStorage } from "./storage.js";
+import { Timings } from "./doctor-timings.js";
 import type { CliIO } from "./cli.js";
 import type { HostClient } from "./verbs.js";
 
@@ -1327,32 +1328,6 @@ export function connectDaemonSocket(opts: ConnectOptions): Promise<DaemonSocket>
 
 // --- the doctor loop ------------------------------------------------------
 
-function fmtMs(ms: number): string {
-  return ms < 10_000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
-}
-
-class Timings {
-  rows: { step: string; ms: number; note: string }[] = [];
-  async time<T>(step: string, fn: () => Promise<T>, note?: (v: T) => string): Promise<T> {
-    const start = Date.now();
-    const v = await fn();
-    this.rows.push({ step, ms: Date.now() - start, note: note ? note(v) : "" });
-    return v;
-  }
-  add(step: string, ms: number, note = ""): void {
-    this.rows.push({ step, ms, note });
-  }
-  print(log: (line: string) => void): void {
-    const w1 = Math.max(...this.rows.map(r => r.step.length), 4) + 2;
-    log("");
-    log("step".padEnd(w1) + "time".padEnd(10) + "note");
-    log("-".repeat(w1 + 10 + 44));
-    for (const r of this.rows) log(r.step.padEnd(w1) + fmtMs(r.ms).padEnd(10) + r.note);
-    log("-".repeat(w1 + 10 + 44));
-    log("TOTAL".padEnd(w1) + fmtMs(this.rows.reduce((a, r) => a + r.ms, 0)));
-  }
-}
-
 /** Envs every guest needs: a PATH that reaches the daemon's node, the harness
  * install, and what the golden import's tools stage puts on the machine. */
 export const GUEST_ENVS: Record<string, string> = {
@@ -1848,6 +1823,15 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
   return opts.computer?.kind === "provider" ? forkDoctor(rt, io, opts) : localDoctor(rt, io, opts);
 }
 
+/** The cloud account a fork-road run forks on: the one named, else the only one this host holds. With more than one
+ * and none named the run is refused with their names, since a fork on the wrong one proves the wrong cloud. */
+function forkPlaceOf(named: PlaceView | undefined, rows: readonly PlaceView[]): string | undefined {
+  if (named !== undefined) return named.id;
+  const clouds = rows.filter(r => r.kind === "provider" && r.takesForks === true);
+  if (clouds.length > 1) throw new Error(`this host forks on ${clouds.length} cloud accounts, so wsp doctor proves the one you name: ${clouds.map(c => `wsp doctor ${c.name}`).join(" or ")}`);
+  return clouds[0]?.id;
+}
+
 /** The doctor's fork road: this host's own image, a machine forked from it at the provider, wsp deployed on that
  * machine, the connection, a file coming back and the teardown. It forks a live machine and bills while it runs,
  * which is why only a named cloud row takes it. */
@@ -1874,6 +1858,8 @@ export async function forkDoctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {
   try {
     io.log("doctor: proving one live workspace end to end, from your image to the machine it forks and back");
 
+    const on = forkPlaceOf(opts.computer, (await rt.places?.list(Date.now())) ?? []);
+
     // Before the first thing that bills: a computer on an older daemon than this wsp deploys is a fact a person
     // came here for, and a run that stops later must still have said it.
     for (const line of await placesBehindLines(rt, Date.now(), opts.hereDaemon)) io.log(line);
@@ -1893,10 +1879,8 @@ export async function forkDoctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {
     const view = await timings.time(
       "a workspace forked from it",
       async () => {
-        // A workspace is one project's copy, so this run records one on the computer this host forks at and the
-        // clone inside the fork is part of what the run proves.
-        const computers = (await rt.places?.list(Date.now())) ?? [];
-        const on = (computers.find(c => c.takesForks === true) ?? computers.find(c => c.kind === "provider"))?.id;
+        // A workspace is one project's copy, so this run records one on the cloud account it proves and the clone
+        // inside the fork is part of what the run proves.
         const project = await rt.projects.add({ source: opts.repo ?? DOCTOR_REPO, ...(on !== undefined ? { on } : {}) });
         const spec = {
           golden,
@@ -1917,9 +1901,10 @@ export async function forkDoctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {
       w => `machine ${w.machineId.slice(0, 24)}…`,
     );
     workspaceId = view.id;
-    const machine = await rt.backend.get(view.machineId);
+    const at = (view.place !== undefined ? rt.places?.backendOf(view.place) : undefined) ?? rt.backend;
+    const machine = await at.get(view.machineId);
 
-    const room = await roomLeft((view.place !== undefined ? rt.places?.backendOf(view.place) : undefined) ?? rt.backend);
+    const room = await roomLeft(at);
     if (room !== "") timings.add("room left where it landed", 0, room);
 
     const { token } = await timings.time(
@@ -2001,7 +1986,7 @@ export async function forkDoctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {
       async () => {
         await rt.workspaces.delete(workspaceId!);
         workspaceId = undefined;
-        return verifyNoneLeft(rt.backend, await rt.owner(), io.log);
+        return verifyNoneLeft(at, await rt.owner(), io.log);
       },
       note => note,
     );

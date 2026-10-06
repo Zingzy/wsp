@@ -38,9 +38,16 @@ export const choices: PieceView = {
     const known = picked !== undefined && picked !== null && answer !== undefined && answer !== null;
     const place = placeOf(slate, id);
     const inset = place === "inside" ? "" : "px-(--settings-inset,20px)";
+    const list = choicesOf(Array.isArray(props["options"]) ? present(slate, piece.props?.["options"], props["options"]) : undefined);
+    // One stop in the tab order, the picked row's or else the first, as a native radio group keeps.
+    const stop = Math.max(0, list.findIndex(choice => same(choice.value, picked)));
+    const pick = (value: SlateJson) => {
+      if (path === undefined) return;
+      void sender.now(path, value).then(() => (piece.on?.change !== undefined ? raise("change") : undefined));
+    };
     const options = (
       <div className="flex min-w-0 flex-col [&>*+*]:border-t [&>*+*]:border-border/50">
-        {choicesOf(Array.isArray(props["options"]) ? present(slate, piece.props?.["options"], props["options"]) : undefined).map((choice, at) => {
+        {list.map((choice, at) => {
           const chosen = same(choice.value, picked);
           const right = known && same(choice.value, answer);
           const wrong = known && chosen && !right;
@@ -54,9 +61,15 @@ export const choices: PieceView = {
               data-slate-choice={right ? "right" : wrong ? "wrong" : chosen ? "picked" : "open"}
               disabled={held !== undefined || path === undefined}
               title={held}
-              onClick={() => {
-                if (path === undefined) return;
-                void sender.now(path, choice.value).then(() => (piece.on?.change !== undefined ? raise("change") : undefined));
+              tabIndex={at === stop ? 0 : -1}
+              onClick={() => pick(choice.value)}
+              onKeyDown={event => {
+                const by = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 0;
+                if (by === 0) return;
+                event.preventDefault();
+                const to = (at + by + list.length) % list.length;
+                event.currentTarget.parentElement?.querySelectorAll<HTMLElement>("[role=radio]")[to]?.focus();
+                pick(list[to]!.value);
               }}
               className={cn(
                 "flex min-h-11 w-full min-w-0 items-center gap-4 py-3 text-left outline-none transition-colors duration-150",

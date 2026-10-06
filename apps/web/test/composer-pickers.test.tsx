@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, markedFor, resolveThreadDefaults, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, markedFor, resolveThreadDefaults, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, type HarnessCatalog, type PlaceView, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -814,7 +814,10 @@ function hostMarked(catalogs: HarnessCatalog[], projectId: string | undefined): 
 /** The fixture's host, its lists marked as the real one marks them. */
 function markedApi(opts: Parameters<typeof fixtureApi>[0]) {
   const made = fixtureApi(opts);
-  made.api.listHarnesses = async workspaceId => hostMarked(opts.table, workspaceId === undefined ? undefined : (opts.workspace ?? BARE).project?.id);
+  made.api.listHarnesses = async workspaceId => {
+    made.listed.push(workspaceId);
+    return hostMarked(opts.table, workspaceId === undefined ? undefined : (opts.workspace ?? BARE).project?.id);
+  };
   return made;
 }
 
@@ -923,6 +926,105 @@ describe("a new thread opens on the defaults", () => {
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toMatchObject({ harness: "codex" });
     expect(started[0]).not.toHaveProperty("thread");
+  });
+});
+
+/** A workspace's composer opened while `prefs` stood, its machine's lists marked by the host under them. */
+async function openOn(prefs: Partial<typeof DEFAULT_PREFERENCES>) {
+  const made = markedApi({ table: [CLAUDE_WORDS, CODEX_WORDS] });
+  useStore.setState({ conn: "connecting", workspaces: [], statuses: {}, sessions: {}, harnesses: [], harnessesByWorkspace: {}, projects: [PROJECT], preferences: { ...DEFAULT_PREFERENCES, ...prefs } });
+  useStore.getState().bind(made.api);
+  useStore.getState().setConn("live");
+  await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
+  render(<WorkspaceThread workspaceId={WS} />);
+  await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toBeDefined());
+  await waitFor(() => expect(picker("model")).not.toBeNull());
+  return made;
+}
+
+/** What Settings does: the patch through the store, the host's answer landing. */
+const settings = (patch: PreferencesPatch) => act(() => useStore.getState().setPreferences(patch));
+
+describe("an open workspace composer nobody picked on follows Settings", () => {
+  it("back to the agent's own model, effort and access when its defaults are reset", async () => {
+    await openOn({ agentDefaults: { claude: { model: "claude-sonnet-5", effort: "low", access: "auto-edit" } } });
+    expect(pickerValue("model")).toBe("claude-sonnet-5");
+    expect(picked("effort")).toBe("low");
+    expect(picked("access")).toBe("acceptEdits");
+    await settings({ agentDefaults: { claude: null } });
+    await waitFor(() => expect(pickerValue("model")).toBe("claude-opus-5"));
+    expect(picked("effort")).toBe("high");
+    expect(picked("access")).toBe("bypassPermissions");
+  });
+
+  it("onto a new model, effort and access for the agent", async () => {
+    await openOn({});
+    expect(pickerValue("model")).toBe("claude-opus-5");
+    await settings({ agentDefaults: { claude: { model: "claude-sonnet-5", effort: "low", access: "ask" } } });
+    await waitFor(() => expect(pickerValue("model")).toBe("claude-sonnet-5"));
+    expect(picked("effort")).toBe("low");
+    expect(picked("access")).toBe("default");
+  });
+
+  it("back to the catalog's first agent when the default agent is reset", async () => {
+    await openOn({ defaultAgent: "codex" });
+    expect(picker("model")?.dataset["harness"]).toBe("codex");
+    await settings({ defaultAgent: null });
+    await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("claude"));
+  });
+
+  it("off the project's own agent and model when the project's picks are taken away", async () => {
+    await openOn({ projectDefaults: { pr_1: { model: "claude-sonnet-5", access: "ask" } } });
+    expect(pickerValue("model")).toBe("claude-sonnet-5");
+    expect(picked("access")).toBe("default");
+    await settings({ projectDefaults: { pr_1: null } });
+    await waitFor(() => expect(pickerValue("model")).toBe("claude-opus-5"));
+    expect(picked("access")).toBe("bypassPermissions");
+    await settings({ projectDefaults: { pr_1: { agent: "codex" } } });
+    await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("codex"));
+    await settings({ projectDefaults: { pr_1: null } });
+    await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("claude"));
+  });
+
+  it("asks nothing more of a workspace that was deleted", async () => {
+    const { listed } = await openOn({});
+    act(() => useStore.getState().applyEvent({ type: "workspace.deleted", workspaceId: WS }));
+    expect(useStore.getState().harnessesByWorkspace[WS]).toBeUndefined();
+    listed.length = 0;
+    await settings({ defaultAgent: "codex" });
+    await waitFor(() => expect(listed).toContain(undefined));
+    expect(listed).not.toContain(WS);
+  });
+
+  it("but keeps what the person picked on it", async () => {
+    await openOn({ agentDefaults: { claude: { model: "claude-sonnet-5" } } });
+    await openModelMenu();
+    fireEvent.click(option("claude-haiku-4-5")!);
+    await waitFor(() => expect(pickerValue("model")).toBe("claude-haiku-4-5"));
+    await settings({ agentDefaults: { claude: null } });
+    await settings({ agentDefaults: { claude: { model: "claude-opus-5" } } });
+    await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]?.[0]?.models.find(m => m.isDefault)?.value).toBe("claude-opus-5"));
+    expect(pickerValue("model")).toBe("claude-haiku-4-5");
+    act(() => useComposerOptionsStore.getState().pick(WS, "harness", "claude"));
+    await settings({ defaultAgent: "codex" });
+    await waitFor(() => expect(useStore.getState().preferences.defaultAgent).toBe("codex"));
+    expect(picker("model")?.dataset["harness"]).toBe("claude");
+  });
+});
+
+describe("a box's model menu on a link that dropped", () => {
+  it("reads the box's lists again once its computer answers, and asks nothing of it while it does not", async () => {
+    const onBox: WorkspaceView = { ...BARE, kind: "cloud", place: "p_srv" };
+    const { api, listed } = fixtureApi({ table: [TABLE], machine: [CLAUDE], workspace: onBox });
+    const box = (present: boolean) => act(() => useStore.setState({ places: [{ id: "p_srv", kind: "computer", name: "srv", default: true, present } as PlaceView] }));
+    box(true);
+    await setup(api);
+    await waitFor(() => expect(listed.filter(id => id === WS)).toHaveLength(1));
+    box(false);
+    await waitFor(() => expect(document.querySelector("[data-composer-picker='model']")).not.toBeNull());
+    expect(listed.filter(id => id === WS)).toHaveLength(1);
+    box(true);
+    await waitFor(() => expect(listed.filter(id => id === WS)).toHaveLength(2));
   });
 });
 

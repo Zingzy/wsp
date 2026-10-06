@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A table is a list in the settings grammar: it fills the card it stands in, the first column the row's name at the
 // left taking the room, figure columns right-aligned at the end; stacked tables share one column template.
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseSlate, slateStartValues, type SlateDoc } from "@wsp/protocol/slate";
 import { ActionRunner, StateSender } from "./actions";
@@ -12,13 +12,12 @@ import { fakeLink, manualScheduler } from "./testing";
 
 afterEach(cleanup);
 
-function draw(text: string) {
+function draw(text: string, link = fakeLink()) {
   const r = parseSlate(text);
   expect(r.errors).toEqual([]);
   const doc: SlateDoc = r.document!;
   const engine = new SlateEngine("t1", () => undefined, manualScheduler());
   engine.setRecord(doc, slateStartValues(doc), 3, 3);
-  const link = fakeLink();
   return render(<SlateView engine={engine} views={SLATE_VIEWS} runner={new ActionRunner(engine, () => link)} sender={new StateSender(engine, () => link)} />).container;
 }
 
@@ -111,8 +110,28 @@ describe("a table in its card", () => {
     expect(t.querySelector("[role=columnheader]")).toBeNull();
     const open = t.querySelector<HTMLButtonElement>("[data-slate-row-open]")!;
     expect(open.getAttribute("aria-label")).toBe("Open, Your order has shipped");
-    expect(open.textContent).toBe("Your order has shippedAcme Storeunread2026-10-03 22:21");
+    expect(open.closest("[role=row]")!.textContent).toBe("Your order has shippedAcme Storeunread2026-10-03 22:21");
     expect(c.querySelector("[data-slate-row-action]")).toBeNull();
+  });
+
+  it("keeps a row that opens a row of cells, its button in a cell of its own, folded or not", async () => {
+    const link = fakeLink();
+    const c = draw(`<slate>
+<value name="mail" start={[{ when: "22:21", from: "Acme Store", subject: "Your order has shipped", unread: "unread" }]} />
+<value name="procs" start={[{ name: "node", pid: 4120 }]} />
+<column>
+  <table id="folded" items={$mail}><col title="When" value={item.when} mono /><col title="From" value={item.from} /><col title="Subject" value={item.subject} /><col title="Unread" value={item.unread} /><action label="Open" onPress={send("Open", item.when)} /></table>
+  <table id="grid" items={$procs}><col title="Name" value={item.name} /><col title="PID" value={item.pid} /><action label="Inspect" onPress={send("Inspect", item.pid)} /></table>
+</column></slate>`, link);
+    expect(c.querySelector("button [role=cell], button [role=row]")).toBeNull();
+    for (const [id, name] of [["folded", "Open, Your order has shipped"], ["grid", "Inspect, node"]] as const) {
+      const row = c.querySelector<HTMLElement>(`[data-slate-piece="${id}"] [role=row]:not([data-slate-head])`)!;
+      const open = within(row).getByRole("button", { name });
+      expect(open.parentElement!.getAttribute("role")).toBe("cell");
+      expect(open.parentElement!.closest("[role=row]")).toBe(row);
+      await act(async () => fireEvent.click(open));
+    }
+    expect(link.event).toHaveBeenCalledTimes(2);
   });
 
   it("draws a cell's tone over the muted words ink, in a grid and in a folded row", () => {
