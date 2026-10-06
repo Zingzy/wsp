@@ -8,7 +8,7 @@ Everything sits beside the state file. The default home is `~/.wsp`; `WSP_HOME` 
 
 | path | what it is |
 | --- | --- |
-| `~/.wsp/state.json` | workspaces, threads, the golden manifest, cost series |
+| `~/.wsp/state.db` | workspaces, threads, transcripts, the golden manifest, cost series, in SQLite; a `state.json` an older wsp wrote is imported once and kept as `state.json.imported`, and `WSP_STATE_STORE=json` keeps the old file for one release |
 | `~/.wsp/.env` | `SOLARI_API_KEY`, and `ANTHROPIC_API_KEY` if you use one; mode 600 |
 | `~/.wsp/recipe.json` | the recipe: catalog ids, ticks, sign-in answers |
 | `~/.wsp/golden-recipe.json` | the saved manifest with every tick |
