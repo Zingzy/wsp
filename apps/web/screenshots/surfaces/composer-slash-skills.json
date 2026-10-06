@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:redirect",
+    "390:key:Escape",
+    "390:key:Escape",
+    "testid=composer-editor",
+    "key:/",
+    "scroll:4000:composer-command-group=source:Skills"
+  ],
+  "wait": "composer-item-id=skill:claude:release-notes",
+  "settleMs": 700
+}

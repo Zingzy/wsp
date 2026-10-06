@@ -1,0 +1,13 @@
+{
+  "at": "/",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "k=settings-row",
+    "k=settings-computers",
+    "place-row=p_hetzner"
+  ],
+  "fixture": "image-built",
+  "wait": "k=image-state",
+  "settleMs": 700
+}

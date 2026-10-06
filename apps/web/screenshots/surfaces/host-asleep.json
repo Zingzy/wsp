@@ -1,0 +1,12 @@
+{
+  "at": "/",
+  "remote": true,
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:redirect",
+    "offline"
+  ],
+  "wait": "sidebar-asleep",
+  "settleMs": 700
+}

@@ -58,8 +58,6 @@ const ALLOWED: ReadonlyArray<{ file: string; text: string; count: number; why: s
   { file: "PairScreen.tsx", text: "text-[13px]", count: 2, why: BEFORE("text-note") },
   { file: "PairScreen.tsx", text: "leading-[18px]", count: 1, why: BEFORE("a named leading") },
   { file: "PairScreen.tsx", text: "tracking-[-0.01em]", count: 1, why: BEFORE("a named tracking for the display title") },
-  { file: "components/ChatMarkdown.tsx", text: "text-[11px]", count: 2, why: BEFORE("text-meta") },
-  { file: "components/ChatMarkdown.tsx", text: "text-[12px]", count: 1, why: BEFORE("text-xs") },
   { file: "components/ForgetWorkspaceDialog.tsx", text: "text-[13px]", count: 1, why: BEFORE("text-note") },
   { file: "components/RightPanelTabs.tsx", text: "rounded-[10px]", count: 1, why: BEFORE("a radius on the scale") },
   { file: "components/ThreadTerminalDrawer.tsx", text: "rgb(14, 18, 24)", count: 1, why: BEFORE("the terminal's theme tokens") },
@@ -109,7 +107,6 @@ const ALLOWED: ReadonlyArray<{ file: string; text: string; count: number; why: s
   { file: "components/chat/ContextMeter.tsx", text: "text-[13px]", count: 1, why: BEFORE("text-note") },
   { file: "components/chat/InlineRun.tsx", text: "text-[12px]", count: 2, why: BEFORE("text-xs") },
   { file: "components/chat/InlineRun.tsx", text: "leading-[18px]", count: 1, why: BEFORE("a named leading") },
-  { file: "components/chat/MessagesTimeline.tsx", text: "text-[13px]", count: 1, why: BEFORE("text-note") },
   { file: "components/chat/PanelLayoutControls.tsx", text: "text-[9px]", count: 1, why: BEFORE("a size on the type scale") },
   { file: "components/chat/PermissionPromptRow.tsx", text: "text-[11px]", count: 2, why: BEFORE("text-meta") },
   { file: "components/chat/PromptDock.tsx", text: "text-[11px]", count: 1, why: BEFORE("text-meta") },
@@ -117,6 +114,7 @@ const ALLOWED: ReadonlyArray<{ file: string; text: string; count: number; why: s
   { file: "components/chat/SubagentFoldRow.tsx", text: "text-[11px]", count: 1, why: BEFORE("text-meta") },
   { file: "components/chat/TerminalContextInlineChip.tsx", text: "text-[11px]", count: 1, why: BEFORE("text-meta") },
   { file: "components/chat/TimelineRuleLine.tsx", text: "text-[11px]", count: 1, why: BEFORE("text-meta") },
+  { file: "components/chat/timeline/rows.tsx", text: "text-[13px]", count: 1, why: BEFORE("text-note") },
   { file: "components/composerInlineChip.ts", text: "text-[12px]", count: 1, why: BEFORE("text-xs") },
   { file: "components/composerInlineChip.ts", text: "rounded-[6px]", count: 1, why: BEFORE("a radius on the scale") },
   { file: "components/diffs/DiffCommentAnnotation.tsx", text: "text-[11px]", count: 1, why: BEFORE("text-meta") },
@@ -125,6 +123,9 @@ const ALLOWED: ReadonlyArray<{ file: string; text: string; count: number; why: s
   { file: "components/files/FileMarkdownPreview.tsx", text: "text-[11px]", count: 1, why: BEFORE("text-meta") },
   { file: "components/machine/MachineSurface.tsx", text: "text-[11px]", count: 2, why: BEFORE("text-meta") },
   { file: "components/machine/MachineSurface.tsx", text: "text-[13px]", count: 1, why: BEFORE("text-note") },
+  { file: "components/markdown/codeBlocks.tsx", text: "text-[12px]", count: 1, why: BEFORE("text-xs") },
+  { file: "components/markdown/links.tsx", text: "text-[11px]", count: 1, why: BEFORE("text-meta") },
+  { file: "components/markdown/plugins.ts", text: "text-[11px]", count: 1, why: BEFORE("text-meta") },
   { file: "components/preview/BrowserMockup.tsx", text: "rounded-[5px]", count: 1, why: BEFORE("a radius on the scale") },
   { file: "components/preview/PreviewEmptyState.tsx", text: "text-[13px]", count: 1, why: BEFORE("text-note") },
   { file: "components/preview/PreviewRecentUrlCard.tsx", text: "text-[13px]", count: 1, why: BEFORE("text-note") },
@@ -327,7 +328,7 @@ const ALLOWED: ReadonlyArray<{ file: string; text: string; count: number; why: s
   { file: "slate/pieces/toggle.tsx", text: "text-[13px]", count: 1, why: BEFORE("text-note") },
   { file: "slate/standing.tsx", text: "text-[13px]", count: 1, why: BEFORE("text-note") },
   { file: "terminal/ghostty/renderer.ts", text: "rgba(72, 122, 191, 0.35)", count: 1, why: BEFORE("a theme token") },
-  { file: "terminal/ghostty/surface.ts", text: "rounded-[3px]", count: 1, why: BEFORE("a radius on the scale") },
+  { file: "terminal/ghostty/surface/terminalSurface.ts", text: "rounded-[3px]", count: 1, why: BEFORE("a radius on the scale") },
 ];
 
 /** How many of each counted kind the sources hold now. A new one fails; one taken away fails until the figure here

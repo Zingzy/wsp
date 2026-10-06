@@ -1,0 +1,15 @@
+{
+  "at": "/",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:redirect",
+    "390:key:Escape",
+    "390:key:Escape",
+    "testid=composer-editor",
+    "type:read the manual and sum it up",
+    "file:manual.pdf:12582912"
+  ],
+  "wait": "composer-refused-file=manual.pdf",
+  "settleMs": 700
+}
