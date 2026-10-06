@@ -6,7 +6,7 @@ use std::path::Path;
 
 use wsp_frames::{words, DaemonErrorCode, GitPushReply};
 
-use crate::git::{check, default_branch, parse_porcelain_v2, rev_exists, run_git, stdout_text, Runs};
+use crate::git::{check, default_branch, parse_porcelain_v2, rev_exists, run_git, stdout_text, GitLine, Runs};
 use crate::paths::OpError;
 
 /// Files of the diffstat one push carries; past it git prints its own "N more files" line and the reply stays a
@@ -15,7 +15,7 @@ const STAT_FILES: &str = "--stat-count=50";
 
 /// The remote a push goes to: origin where there is one, else the first the checkout names, else none.
 async fn remote_name<R: Runs>(runner: &R, cwd: &Path) -> Result<Option<String>, OpError> {
-    let listed = run_git(runner, cwd, &["remote"], None, None).await?;
+    let listed = run_git(runner, cwd, &GitLine::new(&["remote"]), None, None).await?;
     check(&listed, "remote")?;
     let text = stdout_text(&listed);
     let mut names = text.lines().map(str::trim).filter(|n| !n.is_empty());
@@ -27,7 +27,7 @@ async fn remote_name<R: Runs>(runner: &R, cwd: &Path) -> Result<Option<String>, 
 /// host's command line checked out off someone's fork tracks that fork, and pushes there.
 async fn configured_remote<R: Runs>(runner: &R, cwd: &Path, branch: &str) -> Result<Option<String>, OpError> {
     for key in [format!("branch.{branch}.pushRemote"), format!("branch.{branch}.remote")] {
-        let read = run_git(runner, cwd, &["config", "--get", &key], None, None).await?;
+        let read = run_git(runner, cwd, &GitLine::new(&["config", "--get"]).operands(&[&key]), None, None).await?;
         let named = stdout_text(&read).trim().to_owned();
         if read.code == Some(0) && !named.is_empty() && named != "." {
             return Ok(Some(named));
@@ -40,7 +40,7 @@ async fn configured_remote<R: Runs>(runner: &R, cwd: &Path, branch: &str) -> Res
 /// with no remote at all.
 pub(crate) async fn remote_if_any<R: Runs>(runner: &R, cwd: &Path) -> Result<Option<(String, String)>, OpError> {
     let Some(name) = remote_name(runner, cwd).await? else { return Ok(None) };
-    let url = run_git(runner, cwd, &["remote", "get-url", &name], None, None).await?;
+    let url = run_git(runner, cwd, &GitLine::new(&["remote", "get-url"]).operands(&[&name]), None, None).await?;
     check(&url, "remote get-url")?;
     Ok(Some((name, stdout_text(&url).trim().to_owned())))
 }
@@ -52,7 +52,7 @@ pub(crate) async fn remote_url<R: Runs>(runner: &R, cwd: &Path) -> Result<(Strin
 
 /// The branch this checkout is on; a detached head is on none, and there is nothing to bring back from one.
 pub(crate) async fn branch_at<R: Runs>(runner: &R, cwd: &Path) -> Result<String, OpError> {
-    let head = run_git(runner, cwd, &["symbolic-ref", "-q", "--short", "HEAD"], None, None).await?;
+    let head = run_git(runner, cwd, &GitLine::new(&["symbolic-ref", "-q", "--short", "HEAD"]), None, None).await?;
     check(&head, "symbolic-ref")?;
     let branch = stdout_text(&head).trim().to_owned();
     if head.code != Some(0) || branch.is_empty() {
@@ -96,14 +96,14 @@ async fn base_ref<R: Runs>(runner: &R, cwd: &Path, remote: &str, base: &str) -> 
 /// How many commits the branch has that the base lacks.
 async fn ahead_of<R: Runs>(runner: &R, cwd: &Path, from: Option<&str>) -> Result<u64, OpError> {
     let range = from.map_or_else(|| "HEAD".to_owned(), |base| format!("{base}..HEAD"));
-    let counted = run_git(runner, cwd, &["rev-list", "--count", &range], None, None).await?;
+    let counted = run_git(runner, cwd, &GitLine::new(&["rev-list", "--count"]).revs(&[&range]), None, None).await?;
     check(&counted, "rev-list")?;
     Ok(stdout_text(&counted).trim().parse().unwrap_or(0))
 }
 
 /// Changes in the checkout that no commit holds, ignored files apart: what a person is told they are leaving behind.
 async fn uncommitted<R: Runs>(runner: &R, cwd: &Path) -> Result<u64, OpError> {
-    let status = run_git(runner, cwd, &["status", "--porcelain=v2", "--branch", "-z"], None, None).await?;
+    let status = run_git(runner, cwd, &GitLine::new(&["status", "--porcelain=v2", "--branch", "-z"]), None, None).await?;
     check(&status, "status")?;
     let (_, entries) = parse_porcelain_v2(&stdout_text(&status));
     Ok(entries.iter().filter(|e| e.xy != "!!").count() as u64)
@@ -114,7 +114,7 @@ async fn uncommitted<R: Runs>(runner: &R, cwd: &Path) -> Result<u64, OpError> {
 async fn stat_over<R: Runs>(runner: &R, cwd: &Path, from: Option<&str>) -> Result<Vec<String>, OpError> {
     let Some(base) = from else { return Ok(Vec::new()) };
     let range = format!("{base}...HEAD");
-    let diffed = run_git(runner, cwd, &["diff", "--stat", STAT_FILES, &range], None, None).await?;
+    let diffed = run_git(runner, cwd, &GitLine::new(&["diff", "--stat", STAT_FILES]).revs(&[&range]), None, None).await?;
     check(&diffed, "diff --stat")?;
     Ok(stdout_text(&diffed).lines().map(|l| l.trim_end().to_owned()).filter(|l| !l.is_empty()).collect())
 }
@@ -138,7 +138,7 @@ pub(crate) async fn no_credential<R: Runs>(
     if !NO_CREDENTIAL_SAID.iter().any(|mark| said.contains(mark)) {
         return Ok(None);
     }
-    let url = run_git(runner, cwd, &["remote", "get-url", remote], None, None).await?;
+    let url = run_git(runner, cwd, &GitLine::new(&["remote", "get-url"]).operands(&[remote]), None, None).await?;
     let Some(host) = crate::hosts::host_name(stdout_text(&url).trim()) else { return Ok(None) };
     let fix = crate::hosts::host_for(stdout_text(&url).trim()).map(|module| module.credential_fix());
     Ok(Some(sentence(&host, fix)))
@@ -157,7 +157,7 @@ pub(crate) async fn push<R: Runs>(runner: &R, cwd: &Path, named: Option<&str>) -
     let left = uncommitted(runner, cwd).await?;
     let stat = stat_over(runner, cwd, from.as_deref()).await?;
     let remote = configured_remote(runner, cwd, &branch).await?.unwrap_or(remote);
-    let pushed = run_git(runner, cwd, &["push", "-u", &remote, &branch], None, None).await?;
+    let pushed = run_git(runner, cwd, &GitLine::new(&["push", "-u"]).operands(&[&remote, &branch]), None, None).await?;
     if pushed.code != Some(0) {
         if let Some(refusal) = no_credential(runner, cwd, &remote, &pushed.stderr, words::no_git_credential).await? {
             return Err(OpError::coded(DaemonErrorCode::NoGitCredential, refusal));
@@ -253,6 +253,23 @@ mod tests {
         assert_eq!(pushed.remote, "waldyrious");
         assert!(git(&fork, &["branch", "--list", "fix/typo"]).contains("fix/typo"));
         assert!(!git(&repo.origin(), &["branch", "--list", "fix/typo"]).contains("fix/typo"));
+    }
+
+    /// update-ref takes a branch named as a flag, and a push reads a flag after its remote: the branch reaches the
+    /// remote as a branch and the command it names never runs, whatever the checkout's config says to push.
+    #[tokio::test]
+    async fn a_branch_named_as_a_flag_is_pushed_as_a_branch_and_runs_nothing() {
+        let repo = Repo::new();
+        let marker = repo.dir.path().join("ran");
+        let branch = format!("--receive-pack=touch${{IFS}}{};git-receive-pack", marker.display());
+        git(&repo.at(), &["update-ref", &format!("refs/heads/{branch}"), "HEAD"]);
+        git(&repo.at(), &["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")]);
+        repo.commit("work.txt");
+        git(&repo.at(), &["config", "push.default", "current"]);
+        let pushed = push(&here(), &repo.at(), Some("main")).await.unwrap();
+        assert!(!marker.exists(), "the branch's name ran as a command");
+        assert_eq!(pushed.branch, branch);
+        assert!(git(&repo.origin(), &["for-each-ref", "--format=%(refname)"]).contains(&format!("refs/heads/{branch}")));
     }
 
     #[tokio::test]
@@ -353,10 +370,7 @@ mod tests {
         // Every call: git, in the checkout the caller named, and never a program or a folder of the daemon's own.
         assert!(calls.iter().all(|call| call.cwd == "/private/tmp/proof/repo" && call.program == "git"), "a call ran somewhere else");
         assert_eq!(calls.first().map(|call| call.args.clone()), Some(vec!["remote".to_owned()]));
-        assert_eq!(
-            calls.last().map(|call| call.args.clone()),
-            Some(vec!["push".to_owned(), "-u".to_owned(), "origin".to_owned(), "work".to_owned()])
-        );
+        assert_eq!(calls.last().map(|call| call.args.clone()), Some(["push", "-u", "--", "origin", "work"].map(str::to_owned).to_vec()));
         // And nothing was fed on stdin: a push carries its words and reads nothing from this end.
         assert!(calls.iter().all(|call| call.stdin.is_none()), "a git call was fed stdin");
         assert_eq!(calls.len(), 11);
@@ -398,7 +412,7 @@ mod tests {
         assert!(refused.message.contains("nothing was pushed"), "{}", refused.message);
         // The remote's url is read only where the push was refused for a credential: the happy road runs eleven.
         assert_eq!(runner.asked().len(), 12);
-        assert_eq!(runner.asked()[11].args, ["remote", "get-url", "origin"]);
+        assert_eq!(runner.asked()[11].args, ["remote", "get-url", "--", "origin"]);
 
         // The other two sentences a host with no credential on the request answers with read the same way.
         for said in [

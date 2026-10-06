@@ -245,6 +245,11 @@ pub fn no_change(path: &str) -> String {
     format!("{path} has no change")
 }
 
+/// What a pane's save of a file whose name is not UTF-8 is refused with: the daemon opens names one at a time as text.
+pub fn name_not_utf8(path: &str) -> String {
+    format!("{path} has a name that is not UTF-8, and the daemon writes only UTF-8 names")
+}
+
 /// What a pane's save of more than the write cap is refused with.
 pub fn too_large_to_write(cap: u64) -> String {
     format!("that is more than {} MB, the most a pane saves", cap / (1024 * 1024))

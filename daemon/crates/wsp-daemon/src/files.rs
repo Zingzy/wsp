@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use notify::{RecursiveMode, Watcher};
 use wsp_frames::{numbers, FsFilesReply};
 
-use crate::git::{check, run_git, Runs};
+use crate::git::{check, run_git, GitLine, Runs};
 use crate::paths::OpError;
 
 /// Folders whose lists are kept at once; one more drops another.
@@ -67,7 +67,7 @@ impl FileLists {
 /// Tracked files and untracked ones git does not ignore, relative to the folder. The fsmonitor is turned off for
 /// the run: a checkout's config is the agent's to write, and that setting names a program git would start.
 pub(crate) async fn list<R: Runs>(runner: &R, at: &Path) -> Result<FsFilesReply, OpError> {
-    let args = ["-c", "core.fsmonitor=false", "ls-files", "--cached", "--others", "--exclude-standard", "-z"];
+    let args = GitLine::new(&["-c", "core.fsmonitor=false", "ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
     let res = run_git(runner, at, &args, None, Some(LISTING_CAP_BYTES)).await?;
     check(&res, "ls-files")?;
     let text = String::from_utf8_lossy(&res.stdout);

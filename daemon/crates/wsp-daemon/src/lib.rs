@@ -378,7 +378,7 @@ impl Ctx {
         };
         // Root on this computer owns it and nothing else here may open it; inside, the workspace's own root is
         // the only one that can see it at all.
-        if let Err(e) = std::fs::set_permissions(&at, std::os::unix::fs::PermissionsExt::from_mode(0o600)) {
+        if let Err(e) = owner_only(&at) {
             return self.log(&format!("workspace {id} has no door inside it: {}: {e}", at.display()));
         }
         let ctx = Arc::clone(self);
@@ -684,6 +684,13 @@ impl wsp_runtime::ops::Watches for WorkspaceDoors {
 
 /// The root the hello announces: the --root given, else HOME, made absolute and normalised as node's path.resolve
 /// does.
+/// A workspace's door made its owner's alone, the name changed and never what a link at it names: the door sits in
+/// the workspace's wsp home, where a process inside can put a link at the name between the bind and this.
+fn owner_only(at: &Path) -> std::io::Result<()> {
+    use nix::sys::stat::{fchmodat, FchmodatFlags, Mode};
+    fchmodat(nix::fcntl::AT_FDCWD, at, Mode::from_bits_truncate(0o600), FchmodatFlags::NoFollowSymlink).map_err(std::io::Error::from)
+}
+
 fn resolved_root(root: Option<&Path>) -> String {
     let given = root.map(Path::to_path_buf).or_else(|| std::env::var_os("HOME").map(PathBuf::from)).unwrap_or_else(|| PathBuf::from("/"));
     paths::absolute(&given).to_string_lossy().into_owned()
@@ -692,6 +699,23 @@ fn resolved_root(root: Option<&Path>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_door_is_made_its_owners_alone_and_a_link_at_its_name_moves_nothing() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let door = dir.path().join("door.sock");
+        let _held = std::os::unix::net::UnixListener::bind(&door).unwrap();
+        owner_only(&door).unwrap();
+        assert_eq!(std::fs::symlink_metadata(&door).unwrap().permissions().mode() & 0o777, 0o600);
+        let theirs = dir.path().join("passwd");
+        std::fs::write(&theirs, "root:x\n").unwrap();
+        std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let planted = dir.path().join("planted.sock");
+        std::os::unix::fs::symlink(&theirs, &planted).unwrap();
+        let _ = owner_only(&planted);
+        assert_eq!(std::fs::metadata(&theirs).unwrap().permissions().mode() & 0o777, 0o644);
+    }
 
     #[test]
     fn the_root_is_absolute_and_normalised() {

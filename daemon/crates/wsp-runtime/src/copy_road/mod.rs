@@ -393,8 +393,8 @@ mod tests {
         let from = dir.path().join("work");
         repo(&from);
         std::fs::write(from.join(".gitignore"), b"node_modules/\n.next/\n*.local\n").unwrap();
-        assert!(rules::git(&from, &["add", ".gitignore"], rules::READ_MS).unwrap().ok());
-        assert!(rules::git(&from, &["commit", "--quiet", "-m", "ignore"], rules::WRITE_MS).unwrap().ok());
+        assert!(rules::git(&from, &crate::git_line::GitLine::new(&["add", ".gitignore"]), rules::READ_MS).unwrap().ok());
+        assert!(rules::git(&from, &crate::git_line::GitLine::new(&["commit", "--quiet", "-m", "ignore"]), rules::WRITE_MS).unwrap().ok());
         let base = rules::sha_of(&from, "HEAD").unwrap();
         std::fs::create_dir_all(from.join("node_modules/.cache")).unwrap();
         std::fs::create_dir_all(from.join(".next/server")).unwrap();
@@ -433,15 +433,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let from = dir.path().join("work");
         repo(&from);
-        assert!(rules::git(&from, &["checkout", "--quiet", "-b", "feature"], rules::WRITE_MS).unwrap().ok());
+        assert!(rules::git(&from, &crate::git_line::GitLine::new(&["checkout", "--quiet", "-b", "feature"]), rules::WRITE_MS)
+            .unwrap()
+            .ok());
         let held = dir.path().join("held-main");
-        assert!(rules::git(&from, &["worktree", "add", "--quiet", &held.to_string_lossy(), "main"], rules::WRITE_MS).unwrap().ok());
+        assert!(rules::git(
+            &from,
+            &crate::git_line::GitLine::new(&["worktree", "add", "--quiet"]).operands(&[&held.to_string_lossy(), "main"]),
+            rules::WRITE_MS
+        )
+        .unwrap()
+        .ok());
         let to = dir.path().join("work-other");
         let report = make(&ask(&from, &to)).unwrap();
         assert_eq!(report.road, CopyRoadName::Clonefile);
         assert_eq!(report.branch, "main");
-        assert_eq!(rules::git(&to, &["rev-parse", "--abbrev-ref", "HEAD"], rules::READ_MS).unwrap().out(), "main");
-        let listed = rules::git(&from, &["worktree", "list", "--porcelain"], rules::READ_MS).unwrap();
+        assert_eq!(
+            rules::git(&to, &crate::git_line::GitLine::new(&["rev-parse", "--abbrev-ref", "HEAD"]), rules::READ_MS).unwrap().out(),
+            "main"
+        );
+        let listed = rules::git(&from, &crate::git_line::GitLine::new(&["worktree", "list", "--porcelain"]), rules::READ_MS).unwrap();
         assert!(listed.out().contains("held-main"), "the folder lost its own worktree: {}", listed.out());
         remove(&from, &to, report.road).unwrap();
     }
