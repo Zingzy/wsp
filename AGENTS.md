@@ -64,6 +64,8 @@ pnpm exec vitest run --minWorkers=1 --maxWorkers=2 packages/host/test/parity.tes
 `scripts/pre-review.sh [<ticket>]` is the last command before ready.
 `scripts/test-files.sh <file>...` runs named tests, `pnpm check:laws` the
 tree-wide laws, `scripts/heavy.sh <cmd>` heavy runs two at a time on a Mac.
+`pnpm --filter @wsp/desktop flows` walks the everyday flows in the packaged app
+(electron-builder `--linux dir` or `--mac --dir` first, a screen on Linux).
 
 ## Glossary
 

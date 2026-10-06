@@ -12,7 +12,8 @@
     "build:linux": "pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --linux --publish never",
     "build": "pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --publish never",
     "start": "pnpm run build:app && electron build/app",
-    "smoke": "cd ../.. && WSP_DESKTOP_SMOKE=1 vitest run --project node apps/desktop/test/smoke.electron.test.ts"
+    "smoke": "cd ../.. && WSP_DESKTOP_SMOKE=1 vitest run --project node apps/desktop/test/smoke.electron.test.ts",
+    "flows": "cd ../.. && WSP_DESKTOP_FLOWS=1 vitest run --project node apps/desktop/test/flows.electron.test.ts"
   },
   "devDependencies": {
     "@types/jsdom": "^21.1.7",

@@ -98,3 +98,30 @@ describe("every workflow's actions, grants, cargo lines and images", () => {
     expect(read("daemon", "rust-toolchain.toml")).toMatch(/^channel = "\d+\.\d+\.\d+"$/m);
   });
 });
+
+/** Whether a changed file matches one of a push trigger's path globs, as GitHub reads them: `**` crosses folders and
+ * `*` stays inside one. */
+const touches = (globs: readonly string[], file: string): boolean =>
+  globs.some(glob => new RegExp(`^${glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*/g, "\0").replace(/\*/g, "[^/]*").replace(/\0/g, ".*")}$`).test(file));
+
+describe("the flows run", () => {
+  const flows = read(".github", "workflows", "flows.yml");
+  const push = flows.slice(flows.indexOf("\n  push:\n"), flows.indexOf("\n  workflow_dispatch:"));
+  const listed = (key: string): string[] => [...(new RegExp(`^ {4}${key}:\\n((?: {6}- .*\\n)+)`, "m").exec(`${push}\n`)?.[1] ?? "").matchAll(/- "([^"]+)"/g)].map(m => m[1]!);
+
+  it("runs on every land/** push that changes the app, its shell, the runtime or the host, and on no other", () => {
+    expect(listed("branches")).toEqual(["land/**"]);
+    const paths = listed("paths");
+    for (const file of ["apps/web/src/App.tsx", "apps/desktop/src/main.ts", "packages/runtime/src/runtime.ts", "packages/host/src/verbs.ts", ".github/workflows/flows.yml"]) expect(touches(paths, file), file).toBe(true);
+    for (const file of ["apps/www/src/index.ts", "daemon/src/main.rs", "packages/engine/src/index.ts", "README.md"]) expect(touches(paths, file), file).toBe(false);
+  });
+
+  it("walks the flows file in the packaged Linux app under a screen, and the Mac smoke walks it every night", () => {
+    expect(flows).toContain("--linux dir");
+    expect(flows).toContain("xvfb-run --auto-servernum pnpm --filter @wsp/desktop flows");
+    const scripts = (JSON.parse(read("apps", "desktop", "package.json")) as { scripts: Record<string, string> }).scripts;
+    expect(scripts["flows"]).toContain("WSP_DESKTOP_FLOWS=1");
+    expect(scripts["flows"]).toContain("apps/desktop/test/flows.electron.test.ts");
+    expect(read(".github", "workflows", "desktop-smoke.yml")).toContain("pnpm --filter @wsp/desktop flows");
+  });
+});
