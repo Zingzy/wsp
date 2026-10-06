@@ -244,3 +244,30 @@ await rt.close();
     }
   });
 });
+
+describeWithDists("the state database's checkpoints, in a process run as a module", ["runtime"], () => {
+  it("copies a commit's WAL into the database off the loop, as a host started with --input-type=module does", async () => {
+    const script = `
+import { readFileSync } from "node:fs";
+import { sqliteStore } from ${JSON.stringify(distOf("runtime"))};
+const store = sqliteStore(${JSON.stringify(statePath)}, { wsp: "test", daemon: 1, bin: "test" });
+await store.putBlob("transcripts", "w1", Buffer.alloc(6 * 1024 * 1024, 1));
+const wal = () => { const shm = readFileSync(${JSON.stringify(join(home, "state.db-shm"))}); return { frames: shm.readUInt32LE(16), copied: shm.readUInt32LE(96) }; };
+const after = wal();
+await new Promise(r => setTimeout(r, 4500));
+console.log(JSON.stringify({ after, later: wal() }));
+`;
+    const child = spawn(process.execPath, ["--no-warnings", "--input-type=module", "-e", script], { env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: home }, stdio: ["ignore", "pipe", "pipe"] });
+    children.push(child);
+    const out = await new Promise<string>(done => {
+      let said = "";
+      child.stdout.on("data", (b: Buffer) => (said += b.toString()));
+      child.stderr.on("data", (b: Buffer) => (said += b.toString()));
+      child.once("exit", () => done(said));
+    });
+    const { after, later } = JSON.parse(out.trim().split("\n").at(-1)!) as { after: { frames: number; copied: number }; later: { frames: number; copied: number } };
+    expect(out).not.toContain("checkpoints of");
+    expect(after.copied, out).toBeLessThan(after.frames);
+    expect(later.copied, out).toBe(after.frames);
+  }, 15_000);
+});
