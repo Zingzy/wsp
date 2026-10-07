@@ -9,6 +9,8 @@
 // --changed-tests prints instead the test files the change added or modified, which the flake gate repeats, and
 // --always (no base) the files that run on every change: the ones named below, and every test that lists the whole
 // tree through source-files.ts, which is how a law check over all packages is written.
+// --files prints too every test file a picked folder holds that the change reaches, which the default leaves to its
+// folder, so a run that cannot afford the folders still runs the files the imports reach.
 // Committed changes only, so CI and a gate on a checkout of the same commit pick the same files.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -44,9 +46,10 @@ const OUTSIDE = {
 const args = process.argv.slice(2);
 const changedTests = args.includes("--changed-tests");
 const always = args.includes("--always");
+const everyFile = args.includes("--files");
 const base = args.find(arg => !arg.startsWith("--"));
 if (base === undefined && !always) {
-  process.stderr.write("usage: node scripts/affected-tests.mjs <base> [--changed-tests] | --always\n");
+  process.stderr.write("usage: node scripts/affected-tests.mjs <base> [--changed-tests | --files] | --always\n");
   process.exit(3);
 }
 
@@ -178,7 +181,7 @@ for (const [file, reason] of everyChange) pick(file, reason);
 
 const folders = [...picked.keys()].filter(target => target.endsWith("/"));
 for (const [target, reason] of [...picked].sort(([a], [b]) => a.localeCompare(b))) {
-  if (!target.endsWith("/") && folders.some(folder => target.startsWith(folder))) continue;
+  if (!everyFile && !target.endsWith("/") && folders.some(folder => target.startsWith(folder))) continue;
   why(target, reason);
   process.stdout.write(`${target}\n`);
 }
