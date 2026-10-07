@@ -74,6 +74,7 @@ const bridge: DesktopBridge & OnboardingBridge = {
   },
   sayOutside: (line: OutsideLine): void => ipcRenderer.send("outside:say", line),
   setBadge: (count: number): void => ipcRenderer.send("badge:set", count),
+  planAlertsSeen: (): void => ipcRenderer.send("plan-alerts:seen"),
   loginStart: (): Promise<boolean | null> => ipcRenderer.invoke("service:login"),
   setLoginStart: (on: boolean): Promise<boolean | null> => ipcRenderer.invoke("service:login-set", on),
   onOpen: (handler: (target: LinkTarget) => void): (() => void) => {

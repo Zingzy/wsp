@@ -8,8 +8,9 @@
 // the page to open whatever was spoken about, by the id the page put on the
 // line. The page says which lines show and which sound, each as the person
 // chose for that kind of moment; a line that only sounds plays the system's own
-// alert. The dock's badge is the count of threads waiting on the person.
-import { OUTSIDE_HELD, type OutsideLine } from "@wsp/protocol";
+// alert. The dock's badge is the count of threads waiting on the person, with
+// a mark beside it while an account's plan alert stands.
+import { DEFAULT_PREFERENCES, OUTSIDE_HELD, UsageAlertEvent, type OutsideLine } from "@wsp/protocol";
 
 /** The part of Electron's Notification this needs; a fake stands in for it under test. */
 export interface SystemNotification {
@@ -94,12 +95,62 @@ function hold(shown: SystemNotification): void {
   if (standing.size > OUTSIDE_HELD) standing.delete(standing.values().next().value!);
 }
 
-/** The part of Electron's app the badge needs. */
+/** The part of Electron's app the badge needs: a count, and on a Mac the dock's own badge, which takes words. */
 export interface Dock {
   setBadgeCount(count: number): void;
+  dock?: { setBadge(text: string): void } | undefined;
 }
 
-/** Puts the page's count on the dock; zero clears it, and anything but a whole count is dropped. */
-export function showBadge(count: unknown, dock: Dock): void {
-  if (typeof count === "number" && Number.isInteger(count) && count >= 0) dock.setBadgeCount(count);
+/** What the badge says beside the count while an account's plan alert stands. */
+export const PLAN_BADGE_MARK = "!";
+
+/** Puts the page's count on the dock, and a standing plan alert beside it: on a Mac as the mark after the count,
+ * elsewhere, where the badge is a count alone, as one more. Nothing to show clears it, and anything but a whole
+ * count is dropped. */
+export function showBadge(count: unknown, dock: Dock, planAlert = false): void {
+  if (typeof count !== "number" || !Number.isInteger(count) || count < 0) return;
+  if (dock.dock === undefined) return dock.setBadgeCount(count + (planAlert ? 1 : 0));
+  dock.dock.setBadge([...(count > 0 ? [String(count)] : []), ...(planAlert ? [PLAN_BADGE_MARK] : [])].join(" "));
+}
+
+export interface DockBadge {
+  /** The count of threads waiting on the person, from the page or, with no window, the menu bar. */
+  count(count: unknown): void;
+  /** An event the host sent: a window run low or a block marks its account, and the account back takes it off. */
+  heard(event: { type: string }): void;
+  /** The person opened Usage, or the window moved to another host's accounts: every mark goes. */
+  seen(): void;
+  /** The plan alerts switch in Settings > General; off, the badge carries no mark. */
+  alerts(on: boolean): void;
+}
+
+/** The dock's badge, painted again whenever what it shows moved. */
+export function dockBadge(dock: Dock): DockBadge {
+  let waiting: unknown = 0;
+  let on = DEFAULT_PREFERENCES.planAlerts;
+  const standing = new Set<string>();
+  const paint = (): void => showBadge(waiting, dock, on && standing.size > 0);
+  return {
+    count: count => {
+      waiting = count;
+      paint();
+    },
+    heard: event => {
+      const alert = UsageAlertEvent.safeParse(event);
+      if (!alert.success) return;
+      if (alert.data.alert.kind === "back") standing.delete(alert.data.key);
+      else standing.add(alert.data.key);
+      paint();
+    },
+    seen: () => {
+      if (standing.size === 0) return;
+      standing.clear();
+      paint();
+    },
+    alerts: next => {
+      if (next === on) return;
+      on = next;
+      paint();
+    },
+  };
 }

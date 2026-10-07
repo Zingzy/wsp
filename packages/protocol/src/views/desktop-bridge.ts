@@ -174,6 +174,8 @@ export interface DesktopBridge {
   onNeedsYouOpen(handler: (id?: string) => void): () => void;
   /** How many threads wait on the person, for the dock's badge; zero clears it. */
   setBadge(count: number): void;
+  /** The person opened Usage: the plan alerts the dock's badge carries beside that count are taken off. */
+  planAlertsSeen(): void;
   /** Whether this computer's service starts wsp at every login; null where no service is registered for this state.
    * Only the app's own host's page is answered. */
   loginStart(): Promise<boolean | null>;
