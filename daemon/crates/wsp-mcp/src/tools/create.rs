@@ -19,10 +19,10 @@ type Arc<T> = std::sync::Arc<T>;
 
 /// The project a workspace is made for, as far as a create reads it.
 #[derive(Deserialize, Clone)]
-struct Project {
-    id: String,
-    name: String,
-    computer: String,
+pub(super) struct Project {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) computer: String,
 }
 
 /// What a create answers with: the workspace, and the notice of anything it did on the way.
@@ -84,7 +84,8 @@ fn size_refused(word: &str, offered: &[Offer]) -> Failure {
     Failure::usage(fill(&template, &[("word", word), ("sizes", &sizes)]))
 }
 
-struct Asked {
+#[derive(Default)]
+pub(super) struct Asked {
     size: Option<String>,
     agents: Option<Map<String, Value>>,
     parent: Option<String>,
@@ -100,7 +101,7 @@ fn number(x: f64) -> Value {
 
 /// A workspace of one project. A project on this computer runs its threads in its own folder and forks nothing, so a
 /// size is refused before the landing is read.
-async fn create_for(client: &Client, project: &Project, name: &str, asked: Asked) -> Result<Created, Failure> {
+pub(super) async fn create_for(client: &Client, project: &Project, name: &str, asked: Asked) -> Result<Created, Failure> {
     #[derive(Deserialize)]
     struct Capabilities {
         #[serde(default)]
@@ -206,7 +207,7 @@ async fn fork(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let read = async {
         let source = workspace_of(&client, &workspace).await?;
         if let Some(task) = &task {
-            turn::checked_start(&client, task, agent.as_deref(), &picks, Some(&source.id)).await?;
+            turn::checked_start(&client, task, agent.as_deref(), &picks, Some(&source.id), None).await?;
         }
         Ok(source)
     }

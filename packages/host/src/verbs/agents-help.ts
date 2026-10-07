@@ -38,7 +38,7 @@ import { relaySignIn, targetLink, type BoxSignedIn } from "../place-signin.js";
 import { watchBlock, watchOn } from "../watch.js";
 import { type HostClient, table, type VerbContext, placeNamed, absolutePath, accessWordOf, printable, cell } from "./client.js";
 import { workspaceOf, projectOf } from "./workspaces-help.js";
-import { preferencesOf } from "./turns-help.js";
+import { preferencesOf, projectDefaultsOf } from "./turns-help.js";
 
 /** A verb's rows, drawn once or redrawn where they stand until Ctrl-C. The rows come back from one call so a frame
  * is one reading of the host and never half of two, and the socket is handed to the frame rather than asked for
@@ -469,11 +469,6 @@ interface ProjectSetAsk {
 
 export const projectSetNothingLine = "wsp projects set takes --agent, --model, --effort, --access or --reset.";
 export const noDefaultsAnsweredLine = (project: string): string => `the host answered no defaults for ${project}`;
-
-/** What every project starts a new thread on, by project id, each value with where it came from. */
-export async function projectDefaultsOf(client: HostClient): Promise<Record<string, ThreadDefaults>> {
-  return z.record(z.string(), ThreadDefaults).parse((await client.request<{ defaults: unknown }>("projects.defaults")).defaults);
-}
 
 /** One project's overrides moved, and what a new thread on it now starts on. */
 export async function projectDefaultsSet(client: HostClient, ref: string, ask: ProjectSetAsk): Promise<{ project: ProjectView; defaults: ThreadDefaults }> {
