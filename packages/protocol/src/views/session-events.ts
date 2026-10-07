@@ -436,8 +436,9 @@ export const SessionMovedEvent = z.object({
 });
 export type SessionMovedEvent = z.infer<typeof SessionMovedEvent>;
 
-/** A thread opened on a pull request in the worktree that holds its branch, which was left as it stood: the one line
- * saying it is behind the pull request, and how to bring it up. */
+/** One line the host writes on a thread as its turn starts: for a thread opened on a pull request in the worktree that
+ * holds its branch, which was left as it stood, that it is behind the pull request and how to bring it up; for the
+ * first thread in a new worktree, what the worktree ran before the thread started. */
 export const SessionBehindEvent = z.object({
   type: z.literal("session.behind"),
   ...sessionScope,

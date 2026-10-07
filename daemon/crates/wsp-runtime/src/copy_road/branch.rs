@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! A thread on another branch than the project folder's works in a git worktree the host keeps under its own
-//! folder: one per branch, the folder's config files and dependency directories carried in by one directory clone
-//! each, and taken away only with nothing in it uncommitted. A branch some worktree already holds is answered with
-//! that worktree, since git checks a branch out in one place; nothing here resets a branch the person has, so an
-//! existing branch is checked out as it stands and only a new one starts at the folder's HEAD.
+//! folder: one per branch, the folder's config files and the dependency directories of each ecosystem whose
+//! lockfile a folder of the branch holds carried in by one directory clone each (a reflink copy on a Linux disk that
+//! shares blocks, an overlay of a frozen copy of the folder's own on one that does not), and taken away only with
+//! nothing in it uncommitted. A branch some worktree already holds is answered with that worktree, since git checks a
+//! branch out in one place; nothing here resets a branch the person has, so an existing branch is checked out as it
+//! stands and only a new one starts at the folder's HEAD.
 
 use std::fs;
 use std::io;
@@ -11,7 +13,7 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use wsp_frames::{words, GitWorktree, WorktreeRemoval, WorktreeReport};
+use wsp_frames::{words, CarryModule, FoundModule, GitWorktree, WorktreeRemoval, WorktreeReport};
 
 use super::aside::{remove_later, sweep, ASIDE_PREFIX};
 use super::rules::{config_files_in, git, has_branch, ignored, is_repo_top, sha_of, READ_MS, WRITE_MS};
@@ -26,12 +28,31 @@ pub struct Ask<'a> {
     /// The project's id, which names the folder its worktrees sit in.
     pub project: &'a str,
     pub branch: &'a str,
-    /// The names of the ignored directories carried in, wherever in the folder they sit.
-    pub carry: &'a [String],
+    /// The ecosystems a new worktree is read for: each folder holding one's lockfile carries its directories in.
+    pub modules: &'a [CarryModule],
 }
 
-/// How one directory is cloned: `clonefile(2)` on a Mac, handed in so a test can count the calls or fail them.
-pub type CloneDir = fn(&Path, &Path) -> io::Result<()>;
+/// How one carried directory came to be in the worktree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Took {
+    Clone,
+    Overlay,
+}
+
+/// Where one carried directory goes: `at` inside `worktree`; for an overlay, `dir` a folder of its own for its
+/// upper and work directories and `frozen` the key of the frozen copy of the folder's directory, made where it is
+/// not, both named under `beside`, the folder of the project's worktrees.
+pub struct Layer {
+    pub worktree: PathBuf,
+    pub at: String,
+    pub beside: PathBuf,
+    pub dir: String,
+    pub frozen: String,
+}
+
+/// How one directory is cloned from the folder's `source` into its layer's place: handed in so a test can count the
+/// calls or fail them.
+pub type CloneDir = fn(&Path, &Layer) -> io::Result<Took>;
 
 /// The worktree for the branch: the one already holding it, else one made under the worktree root.
 pub fn make(ask: &Ask) -> Result<WorktreeReport, String> {
@@ -45,20 +66,38 @@ pub fn make_with(ask: &Ask, clone: CloneDir) -> Result<WorktreeReport, String> {
         return Err(not_a_repo_top(from));
     }
     one_part("project id", ask.project)?;
-    for name in ask.carry {
-        one_part("carried directory name", name)?;
+    for module in ask.modules {
+        for name in &module.lockfiles {
+            one_part("lockfile name", name)?;
+        }
+        let paths = module.carry.iter().map(|n| ("carried directory", n));
+        for (what, name) in
+            paths.chain(module.never.iter().map(|n| ("directory", n))).chain(module.installed.iter().map(|n| ("install record", n)))
+        {
+            if !downward(name) {
+                return Err(format!("{name:?} is not a {what} name: a path down from a folder, one folder name to a part"));
+            }
+        }
     }
     branch_name(from, ask.branch)?;
     let home = fs::canonicalize(ask.home).map_err(|e| format!("{}: {e}", ask.home.display()))?;
     let held = listed(from)?.into_iter().find(|w| w.branch.as_deref() == Some(ask.branch));
     if let Some(held) = held {
         if !held.prunable {
+            let made = made_here(Path::new(&held.path), &home);
+            // A restart of the computer took its mounts; they come back before a thread runs there again.
+            if made {
+                mount_layers(Path::new(&held.path));
+            }
             return Ok(WorktreeReport {
-                made: made_here(Path::new(&held.path), &home),
+                made,
                 path: held.path,
                 branch: ask.branch.to_owned(),
                 carried: Vec::new(),
                 plain: Vec::new(),
+                overlaid: Vec::new(),
+                fresh: false,
+                modules: Vec::new(),
                 ms: started.elapsed().as_millis() as u64,
             });
         }
@@ -72,6 +111,8 @@ pub fn make_with(ask: &Ask, clone: CloneDir) -> Result<WorktreeReport, String> {
     fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     sweep_aside(&dir);
     let path = claim(&dir, &safe(ask.branch))?;
+    // Layers a worktree once at this path left, removed by hand since, are nobody's now.
+    drop_layers(&path);
     let to = path.to_string_lossy();
     let existing = has_branch(from, ask.branch);
     let added = if existing {
@@ -84,16 +125,37 @@ pub fn make_with(ask: &Ask, clone: CloneDir) -> Result<WorktreeReport, String> {
         let _ = fs::remove_dir_all(&path);
         return Err(added.why());
     }
-    match carry(from, &path, ask.carry, clone) {
-        Ok((carried, plain)) => Ok(WorktreeReport {
-            path: path.display().to_string(),
-            branch: ask.branch.to_owned(),
-            made: true,
-            carried,
-            plain,
-            ms: started.elapsed().as_millis() as u64,
-        }),
+    let found = found_in(&path, from, ask.modules);
+    // Two makes of this project at once would each read the other's frozen copies as nobody's.
+    let frozen = hold_frozen(&dir);
+    match carry(from, &path, &found, clone) {
+        Ok(Carry { carried, plain, overlaid, governed, frozen: keys }) => {
+            if frozen.is_ok() {
+                keep_newest(&dir, &keys);
+                drop_unused_frozen(&dir, &keys, false);
+            }
+            Ok(WorktreeReport {
+                modules: found
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| FoundModule {
+                        id: f.module.id.clone(),
+                        folder: if f.folder.is_empty() { ".".to_owned() } else { f.folder.clone() },
+                        rebuild: !(governed.contains(&i) && built(f, &path)),
+                    })
+                    .collect(),
+                path: path.display().to_string(),
+                branch: ask.branch.to_owned(),
+                made: true,
+                carried,
+                plain,
+                overlaid,
+                fresh: true,
+                ms: started.elapsed().as_millis() as u64,
+            })
+        }
         Err(why) => {
+            drop_layers(&path);
             let tip = sha_of(&path, "HEAD");
             let _ = git(from, &GitLine::new(&["worktree", "remove", "--force"]).operands(&[&to]), WRITE_MS);
             let _ = fs::remove_dir_all(&path);
@@ -104,6 +166,21 @@ pub fn make_with(ask: &Ask, clone: CloneDir) -> Result<WorktreeReport, String> {
             Err(why)
         }
     }
+}
+
+/// The overlays of a worktree wsp made of this folder mounted again where a restart took them, before a turn or a
+/// command runs there; refused for any other path.
+pub fn mount(from: &Path, home: &Path, path: &Path) -> Result<(), String> {
+    if !is_repo_top(from) {
+        return Err(not_a_repo_top(from));
+    }
+    let home = fs::canonicalize(home).map_err(|e| format!("{}: {e}", home.display()))?;
+    let at = resolved(path);
+    if !made_here(&at, &home) || !listed(from)?.iter().skip(1).any(|w| Path::new(&w.path) == at) {
+        return Err(not_ours_to_mount(path, &home));
+    }
+    mount_layers(&at);
+    Ok(())
 }
 
 /// The worktree taken away: refused for anything but a worktree of this folder that wsp made, and for one holding
@@ -125,13 +202,18 @@ pub fn remove_with(from: &Path, home: &Path, path: &Path, force: bool, meanwhile
     if !ours {
         return Err(not_made_here(path, &home));
     }
-    if let Some(beside) = at.parent() {
-        recover_held(beside);
-    }
+    let beside = at.parent().unwrap_or(&at).to_path_buf();
+    recover_held(&beside);
     let said = at.to_string_lossy().into_owned();
+    // One mount or removal of this worktree at a time: a remount meanwhile would stack where git is about to walk.
+    let _held = hold_layers(&at);
     if !at.exists() {
         let gone = git(from, &GitLine::new(&["worktree", "remove"]).operands(&[&said]), WRITE_MS)
             .map_err(|e| format!("git worktree remove: {e}"))?;
+        if gone.ok() {
+            drop_layers(&at);
+            drop_frozen_after(&beside);
+        }
         return if gone.ok() { Ok(WorktreeRemoval { path: said, rescued: None }) } else { Err(gone.why()) };
     }
     if !force {
@@ -159,6 +241,14 @@ pub fn remove_with(from: &Path, home: &Path, path: &Path, force: bool, meanwhile
         }
         _ => None,
     };
+    // An overlay's mount point cannot be renamed, and git's removal would walk into it and then forget a worktree
+    // that still stands: every mount comes down first, or git is not asked.
+    unmount_layers(&at);
+    let left = mounts_beneath(&at);
+    if !left.is_empty() {
+        mount_records(&at);
+        return Err(mounted_inside(path, left.len()));
+    }
     let aside = set_aside_ignored(&at);
     if let Some(beside) = at.parent() {
         meanwhile(beside);
@@ -170,6 +260,7 @@ pub fn remove_with(from: &Path, home: &Path, path: &Path, force: bool, meanwhile
             let _ = fs::rename(held, dir);
             let _ = fs::remove_file(sidecar(held));
         }
+        mount_records(&at);
         return Err(match removed {
             Ok(r) => r.why(),
             Err(e) => format!("git worktree remove: {e}"),
@@ -184,12 +275,31 @@ pub fn remove_with(from: &Path, home: &Path, path: &Path, force: bool, meanwhile
         }
         let _ = fs::remove_file(sidecar(held));
     }
+    drop_layers(&at);
+    drop_frozen_after(&beside);
     Ok(WorktreeRemoval { path: said, rescued })
+}
+
+/// After a removal, under the lock, the frozen copies no worktree sits on any longer, the newest set kept as the
+/// next worktree's cache.
+fn drop_frozen_after(beside: &Path) {
+    if let Ok(_frozen) = hold_frozen(beside) {
+        drop_unused_frozen(beside, &[], false);
+    }
 }
 
 /// Why a folder that is not the top of a repository has no worktrees here.
 pub fn not_a_repo_top(from: &Path) -> String {
     format!("{} is not the top of a git repository; a worktree is made from the repository's top", from.display())
+}
+
+/// Why a path's overlays are not mounted again.
+pub fn not_ours_to_mount(path: &Path, home: &Path) -> String {
+    format!(
+        "{} is not a worktree wsp made for this project, so nothing was mounted; wsp mounts only its own, under {}",
+        path.display(),
+        home.join("worktrees").display()
+    )
 }
 
 /// Why a path is not taken away.
@@ -205,6 +315,12 @@ pub fn not_made_here(path: &Path, home: &Path) -> String {
 pub fn uncommitted(path: &Path, n: usize) -> String {
     let files = if n == 1 { "1 file".to_owned() } else { format!("{n} files") };
     format!("{} has {files} not committed, so it was not removed; commit them, or remove it with --force", path.display())
+}
+
+/// Why a worktree with something mounted inside it that wsp did not mount stays: git's removal would walk into it.
+pub fn mounted_inside(path: &Path, n: usize) -> String {
+    let mounts = if n == 1 { "1 mount".to_owned() } else { format!("{n} mounts") };
+    format!("{} has {mounts} inside it that wsp did not make, so it was not removed; unmount them, then remove it again", path.display())
 }
 
 /// Every worktree of the folder, the folder itself first, read from git each time and never kept.
@@ -321,12 +437,79 @@ fn resolved(path: &Path) -> PathBuf {
     }
 }
 
-/// The config files and the named ignored directories carried from the folder into the worktree. Answers what was
-/// carried and which directories a clone could not take.
-fn carry(from: &Path, to: &Path, names: &[String], clone: CloneDir) -> Result<(Vec<String>, Vec<String>), String> {
+/// One module whose lockfile a folder of the worktree tracks: the folder relative to the worktree, empty for its
+/// top, and the lockfile's own path.
+struct Found<'a> {
+    module: &'a CarryModule,
+    folder: String,
+    lockfile: String,
+}
+
+/// Every folder of the worktree whose tracked files hold a lockfile of a module where the project folder holds one
+/// of that module's directories in that folder, one row per module and folder, the top first and each folder's
+/// modules in the order they were asked. A lockfile a test fixture tracks has no installed folder beside it and
+/// costs no install. A module that carries nothing counts at the top whatever the folder holds, since what it builds
+/// may sit outside the project (Poetry's own venv folder, `UV_PROJECT_ENVIRONMENT`, `CARGO_TARGET_DIR`).
+fn found_in<'a>(at: &Path, from: &Path, modules: &'a [CarryModule]) -> Vec<Found<'a>> {
+    let installed = |module: &CarryModule, folder: &str| {
+        let is_dir = |name: &String| fs::symlink_metadata(from.join(folder).join(name)).is_ok_and(|m| m.is_dir());
+        (folder.is_empty() && module.carry.is_empty()) || module.carry.iter().chain(&module.never).any(is_dir)
+    };
+    let Ok(listed) = git(at, &GitLine::new(&["ls-files", "-z"]), READ_MS) else { return Vec::new() };
+    if !listed.ok() {
+        return Vec::new();
+    }
+    let mut found: Vec<Found> = Vec::new();
+    for file in listed.stdout.split('\0').filter(|f| !f.is_empty()) {
+        let (folder, name) = file.rsplit_once('/').unwrap_or(("", file));
+        for module in modules.iter().filter(|m| m.lockfiles.iter().any(|l| l == name)) {
+            if found.iter().any(|f| f.module.id == module.id && f.folder == folder)
+                || !is_file(&at.join(file))
+                || !installed(module, folder)
+            {
+                continue;
+            }
+            found.push(Found { module, folder: folder.to_owned(), lockfile: file.to_owned() });
+        }
+    }
+    found.sort_by_key(|f| (f.folder.clone(), modules.iter().position(|m| m.id == f.module.id)));
+    found
+}
+
+/// Whether a folder of the worktree holds a path in it, the top holding every one.
+fn holds(folder: &str, path: &str) -> bool {
+    folder.is_empty() || path.strip_prefix(folder).is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Whether a directory is the one a carried name names: the name itself, or the name under any folder.
+fn named(dir: &str, name: &str) -> bool {
+    dir == name || dir.strip_suffix(name).is_some_and(|rest| rest.ends_with('/'))
+}
+
+/// The row that carries a directory: of the folders holding it, the nearest whose module carries its name, unless
+/// a module found in any of them never carries it.
+fn governing(found: &[Found], dir: &str) -> Option<usize> {
+    let over: Vec<(usize, &Found)> = found.iter().enumerate().filter(|(_, f)| holds(&f.folder, dir)).collect();
+    if over.iter().any(|(_, f)| f.module.never.iter().any(|n| named(dir, n))) {
+        return None;
+    }
+    over.into_iter().filter(|(_, f)| f.module.carry.iter().any(|n| named(dir, n))).max_by_key(|(_, f)| f.folder.len()).map(|(i, _)| i)
+}
+
+/// What one carry put in the worktree, relative to it: every file and directory, the directories a clone could not
+/// take and the ones mounted as an overlay, the rows that carried a directory, and the frozen copies the overlays sit on.
+struct Carry {
+    carried: Vec<String>,
+    plain: Vec<String>,
+    overlaid: Vec<String>,
+    governed: Vec<usize>,
+    frozen: Vec<String>,
+}
+
+/// The config files and the ignored directories each found module carries, from the folder into the worktree.
+fn carry(from: &Path, to: &Path, found: &[Found], clone: CloneDir) -> Result<Carry, String> {
     let listing = ignored(from);
-    let mut carried = Vec::new();
-    let mut plain = Vec::new();
+    let mut done = Carry { carried: Vec::new(), plain: Vec::new(), overlaid: Vec::new(), governed: Vec::new(), frozen: Vec::new() };
     for file in config_files_in(from, &listing) {
         let target = to.join(&file);
         // The branch may track a file the folder ignores; the branch's own copy stands.
@@ -337,10 +520,11 @@ fn carry(from: &Path, to: &Path, names: &[String], clone: CloneDir) -> Result<(V
             fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
         fs::copy(from.join(&file), &target).map_err(|e| format!("{}: {e}", target.display()))?;
-        carried.push(file);
+        done.carried.push(file);
     }
-    let dirs = listing.iter().filter_map(|p| p.strip_suffix('/')).filter(|p| names.iter().any(|n| p.rsplit('/').next() == Some(n)));
-    for dir in dirs {
+    let beside = to.parent().unwrap_or(to);
+    for (n, dir) in listing.iter().filter_map(|p| p.strip_suffix('/')).enumerate() {
+        let Some(by) = governing(found, dir) else { continue };
         let (source, target) = (from.join(dir), to.join(dir));
         if !fs::symlink_metadata(&source).is_ok_and(|m| m.is_dir()) || fs::symlink_metadata(&target).is_ok() || !inside(to, &target) {
             continue;
@@ -348,14 +532,35 @@ fn carry(from: &Path, to: &Path, names: &[String], clone: CloneDir) -> Result<(V
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
-        if clone(&source, &target).is_err() {
-            let _ = fs::remove_dir_all(&target);
-            copy_plain(&source, &target).map_err(|e| format!("{}: {e}", target.display()))?;
-            plain.push(dir.to_owned());
+        let key = frozen_key(from, dir, &found[by]);
+        let layer = Layer {
+            worktree: to.to_path_buf(),
+            at: dir.to_owned(),
+            beside: beside.to_path_buf(),
+            dir: format!("{}/{n}", layers_name(to)),
+            frozen: key.clone(),
+        };
+        match clone(&source, &layer) {
+            Ok(Took::Clone) => {}
+            Ok(Took::Overlay) => {
+                if let Err(e) = write_records(&layer) {
+                    unmount_at(to, dir);
+                    return Err(format!("{}: {e}", beside.join(&layer.dir).display()));
+                }
+                done.overlaid.push(dir.to_owned());
+                done.frozen.push(key);
+            }
+            Err(_) => {
+                let _ = fs::remove_dir_all(beside.join(&layer.dir));
+                let _ = fs::remove_dir_all(&target);
+                copy_plain(&source, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+                done.plain.push(dir.to_owned());
+            }
         }
-        carried.push(dir.to_owned());
+        done.carried.push(dir.to_owned());
+        done.governed.push(by);
     }
-    Ok((carried, plain))
+    Ok(done)
 }
 
 /// Whether a path under the worktree stays in it: the branch can track a link where the folder has a directory,
@@ -365,24 +570,562 @@ fn inside(to: &Path, target: &Path) -> bool {
     target.ancestors().skip(1).find_map(|p| fs::canonicalize(p).ok()).is_some_and(|p| p.starts_with(root))
 }
 
+/// Whether a module's directories came in already installed for the branch: the record its install leaves of the
+/// lockfile it installed from is, byte for byte, the lockfile the branch holds in that folder. A module whose
+/// install leaves no such record is never taken as installed.
+fn built(found: &Found, to: &Path) -> bool {
+    let Some(record) = &found.module.installed else { return false };
+    matches!((capped(&to.join(&found.folder).join(record)), capped(&to.join(&found.lockfile))), (Some(x), Some(y)) if x == y)
+}
+
+/// A regular file's bytes, read with no link followed at its name, never waiting on a FIFO and never past a
+/// lockfile's size; anything but a regular file is never read.
+fn capped(at: &Path) -> Option<Vec<u8>> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    const LOCKFILE_MAX: u64 = 64 << 20;
+    let file = fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(at).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() || meta.len() > LOCKFILE_MAX {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(LOCKFILE_MAX + 1).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+/// A path a record beside a worktree wrote that only goes down into it: relative, every part a name.
+fn downward(rel: &str) -> bool {
+    !rel.is_empty() && !rel.starts_with('/') && !rel.split('/').any(|part| part == ".." || part == "." || part.is_empty())
+}
+
+/// A regular file at that path, no link followed.
+fn is_file(at: &Path) -> bool {
+    fs::symlink_metadata(at).is_ok_and(|m| m.is_file())
+}
+
 /// One `clonefile(2)` of a whole directory: the files share their blocks with the folder's until either side
 /// writes, and the call costs one directory rather than one call per file.
 #[cfg(target_os = "macos")]
-fn clone_dir(from: &Path, to: &Path) -> io::Result<()> {
+fn clone_dir(from: &Path, layer: &Layer) -> io::Result<Took> {
     use std::os::unix::ffi::OsStrExt;
     let c = |p: &Path| std::ffi::CString::new(p.as_os_str().as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e));
-    let (source, target) = (c(from)?, c(to)?);
+    let (source, target) = (c(from)?, c(&layer.worktree.join(&layer.at))?);
     // SAFETY: both paths are nul-terminated; the call writes nothing this process owns.
     if unsafe { libc::clonefile(source.as_ptr(), target.as_ptr(), 0) } != 0 {
         return Err(io::Error::last_os_error());
     }
+    Ok(Took::Clone)
+}
+
+/// Linux has no directory clone: a disk that shares blocks takes a reflink copy of every file, and any other disk an
+/// overlay whose lower layer is a frozen copy of the folder's directory, made once per lockfile and never written
+/// again, so a reinstall in the folder reaches no worktree. A plain copy of 863 MB of node_modules took 47 s on
+/// ext4; every worktree after the first of a lockfile costs one mount.
+#[cfg(target_os = "linux")]
+fn clone_dir(from: &Path, layer: &Layer) -> io::Result<Took> {
+    clone_linux(from, layer, may_mount)
+}
+
+/// The Linux road with whether this login may mount handed in. One the kernel lets mount nothing takes the plain
+/// copy at once, so a refused mount never costs a frozen copy on top of it.
+#[cfg(target_os = "linux")]
+fn clone_linux(from: &Path, layer: &Layer, may: fn(&Path) -> bool) -> io::Result<Took> {
+    if crate::copy_reflink::clones_into(from, &layer.beside) {
+        crate::copy::copy_tree(from, &layer.worktree.join(&layer.at), crate::copy_reflink::clone_file)?;
+        return Ok(Took::Clone);
+    }
+    if !may(&layer.beside) {
+        return Err(io::Error::from_raw_os_error(libc::EPERM));
+    }
+    freeze(from, &layer.beside, &layer.frozen)?;
+    overlay(&layer.beside, &frozen_name(&layer.frozen), &layer.worktree, &layer.at, &layer.dir)?;
+    Ok(Took::Overlay)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn clone_dir(_from: &Path, _layer: &Layer) -> io::Result<Took> {
+    Err(io::Error::from(io::ErrorKind::Unsupported))
+}
+
+/// Whether this process may mount an overlay on the disk of `beside`, asked once of the kernel with one overlay of
+/// empty folders and kept for the process: a verb's process makes one worktree, and the answer moves with the login
+/// the daemon runs as, which a cached file would not see.
+#[cfg(target_os = "linux")]
+fn may_mount(beside: &Path) -> bool {
+    static MAY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *MAY.get_or_init(|| {
+        use std::os::fd::AsFd;
+        let probe = beside.join(format!("{ASIDE_PREFIX}probe-{}-{}", std::process::id(), now_nanos()));
+        let mounted = (|| -> io::Result<()> {
+            let mut open = Vec::new();
+            for name in ["lower", "upper", "work", "point"] {
+                fs::DirBuilder::new().recursive(true).mode(0o700).create(probe.join(name))?;
+                open.push(fs::File::open(probe.join(name))?);
+            }
+            let fd = |n: usize| crate::bundle::by_fd(open[n].as_fd()).display().to_string();
+            let options = format!("lowerdir={},upperdir={},workdir={}", fd(0), fd(1), fd(2));
+            nix::mount::mount(
+                Some("overlay"),
+                &crate::bundle::by_fd(open[3].as_fd()),
+                Some("overlay"),
+                nix::mount::MsFlags::empty(),
+                Some(options.as_str()),
+            )?;
+            nix::mount::umount2(&probe.join("point"), nix::mount::MntFlags::MNT_DETACH)?;
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(&probe);
+        mounted.is_ok()
+    })
+}
+
+/// The folder beside a project's worktrees that holds the frozen copies their overlays sit on, one per carried
+/// directory and lockfile, named by `frozen_key`; a copy being made is named with `MAKING_PREFIX` until it is whole.
+/// `NEWEST` in it names the copies the newest make sat on, kept as the cache the next worktree reuses.
+const FROZEN: &str = ".wsp-frozen";
+const MAKING_PREFIX: &str = ".making-";
+const NEWEST: &str = ".newest";
+
+/// A frozen copy's path under the folder of a project's worktrees.
+fn frozen_name(key: &str) -> String {
+    format!("{FROZEN}/{key}")
+}
+
+/// The name of the frozen copy of one directory of the folder: its path and what says which install it holds. That
+/// is the record the folder's install left where the module names one, so a pull that brings a lockfile nobody
+/// installed makes no second copy of the same bytes, and the folder's lockfile otherwise.
+fn frozen_key(from: &Path, dir: &str, by: &Found) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(dir.as_bytes());
+    hash.update([0]);
+    match by.module.installed.as_ref().and_then(|record| capped(&from.join(&by.folder).join(record))) {
+        Some(record) => {
+            hash.update(b"installed\0");
+            hash.update(record);
+        }
+        None => hash.update(capped(&from.join(&by.lockfile)).unwrap_or_default()),
+    }
+    hash.finalize().iter().take(16).map(|b| format!("{b:02x}")).collect()
+}
+
+/// The frozen copies of this project's worktrees held for one make or removal: an exclusive lock on their folder,
+/// opened with no link followed, let go when the file is dropped.
+fn hold_frozen(beside: &Path) -> io::Result<fs::File> {
+    lock(&dir_beneath(beside, FROZEN, true)?)
+}
+
+/// An exclusive lock on an open folder, on a descriptor of its own that `flock` takes.
+#[cfg(target_os = "linux")]
+fn lock(dir: &std::os::fd::OwnedFd) -> io::Result<fs::File> {
+    use std::os::fd::{AsFd, AsRawFd};
+    let held = fs::File::open(crate::bundle::by_fd(dir.as_fd()))?;
+    // SAFETY: the descriptor is the open folder's own, alive for the call.
+    if unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(held)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn lock(_dir: &std::os::fd::OwnedFd) -> io::Result<fs::File> {
+    Err(io::Error::from(io::ErrorKind::Unsupported))
+}
+
+/// The folder at `rel` under `beside`, opened with no link followed anywhere on its way and, with `make`, each part
+/// made 0700 where it is missing.
+#[cfg(target_os = "linux")]
+fn dir_beneath(beside: &Path, rel: &str, make: bool) -> io::Result<std::os::fd::OwnedFd> {
+    let mut at = String::new();
+    for part in rel.split('/') {
+        if make {
+            let above = crate::engine::open_beneath(beside, if at.is_empty() { "." } else { &at })?;
+            match nix::sys::stat::mkdirat(&above, part, nix::sys::stat::Mode::from_bits_truncate(0o700)) {
+                Ok(()) | Err(nix::errno::Errno::EEXIST) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        if !at.is_empty() {
+            at.push('/');
+        }
+        at.push_str(part);
+    }
+    let dir = crate::engine::open_beneath(beside, &at)?;
+    is_dir(&dir)?;
+    Ok(dir)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn dir_beneath(_beside: &Path, _rel: &str, _make: bool) -> io::Result<std::os::fd::OwnedFd> {
+    Err(io::Error::from(io::ErrorKind::Unsupported))
+}
+
+/// An open folder as a path the kernel resolves to it.
+#[cfg(target_os = "linux")]
+fn fd_path(fd: &std::os::fd::OwnedFd) -> PathBuf {
+    use std::os::fd::AsFd;
+    crate::bundle::by_fd(fd.as_fd())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn fd_path(_fd: &std::os::fd::OwnedFd) -> PathBuf {
+    PathBuf::new()
+}
+
+#[cfg(target_os = "linux")]
+fn is_dir(fd: &std::os::fd::OwnedFd) -> io::Result<()> {
+    if nix::sys::stat::fstat(fd)?.st_mode & libc::S_IFMT != libc::S_IFDIR {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a directory"));
+    }
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
-fn clone_dir(_from: &Path, _to: &Path) -> io::Result<()> {
+/// One record file of an open layer folder, read only where it is a regular file.
+#[cfg(target_os = "linux")]
+fn record(layer: &std::os::fd::OwnedFd, name: &str) -> Option<String> {
+    use std::os::fd::AsFd;
+    capped(&crate::bundle::by_fd(layer.as_fd()).join(name)).and_then(|bytes| String::from_utf8(bytes).ok())
+}
+
+/// A frozen copy of the folder's directory named `key` in the frozen folder beside the worktrees, made whole under
+/// another name and renamed in, unless one is there.
+#[cfg(target_os = "linux")]
+fn freeze(source: &Path, beside: &Path, key: &str) -> io::Result<()> {
+    use crate::copy::Copier;
+    use std::os::fd::AsFd;
+    let root = dir_beneath(beside, FROZEN, true)?;
+    let at = crate::bundle::by_fd(root.as_fd());
+    if fs::symlink_metadata(at.join(key)).is_ok_and(|m| m.is_dir()) {
+        return Ok(());
+    }
+    let making = at.join(format!("{MAKING_PREFIX}{}-{}", std::process::id(), now_nanos()));
+    crate::copy_plain::Plain.copy(source, &making)?;
+    fs::rename(&making, at.join(key)).inspect_err(|_| {
+        let _ = crate::copy::remove_tree(&making);
+    })
+}
+
+/// Under the lock, every frozen copy no worktree's overlay sits on sent on its way out, but those in `keep` and the
+/// set the newest make sat on; and every copy a killed make left half made. With the project `going` the newest set
+/// goes too, removed here and now, since no turn waits on it and its folder goes after it.
+#[cfg(target_os = "linux")]
+fn drop_unused_frozen(beside: &Path, keep: &[String], going: bool) {
+    let Ok(root) = dir_beneath(beside, FROZEN, false) else { return };
+    let at = fd_path(&root);
+    let newest: Vec<String> = if going {
+        Vec::new()
+    } else {
+        capped(&at.join(NEWEST)).and_then(|b| String::from_utf8(b).ok()).map(|s| s.lines().map(str::to_owned).collect()).unwrap_or_default()
+    };
+    let used: Vec<String> = fs::read_dir(beside)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_string_lossy().strip_prefix(LAYERS_PREFIX).map(|leaf| beside.join(leaf)))
+        .flat_map(|worktree| layer_records(&worktree))
+        .map(|r| r.lower)
+        .collect();
+    let Ok(entries) = fs::read_dir(&at) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == NEWEST || !name.starts_with(MAKING_PREFIX) && (keep.contains(&name) || used.contains(&name) || newest.contains(&name)) {
+            continue;
+        }
+        if going {
+            let _ = crate::copy::remove_tree(&at.join(&name));
+            continue;
+        }
+        let gone = beside.join(format!("{ASIDE_PREFIX}frozen-{name}-{}", now_nanos()));
+        let set = if fs::rename(at.join(&name), &gone).is_ok() { gone } else { at.join(&name) };
+        if remove_later(&set).is_err() {
+            let _ = fs::remove_dir_all(&set);
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn drop_unused_frozen(_beside: &Path, _keep: &[String], _going: bool) {}
+
+/// The copies this make's overlays sat on written down as the newest set, which stays as the next worktree's cache
+/// once no worktree sits on it; a make that overlaid nothing leaves the set before it standing.
+fn keep_newest(beside: &Path, keys: &[String]) {
+    if keys.is_empty() {
+        return;
+    }
+    let Ok(root) = dir_beneath(beside, FROZEN, false) else { return };
+    let at = fd_path(&root);
+    let making = at.join(format!("{MAKING_PREFIX}newest-{}", std::process::id()));
+    if fs::write(&making, keys.join("\n")).and_then(|()| fs::rename(&making, at.join(NEWEST))).is_err() {
+        let _ = fs::remove_file(&making);
+    }
+}
+
+/// Every frozen copy of a project's worktrees taken away, the project going: what a worktree still sits on stays,
+/// and the folders go once nothing is left in them. A folder already gone has no volume to read, so its worktrees
+/// are looked for under the host's folder.
+pub fn forget(from: &Path, home: &Path, project: &str) -> Result<(), String> {
+    let gone = fs::symlink_metadata(from).is_err_and(|e| e.kind() == io::ErrorKind::NotFound);
+    if !gone && !is_repo_top(from) {
+        return Err(not_a_repo_top(from));
+    }
+    one_part("project id", project)?;
+    let home = fs::canonicalize(home).map_err(|e| format!("{}: {e}", home.display()))?;
+    let root = if gone { home.join("worktrees") } else { root_for(from, &home)? };
+    let beside = root.join(project);
+    if fs::symlink_metadata(&beside).is_err() {
+        return Ok(());
+    }
+    if fs::symlink_metadata(beside.join(FROZEN)).is_ok() {
+        let held = hold_frozen(&beside).map_err(|e| format!("{}: {e}", beside.join(FROZEN).display()))?;
+        drop_unused_frozen(&beside, &[], true);
+        let _ = fs::remove_file(beside.join(FROZEN).join(NEWEST));
+        drop(held);
+        let _ = fs::remove_dir(beside.join(FROZEN));
+    }
+    let _ = fs::remove_dir(&beside);
+    Ok(())
+}
+
+/// The folder beside a worktree that holds the upper and work directories of its overlays, one numbered folder per
+/// mount with the mount's path inside the worktree and the name of the frozen copy under it written in it.
+const LAYERS_PREFIX: &str = ".wsp-layers-";
+#[cfg(target_os = "linux")]
+const LAYER_AT: &str = "at";
+#[cfg(target_os = "linux")]
+const LAYER_LOWER: &str = "lower";
+
+fn layers_name(worktree: &Path) -> String {
+    format!("{LAYERS_PREFIX}{}", worktree.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+}
+
+fn layers_of(worktree: &Path) -> PathBuf {
+    worktree.with_file_name(layers_name(worktree))
+}
+
+/// One overlay a worktree's layers record: its mount point inside the worktree, which only goes down into it, its
+/// layer folder under the folder of the project's worktrees, and the name of the frozen copy it sits on.
+struct Record {
+    at: String,
+    layer: String,
+    lower: String,
+}
+
+/// Every overlay the worktree's layers record, each layer folder opened with no link followed and each record read
+/// only where it is a regular file.
+#[cfg(target_os = "linux")]
+fn layer_records(worktree: &Path) -> Vec<Record> {
+    use std::os::fd::AsFd;
+    let (Some(beside), name) = (worktree.parent(), layers_name(worktree)) else { return Vec::new() };
+    let Ok(dir) = dir_beneath(beside, &name, false) else { return Vec::new() };
+    let Ok(entries) = fs::read_dir(crate::bundle::by_fd(dir.as_fd())) else { return Vec::new() };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let layer = format!("{name}/{}", e.file_name().to_str()?);
+            let open = dir_beneath(beside, &layer, false).ok()?;
+            let at = record(&open, LAYER_AT).filter(|rel| downward(rel))?;
+            let lower = record(&open, LAYER_LOWER).filter(|key| one_part("frozen copy", key).is_ok())?;
+            Some(Record { at, layer, lower })
+        })
+        .collect()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn layer_records(_worktree: &Path) -> Vec<Record> {
+    Vec::new()
+}
+
+/// The two records of a layer written into its new folder, opened with no link followed, neither written over.
+#[cfg(target_os = "linux")]
+fn write_records(layer: &Layer) -> io::Result<()> {
+    use std::io::Write;
+    use std::os::fd::AsFd;
+    let dir = dir_beneath(&layer.beside, &layer.dir, false)?;
+    for (name, text) in [(LAYER_AT, layer.at.as_str()), (LAYER_LOWER, layer.frozen.as_str())] {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(crate::bundle::by_fd(dir.as_fd()).join(name))?
+            .write_all(text.as_bytes())?;
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn write_records(_layer: &Layer) -> io::Result<()> {
     Err(io::Error::from(io::ErrorKind::Unsupported))
 }
+
+/// The worktree's layers held for one mount or removal at a time, so two remounts never stack a second overlay on
+/// one upper; nothing to hold where the worktree has no layers.
+fn hold_layers(worktree: &Path) -> Option<fs::File> {
+    lock(&dir_beneath(worktree.parent()?, &layers_name(worktree), false).ok()?).ok()
+}
+
+/// The worktree's overlays mounted again where a restart took them, one remount at a time.
+fn mount_layers(worktree: &Path) {
+    let Some(_held) = hold_layers(worktree) else { return };
+    mount_records(worktree);
+}
+
+/// Under the hold, each overlay mounted again over its own frozen copy with the upper layer that holds what was
+/// written through it. One already mounted is left as it is, one whose frozen copy is gone stays down, and one whose
+/// directory holds anything now, written there while it was down, is left as it stands rather than hidden.
+fn mount_records(worktree: &Path) {
+    let Some(beside) = worktree.parent() else { return };
+    for r in layer_records(worktree) {
+        match overlay(beside, &frozen_name(&r.lower), worktree, &r.at, &r.layer) {
+            Ok(()) => {}
+            Err(e) if matches!(e.kind(), io::ErrorKind::AlreadyExists | io::ErrorKind::NotFound) => {}
+            Err(e) => eprintln!("{}: {e}", worktree.join(&r.at).display()),
+        }
+    }
+}
+
+/// Every overlay of the worktree taken down, detached so a process still reading one does not hold the removal.
+fn unmount_layers(worktree: &Path) {
+    for r in layer_records(worktree) {
+        unmount_at(worktree, &r.at);
+    }
+}
+
+/// The worktree's overlays taken down and their layers sent on their way out.
+fn drop_layers(worktree: &Path) {
+    let layers = layers_of(worktree);
+    if fs::symlink_metadata(&layers).is_err() {
+        return;
+    }
+    unmount_layers(worktree);
+    let leaf = layers.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let gone = layers.with_file_name(format!("{ASIDE_PREFIX}{leaf}-{}", now_nanos()));
+    let set = if fs::rename(&layers, &gone).is_ok() { gone } else { layers };
+    if remove_later(&set).is_err() {
+        let _ = fs::remove_dir_all(&set);
+    }
+}
+
+/// Every mount the kernel lists at the worktree or under it, as `/proc/self/mountinfo` names them.
+#[cfg(target_os = "linux")]
+fn mounts_beneath(worktree: &Path) -> Vec<String> {
+    let root = worktree.display().to_string();
+    let listed = fs::read_to_string("/proc/self/mountinfo").unwrap_or_default();
+    listed
+        .lines()
+        .filter_map(|l| l.split(' ').nth(4))
+        .map(unescaped)
+        .filter(|p| *p == root || p.strip_prefix(&root).is_some_and(|rest| rest.starts_with('/')))
+        .collect()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn mounts_beneath(_worktree: &Path) -> Vec<String> {
+    Vec::new()
+}
+
+/// A mount point as mountinfo writes it, its space, tab, newline and backslash written as three octal digits.
+#[cfg(target_os = "linux")]
+fn unescaped(field: &str) -> String {
+    let bytes = field.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let octal = bytes.get(i + 1..i + 4).and_then(|d| std::str::from_utf8(d).ok()).and_then(|d| u8::from_str_radix(d, 8).ok());
+        match (bytes[i], octal) {
+            (b'\\', Some(byte)) => {
+                out.push(byte);
+                i += 4;
+            }
+            (byte, _) => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// An overlay at `rel` inside the worktree whose lower layer is `lower` and whose upper and work directories sit in
+/// `layer`, both named under `beside`, the folder of the project's worktrees; the top of it reads with the mode and
+/// owner of the lower's top, which is the folder's directory's. Every folder the kernel is handed is opened with no
+/// link followed anywhere on its way and named to it by its descriptor, never by a path read again; the mount point
+/// is made where it is missing. Refused with `AlreadyExists` where something is mounted there or it holds anything,
+/// with `NotFound` where the frozen copy is gone, and wherever the kernel refuses the mount, a login that is not
+/// root included; the carry then copies every byte.
+#[cfg(target_os = "linux")]
+fn overlay(beside: &Path, lower: &str, worktree: &Path, rel: &str, layer: &str) -> io::Result<()> {
+    use std::os::fd::AsFd;
+    let below = dir_beneath(beside, lower, false)?;
+    dir_beneath(beside, layer, true)?;
+    let upper = match dir_beneath(beside, &format!("{layer}/upper"), false) {
+        Ok(fd) => fd,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            let fd = dir_beneath(beside, &format!("{layer}/upper"), true)?;
+            let like = nix::sys::stat::fstat(&below)?;
+            let top = crate::bundle::by_fd(fd.as_fd());
+            fs::set_permissions(&top, std::os::unix::fs::PermissionsExt::from_mode(like.st_mode & 0o7777))?;
+            std::os::unix::fs::chown(&top, Some(like.st_uid), Some(like.st_gid))?;
+            fd
+        }
+        Err(e) => return Err(e),
+    };
+    let work = dir_beneath(beside, &format!("{layer}/work"), true)?;
+    let point = mount_point(worktree, rel)?;
+    let named = |fd: &std::os::fd::OwnedFd| crate::bundle::by_fd(fd.as_fd()).display().to_string();
+    let options = format!("lowerdir={},upperdir={},workdir={}", named(&below), named(&upper), named(&work));
+    let onto = crate::bundle::by_fd(point.as_fd());
+    nix::mount::mount(Some("overlay"), &onto, Some("overlay"), nix::mount::MsFlags::empty(), Some(options.as_str()))
+        .map_err(io::Error::from)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn overlay(_beside: &Path, _lower: &str, _worktree: &Path, _rel: &str, _layer: &str) -> io::Result<()> {
+    Err(io::Error::from(io::ErrorKind::Unsupported))
+}
+
+/// The empty directory at `rel` inside the worktree, made where it is missing, opened beneath the worktree with no
+/// link followed on the way or at its name: a link anywhere there is an agent's, and the daemon is root.
+#[cfg(target_os = "linux")]
+fn mount_point(worktree: &Path, rel: &str) -> io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::AsFd;
+    let (parent, name) = rel.rsplit_once('/').unwrap_or(("", rel));
+    let above = crate::engine::open_beneath(worktree, parent)?;
+    match nix::sys::stat::mkdirat(&above, name, nix::sys::stat::Mode::from_bits_truncate(0o700)) {
+        Ok(()) | Err(nix::errno::Errno::EEXIST) => {}
+        Err(e) => return Err(e.into()),
+    }
+    let point = crate::engine::open_beneath(worktree, rel)?;
+    let (top, here) = (fs::metadata(worktree)?, nix::sys::stat::fstat(&point)?);
+    if here.st_mode & libc::S_IFMT != libc::S_IFDIR {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a directory"));
+    }
+    if here.st_dev != top.dev() || fs::read_dir(crate::bundle::by_fd(point.as_fd()))?.next().is_some() {
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, "mounted already or not empty"));
+    }
+    Ok(point)
+}
+
+/// Every mount at `rel` inside the worktree detached, a stack of them included, its folder opened beneath the
+/// worktree with no link followed and the name itself never followed: a link put where a mount point was takes
+/// nothing down where it leads. Nothing mounted there is what was asked for.
+#[cfg(target_os = "linux")]
+fn unmount_at(worktree: &Path, rel: &str) {
+    use std::os::fd::AsFd;
+    let (parent, name) = rel.rsplit_once('/').unwrap_or(("", rel));
+    let Ok(above) = crate::engine::open_beneath(worktree, parent) else { return };
+    let at = crate::bundle::by_fd(above.as_fd()).join(name);
+    for _ in 0..16 {
+        match nix::mount::umount2(&at, nix::mount::MntFlags::MNT_DETACH | nix::mount::MntFlags::UMOUNT_NOFOLLOW) {
+            Ok(()) => continue,
+            Err(nix::errno::Errno::EINVAL) | Err(nix::errno::Errno::ENOENT) => {}
+            Err(e) => eprintln!("{}: {e}", worktree.join(rel).display()),
+        }
+        return;
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn unmount_at(_worktree: &Path, _rel: &str) {}
 
 /// Every byte of a directory written again, links kept as links; nothing of `to` is left where it fails.
 fn copy_plain(from: &Path, to: &Path) -> io::Result<()> {
@@ -479,13 +1222,9 @@ fn recover_held(beside: &Path) {
             continue;
         }
         let worktree = beside.join(leaf);
-        let back = fs::read_to_string(sidecar(&held))
-            .ok()
-            .filter(|rel| !rel.is_empty() && !rel.starts_with('/') && !rel.split('/').any(|part| part == ".." || part.is_empty()))
-            .map(|rel| worktree.join(rel))
-            .filter(|to| {
-                worktree.is_dir() && fs::symlink_metadata(to).is_err() && to.parent().is_some_and(Path::is_dir) && inside(&worktree, to)
-            });
+        let back = fs::read_to_string(sidecar(&held)).ok().filter(|rel| downward(rel)).map(|rel| worktree.join(rel)).filter(|to| {
+            worktree.is_dir() && fs::symlink_metadata(to).is_err() && to.parent().is_some_and(Path::is_dir) && inside(&worktree, to)
+        });
         let restored = back.is_some_and(|to| fs::rename(&held, to).is_ok());
         if !restored {
             let gone = beside.join(format!("{ASIDE_PREFIX}{rest}"));
@@ -523,467 +1262,5 @@ fn sweep_aside(dir: &Path) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::copy_road::rules::repo;
-    use std::os::unix::fs::PermissionsExt;
-
-    fn run(at: &Path, args: &[&'static str]) {
-        run_line(at, GitLine::new(args));
-    }
-
-    fn run_line(at: &Path, line: GitLine) {
-        let ran = git(at, &line, WRITE_MS).unwrap();
-        assert!(ran.ok(), "{:?}: {}", line.argv(), ran.why());
-    }
-
-    /// A project holding what a checkout on this Mac holds: an ignored root and nested `node_modules` with a link
-    /// between them as pnpm writes, an ignored `.env.local`, and an ignored `target` nobody carries.
-    fn project(dir: &Path) -> PathBuf {
-        let from = dir.join("work");
-        repo(&from);
-        fs::create_dir_all(from.join("packages/app")).unwrap();
-        fs::write(from.join(".gitignore"), b"node_modules/\ntarget/\n*.local\n").unwrap();
-        fs::write(from.join("packages/app/index.js"), b"app\n").unwrap();
-        run(&from, &["add", "."]);
-        run(&from, &["commit", "--quiet", "-m", "app"]);
-        fs::create_dir_all(from.join("node_modules/.pnpm/dep")).unwrap();
-        fs::write(from.join("node_modules/.pnpm/dep/index.js"), b"dep\n").unwrap();
-        fs::create_dir_all(from.join("packages/app/node_modules")).unwrap();
-        std::os::unix::fs::symlink("../../../node_modules/.pnpm/dep", from.join("packages/app/node_modules/dep")).unwrap();
-        fs::write(from.join(".env.local"), b"KEY=1\n").unwrap();
-        fs::create_dir_all(from.join("target/debug")).unwrap();
-        fs::write(from.join("target/debug/big"), b"built\n").unwrap();
-        from
-    }
-
-    fn carry_names() -> Vec<String> {
-        ["node_modules", ".venv", "vendor"].map(str::to_owned).to_vec()
-    }
-
-    fn ask<'a>(from: &'a Path, home: &'a Path, branch: &'a str, carry: &'a [String]) -> Ask<'a> {
-        Ask { from, home, project: "prj_1", branch, carry }
-    }
-
-    fn worktrees(from: &Path) -> Vec<GitWorktree> {
-        listed(from).unwrap()
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn a_new_branch_gets_a_worktree_under_the_home_with_the_config_and_one_clone_per_dependency_directory() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static CLONES: AtomicUsize = AtomicUsize::new(0);
-        fn counted(from: &Path, to: &Path) -> io::Result<()> {
-            CLONES.fetch_add(1, Ordering::SeqCst);
-            clone_dir(from, to)
-        }
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let head = sha_of(&from, "HEAD").unwrap();
-        let names = carry_names();
-        let report = make_with(&ask(&from, &home, "feat/x", &names), counted).unwrap();
-        let at = fs::canonicalize(&home).unwrap().join("worktrees/prj_1/feat-x");
-        assert_eq!(report.path, at.display().to_string());
-        assert!(report.made);
-        assert_eq!(report.branch, "feat/x");
-        assert_eq!(report.carried, [".env.local", "node_modules", "packages/app/node_modules"]);
-        assert!(report.plain.is_empty(), "{:?}", report.plain);
-        assert_eq!(CLONES.load(Ordering::SeqCst), 2, "one clone per directory, never one per file");
-        assert_eq!(fs::read_to_string(at.join("node_modules/.pnpm/dep/index.js")).unwrap(), "dep\n");
-        assert_eq!(
-            fs::read_to_string(at.join("packages/app/node_modules/dep/index.js")).unwrap(),
-            "dep\n",
-            "the link resolves inside the worktree"
-        );
-        assert_eq!(fs::read_to_string(at.join(".env.local")).unwrap(), "KEY=1\n");
-        assert!(!at.join("target").exists(), "a directory nobody named is not carried");
-        assert_eq!(fs::metadata(&at).unwrap().permissions().mode() & 0o777, 0o700);
-        assert_eq!(git(&at, &GitLine::new(&["rev-parse", "--abbrev-ref", "HEAD"]), READ_MS).unwrap().out(), "feat/x");
-        assert_eq!(sha_of(&at, "HEAD").unwrap(), head, "a new branch starts at the folder's HEAD");
-        assert_eq!(
-            git(&at, &GitLine::new(&["status", "--porcelain"]), READ_MS).unwrap().out(),
-            "",
-            "what was carried is ignored, so the tree is clean"
-        );
-        assert_eq!(
-            git(&from, &GitLine::new(&["rev-parse", "--abbrev-ref", "HEAD"]), READ_MS).unwrap().out(),
-            "main",
-            "the project folder stays on its branch"
-        );
-    }
-
-    #[test]
-    fn an_existing_branch_twenty_commits_ahead_is_checked_out_where_its_tip_stands() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        run(&from, &["checkout", "--quiet", "-b", "ahead"]);
-        fs::write(from.join(".env.local"), b"BRANCH=1\n").unwrap();
-        run(&from, &["add", "--force", ".env.local"]);
-        for n in 0..20 {
-            fs::write(from.join("README.md"), format!("{n}\n")).unwrap();
-            run_line(&from, GitLine::new(&["commit", "--quiet", "-a"]).value("-m", &format!("turn {n}")));
-        }
-        let tip = sha_of(&from, "ahead").unwrap();
-        run(&from, &["checkout", "--quiet", "main"]);
-        fs::write(from.join(".env.local"), b"KEY=1\n").unwrap();
-        let main = sha_of(&from, "main").unwrap();
-        let report = make(&ask(&from, &home, "ahead", &[])).unwrap();
-        assert!(report.made);
-        assert_eq!(sha_of(&from, "refs/heads/ahead").unwrap(), tip, "the branch moved");
-        assert_eq!(sha_of(Path::new(&report.path), "HEAD").unwrap(), tip);
-        assert_eq!(sha_of(&from, "main").unwrap(), main);
-        assert_eq!(fs::read_to_string(Path::new(&report.path).join("README.md")).unwrap(), "19\n");
-        assert_eq!(
-            fs::read_to_string(Path::new(&report.path).join(".env.local")).unwrap(),
-            "BRANCH=1\n",
-            "the branch's own file was overwritten"
-        );
-        assert!(!report.carried.contains(&".env.local".to_owned()));
-    }
-
-    #[test]
-    fn a_branch_a_worktree_already_holds_is_answered_with_that_worktree_and_nothing_is_made() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let hand = dir.path().join("by-hand");
-        run_line(&from, GitLine::new(&["worktree", "add", "--quiet", "-b", "mine"]).operands(&[&hand.to_string_lossy()]));
-        let report = make(&ask(&from, &home, "mine", &carry_names())).unwrap();
-        assert_eq!(report.path, fs::canonicalize(&hand).unwrap().display().to_string());
-        assert!(!report.made, "a worktree the person made is never wsp's");
-        assert!(report.carried.is_empty());
-        assert!(!home.join("worktrees").exists(), "nothing was made under the home");
-        // The project folder's own branch is held by the project folder.
-        let report = make(&ask(&from, &home, "main", &[])).unwrap();
-        assert_eq!(report.path, fs::canonicalize(&from).unwrap().display().to_string());
-        assert!(!report.made);
-        // A worktree wsp made earlier is found again and is still wsp's.
-        let first = make(&ask(&from, &home, "again", &[])).unwrap();
-        let second = make(&ask(&from, &home, "again", &[])).unwrap();
-        assert_eq!(second.path, first.path);
-        assert!(first.made && second.made);
-    }
-
-    #[test]
-    fn two_branches_with_one_folder_name_get_two_folders() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let a = make(&ask(&from, &home, "feat/x", &[])).unwrap();
-        let b = make(&ask(&from, &home, "feat-x", &[])).unwrap();
-        assert!(a.path.ends_with("/prj_1/feat-x"), "{}", a.path);
-        assert!(b.path.ends_with("/prj_1/feat-x-2"), "{}", b.path);
-    }
-
-    #[test]
-    fn a_project_on_another_volume_than_the_home_keeps_its_worktrees_on_its_own_volume() {
-        let home = Path::new("/Users/me/.wsp");
-        assert_eq!(root_of(home, 1, Path::new("/"), 1), PathBuf::from("/Users/me/.wsp/worktrees"));
-        assert_eq!(root_of(home, 1, Path::new("/Volumes/stick"), 2), PathBuf::from("/Volumes/stick/.wsp/worktrees"));
-        let dir = tempfile::tempdir().unwrap();
-        let mount = mount_of(&fs::canonicalize(dir.path()).unwrap());
-        assert!(dir.path().canonicalize().unwrap().starts_with(&mount), "{}", mount.display());
-        let stick = mount.join(".wsp/worktrees/prj_1/feat-x");
-        assert!(made_here(&stick, Path::new("/nowhere")), "a worktree under the volume's own root is wsp's");
-    }
-
-    #[test]
-    fn a_name_that_is_not_one_folder_or_not_a_branch_is_refused_before_anything_is_written() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        for branch in ["-f", "a..b", "x.lock", "a b"] {
-            let refused = make(&ask(&from, &home, branch, &[])).unwrap_err();
-            assert_eq!(refused, format!("{branch} is not a name git takes for a branch"));
-        }
-        let climbing = Ask { project: "../out", ..ask(&from, &home, "ok", &[]) };
-        assert!(make(&climbing).unwrap_err().contains("is not a project id"));
-        let carried = ["../x".to_owned()];
-        assert!(make(&ask(&from, &home, "ok", &carried)).unwrap_err().contains("is not a carried directory name"));
-        assert!(!home.join("worktrees").exists());
-        assert!(make(&ask(&from.join("packages"), &home, "ok", &[])).unwrap_err().contains("is not the top of a git repository"));
-    }
-
-    #[test]
-    fn a_directory_a_clone_cannot_take_is_copied_byte_for_byte_with_its_links_kept() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let names = carry_names();
-        let report = make_with(&ask(&from, &home, "plain", &names), |_, _| Err(io::Error::from_raw_os_error(libc::ENOTSUP))).unwrap();
-        assert_eq!(report.plain, ["node_modules", "packages/app/node_modules"]);
-        let at = Path::new(&report.path);
-        assert_eq!(fs::read_to_string(at.join("node_modules/.pnpm/dep/index.js")).unwrap(), "dep\n");
-        assert!(fs::symlink_metadata(at.join("packages/app/node_modules/dep")).unwrap().file_type().is_symlink());
-        assert_eq!(fs::read_to_string(at.join("packages/app/node_modules/dep/index.js")).unwrap(), "dep\n");
-    }
-
-    #[test]
-    fn a_carry_that_fails_leaves_no_worktree_and_no_new_branch() {
-        if unsafe { libc::geteuid() } == 0 {
-            return;
-        }
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let locked = from.join("node_modules/.pnpm/dep/index.js");
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
-        let names = carry_names();
-        let refused = make_with(&ask(&from, &home, "half", &names), |_, _| Err(io::Error::from_raw_os_error(libc::ENOTSUP))).unwrap_err();
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(refused.contains("node_modules"), "{refused}");
-        assert!(!has_branch(&from, "half"), "the branch the failed call made is still there");
-        assert_eq!(worktrees(&from).len(), 1);
-        let leaf = fs::canonicalize(&home).unwrap().join("worktrees/prj_1/half");
-        assert!(!leaf.exists());
-    }
-
-    #[test]
-    fn a_worktree_with_uncommitted_files_stays_unless_forced_and_a_clean_one_goes_with_its_branch_kept() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let names = carry_names();
-        let report = make(&ask(&from, &home, "work", &names)).unwrap();
-        let at = PathBuf::from(&report.path);
-        fs::write(at.join("README.md"), b"edited\n").unwrap();
-        fs::write(at.join("new.txt"), b"untracked\n").unwrap();
-        let refused = remove(&from, &home, &at, false).unwrap_err();
-        assert_eq!(refused, uncommitted(&at, 2));
-        assert_eq!(
-            refused,
-            format!("{} has 2 files not committed, so it was not removed; commit them, or remove it with --force", at.display())
-        );
-        assert!(at.join("new.txt").is_file() && at.join("node_modules/.pnpm/dep/index.js").is_file(), "a refused removal took something");
-        run(&at, &["add", "."]);
-        run(&at, &["commit", "--quiet", "-m", "work"]);
-        let tip = sha_of(&at, "HEAD").unwrap();
-        let removed = remove(&from, &home, &at, false).unwrap();
-        assert_eq!(removed, WorktreeRemoval { path: at.display().to_string(), rescued: None });
-        assert!(!at.exists());
-        assert!(held_beside(&at).is_empty(), "a removal git agreed to left its directories held, where no sweep takes them");
-        assert_eq!(sha_of(&from, "refs/heads/work").unwrap(), tip, "the branch keeps its commits");
-        assert_eq!(worktrees(&from).len(), 1);
-        // Forced, the files go with it.
-        let report = make(&ask(&from, &home, "scratch", &names)).unwrap();
-        let at = PathBuf::from(&report.path);
-        fs::write(at.join("new.txt"), b"untracked\n").unwrap();
-        remove(&from, &home, &at, true).unwrap();
-        assert!(!at.exists());
-    }
-
-    #[test]
-    fn a_removal_git_refuses_leaves_the_worktree_as_it_was() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let names = carry_names();
-        let at = PathBuf::from(make(&ask(&from, &home, "held", &names)).unwrap().path);
-        run_line(&from, GitLine::new(&["worktree", "lock"]).operands(&[&at.to_string_lossy()]));
-        // A make for another branch sweeps this project's folder while git is still deciding; what the removal
-        // holds aside is not the sweep's to take.
-        let swept = |beside: &Path| {
-            let failed = sweep([beside], |p| fs::remove_dir_all(p));
-            assert!(failed.is_empty(), "{failed:?}");
-        };
-        let refused = remove_with(&from, &home, &at, false, &swept).unwrap_err();
-        assert_eq!(refused, "fatal: cannot remove a locked working tree;");
-        assert_eq!(
-            fs::read_to_string(at.join("node_modules/.pnpm/dep/index.js")).unwrap(),
-            "dep\n",
-            "the dependencies went with a refusal"
-        );
-        assert!(at.join("packages/app/node_modules/dep").exists());
-        assert!(held_beside(&at).is_empty(), "a refusal left something held beside the worktree");
-    }
-
-    fn held_beside(at: &Path) -> Vec<String> {
-        fs::read_dir(at.parent().unwrap())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| n.starts_with(HOLDING_PREFIX))
-            .collect()
-    }
-
-    #[test]
-    fn nothing_is_carried_through_a_link_the_branch_tracks() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let outside = dir.path().join("outside");
-        fs::create_dir_all(&outside).unwrap();
-        run(&from, &["checkout", "--quiet", "-b", "linked"]);
-        run(&from, &["rm", "--quiet", "-r", "packages/app"]);
-        fs::remove_dir_all(from.join("packages/app")).unwrap();
-        std::os::unix::fs::symlink(&outside, from.join("packages/app")).unwrap();
-        run(&from, &["add", "packages/app"]);
-        run(&from, &["commit", "--quiet", "-m", "link"]);
-        run(&from, &["checkout", "--quiet", "main"]);
-        fs::create_dir_all(from.join("packages/app/node_modules/pkg")).unwrap();
-        let names = carry_names();
-        let report = make(&ask(&from, &home, "linked", &names)).unwrap();
-        assert!(!report.carried.contains(&"packages/app/node_modules".to_owned()), "{:?}", report.carried);
-        assert!(!outside.join("node_modules").exists(), "a directory was carried out of the worktree");
-        assert!(report.carried.contains(&"node_modules".to_owned()));
-    }
-
-    /// The id of a process that has exited, and a moment older than a git write may take.
-    fn killed() -> (u32, u128) {
-        let mut done = std::process::Command::new("true").spawn().unwrap();
-        let pid = done.id();
-        done.wait().unwrap();
-        (pid, now_nanos() - u128::from(WRITE_MS + 1_000) * 1_000_000)
-    }
-
-    fn beside_names(at: &Path) -> Vec<String> {
-        let mut names: Vec<String> = fs::read_dir(at.parent().unwrap())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| n.starts_with(HOLDING_PREFIX))
-            .collect();
-        names.sort();
-        names
-    }
-
-    #[test]
-    fn a_hold_a_killed_removal_left_goes_back_into_its_worktree_at_the_next_make() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let names = carry_names();
-        let at = PathBuf::from(make(&ask(&from, &home, "held", &names)).unwrap().path);
-        let (pid, then) = killed();
-        let held = hold_as(&at, pid, then);
-        assert_eq!(held.len(), 2, "{held:?}");
-        assert!(!at.join("node_modules").exists() && beside_names(&at).len() == 4, "{:?}", beside_names(&at));
-        make(&ask(&from, &home, "other", &names)).unwrap();
-        assert_eq!(fs::read_to_string(at.join("node_modules/.pnpm/dep/index.js")).unwrap(), "dep\n");
-        assert_eq!(fs::read_to_string(at.join("packages/app/node_modules/dep/index.js")).unwrap(), "dep\n");
-        assert!(beside_names(&at).is_empty(), "{:?}", beside_names(&at));
-        assert_eq!(git(&at, &GitLine::new(&["status", "--porcelain"]), READ_MS).unwrap().out(), "");
-    }
-
-    #[test]
-    fn a_hold_whose_process_lives_or_that_is_younger_than_a_git_write_stays_where_it_is() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let names = carry_names();
-        let at = PathBuf::from(make(&ask(&from, &home, "held", &names)).unwrap().path);
-        let (dead, then) = killed();
-        hold_as(&at, std::process::id(), then);
-        make(&ask(&from, &home, "other", &names)).unwrap();
-        assert!(!at.join("node_modules").exists(), "a hold whose process lives was taken");
-        let living = beside_names(&at);
-        for name in living.iter().filter(|n| !n.ends_with(FROM_SUFFIX)) {
-            let held = at.parent().unwrap().join(name);
-            let fresh =
-                at.parent().unwrap().join(name.replace(&format!("-{}-{then}-", std::process::id()), &format!("-{dead}-{}-", now_nanos())));
-            fs::rename(&held, &fresh).unwrap();
-            fs::rename(sidecar(&held), sidecar(&fresh)).unwrap();
-        }
-        make(&ask(&from, &home, "third", &names)).unwrap();
-        assert!(!at.join("node_modules").exists(), "a hold younger than a git write was taken");
-        assert_eq!(beside_names(&at).len(), 4);
-    }
-
-    #[test]
-    fn a_hold_whose_worktree_git_already_removed_goes_on_its_way_out_at_the_next_removal() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let names = carry_names();
-        let gone = PathBuf::from(make(&ask(&from, &home, "gone", &names)).unwrap().path);
-        let kept = PathBuf::from(make(&ask(&from, &home, "kept", &names)).unwrap().path);
-        let (pid, then) = killed();
-        hold_as(&gone, pid, then);
-        run_line(&from, GitLine::new(&["worktree", "remove", "--force"]).operands(&[&gone.to_string_lossy()]));
-        // The removal of another worktree here takes it, and the worktree a hold of its own came back into goes whole.
-        hold_as(&kept, pid, then);
-        let removed = remove(&from, &home, &kept, false).unwrap();
-        assert_eq!(removed.path, kept.display().to_string());
-        assert!(!gone.exists() && !kept.exists());
-        assert!(beside_names(&kept).is_empty(), "{:?}", beside_names(&kept));
-    }
-
-    #[test]
-    fn nothing_but_a_worktree_wsp_made_of_this_folder_is_removed() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let hand = dir.path().join("by-hand");
-        run_line(&from, GitLine::new(&["worktree", "add", "--quiet", "-b", "mine"]).operands(&[&hand.to_string_lossy()]));
-        let stray = fs::canonicalize(&home).unwrap().join("worktrees/prj_1/stray");
-        fs::create_dir_all(&stray).unwrap();
-        for path in [&from, &hand, &stray] {
-            let refused = remove(&from, &home, path, true).unwrap_err();
-            assert_eq!(refused, not_made_here(path, &fs::canonicalize(&home).unwrap()));
-        }
-        assert!(from.join("README.md").is_file() && hand.join("README.md").is_file() && stray.is_dir());
-    }
-
-    #[test]
-    fn a_detached_worktree_saves_its_commit_to_a_ref_before_it_goes() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let at = PathBuf::from(make(&ask(&from, &home, "loose", &[])).unwrap().path);
-        run(&at, &["checkout", "--quiet", "--detach"]);
-        fs::write(at.join("README.md"), b"only here\n").unwrap();
-        run(&at, &["commit", "--quiet", "-am", "only here"]);
-        let sha = sha_of(&at, "HEAD").unwrap();
-        let removed = remove(&from, &home, &at, false).unwrap();
-        let name = format!("refs/rescue/prj_1/loose/{}", &sha[..12]);
-        assert_eq!(removed.rescued.as_deref(), Some(name.as_str()));
-        assert_eq!(sha_of(&from, &name).unwrap(), sha);
-    }
-
-    #[test]
-    fn a_worktree_removed_by_hand_is_dropped_by_git_and_its_branch_can_be_made_again() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = project(dir.path());
-        let home = dir.path().join("home");
-        fs::create_dir_all(&home).unwrap();
-        let at = PathBuf::from(make(&ask(&from, &home, "again", &[])).unwrap().path);
-        fs::remove_dir_all(&at).unwrap();
-        let again = make(&ask(&from, &home, "again", &[])).unwrap();
-        assert!(again.made && Path::new(&again.path).join("README.md").is_file(), "{again:?}");
-        fs::remove_dir_all(&again.path).unwrap();
-        remove(&from, &home, Path::new(&again.path), false).unwrap();
-        assert_eq!(worktrees(&from).len(), 1);
-    }
-
-    #[test]
-    fn the_listing_reads_paths_branches_and_the_prunable_mark() {
-        let out = "worktree /a\0HEAD 1\0branch refs/heads/main\0\0worktree /b c\0HEAD 2\0detached\0\0worktree /d\0HEAD 3\0branch refs/heads/feat/x\0prunable gitdir file points to non-existent location\0\0";
-        assert_eq!(
-            worktrees_of(out),
-            [
-                GitWorktree { path: "/a".into(), branch: Some("main".into()), head: Some("1".into()), prunable: false },
-                GitWorktree { path: "/b c".into(), branch: None, head: Some("2".into()), prunable: false },
-                GitWorktree { path: "/d".into(), branch: Some("feat/x".into()), head: Some("3".into()), prunable: true },
-            ]
-        );
-        assert_eq!(safe("feat/x y@{1}"), "feat-x-y--1-");
-    }
-}
+#[path = "../../tests/copy_branch/mod.rs"]
+mod tests;

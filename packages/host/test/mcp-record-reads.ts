@@ -242,6 +242,7 @@ const DEFAULTS_CASES: Record<string, Case[]> = {
     { case: "put back", arguments: { project: "wsp", reset: ["agent", "access"] }, replies: { "projects.resolve": reply({ project: PROJECT_REF }), "preferences.set": reply({ preferences: PREFS({}) }), "projects.defaults": reply({ defaults: { "proj-1": { agent: { value: "claude", from: "catalog" } } } }) } },
     { case: "no defaults answered", arguments: { project: "wsp", effort: "low" }, replies: { "projects.resolve": reply({ project: PROJECT_REF }), "preferences.set": reply({ preferences: PREFS({}) }), "projects.defaults": reply({ defaults: {} }) } },
     { case: "nothing to change", arguments: { project: "wsp" }, replies: {} },
+    { case: "a blank after-worktree command", arguments: { project: "wsp", after_worktree: " " }, replies: {} },
     { case: "no such project", arguments: { project: "nope", model: "m" }, replies: { "projects.resolve": refused('no project "nope"; you have wsp', "usage") } },
   ],
 };

@@ -3,15 +3,22 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, posix } from "node:path";
-import { CARRIED_DIR_NAMES } from "@wsp/catalog";
-import { INLINE_EXEC_MS, LOCAL_MACHINE_ID } from "@wsp/engine";
+import { ECOSYSTEM_MODULES } from "@wsp/catalog";
+import { CHILD_TIMED_OUT, INLINE_EXEC_MS, LOCAL_MACHINE_ID } from "@wsp/engine";
 import type { ProjectView, Caller } from "@wsp/protocol";
 import { threadWord, scopeOf } from "@wsp/protocol";
-import { hereDaemonBehindLine, homeShortened, DAEMON_VERSION, folderName, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, copiesFolder, guestNamesWorkspaceLine, placeBranchLine, refusalLine, runsInFolder, shellLine, workspaceLands } from "@wsp/protocol";
+import { hereDaemonBehindLine, homeShortened, DAEMON_VERSION, folderName, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, copiesFolder, guestNamesWorkspaceLine, placeBranchLine, refusalLine, runsInFolder, shellLine, workspaceLands, worktreeCommandFailedLine, worktreeCommandRunningLine, worktreeStepWords, worktreeSetupLine, type CarryModule, type WorktreeReport } from "@wsp/protocol";
 import { takenNameAfter } from "@wsp/protocol";
 import type { StartPicksAsked } from "../types/harness.js";
 import { type WorkspaceRecord, type LiveWorkspace, CLONE_MS, folderNamed, NO_COPIER_HERE, lastLineOf } from "../types/wiring.js";
 import type { RuntimeContext, FoldersArea } from "../context.js";
+
+/** The ecosystems as the worktree verb is handed them, their rebuilds kept here, where they run. */
+const CARRY_MODULES: CarryModule[] = ECOSYSTEM_MODULES.map(({ id, lockfiles, carry, never, installed }) => ({ id, lockfiles, carry, never, ...(installed !== undefined ? { installed } : {}) }));
+
+/** How long one command a new worktree runs may take: an install stalled on the network, or a line that waits on an
+ * answer nobody gives, holds the start of a thread no longer than this. */
+const WORKTREE_COMMAND_MS = 3 * 60_000;
 
 export function foldersArea(ctx: RuntimeContext): FoldersArea {
   const { local, bus, clock, live, projectsHeld, threadRecords, sessions } = ctx;
@@ -72,10 +79,60 @@ export function foldersArea(ctx: RuntimeContext): FoldersArea {
         const version = await here.version();
         if (version < DAEMON_VERSION) throw new Error(hereDaemonBehindLine(version, DAEMON_VERSION, here.fix));
       }
-      const made = await copier.worktree({ from: top, home: ctx.stateFolder(), project: project.id, branch, carry: [...CARRIED_DIR_NAMES] });
+      const made = await copier.worktree({ from: top, home: ctx.stateFolder(), project: project.id, branch, modules: CARRY_MODULES });
       if (made.path === top) return projectFolder(project);
-      return worktreeRecordAt(project, { path: made.path, branch: made.branch, made: made.made, ...(madeFor !== undefined ? { madeFor } : {}) }, parent);
+      const entry = await worktreeRecordAt(project, { path: made.path, branch: made.branch, made: made.made, ...(madeFor !== undefined ? { madeFor } : {}) }, parent);
+      if (made.fresh) {
+        const said = await settleWorktree(project, made);
+        if (said !== undefined) setupLines.set(entry.record.id, said);
+      }
+      return entry;
     });
+  /** What a new worktree ran, kept for the first turn that starts there to open with. */
+  const setupLines = new Map<string, string>();
+  const takeSetupLine = (workspaceId: string): string | undefined => {
+    const said = setupLines.get(workspaceId);
+    setupLines.delete(workspaceId);
+    return said;
+  };
+  /** What a worktree this call made runs once before any thread starts there, in order: the install of each module
+   * the verb found in a folder of it and not already installed for its lockfile, in that folder, then the project's
+   * own after-worktree command at its top. Each is said as it starts, runs with nothing on its stdin and no longer
+   * than WORKTREE_COMMAND_MS, and one that fails is said; the thread starts all the same, since the agent can run it
+   * again and read why. Answers the line the first thread there opens with. */
+  const settleWorktree = async (project: ProjectView, made: WorktreeReport): Promise<string | undefined> => {
+    const own = (await ctx.preferences.get()).projectDefaults[project.id]?.afterWorktree;
+    const installs = made.modules.filter(m => m.rebuild).flatMap(m => ECOSYSTEM_MODULES.filter(e => e.id === m.id).map(e => ({ command: e.rebuild, folder: m.folder })));
+    const commands = [...installs, ...(own !== undefined ? [{ command: own, folder: "." }] : [])];
+    if (commands.length === 0) return undefined;
+    const machine = await ctx.backendOfKind("local").get(LOCAL_MACHINE_ID);
+    const steps: string[] = [];
+    for (const { command, folder } of commands) {
+      const at = folder === "." ? made.path : join(made.path, folder);
+      const shown = homeShortened(at, homedir());
+      bus.emit({ type: "host.notice", message: worktreeCommandRunningLine(command, shown) });
+      const ran = await machine.exec(`cd ${shellLine([at])} && ${command}`, { timeoutMs: WORKTREE_COMMAND_MS, stdin: new Uint8Array() });
+      if (ran.exitCode === 0) {
+        steps.push(worktreeStepWords(command, folder));
+        continue;
+      }
+      const end = ran.exitCode === CHILD_TIMED_OUT ? { stoppedAfterMin: WORKTREE_COMMAND_MS / 60_000 } : { exitCode: ran.exitCode, said: lastLineOf(ran.stderr.trim() || ran.stdout.trim()) };
+      console.warn(`${command} in ${at} exited ${ran.exitCode}: ${ran.stderr.trim() || ran.stdout.trim()}`);
+      bus.emit({ type: "host.notice", message: worktreeCommandFailedLine(command, shown, end) });
+      steps.push(worktreeStepWords(command, folder, end));
+    }
+    return worktreeSetupLine(steps);
+  };
+  /** The dependency overlays of a worktree wsp made mounted again before a turn or a command runs there, where a
+   * restart of this computer took them; anything else asks nothing. One that cannot be mounted is said in the log and
+   * the turn runs all the same. */
+  const worktreeMounted = async (entry: LiveWorkspace): Promise<void> => {
+    const tree = entry.record.worktree;
+    const top = ctx.projectHeld(entry.record.project).git?.top;
+    const copier = local?.copier;
+    if (tree?.made !== true || tree.gone === true || top === undefined || copier === undefined || !existsSync(tree.path)) return;
+    await copier.worktreeMount({ from: top, home: ctx.stateFolder(), path: tree.path }).catch((e: unknown) => console.warn(`the worktree at ${tree.path} was not mounted again: ${e instanceof Error ? e.message : String(e)}`));
+  };
   /** The record naming a worktree at this path, written again where one stands from before (a worktree removed and
    * made again comes back to its threads, and to the tree it was made for), else a new one, a child of the folder
    * whose thread asked for it so its branch merges back there. */
@@ -402,6 +459,6 @@ export function foldersArea(ctx: RuntimeContext): FoldersArea {
   };
   return {
     projectFolder, worktreeFolder, folderFor, queued, removeWorktree, refuseChanged, dropCheckpoints, holdsThread,
-    worktreeGone, runsIn, armSweep, moveOldCopies, gitSaid, worktreesOf,
+    worktreeGone, runsIn, armSweep, moveOldCopies, gitSaid, worktreesOf, worktreeMounted, takeSetupLine,
   };
 }

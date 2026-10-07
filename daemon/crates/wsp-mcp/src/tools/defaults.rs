@@ -26,6 +26,7 @@ pub struct Words {
     pub agent_set_nothing: String,
     pub agent_setup_nothing: String,
     pub project_set_nothing: String,
+    pub after_worktree_blank: String,
     pub default_agent: String,
     pub starts_own: String,
     pub starts_on: String,
@@ -39,6 +40,7 @@ pub struct Words {
     pub setup: SetupWords,
     pub sign_in_again: String,
     pub new_threads_head: String,
+    pub after_worktree: String,
     pub from: HashMap<String, String>,
     pub no_defaults_answered: String,
     pub labels: Labels,
@@ -426,16 +428,21 @@ pub struct ProjectIn {
     #[serde(default)]
     pub access: Option<String>,
     #[serde(default)]
+    pub after_worktree: Option<String>,
+    #[serde(default)]
     pub reset: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectOut {
     #[cfg_attr(test, schemars(with = "serde_json::Value"))]
     pub project: Box<RawValue>,
     #[cfg_attr(test, schemars(with = "std::collections::BTreeMap<String, serde_json::Value>"))]
     pub defaults: Box<RawValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_worktree: Option<String>,
 }
 
 /// One resolved value and where it came from.
@@ -470,7 +477,10 @@ fn defaults_lines(d: &Resolved) -> Vec<String> {
 }
 
 async fn projects_set(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let ProjectIn { project, agent, model, effort, access, reset } = input(PROJECT_NAME, arguments)?;
+    let ProjectIn { project, agent, model, effort, access, after_worktree, reset } = input(PROJECT_NAME, arguments)?;
+    if after_worktree.as_deref().is_some_and(|command| command.trim().is_empty()) {
+        return Err(Failure::usage(words().after_worktree_blank).into());
+    }
     let reset = reset.unwrap_or_default();
     let resets = |field: &str| reset.iter().any(|r| r == field);
     let client = host.client().await?;
@@ -479,6 +489,7 @@ async fn projects_set(host: Arc<Host>, arguments: Value) -> Result<Answer, Refus
     patched(&mut patch, "model", model.map(Value::from), resets("model"));
     patched(&mut patch, "effort", effort.map(Value::from), resets("effort"));
     patched(&mut patch, "access", access_word(access)?.map(Value::from), resets("access"));
+    patched(&mut patch, "afterWorktree", after_worktree.map(Value::from), resets("after-worktree"));
     if patch.is_empty() {
         return Err(Failure::usage(words().project_set_nothing).into());
     }
@@ -494,9 +505,25 @@ async fn projects_set(host: Arc<Host>, arguments: Value) -> Result<Answer, Refus
     let found: Found = client.request("projects.resolve", params([("ref", Value::from(project))])).await?;
     let named: Named = serde_json::from_str(found.project.get()).map_err(|_| unread(PROJECT_NAME))?;
     let by_project = params([(named.id.as_str(), Value::Object(patch))]);
-    client
-        .request::<Set>("preferences.set", params([("patch", Value::Object(params([("projectDefaults", Value::Object(by_project))])))]))
+    #[derive(Deserialize)]
+    struct Overrides {
+        #[serde(rename = "afterWorktree")]
+        after_worktree: Option<String>,
+    }
+    #[derive(Deserialize, Default)]
+    struct Preferences {
+        #[serde(rename = "projectDefaults", default)]
+        project_defaults: HashMap<String, Overrides>,
+    }
+    #[derive(Deserialize)]
+    struct SetAnswer {
+        #[serde(default)]
+        preferences: Preferences,
+    }
+    let set: SetAnswer = client
+        .request("preferences.set", params([("patch", Value::Object(params([("projectDefaults", Value::Object(by_project))])))]))
         .await?;
+    let after_worktree = set.preferences.project_defaults.get(&named.id).and_then(|o| o.after_worktree.clone());
     #[derive(Deserialize)]
     struct Answered {
         defaults: Option<Box<RawValue>>,
@@ -509,8 +536,9 @@ async fn projects_set(host: Arc<Host>, arguments: Value) -> Result<Answer, Refus
     let defaults = parsed(PROJECT_LISTED, host.cloud(), "defaults", given).ok_or_else(|| unread(PROJECT_NAME))?;
     let read: Resolved = serde_json::from_str(defaults.get()).map_err(|_| unread(PROJECT_NAME))?;
     let head = fill(&words().new_threads_head, &[("project", &named.name)]);
-    let text = std::iter::once(head).chain(defaults_lines(&read)).collect::<Vec<_>>().join("\n");
-    Ok(Answer::text(text, &ProjectOut { project: found.project, defaults }))
+    let own = after_worktree.as_deref().map(|command| fill(&words().after_worktree, &[("command", command)]));
+    let text = std::iter::once(head).chain(defaults_lines(&read)).chain(own).collect::<Vec<_>>().join("\n");
+    Ok(Answer::text(text, &ProjectOut { project: found.project, defaults, after_worktree }))
 }
 
 #[cfg(test)]

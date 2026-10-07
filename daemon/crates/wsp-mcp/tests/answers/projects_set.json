@@ -109,7 +109,17 @@
         "project": "wsp"
       },
       "replies": {},
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"wsp projects set takes --agent, --model, --effort, --access or --reset. Name at least one; with none of them there is nothing to change.\"}],\"structuredContent\":{\"error\":\"wsp projects set takes --agent, --model, --effort, --access or --reset. Name at least one; with none of them there is nothing to change.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"wsp projects set takes --agent, --model, --effort, --access, --after-worktree or --reset. Name at least one; with none of them there is nothing to change.\"}],\"structuredContent\":{\"error\":\"wsp projects set takes --agent, --model, --effort, --access, --after-worktree or --reset. Name at least one; with none of them there is nothing to change.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "a blank after-worktree command",
+      "arguments": {
+        "project": "wsp",
+        "after_worktree": " "
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--after-worktree was given a blank command, which a new worktree cannot run. Name the shell line a new worktree runs, or take the command away with --reset after-worktree.\"}],\"structuredContent\":{\"error\":\"--after-worktree was given a blank command, which a new worktree cannot run. Name the shell line a new worktree runs, or take the command away with --reset after-worktree.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": []
     },
     {

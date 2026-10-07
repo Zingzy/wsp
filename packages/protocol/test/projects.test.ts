@@ -4,7 +4,7 @@
 // this computer belongs to: the command line, the runtime and the app all
 // read these here.
 import { describe, expect, it } from "vitest";
-import { cloneFailedLine, cloneUrlRefusal, noComputerForSourceLine, addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, landsOn, MEMORY_KEPT_CLAUSE, cwdOutsideLine, noBranchesLine, ProjectGolden, projectNameOf, projectPathOn, projectLeftOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceLands, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { cloneFailedLine, cloneUrlRefusal, noComputerForSourceLine, addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, landsOn, MEMORY_KEPT_CLAUSE, cwdOutsideLine, noBranchesLine, ProjectGolden, projectNameOf, projectPathOn, projectLeftOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceLands, worktreeSetupLine, worktreeStepWords, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -251,5 +251,14 @@ describe("a repo cloned on this computer", () => {
   it("a url with no computer names both roads: here into a folder, or a computer that clones", () => {
     expect(noComputerForSourceLine("https://github.com/a/b", ["spoo"])).toBe("https://github.com/a/b is a repo: clone it here with --into <folder>, or name the computer that clones it with --on spoo");
     expect(noComputerForSourceLine("a/b", [])).toBe("a/b is a repo: clone it here with --into <folder>");
+  });
+});
+
+describe("what a new worktree ran before its first thread", () => {
+  it("says each command on a line of its own, so a command holding a separator reads as one", () => {
+    const after = 'read answer; echo "got:$answer"';
+    expect(worktreeSetupLine([worktreeStepWords("cargo fetch --locked", "daemon"), worktreeStepWords(after, ".", { exitCode: 1, said: "" })])).toBe(
+      ["Before this thread started, its new worktree ran:", "- cargo fetch --locked in daemon", `- ${after} (exited 1)`].join("\n"),
+    );
   });
 });

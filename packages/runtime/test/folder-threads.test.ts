@@ -7,10 +7,10 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { CARRIED_DIR_NAMES } from "@wsp/catalog";
+import { ECOSYSTEM_MODULES } from "@wsp/catalog";
 import {
   claudeProjectKey,
   cwdOutsideLine,
@@ -29,7 +29,12 @@ import {
   type ThreadScope,
   type DaemonFrame,
   type DaemonResponse,
+  type EventUnion,
   type TurnResult,
+  worktreeCommandFailedLine,
+  worktreeCommandRunningLine,
+  worktreeSetupLine,
+  worktreeStepWords,
 } from "@wsp/protocol";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { createRuntime, NO_COPIER_HERE, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type ProjectBundler, type Runtime } from "../src/runtime.js";
@@ -37,6 +42,7 @@ import type { DaemonChannel } from "../src/daemon-channel.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { gitCopier } from "./git-copier.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 import { stubBackend, testPlatform } from "./stub-backend.js";
 
 const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" };
@@ -215,13 +221,167 @@ describe("a thread on a project on this computer", () => {
   });
 });
 
+/** Stand-ins for each ecosystem's tool on a PATH of their own, each writing its name, its words and the folder it ran
+ * in to one log; a tool named in failing says why on stderr and exits 1. */
+function tools(failing: string[] = []): { backend: LocalBackend; log: string; ran: () => string[] } {
+  const bin = scratch();
+  const log = join(bin, "ran.log");
+  for (const tool of ["npm", "pnpm", "yarn", "bun", "composer", "uv", "poetry", "cargo", "go"]) {
+    const body = failing.includes(tool) ? `echo "${tool} could not install: lockfile out of date" >&2\nexit 1\n` : `echo "${tool} $* @ $(pwd)" >> '${log}'\n`;
+    writeStub(join(bin, tool), `#!/bin/sh\n${body}`);
+  }
+  const backend = new LocalBackend({ root: bin, env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" } });
+  // On the command line itself: bash with a socket for stdin sources the system's bashrc, which may put a real tool's
+  // folder first on the PATH.
+  const get = backend.get.bind(backend);
+  backend.get = async () => {
+    const machine = await get();
+    return Object.assign(Object.create(machine) as typeof machine, { exec: (cmd: string, o?: { timeoutMs?: number; stdin?: Uint8Array }) => machine.exec(`PATH='${bin}':"$PATH"; ${cmd}`, o) });
+  };
+  return { backend, log, ran: () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []) };
+}
+
+/** A repo on main whose one commit tracks these lockfiles, each in the folder its path names. */
+const repoWith = (lockfiles: string[]): string => {
+  const at = repo();
+  for (const f of lockfiles) {
+    mkdirSync(dirname(join(at, f)), { recursive: true });
+    writeFileSync(join(at, f), "lock\n");
+  }
+  git(at, "add", ".");
+  git(at, "commit", "-q", "-m", "locks");
+  return at;
+};
+
+describe("a new worktree's dependencies", () => {
+  const cases = [
+    { lockfile: "uv.lock", carry: [], never: [".venv"], ran: "uv sync --locked" },
+    { lockfile: "Cargo.lock", carry: [], never: ["target"], ran: "cargo fetch --locked" },
+    { lockfile: "go.sum", carry: [], never: [], ran: "go list -mod=readonly -deps -test ./..." },
+    { lockfile: "bun.lock", carry: ["node_modules"], never: [".next", ".turbo", ".cache"], ran: "bun install --frozen-lockfile" },
+    { lockfile: "pnpm-lock.yaml", carry: ["node_modules"], never: [".next", ".turbo", ".cache"], ran: "pnpm install --frozen-lockfile --prefer-offline" },
+  ];
+  for (const c of cases) {
+    it(`of a project with ${c.lockfile} carries ${c.carry.join(", ") || "nothing"} and runs ${c.ran} once at its top before its thread starts`, async () => {
+      const t = tools();
+      const { rt, copier, starts, worktrees } = here({ backend: t.backend });
+      const project = await rt.projects.add({ source: repoWith([c.lockfile]) });
+      const at = await rt.workspaces.folderFor({ project: project.id, branch: "feat/deps" });
+      const path = join(worktrees, project.id, "feat-deps");
+      const asked = copier.worktrees[0]!.modules.filter(m => m.lockfiles.includes(c.lockfile));
+      expect(asked.map(m => ({ carry: m.carry, never: m.never }))).toEqual([{ carry: c.carry, never: c.never }]);
+      expect(t.ran()).toEqual([`${c.ran} @ ${path}`]);
+      await (await rt.sessions.start(at.workspace.id, { prompt: "go" })).finished;
+      expect(starts[0]!.cwd).toBe(path);
+      await rt.workspaces.folderFor({ project: project.id, branch: "feat/deps" });
+      expect(t.ran()).toEqual([`${c.ran} @ ${path}`]);
+    });
+  }
+
+  it("runs a module's install in the folder of the worktree that holds its lockfile", async () => {
+    const t = tools();
+    const { rt, worktrees } = here({ backend: t.backend });
+    const project = await rt.projects.add({ source: repoWith(["api/uv.lock", "web/package-lock.json"]) });
+    await rt.workspaces.folderFor({ project: project.id, branch: "feat/apps" });
+    const path = join(worktrees, project.id, "feat-apps");
+    expect(t.ran()).toEqual([`uv sync --locked @ ${path}/api`, `npm install --no-save --prefer-offline --no-audit --no-fund @ ${path}/web`]);
+  });
+
+  it("runs no install for a module whose folders the verb carried in already installed for the branch's lockfile", async () => {
+    const t = tools();
+    const inner = gitCopier();
+    const copier: typeof inner = { ...inner, worktree: async ask => { const made = await inner.worktree(ask); return { ...made, modules: made.modules.map(m => ({ ...m, rebuild: false })) }; } };
+    const { rt } = here({ backend: t.backend, copier });
+    const project = await rt.projects.add({ source: repoWith(["pnpm-lock.yaml"]) });
+    await rt.workspaces.folderFor({ project: project.id, branch: "feat/same" });
+    expect(t.ran()).toEqual([]);
+  });
+
+  it("runs nothing for a project folder start, nor in a worktree of a branch whose lockfiles no module knows", async () => {
+    const t = tools();
+    const { rt } = here({ backend: t.backend });
+    const project = await rt.projects.add({ source: repoWith(["Gemfile.lock"]) });
+    await rt.workspaces.folderFor({ project: project.id });
+    await rt.workspaces.folderFor({ project: project.id, branch: "feat/none" });
+    expect(t.ran()).toEqual([]);
+  });
+
+  it("runs the project's after-worktree command once in each new worktree, after the ecosystems' own", async () => {
+    const t = tools();
+    const { rt, worktrees } = here({ backend: t.backend });
+    const project = await rt.projects.add({ source: repoWith(["uv.lock"]) });
+    await rt.preferences.set({ projectDefaults: { [project.id]: { afterWorktree: `echo "after @ $(pwd)" >> '${t.log}'` } } });
+    await rt.workspaces.folderFor({ project: project.id, branch: "a" });
+    await rt.workspaces.folderFor({ project: project.id, branch: "a" });
+    await rt.workspaces.folderFor({ project: project.id, branch: "b" });
+    await rt.workspaces.folderFor({ project: project.id });
+    const [a, b] = [join(worktrees, project.id, "a"), join(worktrees, project.id, "b")];
+    expect(t.ran()).toEqual([`uv sync --locked @ ${a}`, `after @ ${a}`, `uv sync --locked @ ${b}`, `after @ ${b}`]);
+  });
+
+  it("runs a command that waits on an answer with nothing on its stdin, so it ends at once rather than at the bound", async () => {
+    const t = tools();
+    const { rt } = here({ backend: t.backend });
+    const project = await rt.projects.add({ source: repo() });
+    await rt.preferences.set({ projectDefaults: { [project.id]: { afterWorktree: `read answer; echo "read ended: $?" >> '${t.log}'` } } });
+    await rt.workspaces.folderFor({ project: project.id, branch: "feat/asks" });
+    // With stdin left open the read waits for the bound to kill the shell, and the echo never runs.
+    expect(t.ran()).toEqual(["read ended: 1"]);
+  }, 20_000);
+
+  it("says each command as it starts and the one that failed, and its thread starts all the same, opening with what ran", async () => {
+    const t = tools(["pnpm"]);
+    const { rt, starts, worktrees } = here({ backend: t.backend });
+    const heard: EventUnion[] = [];
+    rt.events.on("host.notice", e => heard.push(e as EventUnion));
+    const project = await rt.projects.add({ source: repoWith(["pnpm-lock.yaml", "go.sum"]) });
+    const at = await rt.workspaces.folderFor({ project: project.id, branch: "feat/stale" });
+    const path = join(worktrees, project.id, "feat-stale");
+    const [pnpm, go] = ["pnpm install --frozen-lockfile --prefer-offline", "go list -mod=readonly -deps -test ./... > /dev/null"];
+    const end = { exitCode: 1, said: "pnpm could not install: lockfile out of date" };
+    expect(heard.map(e => (e as { message: string }).message)).toEqual([
+      worktreeCommandRunningLine(pnpm, path),
+      worktreeCommandFailedLine(pnpm, path, end),
+      worktreeCommandRunningLine(go, path),
+    ]);
+    expect(t.ran()).toEqual([`go list -mod=readonly -deps -test ./... @ ${path}`]);
+    const handle = await rt.sessions.start(at.workspace.id, { prompt: "go" });
+    await handle.finished;
+    expect(starts[0]!.cwd).toBe(path);
+    const lines = async (): Promise<string[]> => (await rt.sessions.history(at.workspace.id)).flatMap(e => (e.type === "session.behind" ? [e.text] : []));
+    expect(await lines()).toEqual([worktreeSetupLine([worktreeStepWords(pnpm, ".", end), worktreeStepWords(go, ".")])]);
+    await (await rt.sessions.start(at.workspace.id, { prompt: "again", thread: handle.view().threadId! })).finished;
+    expect(await lines()).toHaveLength(1);
+  });
+
+  it("mounts a worktree wsp made again before each turn there and at the host's start, never the project folder", async () => {
+    const first = here();
+    const project = await first.rt.projects.add({ source: repo() });
+    const tree = await first.rt.workspaces.folderFor({ project: project.id, branch: "feat/mounted" });
+    const folder = await first.rt.workspaces.folderFor({ project: project.id });
+    const path = join(first.worktrees, project.id, "feat-mounted");
+    expect(first.copier.worktreesMounted).toEqual([]);
+    await (await first.rt.sessions.start(tree.workspace.id, { prompt: "go" })).finished;
+    await (await first.rt.sessions.start(folder.workspace.id, { prompt: "go" })).finished;
+    expect(first.copier.worktreesMounted).toEqual([path]);
+    await first.rt.workspaces.exec(tree.workspace.id, "true");
+    expect(first.copier.worktreesMounted).toEqual([path, path]);
+    // A restart of the computer took the mounts; the host's own start puts them back before any turn.
+    await first.rt.close();
+    const second = here({}, true, {}, { root: first.root, store: first.store });
+    await second.rt.workspaces.list();
+    await vi.waitFor(() => expect(second.copier.worktreesMounted).toEqual([path]));
+  });
+});
+
 describe("a thread on another branch", () => {
-  it("runs in a worktree the copier makes under the host's folder, keyed by the project, carrying the catalogue's directories", async () => {
+  it("runs in a worktree the copier makes under the host's folder, keyed by the project, read for every ecosystem the catalogue knows", async () => {
     const { rt, copier, starts, home, worktrees } = here();
     const folder = repo();
     const project = await rt.projects.add({ source: folder });
     const at = await rt.workspaces.folderFor({ project: project.id, branch: "feat/login" });
-    expect(copier.worktrees).toEqual([{ from: folder, home, project: project.id, branch: "feat/login", carry: [...CARRIED_DIR_NAMES] }]);
+    const modules = ECOSYSTEM_MODULES.map(({ id, lockfiles, carry, never, installed }) => ({ id, lockfiles, carry, never, ...(installed !== undefined ? { installed } : {}) }));
+    expect(copier.worktrees).toEqual([{ from: folder, home, project: project.id, branch: "feat/login", modules }]);
     const path = join(worktrees, project.id, "feat-login");
     expect(at.workspace.worktree).toEqual({ path, branch: "feat/login", made: true });
     expect(at.workspace.folder).toBe(path);
@@ -450,7 +610,7 @@ describe("the images a thread's messages carried", () => {
 });
 
 describe("removing a project whose folders hold no thread", () => {
-  it("takes the records no thread names with it, a worktree wsp made too, and is refused while a thread stands", async () => {
+  it("takes the records no thread names with it, a worktree wsp made and the frozen copies its worktrees sat on too, and is refused while a thread stands", async () => {
     const { rt, copier } = here();
     const folder = repo();
     const project = await rt.projects.add({ source: folder });
@@ -459,8 +619,10 @@ describe("removing a project whose folders hold no thread", () => {
     await run.finished;
     const tree = await rt.workspaces.worktree({ project: project.id, branch: "feat/w" });
     await expect(rt.projects.remove(project.id)).rejects.toMatchObject({ message: projectInUseRefusal(project.name, [home.workspace.name]), kind: "conflict" });
+    expect(copier.worktreesForgotten).toEqual([]);
     await rt.sessions.delete(run.view().threadId!);
     await rt.projects.remove(project.id);
+    expect(copier.worktreesForgotten).toEqual([project.id]);
     expect(await rt.projects.list()).toEqual([]);
     expect(await rt.workspaces.list()).toEqual([]);
     expect(copier.worktreesRemoved.map(r => r.path)).toEqual([tree.path]);

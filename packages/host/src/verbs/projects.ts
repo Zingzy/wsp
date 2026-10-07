@@ -22,7 +22,14 @@ import { HOST_RESTARTING_LINE, hostPlatform, table, usageIs, tool, type Verb, fl
 import { workspaces, threads, threadsOf, threadRows, THREAD_HEAD, threadLines, threadTree, placeNames, projectsOf, projectOf, projectLine, NO_PROJECT_YET } from "./workspaces-help.js";
 import { projectDefaultsOf, waitThrough } from "./turns-help.js";
 import { WaitOut, ThreadRowOut, asJson, asText, waitAnswer, timeoutFlag, ACCESS_IN_WORDS, PROJECT_FOLDERS, WEIGH_BY_FOLDERS, projectFolders, projectsFlag, progress, printTable } from "./io.js";
-import { drawRows, PROJECT_SET_RESETS, projectDefaultsSet, newThreadsHeadLine, threadDefaultsLines, defaultsCell } from "./agents-help.js";
+import { drawRows, PROJECT_SET_RESETS, projectDefaultsSet, newThreadsHeadLine, threadDefaultsLines, defaultsCell, afterWorktreeLine } from "./agents-help.js";
+
+/** What projects set answers in words: what a new thread there starts on, then the after-worktree command. */
+const projectSetLines = (set: { project: ProjectView; defaults: ThreadDefaults; afterWorktree?: string }): string[] => [
+  newThreadsHeadLine(set.project.name),
+  ...threadDefaultsLines(set.defaults),
+  ...(set.afterWorktree !== undefined ? [afterWorktreeLine(set.afterWorktree)] : []),
+];
 
 export const PROJECT_VERBS: readonly Verb[] = [
   {
@@ -118,10 +125,10 @@ export const PROJECT_VERBS: readonly Verb[] = [
   },
   {
     name: "projects set",
-    usage: "wsp projects set <project> [--agent <id>] [--model <slug>] [--effort <word>] [--access <word>] [--reset <field>]...",
-    about: "what a new thread on one project starts on, over the agent's own defaults: its agent, model, effort and access",
+    usage: "wsp projects set <project> [--agent <id>] [--model <slug>] [--effort <word>] [--access <word>] [--after-worktree <command>] [--reset <field>]...",
+    about: "what a new thread on one project starts on, over the agent's own defaults: its agent, model, effort and access; and the shell line a new worktree of it runs once, after each ecosystem's own install, for what none of them knows",
     page: "agent",
-    options: { agent: { type: "string" }, model: { type: "string" }, effort: { type: "string" }, access: { type: "string" }, reset: { type: "string", multiple: true } },
+    options: { agent: { type: "string" }, model: { type: "string" }, effort: { type: "string" }, access: { type: "string" }, "after-worktree": { type: "string" }, reset: { type: "string", multiple: true } },
     run: async ctx => {
       const [ref, ...rest] = ctx.args;
       if (ref === undefined || rest.length > 0) throw usageRefusal("wsp projects set takes one project.", usageIs(ctx));
@@ -130,26 +137,28 @@ export const PROJECT_VERBS: readonly Verb[] = [
         ...(flag(ctx.flags, "model") !== undefined ? { model: flag(ctx.flags, "model")! } : {}),
         ...(flag(ctx.flags, "effort") !== undefined ? { effort: flag(ctx.flags, "effort")! } : {}),
         ...(flag(ctx.flags, "access") !== undefined ? { access: flag(ctx.flags, "access")! } : {}),
+        ...(flag(ctx.flags, "after-worktree") !== undefined ? { afterWorktree: flag(ctx.flags, "after-worktree")! } : {}),
         reset: flagList(ctx.flags, "reset"),
       });
-      ctx.out.emit(set, [newThreadsHeadLine(set.project.name), ...threadDefaultsLines(set.defaults)].join("\n"));
+      ctx.out.emit(set, projectSetLines(set).join("\n"));
       return 0;
     },
     tool: tool({
       description:
-        "Sets what a new thread on one project starts on, over each agent's own defaults and under what a start names: its agent, model, effort and access. Nothing about a computer is a project's to set (threads at once, an agent's program, config folder, launch words, variables, or whether it is on); agents_setup sets those per computer. A model or effort kept for the project's agent drops to the agent's own on a thread that runs another agent, and an access word the project's agent maps to none of its modes is refused naming the ones it takes. Answers what a new thread there now starts on, each value with where it came from. reset puts a field back on the layer below: agent, model, effort or access.",
+        "Sets what a new thread on one project starts on, over each agent's own defaults and under what a start names: its agent, model, effort and access. Nothing about a computer is a project's to set (threads at once, an agent's program, config folder, launch words, variables, or whether it is on); agents_setup sets those per computer. A model or effort kept for the project's agent drops to the agent's own on a thread that runs another agent, and an access word the project's agent maps to none of its modes is refused naming the ones it takes. after_worktree is a shell line a new worktree of the project runs once at its top, after the locked install of each ecosystem whose lockfile it holds, each run in the folder holding that lockfile (uv sync --locked, cargo fetch --locked, go list -mod=readonly -deps -test ./..., npm install --no-save, pnpm install --frozen-lockfile where the node_modules carried in were installed from another lockfile, and the like), for what none of them knows. Answers what a new thread there now starts on, each value with where it came from, and the after-worktree command. reset puts a field back on the layer below: agent, model, effort or access, and after-worktree takes the command away.",
       input: {
         project: z.string().describe("the project's name, or its id when two share a name"),
         agent: z.string().optional().describe(`the agent a new thread on it runs, one of ${THREAD_AGENTS.join(", ")}`),
         model: z.string().optional().describe("the model a new thread on it starts on, by the agent's own slug"),
         effort: z.string().optional().describe("the effort a new thread on it starts at, by the agent's own word"),
         access: z.string().optional().describe(ACCESS_IN_WORDS),
-        reset: z.array(z.enum(PROJECT_SET_RESETS)).optional().describe("fields to put back on the layer below: agent, model, effort, access"),
+        after_worktree: z.string().optional().describe("a shell line a new worktree of the project runs once at its top, after each ecosystem's own install"),
+        reset: z.array(z.enum(PROJECT_SET_RESETS)).optional().describe("fields to put back on the layer below: agent, model, effort, access, or after-worktree to take the command away"),
       },
-      output: { project: ProjectView, defaults: ThreadDefaults },
-      call: async ({ project, agent, model, effort, access, reset }, deps) => {
-        const set = await projectDefaultsSet(await deps.client(), project, { ...(agent !== undefined ? { agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { access } : {}), ...(reset !== undefined ? { reset } : {}) });
-        return asText([newThreadsHeadLine(set.project.name), ...threadDefaultsLines(set.defaults)].join("\n"), set);
+      output: { project: ProjectView, defaults: ThreadDefaults, afterWorktree: z.string().optional() },
+      call: async ({ project, agent, model, effort, access, after_worktree, reset }, deps) => {
+        const set = await projectDefaultsSet(await deps.client(), project, { ...(agent !== undefined ? { agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { access } : {}), ...(after_worktree !== undefined ? { afterWorktree: after_worktree } : {}), ...(reset !== undefined ? { reset } : {}) });
+        return asText(projectSetLines(set).join("\n"), set);
       },
     }),
   },
