@@ -13,7 +13,7 @@
 const TYPING_CONTEXT = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
 
 /** Layers drawn over the page that take the keyboard while they are open, wherever focus is. */
-const OPEN_LAYERS = [
+export const OPEN_LAYERS = [
   '[data-slot="dialog-popup"]',
   '[data-slot="alert-dialog-popup"]',
   '[data-slot="command-dialog-popup"]',
