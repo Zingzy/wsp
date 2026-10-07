@@ -412,7 +412,11 @@ export interface AsideQuestion {
   session: string;
   question: string;
   cwd?: string;
+  /** The model, effort, window and speed the thread's latest turn ran at, so the copy sends the request its turns do. */
   model?: string;
+  effort?: string;
+  contextWindow?: string;
+  fast?: boolean;
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
   /** Handed each piece of the answer as the harness writes it, where it writes in pieces. */
   onText?: (text: string) => void;

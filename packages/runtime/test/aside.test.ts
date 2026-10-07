@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, HERE_PLACE_ID, HOST_TOKEN_ENV, HOST_URL_ENV, MCP_SERVER_NAME, SCOPED_MCP_ARG, asideUnsupportedLine, deviceHeldRefusal, threadOpRefusal, type AsideQuestion, type ExecStream, type ExecStreamFactory, type TurnResult } from "@wsp/protocol";
+import { ASIDE_EMPTY_LINE, ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, HERE_PLACE_ID, NO_SLATE_MCP_ARG, type Caller, type ThreadScope, HOST_TOKEN_ENV, HOST_URL_ENV, MCP_SERVER_NAME, SCOPED_MCP_ARG, asideUnsupportedLine, deviceHeldRefusal, threadOpRefusal, type AsideQuestion, type ExecStream, type ExecStreamFactory, type TurnResult } from "@wsp/protocol";
 import { createRuntime, serveRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime, type RuntimeServer } from "../src/index.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -50,6 +50,24 @@ function answering(asked: AsideQuestion[], o: { announce?: boolean; aside?: bool
             return { text: ANSWER };
           },
         }),
+  });
+}
+
+/** A harness whose every turn opens a session of its own, one of `sessions` in turn. */
+function ownSessions(asked: AsideQuestion[], sessions: string[]): HarnessAdapterFactory {
+  let opened = 0;
+  return ctx => ({
+    ...answering(asked)(ctx),
+    start: ({ onEvent }) => {
+      const sessionId = sessions[opened++]!;
+      const finished = Promise.resolve().then(() => {
+        onEvent({ type: "session.start", sessionId, cwd: "/root/w", model: "claude-opus-5" });
+        onEvent({ type: "turn.done", sessionId, result: { status: "completed", text: "done" } });
+        onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+        return { status: "completed" as const, text: "done" };
+      });
+      return { localId: sessionId, finished, interrupt: async () => {} };
+    },
   });
 }
 
@@ -102,8 +120,8 @@ describe("a side question beside a thread", () => {
     const rows = await rt.sessions.list(workspaceId);
 
     expect(await rt.sessions.aside(first, "what did I last ask?")).toEqual({ text: ANSWER });
-    // The row named is the thread's first; the question goes at the latest one's folder and model.
-    expect(asked).toEqual([{ session: SESSION, question: "what did I last ask?", cwd: "/root/b", model: "claude-sonnet-5" }]);
+    // The row named is the thread's first; the question goes at the latest one's folder, model and effort.
+    expect(asked).toEqual([{ session: SESSION, question: "what did I last ask?", cwd: "/root/b", model: "claude-sonnet-5", effort: "high" }]);
     expect(asked[0]!.onText).toBeUndefined();
     expect(await rt.sessions.history(workspaceId)).toEqual(history);
     expect(await rt.sessions.list(workspaceId)).toEqual(rows);
@@ -240,5 +258,51 @@ describe("a side question beside a thread", () => {
 
     expect(await (await connect("t")).request("sessions.aside", { sessionId: first, question: "what did I ask?" })).toMatchObject({ ok: true, text: ANSWER });
     expect(asked).toHaveLength(1);
+  });
+  it("answers a question on thread A and then one on thread B of the same workspace each from its own thread's session", async () => {
+    const sessions = ["44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"];
+    rt = runtime(ownSessions(asked, sessions));
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const a = await rt.sessions.start(ws.id, { prompt: "thread A" });
+    await a.finished;
+    const b = await rt.sessions.start(ws.id, { prompt: "thread B" });
+    await b.finished;
+    expect(a.view().threadId).not.toBe(b.view().threadId);
+    await rt.sessions.aside(a.id, "what is this thread about?");
+    await rt.sessions.aside(b.id, "what is this thread about?");
+    expect(asked.map(q => q.session)).toEqual(sessions);
+  });
+
+  it("hands the copy the effort its thread's turns run at, so the request it sends is theirs and reads their cache", async () => {
+    rt = runtime(answering(asked));
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const turn = await rt.sessions.start(ws.id, { prompt: "the first thing", effort: "high" });
+    await turn.finished;
+    await rt.sessions.aside(turn.id, "what did I ask?");
+    expect(asked[0]).toMatchObject({ session: SESSION, effort: "high" });
+  });
+
+  it("hands a thread another thread started the server its turns get, with no slate, so its copy's tools are theirs", async () => {
+    const wspMcp = { command: "node", args: ["/opt/wsp/dist/bin.js", "mcp"] };
+    const own = ownSessions(asked, ["44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"]);
+    const factory: HarnessAdapterFactory = ctx => ({ ...own(ctx), mcpServers: true, asideServers: true });
+    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, local: localWiring, agents: { here: { url: "http://127.0.0.1:4801" }, wspMcp } });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: { spawn: true, maxMachines: 3, maxDepth: 2 } });
+    const lead = await rt.sessions.start(ws.id, { prompt: "lead" });
+    await lead.finished;
+    const leadThread = lead.view().threadId!;
+    const asThread = (scope: ThreadScope): Caller => ({ origin: "relayed", by: scope });
+    const child = await rt.sessions.start(ws.id, { prompt: "builder" }, asThread({ kind: "thread", threadId: leadThread, workspaceId: ws.id, rootThreadId: leadThread }));
+    await child.finished;
+    await rt.sessions.aside(lead.id, "how is it going?");
+    await rt.sessions.aside(child.id, "how is it going?");
+    expect(asked[0]!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ ...wspMcp, args: [...wspMcp.args, SCOPED_MCP_ARG] });
+    expect(asked[1]!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ ...wspMcp, args: [...wspMcp.args, SCOPED_MCP_ARG, NO_SLATE_MCP_ARG], noSlate: true });
+  });
+
+  it("says in one line why where the harness answered with no words, rather than standing an empty answer under the question", async () => {
+    rt = runtime(ctx => ({ ...answering(asked)(ctx), aside: async () => ({ text: " \n" }) }));
+    const { first } = await twoTurns();
+    await expect(rt.sessions.aside(first, "what did I last ask?")).rejects.toThrow(ASIDE_EMPTY_LINE);
   });
 });

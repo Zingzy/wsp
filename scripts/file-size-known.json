@@ -1,7 +1,7 @@
 {
   "daemon/crates/wsp-daemon/src/git.rs": 2020,
   "daemon/crates/wsp-daemon/src/hosts/github.rs": 1922,
-  "daemon/crates/wsp-daemon/src/ops.rs": 2234,
+  "daemon/crates/wsp-daemon/src/ops.rs": 2224,
   "daemon/crates/wsp-daemon/src/place.rs": 1750,
   "daemon/crates/wsp-daemon/src/ports.rs": 1635,
   "daemon/crates/wsp-runtime/src/bundle.rs": 2555,
@@ -10,7 +10,7 @@
   "daemon/crates/wsp-runtime/src/ops.rs": 2980,
   "packages/catalog/src/mcp.ts": 1797,
   "packages/engine/src/golden-import.ts": 1582,
-  "packages/host/src/doctor.ts": 2023,
+  "packages/host/src/doctor.ts": 2008,
   "packages/host/src/init.ts": 1748,
   "packages/runtime/src/serve.ts": 2289,
   "packages/runtime/src/slates.ts": 1602
