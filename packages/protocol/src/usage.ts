@@ -84,7 +84,11 @@ export const USAGE_WORDS = {
   unread: "not read yet: shows after its next turn",
   reached: "limit reached",
   noUse: "Nothing used in this range",
+  wspThreads: "wsp threads",
 } as const;
+
+/** The source row of the work the agents' own logs on a computer hold that no wsp thread ran. */
+export const outsideWspLine = (computer: string): string => `Outside wsp on ${computer}`;
 
 /** Why an account row carries no windows: its agent reports none, it signs in with a key, or no turn has run on it. */
 export const AccountNote = z.enum([USAGE_WORDS.noLimit, USAGE_WORDS.keyed, USAGE_WORDS.unread]);
@@ -165,7 +169,7 @@ export const USAGE_RANGES = ["day", "week", "month"] as const;
 export const UsageRange = z.enum(USAGE_RANGES);
 export type UsageRange = z.infer<typeof UsageRange>;
 
-export const USAGE_SPLITS = ["agent", "account", "computer", "project", "model"] as const;
+export const USAGE_SPLITS = ["agent", "account", "computer", "project", "model", "source"] as const;
 export const UsageSplit = z.enum(USAGE_SPLITS);
 export type UsageSplit = z.infer<typeof UsageSplit>;
 
@@ -191,11 +195,13 @@ export const UsageTokens = z.object({ input: z.number(), output: z.number(), cac
 export type UsageTokens = z.infer<typeof UsageTokens>;
 
 /** One key's use: its turns and tokens, the cost the harness itself reported where it did, and where it was read:
- * a turn wsp ran, or a harness's own log of work done outside wsp on this computer. */
+ * a turn wsp ran, or a harness's own log of work done outside wsp on this computer. unreported holds the part of the
+ * tokens that came with no cost in a row that also holds a reported cost, so they are still priced at list. */
 export const UsageRow = UsageKey.extend({
   turns: z.number().int(),
   tokens: UsageTokens,
   costReported: z.number().optional(),
+  unreported: UsageTokens.optional(),
   source: z.enum(["wsp", "log"]),
 });
 export type UsageRow = z.infer<typeof UsageRow>;

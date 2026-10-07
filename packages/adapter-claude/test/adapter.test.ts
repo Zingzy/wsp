@@ -319,7 +319,7 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(result.text).toBe("Server is live at :3000 and answered: Hello, World!");
     // The result's usage sums every call of the turn; what the model held at the end is the last reply's own figure.
     expect(result.model).toBe("claude-sonnet-4-5");
-    expect(result.tokens).toEqual({ input: 22_564, output: 251, cached: 18_435, cacheWrite: 4_113, context: 4_269, window: 200_000 });
+    expect(result.tokens).toEqual({ input: 22_564, output: 251, cached: 18_435, cacheWrite: 4_113, reasoning: 0, context: 4_269, window: 200_000 });
 
     const end = events.at(-1);
     if (end?.type !== "session.end") throw new Error("expected session.end");
@@ -1758,5 +1758,99 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
     const { done, command } = await run([init, result(4.25)]);
     expect(done.costUsd).toBe(4.25);
     expect(command).not.toContain("cost-state");
+  });
+
+  const use = (o: { in: number; read: number; write: number; out: number; cost: number }) => ({ inputTokens: o.in, outputTokens: o.out, cacheReadInputTokens: o.read, cacheCreationInputTokens: o.write, webSearchRequests: 0, costUSD: o.cost, contextWindow: 1_000_000 });
+  const call = (id: string, usage: Record<string, number>, model = "claude-opus-5-5", parent: string | null = null) =>
+    JSON.stringify({ type: "assistant", message: { id, model, role: "assistant", content: [{ type: "text", text: "x" }], usage }, parent_tool_use_id: parent, session_id: FIXTURE_SESSION_ID });
+  const ended = (o: { total: number; usage: Record<string, number>; models: Record<string, ReturnType<typeof use>> }) =>
+    JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 1, duration_ms: 900, result: "done", session_id: FIXTURE_SESSION_ID, total_cost_usd: o.total, usage: o.usage, modelUsage: o.models });
+
+  it("files the split by model whatever the stream printed, a subagent's calls and a model it never printed included", async () => {
+    const lines = [
+      init,
+      call("msg_1", { input_tokens: 5, cache_read_input_tokens: 1_000, cache_creation_input_tokens: 200, output_tokens: 1 }),
+      call("msg_2", { input_tokens: 3, cache_read_input_tokens: 500, output_tokens: 1 }, "claude-opus-5-5", "toolu_1"),
+      ended({
+        total: 0.5,
+        usage: { input_tokens: 5, cache_read_input_tokens: 1_000, cache_creation_input_tokens: 200, output_tokens: 40 },
+        models: { "claude-opus-5-5[1m]": use({ in: 8, read: 1_500, write: 200, out: 47, cost: 0.45 }), "claude-haiku-4-5-20251001": use({ in: 700, read: 0, write: 0, out: 30, cost: 0.05 }) },
+      }),
+    ];
+    const { done } = await run(lines);
+    expect(done.costUsd).toBe(0.5);
+    expect(done.models?.map(m => m.model)).toEqual(["claude-opus-5-5[1m]", "claude-haiku-4-5-20251001"]);
+  });
+
+  it("a turn whose CLI made a call it never printed keeps its cost and split: WebFetch's summarizer", async () => {
+    // Recorded on 2.1.280 (2026-10-06): three printed haiku calls read 81,881 tokens, modelUsage 82,084.
+    const lines = readFileSync(new URL("./fixtures/webfetch-turn.jsonl", import.meta.url), "utf8").split("\n").filter(l => l.length > 0);
+    const { done } = await run(lines);
+    expect(done.costUsd).toBeCloseTo(0.04197715, 9);
+    expect(done.models).toHaveLength(1);
+    expect(done.models![0]).toMatchObject({ model: "claude-haiku-4-5-20251001", tokens: { input: 82_084, output: 346, cached: 54_174, cacheWrite: 27_679, reasoning: 162 } });
+    expect(done.models![0]!.costUsd).toBeCloseTo(0.04197715, 9);
+    expect(done.tokens).toMatchObject({ input: 82_084, output: 346 });
+  });
+
+  // A haiku turn on 2.1.280 (2026-10-06) whose Task subagent ran in the background: the CLI printed two results, and the
+  // second's usage held 28,795 of the 116,031 tokens the turn read; modelUsage held all of them.
+  const TASK_SET = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a1","task_type":"local_agent","description":"echo there"}],"session_id":"${FIXTURE_SESSION_ID}"}`;
+  const TASK_NONE = `{"type":"system","subtype":"background_tasks_changed","tasks":[],"session_id":"${FIXTURE_SESSION_ID}"}`;
+  const TASK_DONE = `{"type":"system","subtype":"task_notification","task_id":"a1","status":"completed","summary":"echo there completed","session_id":"${FIXTURE_SESSION_ID}"}`;
+  const wokeLines = (first: Record<string, ReturnType<typeof use>> | undefined, second: Record<string, ReturnType<typeof use>> | undefined) => [
+    init,
+    TASK_SET,
+    JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 3, duration_ms: 900, result: "waiting", session_id: FIXTURE_SESSION_ID, total_cost_usd: 0.08, usage: { input_tokens: 18, cache_creation_input_tokens: 10_166, cache_read_input_tokens: 44_218, output_tokens: 1_535 }, ...(first !== undefined ? { modelUsage: first } : {}) }),
+    TASK_NONE,
+    TASK_DONE,
+    `{"type":"system","subtype":"init","cwd":"/w","session_id":"${FIXTURE_SESSION_ID}","model":"claude-opus-5-5"}`,
+    JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 1, duration_ms: 300, result: "done", session_id: FIXTURE_SESSION_ID, total_cost_usd: 0.1, usage: { input_tokens: 10, cache_creation_input_tokens: 887, cache_read_input_tokens: 27_898, output_tokens: 144 }, origin: { kind: "task-notification" }, ...(second !== undefined ? { modelUsage: second } : {}) }),
+  ];
+
+  it("a turn the CLI woke for its background work counts every token since its start: the turn's tokens are its split by model", async () => {
+    const { done } = await run(wokeLines({ "claude-haiku-4-5-20251001": use({ in: 18, read: 70_000, write: 17_218, out: 1_681, cost: 0.08 }) }, { "claude-haiku-4-5-20251001": use({ in: 28, read: 97_898, write: 18_105, out: 1_825, cost: 0.1 }) }));
+    expect(done.text).toBe("done");
+    const split = done.models!;
+    expect(split).toHaveLength(1);
+    expect(done.tokens).toMatchObject({ input: 116_031, output: 1_825, cached: 97_898, cacheWrite: 18_105 });
+    expect(done.tokens).toMatchObject({ input: split[0]!.tokens.input, output: split[0]!.tokens.output, cached: split[0]!.tokens.cached, cacheWrite: split[0]!.tokens.cacheWrite });
+  });
+
+  it("a woken agent cut before its reply adds the calls it printed after the held reply to the turn, as an entry with no cost", async () => {
+    const lines = wokeLines({ "claude-haiku-4-5-20251001": use({ in: 18, read: 70_000, write: 17_218, out: 1_681, cost: 0.08 }) }, undefined)
+      .slice(0, -1)
+      .concat(call("msg_9", { input_tokens: 2, cache_read_input_tokens: 60_000, output_tokens: 8 }, "claude-haiku-4-5-20251001"));
+    const factory: ExecStreamFactory = () => {
+      let resolveExit: (code: number | null) => void = () => {};
+      const exited = new Promise<number | null>(resolve => (resolveExit = resolve));
+      return {
+        lines: (async function* () {
+          yield* lines;
+          resolveExit(null);
+          throw new Error("stopped after 6:00:00 at the 6h turn limit");
+        })(),
+        exited,
+        teardown: () => {},
+        kill: () => {},
+        write: async () => "written" as const,
+        closeInput: () => {},
+      };
+    };
+    const adapter = createClaudeAdapter({ exec: factory, configDir: "/root/.claude-cfg" });
+    const done = await adapter.start({ prompt: "x", onEvent: () => {} }).finished;
+    expect(done).toMatchObject({ status: "failed", text: "waiting", error: "stopped after 6:00:00 at the 6h turn limit", costUsd: 0.08 });
+    expect(done.tokens).toMatchObject({ input: 87_236 + 60_002, output: 1_681 + 8, cached: 70_000 + 60_000, cacheWrite: 17_218 });
+    // The reply's cost covers the reply's tokens alone, so the calls after it come with none and take the list price.
+    expect(done.models).toEqual([
+      { model: "claude-haiku-4-5-20251001", tokens: { input: 87_236, output: 1_681, cached: 70_000, cacheWrite: 17_218, reasoning: 0 }, costUsd: 0.08 },
+      { model: "claude-haiku-4-5-20251001", tokens: { input: 60_002, output: 8, cached: 60_000, cacheWrite: 0, reasoning: 0 } },
+    ]);
+  });
+
+  it("a woken turn with no split by model still counts both of its results' tokens", async () => {
+    const { done } = await run(wokeLines(undefined, undefined), FIXTURE_SESSION_ID);
+    expect(done.models).toBeUndefined();
+    expect(done.tokens).toMatchObject({ input: 18 + 10_166 + 44_218 + 10 + 887 + 27_898, output: 1_535 + 144, cached: 44_218 + 27_898, cacheWrite: 10_166 + 887 });
   });
 });
