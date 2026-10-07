@@ -18,9 +18,10 @@ use crate::start;
 use crate::{Args, Env};
 
 /// Whether the cloud is on, read off the variable as the protocol's cloudFromEnv reads it: the greeting and the list
-/// are the TypeScript server's for that state.
+/// are the TypeScript server's for that state. Never in a public build, whose record carries no cloud (build.rs), as
+/// the public host turns none on.
 pub fn cloud_on(env: &Env) -> bool {
-    env.get(&record::host().env.cloud).is_some_and(|value| value == "1")
+    !cfg!(wsp_public) && env.get(&record::host().env.cloud).is_some_and(|value| value == "1")
 }
 
 pub struct Host {

@@ -16,29 +16,32 @@ use crate::record::{self, fill};
 
 pub const SEARCH: Tool = Tool {
     name: "skills_search",
-    listed: include_str!("../../record/tools/skills_search.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/skills_search.json")),
     call: |host, args| Box::pin(search(host, args)),
 };
 pub const SHOW: Tool = Tool {
     name: "skills_show",
-    listed: include_str!("../../record/tools/skills_show.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/skills_show.json")),
     call: |host, args| Box::pin(show(host, args)),
 };
-pub const ADD: Tool =
-    Tool { name: "skills_add", listed: include_str!("../../record/tools/skills_add.json"), call: |host, args| Box::pin(add(host, args)) };
+pub const ADD: Tool = Tool {
+    name: "skills_add",
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/skills_add.json")),
+    call: |host, args| Box::pin(add(host, args)),
+};
 pub const REMOVE: Tool = Tool {
     name: "skills_remove",
-    listed: include_str!("../../record/tools/skills_remove.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/skills_remove.json")),
     call: |host, args| Box::pin(remove(host, args)),
 };
 pub const DISABLE: Tool = Tool {
     name: "skills_disable",
-    listed: include_str!("../../record/tools/skills_disable.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/skills_disable.json")),
     call: |host, args| Box::pin(toggle(host, args, "skills_disable", false)),
 };
 pub const ENABLE: Tool = Tool {
     name: "skills_enable",
-    listed: include_str!("../../record/tools/skills_enable.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/skills_enable.json")),
     call: |host, args| Box::pin(toggle(host, args, "skills_enable", true)),
 };
 

@@ -3,10 +3,11 @@
 // packed tarball and on the desktop app's folder, and, with PUBLIC_BUILD=1 set
 // as the build was, that build packed and read by it.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { servingHost } from "@wsp/host";
 import { CLOUD_ENV } from "@wsp/protocol";
 import { afterAll, describe, expect, it } from "vitest";
 import { providerWords } from "../scripts/public-check.mjs";
@@ -46,6 +47,28 @@ describe("the check a public build passes", () => {
     expect(providerWords(root)).toEqual([]);
   });
 
+  it.each([
+    ["a key's variable", 'export const BOX_KEY_ENV = "BOAT_API_KEY";'],
+    ["an API's host", 'const url = "https://api.getsolari.com/v1";'],
+    ["a console's host", 'const where = "console.getsolari.com";'],
+    ["a key's prefix", 'const k = "slr_live_";'],
+    ["the harness shim's mark", 'if (x !== "# ascii-harness-shim") return;'],
+    ["the lazy launcher's mark", 'const lazy = "# ascii-lazy-harness ";'],
+  ])("finds %s inside a longer word", (_, code) => {
+    expect(providerWords(built({ "dist/bin.js": `${code}\n` }))).toHaveLength(1);
+  });
+
+  it("reads a daemon binary's strings, and takes the operating system named Solaris for what it is", () => {
+    const elf = (text: string): string => `\x7fELF\x02\x01\x01\x00${text}\x00`;
+    const root = built({ "assets/daemon/x86_64-unknown-linux-musl/wsp-daemon": elf('{"providers":["box","solari"]}'), "assets/daemon/aarch64-apple-darwin/wsp-daemon": elf("target_os = solaris") });
+    expect(providerWords(root).map(hit => hit.file)).toEqual(["assets/daemon/x86_64-unknown-linux-musl/wsp-daemon"]);
+  });
+
+  it("holds the package's own README, which npm shows on its page, to no provider either", () => {
+    expect(providerWords(built({ "README.md": "Get a Solari account first.\n" }))).toHaveLength(1);
+    expect(providerWords(built({ "README.md": readFileSync(join(pkg, "README.md"), "utf8") }))).toEqual([]);
+  });
+
   it("reads a tarball as npm packs it", () => {
     const root = built({ "package/dist/chunk.js": 'export const BOX_API_URL = "https://ascii.dev/api/box/v1";\n' });
     const tarball = join(root, "pkg.tgz");
@@ -70,9 +93,16 @@ describe.runIf(process.env["PUBLIC_BUILD"] === "1")("the public build this tree 
   it("turns no cloud on for the variable a development build reads, so a cloud verb is a word it does not know", () => {
     const home = mkdtempSync(join(tmpdir(), "wsp-public-home-"));
     made.push(home);
-    const run = spawnSync(process.execPath, [join(pkg, "dist", "bin.js"), "fork", "api"], { encoding: "utf8", env: { PATH: process.env["PATH"] ?? "", HOME: home, [CLOUD_ENV]: "1" } });
-    expect(run.stderr.trim()).toBe("unknown command: fork. Run wsp --help for the list.");
-    expect(run.status).toBe(3);
+    // A build where fork is a verb would start a host for it: that host is this state's, and stopped below.
+    const state = join(home, "state.json");
+    try {
+      const run = spawnSync(process.execPath, [join(pkg, "dist", "bin.js"), "fork", "api", "--state", state], { cwd: home, encoding: "utf8", env: { PATH: process.env["PATH"] ?? "", HOME: home, [CLOUD_ENV]: "1" } });
+      expect(run.stderr.trim()).toBe("unknown command: fork. Run wsp --help for the list.");
+      expect(run.status).toBe(3);
+    } finally {
+      const host = servingHost(state);
+      if (host !== undefined) process.kill(host.pid);
+    }
   });
 
   it.runIf(existsSync(join(desktopApp, "main", "main.mjs")))("lays out a desktop app whose host bundle and resources carry none", () => {

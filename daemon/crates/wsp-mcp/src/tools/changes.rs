@@ -61,13 +61,19 @@ struct Woken {
 
 const COMMIT_NAME: &str = "commit";
 
-pub const COMMIT: Tool =
-    Tool { name: COMMIT_NAME, listed: include_str!("../../record/tools/commit.json"), call: |host, args| Box::pin(commit(host, args)) };
+pub const COMMIT: Tool = Tool {
+    name: COMMIT_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/commit.json")),
+    call: |host, args| Box::pin(commit(host, args)),
+};
 
 const DISCARD_NAME: &str = "discard";
 
-pub const DISCARD: Tool =
-    Tool { name: DISCARD_NAME, listed: include_str!("../../record/tools/discard.json"), call: |host, args| Box::pin(discard(host, args)) };
+pub const DISCARD: Tool = Tool {
+    name: DISCARD_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/discard.json")),
+    call: |host, args| Box::pin(discard(host, args)),
+};
 
 /// The files named go with the draft and the commit alike; without them every changed file does.
 async fn commit(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {

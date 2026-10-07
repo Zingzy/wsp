@@ -79,9 +79,11 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends musl-tools gperf
           ./scripts/libseccomp-archive.sh musl
+      # Public: a Mac daemon's tool server embeds no cloud tool and no provider. The jobs that ship it read it for one.
       - name: Build
         env:
           TARGET: ${{ matrix.target }}
+          PUBLIC_BUILD: "1"
         run: |
           FEATURES=$(node ../packages/wspx/scripts/daemon-features.mjs "$TARGET")
           if [ "$RUNNER_OS" = "Linux" ]; then

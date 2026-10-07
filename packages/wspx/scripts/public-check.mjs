@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // node scripts/public-check.mjs <folder or .tgz>...: whether a public build
 // carries a cloud provider. Every script in it is read as code, its comments
-// left out, and every page, stylesheet, picture and manifest whole; the README
-// is prose about the product and is not read. A provider module or its words
-// is a line naming the file, and the exit is 1. The release runs it on the packed
+// left out, every page, stylesheet, picture, manifest and README whole, and
+// every daemon binary for its strings. A provider module or its words is a
+// line naming the file, and the exit is 1. The release runs it on the packed
 // tarball and on the desktop app's folder before either leaves the runner.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -12,12 +12,29 @@ import { extname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
-/** What a provider leaves in a bundle: its backend classes, its API's address, its key's variable and its name.
- * Solarized is a colour theme the diff viewer ships, not the provider. */
-export const PROVIDER_WORDS = [/\bsolari(?!zed)/i, /\bboat\b/i, /\bBox(?:Backend|Machine)\b/, /\bBOX_API_URL\b/, /ascii\.dev/i];
+/** What a provider leaves in a build: its backend classes, its API's address, its key's variable and prefix, ASCII's
+ * shim marks and the providers' names, matched inside a longer word (BOAT_API_KEY, getsolari.com). Solarized is a
+ * colour theme the diff viewer ships, Solaris an operating system a binary may name, and newsboat a Linux package. */
+export const PROVIDER_WORDS = [
+  /solari(?![sz])/i,
+  /(?<![a-z])boat(?![a-z])/i,
+  /\bBox(?:Backend|Machine)\b/,
+  /\bBOX_API_URL\b/,
+  /ascii\.dev/i,
+  /slr_live_/,
+  /ascii-(?:harness-shim|lazy-harness)/,
+];
 
 const SCRIPT = new Set([".js", ".mjs", ".cjs"]);
-const TEXT = new Set([".json", ".html", ".css", ".svg"]);
+const TEXT = new Set([".json", ".html", ".css", ".svg", ".md"]);
+/** The first bytes of an ELF file and of a Mach-O, thin or universal, either byte order: a daemon binary. */
+const BINARY_MAGIC = ["7f454c46", "cffaedfe", "feedfacf", "cafebabe", "bebafeca"];
+
+/** A daemon binary's text, its strings among it, or nothing for any other file. */
+function binaryText(path) {
+  const bytes = readFileSync(path);
+  return BINARY_MAGIC.includes(bytes.subarray(0, 4).toString("hex")) ? bytes.toString("latin1") : undefined;
+}
 
 /** A script's code with its comments gone: every name and every literal, one to a line. */
 export function codeOf(text, fileName = "bundle.js") {
@@ -49,9 +66,8 @@ const walk = dir => readdirSync(dir).flatMap(name => {
 export function providerWordsUnder(root) {
   return walk(root).flatMap(path => {
     const ext = extname(path);
-    if (!SCRIPT.has(ext) && !TEXT.has(ext)) return [];
-    const text = readFileSync(path, "utf8");
-    return wordsIn(SCRIPT.has(ext) ? codeOf(text, path) : text).map(hit => ({ file: relative(root, path), ...hit }));
+    const text = SCRIPT.has(ext) ? codeOf(readFileSync(path, "utf8"), path) : TEXT.has(ext) ? readFileSync(path, "utf8") : binaryText(path);
+    return text === undefined ? [] : wordsIn(text).map(hit => ({ file: relative(root, path), ...hit }));
   });
 }
 

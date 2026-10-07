@@ -62,7 +62,7 @@ export const BOX_PRICING: BackendPricing = {
 export const BOX_BASE_TEMPLATE = "base";
 
 // Frozen: one shared object for every backend, so nothing shrinks a budget for everyone by accident.
-// Pure and with no arithmetic, which a bundler keeps: a public build, which builds no BoxBackend, drops it whole.
+// No arithmetic, since esbuild keeps that, and marked pure, so a public build, which builds no BoxBackend, drops it whole.
 export const BOX_BUDGETS: LifecycleBudgets = /* @__PURE__ */ Object.freeze({
   // A second attempt would be a stop that snapshots the disk for minutes and a resume that counts as a billed start
   // against 5 a minute and 75 a day on the trial; a wake that fails its check fails on the machine it has.

@@ -71,7 +71,12 @@ const LAZY_RUN: FirstRunInstaller = {
   },
 };
 
-export const FIRST_RUN_INSTALLERS: readonly FirstRunInstaller[] = [MISE, LAZY_RUN];
+/** False in a public build, which the bundler fills in where PUBLIC_BUILD=1; never filled in anywhere else. */
+declare const __WSP_CLOUD__: boolean | undefined;
+
+/** ASCII's reader only where the cloud is built, since only its image carries the shim: the test is spelled out here,
+ * since a bundler folds the constant only where it is written, and a public build drops LAZY_RUN with it. */
+export const FIRST_RUN_INSTALLERS: readonly FirstRunInstaller[] = typeof __WSP_CLOUD__ === "boolean" && !__WSP_CLOUD__ ? [MISE] : [MISE, LAZY_RUN];
 
 /** Runs one sh script where the agents' commands are looked up, answering its stdout, or nothing when it failed. */
 export type RunScript = (script: string) => Promise<string | undefined>;

@@ -42,13 +42,14 @@ function setOnPurpose(): string[] {
   return [...new Set(texts.flatMap(text => [...text.matchAll(/\b(WSP_[A-Z0-9_]+)(?:: |=)/g)].map(m => m[1]!)))].sort();
 }
 
-/** Every wsp variable this file reads off process.env, whether spelled out or reached through a constant. */
+/** Every wsp variable this file reads off process.env, whether spelled out or reached through a constant, and every
+ * gate, which a build input with no WSP_ prefix can be. */
 function wspReads(text: string, constants: Record<string, string>): string[] {
   const found: string[] = [];
   const reads = /process\.env(?:\.([A-Za-z_]\w*)|\[\s*["']([^"']+)["']\s*\]|\[\s*([A-Za-z_]\w*)\s*\])/g;
   for (const [, dotted, quoted, through] of text.matchAll(reads)) {
     const name = dotted ?? quoted ?? (through === undefined ? undefined : constants[through]);
-    if (name !== undefined && name.startsWith("WSP_")) found.push(name);
+    if (name !== undefined && (name.startsWith("WSP_") || name in GATES)) found.push(name);
   }
   return found;
 }

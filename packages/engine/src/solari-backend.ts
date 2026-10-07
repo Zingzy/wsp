@@ -122,7 +122,7 @@ export const SNAPSHOT_LISTED_MS = 3 * 60_000;
 export const SNAPSHOT_LISTED_EVERY_MS = 15_000;
 
 // Frozen: one shared object every SolariBackend hands out, so nothing shrinks a budget for everyone by accident.
-// Pure and with no arithmetic, which a bundler keeps: a public build, which builds no SolariBackend, drops it whole.
+// No arithmetic, since esbuild keeps that, and marked pure, so a public build, which builds no SolariBackend, drops it whole.
 export const SOLARI_LIFECYCLE: Lifecycle = /* @__PURE__ */ Object.freeze({
   budgets: /* @__PURE__ */ Object.freeze({
     // A resume can land a zombie on a fresh host at default size; one re-pause and resume clears it, a second never has.

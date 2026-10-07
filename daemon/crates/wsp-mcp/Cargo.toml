@@ -19,6 +19,10 @@ wsp-frames = { path = "../wsp-frames" }
 wsp-seal = { path = "../wsp-seal" }
 getrandom = "0.4"
 
+# The record copied into the build, a public build's with no cloud in it: build.rs.
+[build-dependencies]
+serde_json = { workspace = true, features = ["raw_value"] }
+
 [dev-dependencies]
 # A tool's input and output structs derive their JSON Schema in the test build alone, where it is held to the schema
 # the TypeScript server lists; the binary serves that recorded schema and carries none of this.

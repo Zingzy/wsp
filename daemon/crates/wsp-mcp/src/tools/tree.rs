@@ -36,7 +36,7 @@ const MERGE_IN_NAME: &str = "merge_in";
 
 pub const MERGE_IN: Tool = Tool {
     name: MERGE_IN_NAME,
-    listed: include_str!("../../record/tools/merge_in.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/merge_in.json")),
     call: |host, args| Box::pin(merge_in(host, args)),
 };
 

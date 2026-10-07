@@ -102,7 +102,7 @@ fn parsed(listed: &str, cloud: bool, field: &str, given: &RawValue) -> Option<Bo
 }
 
 const DEFAULT_NAME: &str = "agents_default";
-const DEFAULT_LISTED: &str = include_str!("../../record/tools/agents_default.json");
+const DEFAULT_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/agents_default.json"));
 
 pub const DEFAULT: Tool = Tool { name: DEFAULT_NAME, listed: DEFAULT_LISTED, call: |host, args| Box::pin(agents_default(host, args)) };
 
@@ -128,7 +128,7 @@ async fn agents_default(host: Arc<Host>, arguments: Value) -> Result<Answer, Ref
 }
 
 const SET_NAME: &str = "agents_set";
-const SET_LISTED: &str = include_str!("../../record/tools/agents_set.json");
+const SET_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/agents_set.json"));
 
 pub const SET: Tool = Tool { name: SET_NAME, listed: SET_LISTED, call: |host, args| Box::pin(agents_set(host, args)) };
 
@@ -277,7 +277,7 @@ async fn agents_set(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused
 }
 
 const SETUP_NAME: &str = "agents_setup";
-const SETUP_LISTED: &str = include_str!("../../record/tools/agents_setup.json");
+const SETUP_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/agents_setup.json"));
 
 pub const SETUP: Tool = Tool { name: SETUP_NAME, listed: SETUP_LISTED, call: |host, args| Box::pin(agents_setup(host, args)) };
 
@@ -409,7 +409,7 @@ async fn agents_setup(host: Arc<Host>, arguments: Value) -> Result<Answer, Refus
 }
 
 const PROJECT_NAME: &str = "projects_set";
-const PROJECT_LISTED: &str = include_str!("../../record/tools/projects_set.json");
+const PROJECT_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/projects_set.json"));
 
 pub const PROJECT: Tool = Tool { name: PROJECT_NAME, listed: PROJECT_LISTED, call: |host, args| Box::pin(projects_set(host, args)) };
 

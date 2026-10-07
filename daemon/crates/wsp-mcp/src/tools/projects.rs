@@ -11,7 +11,7 @@ use crate::zod::{self, Schema};
 
 const NAME: &str = "projects";
 
-const LISTED: &str = include_str!("../../record/tools/projects.json");
+const LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/projects.json"));
 
 pub const TOOL: Tool = Tool { name: NAME, listed: LISTED, call: |host, args| Box::pin(call(host, args)) };
 

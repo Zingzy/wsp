@@ -178,7 +178,10 @@ describe("the release workflow", () => {
       expect(job.indexOf(check)).toBeGreaterThan(at);
       expect(job.indexOf(check)).toBeLessThan(job.indexOf(ships));
     }
-    expect(workflow.split('PUBLIC_BUILD: "1"').length - 1).toBe(roads.length);
+    // The daemons are built public too, and read where they ship: in each app's folder and in the tarball.
+    const daemonBuild = daemonJob.indexOf("- name: Build\n");
+    expect(daemonJob.slice(daemonBuild, daemonJob.indexOf("- name:", daemonBuild + 1))).toContain('PUBLIC_BUILD: "1"');
+    expect(workflow.split('PUBLIC_BUILD: "1"').length - 1).toBe(roads.length + 1);
   });
 
   it("publishes the command line package from the runner through trusted publishing, and holds no npm token", () => {

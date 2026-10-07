@@ -33,8 +33,11 @@ pub struct ForgetOut {
 
 const FORGET_NAME: &str = "forget";
 
-pub const FORGET: Tool =
-    Tool { name: FORGET_NAME, listed: include_str!("../../record/tools/forget.json"), call: |host, args| Box::pin(forget(host, args)) };
+pub const FORGET: Tool = Tool {
+    name: FORGET_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/forget.json")),
+    call: |host, args| Box::pin(forget(host, args)),
+};
 
 async fn forget(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let ForgetIn { workspace } = input(FORGET_NAME, arguments)?;
@@ -77,8 +80,11 @@ pub struct DeleteOut {
 
 const DELETE_NAME: &str = "delete";
 
-pub const DELETE: Tool =
-    Tool { name: DELETE_NAME, listed: include_str!("../../record/tools/delete.json"), call: |host, args| Box::pin(delete(host, args)) };
+pub const DELETE: Tool = Tool {
+    name: DELETE_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/delete.json")),
+    call: |host, args| Box::pin(delete(host, args)),
+};
 
 #[derive(Deserialize)]
 struct Place {
