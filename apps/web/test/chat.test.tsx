@@ -67,7 +67,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
       started.push(opts);
       return { id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running", prompt: opts.prompt, startedAt: T0 };
     },
-    interruptSession: async () => "accepted",
+    interruptSession: async () => ({ outcome: "accepted" }),
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
   return { api, started, emit };

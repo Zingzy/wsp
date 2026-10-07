@@ -12,7 +12,7 @@ import { spawn } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
 import { platform } from "node:os";
 import { PassThrough } from "node:stream";
-import { DaemonEvent, LOOPBACK, runsInFolder, SSH_BEHIND_KIND, SshStartReply, sshBehindLine, unknownOpLine, callbackPortOf, hostOf, isHttpUrl, isJoinedComputer, isLoopback, type AgentsTarget, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward, type WorkspaceKind } from "@wsp/protocol";
+import { DaemonEvent, FORWARD_MAX_PER_TARGET, LOOPBACK, runsInFolder, SSH_BEHIND_KIND, SshStartReply, sshBehindLine, unknownOpLine, callbackPortOf, hostOf, isHttpUrl, isJoinedComputer, isLoopback, type AgentsTarget, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward, type WorkspaceKind } from "@wsp/protocol";
 import { plumbTunnel, realClock, tunnelFrame, type Clock, type DaemonChannel, type EventUnion, type Runtime, type SignInForward } from "@wsp/runtime";
 import { DAEMON_CONNECT_TIMEOUT_MS, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
 import type { GuestDoor } from "./guest.js";
@@ -112,8 +112,7 @@ export const RELAY_WINDOW_MS = 3 * 60_000;
 export const RELAY_CAP_MS = 15 * 60_000;
 /** A url forward with no connection and no bytes for this long is one nobody is using. */
 export const FORWARD_IDLE_MS = 10 * 60_000;
-/** url forwards per workspace: the machine names the ports, so its say over this computer's loopback is bounded. */
-export const FORWARD_MAX_PER_TARGET = 16;
+export { FORWARD_MAX_PER_TARGET };
 /** The longest pause between redials of a dropped daemon link, before jitter. */
 export const REDIAL_CEILING_MS = 30_000;
 /** A callback that lands while the link is down waits this long for it: the longest jittered redial pause plus the dial's
@@ -700,6 +699,8 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       o.log(`${link.target.name}: ignored ${e.type === "browser.open" ? "a sign-in page" : "a callback port"} from the ${link.target.noun}; no sign-in runs there`);
       return;
     }
+    // A watch a pane named on a computer's one link is that pane's; this link's own watch names none.
+    if ((e.type === "port.open" || e.type === "port.close") && e.watch !== undefined) return;
     switch (e.type) {
       case "port.open": {
         link.ports.add(e.port);

@@ -8,7 +8,7 @@
 // behind a toggle. The count is the rows on the screen, never the machine's total.
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ChevronRightIcon } from "lucide-react";
-import { foldThreads, isLocalWorkspace, type ProcEntry, type ProcInspectReply, type ProcSignal } from "@wsp/protocol";
+import { folderOnJoined, foldThreads, isLocalWorkspace, threadCgroup, workspaceKind, type ProcEntry, type ProcInspectReply, type ProcSignal } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { staleWord, type StaleWord } from "../../machine/live.js";
 import { getProcs, useWorkspaceProcs } from "../../machine/procs.js";
@@ -28,15 +28,16 @@ const COLUMNS = "grid grid-cols-[3.5rem_3.25rem_3.75rem_minmax(0,1fr)] items-cen
 const NO_TABS: readonly never[] = [];
 const NO_THREADS: readonly ProcThread[] = [];
 
-/** The threads of this workspace with a turn running, each with the process the host started for it. */
-function useThreadRoots(workspaceId: string): readonly ProcThread[] {
+/** The threads of this workspace with a turn running, each with the process the host started for it; on a computer
+ * the person joined, every thread, by the cgroup what it started stands in, a server it left running included. */
+function useThreadRoots(workspaceId: string, byCgroup: boolean): readonly ProcThread[] {
   const sessions = useStore(s => s.sessions[workspaceId]);
   return useMemo(() => {
     if (sessions === undefined) return NO_THREADS;
-    return foldThreads(sessions)
-      .filter(t => t.pid !== undefined)
-      .map(t => ({ threadId: t.id, title: t.title, pid: t.pid! }));
-  }, [sessions]);
+    const threads = foldThreads(sessions);
+    if (byCgroup) return threads.map(t => ({ threadId: t.id, title: t.title, cgroup: threadCgroup(t.id) }));
+    return threads.filter(t => t.pid !== undefined).map(t => ({ threadId: t.id, title: t.title, pid: t.pid! }));
+  }, [sessions, byCgroup]);
 }
 
 function useTerminalTitles(workspaceId: string): ReadonlyMap<string, string> {
@@ -59,10 +60,12 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
   useEffect(() => getProcs(workspaceId).watch(), [workspaceId]);
 
   const snapshot = procs.snapshot;
-  const threads = useThreadRoots(workspaceId);
-  // Only a local workspace shares its computer with everything else the person runs; this computer's own panel is
-  // that whole computer, and a machine wsp forks runs only what this workspace put on it.
-  const own = workspace !== null && isLocalWorkspace(workspace);
+  const joined = workspace !== null && folderOnJoined(workspaceKind(workspace));
+  const threads = useThreadRoots(workspaceId, joined);
+  // A local workspace, and a folder on a computer the person joined, share that computer with everything else the
+  // person runs; this computer's own panel is that whole computer, and a machine wsp forks runs only what this
+  // workspace put on it.
+  const own = workspace !== null && (isLocalWorkspace(workspace) || joined);
   const table = useMemo(() => procTable(snapshot?.procs ?? [], sort, filter, own ? threads : NO_THREADS), [snapshot, sort, filter, own, threads]);
   const sectioned = own && table.threads.length > 0;
   const showRest = !sectioned || restOpen;
@@ -129,11 +132,26 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
             )
           )}
           {sectioned &&
-            table.threads.map(({ thread, rows }) => (
+            table.threads.map(({ thread, rows, spent }) => (
               <div key={thread.threadId}>
-                <p className="truncate px-2 font-sans text-xs text-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={thread.title} data-procs-thread={thread.threadId}>
-                  {thread.title}
-                </p>
+                {spent === undefined ? (
+                  <p className="truncate px-2 font-sans text-xs text-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={thread.title} data-procs-thread={thread.threadId}>
+                    {thread.title}
+                  </p>
+                ) : (
+                  <div className={COLUMNS} style={{ height: ROW_PX }} data-procs-thread={thread.threadId}>
+                    <span />
+                    <span className="text-right tabular-nums text-muted-foreground" data-procs-thread-cpu>
+                      {spent.cpu.toFixed(1)}
+                    </span>
+                    <span className="text-right tabular-nums text-muted-foreground" data-procs-thread-mem>
+                      {compactBytes(spent.rss)}
+                    </span>
+                    <span className="truncate pl-2 font-sans text-xs text-foreground" title={thread.title}>
+                      {thread.title}
+                    </span>
+                  </div>
+                )}
                 {draw(rows, 1)}
               </div>
             ))}

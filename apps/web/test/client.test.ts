@@ -61,7 +61,7 @@ describe("makeApi wrappers", () => {
     const { api, lastSent } = await connect();
     const interrupt = api.interruptSession!;
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, outcome: "not-running" });
-    expect(await interrupt("s1")).toBe("not-running");
+    expect(await interrupt("s1")).toEqual({ outcome: "not-running" });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "sessions.interrupt", sessionId: "s1" });
     // An outcome outside the enum must not read as accepted.
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, outcome: "maybe" });

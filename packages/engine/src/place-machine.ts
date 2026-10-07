@@ -7,7 +7,7 @@
 // sentence rather than sending a frame nothing on the far side would take.
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
-import { DaemonExecReply, EXEC_TIMEOUT_MAX_MS, base64Length, placeProvisionPaths, shellQuote, type Capabilities } from "@wsp/protocol";
+import { DaemonExecReply, EXEC_TIMEOUT_MAX_MS, base64Length, cgroupJoinLine, placeProvisionPaths, shellQuote, type Capabilities } from "@wsp/protocol";
 import { INLINE_EXEC_MS, execDetached, machineAnswer } from "./exec-detached.js";
 import { LINK_MARGIN_MS, type MachineLink } from "./link-backend.js";
 import type { BackendPricing, BytesLanded, ExecResult, Machine, MachineBackend, MachineKind, MachineListRow, MachineState, RunOptions } from "./machine.js";
@@ -174,6 +174,17 @@ export class PlaceFolderMachine extends PlaceMachine {
 
   override async exec(cmd: string, opts?: { timeoutMs?: number; idempotencyKey?: string; stdin?: Uint8Array }): Promise<ExecResult> {
     return super.exec(asLogin(await this.loginOf(), cmd), opts);
+  }
+
+  /** This computer as a turn's launch reaches it: each line still runs as the login, from a shell that first stands
+   * itself in the thread's cgroup as the daemon's root, so the run and everything it starts stand there too; a
+   * folder named goes in front of the login's PATH for those lines alone. */
+  inCgroup(cgroup: string, pathFirst?: string): Machine {
+    const join = cgroupJoinLine(cgroup);
+    const path = pathFirst === undefined ? "" : `export PATH=${shellQuote(pathFirst)}:"$PATH"; `;
+    const grouped = Object.create(this) as PlaceFolderMachine;
+    grouped.exec = async (cmd, opts) => PlaceMachine.prototype.exec.call(this, `${join}\n${asLogin(await this.loginOf(), `${path}${cmd}`)}`, opts);
+    return grouped;
   }
 
   /** One daemon frame answered by that computer's own daemon, naming no machine. A refusal comes back as the reply

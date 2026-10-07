@@ -15,7 +15,7 @@ import { OWN_MARK, outsideAfterScript, outsideBeforeScript, keyFingerprint } fro
 import { daemonBinaryHere } from "../src/assets.js";
 import { GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 import { apparmorStep, apparmorStoodLine, joinedPlace, placeFoundSkippedLine, placeFoundStep, sshDaemonPlace } from "../src/doctor.js";
-import { PLACE_FOUND_END, placeOutsideLeftLine, placeOwnersUnknownLine, TOOL_PREFIX } from "@wsp/protocol";
+import { PLACE_FOUND_END, threadCgroupsEndScript, placeOutsideLeftLine, placeOwnersUnknownLine, TOOL_PREFIX } from "@wsp/protocol";
 import { pinnedDroppingPort } from "../../runtime/test/held-port.js";
 import { NOTHING_TO_LEAVE_LINE, brokenJoinLine, brokenPlaceLeftLine, joinCutByLeaveLine, joinCommand } from "../src/places.js";
 import { placeFilePath, placeKeyPath, placeLogPath, readPlaceFile, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
@@ -505,6 +505,8 @@ describe("taking wsp off the computer it is typed on", () => {
       ["systemctl", "daemon-reload"],
       ["systemctl", "--user", "stop", unit.name],
       ["systemctl", "--user", "disable", unit.name],
+      // A thread's turns stand in cgroups of their own, outside the unit, so they are ended once it has stopped.
+      ["sh", "-c", threadCgroupsEndScript()],
     ]);
     // The file is gone and the link systemd keeps beside it was taken with it, so no start brings the agent back,
     // and the line a person reads says what a leave that left the process running never could.

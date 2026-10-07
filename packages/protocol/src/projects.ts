@@ -383,6 +383,13 @@ export function runsInFolder(kind: WorkspaceKind): boolean {
   return kindWords(kind).inFolder;
 }
 
+/** Whether a workspace of this kind is a folder on a computer the person joined, reached over that computer's link:
+ * its ports open here on demand, its threads' processes are told apart by cgroup, and nothing of a machine wsp
+ * made, a pause, a bring back or an export, applies to it. */
+export function folderOnJoined(kind: WorkspaceKind): boolean {
+  return kindWords(kind).inFolder && !kindWords(kind).copiesFolder;
+}
+
 /** Whether a record is a folder's that no thread names: the host makes one before a folder's first thread and keeps
  * it past its last, so nothing shows it and nothing counts it as standing on its project. */
 export function bareFolder(record: { readonly kind?: WorkspaceKind | undefined }, holdsThread: boolean): boolean {

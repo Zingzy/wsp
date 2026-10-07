@@ -42,6 +42,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
   const {
     opts, store, bus, clock, deviceDoor, threadLaunch, live, setups, threadRecords, sessions, transcriptIndex,
   } = ctx;
+  /** The end a stop is running on a thread's group, by thread: the thread's next turn launches after it, never into
+   * the group it is emptying. */
+  const ending = new Map<string, Promise<void>>();
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, opened, origin) {
       await ctx.ready();
@@ -168,6 +171,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           // A name no catalog row declares is one an MCP server's definition reads; the kind decides whether the
           // environment is what carries it.
           serverValuesOf(opts.vault?.() ?? {}),
+          threadId,
         );
       } catch (e) {
         dropScope();
@@ -306,6 +310,15 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         for (;;) {
           const running = ctx.runningOn(threadId);
           if (running === undefined) {
+            const stopping = ending.get(threadId);
+            if (stopping !== undefined) {
+              if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
+              outcome = "queued";
+              await stopping;
+              refuse();
+              cleared = false;
+              continue;
+            }
             // A turn of this thread another send is still carrying to the machine has no harness to steer or to wait
             // out yet, so this one waits for the moment it has one or is given up, and looks again.
             const launching = ctx.launchingOn(threadId);
@@ -567,12 +580,30 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // itself may already be over, which is an answer and not a reason to leave its builders running. A child
       // that stops its lead stops its siblings and itself with it, and may never read the answer.
       const under = s.view.threadId === undefined ? [] : await ctx.stopUnder(s.view.threadId, origin);
-      const answered = (outcome: SessionInterruptOutcome): SessionInterruptResult => ({ outcome, ...(under.length > 0 ? { under } : {}) });
-      if (s.view.status !== "running" || s.handle === undefined) return answered("not-running");
-      await s.handle.interrupt();
-      // The harness resolves finished only after session.end, so accepted means the turn is over on the transcript too.
-      await s.handle.finished.catch(() => {});
-      return answered("accepted");
+      const answered = (outcome: SessionInterruptOutcome, left?: string): SessionInterruptResult => ({ outcome, ...(under.length > 0 ? { under } : {}), ...(left !== undefined ? { left } : {}) });
+      // A stop ends what the thread left running on a computer that groups a thread's processes, a server it
+      // detached included, once its turn has had its own grace; a thread whose turn is over still has those. Set
+      // before the turn is stopped, so a send queued behind it sees the end before it sees the turn gone.
+      const thread = s.view.threadId;
+      const entry = thread === undefined ? undefined : await ctx.entryOfRow(s.view, origin);
+      const ends = entry === undefined ? undefined : ctx.moduleOf(entry.record.kind).endThread;
+      let ended = (): void => {};
+      const held = ends === undefined ? undefined : new Promise<void>(resolve => (ended = resolve));
+      if (held !== undefined) ending.set(thread!, held);
+      try {
+        if (s.view.status !== "running" || s.handle === undefined) {
+          // Another turn of the thread running or on its way stands in the same group, and is not what was stopped.
+          if (ends === undefined || ctx.runningOn(thread!) !== undefined || ctx.launchingOn(thread!) !== undefined) return answered("not-running");
+          return answered("not-running", await ends(entry!, thread!, {}));
+        }
+        await s.handle.interrupt();
+        // The harness resolves finished only after session.end, so accepted means the turn is over on the transcript too.
+        await s.handle.finished.catch(() => {});
+        return answered("accepted", await ends?.(entry!, thread!, {}));
+      } finally {
+        if (held !== undefined && ending.get(thread!) === held) ending.delete(thread!);
+        ended();
+      }
     },
 
     async steer(sessionId, o, origin) {
@@ -932,11 +963,13 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         // its refs were dropped.
         if (ctx.turnRuns(workspaceId)) throw Object.assign(new Error(WORKTREE_BUSY_LINE), { kind: "conflict" });
         const threads = new Set([...sessions.values()].flatMap(s => (s.view.workspaceId === workspaceId && s.view.threadId !== undefined ? [s.view.threadId] : [])));
+        for (const thread of threads) await ctx.moduleOf(entry.record.kind).endThread?.(entry, thread, { remove: true });
         await ctx.workspaces.delete(workspaceId, origin);
         return { workspaceId, worktree: tree.path, threads: threads.size };
       }
       if (ctx.threadRuns(threadId)) throw Object.assign(new Error(THREAD_WORKING_LINE), { kind: "conflict" });
       ctx.reapKept(threadId);
+      await ctx.moduleOf(entry.record.kind).endThread?.(entry, threadId, { remove: true });
       await ctx.openTranscript(workspaceId);
       await ctx.dropCheckpoints(entry, threadId);
       await ctx.dropThreadFiles(entry, [threadId]);

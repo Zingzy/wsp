@@ -5,7 +5,7 @@
 // runs on the computer itself as that login. The computer is a fake on the
 // link, answering the frames the host sends it and keeping every one.
 import { describe, expect, it } from "vitest";
-import { childOnAnotherComputerLine, claudeMemoryDir, claudeProjectKey, HERE_PLACE_ID, placeLoginNotRootLine, rootsPathIn, type AsideQuestion, type ThreadScope, type TurnResult } from "@wsp/protocol";
+import { cgroupJoinLine, childOnAnotherComputerLine, claudeMemoryDir, claudeProjectKey, HERE_PLACE_ID, placeLoginNotRootLine, rootsPathIn, threadCgroup, type AsideQuestion, type ThreadScope, type TurnResult } from "@wsp/protocol";
 import type { HarnessAdapterFactory, HarnessStartOptions } from "../src/runtime.js";
 import type { ServersActs } from "../src/agents-read.js";
 import { freeFolderScript, projectLanding } from "../src/project-landing.js";
@@ -79,7 +79,7 @@ describe("a thread on a project of a computer the person joined", () => {
     expect(roots.at(-1)?.cmd).not.toContain("runuser");
   });
 
-  it("runs a turn on the computer itself with the login's home, through the link's exec, in a scope of its own outside the daemon's unit, and Stop ends its whole process group", async () => {
+  it("runs a turn on the computer itself with the login's home, through the link's exec, in its thread's cgroup outside the daemon's unit, and Stop ends its whole process group", async () => {
     const launched: string[] = [];
     const { rt, project, seen } = await joined({ adapters: { claude: launching(launched) } });
     const at = await rt.workspaces.folderFor({ project: project.id });
@@ -90,11 +90,15 @@ describe("a thread on a project of a computer the person joined", () => {
     // environment the run starts under.
     expect(launched[0]).toMatch(/^\/root\/\.wsp\/run\/[0-9a-f]+$/);
     expect(envOf(launch.stdin)["HOME"]).toBe("/root");
-    // A restart of that computer's daemon takes every process in its unit's cgroup, setsid or not, so the run's
-    // setsid starts in a scope named for the run under wsp.slice.
-    const unit = `wsp-run-${launched[0]!.slice(launched[0]!.lastIndexOf("/") + 1)}.scope`;
-    // The wsp that computer's daemon writes for its threads goes in front of the login's own PATH for the turn.
-    expect(launch.cmd).toContain(`PATH='/root/.wsp/place-bin':"$PATH" systemd-run --scope --quiet --collect --slice=wsp.slice --unit='${unit}' -- setsid bash '${launched[0]}'.sh`);
+    // A restart of that computer's daemon takes every process in its unit's cgroup, setsid or not, so the launch
+    // stands itself in the thread's own cgroup, outside that unit, before the run's setsid.
+    expect(launch.cmd.startsWith(`${cgroupJoinLine(threadCgroup(run.view().threadId!))}\n`)).toBe(true);
+    expect(launch.cmd).not.toContain("systemd-run");
+    // The wsp that computer's daemon writes for its threads goes in front of the login's own PATH for the turn,
+    // before the run starts.
+    const pathAt = launch.cmd.indexOf(`export PATH='/root/.wsp/place-bin':"$PATH"; `);
+    expect(pathAt).toBeGreaterThan(0);
+    expect(launch.cmd.indexOf(`setsid bash '${launched[0]}'.sh`)).toBeGreaterThan(pathAt);
     await rt.sessions.interrupt(run.view().id);
     await expect.poll(() => seen.kills.length).toBeGreaterThan(0);
     expect(seen.kills[0]).toContain("kill -TERM -- -$P");

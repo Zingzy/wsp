@@ -25,14 +25,16 @@ import { connectDaemon } from "../reach.js";
 import { verifyPlaceBytes } from "@wsp/keys";
 import { CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, type PlaceDoor, PlaceForksNowhereError, PlaceProvisioningError } from "./types.js";
 import { bounded, readsAsEd25519, JOIN_PROVE_MS, PLACE_BAD_KEY_REFUSAL, takenReport, sharedLoginFile, REPLACED, BACKEND_FACTS_MS, GITHUB_ROW } from "./helpers.js";
+import { panePorts } from "./pane-ports.js";
 import type { PlaceDoorContext } from "./context.js";
 import type { PlaceRecordsArea } from "./records.js";
 import type { PlaceSetupArea } from "./setup.js";
 import type { PlaceViewsArea } from "./views.js";
 
 /** The door's half that joins, proves and holds each computer's link, and answers what a link and a place say. */
-export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "signInsAt" | "githubFromVault" | "loginLanded" | "offerOf" | "backendOf" | "forkingBackend" | "joined" | "folderComputer" | "forward" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
+export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "signInsAt" | "githubFromVault" | "loginLanded" | "offerOf" | "backendOf" | "forkingBackend" | "joined" | "folderComputer" | "forward" | "paneForwards" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
   const { opts, store, wiring, clockNow, seenEveryMs, live, kept, signInsHere, backends, forwards, asking, emit } = ctx;
+  const panes = panePorts({ forwards, now: clockNow, schedule: ctx.schedule });
   const {
     records, wiredProvider, providerIds, providerBackend, recordOf, settingsOf, settingsHeld, awaiting, holdBack,
     defaultId, inTurn, markDefault, markHeld, challenge, signedRefusal, writeSeen, change,
@@ -343,12 +345,12 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
       return read;
     },
 
-    async forward(placeId, placePort) {
-      const key = `${placeId}:${placePort}`;
-      const already = forwards.get(key);
-      if (already !== undefined) return { localPort: already.localPort };
+    async forward(placeId, placePort, o = {}) {
+      const key = o.pane !== undefined ? `${placeId}:open:${placePort}` : `${placeId}:${placePort}`;
       const conns = new Map<string, Socket>();
-      const server = createServer(conn => {
+      /** One connection to this computer's port, carried as a tunnel to that computer's. */
+      const tunnelled = (conn: Socket, used?: () => void): void => {
+        const into = forwards.get(key)?.conns ?? conns;
         const tunnelId = `p${++tunnelSeq}`;
         const reach = live.get(placeId)?.reach;
         conn.on("error", () => {});
@@ -358,10 +360,12 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
           conn.destroy();
           return;
         }
-        conns.set(tunnelId, conn);
+        used?.();
+        into.set(tunnelId, conn);
         conn.pause();
         conn.on("close", () => {
-          conns.delete(tunnelId);
+          into.delete(tunnelId);
+          used?.();
           void reach.request("tunnel.close", { tunnelId }).catch(() => undefined);
         });
         reach.request("tunnel.open", { tunnelId, port: placePort }).then(
@@ -370,11 +374,15 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
             conn.resume();
           },
           () => {
-            conns.delete(tunnelId);
+            into.delete(tunnelId);
             conn.destroy();
           },
         );
-      });
+      };
+      if (o.pane !== undefined) return { localPort: await panes.reach(key, placePort, o.pane, tunnelled) };
+      const already = forwards.get(key);
+      if (already !== undefined) return { localPort: already.localPort };
+      const server = createServer(conn => tunnelled(conn));
       const localPort = await new Promise<number>((resolve, reject) => {
         server.once("error", reject);
         server.listen(0, LOOPBACK, () => {
@@ -386,6 +394,8 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
       forwards.set(key, { server, localPort, conns });
       return { localPort };
     },
+
+    paneForwards: panes,
 
     async placeFor(word) {
       const all = await records();

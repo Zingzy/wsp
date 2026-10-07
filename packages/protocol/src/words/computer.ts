@@ -611,3 +611,15 @@ export function wakeFailedLine(machineId: string, faults: string): string {
 
 /** What the needs-you road says outside the app when a machine came up while the person was looking elsewhere. */
 export const workspaceAwakeLine = (name: string): string => `${name} is awake`;
+
+/** What a stop of a thread on a computer the person joined says when what the thread started there did not all end:
+ * the processes still running, by pid as the Processes pane lists them, or none where that computer did not answer. */
+export function threadLeftLine(name: string, pids: readonly number[]): string {
+  if (pids.length === 0) return `${name} did not say that what this thread started there has ended; look in Processes and end what still runs there`;
+  const one = pids.length === 1;
+  return `${one ? "a process" : `${pids.length} processes`} this thread started on ${name} still ${one ? "runs" : "run"} after Stop (${pids.join(", ")}); end ${one ? "it" : "them"} in Processes, or restart ${name}`;
+}
+
+/** What a delete of a thread on a computer the person joined says when what the thread started there did not all end:
+ * the delete goes on, and that computer's next link ends it. */
+export const threadEndOwedLine = (name: string): string => `what this thread started on ${name} did not all end; wsp ends it when ${name} next connects`;

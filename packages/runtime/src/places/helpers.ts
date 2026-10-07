@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash, createPublicKey } from "node:crypto";
-import type { Server, Socket } from "node:net";
+import { createServer, type Server, type Socket } from "node:net";
 import {
+  LOOPBACK,
   isPlainPath,
   PendingComputer,
   RecipeFile,
@@ -155,6 +156,35 @@ export interface Forward {
   server: Server;
   localPort: number;
   conns: Map<string, Socket>;
+  /** Takes away what a port opened for a pane holds beyond its first listener. */
+  stop?: () => void;
+}
+
+/** How far above the port asked for a pane's port is looked for when this computer already uses that one. */
+const NEAR_PORTS = 20;
+
+/** Listens on the port asked for on both loopback families, since a browser resolves localhost to either, or on the
+ * first free one above it: a port this computer already uses on either family is passed over, and a family it does
+ * not have is not. Answers the listeners and the port they hold. */
+export async function listenNear(port: number, onConn: (conn: Socket) => void): Promise<[Server[], number]> {
+  const listen = (host: string, at: number): Promise<Server | NodeJS.ErrnoException> =>
+    new Promise(resolve => {
+      const server = createServer(onConn);
+      server.once("error", (e: NodeJS.ErrnoException) => resolve(e));
+      server.listen(at, host, () => {
+        server.unref();
+        resolve(server);
+      });
+    });
+  for (let at = port; at <= Math.min(port + NEAR_PORTS, 65_535); at++) {
+    const v4 = await listen(LOOPBACK, at);
+    if (v4 instanceof Error) continue;
+    const v6 = await listen("::1", at);
+    if (!(v6 instanceof Error)) return [[v4, v6], at];
+    if (v6.code !== "EADDRINUSE") return [[v4], at];
+    v4.close();
+  }
+  throw new Error(`no port from ${port} to ${port + NEAR_PORTS} is free on this computer`);
 }
 
 /** How long a machine frame waits for its answer when the caller named no bound of its own. A link that dies fails

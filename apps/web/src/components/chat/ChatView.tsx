@@ -16,7 +16,7 @@ import { answerPrompt } from "./answerPrompt.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { threadKeyOf, USAGE_WORDS, workspaceWord } from "@wsp/protocol";
+import { threadKeyOf, USAGE_WORDS, folderOnJoined, workspaceKind, workspaceWord } from "@wsp/protocol";
 import { Button } from "../ui/button";
 import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { TreeRows } from "../../tree/TreeRows.js";
@@ -32,6 +32,8 @@ import { useReadStamp } from "./useReadStamp";
 import { threadsOpenedBy, type ThreadOnWorkspace } from "../../sidebar/threadTree";
 import { computerName, useComputerName } from "../../sidebar/workspaceRows";
 import { TimelineRuleLine } from "./TimelineRuleLine";
+import { LoopbackLinks, openInBrowser } from "../../browser/loopbackLinks";
+import { useBrowserTabs } from "../../browser/tabs";
 import { MessagesTimeline, type MachineWait, type ReplyRuns } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
@@ -302,6 +304,12 @@ export function ChatView({
           ),
         };
   const leaving = useLeaving(drawn);
+  // A thread in a folder on a computer the person joined names that computer's ports in its links: they open in a
+  // Browser tab, which holds the port's forward to this computer while it shows it.
+  const opensForwarded = useMemo(
+    () => (workspace !== null && folderOnJoined(workspaceKind(workspace)) ? openInBrowser(at => useRightPanelStore.getState().openBrowser(workspaceId, useBrowserTabs.getState().createTab(workspaceId, at))) : null),
+    [workspace, workspaceId],
+  );
 
   return (
     <div ref={rootRef} data-chat-view className="relative isolate h-full min-h-0 text-foreground [--empty-lift:calc((100%-var(--chat-composer-inset,0px)-5.5rem)/2)]">
@@ -322,17 +330,19 @@ export function ChatView({
             </div>
           </>
         ) : null}
-        {[leaving, drawn].map(shown =>
-          shown === null ? null : shown === leaving ? (
-            <div key={shown.key} aria-hidden inert className="absolute inset-0 [content-visibility:hidden]">
-              {shown.node}
-            </div>
-          ) : (
-            <div key={shown.key} className="absolute inset-0">
-              {shown.node}
-            </div>
-          ),
-        )}
+        <LoopbackLinks value={opensForwarded}>
+          {[leaving, drawn].map(shown =>
+            shown === null ? null : shown === leaving ? (
+              <div key={shown.key} aria-hidden inert className="absolute inset-0 [content-visibility:hidden]">
+                {shown.node}
+              </div>
+            ) : (
+              <div key={shown.key} className="absolute inset-0">
+                {shown.node}
+              </div>
+            ),
+          )}
+        </LoopbackLinks>
       </div>
       <div
         ref={composerRef}

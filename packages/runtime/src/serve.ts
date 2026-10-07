@@ -102,7 +102,6 @@ import {
   type ExecEvent,
   type SealedImage,
   type SealedImageExport,
-  type ForwardEvent,
   type PlaceAuthRefusal,
   type PlaceDoorView,
   type PlaceView,
@@ -122,14 +121,8 @@ import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 import { keyFingerprint, openFrame, verifyPlaceBytes, type Seal } from "@wsp/keys";
 import type { HostEditor, HostFolders, HostSsh, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, RecipeShelf, Runtime } from "./runtime.js";
 
-/** The port forwards a host holds, as the app lists and stops them. The
- * runtime keeps none itself: the host that owns the daemon links supplies this. */
-export interface ForwardsSource {
-  list(): PortForward[];
-  /** True when a forward was open on that workspace and port and is now closed. */
-  stop(workspaceId: string, port: number): boolean;
-  on(fn: (e: ForwardEvent) => void): () => void;
-}
+import { forwardsOf, type ForwardsSource } from "./forwards.js";
+export type { ForwardsSource };
 
 /** The address a host binds when nobody names another and the path the runtime answers upgrades on, both the
  * protocol's own rule; re-exported so the host and its tests keep reading them off the server they start. */
@@ -377,6 +370,7 @@ const startedOut = (made: StartResult): StartResult => ({ ...made, workspace: ha
 
 export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<RuntimeServer> {
   const bundler = bundlerFrom(opts);
+  const forwards = forwardsOf(opts.forwards, rt.places?.paneForwards);
   const lander = doorFrom(opts, "landing", "this runtime cannot write folders on this computer");
   const folders = doorFrom(opts, "folders", "this runtime cannot browse the folders on this computer");
   const terminalConfig = doorFrom(opts, "terminalConfig", "this runtime cannot read the terminal config on this computer");
@@ -1206,7 +1200,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 if (rt.workspaces.seenBy(e, origin)) send(e as Record<string, unknown>);
               };
               detaches.push(rt.events.on("*", pass));
-              if (opts.forwards) detaches.push(opts.forwards.on(pass));
+              detaches.push(forwards.on(pass));
               if (opts.init) detaches.push(opts.init.on(pass));
               if (opts.doctor) detaches.push(opts.doctor.on(pass));
               if (opts.release) detaches.push(opts.release.on(pass));
@@ -1858,14 +1852,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "forwards.list": {
               const shown: PortForward[] = [];
-              for (const f of opts.forwards?.list() ?? []) if ((await rt.workspaces.originRefusal(f.workspaceId, origin)) === undefined) shown.push(f);
+              for (const f of forwards.list()) if ((await rt.workspaces.originRefusal(f.workspaceId, origin)) === undefined) shown.push(f);
               send({ id: msg.id, ok: true, forwards: shown });
               return;
             }
             case "forwards.stop": {
               const refusal = await rt.workspaces.originRefusal(msg.workspaceId, origin);
               if (refusal !== undefined) throw new Error(refusal);
-              if (!opts.forwards?.stop(msg.workspaceId, msg.port)) throw new Error(`nothing is forwarding localhost:${msg.port} for that workspace`);
+              if (!forwards.stop(msg.workspaceId, msg.port)) throw new Error(`nothing is forwarding localhost:${msg.port} for that workspace`);
               send({ id: msg.id, ok: true });
               return;
             }

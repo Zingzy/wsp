@@ -26,6 +26,8 @@ export const DaemonEvent = z.discriminatedUnion("type", [
     pid: z.number().optional(),
     process: z.string().optional(),
     loopback: z.boolean().optional(),
+    /** The watch it is for, where the socket named one. */
+    watch: z.string().optional(),
   }),
   z.object({ type: z.literal("port.close"), port: z.number(), ...portCloseDetail }),
   z.object({ type: z.literal("inbox.file"), path: z.string(), bytes: z.number() }),

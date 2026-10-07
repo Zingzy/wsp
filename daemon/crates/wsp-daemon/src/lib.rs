@@ -310,7 +310,10 @@ impl Ctx {
         let manifest = manifest::ProcessManifest::load(Some(manifest_path), options.run_dir.as_deref(), options.log_dir.as_deref())?;
         let interval = options.ports_interval_ms.map_or(ports::DEFAULT_INTERVAL, Duration::from_millis);
         let given = options.proc_root.as_deref();
-        let ports = Arc::new(ports::PortWatch::new(ports::source_for(given), ports::lineage_for(given), ports::cwd_for(given), interval));
+        let ports = Arc::new(
+            ports::PortWatch::new(ports::source_for(given), ports::lineage_for(given), ports::cwd_for(given), interval)
+                .with_cgroups(ports::cgroup_for(given)),
+        );
         let guest_unwatched = Duration::from_millis(options.guest_unwatched_ms.unwrap_or(numbers::GUEST_UNWATCHED_MS));
         #[cfg(target_os = "linux")]
         let (runtime, runtime_refusal) = open_runtime(&options, &log, daemon_port);

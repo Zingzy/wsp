@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { DAEMON_VERSION, PLACE_SUDO_KIND, hostKeyMismatchRefusal, PLACE_LEAVE_VERB, PlaceReport, placeDaemonPaths, shellQuote, workFolderIn, wsUrlOf } from "@wsp/protocol";
+import { DAEMON_VERSION, PLACE_SUDO_KIND, threadCgroupsEndScript, hostKeyMismatchRefusal, PLACE_LEAVE_VERB, PlaceReport, placeDaemonPaths, shellQuote, workFolderIn, wsUrlOf } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PlaceHostKeyChangedError, PlaceLoginRefusedError } from "@wsp/runtime";
 import { SSH_SUDO_READ, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
@@ -164,6 +164,7 @@ describe("the leave over the ssh road, which a remove takes wherever this host h
       { argv: ["systemctl", "daemon-reload"], unitThere: false },
       { argv: ["systemctl", "--user", "stop", unit.name], unitThere: false },
       { argv: ["systemctl", "--user", "disable", unit.name], unitThere: false },
+      { argv: ["sh", "-c", threadCgroupsEndScript()], unitThere: false },
     ]);
     const printed = ["vps left the wsp at http://192.168.1.20:4400; removed:", ...said.removed.map(line => sweptLine(line)), ...said.kept];
     const { leave } = leaver({ exitCode: 0, stdout: `${printed.join("\n")}\n` });

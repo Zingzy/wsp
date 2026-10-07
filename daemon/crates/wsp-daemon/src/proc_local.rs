@@ -229,6 +229,7 @@ impl ProcSource for LocalProcSource {
                 rss: row.rss,
                 started_at,
                 pty: input.pty.get(&row.pid).cloned(),
+                cgroup: None,
             });
         }
         spent.retain(|pid, _| seen.contains(pid));

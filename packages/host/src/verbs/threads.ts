@@ -364,9 +364,9 @@ export const THREAD_VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: "Stops the thread's running turn (by id, or a prefix of it), as the app's stop button does; the machine stays up and the thread takes the next send. outcome accepted means the turn ended interrupted; not-running means it had already ended, which is an answer, not an error. A thread whose agents spawned threads of their own stops as one: under names each of those that was running and was stopped with it. Given the id of one of the agent's own subagents (off threads' subagents), that one is stopped alone and the turn runs on: accepted means the agent took the stop, refused and unsupported carry the reason in error.",
+      description: "Stops the thread's running turn (by id, or a prefix of it), as the app's stop button does; the machine stays up and the thread takes the next send. outcome accepted means the turn ended interrupted; not-running means it had already ended, which is an answer, not an error. A thread whose agents spawned threads of their own stops as one: under names each of those that was running and was stopped with it. Given the id of one of the agent's own subagents (off threads' subagents), that one is stopped alone and the turn runs on: accepted means the agent took the stop, refused and unsupported carry the reason in error. On a computer the person added, left says what the thread started there that the stop could not end.",
       input: { thread: z.string(), task: z.string().optional() },
-      output: { threadId: z.string(), task: z.string().optional(), outcome: SessionInterruptOutcome, under: z.array(z.string()).optional(), error: z.string().optional() },
+      output: { threadId: z.string(), task: z.string().optional(), outcome: SessionInterruptOutcome, under: z.array(z.string()).optional(), error: z.string().optional(), left: z.string().optional() },
       call: async ({ thread: ref, task }, deps) => {
         const stopped = await stop(await deps.client(), ref, task);
         return asText(stopLine(stopped), { ...stopped });

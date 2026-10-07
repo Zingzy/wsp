@@ -235,6 +235,20 @@ describe("the callback relay on a joined computer", () => {
     await until(() => relay!.list().length === 0);
   });
 
+  it("reads its sign-in's listener off the link's own port watch, never off a watch a pane named on that link", async () => {
+    const { port, box, forwards } = await setup();
+    forwards()!.open({ placeId: "pl_1" });
+    box.push({ type: "browser.open", url: AUTH(port), port });
+    await until(() => relay!.list().length === 1);
+    box.push({ type: "port.open", port });
+    // A folder's watch on the same link losing sight of the port says nothing about the sign-in's listener.
+    box.push({ type: "port.close", port, left: true, watch: "ws_a" });
+    await new Promise(r => setTimeout(r, 50));
+    expect(relay!.list().map(f => f.port)).toEqual([port]);
+    box.push({ type: "port.close", port, exited: true });
+    await until(() => relay!.list().length === 0);
+  });
+
   it("takes a page or a callback port from the computer only while a sign-in there runs, and closes the forward when that sign-in ends", async () => {
     const { port, box, forwards, lines } = await setup();
     box.push({ type: "browser.open", url: AUTH(port), port });

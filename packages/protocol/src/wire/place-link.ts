@@ -266,6 +266,18 @@ export const placeNoLinkLine = (name: string): string => `${name} took the agent
  * computer opens a socket again, and a stage with no line of its own reads as one that stopped. */
 export const placeDialBackLine = (name: string): string => `waiting for ${name} to dial back`;
 
+/** A Browser pane asking for a port of a computer the person joined that this computer would need root to open. */
+export const paneForwardFloorLine = (port: number): string => `localhost:${port} is below 1024, which this computer opens only as root; serve it on a port from 1024 up`;
+
+/** A Browser pane asking for one port more than a workspace may hold open on this computer. */
+export const paneForwardCapLine = (name: string, cap: number): string => `${name} already has ${cap} ports open on this computer; stop one in Ports first`;
+
+/** A Browser pane asking again for a port whose forward a quiet hour ended. */
+export const paneForwardQuietLine = (port: number): string => `localhost:${port} closed after an hour with nothing connecting to it; open the address again to forward it`;
+
+/** A Browser pane asking again for a port whose forward the person stopped in Ports. */
+export const paneForwardStoppedLine = (port: number): string => `localhost:${port} was stopped in Ports; open the address again to forward it`;
+
 /** Why a build on a joined computer stopped when that computer's link went and it never dialled back in time. */
 export const placeWentAwayLine = (name: string): string => `${name} went away before the build finished`;
 

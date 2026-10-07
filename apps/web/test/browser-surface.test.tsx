@@ -162,6 +162,44 @@ describe("framing a port", () => {
     expect(screen.queryByRole("button", { name: "Annotate preview" })).toBeNull();
   });
 
+  it("on a folder on a computer the person joined, frames the port forwarded to this computer, the path on it", async () => {
+    const asked: number[] = [];
+    const forwarded: Api["portReach"] = async (_id, port) => {
+      asked.push(port);
+      return { url: `http://localhost:${port}/`, expiresAt: Date.now() + 3_600_000 };
+    };
+    await setup({ portReach: forwarded, workspaces: [{ ...workspace(WS), kind: "place" }] });
+    fireEvent.change(address(), { target: { value: "localhost:8080/app?x=1" } });
+    fireEvent.submit(address().closest("form")!);
+    const f = await screen.findByTitle(":8080");
+    expect(f.getAttribute("src")).toBe("http://localhost:8080/app?x=1");
+    expect(asked).toContain(8080);
+  });
+
+  it("on a folder on a computer the person joined, asks again inside the forward's hold and drops the frame once the forward has ended", async () => {
+    let calls = 0;
+    const forwarded: Api["portReach"] = async (_id, port) => {
+      calls++;
+      if (calls === 3) throw new Error(`localhost:${port} closed after an hour with nothing connecting to it; open the address again to forward it`);
+      return { url: `http://localhost:${port}/`, expiresAt: Date.now() + 120_000 };
+    };
+    await setup({ portReach: forwarded, workspaces: [{ ...workspace(WS), kind: "place" }] });
+    vi.useFakeTimers();
+    fireEvent.change(address(), { target: { value: "localhost:8080" } });
+    fireEvent.submit(address().closest("form")!);
+    await act(async () => {});
+    expect(screen.queryByTitle(":8080")).not.toBeNull();
+    // Halfway through the two minutes the forward stands without an ask, so a pane that shows it keeps it.
+    await act(() => vi.advanceTimersByTimeAsync(60_000 - 1));
+    expect(calls).toBe(1);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(calls).toBe(2);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(calls).toBe(3);
+    expect(screen.queryByTitle(":8080")).toBeNull();
+    expect(screen.getByText(/opens no address this pane can reach for port 8080/)).toBeDefined();
+  });
+
   it("typing a loopback address or a bare port in the bar frames that port", async () => {
     await setup();
     act(() => address().focus());

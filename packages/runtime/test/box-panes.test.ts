@@ -2,10 +2,11 @@
 // What a pane of a thread in a folder on a computer the person joined carries
 // over that computer's one link, and what an add there leaves when it fails.
 // The daemon there answers for the whole computer as root, so the channel
-// holds a pane to its own folder and its own ptys, and refuses before the link
-// anything that would read or act on the computer as a whole.
+// holds a pane to its own folder and its own ptys, reads the computer's ports,
+// load and processes for it through watches it shares with every pane there
+// (box-panels.test.ts), and refuses a command before the link.
 import { describe, expect, it } from "vitest";
-import { forkOpRefusedLine, forkProcsUnreadLine, placeWatchesItselfLine } from "@wsp/protocol";
+import { forkOpRefusedLine } from "@wsp/protocol";
 import { until } from "./until.js";
 import { handedLine, joined } from "./box-fixture.js";
 
@@ -20,7 +21,7 @@ async function pane() {
 }
 
 describe("a pane of a thread in a folder on a computer you joined", () => {
-  it("opens with the folder's own hello, its shell in the project folder, keeps that computer's readings off it, and lets its ptys go when it closes", async () => {
+  it("opens with the folder's own hello, its shell in the project folder, reads that computer's load for it, and lets its ptys go when it closes", async () => {
     const { seen, channel, heard, sent, folder } = await pane();
     expect(folder).toBe("/root/spoo-ts");
     expect(heard).toEqual([expect.objectContaining({ type: "daemon.hello", root: folder })]);
@@ -34,12 +35,11 @@ describe("a pane of a thread in a folder on a computer you joined", () => {
     expect(sent("pty.create").at(-1)).toMatchObject({ cwd: `${folder}/docs` });
     const killed = await channel.send({ op: "pty.create", cols: 80, rows: 24 });
 
-    // The ports and the load that daemon reads are the whole computer's: answered here, nothing goes up the link.
-    for (const op of ["ports.watch", "sys.watch"]) {
-      const before = sent(op).length;
-      expect(await channel.send({ op })).toMatchObject({ ok: false, code: "unsupported", error: placeWatchesItselfLine("hetzner") });
-      expect(sent(op)).toHaveLength(before);
-    }
+    // The load that daemon reads is the whole computer's, which a box thread's Computer panel shows: asked once up
+    // the link, which keeps sending it for as long as it stands.
+    expect(await channel.send({ op: "sys.watch" })).toMatchObject({ ok: true });
+    expect(await channel.send({ op: "sys.watch" })).toMatchObject({ ok: true });
+    expect(sent("sys.watch")).toHaveLength(1);
 
     // A pty of another pane on that computer is not this channel's to read.
     const ptyId = String((created as Record<string, unknown>)["ptyId"]);
@@ -64,13 +64,12 @@ describe("a pane of a thread in a folder on a computer you joined", () => {
     expect(sent("pty.detach")).toEqual([expect.objectContaining({ ptyId })]);
   });
 
-  it("refuses the computer's process watch, reads and kills before anything reaches it", async () => {
+  it("sends the computer's process watch, reads and kills up the link naming no machine, since the thread is root there", async () => {
     const { channel, sent } = await pane();
-    // The daemon there acts on any pid it is handed, the computer's own and every other thread's included.
-    for (const frame of [{ op: "proc.kill", pid: 1, signal: "KILL" }, { op: "proc.inspect", pid: 1 }, { op: "proc.watch" }, { op: "proc.unwatch" }]) {
-      const before = sent(frame.op).length;
-      expect(await channel.send(frame)).toMatchObject({ ok: false, code: "unsupported", error: forkProcsUnreadLine("spoo-ts", "hetzner") });
-      expect(sent(frame.op)).toHaveLength(before);
+    for (const frame of [{ op: "proc.watch" }, { op: "proc.inspect", pid: 900 }, { op: "proc.kill", pid: 900, signal: "TERM" }]) {
+      expect(await channel.send(frame)).toMatchObject({ ok: true });
+      expect(sent(frame.op).at(-1)).toMatchObject(frame);
+      expect(sent(frame.op).at(-1)).not.toHaveProperty("machineId");
     }
     channel.close();
   });

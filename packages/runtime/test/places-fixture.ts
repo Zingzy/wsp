@@ -8,6 +8,7 @@ import { newPlaceKeyPair, type PlaceKeyPair, type PlaceLeaver, type PlaceUpdater
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import type { AgentsActs, AgentsReader, ServerIcons, ServersActs, SkillsActs } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
+import type { Clock } from "../src/clock.js";
 import { stubBackend } from "./stub-backend.js";
 import { WsClient } from "./ws-client.js";
 import { joinAt, relinkAt, wiring } from "./place-join.js";
@@ -27,7 +28,7 @@ afterEach(async () => {
   ctx.runtime = undefined;
 });
 
-export async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs; serverIcons?: ServerIcons; adapters?: Record<string, HarnessAdapterFactory>; runOver?: PlaceWiring["runOver"]; back?: PlaceWiring["back"]; dialWaitMs?: number } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+export async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs; serverIcons?: ServerIcons; adapters?: Record<string, HarnessAdapterFactory>; runOver?: PlaceWiring["runOver"]; back?: PlaceWiring["back"]; dialWaitMs?: number; clock?: Clock } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   ctx.runtime = createRuntime({
@@ -43,6 +44,7 @@ export async function serving(opts: { provider?: { id: string; rateUsdPerHour: n
     placeLinks: { ...wiring(hostKey, opts.provider, opts.update), ...(opts.leave === undefined ? {} : { leave: opts.leave }), ...(opts.runOver === undefined ? {} : { runOver: opts.runOver }), ...(opts.back === undefined ? {} : { back: opts.back }) },
     ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
     ...(opts.dialWaitMs !== undefined ? { placeDialWaitMs: opts.dialWaitMs } : {}),
+    ...(opts.clock !== undefined ? { clock: opts.clock } : {}),
     ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
   });
   ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices, ...(opts.folders === undefined ? {} : { folders: opts.folders }), ...(serve.log === undefined ? {} : { log: serve.log }) });

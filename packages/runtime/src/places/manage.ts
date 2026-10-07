@@ -59,6 +59,7 @@ import {
   twoPlacesRefusal,
   linkedOver,
   shellQuote,
+  threadCgroupsEndScript,
 } from "@wsp/protocol";
 import { ownedFloorBytes, PlaceAbsentError, PlaceMachine, keyFingerprint } from "@wsp/engine";
 import { openPlaceForward } from "../place-forward.js";
@@ -75,6 +76,9 @@ import type { PlaceDoorContext } from "./context.js";
 import type { PlaceRecordsArea } from "./records.js";
 import type { PlaceSetupArea } from "./setup.js";
 import type { PlaceViewsArea } from "./views.js";
+
+/** How long a leave over the link gives the threads' cgroups there to end: each thread's processes get their grace. */
+const THREADS_END_MS = 60_000;
 
 /** The door's half a person drives: add, dial, update, remove, set up, follow a recipe and list the places. */
 export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "add" | "dial" | "road" | "exec" | "adds" | "reportOf" | "homeOf" | "list" | "rows" | "set" | "update" | "remove" | "find" | "pending" | "choose" | "setUp" | "follow" | "recipeChanged" | "followers" | "skip" | "estimate" | "setupLog" | "unfollow" | "picksOf" | "on" | "close"> {
@@ -562,8 +566,10 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
             // Before the folder holding the list goes with the leave: the servers wsp merged into the agents' own
             // files there are keys inside files that are theirs, which the daemon knows no format to take out.
             const took = await unmergedOver(placeId, held);
+            // A thread's turns stand in cgroups of their own, outside the unit the leave stops, so they go first.
+            const ended = await ctx.door.exec(placeId, threadCgroupsEndScript(), { timeoutMs: THREADS_END_MS }).catch(() => undefined);
             const answer = await reach.request("place.leave");
-            swept = [...took, ...(Array.isArray(answer["swept"]) ? (answer["swept"] as unknown[]).map(String) : [])];
+            swept = [...took, ...(ended?.stdout.split("\n").filter(line => line !== "") ?? []), ...(Array.isArray(answer["swept"]) ? (answer["swept"] as unknown[]).map(String) : [])];
             if (loginRoad !== undefined && away === undefined) note = placeSweptOverLinkLine(held.name, loginRoad.at, loginRoad.said);
           } catch (e) {
             const failed = `${held.name} was connected but did not finish the sweep: ${e instanceof Error ? e.message : String(e)}; run ${PLACE_LEAVE_LINE} on that computer`;
@@ -734,6 +740,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
         for (const conn of f.conns.values()) conn.destroy();
         f.conns.clear();
         f.server.close();
+        f.stop?.();
         forwards.delete(key);
       }
       awaiting.clear();

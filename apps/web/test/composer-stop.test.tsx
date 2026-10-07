@@ -5,18 +5,19 @@
 // reply. The runtime keys sessions.interrupt by its own session id; the
 // transcript's events carry the harness id, so the row from sessions.list is
 // what maps one to the other.
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { EventUnion, SessionView, WorkspaceView } from "@wsp/protocol";
+import { threadLeftLine, type EventUnion, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG } from "./agents.js";
 import { composerEditor, isEditable } from "./composer-harness.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
-import { makeApi, ProtocolClient } from "../src/protocol/client.js";
+import { makeApi, ProtocolClient, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ChatComposer, STOP_WAIT, stopFailureWords } from "../src/components/chat/ChatComposer.js";
 import { COMPOSER_WORDS } from "../src/components/chat/composerWords.js";
 import { clearNotices, lastNotice } from "./notice-text.js";
+import { useThreadVerbs } from "../src/actions/verbs.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
@@ -145,6 +146,21 @@ describe("composer stop", () => {
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
   });
 
+  it("a stop that left processes running on a computer the person added says so in a flyout", async () => {
+    rows = [runningRow];
+    const { deliver, push } = await setup();
+    await streamTurn(push);
+    clearNotices();
+    const left = threadLeftLine("hetzner", [4242]);
+    onInterrupt = f => {
+      deliver(done("interrupted"));
+      deliver(end);
+      return { id: f["id"], ok: true, outcome: "accepted", left };
+    };
+    fireEvent.click(stopButton());
+    await waitFor(() => expect(lastNotice()).toBe(left));
+  });
+
   it("a double click sends one request; the button stays disabled as Stopping until the reply", async () => {
     rows = [runningRow];
     const { sock, deliver, push } = await setup();
@@ -205,6 +221,41 @@ describe("composer stop", () => {
     } finally {
       STOP_WAIT.ms = was;
     }
+  });
+
+  it("a stop that left processes running says so in a flyout even when its answer comes after the wait", async () => {
+    rows = [runningRow];
+    const { deliver, push } = await setup();
+    await streamTurn(push);
+    clearNotices();
+    const was = STOP_WAIT.ms;
+    STOP_WAIT.ms = 30;
+    try {
+      let held: Frame | null = null;
+      onInterrupt = f => { held = f; return undefined; };
+      fireEvent.click(stopButton());
+      await waitFor(() => expect(lastNotice()).toBe(COMPOSER_WORDS.stopDidNotEnd));
+      const left = threadLeftLine("hetzner", [4242]);
+      act(() => {
+        deliver(done("interrupted"));
+        deliver(end);
+        deliver({ id: held!["id"], ok: true, outcome: "accepted", left });
+      });
+      await waitFor(() => expect(lastNotice()).toBe(left));
+    } finally {
+      STOP_WAIT.ms = was;
+    }
+  });
+});
+
+describe("a stop from the thread's row or the palette", () => {
+  it("says what the stop left running in the composer's flyout", async () => {
+    clearNotices();
+    const left = threadLeftLine("hetzner", [4242]);
+    useStore.setState({ api: { interruptSession: async () => ({ outcome: "accepted", left }) } as unknown as Api });
+    const { result } = renderHook(() => useThreadVerbs());
+    await act(() => result.current.stop!("sess_local_1"));
+    expect(lastNotice()).toBe(left);
   });
 });
 

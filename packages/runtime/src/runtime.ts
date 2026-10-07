@@ -573,6 +573,7 @@ function runtimeCore(ctx: RuntimeContext, opts: RuntimeOptions): RuntimeCore {
       // can land.
       providers: () => places,
       now: () => clock.now(),
+      schedule: (fn, ms) => clock.schedule(fn, ms, { unref: true }),
       onStage: event => bus.emit(event),
       onSetup: event => bus.emit(event),
       copyBuild: placeId => copyRows.get(placeId),

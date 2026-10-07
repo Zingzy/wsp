@@ -43,6 +43,7 @@ import {
   type WorkspaceSize,
   type PlaceProveRequest,
 } from "@wsp/protocol";
+import type { PaneForwards } from "./pane-ports.js";
 import type { EngineStep, ExecResult, Machine, MachineBackend, PlaceFolderMachine, ProvisionOn, ProvisionPlan, ProvisionStage, SetupRun } from "@wsp/engine";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "../devices.js";
@@ -434,6 +435,8 @@ export interface PlaceDoorOptions {
    * Absent, nothing syncs. */
   recipes?: () => RecipeResolver | undefined;
   now?: () => number;
+  /** Runs fn once after ms, on the runtime's clock; the returned function cancels it. Unref'd timers by default. */
+  schedule?: (fn: () => void, ms: number) => () => void;
 }
 
 /** A saved recipe resolved against this computer now: its file, what this computer has for each row, the hash. */
@@ -531,7 +534,11 @@ export interface PlaceDoor {
   /** A port on this computer's loopback carried to one port on the place's own, for as long as this host runs: the
    * place's own daemon port and every fork's daemon port ride the same code. The same pair answers the same local
    * port every time, and the listener stays bound while the link is down, so nothing cached goes stale. */
-  forward(placeId: string, placePort: number): Promise<{ localPort: number }>;
+  /** With pane, a port a Browser pane opens for that workspace: the same number on this computer where it is free,
+   * else the first free one above it, on both loopback families, standing while the pane asks for it (pane-ports.ts). */
+  forward(placeId: string, placePort: number, o?: { pane?: { workspaceId: string; name: string } }): Promise<{ localPort: number }>;
+  /** The ports Browser panes opened, as the app lists and stops them beside the relay's forwards. */
+  readonly paneForwards: PaneForwards;
   /** The place a person's word names: an id, a name, or this computer itself, which is answered with no id since
    * the host's own backend is what a fork there lands on. Refuses with noSuchPlaceRefusal naming what is held. */
   placeFor(word: string): Promise<{ placeId?: string }>;

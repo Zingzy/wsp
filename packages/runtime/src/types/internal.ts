@@ -827,6 +827,13 @@ export interface KindModule {
    * person's own terminal in that folder share one memory. Nothing where the folder a turn runs in is the key,
    * which is every machine wsp makes. */
   memoryKey: (entry: LiveWorkspace, agentId: string) => string | undefined;
+  /** Ends every process a thread left on this kind's computer, a server it detached included, and with remove takes
+   * the thread's group away too: a stop and a delete of the thread. Absent on a kind that keeps no group per
+   * thread, whose turns end with their own process group. Answers what a stop could not end there, in words. */
+  endThread?: (entry: LiveWorkspace, threadId: string, o: { remove?: boolean }) => Promise<string | undefined>;
+  /** Where a pane reaches one port of this kind's machine, where the kind answers it itself rather than through its
+   * machine's preview route: a computer the person joined forwards the port to this computer on demand. */
+  portReach?: (entry: LiveWorkspace, port: number) => Promise<{ url: string; expiresAt: number }>;
   /** Whether a request relayed from a machine may drive this workspace; a local one answers only this computer,
    * and so does a machine of another kind whose dial names this computer. The machine id is absent on the one
    * road that asks before a machine exists, a fork's create, where only the kind can answer. */

@@ -3,12 +3,14 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve as resolvePathOn } from "node:path";
 import { CATALOG_AGENTS, GUEST_HOME, guestEnv, loginHomeIn, sharedLoginOf, sharedOn } from "@wsp/catalog";
-import { INLINE_EXEC_MS, installScript, INSTALL_MS, guestAgentHomes, placeFolderBackend, projectInstalls, type Lifecycle, type MachineBackend, GUEST_TMP, GITHUB_TOKEN_ENV, LOCAL_MACHINE_ID, projectStateKey } from "@wsp/engine";
-import { type DaemonReachView, type ExecStreamFactory, type ProjectSource, type ProjectView, type WorkspaceKind, type WorkspaceProject, SCOPED_MCP_ARG, imageCarriesCheckout, placeLoginNotRootLine, DAEMON_TOKEN_PATH, homeShortened, folderName, kindForComputer, noKindLine, registeredLine, REGISTERING_LINE, cloneFailedLine, cloneIntoTakenLine, cloneUrlRefusal, placeDaemonPaths, rootsPathIn, shellLine, shellQuote, placeForksNowhereLine, placeServesDaemonLine } from "@wsp/protocol";
+import { INLINE_EXEC_MS, installScript, INSTALL_MS, guestAgentHomes, PlaceFolderMachine, placeFolderBackend, projectInstalls, type Lifecycle, type MachineBackend, GUEST_TMP, GITHUB_TOKEN_ENV, LOCAL_MACHINE_ID, projectStateKey } from "@wsp/engine";
+import { type DaemonReachView, type ExecStreamFactory, type ProjectSource, type ProjectView, type WorkspaceKind, type WorkspaceProject, SCOPED_MCP_ARG, imageCarriesCheckout, placeLoginNotRootLine, DAEMON_TOKEN_PATH, homeShortened, folderName, kindForComputer, noKindLine, registeredLine, REGISTERING_LINE, cloneFailedLine, cloneIntoTakenLine, cloneUrlRefusal, placeDaemonPaths, rootsPathIn, shellLine, shellQuote, placeForksNowhereLine, placeServesDaemonLine, threadCgroup } from "@wsp/protocol";
 import { cloneLines, underLoginHome } from "../project-landing.js";
+import { threadEnds } from "./thread-ends.js";
+import { PANE_HOLD_MS } from "../places/pane-ports.js";
 import { projectRemote, projectSource } from "../project-sources.js";
 import { openDaemonChannel } from "../daemon-channel.js";
-import { machineExecStream, turnScope, type MachineExecOptions, type TurnWaiting } from "../machine-exec.js";
+import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "../machine-exec.js";
 import { writeDaemonRootsScript } from "../daemon-roots.js";
 import { PlaceForksNowhereError, placeHomeRefusal, type PlaceDoor } from "../places.js";
 import { loginEnvOn, PLACE_LOGIN_ENV } from "../types/harness.js";
@@ -19,6 +21,7 @@ import type { RuntimeContext, KindsArea } from "../context.js";
 
 export function kindsArea(ctx: RuntimeContext): KindsArea {
   const { opts, backend, local, placeDoor, clock, places } = ctx;
+  const ends = placeDoor === undefined ? undefined : threadEnds(ctx, placeDoor);
   const projectOf = (dest: string, size: number): WorkspaceProject => ({ name: folderName(dest), dest, importedAt: new Date(clock.now()).toISOString(), size });
   /** The command that puts a project's repo inside a copy of an image, word for word, so the test that reads the
    * machine's log and the machine that runs it read one line. No --branch where the record names no base: the
@@ -342,15 +345,25 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
               if (login.user !== "root") throw Object.assign(new Error(placeLoginNotRootLine(placeDoorOf().nameOf(record.place!), login.user)), { kind: "usage" });
             },
             // The same detached run a machine's turn is, on the computer itself as its login, under wsp's own folder
-            // in that login's home rather than a folder every account there shares, and in a scope of its own, since
-            // the daemon that starts it is restarted by every update.
+            // in that login's home rather than a folder every account there shares.
+            // A thread's turn is launched from a shell standing in that thread's cgroup, so everything it starts is
+            // the thread's to list and to end, a server it detached included; wsp's own folder goes in front of the
+            // login's PATH for the turn alone, so the wsp it finds is the one that computer's daemon writes for its threads.
             execStream: (entry, o, waiting) => {
+              const machine = entry.machine;
               const at = placeDaemonPaths(placeOf(entry.record).home);
-              // wsp's own folder goes in front of the login's PATH for the turn alone, so the wsp it finds is the one
-              // that computer's daemon writes for its threads.
-              const launchUnder = (base: string): string => `PATH=${shellQuote(at.guestBin)}:"$PATH" ${turnScope(base)}`;
-              return machineExecStream(entry.machine, { reading: machineReading, runDir: at.runDir, launchUnder, ...o }, waiting);
+              const launchOn = o?.thread !== undefined && machine instanceof PlaceFolderMachine ? machine.inCgroup(threadCgroup(o.thread), at.guestBin) : undefined;
+              return machineExecStream(machine, { reading: machineReading, runDir: at.runDir, ...o, ...(launchOn !== undefined ? { launchOn } : {}) }, waiting);
             },
+            // That computer's port at the same number on this one, so a link its threads print opens what they meant;
+            // held while the pane showing it asks again inside the hold.
+            portReach: async (entry, port) => {
+              const { localPort } = await placeDoor.forward(entry.record.place!, port, { pane: { workspaceId: entry.record.id, name: entry.record.name } });
+              return { url: `http://localhost:${localPort}/`, expiresAt: clock.now() + PANE_HOLD_MS };
+            },
+            // As root on that computer, since a thread's cgroup is root's to empty and take away; a computer that is
+            // away is owed the end of a deleted thread's.
+            endThread: (entry, threadId, o) => ends!.end(entry.record.place!, threadId, o),
             folder: record => ctx.checkoutOf(record),
             home: (entry, id) => placeAgentHome(entry.record.place, placeOf(entry.record).home, id),
             homeDir: record => placeOf(record).home,

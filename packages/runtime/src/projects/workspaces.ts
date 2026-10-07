@@ -1094,13 +1094,19 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
     async portReach(id, port, origin) {
       const entry = await ctx.entryOf(id, origin);
       await ctx.copyBlocked(entry);
-      const reach = await entry.ws.portReach(port);
+      const own = ctx.moduleOf(entry.record.kind).portReach;
+      const reach = own !== undefined ? await own(entry, port) : await entry.ws.portReach(port);
       return { url: reach.url, expiresAt: reach.expiresAt };
     },
 
     async portProbe(id, port, origin) {
       const entry = await ctx.entryOf(id, origin);
       await ctx.copyBlocked(entry);
+      const own = ctx.moduleOf(entry.record.kind).portReach;
+      if (own !== undefined) {
+        const res = await fetch((await own(entry, port)).url, { redirect: "manual", signal: AbortSignal.timeout(PORT_PROBE_TIMEOUT_MS) });
+        return { status: res.status, body: await readBodyUpTo(res, PORT_PROBE_BODY_CAP) };
+      }
       const reach = await entry.ws.portReach(port);
       // A followed redirect would refetch without the token or the edge's cookies and report the edge's 401 for a page the frame loads fine.
       const res = await fetch(reach.url, { redirect: "manual", signal: AbortSignal.timeout(PORT_PROBE_TIMEOUT_MS) });
