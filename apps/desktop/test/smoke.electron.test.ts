@@ -361,6 +361,11 @@ function readPreview(page: Page, workspaceId: string): Promise<string | undefine
   return page.evaluate(id => (window as unknown as DesktopWindow).wsp.workspacePreview(id), workspaceId);
 }
 
+/** A thread's picture as the page files it, under the theme drawn now. */
+function readThreadPicture(page: Page, threadId: string): Promise<string | undefined> {
+  return page.evaluate(id => (window as unknown as DesktopWindow).wsp.workspacePreview(`${document.documentElement.dataset["theme"] ?? ""}/${id}`), threadId);
+}
+
 /** A page in both themes: the shell's theme source is flipped, since the onboarding page follows the system's. */
 async function photograph(app: ElectronApplication, page: Page, name: string): Promise<string[]> {
   mkdirSync(SHOTS, { recursive: true });
@@ -712,7 +717,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       await win.keyboard.press("Tab");
       await win.keyboard.up("Control");
       await win.waitForSelector("[data-workspace-switcher]", { state: "detached" });
-      await vi.waitFor(async () => expect(await readPreview(win, opened!)).toMatch(/^data:image\/png;base64,\w/), { timeout: 30_000, interval: 100 });
+      await vi.waitFor(async () => expect(await readThreadPicture(win, opened!)).toMatch(/^data:image\/png;base64,\w/), { timeout: 30_000, interval: 100 });
 
       await win.keyboard.down("Control");
       await win.keyboard.press("Tab");

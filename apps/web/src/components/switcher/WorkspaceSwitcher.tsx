@@ -11,8 +11,8 @@ import { agentName } from "@wsp/catalog";
 import { deriveSidebarProjects } from "../../adapt/index.js";
 import { cn } from "../../lib/utils.js";
 import { ProjectGlyph } from "../../projects/look.js";
-import { useStore } from "../../protocol/store.js";
-import { capturePagePreview, loadPagePreviews, useWorkspacePreviews } from "../../shell/workspacePreviews.js";
+import { threadOnScreen, useStore } from "../../protocol/store.js";
+import { capturePagePreview, loadPagePreviews, picturesInTheme, useWorkspacePreviews } from "../../shell/workspacePreviews.js";
 import { highlightedTarget, SWITCHER_PAINT_DELAY_MS, useWorkspaceSwitcher } from "../../shell/workspaceSwitcher.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
 import { restingAge } from "../status/restingAge.js";
@@ -31,35 +31,49 @@ export function WorkspaceSwitcher() {
   const [painted, setPainted] = useState(false);
 
   // The picture is asked for from inside the store update that switches, before React draws the thread arriving, so
-  // what the shell photographs is the one being left. Every switch runs through here, whatever raised it.
+  // what the shell photographs is the one being left; `previous` is what was on screen. Every switch runs through here,
+  // whatever raised it.
   useEffect(
     () =>
       useStore.subscribe((state, previous) => {
         const left = previous.selectedThreadId;
-        if (left === null || (left === state.selectedThreadId && previous.selectedId === state.selectedId)) return;
-        capturePagePreview(left);
+        if (left === null || previous.selectedId === null || (left === state.selectedThreadId && previous.selectedId === state.selectedId)) return;
+        if (threadOnScreen(previous, { workspaceId: previous.selectedId, threadId: left })) void capturePagePreview(left);
       }),
     [],
   );
 
-  useEffect(() => {
-    if (open) void loadPagePreviews(targets.map(target => target.threadId));
-  }, [open, targets]);
-
-  // The hold, not the step, is what asks for the overlay: a chord let go inside the delay paints nothing. Stepping
-  // again does not restart it, so the wait is from the first press however many cards a person walks.
+  // The thread on screen is photographed as the overlay opens, so its card is fresh and a walk that ends on another
+  // thread leaves a picture of this one. The hold, not the step, is what asks for the overlay: a chord let go inside
+  // the delay paints nothing, and stepping again does not restart it. The paint also waits for that picture, which the
+  // shell answers within its own ceiling, since it copies a frame drawn after the ask lands, and a frame with the overlay
+  // in it would be filed under the thread.
   useEffect(() => {
     if (!open) {
       setPainted(false);
       return;
     }
-    const timer = setTimeout(() => setPainted(true), SWITCHER_PAINT_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [open]);
+    let live = true;
+    const { selectedId, selectedThreadId } = useStore.getState();
+    const onScreen = selectedId !== null && selectedThreadId !== null && threadOnScreen(useStore.getState(), { workspaceId: selectedId, threadId: selectedThreadId });
+    const shot = onScreen ? capturePagePreview(selectedThreadId) : Promise.resolve();
+    void shot.then(() => loadPagePreviews(targets.map(target => target.threadId)));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const delay = new Promise<void>(resolve => {
+      timer = setTimeout(resolve, SWITCHER_PAINT_DELAY_MS);
+    });
+    void Promise.all([shot, delay]).then(() => {
+      if (live) setPainted(true);
+    });
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [open, targets]);
 
   const cards = useMemo(() => {
     if (!open || !painted) return [];
-    return buildSwitcherCards({ projects: deriveSidebarProjects({ workspaces, statuses, sessions }), places, targets, images });
+    return buildSwitcherCards({ projects: deriveSidebarProjects({ workspaces, statuses, sessions }), places, targets, images: picturesInTheme(images, targets.map(target => target.threadId)) });
   }, [targets, images, open, painted, places, sessions, statuses, workspaces]);
 
   if (!open || !painted) return null;
