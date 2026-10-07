@@ -539,7 +539,11 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       const entry = await ctx.entryOf(id, origin);
       const start = ctx.moduleOf(entry.record.kind).restartDaemon;
       if (start === undefined) throw new Error(`${entry.record.name}'s daemon runs on ${machineWord(entry.record.kind)}, which this host does not hold the process of`);
-      await start(entry);
+      try {
+        await start(entry);
+      } finally {
+        if (ctx.moduleOf(entry.record.kind).sharedDaemon) ctx.sharedDaemonReplaced();
+      }
       // The poll's last measurement is of the daemon that is gone, and the next one is a poll away: the row would
       // go on saying no daemon for that long over a daemon this host has just watched start. Dropped rather than
       // replaced with a claim, so the row falls back to what this kind's road says and the next poll measures.
@@ -1016,13 +1020,13 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
     async daemonChannel(id, onEvent, origin) {
       const entry = await ctx.entryOf(id, origin);
       if (!ctx.moduleOf(entry.record.kind).sharedDaemon) return ctx.copyChannel(entry, onEvent, ctx.WORKSPACE_FRAMES);
-      const ptys = ctx.ownPtys.get(id) ?? new Map<string, number>();
-      ctx.ownPtys.set(id, ptys);
+      const ptys = ctx.portPids.get(id) ?? new Map<string, number>();
+      ctx.portPids.set(id, ptys);
       const heard = (event: Record<string, unknown>): void => {
         if (event["type"] === "pty.exit" && ptys.delete(String(event["ptyId"]))) ctx.portRootsMoved(id);
         onEvent(event);
       };
-      return ctx.rootedPorts(id, ctx.checkoutOf(entry.record), ptys, ctx.ownedPtys(id, await ctx.copyChannel(entry, heard, ctx.WORKSPACE_FRAMES)));
+      return ctx.rootedPorts(id, ctx.checkoutOf(entry.record), ptys, ctx.heldToOwner(id, await ctx.copyChannel(entry, heard, ctx.WORKSPACE_FRAMES)));
     },
 
     async guestChannel(id, onEvent) {

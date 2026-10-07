@@ -334,8 +334,9 @@ export interface ChannelsArea {
   readonly copyBlocked: (entry: LiveWorkspace) => Promise<void>;
   readonly WORKSPACE_FRAMES: string[];
   readonly GUEST_ROAD_FRAMES: string[];
-  readonly ownPtys: Map<string, Map<string, number>>;
-  readonly ownedPtys: (owner: string, channel: DaemonChannel) => DaemonChannel;
+  readonly portPids: Map<string, Map<string, number>>;
+  readonly heldToOwner: (owner: string, channel: DaemonChannel) => DaemonChannel;
+  readonly sharedDaemonReplaced: () => void;
   readonly turnGroups: Map<string, Set<number>>;
   readonly armRootsRecheck: () => void;
   readonly portRootsMoved: (workspaceId: string) => void;

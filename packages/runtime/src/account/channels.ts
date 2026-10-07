@@ -203,25 +203,29 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
    * tunnel reaches any port inside the workspace, and only this host's relay listens for one. */
   const GUEST_ROAD_FRAMES = [...WORKSPACE_FRAMES, "guest.watch", "guest.reply", "guest.close", "ssh.start", "tunnel.open", "tunnel.write", "tunnel.close"];
 
-  /** The ptys each local workspace's own channels opened, by pty, with the pid each leads. Every local workspace
-   * dials the one daemon this host runs, which names no workspace on a pty, so the one a workspace opened is the
-   * only record of whose it is. */
-  const ownPtys = new Map<string, Map<string, number>>();
+  /** The pid each pty a local workspace's own channels opened leads, by workspace and pty: the ports watch roots at
+   * them. Dropped at the pty's exit, which `ptyOwners` keeps. */
+  const portPids = new Map<string, Map<string, number>>();
   /** The ptys each channel's owner opened on a daemon several owners dial, a local workspace's by its id and this
    * computer's own terminal by the place's. The daemon tells these apart by no name, so without this every owner's
-   * panes would list every other's shells. Kept past a pty's exit, which a pane still shows. */
+   * panes would list and drive every other's shells. Kept past a pty's exit, which a pane still shows, and emptied
+   * when that daemon is replaced, since the next one numbers its ptys from pty_1 again. */
   const ptyOwners = new Map<string, Set<string>>();
-  /** A channel whose pty.list answers only the ptys its owner opened through a channel of its own. */
-  const ownedPtys = (owner: string, channel: DaemonChannel): DaemonChannel => {
+  /** A channel that answers only for the ptys its owner opened through a channel of its own: its pty.list holds no
+   * other, and an op naming another's pty is told there is no such pty, as a box's daemon tells another machine,
+   * without reaching the daemon. */
+  const heldToOwner = (owner: string, channel: DaemonChannel): DaemonChannel => {
     const mine = ptyOwners.get(owner) ?? new Set<string>();
     ptyOwners.set(owner, mine);
     return {
       async send(frame) {
+        const asked = (frame as Record<string, unknown>)["ptyId"];
+        if (asked !== undefined && !mine.has(String(asked))) return { id: frame.id, ok: false, error: `no such pty: ${String(asked)}` } as DaemonResponse;
         const reply = await channel.send(frame);
         const said = reply as Record<string, unknown>;
         if (said["ok"] !== true) return reply;
         if (frame.op === "pty.create") mine.add(String(said["ptyId"]));
-        if (frame.op === "pty.kill") mine.delete(String((frame as Record<string, unknown>)["ptyId"]));
+        if (frame.op === "pty.kill") mine.delete(String(asked));
         if (frame.op === "pty.list" && Array.isArray(said["ptys"])) {
           const rows = said["ptys"] as Record<string, unknown>[];
           const held = new Set(rows.map(row => String(row["id"])));
@@ -233,6 +237,10 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
       close: () => channel.close(),
       closed: channel.closed,
     };
+  };
+  /** Forgets whose every pty was, once the daemon the owners share is replaced and its ptys with it. */
+  const sharedDaemonReplaced = (): void => {
+    for (const mine of ptyOwners.values()) mine.clear();
   };
   /** Each local workspace's channels that watch ports, as the push that names that workspace's roots again. */
   const portWatchers = new Map<string, Set<() => void>>();
@@ -263,7 +271,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
       else groups?.delete(pid);
     }
     if (groups?.size === 0) turnGroups.delete(workspaceId);
-    for (const pid of ownPtys.get(workspaceId)?.values() ?? []) roots.add(pid);
+    for (const pid of portPids.get(workspaceId)?.values() ?? []) roots.add(pid);
     return [...roots].sort((a, b) => a - b);
   };
   /** Reads the workspace's roots now, which drops a turn's group that emptied, and names them again to every channel
@@ -487,7 +495,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
     startedAs, cutBefore, resumedFact, folderOf, accessOf, daemonNotes, homeOf, providerOf, placeIdOf, settingsAt,
     turnLimitOf, agentsHeld, spawnAt, projectHeld, refOf, checkoutOf, computerOf, servedByItsComputer, channelOver,
     withDaemon, overChannel, onThisComputer, placeGuard, placeRefuses, copyBlocked, WORKSPACE_FRAMES, GUEST_ROAD_FRAMES,
-    ownPtys, ownedPtys, turnGroups, armRootsRecheck, portRootsMoved, rootedPorts, copyChannel, leadStart, startChildOn,
+    portPids, heldToOwner, sharedDaemonReplaced, turnGroups, armRootsRecheck, portRootsMoved, rootedPorts, copyChannel, leadStart, startChildOn,
     sameRepository,
   };
 }

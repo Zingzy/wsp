@@ -300,30 +300,56 @@ describe("local workspace", () => {
     channel.close();
   }, 30_000);
 
-  it("two folders on the one daemon each list only the ptys their own channels opened, and this computer's own terminal only its own", async () => {
-    // The one daemon every folder here dials, which lists every pty it holds to whoever asks.
+  /** The one daemon every folder here dials, which lists every pty it holds to whoever asks and numbers them from
+   * pty_1 up, starting again from pty_1 once it restarts. `heard` is every frame that reached it. */
+  const sharedDaemon = () => {
     const held = new Map<string, boolean>();
+    const heard: Record<string, unknown>[] = [];
+    let made = 0;
     const daemonChannel = async (): Promise<DaemonChannel> => ({
       send: async frame => {
+        const said = frame as Record<string, unknown>;
+        heard.push(said);
         if (frame.op === "pty.create") {
-          const ptyId = `pty_${held.size + 1}`;
+          const ptyId = `pty_${++made}`;
           held.set(ptyId, false);
-          return { id: null, ok: true, ptyId, pid: 4000 + held.size } as never;
+          return { id: null, ok: true, ptyId, pid: 4000 + made } as never;
         }
-        if (frame.op === "pty.kill") held.delete(String((frame as Record<string, unknown>)["ptyId"]));
         if (frame.op === "pty.list") return { id: null, ok: true, ptys: [...held].map(([id, exited], i) => ({ id, pid: 4001 + i, cols: 80, rows: 24, exited })) } as never;
+        if (said["ptyId"] !== undefined && !held.has(String(said["ptyId"]))) return { id: null, ok: false, error: `no such pty: ${String(said["ptyId"])}` } as never;
+        if (frame.op === "pty.kill") held.delete(String(said["ptyId"]));
         return { id: null, ok: true } as never;
       },
       close: () => {},
       closed: new Promise(() => {}),
     });
+    const restartDaemon = async (): Promise<void> => {
+      held.clear();
+      made = 0;
+    };
     const token = "cafef00d".repeat(3);
     const daemonRoad = async () => ({ url: "http://127.0.0.1:7070", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: token });
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: { ...localWiring, daemonRoad }, daemonToken: token, daemonChannel });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: { ...localWiring, daemonRoad, restartDaemon }, daemonToken: token, daemonChannel });
+    return { rt, held, heard };
+  };
+  const listed = async (channel: DaemonChannel): Promise<unknown[]> =>
+    ((await channel.send({ id: null, op: "pty.list" } as never)) as unknown as { ptys: { id: string }[] }).ptys.map(p => p.id);
+  const opened = async (channel: DaemonChannel): Promise<string> =>
+    ((await channel.send({ id: null, op: "pty.create" } as never)) as unknown as { ptyId: string }).ptyId;
+  /** Every op a pane sends a pty by its id. */
+  const PTY_BY_ID = [
+    { op: "pty.attach" },
+    { op: "pty.write", data: "x" },
+    { op: "pty.resize", cols: 80, rows: 24 },
+    { op: "pty.tab" },
+    { op: "pty.detach" },
+    { op: "pty.kill" },
+  ];
+
+  it("two folders on the one daemon each list only the ptys their own channels opened, and this computer's own terminal only its own", async () => {
+    const { rt, held } = sharedDaemon();
     const a = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "one"))).id, name: "a" });
     const b = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "other"))).id, name: "b" });
-    const listed = async (channel: DaemonChannel): Promise<unknown[]> =>
-      ((await channel.send({ id: null, op: "pty.list" } as never)) as unknown as { ptys: { id: string }[] }).ptys.map(p => p.id);
 
     const chA = await rt.workspaces.daemonChannel(a.id, () => {});
     const chB = await rt.workspaces.daemonChannel(b.id, () => {});
@@ -340,6 +366,58 @@ describe("local workspace", () => {
     await chA.send({ id: null, op: "pty.kill", ptyId: "pty_1" } as never);
     expect(await listed(chA)).toEqual([]);
     expect(await listed(chB)).toEqual(["pty_2"]);
+  });
+
+  it("a folder's channel is told there is no such pty for every op on another folder's shell or this computer's, and none of those frames reaches the daemon", async () => {
+    const { rt, heard } = sharedDaemon();
+    const a = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "one"))).id, name: "a" });
+    const b = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "other"))).id, name: "b" });
+    const chA = await rt.workspaces.daemonChannel(a.id, () => {});
+    const own = await opened(chA);
+    const theirs = [await opened(await rt.workspaces.daemonChannel(b.id, () => {})), await opened(await rt.hereChannel(() => {}))];
+    const before = heard.length;
+
+    for (const ptyId of theirs) {
+      for (const frame of PTY_BY_ID) {
+        expect(await chA.send({ id: 7, ...frame, ptyId } as never), `${frame.op} ${ptyId}`).toEqual({ id: 7, ok: false, error: `no such pty: ${ptyId}` });
+      }
+    }
+    expect(heard.slice(before)).toEqual([]);
+    // Its own shell still answers every one of them.
+    for (const frame of PTY_BY_ID) expect((await chA.send({ id: 7, ...frame, ptyId: own } as never)).ok, frame.op).toBe(true);
+  });
+
+  it("a thread on one folder cannot write into another folder's shell through its own folder's channel", async () => {
+    const { rt, heard } = sharedDaemon();
+    const a = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "one"))).id, name: "a" });
+    const b = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "other"))).id, name: "b" });
+    const shellB = await opened(await rt.workspaces.daemonChannel(b.id, () => {}));
+    const thread = { origin: "here", by: { kind: "thread", threadId: "thr_a", workspaceId: a.id, rootThreadId: "thr_a" } } as const;
+    const chA = await rt.workspaces.daemonChannel(a.id, () => {}, thread);
+
+    expect(await chA.send({ id: 1, op: "pty.write", ptyId: shellB, data: "rm -rf ~\n" } as never)).toEqual({ id: 1, ok: false, error: `no such pty: ${shellB}` });
+    expect(heard.filter(f => f["op"] === "pty.write")).toEqual([]);
+  });
+
+  it("after the shared daemon restarts, a shell another folder opens under a reused id is neither listed to nor attached by the folder that held that id before", async () => {
+    const { rt, heard } = sharedDaemon();
+    const a = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "one"))).id, name: "a" });
+    const b = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "other"))).id, name: "b" });
+    const chA = await rt.workspaces.daemonChannel(a.id, () => {});
+    expect(await opened(chA)).toBe("pty_1");
+    expect(await opened(await rt.workspaces.daemonChannel(b.id, () => {}))).toBe("pty_2");
+
+    await rt.workspaces.restartDaemon(a.id);
+    const chB = await rt.workspaces.daemonChannel(b.id, () => {});
+    expect(await opened(chB)).toBe("pty_1");
+
+    expect(await listed(await rt.workspaces.daemonChannel(a.id, () => {}))).toEqual([]);
+    // The pane's reattach after the redial names the shell it held before the restart.
+    const before = heard.length;
+    expect(await chA.send({ id: 3, op: "pty.attach", ptyId: "pty_1" } as never)).toEqual({ id: 3, ok: false, error: "no such pty: pty_1" });
+    expect(heard.slice(before)).toEqual([]);
+    expect(await listed(chB)).toEqual(["pty_1"]);
+    expect((await chB.send({ id: 4, op: "pty.attach", ptyId: "pty_1" } as never)).ok).toBe(true);
   });
 
   it("an ended turn's pid leaves the roots once its group is gone, with no channel watching, so a stranger leading a group of that number is never the workspace's", async () => {

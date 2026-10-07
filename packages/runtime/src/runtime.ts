@@ -876,7 +876,7 @@ function runtimeOf(ctx: RuntimeContext): Runtime {
     devices: deviceDoor,
     ...(placeDoor !== undefined ? { places: placeDoor } : {}),
     ...(opts.recipes !== undefined ? { recipes: opts.recipes } : {}),
-    hereChannel: async onEvent => ctx.ownedPtys(HERE_PLACE_ID, await ctx.channelOver(await ctx.localRoad(), THIS_COMPUTER, onEvent)),
+    hereChannel: async onEvent => ctx.heldToOwner(HERE_PLACE_ID, await ctx.channelOver(await ctx.localRoad(), THIS_COMPUTER, onEvent)),
     agents: { ...ctx.agentsRead, homesHere: ctx.homesHere },
     preferences: ctx.preferences,
     usage: ctx.usage,
