@@ -214,12 +214,17 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
    * run's files, and every road that asks whether a run is still there asks about this one. */
   const claim = (base: string): string => `${base}.d`;
   /** What ending one run comes to on the guest, in the shell both the reader's own reap and the connect sweep run:
-   * the recorded process group gets TERM, then KILL once the stop grace passes, and the run's files go. */
-  const reapScript = (b: string): string =>
-    `P=$(cat ${q(b)}.pid 2>/dev/null); ` +
-    `if [ -n "$P" ]; then kill -TERM -- -$P 2>/dev/null; ` +
-    `for i in ${GRACE_CHECKS}; do kill -0 -- -$P 2>/dev/null || break; sleep ${GRACE_POLL_MS / 1000}; done; ` +
-    `kill -KILL -- -$P 2>/dev/null; fi; ` +
+   * the recorded process group gets TERM, then KILL once the stop grace passes, and the run's files go. `read` runs
+   * between the two, once nothing of the group is left to write. Without `signal` the group is not sent anything:
+   * a group the reader's first reap ended is signalled once, never again. */
+  const reapScript = (b: string, read = "", signal = true): string =>
+    (signal
+      ? `P=$(cat ${q(b)}.pid 2>/dev/null); ` +
+        `if [ -n "$P" ]; then kill -TERM -- -$P 2>/dev/null; ` +
+        `for i in ${GRACE_CHECKS}; do kill -0 -- -$P 2>/dev/null || break; sleep ${GRACE_POLL_MS / 1000}; done; ` +
+        `kill -KILL -- -$P 2>/dev/null; fi; `
+      : "") +
+    read +
     `rm -rf ${q(b)}.*`;
   /** A handle this factory could have minted: the run directory it launches into and a name of its own shape. */
   const minted = (run: string): boolean => run.startsWith(`${runDir}/`) && RUN_ID.test(run.slice(runDir.length + 1));
@@ -230,6 +235,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
    * host was listening is replayed to whoever attaches. */
   const open = (base: string, hasInput: boolean, opened: Promise<void>, turnStartedAt?: number): ExecStream => {
     const sentinel = `__WSP_EOF_${randomBytes(6).toString("hex")}__`;
+    const reapMark = `__WSP_REAPED_${randomBytes(6).toString("hex")}__`;
 
     let killed = false;
     let inputClosed = false;
@@ -271,9 +277,29 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         .catch(() => undefined);
     };
 
-    // Runs after the last poll read the log, so the group's stragglers cannot cost the turn a line.
-    const reap = (): Promise<void> =>
-      machine.exec(`${reapScript(base)}; true`, { timeoutMs: execTimeoutMs }).then(() => undefined, () => undefined);
+    /** Ends the run on the first call and answers a chunk of its log past `offset`, read once the group is gone: a
+     * run that outlasted its stop grace printed into a window no poll read. The read stops at `end`, the size the first
+     * reap found the log at once the KILL went out, since a process that left the group and still holds the log would
+     * otherwise keep the stop going; the files stay while more than the chunk is left, for the next reap to read on
+     * from. Answers undefined where nothing came back. */
+    const reap = (offset: number, end?: number): Promise<{ chunk: Buffer; end: number } | undefined> => {
+      const log = `${q(base)}.log`;
+      const read =
+        `S=${end ?? `$({ wc -c < ${log}; } 2>/dev/null || echo 0)`}; N=$((S - ${offset})); [ $N -gt ${EXEC_CHUNK_BYTES} ] && N=${EXEC_CHUNK_BYTES}; ` +
+        `[ $N -gt 0 ] && tail -c +${offset + 1} ${log} 2>/dev/null | head -c $N | base64 -w0; printf '\\n%s %s\\n' ${reapMark} "$((S))"; ` +
+        `[ $((S - ${offset})) -gt ${EXEC_CHUNK_BYTES} ] && exit 0; `;
+      return machine.exec(`${reapScript(base, read, end === undefined)}; true`, { timeoutMs: execTimeoutMs }).then(
+        res => {
+          const out = res.stdout.split("\n");
+          const markIdx = out.findIndex(l => l.startsWith(`${reapMark} `));
+          const size = markIdx === -1 ? Number.NaN : Number.parseInt(out[markIdx]!.slice(reapMark.length + 1), 10);
+          return Number.isSafeInteger(size) ? { chunk: Buffer.from(out.slice(0, markIdx).join(""), "base64"), end: size } : undefined;
+        },
+        () => undefined,
+      );
+    };
+    const remove = (): Promise<void> =>
+      machine.exec(`${reapScript(base, "", false)}; true`, { timeoutMs: execTimeoutMs }).then(() => undefined, () => undefined);
 
     // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete. The
     // group's work rides the same poll when it is worth reading, so a turn working in silence costs no exec of its
@@ -291,13 +317,29 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       let offset = 0;
       let downs = 0;
       let pending = Buffer.alloc(0);
-      const drainPending = (): string | undefined =>
-        pending.length > 0 ? pending.toString("utf8") : undefined;
+      /** Every line the log held past the last poll once the KILL went out, read by the reap, and the one it ended on
+       * without a newline; the run's files go whatever the reads answered. */
+      async function* reaped(): AsyncGenerator<string> {
+        let end: number | undefined;
+        for (let read = await reap(offset); read !== undefined; read = await reap(offset, end)) {
+          end = read.end;
+          offset += read.chunk.length;
+          pending = Buffer.concat([pending, read.chunk]);
+          let nl: number;
+          while ((nl = pending.indexOf(0x0a)) !== -1) {
+            yield pending.subarray(0, nl).toString("utf8");
+            pending = pending.subarray(nl + 1);
+          }
+          if (read.chunk.length === 0 || offset >= end) break;
+        }
+        if (end === undefined || offset < end) await remove();
+        if (pending.length > 0) yield pending.toString("utf8");
+      }
 
       try {
         await opened;
       } catch (e) {
-        await reap();
+        yield* reaped();
         finish(null);
         throw e;
       }
@@ -310,20 +352,20 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       /** When the polls last started coming back with nothing: before the reader has caught up, a cut waits out the
        * same reach window an attach's probe gets, so one gateway error after a re-open does not take the reply. */
       let darkSince: number | undefined;
-      const cutInTheDark = async (cut: Error | undefined, at: number): Promise<void> => {
-        darkSince ??= at;
-        if (cut !== undefined && (caughtUp || now() - darkSince >= LINK_RETRY_WINDOW_MS)) await cutHere(cut);
-      };
-      const cutHere = async (e: Error): Promise<never> => {
-        await reap();
+      async function* cutHere(e: Error): AsyncGenerator<string, never> {
+        yield* reaped();
         finish(null);
         throw e;
-      };
+      }
+      async function* cutInTheDark(cut: Error | undefined, at: number): AsyncGenerator<string> {
+        darkSince ??= at;
+        if (cut !== undefined && (caughtUp || now() - darkSince >= LINK_RETRY_WINDOW_MS)) yield* cutHere(cut);
+      }
       while (true) {
         // This process is done reading this run: the poll ends here and the stream settles for nobody.
         if (dropped) await never();
         if (killed) {
-          await reap();
+          yield* reaped();
           finish(null);
           return;
         }
@@ -331,7 +373,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         if (waiting()) activity.touch(at);
         const quietMs = activity.quietMs(at);
         const cut = turnCut({ idleMs, deadlineMs }, at - startedAt, quietMs);
-        if (cut !== undefined && caughtUp && !exitSeen) await cutHere(cut);
+        if (cut !== undefined && caughtUp && !exitSeen) yield* cutHere(cut);
 
         let res: ExecResult;
         try {
@@ -340,7 +382,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           // Machine likely napping; polls recover after wake (P10 semantics). A poll that never reached the machine
           // says nothing about the process it was sent to read, so the stretch the road was dark is no part of the
           // turn's silence: the idle clock holds here and goes on from the road's return.
-          await cutInTheDark(cut, at);
+          yield* cutInTheDark(cut, at);
           await nap(pollMs);
           activity.hold(now() - at);
           continue;
@@ -349,7 +391,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         const out = res.stdout.split("\n");
         const markIdx = out.findIndex(l => l.startsWith(sentinel));
         if (markIdx === -1) {
-          await cutInTheDark(cut, at);
+          yield* cutInTheDark(cut, at);
           await nap(pollMs);
           continue;
         }
@@ -374,19 +416,15 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         }
 
         if (exitStr !== "") {
-          const tail = drainPending();
-          if (tail !== undefined) yield tail;
-          await reap();
+          yield* reaped();
           finish(Number.parseInt(exitStr, 10));
           return;
         }
         caughtUp = true;
-        if (cut !== undefined) await cutHere(cut);
+        if (cut !== undefined) yield* cutHere(cut);
         // The pid is checked after the exit file: a leader that finished in between shows as down with no exit yet.
         if (live === "down" && ++downs > 1) {
-          const tail = drainPending();
-          if (tail !== undefined) yield tail;
-          await reap();
+          yield* reaped();
           finish(null);
           return;
         }

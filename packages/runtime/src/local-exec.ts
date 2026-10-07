@@ -39,6 +39,7 @@ import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { EXEC_CHUNK_BYTES, psCpuSeconds, RUN_STOP_MS, shellQuote, TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { readsWork, turnActivity, turnCut, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -281,8 +282,10 @@ async function leadsThisRun(base: string, pid: number): Promise<boolean> {
 /** Everything one run left on this computer, ended and taken away: the run's own process group gets TERM, then
  * KILL once the stop grace passes, and the run's files go. The group and never the leader alone, at every ending
  * including the leader's own exit, since the children a harness leaves behind are what hold a machine's memory for
- * its life. A group that is not this run's is left alone and only its files go. */
-async function reapRun(base: string, graceMs = RUN_STOP_MS): Promise<void> {
+ * its life. A group that is not this run's is left alone and only its files go. `lastRead` runs once the group is
+ * gone and before the log goes, so a reader takes what was printed after its last poll, up to the size the log had at
+ * the KILL: a process that left the group and still holds the log would otherwise keep the read, and the stop, going. */
+async function reapRun(base: string, lastRead: (end: number) => Promise<void> = async () => {}, graceMs = RUN_STOP_MS): Promise<void> {
   const pid = Number(readFile(`${base}.pid`)?.trim() ?? "");
   if (Number.isSafeInteger(pid) && pid > 0 && (await leadsThisRun(base, pid))) {
     signalGroup(pid, "SIGTERM");
@@ -291,8 +294,17 @@ async function reapRun(base: string, graceMs = RUN_STOP_MS): Promise<void> {
     for (let waited = 0; waited < graceMs && groupExists(pid); waited += GRACE_POLL_MS) await sleep(Math.min(GRACE_POLL_MS, graceMs - waited));
     signalGroup(pid, "SIGKILL");
   }
+  await lastRead(logSize(base));
   for (const suffix of ["sh", "log", "pid", "exit", "in", "held", "late", "fifo", "tail"]) rmSync(`${base}.${suffix}`, { force: true });
   rmSync(`${base}.d`, { recursive: true, force: true });
+}
+
+function logSize(base: string): number {
+  try {
+    return statSync(`${base}.log`).size;
+  } catch {
+    return 0;
+  }
 }
 
 /** Hands a run the seed its launch held back: into the channel where nothing reached it yet, then dropped. The
@@ -426,6 +438,8 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     /** The poll runs whether or not anybody is reading yet: the run is on this computer either way, so its limits,
      * its ending and its reap cannot wait on a consumer. What it reads is queued for whoever iterates. */
     const lines = new Lines();
+    /** One decoder for the whole log, so a character split across two chunks comes back whole. */
+    const decoder = new StringDecoder("utf8");
     let offset = o.from ?? 0;
     let downs = 0;
     let reading = false;
@@ -456,12 +470,12 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
       wake?.();
     };
     opts.reading?.add(drop);
-    /** What the log holds past what has been read, a chunk at a time so one poll of a run that printed megabytes
-     * while nobody watched cannot hold the loop. */
-    const readLog = (): Buffer => {
+    /** What the log holds past what has been read, up to `end`, a chunk at a time so one poll of a run that printed
+     * megabytes while nobody watched cannot hold the loop. */
+    const readLog = (end = Infinity): Buffer => {
       let fd: number | undefined;
       try {
-        const size = statSync(`${base}.log`).size;
+        const size = Math.min(statSync(`${base}.log`).size, end);
         if (size <= offset) return Buffer.alloc(0);
         fd = openSync(`${base}.log`, "r");
         const buf = Buffer.alloc(Math.min(size - offset, EXEC_CHUNK_BYTES));
@@ -477,7 +491,13 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     const settle = async (code: number | null, cut?: Error): Promise<void> => {
       if (finishCode !== undefined) return;
       opts.reading?.delete(drop);
-      await reapRun(base);
+      await reapRun(base, async end => {
+        for (let chunk = readLog(end); chunk.length > 0; chunk = readLog(end)) {
+          lines.feed(decoder.write(chunk));
+          await new Promise(resolve => setImmediate(resolve));
+        }
+      });
+      lines.feed(decoder.end());
       if (cut === undefined) lines.end();
       else lines.fail(cut);
       finish(code);
@@ -510,7 +530,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         if (chunk.length > 0) {
           if (startedWith === undefined && hasInput && pid !== undefined) startedWith = ownOrphans(() => groupRows(pid), pid);
           activity.touch(now());
-          lines.feed(chunk.toString("utf8"));
+          lines.feed(decoder.write(chunk));
           if (chunk.length < EXEC_CHUNK_BYTES) caughtUp = true;
           exitSeen = ended !== undefined && ended !== "";
           // There may be more than one chunk waiting, and a log read from its first byte can be hundreds of them: the
