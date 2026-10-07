@@ -59,6 +59,26 @@ describe("a thread tile", () => {
     expect(slot().textContent).not.toContain("Refused");
   });
 
+  it("a thread its computer's threads at once holds back says Waiting with the hourglass, no time and no crab, and its card says what holds it and how to raise it", async () => {
+    vi.useFakeTimers();
+    try {
+      mount({ over: { status: "running", capped: { placeId: "p_hetzner", place: "hetzner", running: 2, atOnce: 2 } } });
+      expect(slot().dataset["threadStatus"]).toBe("waiting");
+      expect(slot().dataset["tone"]).toBeUndefined();
+      expect(slot().textContent).toBe("Waiting");
+      expect(slot().querySelector("svg")!.getAttribute("class")).toContain("lucide-hourglass");
+      expect(tile().querySelector("[data-crab]")).toBeNull();
+      fireEvent.pointerEnter(tile(), { pointerType: "mouse" });
+      fireEvent.mouseEnter(tile());
+      fireEvent.mouseMove(tile());
+      await act(async () => void vi.advanceTimersByTime(600));
+      const notes = [...document.querySelectorAll<HTMLElement>('[data-tile-card] [data-tile-card-line="note"]')].map(line => line.textContent);
+      expect(notes).toEqual(["hetzner is running 2 of 2 threads", "Raise threads at once on hetzner in Settings to start it now"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("in the Settled fold rests whatever its state: its age in the row's ink, no tone, no glyph, and a muted title", () => {
     mount({ over: { status: "failed", endedAt: "2026-09-17T00:05:00.000Z" }, settled: true });
     expect(slot().textContent).toBe("3m");

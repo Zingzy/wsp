@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "send",
-    "description": "Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever the thread's start named. A model or effort named here is the turn's; the thread runs on the agent and at the access its own turns ran at, which a message does not change; a turn that joins a running one keeps that one's. On a thread whose turn is not running the message starts a new turn (outcome `started`); when the turn is still running the message joins it (outcome `steered`) or waits for it and then runs (outcome `queued`), and the reply is that turn's. When the thread's turn has replied but its agent process is still running, the message waits for that process and runs as the thread's next turn (outcome `queued`), which the runtime says as `This thread replied, still working; the message runs as its next turn once that process exits`. A send is never refused for meeting a turn, and two sends keep the order they arrived in.",
+    "description": "Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever the thread's start named. A model or effort named here is the turn's; the thread runs on the agent and at the access its own turns ran at, which a message does not change; a turn that joins a running one keeps that one's. On a thread whose turn is not running the message starts a new turn (outcome `started`); when the turn is still running the message joins it (outcome `steered`) or waits for it and then runs (outcome `queued`), and the reply is that turn's. When the thread's turn has replied but its agent process is still running, the message waits for that process and runs as the thread's next turn (outcome `queued`), which the runtime says as `This thread replied, still working; the message runs as its next turn once that process exits`. A send is never refused for meeting a turn, and two sends keep the order they arrived in. A start on a computer already running as many threads as its threads at once waits for a slot and starts on its own when one frees (outcome `held`), with capped beside it, the computer and what runs there against its number, which the thread's row in threads carries while it waits; a thread that follows a run or a send to its end, not detached, lends that thread's next turn its own slot, one turn at a time, a turn already held ahead of the message included, and every other start, a child started detached included, waits for a slot of its own.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -63,8 +63,34 @@
           "enum": [
             "started",
             "steered",
-            "queued"
+            "queued",
+            "held"
           ]
+        },
+        "capped": {
+          "type": "object",
+          "properties": {
+            "placeId": {
+              "type": "string"
+            },
+            "place": {
+              "type": "string"
+            },
+            "running": {
+              "type": "integer"
+            },
+            "atOnce": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "placeId",
+            "place",
+            "running",
+            "atOnce"
+          ],
+          "additionalProperties": false,
+          "description": "what holds the start back while outcome is held: the computer and what runs there against its threads at once"
         },
         "afterCut": {
           "type": "boolean",
@@ -89,7 +115,7 @@
   },
   "cloudOn": {
     "name": "send",
-    "description": "Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever the thread's start named. A model or effort named here is the turn's; the thread runs on the agent and at the access its own turns ran at, which a message does not change; a turn that joins a running one keeps that one's. On a thread whose turn is not running the message starts a new turn (outcome `started`); when the turn is still running the message joins it (outcome `steered`) or waits for it and then runs (outcome `queued`), and the reply is that turn's. When the thread's turn has replied but its agent process is still running, the message waits for that process and runs as the thread's next turn (outcome `queued`), which the runtime says as `This thread replied, still working; the message runs as its next turn once that process exits`. A send is never refused for meeting a turn, and two sends keep the order they arrived in.",
+    "description": "Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever the thread's start named. A model or effort named here is the turn's; the thread runs on the agent and at the access its own turns ran at, which a message does not change; a turn that joins a running one keeps that one's. On a thread whose turn is not running the message starts a new turn (outcome `started`); when the turn is still running the message joins it (outcome `steered`) or waits for it and then runs (outcome `queued`), and the reply is that turn's. When the thread's turn has replied but its agent process is still running, the message waits for that process and runs as the thread's next turn (outcome `queued`), which the runtime says as `This thread replied, still working; the message runs as its next turn once that process exits`. A send is never refused for meeting a turn, and two sends keep the order they arrived in. A start on a computer already running as many threads as its threads at once waits for a slot and starts on its own when one frees (outcome `held`), with capped beside it, the computer and what runs there against its number, which the thread's row in threads carries while it waits; a thread that follows a run or a send to its end, not detached, lends that thread's next turn its own slot, one turn at a time, a turn already held ahead of the message included, and every other start, a child started detached included, waits for a slot of its own.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -151,8 +177,34 @@
           "enum": [
             "started",
             "steered",
-            "queued"
+            "queued",
+            "held"
           ]
+        },
+        "capped": {
+          "type": "object",
+          "properties": {
+            "placeId": {
+              "type": "string"
+            },
+            "place": {
+              "type": "string"
+            },
+            "running": {
+              "type": "integer"
+            },
+            "atOnce": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "placeId",
+            "place",
+            "running",
+            "atOnce"
+          ],
+          "additionalProperties": false,
+          "description": "what holds the start back while outcome is held: the computer and what runs there against its threads at once"
         },
         "afterCut": {
           "type": "boolean",

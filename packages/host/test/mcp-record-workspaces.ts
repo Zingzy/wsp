@@ -477,6 +477,7 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "updated clean, nothing sent", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "updated", base: "main \u0085 🧪" }) } },
     { case: "refused", arguments: { workspace: "alpha", check: "lint" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.fix": refused("lint has not failed on #4", "usage") } },
     { case: "a child to merge", arguments: { workspace: "alpha", child: "beta \u0085 🧪" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "started", threadId: "t-4", child: "beta \u0085 🧪", base: "tree/lead", agent: "claude" }) } },
+    { case: "held by its computer's threads at once", arguments: { workspace: "alpha", check: "ci" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "held", threadId: "t-6", check: "ci", base: "main", agent: "claude", capped: { placeId: "p_hetzner", place: "hetzner \u0085 🧪", running: 2, atOnce: 1 } }) } },
     { case: "a check and a child", arguments: { workspace: "alpha", check: "lint", child: "beta" }, replies: {} },
     { case: "gone", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: GONE }) } },
   ],

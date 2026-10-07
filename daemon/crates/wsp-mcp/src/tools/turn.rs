@@ -21,6 +21,7 @@ use crate::client::Client;
 use crate::failure::Failure;
 use crate::host::Host;
 use crate::record::{self, fill};
+use crate::words::plural;
 
 pub const RUN: Tool = Tool {
     name: "run",
@@ -93,7 +94,30 @@ pub struct TurnOut {
     pub text: Option<String>,
     pub outcome: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub capped: Option<CapWait>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub after_cut: Option<bool>,
+}
+
+/// What holds a start back while its outcome is held: the computer and what runs there against its threads at once.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct CapWait {
+    pub place_id: String,
+    pub place: String,
+    pub running: u64,
+    pub at_once: u64,
+}
+
+impl CapWait {
+    /// The line a held start says beside its thread: `capWaitLine`.
+    pub fn line(&self) -> String {
+        fill(
+            &turns().cap_wait,
+            &[("place", &self.place), ("running", &self.running.to_string()), ("threads", &plural(self.at_once as usize, "thread"))],
+        )
+    }
 }
 
 /// The model, effort and access mode a start names, as the composer's pickers name them, and whether it runs fast.
@@ -731,6 +755,8 @@ pub(super) struct Turn {
     harness: String,
     outcome: String,
     turn_id: String,
+    /// What holds the start back where its outcome is held.
+    capped: Option<CapWait>,
     /// The folder the host started the thread in.
     cwd: Option<String>,
     result: Option<TurnResult>,
@@ -739,15 +765,19 @@ pub(super) struct Turn {
 }
 
 const SESSION_STATUSES: [&str; 4] = ["running", "completed", "interrupted", "failed"];
-const START_OUTCOMES: [&str; 3] = ["started", "steered", "queued"];
+const START_OUTCOMES: [&str; 4] = ["started", "steered", "queued", "held"];
 
 /// Starts the turn as the agent's under `request_id`, which every send of this start carries, and answers with it the
-/// moment the runtime names it.
-async fn begin(client: &Client, start: &Map<String, Value>, request_id: &str) -> Result<Turn, Failure> {
+/// moment the runtime names it. A start the caller follows runs in the caller's own slot on its computer.
+async fn begin(client: &Client, start: &Map<String, Value>, request_id: &str, followed: bool) -> Result<Turn, Failure> {
     client.events().await?;
     let mut asked = start.clone();
+    if followed {
+        asked.insert("followed".to_owned(), Value::from(true));
+    }
     asked.insert("startedBy".to_owned(), Value::from("agent"));
     asked.insert("requestId".to_owned(), Value::from(request_id));
+    asked.insert("answerHeld".to_owned(), Value::from(true));
     let answer: Value = client.request("sessions.start", asked).await?;
     let str_at = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
     let session =
@@ -762,6 +792,7 @@ async fn begin(client: &Client, start: &Map<String, Value>, request_id: &str) ->
         thread_id,
         workspace_id: str_at(session, "workspaceId").unwrap_or_default(),
         harness: str_at(session, "harness").unwrap_or_default(),
+        capped: if outcome == "held" { session.get("capped").cloned().and_then(|c| serde_json::from_value(c).ok()) } else { None },
         outcome,
         turn_id,
         cwd: str_at(session, "cwd"),
@@ -819,7 +850,7 @@ async fn begin_through(host: &Host, client: Arc<Client>, start: &Map<String, Val
     let id = request_id();
     let mut socket = client;
     loop {
-        match begin(&socket, start, &id).await {
+        match begin(&socket, start, &id, false).await {
             Ok(turn) => return Ok(turn),
             Err(failure) => socket = redial_unanswered(host, &socket, failure).await?,
         }
@@ -851,7 +882,7 @@ pub(super) async fn follow(
         let attempt: Result<Turn, Failure> = async {
             let mut turn = match started.clone() {
                 None => {
-                    let turn = begin(&socket, start, &id).await?;
+                    let turn = begin(&socket, start, &id, true).await?;
                     *started = Some(turn.clone());
                     turn
                 }
@@ -917,6 +948,7 @@ pub(super) fn turn_out(turn: &Turn) -> TurnOut {
         harness: turn.harness.clone(),
         text: turn.result.as_ref().map(|r| r.text.clone().unwrap_or_default()),
         outcome: turn.outcome.clone(),
+        capped: turn.capped.clone(),
         after_cut: turn.after_cut.then_some(true),
     }
 }
@@ -1016,6 +1048,14 @@ impl Opened {
     }
 }
 
+/// A detached start's line, with the wait under it where the start is held: `detachedOut`.
+fn held_line(line: String, turn: &Turn) -> String {
+    match &turn.capped {
+        Some(capped) => format!("{line}\n{}", capped.line()),
+        None => line,
+    }
+}
+
 /// The first line of a thread: where it went when the host picked it, else its id.
 fn opened_thread(thread_id: &str, opened: Option<&Opened>, folder: Option<&str>) -> String {
     opened.map_or_else(|| fill(&turns().opened_thread, &[("thread", thread_id)]), |o| o.line(thread_id, folder))
@@ -1085,9 +1125,9 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     picks.wire(&mut start)?;
     let mut started = None;
     let answered = if detach == Some(true) {
-        begin_through(&host, client.clone(), &start)
-            .await
-            .map(|turn| Answer::text(opened_thread(&turn.thread_id, opened.as_ref(), turn.cwd.as_deref()), &turn_out(&turn)))
+        begin_through(&host, client.clone(), &start).await.map(|turn| {
+            Answer::text(held_line(opened_thread(&turn.thread_id, opened.as_ref(), turn.cwd.as_deref()), &turn), &turn_out(&turn))
+        })
     } else {
         match follow(&host, client.clone(), &start, &mut started).await {
             Ok(turn) => match turn_refusal(&turn) {
@@ -1136,7 +1176,7 @@ async fn send(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     picks.wire(&mut start)?;
     if detach == Some(true) {
         let turn = begin_through(&host, client, &start).await?;
-        return Ok(Answer::text(opened_thread(&turn.thread_id, None, None), &turn_out(&turn)));
+        return Ok(Answer::text(held_line(opened_thread(&turn.thread_id, None, None), &turn), &turn_out(&turn)));
     }
     let turn = follow(&host, client, &start, &mut None).await?;
     if let Some(refused) = turn_refusal(&turn) {

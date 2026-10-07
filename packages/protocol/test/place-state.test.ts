@@ -33,17 +33,19 @@ const spoo: PlaceView = { id: "p_1", kind: "computer", name: "spoo", default: fa
 const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, cap: { machines: 3, spendPerDayUsd: 10 }, running: 0 };
 
 describe("threads at once", () => {
-  it("reads one thread per 2.5 GB, rounded to the nearest, at least one and never more than the cores", () => {
+  it("reads one thread per 2 GB, rounded, at least one and never more than twice the cores, as the owner ruled", () => {
+    // A 16 GB Mac held six and stopped answering at eight; the owner keeps it at eight. A 4 GB box held two and lost every turn at three.
+    expect(threadsAtOnce({ cpu: 10, memMb: 16384 })).toBe(8);
+    expect(threadsAtOnce({ cpu: 2, memMb: 7782 })).toBe(4);
+    expect(threadsAtOnce({ cpu: 4, memMb: 8192 })).toBe(4);
     expect(threadsAtOnce({ cpu: 2, memMb: 4096 })).toBe(2);
-    expect(threadsAtOnce({ cpu: 4, memMb: 8192 })).toBe(3);
-    expect(threadsAtOnce({ cpu: 10, memMb: 16384 })).toBe(6);
-    expect(threadsAtOnce({ cpu: 2, memMb: 8192 })).toBe(2);
-    expect(threadsAtOnce({ cpu: 2, memMb: 7885 })).toBe(2);
+    expect(threadsAtOnce({ cpu: 1, memMb: 8192 })).toBe(2);
+    expect(threadsAtOnce({ cpu: 16, memMb: 65536 })).toBe(32);
     expect(threadsAtOnce({ cpu: 1, memMb: 1024 })).toBe(1);
   });
 
   it("gives a computer its rule's default off its shape, a cloud 3 machines and $10 a day, and a set number over either", () => {
-    expect(placeCapOf({ kind: "computer", shape: { cpu: 10, memMb: 16384 } })).toEqual({ threads: 6 });
+    expect(placeCapOf({ kind: "computer", shape: { cpu: 10, memMb: 16384 } })).toEqual({ threads: 8 });
     expect(placeCapOf({ kind: "computer" })).toBeUndefined();
     expect(placeCapOf({ kind: "computer" }, { threads: 1 })).toEqual({ threads: 1 });
     expect(placeCapOf({ kind: "computer", shape: { cpu: 2, memMb: 7885 } }, { threads: 1 })).toEqual({ threads: 1 });
@@ -175,6 +177,10 @@ describe("what runs on a place", () => {
 
   it("counts running threads on a computer and machines holding a slot on a cloud", () => {
     expect(runningOn(HERE_PLACE_ID, places, workspaces, threads)).toBe(2);
+    // A thread another thread started there runs in that one's slot, and the row still counts it: every agent there.
+    const tree = [...threads, { workspaceId: "w_mac", status: "running" as const, parentThreadId: "t_1" }, { workspaceId: "w_box", status: "running" as const, parentThreadId: "t_1" }];
+    expect(runningOn(HERE_PLACE_ID, places, workspaces, tree)).toBe(3);
+    expect(runningOn("p_1", places, workspaces, tree)).toBe(2);
     expect(runningOn("p_1", places, workspaces, threads)).toBe(1);
     // A napping machine and a gone one hold no slot; a waking one does.
     expect(runningOn("solari", places, workspaces, threads)).toBe(2);

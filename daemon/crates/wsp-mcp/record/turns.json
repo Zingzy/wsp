@@ -125,6 +125,7 @@
   "moved": "its worktree at {from} is gone, so it goes on in {to}",
   "movedFresh": "its worktree at {from} is gone, so it goes on in {to} in a fresh session of its agent",
   "openedThread": "thread {thread}",
+  "capWait": "waiting while {place} is running {running} of {threads}",
   "noResult": "turn ended without a result",
   "noThreadStamped": "the runtime stamped no thread on the session",
   "turnFailed": "turn {status}",

@@ -1,34 +1,41 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomUUID } from "node:crypto";
 import { landsBytes } from "@wsp/engine";
-import { type ReachState, type Caller, type WorkspaceStatus, threadWord, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, machineLacksLine, machineNeverAnswered, runsInFolder } from "@wsp/protocol";
+import { type ReachState, type Caller, type SessionView, type ThreadCapWait, type WorkspaceStatus, threadWord, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, machineLacksLine, machineNeverAnswered, runsInFolder } from "@wsp/protocol";
 import { type LiveWorkspace, DAEMON_REVIVE_AGAIN_MS, DAEMON_LACKS_AGAIN_MS } from "../types/wiring.js";
 import type { MachineMoment } from "../types/internal.js";
-import type { RuntimeContext, DaemonArea } from "../context.js";
+import type { RuntimeContext, DaemonArea, DetachedSend } from "../context.js";
 
 export function daemonArea(ctx: RuntimeContext): DaemonArea {
   const { bus, clock, daemonHelloTimeoutMs, live, sessions } = ctx;
   /** A message into a thread, or a thread opened with it, answered as soon as it is on its way, as `wsp send --detach`
-   * does: joined into the running turn, waiting behind it, or started. The turn goes on without the caller. */
+   * does: joined into the running turn, waiting behind it, started, or held for a slot on its computer. The turn goes on
+   * without the caller, so it is never run in the slot of a thread that asked for it. */
   const sendDetached = async (
     workspaceId: string,
     o: { prompt: string; thread?: string },
     origin: Caller | undefined,
-  ): Promise<{ outcome: "steered" | "queued" | "started"; threadId: string; harness: string }> => {
+  ): Promise<DetachedSend> => {
     const requestId = randomUUID();
     let queuedNow: ((harness: string) => void) | undefined;
     const queued = new Promise<{ queuedOn: string }>(resolve => {
       queuedNow = harness => resolve({ queuedOn: harness });
     });
+    let heldNow: ((held: { view: SessionView; wait: ThreadCapWait }) => void) | undefined;
+    const held = new Promise<{ held: { view: SessionView; wait: ThreadCapWait } }>(resolve => {
+      heldNow = h => resolve({ held: h });
+    });
     const off = bus.on("session.queued", e => {
       if (e.type === "session.queued" && e.requestId === requestId) queuedNow?.(e.harness);
     });
     try {
-      const started = ctx.sessionsApi.start(workspaceId, { ...o, requestId }, origin);
-      const first = await Promise.race([started, queued]);
-      if ("queuedOn" in first) {
+      const started = ctx.sessionsApi.start(workspaceId, { ...o, requestId, onHeld: h => heldNow?.(h) }, origin);
+      const first = await Promise.race([started, queued, held]);
+      if ("queuedOn" in first || "held" in first) {
         started.catch((e: unknown) => console.warn(`a message waiting in thread ${threadWord(o.thread ?? "")} was not sent: ${e instanceof Error ? e.message : String(e)}`));
-        return { outcome: "queued", threadId: o.thread!, harness: first.queuedOn };
+        if ("queuedOn" in first) return { outcome: "queued", threadId: o.thread!, harness: first.queuedOn };
+        const { view, wait } = first.held;
+        return { outcome: "held", threadId: view.threadId ?? view.id, harness: view.harness, capped: wait };
       }
       const view = first.view();
       return { outcome: first.outcome === "steered" ? "steered" : "started", threadId: view.threadId ?? view.id, harness: view.harness };

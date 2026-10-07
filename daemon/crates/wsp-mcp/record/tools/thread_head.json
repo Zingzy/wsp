@@ -178,6 +178,30 @@
             "setupRefusal": {
               "type": "string"
             },
+            "capped": {
+              "type": "object",
+              "properties": {
+                "placeId": {
+                  "type": "string"
+                },
+                "place": {
+                  "type": "string"
+                },
+                "running": {
+                  "type": "integer"
+                },
+                "atOnce": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "placeId",
+                "place",
+                "running",
+                "atOnce"
+              ],
+              "additionalProperties": false
+            },
             "limit": {
               "type": "object",
               "properties": {
@@ -660,6 +684,13 @@
                     "type": "boolean"
                   },
                   "reason": {
+                    "type": "string"
+                  },
+                  "unstarted": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "prompt": {
                     "type": "string"
                   }
                 },
@@ -1288,6 +1319,58 @@
                   "workspaceId",
                   "sessionId",
                   "text"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.capped"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "placeId": {
+                    "$ref": "#/properties/facts/properties/capped/properties/placeId"
+                  },
+                  "place": {
+                    "$ref": "#/properties/facts/properties/capped/properties/place"
+                  },
+                  "running": {
+                    "$ref": "#/properties/facts/properties/capped/properties/running"
+                  },
+                  "atOnce": {
+                    "$ref": "#/properties/facts/properties/capped/properties/atOnce"
+                  },
+                  "requestId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "placeId",
+                  "place",
+                  "running",
+                  "atOnce"
                 ],
                 "additionalProperties": false
               },
@@ -1636,6 +1719,30 @@
             "setupRefusal": {
               "type": "string"
             },
+            "capped": {
+              "type": "object",
+              "properties": {
+                "placeId": {
+                  "type": "string"
+                },
+                "place": {
+                  "type": "string"
+                },
+                "running": {
+                  "type": "integer"
+                },
+                "atOnce": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "placeId",
+                "place",
+                "running",
+                "atOnce"
+              ],
+              "additionalProperties": false
+            },
             "limit": {
               "type": "object",
               "properties": {
@@ -2118,6 +2225,13 @@
                     "type": "boolean"
                   },
                   "reason": {
+                    "type": "string"
+                  },
+                  "unstarted": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "prompt": {
                     "type": "string"
                   }
                 },
@@ -2746,6 +2860,58 @@
                   "workspaceId",
                   "sessionId",
                   "text"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.capped"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "placeId": {
+                    "$ref": "#/properties/facts/properties/capped/properties/placeId"
+                  },
+                  "place": {
+                    "$ref": "#/properties/facts/properties/capped/properties/place"
+                  },
+                  "running": {
+                    "$ref": "#/properties/facts/properties/capped/properties/running"
+                  },
+                  "atOnce": {
+                    "$ref": "#/properties/facts/properties/capped/properties/atOnce"
+                  },
+                  "requestId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "placeId",
+                  "place",
+                  "running",
+                  "atOnce"
                 ],
                 "additionalProperties": false
               },

@@ -595,8 +595,34 @@
               "enum": [
                 "started",
                 "steered",
-                "queued"
+                "queued",
+                "held"
               ]
+            },
+            "capped": {
+              "type": "object",
+              "properties": {
+                "placeId": {
+                  "type": "string"
+                },
+                "place": {
+                  "type": "string"
+                },
+                "running": {
+                  "type": "integer"
+                },
+                "atOnce": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "placeId",
+                "place",
+                "running",
+                "atOnce"
+              ],
+              "additionalProperties": false,
+              "description": "what holds the start back while outcome is held: the computer and what runs there against its threads at once"
             },
             "afterCut": {
               "type": "boolean",

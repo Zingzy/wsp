@@ -7,9 +7,10 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { installFakeLayout } from "./fake-layout.js";
 import type { EventUnion, HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
-import { QUESTION_TOOL, USAGE_WORDS, pickedOptionId, questionOptions } from "@wsp/protocol";
+import { QUESTION_TOOL, USAGE_WORDS, spawnCapRefusal, pickedOptionId, questionOptions } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
+import { useSettingsStore } from "../src/settings/settingsStore.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
 import type { ChatThreadHandle } from "../src/components/chat/useChatThread.js";
@@ -571,6 +572,50 @@ describe("ChatView", () => {
     emit({ type: "session.permission.closed", workspaceId: "ws_other", sessionId: "sess_target", turnId: "turn_target", threadId: "thr_target", at: T0 + 900, askId: "ask_target", outcome: "allowed", optionId: "allow" });
     await waitFor(() => expect(document.querySelector('[data-permission-prompt="ask_target"]')).toBeNull());
     expect(document.body.textContent).toContain("Working for");
+  });
+
+  it("a turn its computer's threads at once holds back says what holds it at the transcript's end, with the setting that lets it start, and works once it starts", async () => {
+    const sc = { workspaceId: WS, sessionId: "turn_held", turnId: "turn_held", threadId: "thr_held" };
+    const capped = { placeId: "p_hetzner", place: "hetzner", running: 2, atOnce: 2 };
+    const history: SessionEvent[] = [{ type: "session.capped", ...sc, at: T0, ...capped }];
+    const held: SessionView = { id: "turn_held", workspaceId: WS, harness: "claude", status: "running", threadId: "thr_held", prompt: "fix the build", capped };
+    const rows: SessionView[] = [held];
+    const { api, emit } = fixtureApi([workspace], { [WS]: history }, rows);
+    useSettingsStore.getState().go({ kind: "group", group: "general" });
+    await setup(api);
+
+    const line = await screen.findByText("waiting while hetzner is running 2 of 2 threads");
+    const row = line.closest<HTMLElement>("[data-machine-wait]")!;
+    expect(row).not.toBeNull();
+    expect(document.body.textContent).not.toContain("Working for");
+    fireEvent.click(within(row).getByRole("button", { name: "Raise threads at once" }));
+    expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "p_hetzner" });
+    expect(useStore.getState().settingsOpen).toBe(true);
+
+    // The runtime takes the hold off the row as the turn starts, and the line goes with it.
+    rows[0] = { ...held, capped: undefined };
+    emit({ type: "session.start", ...sc, at: T0 + 60_000, model: "claude-sonnet-5", prompt: "fix the build" });
+    await screen.findByText(/Working for/);
+    expect(screen.queryByText(/^waiting while hetzner/)).toBeNull();
+    act(() => useStore.setState({ settingsOpen: false }));
+  });
+
+  it("a sub-thread a cap refused reads on its lead's transcript as the refusal, whole, with no click", async () => {
+    const sc = { workspaceId: WS, sessionId: "turn_lead", turnId: "turn_lead", threadId: "thr_lead" };
+    const refusal = spawnCapRefusal("1a2b3c4d-0000", 3, 3);
+    const history: SessionEvent[] = [
+      { type: "session.start", ...sc, at: T0, prompt: "split the work" },
+      { type: "session.delta", ...sc, at: T0 + 1, kind: "tool_use", toolName: "mcp__wsp__fork", toolUseId: "call_1", text: JSON.stringify({ workspace: "site", task: "build it" }) },
+      { type: "session.delta", ...sc, at: T0 + 2, kind: "tool_result", toolUseId: "call_1", isError: true, text: refusal },
+      { type: "session.delta", ...sc, at: T0 + 3, kind: "text", text: "The fork was refused." },
+      { type: "session.done", ...sc, at: T0 + 4, result: { status: "completed", text: "The fork was refused." } },
+      { type: "session.end", ...sc, at: T0 + 5, exitCode: 0, sawResult: true },
+    ];
+    const rows: SessionView[] = [{ id: "turn_lead", workspaceId: WS, harness: "claude", status: "completed", threadId: "thr_lead", prompt: "split the work" }];
+    const { api } = fixtureApi([workspace], { [WS]: history }, rows);
+    await setup(api);
+    await screen.findByText("The fork was refused.");
+    expect(await screen.findByText(refusal, { exact: false })).toBeDefined();
   });
 
   it("relays a permission prompt as its own row, answers it from the chat, and closes the row on the runtime's event", async () => {

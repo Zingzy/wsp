@@ -51,6 +51,17 @@ export const ThreadWaitingOn = z.object({
 });
 export type ThreadWaitingOn = z.infer<typeof ThreadWaitingOn>;
 
+/** A turn a computer's threads at once holds back: the computer by its id and its name, and what runs there against
+ * its cap as the turn last looked. Read off the live wait and never written down, as waitingOn is, so a host that
+ * restarts holds no turn waiting on a slot it no longer counts. */
+export const ThreadCapWait = z.object({
+  placeId: z.string(),
+  place: z.string(),
+  running: z.number().int(),
+  atOnce: z.number().int(),
+});
+export type ThreadCapWait = z.infer<typeof ThreadCapWait>;
+
 /** The sidebar's sections a thread's own state files it under; Pinned is a mark of its own and the Settled fold is
  * the settle, so neither is a place a thread is dragged to by this. */
 export const ThreadSection = z.enum(["needs-you", "working", "done", "idle"]);
@@ -160,6 +171,8 @@ export const SessionView = z.object({
    * read leading out of that computer's home, onto it, or into wsp's own. Rides the answer and never the row, as
    * waitingOn does. */
   setupRefusal: z.string().optional(),
+  /** The computer's threads at once this turn waits on before it starts; absent on every turn that is not held. */
+  capped: ThreadCapWait.optional(),
   /** The process this turn leads on the computer the host runs on, where the turn runs there: the pid the Processes
    * pane heads this thread's tree with. Absent on a turn running on another machine, whose pids are not this
    * computer's, and on a turn that is over. It is never written down: a pid outlives nothing, and the computer is
@@ -225,6 +238,8 @@ export const ThreadView = z.object({
   waitingOn: ThreadWaitingOn.optional(),
   /** Why the latest turn's agent cannot start or read its own store there now, as SessionView.setupRefusal carries it. */
   setupRefusal: z.string().optional(),
+  /** The cap the latest turn waits on before it starts, as SessionView.capped carries it. */
+  capped: ThreadCapWait.optional(),
   /** The usage limit that stopped the latest turn, and the reset it is armed to go on at, as SessionView carries them. */
   limit: TurnLimit.optional(),
   resumeAt: z.number().optional(),
@@ -294,6 +309,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.asking !== undefined ? { asking: latest.asking } : {}),
       ...(latest.waitingOn !== undefined ? { waitingOn: latest.waitingOn } : {}),
       ...(latest.setupRefusal !== undefined ? { setupRefusal: latest.setupRefusal } : {}),
+      ...(latest.capped !== undefined ? { capped: latest.capped } : {}),
       ...(latest.limit !== undefined ? { limit: latest.limit } : {}),
       ...(latest.resumeAt !== undefined ? { resumeAt: latest.resumeAt } : {}),
       ...(latest.pid !== undefined ? { pid: latest.pid } : {}),

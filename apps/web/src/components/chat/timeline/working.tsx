@@ -24,9 +24,9 @@ export function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
             </span>
           </>
         ) : null}
-        {machineWait.onWake !== null ? (
-          <Button size="xs" variant="outline" onClick={machineWait.onWake}>
-            Wake
+        {machineWait.act !== null ? (
+          <Button size="xs" variant="outline" data-wait-act onClick={machineWait.act.run}>
+            {machineWait.act.label}
           </Button>
         ) : null}
       </TimelineRuleLine>

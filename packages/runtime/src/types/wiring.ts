@@ -427,7 +427,7 @@ export interface SessionHandle {
   /** The runtime's id for the turn, as its events carry it. */
   readonly turnId: string;
   /** How the start that handed this out went: steered means the handle is the thread's running turn, not a new one. */
-  readonly outcome: SessionStartOutcome;
+  readonly outcome: Exclude<SessionStartOutcome, "held">;
   view(): SessionView;
   interrupt(): Promise<void>;
   steer?(prompt: string): Promise<"accepted" | "not-running">;

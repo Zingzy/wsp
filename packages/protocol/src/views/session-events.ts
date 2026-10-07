@@ -6,7 +6,7 @@ import { AttachmentRecord } from "../attachments.js";
 import { TurnLimit, UsageTokens } from "../usage.js";
 import { SessionSlateEvent } from "../slate/wire.js";
 import { permissionPrompt } from "../wire/helpers.js";
-import { PermissionOutcome, SessionOrigin, SubagentState, TurnRefusal } from "./session.js";
+import { PermissionOutcome, SessionOrigin, SubagentState, ThreadCapWait, TurnRefusal } from "./session.js";
 
 // --- session events (the wire form of adapter-port.ts's AdapterEvent) ------
 
@@ -170,6 +170,11 @@ export const SessionEndEvent = z.object({
   sawResult: z.boolean(),
   /** Set when the runtime ended the session itself (a nap, a delete, a machine gone at the provider) rather than the harness exiting. */
   reason: z.string().optional(),
+  /** Set on the end of a turn its computer's threads at once held and that never launched: no agent ran, so the
+   * thread's session was not cut. */
+  unstarted: z.literal(true).optional(),
+  /** On an unstarted end, the words the turn was sent, which no session.start recorded. */
+  prompt: z.string().optional(),
 });
 
 /** A message the person sent into the turn while it ran; stamped by the runtime once the harness took it, so a
@@ -440,6 +445,18 @@ export const SessionBehindEvent = z.object({
 });
 export type SessionBehindEvent = z.infer<typeof SessionBehindEvent>;
 
+/** A start found its computer running as many threads as it takes at once and holds its turn until one ends or the
+ * person raises the number: written once as the wait begins, so the thread's transcript and whoever reads it say why
+ * nothing has started. The turn it names starts on its own when a slot frees. */
+export const SessionCappedEvent = z.object({
+  type: z.literal("session.capped"),
+  ...sessionScope,
+  ...ThreadCapWait.shape,
+  /** The id the client minted for the sessions.start that waits. */
+  requestId: z.string().optional(),
+});
+export type SessionCappedEvent = z.infer<typeof SessionCappedEvent>;
+
 /** Where a reply's block run stands: running in its own pty, exited with its code and output, moved to a terminal
  * tab still running, or lost, its pty gone before anybody saw it end. */
 export const RunState = z.enum(["running", "exited", "moved", "lost"]);
@@ -492,6 +509,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionRunEvent,
   SessionMovedEvent,
   SessionBehindEvent,
+  SessionCappedEvent,
   SessionSubagentEvent,
   SessionSlateEvent,
 ]);

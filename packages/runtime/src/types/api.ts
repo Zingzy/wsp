@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { GoldenDelta, ExecResult, GoldenManifest, GoldenVersion, MachineBackend, MachineKind, RetentionPlan, SnapshotRow, TemplateRow } from "@wsp/engine";
-import type { AgentsReport, AgentsSignInEvent, AgentsTarget, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
+import type { ThreadCapWait, AgentsReport, AgentsSignInEvent, AgentsTarget, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
   Capabilities,
   DaemonReachView,
@@ -387,6 +387,15 @@ export interface Runtime {
         behind?: string;
         /** Set by Resume at reset alone: the reset this turn goes on at, stamped on its session.start. */
         afterLimit?: number;
+        /** Set by a child's finished line into its lead alone: no computer's threads at once holds it, since it is
+         * how a tree waiting on its children moves. */
+        wakesLead?: true;
+        /** Called once, as its computer's threads at once first holds the turn back, with the row it waits on: a
+         * caller that answers a held start at once reads it here, and the start goes on to its launch. */
+        onHeld?: (held: { view: SessionView; turnId: string; wait: ThreadCapWait }) => void;
+        /** The thread this request came out of follows the turn to its end, so the turn runs in that thread's slot. A
+         * start with no onHeld is followed whatever this says, since its caller waits for the launch. */
+        followed?: boolean;
       },
       origin?: Caller,
     ): Promise<SessionHandle>;

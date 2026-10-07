@@ -52,6 +52,18 @@ describe("a thread's messages", () => {
     ]);
   });
 
+  it("reads a turn that never started as a turn of its own, with the words it was sent, after a turn that replied", () => {
+    const events: SessionEvent[] = [
+      ...turn("build it", "built it"),
+      { type: "session.capped", ...SCOPE, turnId: "u2", at: AT + 6_000, placeId: "here", place: "hetzner", running: 1, atOnce: 1 },
+      { type: "session.end", ...SCOPE, turnId: "u2", at: AT + 9_000, exitCode: null, sawResult: false, reason: "the host restarted", unstarted: true, prompt: "and the tests" },
+    ];
+    expect(threadMessages(events, "t1").slice(-2)).toEqual([
+      { who: "person", at: AT + 9_000, text: "and the tests" },
+      { who: "turn", at: AT + 9_000, text: "failed: the host restarted" },
+    ]);
+  });
+
   it("reads the harness's two messages as two rows: the reply given while a background command ran and the one it was woken for", () => {
     const rows = threadMessages(
       [

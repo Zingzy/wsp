@@ -4,7 +4,7 @@ import {
   AGENT_KEEP_MS, AGENTS_KEPT, type PermissionAsk, type SessionRenameWrite, type SessionView, type TurnResult,
   type Caller, ThreadScope, WorkspaceOrigin, GitDiffReply, GitWorktreesReply, repoPathOf, worktreeOf, foldThreads, threadWord, threadsFollowed, scopeOf,
   type ThreadWaitingOn, isLocalWorkspace, NO_SUCH_TURN, NOTIFY_ME, notifyLine, runsInFolder, DEVICE_OPS, sendRefusal,
-  workspaceState, HERE_PLACE_ID,
+  workspaceState, HERE_PLACE_ID, runningOn as runningOnPlace, type ThreadCapWait,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { PLAN_RESETS, secretsOf } from "../adapters.js";
@@ -12,9 +12,9 @@ import { accountOf, accountOnComputer, resetDetailsDue, type Vaulted } from "../
 import type { WorkspaceRecord, LiveWorkspace, SessionHandle } from "../types/wiring.js";
 import {
   RESTARTED_REASON, NOTIFY_OWED, readRoad, readScope, noCheckpointLogLine, type Taken, type TurnLive, type KeptProcess, type KeptLaunch, launchesAs,
-  stampSessionFile, sameSessionFile, DaemonRefusal, type LiveSession,
+  stampSessionFile, sameSessionFile, DaemonRefusal, type LiveSession, HELD_STARTS, type HeldStartRecord,
 } from "../types/internal.js";
-import type { RuntimeContext, ThreadsArea } from "../context.js";
+import type { CapHeld, RuntimeContext, ThreadsArea } from "../context.js";
 
 /** A child's finished line into one thread, as the store keeps it until that thread takes it. */
 type Owed = { id: string; from: string; notify: string; text: string; by?: ThreadScope; road?: WorkspaceOrigin };
@@ -191,6 +191,153 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
    * for as long as it stands open. */
   const leadAsks = new Map<string, PermissionAsk>();
 
+  /** Every turn held for its launch that its computer's threads at once has not let through yet, by turn id: the
+   * computer it runs on, the running turns that wait on it and so lend it a slot, the order it came in, which is the
+   * order those turns start in, a stop that reached it, and once it waits on a slot, what its row says and the two
+   * ways the wait ends, a look again or a stop. Written down while it waits, so a host that restarts under it ends it
+   * rather than leaving its caller waiting on a turn nobody holds. */
+  const capHeld = new Map<string, CapHeld>();
+  let capOrder = 0;
+  let heldWrites: Promise<unknown> = Promise.resolve();
+  const heldWrite = (write: () => Promise<void>): void => {
+    heldWrites = heldWrites.then(write).catch((e: unknown) => console.warn(`a held start was not written down: ${e instanceof Error ? e.message : String(e)}`));
+  };
+
+  /** Each running turn that runs in another turn's slot, by turn id, with the turn whose slot it is. A turn in the
+   * slot of one that ends holds a slot of its own from then: the turn that lent to the one that ended was following it
+   * and works again, so two working agents never count as one. */
+  const borrowed = new Map<string, string>();
+  bus.on("*", e => {
+    if (e.type !== "session.end" || e.turnId === undefined) return;
+    borrowed.delete(e.turnId);
+    for (const [turn, lender] of borrowed) if (lender === e.turnId) borrowed.delete(turn);
+  });
+
+  /** A start holds its thread: from here until it is let through it counts as no thread running and stands in line. */
+  const capHold = (record: WorkspaceRecord, turnId: string, lender: string | undefined): void => {
+    if (!capHeld.has(turnId)) capHeld.set(turnId, { placeId: ctx.placeIdOf(record), lenders: lender !== undefined ? [lender] : [], order: capOrder++ });
+  };
+
+  /** A running turn follows a thread whose next turn to run is held: that held turn may run in the follower's slot too,
+   * since the follower works no more until it is through, and looks again now. */
+  const capLend = (turnId: string, lender: string): void => {
+    const held = capHeld.get(turnId);
+    if (held === undefined || held.lenders.includes(lender)) return;
+    held.lenders.push(lender);
+    held.waiting?.wake();
+  };
+
+  /** What holds a turn on this workspace back now: its computer's threads at once, met by the slots its running
+   * threads hold, and the turns there that came before this one and are not through yet. A turn a running turn there
+   * follows to its end runs in that turn's slot, one at a time, since the follower works no more until it ends; so a
+   * chain of follows never waits on itself, and every other turn, a child started detached included, takes a slot of
+   * its own. Nothing where there is room, and nothing on a cloud, whose cap counts machines. Synchronous, so a start
+   * let through is counted before anything else looks. */
+  const capFull = (record: WorkspaceRecord, turnId: string): ThreadCapWait | undefined => {
+    const placeId = ctx.placeIdOf(record);
+    const atOnce = placeId === undefined ? undefined : ctx.placeDoor?.threadsAt(placeId);
+    const mine = capHeld.get(turnId);
+    if (placeId === undefined || atOnce === undefined || mine === undefined) return undefined;
+    const rows = [{ id: HERE_PLACE_ID, kind: "computer" as const }, ...(placeId === HERE_PLACE_ID ? [] : [{ id: placeId, kind: "computer" as const }])];
+    const standing = [...live.values()].map(e => ({ ...e.record, provider: ctx.providerOf(e.record) }));
+    const others = foldThreads([...sessions.values()].filter(s => s.turnId !== turnId && !capHeld.has(s.turnId)).map(s => s.view));
+    const here = others.filter(t => runningOnPlace(placeId, rows, standing, [t]) > 0);
+    const onHere = new Set(here.map(t => t.threadId ?? t.id));
+    const runningHere = new Set([...sessions.values()].filter(s => s.view.status === "running" && s.view.threadId !== undefined && onHere.has(s.view.threadId)).map(s => s.turnId));
+    const runsHere = (turn: string): boolean => runningHere.has(turn);
+    const lent = [...borrowed].filter(([turn, lender]) => runsHere(turn) && runsHere(lender));
+    const lender = mine.lenders.find(l => runsHere(l) && !lent.some(([, other]) => other === l));
+    if (lender !== undefined) {
+      borrowed.set(turnId, lender);
+      return undefined;
+    }
+    const ahead = [...capHeld.entries()].filter(([id, h]) => id !== turnId && h.placeId === placeId && h.order < mine.order).length;
+    return here.length - lent.length + ahead < atOnce ? undefined : { placeId, place: ctx.placeDoor!.nameOf(placeId), running: here.length, atOnce };
+  };
+
+  /** Holds a turn until a turn ends anywhere, a computer's settings change, a workspace is deleted or a held turn
+   * leaves, any of which may free its slot or move the count its row says, so the caller looks again; said into the
+   * thread's transcript as the wait begins and again whenever the count it says moved. Its machine is held awake
+   * meanwhile, as a running turn holds it, so it is there to start on. Rejects with the stop's reason when the turn
+   * is stopped, whether the stop came while it waited or before. */
+  const capWait = (at: { workspaceId: string; threadId: string; turnId: string; sessionId: string; requestId?: string }, wait: ThreadCapWait): Promise<void> => {
+    const held = capHeld.get(at.turnId) ?? { placeId: wait.placeId, lenders: [], order: capOrder++ };
+    capHeld.set(at.turnId, held);
+    if (held.stopped !== undefined) return Promise.reject(new Error(held.stopped));
+    const said = held.waiting?.wait;
+    const moved = said === undefined || said.running !== wait.running || said.atOnce !== wait.atOnce || said.place !== wait.place;
+    if (held.waiting === undefined) {
+      const row = sessions.get(at.turnId);
+      const written: HeldStartRecord = {
+        workspaceId: at.workspaceId, threadId: at.threadId, turnId: at.turnId, sessionId: at.sessionId, harness: row?.view.harness ?? "", place: wait.place,
+        ...(row?.view.prompt !== undefined ? { prompt: row.view.prompt } : {}),
+        ...(row?.notify !== undefined ? { notify: row.notify } : {}), ...(row?.notifyBy !== undefined ? { notifyBy: row.notifyBy } : {}), ...(row?.notifyRoad !== undefined ? { notifyRoad: row.notifyRoad } : {}),
+      };
+      heldWrite(() => ctx.store.put(HELD_STARTS, at.turnId, written));
+    }
+    ctx.idle.hold(at.workspaceId);
+    return new Promise<void>((resolve, reject) => {
+      let over = false;
+      const end = (): void => {
+        over = true;
+        done();
+        ctx.idle.release(at.workspaceId);
+      };
+      const wake = (): void => {
+        if (over) return;
+        end();
+        resolve();
+      };
+      const done = bus.on("*", e => {
+        if (e.type === "session.end" || e.type === "place.changed" || e.type === "workspace.deleted") wake();
+      });
+      held.waiting = {
+        wait,
+        wake,
+        stop: reason => {
+          if (over) return;
+          end();
+          reject(new Error(reason));
+        },
+      };
+      if (moved) ctx.record({ type: "session.capped", workspaceId: at.workspaceId, sessionId: at.sessionId, turnId: at.turnId, threadId: at.threadId, ...wait, ...(at.requestId !== undefined ? { requestId: at.requestId } : {}) });
+    });
+  };
+
+  /** Stops a held turn wherever it is between its hold and its launch: a wait it is in ends now, and a look it has not
+   * made yet reads the mark and gives up, so a stop that lands between a wake and the next look is never lost. */
+  const capStop = (turnId: string, reason: string): boolean => {
+    const held = capHeld.get(turnId);
+    if (held === undefined) return false;
+    held.stopped = reason;
+    held.waiting?.stop(reason);
+    return true;
+  };
+
+  /** A stop on a turn is being read: until it is let go, the turn's next look waits for it, so a slot freeing while
+   * the stop is still asking whether it may cannot let the turn through first. */
+  const capStopping = (turnId: string): (() => void) => {
+    const held = capHeld.get(turnId);
+    if (held === undefined) return () => {};
+    let done!: () => void;
+    const asking = new Promise<void>(r => (done = r));
+    (held.stops ??= new Set()).add(asking);
+    return () => {
+      held.stops?.delete(asking);
+      done();
+    };
+  };
+
+  /** A turn is let through or given up: every turn still waiting looks again, since its place in line or the count
+   * its row says just moved. */
+  const capLeft = (turnId: string): void => {
+    const held = capHeld.get(turnId);
+    if (held === undefined) return;
+    capHeld.delete(turnId);
+    if (held.waiting !== undefined) heldWrite(() => ctx.store.delete(HELD_STARTS, turnId));
+    for (const other of [...capHeld.values()]) other.waiting?.wake();
+  };
+
   /** The thread one running turn's calls are stopped behind, when one of them is a wsp call that follows another
    * thread to the end of its turn and that thread has an open prompt. A call that opened its own thread is behind
    * the whole tree under the caller, so a chain of agents waiting on each other names the one question at the
@@ -312,7 +459,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     // what every row written before the road rode beside the targets holds.
     const asWho: Caller | undefined = by === undefined ? road : { origin: road ?? "here", by };
     // A start answers once the line steered the running turn or launched one of its own, which is when it is taken.
-    ctx.sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: "agent" }, asWho).then(() => owedTaken(line), (e: unknown) => {
+    ctx.sessionsApi.start(parent.workspaceId, { prompt: text, harness: parent.harness, thread: notify, startedBy: "agent", wakesLead: true }, asWho).then(() => owedTaken(line), (e: unknown) => {
       // A line queued behind the parent's turn meets the nap that ended that turn: it waits for the wake as well.
       if (holdForWake()) return;
       console.warn(`thread ${from.slice(0, 8)} ended, but its line did not reach thread ${notify.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
@@ -557,7 +704,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
   };
   return {
     threadRuns, launchingOn, runningOn, latestOn, keptAgents, reapKept, endKept, hostWrites, writeSession, takeKept,
-    holdKept, threadOfToken, treeUnder, drivesThread, leadAsks, stoppedBehind, stopUnder, notifyOn, notifyReach, tellAs,
+    holdKept, threadOfToken, treeUnder, drivesThread, leadAsks, capHeld, capHold, capLend, capFull, capWait, capStop, capStopping, capLeft, stoppedBehind, stopUnder, notifyOn, notifyReach, tellAs,
     notifyEnd, deliverOwed, settleCut, notARepo, checkpointsLanding, keepCheckpoint, takenTurn, recordSteer, snapshotOf,
     readTurnChanges, usageComputerOf, vaultedFor, usageAccountOf, limitDetailsDue,
   };

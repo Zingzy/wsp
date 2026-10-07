@@ -79,7 +79,7 @@ import { PaperclipIcon } from "lucide-react";
 import { ASIDE_NO_SESSION_LINE, composerHeldLine, HERE_PLACE_ID, hereName, HOST_ASLEEP_SEND, isLocalWorkspace, signedOutLine, type AgentsTarget, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
-import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { useComputerName } from "../../sidebar/workspaceRows";
 import { useThreadFolder, useThreadStart } from "../../files/root";
 import { useDaemonWire } from "../../files/wire";
@@ -90,6 +90,7 @@ import { addNotice } from "../../notices/store";
 import { collapseExpandedComposerCursor, detectComposerTrigger, enterSends, expandCollapsedComposerCursor, insertComposerBlock, isCollapsedCursorAdjacentToInlineToken, replaceTextRange } from "../../composer-logic";
 import { hostItemText, serializeComposerMention, splitPromptIntoComposerSegments } from "../../composer-editor-mentions";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
+import type { TurnSummary } from "../../adapt/index.js";
 import { asideQuestion, catalogFromHarness, COMPOSER_PLACEHOLDER_SHORT, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
 import { useAsideStore } from "./asideStore";
 import { opensThread, ComposerCheckoutRow, HomeCheckoutRow, ROW_ITEM_CLASS } from "./ComposerCheckoutRow";
@@ -375,7 +376,11 @@ export function ChatComposer({
   // thread's folder, which every agent reads.
   const readsImage = readsImages(harnessCatalog);
 
-  const runningTurn = thread.view.running ? thread.view.latestTurn : null;
+  // A turn its computer's threads at once holds back has no start in the transcript yet: its row is the turn a stop
+  // ends before it starts, and there is nothing in it to steer.
+  const lastRow = useThreadSessions(workspaceId, thread.threadKey).at(-1);
+  const heldRow = !thread.view.running && lastRow?.status === "running" && lastRow.capped !== undefined ? lastRow : null;
+  const runningTurn: Pick<TurnSummary, "turnId" | "sessionId"> | null = thread.view.running ? thread.view.latestTurn : heldRow === null ? null : { turnId: heldRow.id, sessionId: heldRow.id };
   // The runtime keys sessions.interrupt by its own session id; the events carry the harness id, which differs after a
   // resume, so the row from sessions.list maps one to the other. Without a row the events' id goes, and the runtime answers.
   const stopTarget = useMemo(() => {
@@ -403,7 +408,7 @@ export function ChatComposer({
   const stopPending = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId;
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
   // The catalog answers before the click: a harness that steers takes the row into the turn, any other queues it.
-  const canSteer = canStop && harnessCatalog?.steers === true && api?.steerSession !== undefined;
+  const canSteer = canStop && heldRow === null && harnessCatalog?.steers === true && api?.steerSession !== undefined;
   // The draft holds the collapsed caret, where a chip is one place; a trigger reads the text as sent. A caret beside a
   // chip opens nothing, so a chip's own text never reads as a token being typed.
   const candidate = useMemo(() => {

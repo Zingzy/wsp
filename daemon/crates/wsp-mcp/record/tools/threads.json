@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "threads",
-    "description": "Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one. subagents lists the agent's own subagents of every turn (id, title, state running, done, failed or stopped); stop takes one of them alone by its id.",
+    "description": "Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. capped is on a thread waiting for a slot on its computer: the computer and what runs there against its threads at once; it starts on its own when one frees. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one. subagents lists the agent's own subagents of every turn (id, title, state running, done, failed or stopped); stop takes one of them alone by its id.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -176,6 +176,30 @@
               },
               "setupRefusal": {
                 "type": "string"
+              },
+              "capped": {
+                "type": "object",
+                "properties": {
+                  "placeId": {
+                    "type": "string"
+                  },
+                  "place": {
+                    "type": "string"
+                  },
+                  "running": {
+                    "type": "integer"
+                  },
+                  "atOnce": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "placeId",
+                  "place",
+                  "running",
+                  "atOnce"
+                ],
+                "additionalProperties": false
               },
               "limit": {
                 "type": "object",
@@ -331,7 +355,7 @@
   },
   "cloudOn": {
     "name": "threads",
-    "description": "Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one. subagents lists the agent's own subagents of every turn (id, title, state running, done, failed or stopped); stop takes one of them alone by its id.",
+    "description": "Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. capped is on a thread waiting for a slot on its computer: the computer and what runs there against its threads at once; it starts on its own when one frees. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one. subagents lists the agent's own subagents of every turn (id, title, state running, done, failed or stopped); stop takes one of them alone by its id.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -506,6 +530,30 @@
               },
               "setupRefusal": {
                 "type": "string"
+              },
+              "capped": {
+                "type": "object",
+                "properties": {
+                  "placeId": {
+                    "type": "string"
+                  },
+                  "place": {
+                    "type": "string"
+                  },
+                  "running": {
+                    "type": "integer"
+                  },
+                  "atOnce": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "placeId",
+                  "place",
+                  "running",
+                  "atOnce"
+                ],
+                "additionalProperties": false
               },
               "limit": {
                 "type": "object",

@@ -1353,6 +1353,20 @@ describe("composer while the workspace is not live", () => {
   });
 });
 
+describe("a turn its computer's threads at once holds back", () => {
+  it("offers stop on the open thread, and the stop goes to the held turn, which never started", async () => {
+    const sc = { workspaceId: WS, sessionId: "turn_held", turnId: "turn_held", threadId: "thr_held" };
+    const capped = { placeId: "p_hetzner", place: "hetzner", running: 2, atOnce: 2 };
+    const held: SessionView = { id: "turn_held", workspaceId: WS, harness: "claude", status: "running", threadId: "thr_held", prompt: "fix the build", capped };
+    const { api, interrupted } = fixtureApi([workspace], { [WS]: [{ type: "session.capped", ...sc, at: Date.now(), ...capped }] }, [], { listSessions: async () => [held] });
+    await setup(api);
+    await screen.findByText("waiting while hetzner is running 2 of 2 threads");
+    const stop = await screen.findByRole("button", { name: "Stop generation" });
+    fireEvent.click(stop);
+    await waitFor(() => expect(interrupted).toEqual(["turn_held"]));
+  });
+});
+
 describe("a new thread while another thread of the workspace works", () => {
   const a = { workspaceId: WS, sessionId: "sess_a", turnId: "turn_a", threadId: "thr_a" };
   const WORKING: SessionEvent[] = [

@@ -7,7 +7,7 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import { AFTER_CUT_LINE, LIMIT_WORDS, NOTIFY_ME, compactedLine, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
+import { AFTER_CUT_LINE, LIMIT_WORDS, NOTIFY_ME, compactedLine, spawnsThread, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
   PermissionPrompt,
@@ -53,6 +53,8 @@ type SessionDelta = Extract<SessionEvent, { type: "session.delta" }>;
 
 interface ToolCall {
   readonly entryIndex: number;
+  /** The tool's own name as the harness spelled it, absent where the call never named one. */
+  readonly name?: string;
   input: string;
   /** What the call itself answered, once it really has, read by the fold that opens later so a subagent's life is
    * keyed off the call whatever order the frames arrive in. The harness's own note to the agent is not an answer:
@@ -507,6 +509,7 @@ export function createSessionFold(): SessionFold {
         return;
       case "session.moved":
       case "session.behind":
+      case "session.capped":
       case "session.subagent":
         return;
       case "session.slate": {
@@ -658,7 +661,7 @@ export function createSessionFold(): SessionFold {
         };
         const index = addWork(t, { ...base, ...facts }, at);
         const registryKey = e.toolUseId ?? `anon:${index}`;
-        t.tools.set(registryKey, { entryIndex: index, input: e.text });
+        t.tools.set(registryKey, { entryIndex: index, ...(e.toolName !== undefined ? { name: e.toolName } : {}), input: e.text });
         if (e.toolUseId === undefined) t.openAnonymousTool = index;
         return;
       }
@@ -680,6 +683,15 @@ export function createSessionFold(): SessionFold {
         }
         const failed = e.isError === true || entry.toolLifecycleStatus === "failed";
         if (!note) call.answered = { at, failed };
+        // A thread or a machine the lead asked for and was refused, by a cap or any other refusal, is the lead's to read
+        // and the person's to see: the refusal stands as an error row, whole, where a folded call would hide it.
+        const refused = e.isError === true && call.name !== undefined && spawnsThread(call.name) ? compactLines(e.text)[0] : undefined;
+        if (refused !== undefined) {
+          const row: WorkLogEntry = { id: entry.id, turnId: entry.turnId, createdAt: entry.createdAt, label: refused, tone: "error", toolLifecycleStatus: "failed", sourceActivityKind: "tool.completed", ...(entry.toolCallId !== undefined ? { toolCallId: entry.toolCallId } : {}) };
+          replace(call.entryIndex, workEntry(row, timeline[call.entryIndex]!.createdAt));
+          if (e.toolUseId === undefined) t.openAnonymousTool = null;
+          return;
+        }
         replace(call.entryIndex, workEntry({
           ...entry,
           toolLifecycleStatus: failed ? "failed" : "completed",

@@ -12,7 +12,7 @@
 import type { ComponentProps, DragEvent, MouseEvent, ReactNode } from "react";
 import { AlarmClockIcon, FileDiffIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
 import { agentName } from "@wsp/catalog";
-import type { PlaceView } from "@wsp/protocol";
+import { capRunningLine, type PlaceView, type ThreadCapWait } from "@wsp/protocol";
 import { THREAD_WORDS, WORKSPACE_WORDS } from "../actions/format.js";
 import type { Launch, SidebarThreadSnapshot } from "../adapt/index.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
@@ -31,7 +31,7 @@ import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { tileCardLines, tilePrIcon, type TileCardLine } from "./tileCard.js";
 import type { TileCheckout } from "./tileCheckout.js";
-import { SNOOZE_WORDS } from "./words.js";
+import { CAP_WAIT_WORDS, SNOOZE_WORDS } from "./words.js";
 import { LINK_DOWN_WORDS } from "../adapt/terminal-pane.js";
 import { ONE_LINE_ROW_CLASS, TILE_CLASS, TILE_ROW_ONE_CLASS, TILE_ROW_TWO_CLASS, TILE_TITLE_CLASS, threadRowId } from "./rowGrammar.js";
 
@@ -152,6 +152,9 @@ const NameBox = ({ name, label, saving, onRename, onCancel }: { name: string; la
 
 const NO_CHECKOUT: TileCheckout = { branch: "", counts: [] };
 
+/** A held thread's reason and the setting that ends its wait, the card's lines while its computer holds it back. */
+const capNotes = (capped: ThreadCapWait | undefined): string[] => (capped === undefined ? [] : [capRunningLine(capped), CAP_WAIT_WORDS.raise(capped.place)]);
+
 export function ThreadTile({
   thread,
   place,
@@ -219,7 +222,7 @@ export function ThreadTile({
     model,
     pr: checkout.pr,
     changed: checkout.changed,
-    notes: [snoozed ? SNOOZE_WORDS.workingHover(snoozedWorking) : thread.asking, thread.setupRefusal ?? null, ...checkout.counts, checkout.why ?? null],
+    notes: [snoozed ? SNOOZE_WORDS.workingHover(snoozedWorking) : thread.asking, ...capNotes(thread.capped), thread.setupRefusal ?? null, ...checkout.counts, checkout.why ?? null],
   });
   // An agent the host refuses to start there says so in the slot, over a resting or failed thread's own status.
   const setupRefused = thread.setupRefusal !== undefined && (status === RESTING || status.id === FAILED.id) ? thread.setupRefusal : undefined;

@@ -12,7 +12,7 @@ import { cli } from "../src/cli.js";
 import { dialHost, threadRows } from "../src/verbs.js";
 import { THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { withDaemonRoads } from "./stub-backend.js";
-import { UNREACHED_LINE, bornDeadAgent, captured, heldAgent, projectOn, scriptedAgent } from "./verbs-fixture.js";
+import { UNREACHED_LINE, bornDeadAgent, captured, heldAgent, lastingAgent, projectOn, scriptedAgent } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { CLOUD_ON } from "../src/cloud.js";
 import { verbsHost } from "./verbs-host.js";
@@ -609,6 +609,54 @@ describe("wsp verbs over the host: send, steer, stop and notify", () => {
     expect(fourth.io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`]);
     expect(held.starts.map(s => s.prompt)).toEqual(["build it", "more", "third", "fourth"]);
     held.release(3, "fourth done");
+  });
+
+  it("run on a computer at its threads at once says the wait on stderr and starts when a slot frees; --detach answers at once with outcome held and the wait", async () => {
+    const held = heldAgent(false);
+    await h.restartHost({ claude: held.adapter });
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-repo-")));
+    try {
+      await projectOn(h.rt, HERE_PLACE_ID, folder, { name: "spoo" });
+      await h.rt.places!.set(HERE_PLACE_ID, { threads: 1 });
+      const here = (await h.rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)!.name;
+      await h.run("run", "spoo", "--detach", "one");
+      const detached = await h.run("run", "spoo", "--detach", "--json", "two");
+      expect(detached.code).toBe(0);
+      expect(held.starts.map(s => s.prompt)).toEqual(["one"]);
+      expect(h.json(detached.io)).toEqual([expect.objectContaining({ outcome: "held", capped: { placeId: HERE_PLACE_ID, place: here, running: 1, atOnce: 1 } })]);
+      const followed = h.starting("run", "spoo", "three");
+      await vi.waitFor(() => expect(followed.io.errors).toEqual([`waiting while ${here} is running 1 of 1 thread`]), { timeout: 10_000, interval: 10 });
+      held.release(0, "one done");
+      await vi.waitFor(() => expect(held.starts).toHaveLength(2));
+      held.release(1, "two done");
+      await vi.waitFor(() => expect(held.starts).toHaveLength(3));
+      held.release(2, "three done");
+      await followed.ended;
+      expect(followed.io.lines.at(-1)).toBe("three done");
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("a followed run the cap held, whose host restarts under it, ends with the restart named rather than waiting for good", async () => {
+    const lasting = lastingAgent();
+    await h.restartHost({ claude: lasting.adapter });
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-repo-")));
+    try {
+      await projectOn(h.rt, HERE_PLACE_ID, folder, { name: "spoo" });
+      await h.rt.places!.set(HERE_PLACE_ID, { threads: 1 });
+      const here = (await h.rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)!.name;
+      await h.run("run", "spoo", "--detach", "one");
+      const turn = h.starting("run", "spoo", "two");
+      await vi.waitFor(() => expect(turn.io.errors).toContain(`waiting while ${here} is running 1 of 1 thread`), { timeout: 10_000, interval: 10 });
+      await h.restartHost({ claude: lasting.adapter });
+      expect(await turn.ended).toBe(EXIT_CODES.provider);
+      expect(turn.io.errors.at(-1)).toBe(`wsp run: the host restarted while this turn waited for a slot on ${here}; nothing started, so send it again`);
+      expect(lasting.started()).toBe(1);
+    } finally {
+      lasting.finish("one done");
+      rmSync(folder, { recursive: true, force: true });
+    }
   });
 
   it("threads wait returns the first of two threads to finish, in the notify line's words, then the second; a thread already over comes back at once from its transcript; a timeout prints nothing on stdout and says so on stderr", async () => {

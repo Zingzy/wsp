@@ -6,7 +6,7 @@
 // Nothing here says what a workspace is made of: that pair of words is the
 // protocol's table (madeOfWord, portsWord), so a row in the app and a cell in
 // the command line's table cannot say two things about one workspace.
-import { threadStateWord } from "@wsp/protocol";
+import { CAP_RAISE_ACT, threadStateWord } from "@wsp/protocol";
 import { onceNamed } from "../settings/format.js";
 
 /** The one word for the act, read by the plus on a project, the project's menu and the palette's row: three
@@ -95,4 +95,9 @@ export const SNOOZE_WORDS = {
   /** The slot of a snoozed root while threads of its tree run, and its hover line. */
   working: (n: number): string => `${n} working`,
   workingHover: (n: number): string => `Snoozed, ${n} working in it`,
+} as const;
+
+/** What a held thread's card says under the reason: the setting that lets it start before a thread there ends. */
+export const CAP_WAIT_WORDS = {
+  raise: (place: string): string => `${CAP_RAISE_ACT} on ${place} in Settings to start it now`,
 } as const;

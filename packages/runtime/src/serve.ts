@@ -119,6 +119,7 @@ import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, threadOf, type DeviceDoor, type HeldDevice } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 import { keyFingerprint, openFrame, verifyPlaceBytes, type Seal } from "@wsp/keys";
+import { answeredStart } from "./threads/answered-start.js";
 import type { HostEditor, HostFolders, HostSsh, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, RecipeShelf, Runtime } from "./runtime.js";
 
 import { forwardsOf, type ForwardsSource } from "./forwards.js";
@@ -1583,8 +1584,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                         origin,
                       )
                       .then(found => ({ workspaceId: found.workspace.id, cwd: found.cwd }));
-              const handle = await rt.sessions.start(at.workspaceId, {
-                prompt: msg.prompt,
+              await answeredStart(msg.answerHeld === true, onHeld => rt.sessions.start(at.workspaceId, {
+                prompt: msg.prompt, ...(onHeld !== undefined ? { onHeld } : {}), ...(msg.followed === true ? { followed: true } : {}),
                 ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
                 ...(msg.thread !== undefined ? { thread: msg.thread } : {}),
                 ...(at.cwd !== undefined ? { cwd: at.cwd } : {}),
@@ -1601,8 +1602,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.turnToken !== undefined ? { turnToken: msg.turnToken } : {}),
                 ...(msg.title !== undefined ? { title: msg.title } : {}),
                 ...(msg.attachments !== undefined ? { attachments: msg.attachments } : {}),
-              }, origin);
-              send({ id: msg.id, ok: true, session: handle.view(), outcome: handle.outcome, turnId: handle.turnId });
+              }, origin), reply => send({ id: msg.id, ok: true, ...reply }));
               return;
             }
             case "harnesses.list":

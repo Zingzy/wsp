@@ -16,7 +16,8 @@ import {
   REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine,
   attachmentRecord, attachmentKey, filesBlocked, isImage, sendFilesDir, attachedFilesPrompt, threadMessages,
   threadSeed, taskStopRefusedLine, taskStopUnsupportedLine, agentOffLine, HEAD_BYTES, HISTORY_PAGE_BYTES,
-  HISTORY_PAGE_EVENTS, AGENT_STARTING_MS, ASIDE_EMPTY_LINE, type AsideQuestion, type McpServerSpec, type SessionAsker,
+  HISTORY_PAGE_EVENTS, AGENT_STARTING_MS, ASIDE_EMPTY_LINE, capStoppedLine, deletedBeforeStartLine, type AsideQuestion,
+  type McpServerSpec, type SessionAsker,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { headShape } from "../transcript-reader.js";
@@ -25,7 +26,7 @@ import { SESSION_TITLE_TIMEOUT_MS } from "../types/events.js";
 import type { Runtime } from "../types/api.js";
 import {
   ATTACHMENTS, ATTACHMENT_KEYS, snippetAround, type KeptProcess, type KeptLaunch, type ThreadRecord, type KeptImages,
-  type LiveSession,
+  type LiveSession, type SessionEntry,
 } from "../types/internal.js";
 import type { RuntimeContext, SessionsArea } from "../context.js";
 
@@ -45,6 +46,71 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
   /** The end a stop is running on a thread's group, by thread: the thread's next turn launches after it, never into
    * the group it is emptying. */
   const ending = new Map<string, Promise<void>>();
+  /** A stop on one turn; `marked` lets a held turn's next look go on once the stop has marked it, or will not. */
+  const stopTurn = async (marked: () => void, ...[sessionId, origin, task]: Parameters<Runtime["sessions"]["interrupt"]>): ReturnType<Runtime["sessions"]["interrupt"]> => {
+    await ctx.ready();
+    // A turn held back is named by its turn id, and its row goes under its launch's id once it starts, so a stop sent
+    // off the waiting line finds the turn it became.
+    const rowOf = (): SessionEntry | undefined => sessions.get(sessionId) ?? [...sessions.values()].find(r => r.turnId === sessionId);
+    let s = rowOf();
+    if (!s) return { outcome: "not-found" };
+    // One absence for every row a thread cannot reach, wherever it stands: a sentence about the workspace would
+    // tell a thread which of the two rules hid the row.
+    if ((await ctx.entryOfRow(s.view, origin)) === undefined) return { outcome: "not-found" };
+    // One subagent of the turn, and nothing else: the threads under this one and the turn itself run on.
+    if (task !== undefined) {
+      if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
+      const agent = ctx.agentLabel(s.view.harness);
+      if (s.handle.stopTask === undefined) return { outcome: "unsupported", error: taskStopUnsupportedLine(agent) };
+      const stopped = await s.handle.stopTask(task);
+      if (stopped.outcome === "refused") return { outcome: "refused", error: taskStopRefusedLine(agent, stopped.error) };
+      return stopped.outcome === "unsupported" ? { outcome: "unsupported", error: taskStopUnsupportedLine(agent) } : { outcome: stopped.outcome };
+    }
+    // A turn its computer's threads at once has not let through has no process to stop and holds no slot: it is marked
+    // before anything here waits, whether or not it has looked yet, so it gives up at its next look and never launches.
+    const held = ctx.capHeld.get(sessionId);
+    if (held !== undefined) ctx.capStop(sessionId, capStoppedLine(held.waiting?.wait));
+    marked();
+    // A thread's agents spawned a tree under it, and a stop on the thread is a stop on the tree: the children go
+    // first, so nothing under a stopped lead is left working for a thread that is no longer reading. The lead
+    // itself may already be over, which is an answer and not a reason to leave its builders running. A child
+    // that stops its lead stops its siblings and itself with it, and may never read the answer.
+    const under = s.view.threadId === undefined ? [] : await ctx.stopUnder(s.view.threadId, origin);
+    const answered = (outcome: SessionInterruptOutcome, left?: string): SessionInterruptResult => ({ outcome, ...(under.length > 0 ? { under } : {}), ...(left !== undefined ? { left } : {}) });
+    if (held !== undefined) {
+      await s.launch;
+      return answered("accepted");
+    }
+    // A turn let through and still reaching its machine is stopped once it is there.
+    if (s.view.status === "running" && s.handle === undefined && s.launch !== undefined) {
+      await s.launch;
+      s = rowOf() ?? s;
+    }
+    // A stop ends what the thread left running on a computer that groups a thread's processes, a server it
+    // detached included, once its turn has had its own grace; a thread whose turn is over still has those. Set
+    // before the turn is stopped, so a send queued behind it sees the end before it sees the turn gone.
+    const thread = s.view.threadId;
+    const entry = thread === undefined ? undefined : await ctx.entryOfRow(s.view, origin);
+    const ends = entry === undefined ? undefined : ctx.moduleOf(entry.record.kind).endThread;
+    let ended = (): void => {};
+    const endingNow = ends === undefined ? undefined : new Promise<void>(resolve => (ended = resolve));
+    if (endingNow !== undefined) ending.set(thread!, endingNow);
+    try {
+      if (s.view.status !== "running" || s.handle === undefined) {
+        // Another turn of the thread running or on its way stands in the same group, and is not what was stopped.
+        if (ends === undefined || ctx.runningOn(thread!) !== undefined || ctx.launchingOn(thread!) !== undefined) return answered("not-running");
+        return answered("not-running", await ends(entry!, thread!, {}));
+      }
+      await s.handle.interrupt();
+      // The harness resolves finished only after session.end, so accepted means the turn is over on the transcript too.
+      await s.handle.finished.catch(() => {});
+      return answered("accepted", await ends?.(entry!, thread!, {}));
+    } finally {
+      if (endingNow !== undefined && ending.get(thread!) === endingNow) ending.delete(thread!);
+      ended();
+    }
+  };
+
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, opened, origin) {
       await ctx.ready();
@@ -101,6 +167,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       if (ctx.agentOff(entry, o.harness)) throw Object.assign(new Error(agentOffLine(ctx.agentLabel(o.harness), ctx.computerOf(entry))), { kind: "usage" });
       await ctx.confineSetup(entry, o.harness);
       const refuse = (): void => {
+        if (!live.has(workspaceId)) throw new Error(deletedBeforeStartLine(entry.record.name));
         const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
         if (refusal !== null) throw new Error(refusal);
       };
@@ -217,6 +284,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         ...(resume !== undefined ? { claudeSessionId: resume } : {}),
         ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
       };
+      // The running turn this request came out of, when it waits on this one: its follow, or a start answered only at
+      // its launch. This turn runs in that turn's slot, so a thread following another never holds the slot it waits for.
+      const asker = scopeOf(origin)?.threadId;
+      const waitedOn = o.followed === true || o.onHeld === undefined;
+      const lender = asker === undefined || asker === threadId || !waitedOn ? undefined : ctx.runningOn(asker)?.turnId;
       let launched!: () => void;
       const launch = new Promise<void>(r => (launched = r));
       let held = false;
@@ -229,11 +301,12 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         held = true;
         // The row that says the thread is spoken for also says who its turns tell: a send into the thread reads the
         // opener's notify off its rows, and inside the launch window this is the only one.
+        ctx.capHold(entry.record, turnId, lender);
         sessions.set(turnId, { view, turnId, launch, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}) });
         bus.emit({ type: "session.held", workspaceId, threadId, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
       };
       hold();
-      let outcome: SessionStartOutcome = "started";
+      let outcome: Exclude<SessionStartOutcome, "held"> = "started";
       // A start still waiting on its agent past AGENT_STARTING_MS says so once, with whether the agent's command is a
       // wrapper whose first run installs it; nothing goes out once the turn's session started or the start left.
       let quiet = false;
@@ -261,6 +334,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // Every send takes one trip before its launch: its files land and its folder's snapshot is taken, or only started
       // where the agent takes its prompt late.
       let landed = false;
+      // Let through by its computer's threads at once, which it is asked once, and whether the caller heard it held.
+      let through = false;
+      let toldHeld = false;
       let snapshot: { from: Promise<string | undefined> | string; cwd: string } | undefined;
       // What this send's own folders on the machine are named by where its request id cannot be: the landing runs
       // before any turn is registered, so two sends arriving together both pass the wait, and a folder they shared
@@ -323,6 +399,8 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
             // out yet, so this one waits for the moment it has one or is given up, and looks again.
             const launching = ctx.launchingOn(threadId);
             if (launching !== undefined && launching.turnId !== turnId) {
+              // A held turn ahead of this one would otherwise wait on the slot this send's follower holds.
+              if (lender !== undefined) ctx.capLend(launching.turnId, lender);
               if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
               outcome = "queued";
               await launching.launch;
@@ -342,6 +420,34 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
               continue;
             }
             hold();
+            // A computer running as many threads as it takes at once holds this turn back before anything lands, so
+            // the checkpoint the turn starts from is taken when it starts; the look is part of the run to the launch.
+            if (!through) {
+              const stops = ctx.capHeld.get(turnId)?.stops;
+              if (stops !== undefined && stops.size > 0) {
+                await Promise.all(stops);
+                refuse();
+                cleared = false;
+                continue;
+              }
+              const stopped = ctx.capHeld.get(turnId)?.stopped;
+              if (stopped !== undefined) throw new Error(stopped);
+              const full = o.wakesLead === true ? undefined : ctx.capFull(entry.record, turnId);
+              if (full !== undefined) {
+                hush();
+                const waits = ctx.capWait({ workspaceId, threadId, turnId, sessionId: resume ?? turnId, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) }, full);
+                if (!toldHeld) {
+                  toldHeld = true;
+                  o.onHeld?.({ view: { ...view, capped: full }, turnId, wait: full });
+                }
+                await waits;
+                refuse();
+                cleared = false;
+                continue;
+              }
+              through = true;
+              ctx.capLeft(turnId);
+            }
             if (landed) break;
             landed = true;
             const landing = ctx.runsIn(entry, resume === undefined ? undefined : ctx.folderOf(workspaceId, resume), folder);
@@ -477,10 +583,16 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       } finally {
         if (!handedOver) {
           hush();
+          ctx.capLeft(turnId);
           // The turn never reached a machine, so nothing out there is holding this token: it goes now rather than
           // standing until a host restart.
           dropScope();
           if (held) {
+            // A start its caller heard was held went on without it, so the thread it was to report to hears how it
+            // ended, as it hears of a turn that ran: a lead that ended its turn to wait on it is woken.
+            if (toldHeld && failure !== undefined && notify !== undefined) {
+              ctx.notifyEnd({ view, turnId }, notify, ctx.tellAs({ ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}) }), { status: "failed", error: failure });
+            }
             sessions.delete(turnId);
             // Whoever the row told this thread was working must not be left waiting for a turn that never opened, so
             // its end goes out. On the bus alone and not through record: no turn ran, and a transcript that held an
@@ -560,49 +672,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
     },
 
     async interrupt(sessionId, origin, task) {
-      await ctx.ready();
-      const s = sessions.get(sessionId);
-      if (!s) return { outcome: "not-found" };
-      // One absence for every row a thread cannot reach, wherever it stands: a sentence about the workspace would
-      // tell a thread which of the two rules hid the row.
-      if ((await ctx.entryOfRow(s.view, origin)) === undefined) return { outcome: "not-found" };
-      // One subagent of the turn, and nothing else: the threads under this one and the turn itself run on.
-      if (task !== undefined) {
-        if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
-        const agent = ctx.agentLabel(s.view.harness);
-        if (s.handle.stopTask === undefined) return { outcome: "unsupported", error: taskStopUnsupportedLine(agent) };
-        const stopped = await s.handle.stopTask(task);
-        if (stopped.outcome === "refused") return { outcome: "refused", error: taskStopRefusedLine(agent, stopped.error) };
-        return stopped.outcome === "unsupported" ? { outcome: "unsupported", error: taskStopUnsupportedLine(agent) } : { outcome: stopped.outcome };
-      }
-      // A thread's agents spawned a tree under it, and a stop on the thread is a stop on the tree: the children go
-      // first, so nothing under a stopped lead is left working for a thread that is no longer reading. The lead
-      // itself may already be over, which is an answer and not a reason to leave its builders running. A child
-      // that stops its lead stops its siblings and itself with it, and may never read the answer.
-      const under = s.view.threadId === undefined ? [] : await ctx.stopUnder(s.view.threadId, origin);
-      const answered = (outcome: SessionInterruptOutcome, left?: string): SessionInterruptResult => ({ outcome, ...(under.length > 0 ? { under } : {}), ...(left !== undefined ? { left } : {}) });
-      // A stop ends what the thread left running on a computer that groups a thread's processes, a server it
-      // detached included, once its turn has had its own grace; a thread whose turn is over still has those. Set
-      // before the turn is stopped, so a send queued behind it sees the end before it sees the turn gone.
-      const thread = s.view.threadId;
-      const entry = thread === undefined ? undefined : await ctx.entryOfRow(s.view, origin);
-      const ends = entry === undefined ? undefined : ctx.moduleOf(entry.record.kind).endThread;
-      let ended = (): void => {};
-      const held = ends === undefined ? undefined : new Promise<void>(resolve => (ended = resolve));
-      if (held !== undefined) ending.set(thread!, held);
+      const asking = task === undefined ? ctx.capStopping(sessionId) : () => {};
       try {
-        if (s.view.status !== "running" || s.handle === undefined) {
-          // Another turn of the thread running or on its way stands in the same group, and is not what was stopped.
-          if (ends === undefined || ctx.runningOn(thread!) !== undefined || ctx.launchingOn(thread!) !== undefined) return answered("not-running");
-          return answered("not-running", await ends(entry!, thread!, {}));
-        }
-        await s.handle.interrupt();
-        // The harness resolves finished only after session.end, so accepted means the turn is over on the transcript too.
-        await s.handle.finished.catch(() => {});
-        return answered("accepted", await ends?.(entry!, thread!, {}));
+        return await stopTurn(asking, sessionId, origin, task);
       } finally {
-        if (held !== undefined && ending.get(thread!) === held) ending.delete(thread!);
-        ended();
+        asking();
       }
     },
 

@@ -6,6 +6,7 @@ import { connect as connectTcp } from "node:net";
 import type { Readable, Writable } from "node:stream";
 import { ROAD_MODULES, agentName, catalogEntry, isRoad } from "@wsp/catalog";
 import {
+  capWaitLine,
   LOOPBACK,
   SSH_ALIAS_PREFIX,
   sshAlias,
@@ -436,12 +437,13 @@ export async function mergedIn(client: HostClient, leadRef: string, child: strin
   return MergeInResult.parse(await client.request("workspaces.mergeIn", { workspaceId: awoken.id, child }));
 }
 
-/** What a fix reads as: which agent was asked to fix what, or that the update left nothing to fix. */
+/** What a fix reads as: which agent was asked to fix what, with the wait where its computer holds the turn back, or that
+ * the update left nothing to fix. */
 export function fixLine(workspace: string, asked: FixResult): string {
   if (asked.outcome === "updated") return fixNothingLine(workspace, asked.base);
   const agent = agentName(asked.agent);
-  if (asked.child !== undefined) return fixMergeChildLine(workspace, agent, asked.child);
-  return asked.check !== undefined ? fixAskedLine(workspace, agent, asked.check) : fixConflictsLine(workspace, agent, asked.base);
+  const line = asked.child !== undefined ? fixMergeChildLine(workspace, agent, asked.child) : asked.check !== undefined ? fixAskedLine(workspace, agent, asked.check) : fixConflictsLine(workspace, agent, asked.base);
+  return asked.outcome === "held" && asked.capped !== undefined ? `${line}\n${capWaitLine(asked.capped)}` : line;
 }
 
 /** A workspace started off a link, as the host answers it: the workspace in the host's own bytes, as a create's. */
