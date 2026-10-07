@@ -3,6 +3,7 @@
 //! tells every authed socket about it, and the listener heuristic for a flow whose URL names no port.
 
 use std::io;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -91,17 +92,109 @@ pub(crate) fn note_opens(ctx: &Ctx, events: &[DaemonEvent]) {
     }
 }
 
-/// The unix socket the shim posts to, bound; a stale socket file from an earlier daemon is removed first.
-pub(crate) fn listen_open_socket(path: &Path) -> io::Result<UnixListener> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+/// The open socket, bound in its folder, and that folder held open: what the hand-over to a login changes, by name in
+/// the folder it holds rather than by a path the login could rearrange in between.
+pub(crate) struct OpenSocket {
+    pub(crate) listener: UnixListener,
+    folder: OwnedFd,
+    name: String,
+}
+
+/// The unix socket the shim posts to, bound in its folder. The folder sits under a home whose login can put a link
+/// where a folder was, so it is walked from the top one name at a time with no link followed, a missing one made
+/// there, and refused unless this daemon owns it; a stale socket from an earlier daemon is unlinked in it and the new
+/// one bound in it. A link root owns on the way is the system's own (a /home that is a link into /var), which no
+/// login can make, and the walk starts again at where it points; any other link is refused.
+pub(crate) fn listen_open_socket(path: &Path) -> io::Result<OpenSocket> {
+    use nix::sys::stat::fstat;
+    use nix::unistd::{unlinkat, UnlinkatFlags};
+    let (folder, name) = crate::beneath::from_top(path, true)?;
+    if fstat(&folder)?.st_uid != nix::unistd::geteuid().as_raw() {
+        return Err(io::Error::other(format!("{} is not this daemon's folder", path.parent().unwrap_or(path).display())));
     }
-    match std::fs::remove_file(path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
+    match unlinkat(&folder, name.as_str(), UnlinkatFlags::NoRemoveDir) {
+        Ok(()) | Err(nix::errno::Errno::ENOENT) => {}
+        Err(e) => return Err(e.into()),
     }
-    UnixListener::bind(path)
+    let listener = UnixListener::bind(bound_at(&folder, &name, path))?;
+    Ok(OpenSocket { listener, folder, name })
+}
+
+/// The name the bind takes: the held folder through /proc, so the socket lands in that folder whatever the path names
+/// by now.
+#[cfg(target_os = "linux")]
+fn bound_at(folder: &OwnedFd, name: &str, _path: &Path) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("/proc/self/fd/{}/{name}", folder.as_raw_fd()))
+}
+
+/// macOS has no /proc, and a daemon there runs as the person whose home it is, so no other login stands to swap a
+/// folder between the walk and the bind.
+#[cfg(not(target_os = "linux"))]
+fn bound_at(_folder: &OwnedFd, _name: &str, path: &Path) -> std::path::PathBuf {
+    path.to_path_buf()
+}
+
+/// The bound socket handed to one login, that login's alone to open: what a tool a line runs as that login posts a
+/// page to. Changed by name in the folder the bind held, which is refused unless this daemon alone may write in it,
+/// so nothing the login does can put another file at the name, and a link standing there is changed itself and names
+/// nothing. The login has to get through that folder to the socket, so where the folder is not already the login's
+/// it is made searchable by that login alone, never listable, and by no other login or group.
+pub(crate) fn hand_open_socket(open: &OpenSocket, uid: u32) -> io::Result<()> {
+    use nix::sys::stat::{fchmodat, fstat, fstatat, FchmodatFlags, Mode, SFlag};
+    use nix::unistd::{fchownat, Uid};
+    let held = fstat(&open.folder)?;
+    if held.st_mode & 0o022 != 0 {
+        return Err(io::Error::other("its folder is not this daemon's alone to write"));
+    }
+    let socket = fstatat(&open.folder, open.name.as_str(), nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)?;
+    if SFlag::from_bits_truncate(socket.st_mode) & SFlag::S_IFMT != SFlag::S_IFSOCK {
+        return Err(io::Error::other("what stands at its name is not a socket"));
+    }
+    if held.st_uid != uid {
+        search_for(&open.folder, uid)?;
+    }
+    fchmodat(&open.folder, open.name.as_str(), Mode::from_bits_truncate(0o600), FchmodatFlags::NoFollowSymlink)?;
+    fchownat(&open.folder, open.name.as_str(), Some(Uid::from_raw(uid)), None, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)?;
+    Ok(())
+}
+
+/// The folder's access list set whole: its owner keeps its own bits, the one login may search it, and its group
+/// and every other login may do nothing, so the mode reads 0710 with the group bits standing for the list's mask. A
+/// group would let in every login that shares it, and a login's primary group is often shared.
+#[cfg(target_os = "linux")]
+fn search_for(folder: &OwnedFd, uid: u32) -> io::Result<()> {
+    use xattr::FileExt as _;
+    const UNDEFINED: u32 = u32::MAX;
+    let owner = (nix::sys::stat::fstat(folder)?.st_mode >> 6) & 0o7;
+    // posix_acl_xattr: a version word, then (tag, perm, id) rows in tag order: the owner, a named user, the
+    // group, the mask, the others.
+    let rows: [(u16, u32, u32); 5] =
+        [(0x01, owner, UNDEFINED), (0x02, 0o1, uid), (0x04, 0, UNDEFINED), (0x10, 0o1, UNDEFINED), (0x20, 0, UNDEFINED)];
+    let mut list = 2u32.to_le_bytes().to_vec();
+    for (tag, perm, id) in rows {
+        list.extend_from_slice(&tag.to_le_bytes());
+        list.extend_from_slice(&(perm as u16).to_le_bytes());
+        list.extend_from_slice(&id.to_le_bytes());
+    }
+    std::fs::File::from(folder.try_clone()?).set_xattr("system.posix_acl_access", &list)
+}
+
+/// A daemon off Linux runs as the person whose home it is, so its folder is already the login's.
+#[cfg(not(target_os = "linux"))]
+fn search_for(_folder: &OwnedFd, uid: u32) -> io::Result<()> {
+    Err(io::Error::other(format!("only Linux hands a folder to uid {uid} alone")))
+}
+
+/// Whether that login reaches the socket at its path, asked of the kernel as that login: search on every folder on
+/// the way and write on the socket, which is what a connect needs. What the report's loginReach rests on, so a
+/// folder above the socket that shuts the login out is never reported as a road it has.
+pub(crate) fn login_reaches(path: &Path, uid: u32) -> bool {
+    use std::os::unix::process::CommandExt;
+    let gid = nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid)).ok().flatten().map_or(uid, |user| user.gid.as_raw());
+    let mut test = std::process::Command::new("/bin/sh");
+    test.args(["-c", "test -w \"$1\"", "sh"]).arg(path).env_clear().uid(uid).gid(gid);
+    test.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    test.status().is_ok_and(|status| status.success())
 }
 
 pub(crate) async fn serve_open_socket(listener: UnixListener, ctx: Arc<Ctx>) {
@@ -305,7 +398,7 @@ mod tests {
     async fn a_peer_that_stalls_mid_head_or_never_fills_its_length_is_answered_408_and_cut_while_others_are_served() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("open.sock");
-        let listener = listen_open_socket(&path).unwrap();
+        let listener = listen_open_socket(&path).unwrap().listener;
         let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen = Arc::clone(&heard);
         tokio::spawn(async move {
@@ -337,7 +430,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("open.sock");
         std::fs::write(&path, "stale").unwrap();
-        let listener = listen_open_socket(&path).unwrap();
+        let listener = listen_open_socket(&path).unwrap().listener;
         let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen = Arc::clone(&heard);
         tokio::spawn(async move {
@@ -367,5 +460,119 @@ mod tests {
             .starts_with("HTTP/1.1 400 "));
         assert!(post(&path, b"POST /open HTTP/1.1\r\nContent-Length: x\r\n\r\n").await.starts_with("HTTP/1.1 400 "));
         assert_eq!(*heard.lock().unwrap(), [url, url]);
+    }
+
+    /// The socket handed to the login is that login's alone to open, which the kernel holds every other login to;
+    /// it is handed only from a folder this daemon alone writes, and that folder is made searchable by the login
+    /// alone, so the 0700 folder an add leaves lets the login through and no other login or group. Run as root it is
+    /// handed to nobody; run as anyone else the uid is their own, whose folder it already is.
+    #[tokio::test]
+    async fn the_open_socket_is_handed_to_the_login_alone_and_only_from_a_folder_this_daemon_alone_writes() {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+        let me = nix::unistd::geteuid().as_raw();
+        let login = if me == 0 { 65534 } else { me };
+        let folder = |mode: u32| {
+            let dir = tempfile::tempdir().unwrap();
+            let at = dir.path().canonicalize().unwrap();
+            std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let wsp = at.join(".wsp");
+            std::fs::create_dir(&wsp).unwrap();
+            std::fs::set_permissions(&wsp, std::fs::Permissions::from_mode(mode)).unwrap();
+            (dir, wsp)
+        };
+
+        for mode in [0o755, 0o700] {
+            let (_held, at) = folder(mode);
+            let path = at.join("open.sock");
+            let open = listen_open_socket(&path).unwrap();
+            hand_open_socket(&open, login).unwrap();
+            let socket = std::fs::symlink_metadata(&path).unwrap();
+            assert_eq!((socket.uid(), socket.mode() & 0o777), (login, 0o600), "the login's to open, and no group's or other login's");
+            let searched = std::fs::metadata(&at).unwrap().mode() & 0o777;
+            assert!(login_reaches(&path, login), "folder {mode:o}");
+            if me == 0 {
+                // The login searches the folder; another login, one in the login's group and one in the folder's own
+                // group do not, so none of them opens anything in it by name.
+                assert!(searches(&at, login, 65534), "folder {mode:o}");
+                assert!(!searches(&at, 65533, 65533), "folder {mode:o}: another login");
+                assert!(!searches(&at, 65533, 65534), "folder {mode:o}: a login in the login's group");
+                assert!(!searches(&at, 65533, 0), "folder {mode:o}: a login in the folder's own group");
+                assert_eq!(searched, 0o710, "folder {mode:o}: the group bits are the access list's mask, which lets one login search");
+            } else {
+                assert_eq!(searched, mode, "a folder already the login's own is left as it was");
+            }
+        }
+
+        let (_shared, at) = folder(0o777);
+        let path = at.join("open.sock");
+        let open = listen_open_socket(&path).unwrap();
+        let refused = hand_open_socket(&open, login).unwrap_err().to_string();
+        assert!(refused.contains("not this daemon's alone"), "{refused}");
+        assert_eq!(std::fs::symlink_metadata(&path).unwrap().uid(), me, "a socket in a folder others write in stays as bound");
+
+        // A link standing at the socket's own name is taken away by the bind, and what it named is left alone.
+        let (_linked, at) = folder(0o755);
+        let named = at.join("named");
+        std::fs::write(&named, "theirs").unwrap();
+        std::os::unix::fs::symlink(&named, at.join("open.sock")).unwrap();
+        let open = listen_open_socket(&at.join("open.sock")).unwrap();
+        hand_open_socket(&open, login).unwrap();
+        assert_eq!(std::fs::read_to_string(&named).unwrap(), "theirs");
+        assert!(std::fs::symlink_metadata(at.join("open.sock")).unwrap().file_type().is_socket());
+    }
+
+    /// Whether `uid` with `gid` as its group may search the folder, asked of the kernel as that login.
+    fn searches(folder: &Path, uid: u32, gid: u32) -> bool {
+        use std::os::unix::process::CommandExt;
+        let mut test = std::process::Command::new("/bin/sh");
+        test.args(["-c", "test -x \"$1\"", "sh"]).arg(folder).env_clear().uid(uid).gid(gid);
+        test.status().is_ok_and(|status| status.success())
+    }
+
+    /// A link root owns on the way is the system's own, a /home that points into /var, and the socket lands where it
+    /// points; only root can make one, so the case runs as root.
+    #[tokio::test]
+    async fn a_link_root_owns_on_the_way_is_followed_to_where_it_points() {
+        if !nix::unistd::geteuid().is_root() {
+            return;
+        }
+        let top = tempfile::tempdir().unwrap();
+        let top = top.path().canonicalize().unwrap();
+        std::fs::create_dir_all(top.join("var").join("home").join(".wsp")).unwrap();
+        std::os::unix::fs::symlink("var/home", top.join("home")).unwrap();
+        let open = listen_open_socket(&top.join("home").join(".wsp").join("open.sock")).unwrap();
+        drop(open);
+        assert!(top.join("var").join("home").join(".wsp").join("open.sock").exists());
+    }
+
+    /// The socket's folder sits under a home its login owns, who can put a link where wsp's folder was. The bind
+    /// walks to the folder with no link followed, so a link standing there, or anywhere on the way, is refused and
+    /// nothing is unlinked or bound where it points.
+    #[tokio::test]
+    async fn a_link_put_in_place_of_the_sockets_folder_is_refused_and_nothing_lands_where_it_points() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let elsewhere = home.join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("open.sock"), "not wsp's").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, home.join(".wsp")).unwrap();
+        // The login planted it, so it is the login's: run as root that is nobody's link.
+        let planted = |link: &std::path::Path| {
+            if nix::unistd::geteuid().is_root() {
+                std::os::unix::fs::lchown(link, Some(65534), Some(65534)).unwrap();
+            }
+        };
+        planted(&home.join(".wsp"));
+        let refused = listen_open_socket(&home.join(".wsp").join("open.sock")).err().map(|e| e.to_string());
+        assert!(refused.as_deref().is_some_and(|said| said.contains("link")), "{refused:?}");
+        assert_eq!(std::fs::read_to_string(elsewhere.join("open.sock")).unwrap(), "not wsp's", "what the link names was unlinked");
+
+        // A link further up the way is refused the same.
+        std::fs::remove_file(home.join(".wsp")).unwrap();
+        std::os::unix::fs::symlink(&home, home.join("up")).unwrap();
+        planted(&home.join("up"));
+        std::fs::create_dir(home.join("real")).unwrap();
+        assert!(listen_open_socket(&home.join("up").join("real").join("open.sock")).is_err());
+        assert!(!home.join("real").join("open.sock").exists());
     }
 }

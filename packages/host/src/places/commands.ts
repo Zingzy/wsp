@@ -36,7 +36,7 @@ interface PlaceDeps {
   /** Opens the tool's page on this computer when the person presses o, as a builder's sign-in does. */
   open(url: string): Promise<boolean>;
   /** The pty road to one computer's own daemon, through the host that holds its link. */
-  placeLink(client: HostClient, placeId: string): Promise<PlaceLink>;
+  placeLink(client: HostClient, placeId: string, computer?: string): Promise<PlaceLink>;
   /** Runs the tool's own sign-in on that computer; a test hands its own rather than a pty on a real box. */
   signIn(o: BoxSignIn): Promise<BoxSignedIn>;
   /** The key this computer's ssh client already holds for a computer, read with nothing dialled: a computer it
@@ -597,7 +597,7 @@ async function runBoxSignIn(io: CliIO, client: HostClient, place: PlaceView, age
   if (place.signIns?.[agent] === "signed-in") io.log(boxReplacesLine(place.name, agent));
   // The host plans the line: a shared login at that computer's logins folder, any other as the owner of its home.
   const { line } = await client.request<{ line: unknown }>("agents.signInLine", { target: { placeId: place.id }, agent });
-  const road = await deps.placeLink(client, place.id);
+  const road = await deps.placeLink(client, place.id, place.name);
   try {
     const answer = await deps.signIn({ link: road.link, agent, line: SignInLine.parse(line), terminal: deps.terminal, open: deps.open });
     io.log(answer.signedIn ? boxSignedInLine(place.name, agent, answer.detail) : boxNotSignedInLine(place.name, agent, answer.said));

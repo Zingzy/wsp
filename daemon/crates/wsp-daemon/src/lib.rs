@@ -78,6 +78,10 @@ pub struct Options {
     pub run_dir: Option<PathBuf>,
     pub log_dir: Option<PathBuf>,
     pub open_socket_path: Option<PathBuf>,
+    /// The uid of the login a computer's lines run as where that is not this daemon's own: the owner of the home on
+    /// a box whose ssh login is not root. The open socket and the terminal of a line run as that login are handed
+    /// to it, and to no other login. Cleared at the bind when the socket could not be handed over.
+    pub login_uid: Option<u32>,
     pub proc_root: Option<PathBuf>,
     pub passwd_path: Option<PathBuf>,
     pub ports_interval_ms: Option<u64>,
@@ -143,6 +147,7 @@ impl Options {
             run_dir: None,
             log_dir: None,
             open_socket_path: None,
+            login_uid: None,
             proc_root: None,
             passwd_path: None,
             ports_interval_ms: None,
@@ -379,7 +384,7 @@ impl Ctx {
     pub(crate) fn open_workspace_door(self: &Arc<Self>, id: &str, at: &Path) {
         let at = at.to_path_buf();
         let listener = match relay::listen_open_socket(&at) {
-            Ok(listener) => listener,
+            Ok(open) => open.listener,
             Err(e) => return self.log(&format!("workspace {id} has no door inside it: {}: {e}", at.display())),
         };
         // Root on this computer owns it and nothing else here may open it; inside, the workspace's own root is
@@ -531,12 +536,27 @@ impl Daemon {
             options.unit_path = Some(std::env::var("PATH").unwrap_or_default());
             std::env::set_var("PATH", wsp_frames::probe_path(&place::place_home(options.home.as_deref())));
         }
-        if auth::current_token(&options.token_path).is_none() {
+        if auth::read_token(&options.token_path)?.is_none() {
             return Err(io::Error::other(wsp_frames::words::NO_TOKEN_AT_START));
         }
         let listener = TcpListener::bind((options.host.as_str(), options.port)).await?;
         let open_socket = match &options.open_socket_path {
-            Some(path) => Some(relay::listen_open_socket(path)?),
+            Some(path) => {
+                let open = relay::listen_open_socket(path)?;
+                // The report says the login reaches the socket only once the kernel, asked as that login, says it does:
+                // a folder that is not root's alone keeps the socket root's, and one above it that shuts the login out
+                // leaves it unreachable, and either way the host offers that login no relay.
+                if let Some(uid) = options.login_uid {
+                    if let Err(e) = relay::hand_open_socket(&open, uid) {
+                        log(&format!("the open socket stays root's, {} is not handed to uid {uid}: {e}", path.display()));
+                        options.login_uid = None;
+                    } else if !relay::login_reaches(path, uid) {
+                        log(&format!("uid {uid} cannot reach the open socket at {}, so no sign-in there rides the relay", path.display()));
+                        options.login_uid = None;
+                    }
+                }
+                Some(open.listener)
+            }
             None => None,
         };
         // The port the listener above actually bound, which is the one a workspace must not reach at its

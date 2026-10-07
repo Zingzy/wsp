@@ -1230,36 +1230,26 @@ impl Ops {
     /// A shell inside a running workspace, on a pty of that workspace's own, for the terminal pane of a machine
     /// this computer holds. The folder is the caller's and absolute, which is the one refusal the daemon's own
     /// switch answers before it reaches this; the environment is the workspace's own with the terminal named, as
-    /// a thread's is.
+    /// a thread's is, and what the frame named over it.
     pub async fn pty_in(
         &self,
         id: &str,
         cols: u16,
         rows: u16,
         cwd: &str,
-        shell: Option<&str>,
-        run: Option<&str>,
+        asked: runtime::PtyAsk<'_>,
     ) -> Result<runtime::PtyInsideRunning, OpError> {
         self.running(id)?;
         // Over the workspace's own boot environment, which the broker starts from as every tenant does: the
         // PATH the workspace booted with, the recipe's knobs and the compose project are there and none of them is
         // spelled here.
-        let env = BTreeMap::from([
+        let mut env = BTreeMap::from([
             ("HOME".to_owned(), "/root".to_owned()),
             ("USER".to_owned(), "root".to_owned()),
             ("TERM".to_owned(), TERM.to_owned()),
         ]);
-        // A login shell, as a person's terminal on any other machine opens: the workspace's own profile and the
-        // person's own rc file, which are the computer's home bound inside.
-        // A reply's run goes through the same shell, interactive as well as login, and the pty exits with it.
-        let mut args = match (shell, run) {
-            (Some(shell), _) => vec![shell.to_owned()],
-            (None, Some(_)) => vec![SHELL_INSIDE.to_owned(), "-l".to_owned(), "-i".to_owned()],
-            (None, None) => vec![SHELL_INSIDE.to_owned(), "-l".to_owned()],
-        };
-        if let Some(run) = run {
-            args.extend(["-c".to_owned(), run.to_owned()]);
-        }
+        env.extend(asked.env.into_iter().flatten().map(|(k, v)| (k.clone(), v.clone())));
+        let args = asked.argv(SHELL_INSIDE);
         let opts = runtime::PtyInside { cols, rows, cwd: cwd.to_owned(), args, env };
         self.runtime.pty(id, &opts).await.map_err(|e| OpError::plain(e.to_string()))
     }

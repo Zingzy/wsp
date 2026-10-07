@@ -47,4 +47,10 @@ agentVersions?: { [key in string]: string },
  * workspace on it shares. Absent from a report a daemon older than this field sent, which reads as unknown
  * rather than as none.
  */
-logins?: Array<string>, };
+logins?: Array<string>, 
+/**
+ * The login this computer's lines run as, the owner of its home where that is not root, opens the browser
+ * shim's socket and the terminal of a sign-in run as it: what lets a sign-in there ride the relay. Absent from
+ * a daemon that was told no such login or could not hand it its socket, and from one older than this field.
+ */
+loginReach?: boolean, };

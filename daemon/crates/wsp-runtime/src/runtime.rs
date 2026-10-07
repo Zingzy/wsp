@@ -8,7 +8,7 @@
 //! namespaces and cgroup and none of the linux section the filter lives in, so the exec loads it itself, through
 //! the executor that runs the command.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs;
 use std::io;
@@ -158,6 +158,37 @@ pub struct Exec {
     /// One of the two streams filled the output cap and what came after it is gone. Read by whoever asked, since
     /// a diff cut here and a diff cut by a pane's own budget are the same thing to the person reading it.
     pub truncated: bool,
+}
+
+/// What a frame asks a pty inside a workspace to run: a shell it names, a reply's command through a shell, or the
+/// program itself as argv, and what its environment carries over the workspace's own.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PtyAsk<'a> {
+    pub shell: Option<&'a str>,
+    pub run: Option<&'a str>,
+    pub args: Option<&'a [String]>,
+    pub env: Option<&'a BTreeMap<String, String>>,
+}
+
+impl PtyAsk<'_> {
+    /// What the pty runs, `login_shell` where the frame names no shell: a login shell, as a person's terminal on any
+    /// other machine opens, so the workspace's own profile and the person's rc file, the computer's home bound
+    /// inside, apply. A reply's run goes through the same shell, interactive as well as login, and the pty exits with
+    /// it. Args are the program itself, run with no shell at all.
+    pub fn argv(&self, login_shell: &str) -> Vec<String> {
+        if let Some(args) = self.args {
+            return args.to_vec();
+        }
+        let mut argv = match (self.shell, self.run) {
+            (Some(shell), _) => vec![shell.to_owned()],
+            (None, Some(_)) => vec![login_shell.to_owned(), "-l".to_owned(), "-i".to_owned()],
+            (None, None) => vec![login_shell.to_owned(), "-l".to_owned()],
+        };
+        if let Some(run) = self.run {
+            argv.extend(["-c".to_owned(), run.to_owned()]);
+        }
+        argv
+    }
 }
 
 /// What one pty inside a workspace is opened with: the size the pane holds, the folder the shell starts in,
@@ -345,7 +376,6 @@ impl Runtime {
             rows: opts.rows,
             cwd: PathBuf::from(&opts.cwd),
             size_file: PathBuf::from(format!("{}/{name}", numbers::GUEST_WSP_HOME)),
-            env: opts.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
             argv: opts.args.clone(),
         };
         if let Some(dir) = size_file.parent() {
@@ -355,7 +385,7 @@ impl Runtime {
         let pid_file = self.layout.workspace(id).join(format!("pty-{at}.pid"));
         let _ = fs::remove_file(&pid_file);
         let line = crate::pty::helper_argv(self.layout.root(), id, &pid_file, &crate::pty::broker_line(profile::INIT_PATH, &ask));
-        let started = crate::pty::start(&self.exe, &line).map_err(|e| Error::Helper { verb: "pty", detail: e.to_string() });
+        let started = crate::pty::start(&self.exe, &line, &opts.env).map_err(|e| Error::Helper { verb: "pty", detail: e.to_string() });
         let (mut helper, input, output) = match started {
             Ok(started) => started,
             Err(e) => {
@@ -801,7 +831,15 @@ pub fn helper_create(root: &Path, id: &str) -> Result<(), Error> {
 /// In the helper process: the command as a tenant of the workspace behind its seccomp filter, its stdio inherited
 /// from this process, waited for; past the deadline its group is killed and the answer is 124. Answers the exit
 /// code to exit with.
-pub fn helper_exec(root: &Path, id: &str, args: Vec<String>, timeout: Option<Duration>, pid_file: Option<PathBuf>) -> Result<i32, Error> {
+/// `env` is set over the workspace's own environment for the tenant alone.
+pub fn helper_exec(
+    root: &Path,
+    id: &str,
+    args: Vec<String>,
+    env: HashMap<String, String>,
+    timeout: Option<Duration>,
+    pid_file: Option<PathBuf>,
+) -> Result<i32, Error> {
     let layout = Layout::new(root);
     let fence = Fenced::read(&layout.config(id))?;
     let tenant = ContainerBuilder::new(id.to_owned(), SyscallType::default())
@@ -812,6 +850,7 @@ pub fn helper_exec(root: &Path, id: &str, args: Vec<String>, timeout: Option<Dur
         .map_err(container)?
         .as_tenant()
         .with_container_args(args)
+        .with_env(env)
         .with_detach(false)
         .build()
         .map_err(container)?;
@@ -1228,7 +1267,8 @@ mod tests {
         assert_eq!(Fenced::read(&config).unwrap_err().to_string(), NOTIFY_REFUSAL);
         // The helper road: no youki state exists under this root, so a refusal that reads as anything but the
         // notify sentence would be youki's, asked after the read.
-        let refused = helper_exec(dir.path(), "wsp-n", vec!["true".to_owned()], Some(Duration::from_secs(1)), None).unwrap_err();
+        let refused =
+            helper_exec(dir.path(), "wsp-n", vec!["true".to_owned()], HashMap::new(), Some(Duration::from_secs(1)), None).unwrap_err();
         assert_eq!(helper_failure_line(&refused), format!("wsp-runtime: {NOTIFY_REFUSAL}"));
     }
 

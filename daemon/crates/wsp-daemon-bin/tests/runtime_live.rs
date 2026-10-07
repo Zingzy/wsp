@@ -2717,7 +2717,7 @@ async fn a_pane_opens_a_shell_inside_the_workspace_on_a_pty_of_the_workspaces_ow
     assert_eq!(code, 0, "the reading of the workspace's /dev failed: {said}");
 
     let opened = Instant::now();
-    let mut running = match w.ops.pty_in(&id, 100, 40, "/root", None, None).await {
+    let mut running = match w.ops.pty_in(&id, 100, 40, "/root", wsp_runtime::runtime::PtyAsk::default()).await {
         Ok(running) => running,
         // On its own line and whole: the sentence names which step gave out, how the helper ended and what it
         // printed, which is what says whether this is a mount, a filter or the road itself.
@@ -2957,6 +2957,51 @@ async fn the_computers_daemon_answers_a_workspaces_pane_and_leaves_its_quiet_clo
         .filter(|name| name.starts_with("pty-"))
         .collect();
     assert!(held.is_empty(), "the pty left {held:?} behind");
+    w.close().await;
+}
+
+/// A sign-in's pty inside a workspace: the args run as the program's argv with nothing typed, the env the frame
+/// names reaches it over the workspace's own, and no value of that env stands on a command line of the computer's,
+/// which every login there can read in /proc.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn a_workspaces_pty_runs_its_args_with_the_env_the_frame_names() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    let d = frames_daemon().await;
+    let mut pane = FrameClient::connect(d.addr).await;
+    let secret = "not-on-any-cmdline-31415";
+    let args = json!([
+        "/bin/sh",
+        "-c",
+        "printf 'argv=%s asked=%s home=%s\\n' \"$1\" \"$WSP_ASKED\" \"$HOME\"; sleep 2; exit 5",
+        "sh",
+        "two words"
+    ]);
+    let made = pane
+        .ok(
+            "pty.create",
+            json!({ "machineId": &id, "cols": 200, "rows": 40, "cwd": "/root", "args": args, "env": { "WSP_ASKED": secret } }),
+        )
+        .await;
+    assert_eq!(made["argv"], json!(true), "{made}");
+    let pty = made["ptyId"].as_str().unwrap().to_owned();
+    pane.ok("pty.attach", json!({ "ptyId": &pty, "machineId": &id })).await;
+    let want = format!("argv=two words asked={secret} home=/root");
+    assert!(pane.printed_within(&pty, &want, Duration::from_secs(30)).await, "{:?}", pane.pty_text(&pty));
+    let lines: Vec<String> = fs::read_dir("/proc")
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| fs::read(e.path().join("cmdline")).ok())
+        .map(|raw| String::from_utf8_lossy(&raw).replace('\0', " "))
+        .filter(|line| line.contains(secret))
+        .collect();
+    assert!(lines.is_empty(), "the env's value stood on a command line: {lines:?}");
+    pane.listen(Duration::from_secs(4)).await;
+    let exit = pane.seen.iter().find(|f| f["type"] == "pty.exit" && f["ptyId"] == json!(pty)).cloned();
+    assert_eq!(exit.map(|e| e["exitCode"].clone()), Some(json!(5)), "{:?}", pane.seen);
+    assert_eq!(pane.pty_text(&pty), format!("{want}\r\n"), "only the program's own words, no prompt and no echo");
     w.close().await;
 }
 

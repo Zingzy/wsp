@@ -614,6 +614,44 @@ async fn checks_each_auth_frame_against_the_token_file_as_it_is_now() {
     assert_eq!(c1.request("ping", json!({})).await["ok"], true);
 }
 
+/// A box's root daemon keeps its token in the home of the login its lines run as, who owns that home and can move
+/// root's `.wsp` aside and make a folder of its own at the name with a token it wrote. Done here by a real process
+/// of nobody's in a home of nobody's: neither the planted token nor the one moved aside opens the door, so nothing
+/// runs as root. Only root can stand for another login, so the case runs as root.
+#[tokio::test]
+async fn a_token_a_login_planted_in_a_folder_of_its_own_where_wsp_was_opens_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    if !nix::unistd::geteuid().is_root() {
+        return;
+    }
+    let top = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(top.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let home = top.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    std::os::unix::fs::chown(&home, Some(65534), Some(65534)).unwrap();
+    let wsp = home.join(".wsp");
+    std::fs::create_dir(&wsp).unwrap();
+    std::fs::set_permissions(&wsp, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::write(wsp.join("daemon-token"), format!("{TOKEN}\n")).unwrap();
+    let token_path = wsp.join("daemon-token");
+    let d = start_with(|options| options.token_path = token_path).await;
+    assert_eq!(Client::connect(d.addr, TOKEN, None).await.1, None, "root's own token opens the door");
+
+    let mut plant = std::process::Command::new("/bin/sh");
+    plant.args(["-c", "mv .wsp .wsp-root && mkdir .wsp && printf 'planted-by-nobody\\n' > .wsp/daemon-token"]);
+    plant.current_dir(&home).env_clear().uid(65534).gid(65534);
+    assert!(plant.status().unwrap().success(), "nobody owns the home, so it can move root's folder aside");
+
+    let (mut planted, closed) = Client::connect(d.addr, "planted-by-nobody", None).await;
+    if closed.is_none() {
+        let ran = planted.request("exec", json!({ "cmd": "id -u; id -un", "timeoutMs": 5000 })).await;
+        panic!("the planted token opened the door, and exec answered {ran}");
+    }
+    assert_eq!(closed.map(|c| c.code), Some(4401));
+    assert_eq!(Client::connect(d.addr, TOKEN, None).await.1.map(|c| c.code), Some(4401), "the token moved aside is not read either");
+}
+
 #[tokio::test]
 async fn answers_the_auth_frame_then_greets_with_its_root_and_version_before_anything_else() {
     let d = start(None).await;
@@ -954,6 +992,42 @@ async fn starts_in_the_home_directory_not_wherever_the_daemon_runs() {
     assert_eq!(c.request("pty.write", json!({ "ptyId": pty_id, "data": "echo CWD=$PWD\n" })).await["ok"], true);
     let want = format!("CWD={home}\r");
     assert!(c.wait_text(&want, WAIT).await, "{:?}", c.pty_text());
+}
+
+/// A pty with args runs them as its argv: no shell line is typed, so nothing but the program's own words reach
+/// the socket, an argument with a space in it arrives as one word, the env named rides along, and the pty ends
+/// with the program's own code.
+#[tokio::test]
+async fn args_run_as_the_ptys_argv_with_no_line_typed_into_a_shell() {
+    let d = start(None).await;
+    let mut c = authed(&d).await;
+    let args = json!(["/bin/sh", "-c", "printf 'argv=%s asked=%s\\n' \"$1\" \"$WSP_ASKED\"; exit 4", "sh", "two words"]);
+    let created = c.request("pty.create", json!({ "cols": 200, "rows": 24, "args": args, "env": { "WSP_ASKED": "yes" } })).await;
+    assert_eq!(created["ok"], true, "{created}");
+    assert_eq!(created["argv"], true, "a daemon that ran the args says so, which an older one never does: {created}");
+    let pty_id = created["ptyId"].as_str().unwrap().to_owned();
+    assert_eq!(c.request("pty.attach", json!({ "ptyId": pty_id })).await["ok"], true);
+    assert!(c.wait_event("pty.exit", WAIT, |_| true).await, "{:?}", c.frames);
+    assert_eq!(c.pty_text(), "argv=two words asked=yes\r\n", "only the program's own words, no prompt and no echo");
+    assert_eq!(c.events("pty.exit")[0]["exitCode"], 4);
+    // Not a reply's run: the panes may adopt it.
+    let listed = c.request("pty.list", json!({})).await;
+    assert!(listed["ptys"].as_array().unwrap().iter().all(|p| p.get("reply").is_none()), "{listed}");
+    c.every_event_parses();
+}
+
+/// Args are the whole of what the pty runs, so a frame that also names a shell or a line to run through one is
+/// asking for two programs, and an empty argv names none.
+#[tokio::test]
+async fn args_beside_a_shell_or_a_run_or_empty_are_a_bad_request() {
+    let d = start(None).await;
+    let mut c = authed(&d).await;
+    for asked in [json!({ "args": ["/bin/true"], "shell": "bash" }), json!({ "args": ["/bin/true"], "run": "true" }), json!({ "args": [] })]
+    {
+        let r = c.request("pty.create", asked.clone()).await;
+        assert_eq!((r["ok"].as_bool(), r["code"].as_str()), (Some(false), Some("bad-request")), "{asked} answered {r}");
+    }
+    assert!(c.request("pty.list", json!({})).await["ptys"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

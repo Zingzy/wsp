@@ -138,7 +138,7 @@ describe("o and the page the machine asks to open", () => {
     t.shim(PAGE, 42485);
     expect(t.opened).toEqual([PAGE]);
     expect(t.text()).toContain("default (builder): that page is already open here");
-    expect(pty.writes.slice(1)).toEqual([]);
+    expect(pty.writes).toEqual([]);
     t.link.exit(pty, 0);
     const [r] = await t.run;
     expect(r).toMatchObject({ state: "signed-in", exit: 0 });

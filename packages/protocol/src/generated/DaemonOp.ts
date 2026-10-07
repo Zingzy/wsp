@@ -21,6 +21,17 @@ export type DaemonOp = { "op": "pty.create", cols?: number, rows?: number, shell
  */
 run?: string, 
 /**
+ * The program this pty runs and its arguments, as its argv: no shell reads a line for it, so nothing is
+ * typed and no word is quoted. Never beside a shell or a run, which name another program.
+ */
+args?: Array<string>, 
+/**
+ * The program runs as the login this computer's lines run as, the owner of its home, so the terminal is
+ * handed to that login, which can then open it by name as a tool reading a typed code does. Taken only by
+ * a daemon told that login at its start.
+ */
+asLogin?: boolean, 
+/**
  * The workspace this pty is for, on a daemon that runs workspaces: the shell opens inside that
  * workspace's namespaces, in the folder the frame names, which is absolute and is asked for, since this
  * daemon has no working directory inside a workspace. Without one the shell is the daemon's own

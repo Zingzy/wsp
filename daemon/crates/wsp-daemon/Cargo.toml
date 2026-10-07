@@ -33,6 +33,10 @@ ignore = "0.4"
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# The access list that lets one login search the open socket's folder, set on the folder held open.
+xattr = "1"
+
 [dev-dependencies]
 tempfile = "3"
 ed25519-dalek = { version = "3", features = ["pem"] }

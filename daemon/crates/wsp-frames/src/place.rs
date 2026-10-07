@@ -146,6 +146,11 @@ pub struct PlaceReport {
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "under_paths_opt::<_, 200, 64>")]
     #[ts(optional)]
     pub logins: Option<Vec<String>>,
+    /// The login this computer's lines run as, the owner of its home where that is not root, opens the browser
+    /// shim's socket and the terminal of a sign-in run as it: what lets a sign-in there ride the relay. Absent from
+    /// a daemon that was told no such login or could not hand it its socket, and from one older than this field.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub login_reach: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

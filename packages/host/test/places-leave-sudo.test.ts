@@ -14,7 +14,7 @@ import { SSH_SUDO_READ, keyFingerprint, type SshReach, type SshTransport } from 
 import { daemonBinaryHere } from "../src/assets.js";
 import { noPlaceSystemLine } from "../src/daemon-binary.js";
 import { daemonFlags, sshDaemonPlace } from "../src/doctor.js";
-import { deviceLeftLine, joinCommand, placeDaemonFlags, preparePlaceHome, joinPlace, placeNameHere, removeCommand, placeLeaver, placeRunner, placeLeaveFailedLine, placeNoKeyForSudoLine, placeSudoReader, placeUndoer, placeUndoNeedsSudoLine, sudoPasswordAsk } from "../src/places.js";
+import { deviceLeftLine, joinCommand, loginUidOf, placeDaemonFlags, preparePlaceHome, joinPlace, placeNameHere, removeCommand, placeLeaver, placeRunner, placeLeaveFailedLine, placeNoKeyForSudoLine, placeSudoReader, placeUndoer, placeUndoNeedsSudoLine, sudoPasswordAsk } from "../src/places.js";
 import { placeFilePath, placeKeyPath, readPlaceFile, sweptLine, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { type ServiceRunner } from "../src/service.js";
@@ -403,6 +403,18 @@ describe("the daemon's line on a joined computer", () => {
     const agents = flags[flags.indexOf("--agents") + 1]!.split(",");
     expect(agents).toEqual(CATALOG_AGENTS.map(a => `${a.id}=${a.bin}`));
     expect(agents.length).toBeGreaterThan(0);
+    // /home/maya is no folder here, so no login is read off it and none is named.
+    expect(flags).not.toContain("--login-uid");
+  });
+
+  it("names the login a root daemon's lines go to, the owner of the home, and none where the home is the daemon's own", () => {
+    const home = tmp("login-home");
+    const owner = statSync(home).uid;
+    const run = { execPath: "/usr/bin/node", execArgv: [], argv: ["/usr/bin/node", "/opt/wsp/bin.js"], version: "9.9.9", PATH: "" };
+    const flags = placeDaemonFlags(home, placeDaemonPaths(home).placeFile, run, loginUidOf(home, owner + 1));
+    expect(flags.slice(-2)).toEqual(["--login-uid", String(owner)]);
+    expect(loginUidOf(home, owner)).toBeUndefined();
+    expect(loginUidOf(join(home, "not-there"), owner + 1)).toBeUndefined();
   });
 
   it("what the daemon needs on disk is made before it starts: wsp's folder, the inbox, the work folder and a fresh token nobody else can read", () => {

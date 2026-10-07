@@ -2,7 +2,7 @@
 import type { Machine } from "@wsp/engine";
 import { noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { NO_AGENTS_READER, agentsReads, pageReachOf, projectOf, type AgentsActs, type AgentsOn, type AgentsRead, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type ServersActs, type SignInForward, type SkillsActs } from "../src/agents-read.js";
+import { NO_AGENTS_READER, agentsReads, pageReachOf, projectOf, type AgentsActs, type AgentsOn, type AgentsRead, type AgentsWorkspace, type PtyLink, type ServerToolsAsk, type SignInAsk, type ServersActs, type SignInForward, type SkillsActs } from "../src/agents-read.js";
 import type { PlaceDoor } from "../src/places.js";
 import { until } from "./until.js";
 
@@ -119,6 +119,7 @@ describe("the sign-ins on a computer or a workspace", () => {
       list: async () => [{ id: "pl_1", name: "spoo", kind: "computer" }],
       reportOf: async () => undefined,
       signInsAt: () => undefined,
+      nameOf: () => "spoo",
       loginLanded: async () => {},
       exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
     }) as unknown as PlaceDoor;
@@ -127,6 +128,7 @@ describe("the sign-ins on a computer or a workspace", () => {
     const ch = channel();
     const planned: { on: AgentsOn; ask: SignInAsk }[] = [];
     const handed: (SignInForward | undefined)[] = [];
+    const linked: PtyLink[] = [];
     const codes: string[] = [];
     let finish: () => void = () => {};
     const acts: AgentsActs = {
@@ -136,6 +138,7 @@ describe("the sign-ins on a computer or a workspace", () => {
         if (ask.agent === "opencode") throw new Error("opencode asks you to pick");
         return async run => {
           handed.push(run.forward);
+          linked.push(run.link);
           // What the host's watched pty does: a frame down the link, an event back up, the code writer handed over.
           await run.link.op("pty.create", {});
           run.link.onEvent(e => run.emit({ state: "waiting", url: String(e["url"]) }));
@@ -162,8 +165,18 @@ describe("the sign-ins on a computer or a workspace", () => {
       changed: target => void changed.push(target),
       now: () => Date.parse("2026-09-24T12:00:00Z"),
     });
-    return { api, ch, planned, handed, changed, codes, forgot, logged, finish: () => finish() };
+    return { api, ch, planned, handed, linked, changed, codes, forgot, logged, finish: () => finish() };
   }
+
+  it("hand a joined computer's sign-in a link that names the computer, which a refusal to update its daemon names, and a workspace's none", async () => {
+    const t = acting({ now: "running" }, undefined, spoo());
+    const box = await t.api.signIn({ placeId: "pl_1" }, { agent: "codex", server: "notion" }, () => {});
+    const ws = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "claude", server: "notion" }, () => {});
+    await tick();
+    expect(t.linked.map(l => l.computer)).toEqual(["spoo", undefined]);
+    box.leave();
+    ws.leave();
+  });
 
   it("tell the host a workspace's callback port is forwarded from here where the relay does, and nothing where it does not", async () => {
     for (const relayed of [true, false]) {
@@ -229,6 +242,15 @@ describe("the sign-ins on a computer or a workspace", () => {
     expect(report.reach).toBe("none");
     expect(report).not.toHaveProperty("runAs");
     expect(pageReachOf({ kind: "box", machine: {} as never, login: {}, relayed: true }, "ada")).toBe("none");
+  });
+
+  it("report relay for a joined computer whose daemon hands the login its lines go to the shim's socket and the sign-in's terminal", async () => {
+    const reached = { ...spoo(), reportOf: async () => ({ loginReach: true, login: {} }) } as unknown as PlaceDoor;
+    const t = acting({ now: "running" }, undefined, reached, { ...READ, home: "/home/ada", user: "ada", runAs: "ada" });
+    t.api.forwards({ reaches: () => true, open: () => undefined });
+    expect((await t.api.read({ placeId: "pl_1" })).reach).toBe("relay");
+    expect(pageReachOf({ kind: "box", machine: {} as never, login: {}, relayed: true, loginReach: true }, "ada")).toBe("relay");
+    expect(pageReachOf({ kind: "box", machine: {} as never, login: {}, loginReach: true }, "ada")).toBe("none");
   });
 
   it("drop what the reader kept for the target before saying it changed, and log each sign-in's start and end without its page or code", async () => {

@@ -37,7 +37,8 @@
       },
       "logins": [
         "codex/auth.json"
-      ]
+      ],
+      "loginReach": true
     }
   },
   {

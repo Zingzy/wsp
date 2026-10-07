@@ -20,8 +20,9 @@ export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale" | "rea
  * workspace's own. An act, or a server started for its tools, works in a project only where exactly one is named. */
 export type AgentsOn =
   | { kind: "here"; projects?: readonly AgentsProject[] }
-  /** `relayed`: this host forwards that computer's sign-in callback port from this computer. */
-  | { kind: "box"; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string; relayed?: boolean; projects?: readonly AgentsProject[] }
+  /** `relayed`: this host forwards that computer's sign-in callback port from this computer. `loginReach`: its daemon
+   * hands the login its lines run as the browser shim's socket and a sign-in's terminal. */
+  | { kind: "box"; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string; relayed?: boolean; loginReach?: boolean; projects?: readonly AgentsProject[] }
   /** `relayed`: this host forwards the workspace's sign-in callback port from this computer. */
   | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; projects?: readonly AgentsProject[]; relayed?: boolean };
 
@@ -31,7 +32,8 @@ export const projectOf = (on: AgentsOn): string | undefined => (on.projects?.len
 /** Where a sign-in page that returns to localhost reaches the harness on the target: the one rule the sign-in is
  * planned by and the report tells the app. A line handed to another login can open neither the pty's device its page
  * is written to nor the socket of the root daemon its shim posts to, so its page never reaches this computer. */
-export const pageReachOf = (on: AgentsOn, runAs?: string): PageReach => (on.kind === "here" ? "here" : on.relayed === true && runAs === undefined ? "relay" : "none");
+export const pageReachOf = (on: AgentsOn, runAs?: string): PageReach =>
+  on.kind === "here" ? "here" : on.relayed === true && (runAs === undefined || (on.kind === "box" && on.loginReach === true)) ? "relay" : "none";
 
 /** One MCP server of one agent's config on a target, asked for its tools. `key` names the target, which is what an
  * answer is kept under. */
@@ -65,6 +67,8 @@ export interface PtyLink {
   closed?: Promise<unknown>;
   /** The pty is on a computer somebody owns: bash there reads no startup file, by ptyBareOn. */
   bare?: boolean;
+  /** The joined computer's name, where the pty is on one: what the line that updates its daemon names. */
+  computer?: string;
 }
 
 /** An agent's sign-in, or with `server` one MCP server's in that agent's config. */
@@ -331,6 +335,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         ...(report?.agentVersions !== undefined ? { versions: report.agentVersions } : {}),
         ...(row.logins !== undefined ? { logins: row.logins } : {}),
         ...(reached(target) ? { relayed: true } : {}),
+        ...(report?.loginReach === true ? { loginReach: true } : {}),
         ...(await projectsAt(target, row.name, read)),
       };
     }
@@ -418,6 +423,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
           },
           closed: channel.closed,
           bare: ptyBareOn(target),
+          ...("placeId" in target && target.placeId !== HERE_PLACE_ID && o.places() !== undefined ? { computer: o.places()!.nameOf(target.placeId) } : {}),
         };
         const step = (s: Omit<AgentsSignInEvent, "type" | "signInId">): void => {
           const event: AgentsSignInEvent = { type: "agents.signIn", signInId, ...s };

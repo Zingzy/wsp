@@ -16,6 +16,7 @@
 //! The two lines below, the broker's and the helper's, are rendered here and read back by the broker's own flags,
 //! so the line a case drives against a stub is the line a box runs.
 
+use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -31,10 +32,14 @@ pub struct Ask {
     pub cwd: PathBuf,
     /// Where the size of the pane is read at every window-change signal, as the workspace sees it.
     pub size_file: PathBuf,
-    pub env: Vec<(String, String)>,
     /// The shell and its arguments.
     pub argv: Vec<String>,
 }
+
+/// The variable the helper reads the tenant's environment off, beyond the workspace's own: a value on a command line
+/// stands in a /proc/<pid>/cmdline every login on the computer can read, and a process's own environment is its
+/// owner's alone to read.
+pub const TENANT_ENV: &str = "WSP_TENANT_ENV";
 
 /// The size a pane holds, as both sides of the file spell it: two numbers on one line, columns first.
 pub fn size_line(cols: u16, rows: u16) -> String {
@@ -65,10 +70,6 @@ pub fn broker_line(init: &str, ask: &Ask) -> Vec<String> {
         "--size-file".to_owned(),
         ask.size_file.to_string_lossy().into_owned(),
     ];
-    for (name, value) in &ask.env {
-        line.push("--env".to_owned());
-        line.push(format!("{name}={value}"));
-    }
     line.push("--".to_owned());
     line.extend(ask.argv.iter().cloned());
     line
@@ -96,9 +97,9 @@ pub fn helper_argv(root: &Path, id: &str, pid_file: &Path, broker: &[String]) ->
 /// The helper started with all three pipes, and the two ends of the pane's road taken off it at once. Taken here
 /// and not later: a wait on a child drops its stdin the moment it is polled, so a pane whose keystrokes had
 /// nowhere to go would be a terminal that prints and never answers.
-pub fn start(exe: &Path, args: &[String]) -> io::Result<(Child, ChildStdin, ChildStdout)> {
+pub fn start(exe: &Path, args: &[String], env: &BTreeMap<String, String>) -> io::Result<(Child, ChildStdin, ChildStdout)> {
     let mut cmd = Command::new(exe);
-    cmd.args(args);
+    cmd.args(args).env(TENANT_ENV, serde_json::to_string(env).map_err(io::Error::other)?);
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     cmd.process_group(0).kill_on_drop(true);
     let mut child = cmd.spawn()?;
@@ -207,9 +208,6 @@ mod inside {
     fn shell_on(slave: &OwnedFd, ask: &Ask) -> io::Result<std::process::Child> {
         let mut cmd = Command::new(&ask.argv[0]);
         cmd.args(&ask.argv[1..]).current_dir(&ask.cwd);
-        for (name, value) in &ask.env {
-            cmd.env(name, value);
-        }
         cmd.stdin(Stdio::from(slave.try_clone()?)).stdout(Stdio::from(slave.try_clone()?)).stderr(Stdio::from(slave.try_clone()?));
         // Between the fork and the exec, where the slave is already this child's stdio.
         //
@@ -329,7 +327,6 @@ mod tests {
             rows: 40,
             cwd: PathBuf::from("/root/project"),
             size_file: PathBuf::from("/root/.wsp/pty-1.size"),
-            env: vec![("HOME".to_owned(), "/root".to_owned()), ("TERM".to_owned(), "xterm-256color".to_owned())],
             argv: vec!["bash".to_owned(), "-l".to_owned()],
         }
     }
@@ -380,10 +377,6 @@ mod tests {
                 "/root/project",
                 "--size-file",
                 "/root/.wsp/pty-1.size",
-                "--env",
-                "HOME=/root",
-                "--env",
-                "TERM=xterm-256color",
                 "--",
                 "bash",
                 "-l",
@@ -406,8 +399,9 @@ mod tests {
         let stub = dir.path().join("stub.sh");
         let broker = broker_line("/sbin/wsp-init", &ask());
         let args = helper_argv(Path::new("/wsp"), "wsp-a", Path::new("/wsp/run/wsp-a/pty-1.pid"), &broker);
-        let text = "#!/bin/sh\necho \"$@\"\necho 'a refusal of its own' >&2\nexec cat\n";
-        let (mut helper, mut input, mut output) = spawn_stub(&stub, text, || start(&stub, &args));
+        let text = "#!/bin/sh\necho \"$@\"\necho \"$WSP_TENANT_ENV\"\necho 'a refusal of its own' >&2\nexec cat\n";
+        let env = BTreeMap::from([("WSP_ASKED".to_owned(), "a value".to_owned())]);
+        let (mut helper, mut input, mut output) = spawn_stub(&stub, text, || start(&stub, &args, &env));
 
         input.write_all(b"typed\n").await.unwrap();
         input.flush().await.unwrap();
@@ -415,8 +409,12 @@ mod tests {
         drop(input);
         let mut printed = String::new();
         output.read_to_string(&mut printed).await.unwrap();
-        let (line, typed) = printed.split_once('\n').expect("the line the stub was given, then what it copied");
+        let (line, rest) = printed.split_once('\n').expect("the line the stub was given, then what it copied");
         assert_eq!(line, args.join(" "));
+        // The tenant's variables ride the helper's own environment and stand nowhere on its line.
+        let (tenant, typed) = rest.split_once('\n').expect("the tenant's variables, then what it copied");
+        assert_eq!(tenant, r#"{"WSP_ASKED":"a value"}"#);
+        assert!(!line.contains("a value"), "{line}");
         assert_eq!(typed, "typed\n");
 
         // The third pipe is the helper's own, which is where the sentence a terminal never stood is read.
@@ -461,7 +459,7 @@ mod tests {
         holding.recv().unwrap();
         let broker = broker_line("/sbin/wsp-init", &ask());
         let args = helper_argv(Path::new("/wsp"), "wsp-a", Path::new("/wsp/run/wsp-a/pty-1.pid"), &broker);
-        let (mut helper, _input, _output) = spawn_stub(&stub, "#!/bin/sh\nexit 0\n", || start(&stub, &args));
+        let (mut helper, _input, _output) = spawn_stub(&stub, "#!/bin/sh\nexit 0\n", || start(&stub, &args, &BTreeMap::new()));
         assert!(helper.wait().await.unwrap().success(), "the stub spawned once the thread writing it closed its file");
         holder.join().unwrap();
     }

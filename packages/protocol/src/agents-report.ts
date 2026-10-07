@@ -341,7 +341,8 @@ export type AgentsChangedEvent = z.infer<typeof AgentsChangedEvent>;
 /** One sign-in as a line on the computer it runs on, for the person's own terminal: what runs first (the store's
  * folder, where the login lives outside the home), the command, the environment it runs with, and the tool's own
  * status line afterwards. Paths and commands only, never a value. */
-export const SignInLine = z.object({ command: z.string(), env: z.record(z.string()).optional(), prepare: z.string().optional(), status: z.string().optional() });
+/** asLogin: the command runs as the computer's login rather than as its daemon, so its terminal is handed to that login. */
+export const SignInLine = z.object({ command: z.string(), env: z.record(z.string()).optional(), prepare: z.string().optional(), status: z.string().optional(), asLogin: z.boolean().optional() });
 export type SignInLine = z.infer<typeof SignInLine>;
 
 /** A paste the agent's token check refused. */

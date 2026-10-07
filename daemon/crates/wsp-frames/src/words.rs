@@ -395,5 +395,10 @@ pub const NO_SSHD: &str = "this workspace's image has no ssh server (/usr/sbin/s
 /// somebody owns: it runs as that computer's root, and starts no ssh server there for anybody's editor.
 pub const SSH_NOT_ON_A_PLACE: &str = "this daemon starts an ssh server inside a workspace on this computer, never on the computer itself; name the workspace the editor is for";
 
+/// What a pty.create is refused with where its args name no program, or come beside a shell or a run, which name
+/// another program: the args are the whole of what the pty runs.
+pub const PTY_ARGS_ALONE: &str =
+    "a pty with args runs those args and nothing else: name the program first, with no shell and no run beside them";
+
 /// What an ssh.start is refused with where the key is not one ed25519 public key line.
 pub const SSH_KEY_SHAPE: &str = "the key is not one ssh-ed25519 public key line";

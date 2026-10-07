@@ -79,6 +79,10 @@ export const PlaceReport = z.object({
    * workspace on it shares. Absent from a report a daemon older than this field sent, which is unknown and not
    * none; a name that walks out of that folder is refused, since the host joins it onto a folder of its own. */
   logins: z.array(z.string().max(200).refine(isUnderPath, "a name under a folder")).max(64).optional(),
+  /** The login that computer's lines run as, the owner of its home where that is not root, opens its browser shim's
+   * socket and the terminal of a sign-in run as it, so a sign-in there can ride the relay. Absent from a daemon told no
+   * such login, from one that could not hand it the socket, and from one older than this field. */
+  loginReach: z.boolean().optional(),
   /** Which of the host's addresses this link reached; the address a turn on the place is told to dial back. */
   dialed: z.string().refine(isHttpUrl, "http or https URL"),
 });
