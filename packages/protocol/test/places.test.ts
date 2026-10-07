@@ -237,7 +237,7 @@ describe("the address a person types on the join screen", () => {
   });
 
   it("leaves an address that already carries a scheme alone", () => {
-    expect(joinAddressOf("https://p_x.singhi.me")).toBe("https://p_x.singhi.me");
+    expect(joinAddressOf("https://p_x.usewsp.com")).toBe("https://p_x.usewsp.com");
     expect(joinAddressOf("http://192.168.1.20:4420")).toBe("http://192.168.1.20:4420");
   });
 

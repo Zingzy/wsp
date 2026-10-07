@@ -2042,17 +2042,17 @@ describe("a desktop shell and the host that served it its page", () => {
 describe("the one listing of the hosts a computer can reach", () => {
   it("prints each host on the account with its beat, and marks the one every line takes", () => {
     const cells = hostsTable([
-      { host: "macbook", address: "https://h1.singhi.me", awayMs: 12_000, connector: "2026.8.1", hostKey: "SHA256:aaa", deviceId: "d_1", default: true },
+      { host: "macbook", address: "https://h1.usewsp.com", awayMs: 12_000, connector: "2026.8.1", hostKey: "SHA256:aaa", deviceId: "d_1", default: true },
       { host: "attic", awayMs: null },
-      { host: "box", address: "https://h2.singhi.me", deviceId: "d_2", hostKey: "SHA256:bbb" },
+      { host: "box", address: "https://h2.usewsp.com", deviceId: "d_2", hostKey: "SHA256:bbb" },
     ]);
     expect(cells[0]).toEqual(["HOST", "ADDRESS", "STATE", "DEVICE", "CONNECTOR", "KEY", ""]);
-    expect(cells[1]).toEqual(["macbook", "https://h1.singhi.me", "up 12s", "d_1", "2026.8.1", "SHA256:aaa", "default"]);
+    expect(cells[1]).toEqual(["macbook", "https://h1.usewsp.com", "up 12s", "d_1", "2026.8.1", "SHA256:aaa", "default"]);
     // A host on the account that has not said where it is: there is nothing to dial and the row says so.
     expect(cells[2]).toEqual(["attic", NOT_UP_YET, "not yet", "", "", "", ""]);
     // A row read off this computer's records while the relay did not answer says nothing of a beat, so its state is
     // left empty rather than read as away.
-    expect(cells[3]).toEqual(["box", "https://h2.singhi.me", "", "d_2", "", "SHA256:bbb", ""]);
+    expect(cells[3]).toEqual(["box", "https://h2.usewsp.com", "", "d_2", "", "SHA256:bbb", ""]);
   });
 
   it("says a host that is beating with no address yet waits on its next start, so one row says one thing", () => {

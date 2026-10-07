@@ -140,7 +140,7 @@ describe("the ws url of a host's address", () => {
 describe("how long a dial waits, by the road", () => {
   it("gives a host on this computer a loopback's window and one at an address off it the road's", () => {
     const near = dialWindowMs({ kind: "here" });
-    const far = dialWindowMs({ kind: "alias", alias: "box", record: record("https://h5aab7a97cd80893f.singhi.me") });
+    const far = dialWindowMs({ kind: "alias", alias: "box", record: record("https://h5aab7a97cd80893f.usewsp.com") });
     expect(near).toBe(5_000);
     // Longer than the 5.8 s a content delivery edge was measured holding a request while its tunnel came up, which
     // is the road a relayed box is reached over.
@@ -150,7 +150,7 @@ describe("how long a dial waits, by the road", () => {
       expect(dialWindowMs({ kind: "url", url }), url).toBe(near);
     }
     // A hand-edited record can hold any word, and the window is no place to throw over one.
-    for (const url of ["https://h5aab7a97cd80893f.singhi.me", "http://box.local:4400", "http://10.0.0.4:4400", "wss://attic.example/ws", "not-an-address", "http://"]) {
+    for (const url of ["https://h5aab7a97cd80893f.usewsp.com", "http://box.local:4400", "http://10.0.0.4:4400", "wss://attic.example/ws", "not-an-address", "http://"]) {
       expect(dialWindowMs({ kind: "alias", alias: "box", record: record(url) }), url).toBe(far);
       expect(dialWindowMs({ kind: "url", url }), url).toBe(far);
     }
