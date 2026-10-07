@@ -127,6 +127,47 @@ describe("a thread whose start named who to tell", () => {
     }
   });
 
+  it("a line waiting behind its parent's turn when the host stops goes once, as the parent's next turn, after the host starts again", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h1 = held(true);
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h1.adapter } });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
+    const parent = await rt1.sessions.start(ws.id, { prompt: "orchestrate" });
+    const parentThread = parent.view().threadId!;
+    h1.reply(0, "waiting for the builder");
+    const kid = await rt1.sessions.start(ws.id, { prompt: "build it", notify: [parentThread] });
+    h1.end(1, "done");
+    const line = `thread ${kid.view().threadId!.slice(0, 8)} finished (completed): done`;
+    await settle();
+    expect(h1.steered).toEqual([]);
+    expect(h1.starts).toHaveLength(2);
+    await rt1.close();
+
+    const h2 = held(true);
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h2.adapter } });
+    try {
+      await rt2.sessions.list(ws.id);
+      await vi.waitFor(() => expect(h2.starts).toHaveLength(1));
+      expect(h2.starts[0]).toMatchObject({ prompt: line, resume: parent.view().claudeSessionId });
+      h2.end(0, "read it");
+      await settle();
+      expect(h2.starts).toHaveLength(1);
+      expect(h2.steered).toEqual([]);
+    } finally {
+      await rt2.close();
+    }
+
+    const rt3 = createRuntime({ backend, store, adapters: { claude: held(true).adapter } });
+    try {
+      await rt3.sessions.list(ws.id);
+      await settle();
+      expect((await rt3.sessions.history(ws.id)).filter(e => e.type === "session.start" && e.threadId === parentThread).map(e => (e as { prompt: string }).prompt)).toEqual(["orchestrate", line]);
+    } finally {
+      await rt3.close();
+    }
+  });
+
   it("a running parent that cannot steer is told once its turn ends: the line waits behind it as a queued send does", async () => {
     const h = held(false);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
@@ -268,6 +309,60 @@ describe("a thread whose start named who to tell", () => {
     await vi.waitFor(() => expect(h.starts).toHaveLength(3));
     expect(h.starts[2]).toMatchObject({ prompt: line, resume: parent.view().claudeSessionId });
     expect(events.filter(e => e.type === "session.start").at(-1)).toMatchObject({ threadId: parent.view().threadId, prompt: line });
+    h.end(2, "read it");
+    await rt.close();
+  });
+
+  it("a line held for a napping parent outlives a host restart and goes when the workspace wakes", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h1 = held(true);
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h1.adapter } });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
+    const parent = await rt1.sessions.start(ws.id, { prompt: "orchestrate" });
+    h1.end(0, "waiting");
+    await parent.finished;
+    const kid = await rt1.sessions.start(ws.id, { prompt: "build it", notify: [parent.view().threadId!] });
+    await rt1.workspaces.nap(ws.id);
+    const line = `thread ${kid.view().threadId!.slice(0, 8)} finished (failed): machine paused while the agent was working`;
+    await rt1.close();
+
+    const h2 = held(true);
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h2.adapter } });
+    try {
+      await rt2.sessions.list(ws.id);
+      await settle();
+      expect(h2.starts).toEqual([]);
+      await rt2.workspaces.wake(ws.id);
+      await vi.waitFor(() => expect(h2.starts).toHaveLength(1));
+      expect(h2.starts[0]).toMatchObject({ prompt: line, resume: parent.view().claudeSessionId });
+      h2.end(0, "read it");
+    } finally {
+      await rt2.close();
+    }
+  });
+
+  it("a line queued behind its parent's turn when the person pauses the parent's workspace goes to the parent at the wake, not to the person", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
+    const parentThread = parent.view().threadId!;
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parentThread] });
+    h.end(1, "done");
+    const line = `thread ${kid.view().threadId!.slice(0, 8)} finished (completed): done`;
+    await vi.waitFor(() => expect(events.filter(e => e.type === "session.queued")).toMatchObject([{ threadId: parentThread, prompt: line }]));
+    await rt.workspaces.nap(ws.id);
+    // The nap's interrupt reaches the parent's process, which exits; the held harness waits to be told.
+    h.end(0, "", { status: "interrupted" });
+    await settle();
+    expect(h.starts).toHaveLength(2);
+    await rt.workspaces.wake(ws.id);
+    await vi.waitFor(() => expect(h.starts).toHaveLength(3));
+    expect(h.starts[2]).toMatchObject({ prompt: line, resume: parent.view().claudeSessionId });
+    expect(events.filter(e => e.type === "session.notify").map(e => (e as { notify: string }).notify)).toEqual([parentThread]);
     h.end(2, "read it");
     await rt.close();
   });
