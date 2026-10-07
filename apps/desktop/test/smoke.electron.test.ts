@@ -19,7 +19,7 @@ import { ADD_COMPUTER_WORDS, SETTINGS_WORDS } from "../../web/src/settings/forma
 import { threadRowId } from "../../web/src/sidebar/rowGrammar.js";
 import { FIRST_RUN_WORDS } from "../../web/src/sidebar/words.js";
 import { VERSION } from "../../../packages/host/src/version.js";
-import { builtExecutableHere } from "./packaged.js";
+import { alive, APP_URL, appWindows, builtApp, loginShell, windowAt } from "./launched-app.js";
 import { menuShapeOf, workspaceMenuShape } from "./workspace-menu.js";
 import { notForThisPage } from "../src/origin.js";
 import { QUIT_WORD } from "../src/quit.js";
@@ -35,14 +35,6 @@ for (const name of [...LAUNCH_ENV, "ELECTRON_RUN_AS_NODE"]) delete process.env[n
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
 /** What the loopback page carries of the host's token: its sha256, hex. The token itself is in no page. */
 const DIGEST = /^[0-9a-f]{64}$/;
-
-function builtApp(): string {
-  const fromEnv = process.env["WSP_DESKTOP_APP"];
-  if (fromEnv !== undefined) return fromEnv;
-  const built = builtExecutableHere();
-  if (built === undefined) throw new Error(`no packaged tree for ${process.platform}-${process.arch}`);
-  return built;
-}
 
 const GOLDEN = {
   head: 1,
@@ -142,30 +134,11 @@ interface Launched {
   said: string[];
 }
 
-const APP_URL = /^http:\/\/127\.0\.0\.1:\d+\/$/;
 const ONBOARDING_URL = /onboarding\.html/;
 /** Where the photographed states go, beside the render tests' own. */
 const SHOTS = join(tmpdir(), "wsp-render");
-const DEVTOOLS_URL = /^devtools:\/\//;
 /** The words every notice about the app and its host being two releases shares. */
 const VERSION_LINE = /this app is/;
-
-/** The windows the app opened: a devtools window is Chromium's own, enumerated alongside them and able to come first. */
-function appWindows(app: ElectronApplication): Page[] {
-  return app.windows().filter(w => !DEVTOOLS_URL.test(w.url()));
-}
-
-/** The window showing a page, picked by its URL and never by the order the windows were made in. */
-function windowAt(app: ElectronApplication, url: RegExp): Promise<Page> {
-  return vi.waitFor(
-    () => {
-      const page = appWindows(app).find(w => url.test(w.url()));
-      if (page === undefined) throw new Error(`no window at ${url}, saw ${JSON.stringify(app.windows().map(w => w.url()))}`);
-      return page;
-    },
-    { timeout: 30_000, interval: 50 },
-  );
-}
 
 const PAGE = `<!doctype html><html><head><title>wsp</title></head><body><script>window.__WSP__ = window.__WSP__ || { token: "" };</script></body></html>`;
 
@@ -207,9 +180,7 @@ function deadPid(): number {
 function loginShellIn(home: string, path: string | undefined): string {
   const bin = join(home, "bin");
   mkdirSync(bin, { recursive: true });
-  const shell = join(home, "login-shell");
-  writeStub(shell, `#!/bin/sh\nprintf %s ${JSON.stringify(path ?? `${bin}:${LAUNCHD_PATH.join(":")}`)}\n`);
-  return shell;
+  return loginShell(join(home, "login-shell"), path ?? `${bin}:${LAUNCHD_PATH.join(":")}`);
 }
 
 /** HOME is the temp dir too, so the app's ~/.wsp and the service unit it writes under ~/Library never touch this
@@ -464,15 +435,6 @@ function claudeStandIn(dir: string, gate: string, pidFile: string, o: { asks?: b
       "",
     ].join("\n"),
   );
-}
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function refused(url: string): Promise<boolean> {
