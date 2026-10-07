@@ -36,7 +36,7 @@ describe("the agents on a computer you own", () => {
     },
   });
 
-  it("cover every project recorded on that computer, each at its checkout there, and an act names one of them", async () => {
+  it("cover every project recorded on that computer, each at its folder there, and an act names one of them", async () => {
     const asked: AgentsOn[] = [];
     const { hostKey } = await serving({ agentsReader: { read: async on => (asked.push(on), READ), tools: async on => (asked.push(on), { auth: "open", readAt: "2026-09-25T12:00:00.000Z" }) }, vault: {} });
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }), answers: c => forks(c, undefined, undefined, HOLDS_PROJECTS) });
@@ -47,9 +47,9 @@ describe("the agents on a computer you own", () => {
     expect((await c.request("agents.read", { target: { placeId } })).ok).toBe(true);
     const tools = await c.request("servers.tools", { target: { placeId, project: project.id }, agent: "claude", name: "db" });
     expect(tools.ok, String(tools["error"])).toBe(true);
-    const at = { id: project.id, name: "landing", path: project.checkout };
+    const at = { id: project.id, name: "landing", path: project.path };
     expect(asked.map(on => on.projects)).toEqual([[at], [at]]);
-    expect(project.checkout).toBeDefined();
+    expect(project.path).toBe("/home/maya/landing");
   });
 
   it("are read over that computer's link with the login, sign-ins and versions its report carries, and answered stamped", async () => {
@@ -145,13 +145,19 @@ describe("the agents on a computer you own", () => {
       ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
       const { client, placeId } = await join(hostKey, {
         code: await code(),
-        report: report("srv", { agents: ["claude"] }),
+        report: report("srv", { agents: ["claude"], login: { HOME: boxHome, USER: "root", PATH: "/usr/bin:/bin" } }),
         answers: c => {
           forks(c, undefined, undefined, KEEPS_NO_IMAGE).swallow.add("exec");
           c.onFrame(raw => {
             const frame = raw as unknown as Record<string, unknown>;
             if (frame["op"] !== "exec") return;
             if (flaky) return c.say({ id: frame["id"], ok: true, exitCode: 1, stdout: "", stderr: "realpath: no such folder", truncated: false });
+            // The box was joined as root, the one login a thread there runs as, whoever runs this test.
+            if (String(frame["cmd"]).includes("command -v runuser")) return c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: `Linux\n0\nroot\nroot\n1\n${boxHome}\n/usr/bin:/bin\n`, stderr: "", truncated: false });
+            // Root's login shell answers its PATH there, never through this computer's getent, which a Mac lacks.
+            if (String(frame["cmd"]).includes("-ilc")) return c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: "/usr/bin:/bin", stderr: "", truncated: false });
+            // The add's clone reaches no remote from a test: the folder it claimed stands for the checkout.
+            if (String(frame["cmd"]).includes("git clone")) return c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false });
             const stdout = execFileSync("/bin/bash", ["-c", String(frame["cmd"])], { env: { HOME: boxHome, PATH: "/usr/bin:/bin" }, encoding: "utf8" });
             c.say({ id: frame["id"], ok: true, exitCode: 0, stdout, stderr: "", truncated: false });
           });

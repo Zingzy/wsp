@@ -252,6 +252,7 @@ export interface KindsArea {
   readonly lifecycleOf: (entry: LiveWorkspace) => Lifecycle;
   readonly execFactoryFor: (entry: LiveWorkspace, o?: MachineExecOptions, waiting?: TurnWaiting) => ExecStreamFactory;
   readonly threadFolder: (entry: LiveWorkspace, o: { cwd?: string | undefined }) => Promise<string>;
+  readonly kindOf: (computer: string) => WorkspaceKind;
 }
 
 export interface RulesArea {

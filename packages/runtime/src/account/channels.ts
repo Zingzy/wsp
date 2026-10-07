@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { join, relative } from "node:path";
 import { remoteHost } from "@wsp/catalog";
-import { type DaemonFrame, type DaemonResponse, type DaemonReachView, type ProjectRef, type ProjectView, type WorkspaceAgents, type PlaceSettings, branchUnreadRefusal, GitPushReply, GitStatusReply, GitStartOnReply, DETACHED_HEAD, childStartedLine, forkNeedsPushLine, pushedForChildLine, uncommittedStayed, agentsFrom, placeAtLimitLine, placeSpendLimit, spendCapRefusal, THIS_COMPUTER, isLocalWorkspace, kindWords, machineWord, noSuchProjectLine, absentComputer, HERE_PLACE_ID, placeBlocked, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeServesDaemonLine, ownerRepoOf, copiesFolder, kindForComputer, type Caller } from "@wsp/protocol";
+import { runsInFolder, type DaemonFrame, type DaemonResponse, type DaemonReachView, type ProjectRef, type ProjectView, type WorkspaceAgents, type PlaceSettings, branchUnreadRefusal, GitPushReply, GitStatusReply, GitStartOnReply, DETACHED_HEAD, childStartedLine, forkNeedsPushLine, pushedForChildLine, uncommittedStayed, agentsFrom, placeAtLimitLine, placeSpendLimit, spendCapRefusal, THIS_COMPUTER, isLocalWorkspace, kindWords, machineWord, noSuchProjectLine, absentComputer, HERE_PLACE_ID, placeBlocked, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeServesDaemonLine, ownerRepoOf, copiesFolder, kindForComputer, type Caller } from "@wsp/protocol";
 import { groupExists } from "../local-exec.js";
 import type { DaemonChannel } from "../daemon-channel.js";
 import type { MachineExecOptions } from "../machine-exec.js";
@@ -184,7 +184,8 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
     const report = await placeDoor.reportOf(placeId);
     return report === undefined ? undefined : placeBlocked(placeDoor.nameOf(placeId), report);
   };
-  const copyBlocked = (entry: LiveWorkspace): Promise<void> => placeRefuses(entry.record.place);
+  // A thread in a folder on that computer runs on the computer itself, which nothing of a copy's walls holds back.
+  const copyBlocked = (entry: LiveWorkspace): Promise<void> => (runsInFolder(entry.record.kind) ? Promise.resolve() : placeRefuses(entry.record.place));
 
   /** The frames a place daemon stamps with the workspace they are of: a guest session's, by the listener it arrived
    * on and never anything the guest said, and a tunnel's, by the workspace it was opened inside. */
@@ -421,7 +422,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
    * which names the root git.status is asked under; a session or a pty the computer pushes never reaches a door. */
   const BLOCKED_READS: ReadonlySet<string> = new Set(["git.status", "ping"]);
   const copyChannel = async (entry: LiveWorkspace, onEvent: (event: Record<string, unknown>) => void, carries: readonly string[]): Promise<DaemonChannel> => {
-    const said = await blockedLine(entry.record.place);
+    const said = runsInFolder(entry.record.kind) ? undefined : await blockedLine(entry.record.place);
     const heard = (event: Record<string, unknown>): void => {
       if (said === undefined || event["type"] === "daemon.hello") onEvent(event);
     };

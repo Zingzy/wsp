@@ -3,7 +3,7 @@ import { CATALOG_AGENTS, type ThreadAgent } from "@wsp/catalog";
 import {
   AGENT_KEEP_MS, AGENTS_KEPT, type PermissionAsk, type SessionRenameWrite, type SessionView, type TurnResult,
   type Caller, ThreadScope, WorkspaceOrigin, GitDiffReply, GitWorktreesReply, repoPathOf, worktreeOf, foldThreads, threadWord, threadsFollowed, scopeOf,
-  type ThreadWaitingOn, isLocalWorkspace, NO_SUCH_TURN, NOTIFY_ME, notifyLine, copiesFolder, DEVICE_OPS, sendRefusal,
+  type ThreadWaitingOn, isLocalWorkspace, NO_SUCH_TURN, NOTIFY_ME, notifyLine, runsInFolder, DEVICE_OPS, sendRefusal,
   workspaceState, HERE_PLACE_ID,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
@@ -385,7 +385,7 @@ export function threadsArea(ctx: RuntimeContext): ThreadsArea {
     ctx.record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined, reason });
   };
   /** A folder on this computer git holds no repo in: it keeps no checkpoint and no rewind moves its files. */
-  const notARepo = (r: WorkspaceRecord): boolean => copiesFolder(r.kind) && ctx.projectHeld(r.project).git === undefined;
+  const notARepo = (r: WorkspaceRecord): boolean => runsInFolder(r.kind) && ctx.projectHeld(r.project).git === undefined;
   /** What a rewind to a turn needs, kept once the turn is over: the checkout's tree through the workspace's own
    * daemon, and the harness's anchor. A checkout the daemon takes none of (not a repo, a daemon too old, a machine
    * gone) leaves the anchor alone; the turn itself is as it ended either way. */

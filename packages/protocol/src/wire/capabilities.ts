@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { InitJob, InitAgent, InitKeys } from "../init-job.js";
+import { WorkspaceKind } from "../views/workspace-kind.js";
 
 // --- backend capabilities ----------------------------------------------------
 
@@ -110,7 +111,7 @@ export type Capabilities = z.infer<typeof Capabilities>;
  * computer's name as the runtime words it, and what that computer offers. The reply of workspaces.landing, read
  * ahead of a create by the command line and by every row of that project in the app, which takes its words about a
  * copy's ports and its state word's pause mode off these flags. */
-export const WorkspaceLanding = z.object({ place: z.string().optional(), name: z.string(), capabilities: Capabilities });
+export const WorkspaceLanding = z.object({ place: z.string().optional(), name: z.string(), capabilities: Capabilities, kind: WorkspaceKind.optional() });
 export type WorkspaceLanding = z.infer<typeof WorkspaceLanding>;
 
 /** Whether this host forks no machine at all: the provider module a keyless host wires offers no size, so the roads

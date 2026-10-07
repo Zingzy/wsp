@@ -164,9 +164,9 @@ describe("the bytes both sides of a link sign", () => {
 });
 
 describe("the kinds a workspace can be", () => {
-  it("holds no kind for the computer a place is: a place is not a workspace, and its forks are the workspaces", () => {
-    expect(Object.keys(WORKSPACE_KIND_WORDS)).not.toContain("place");
-    expect(WorkspaceKind.safeParse("place").success).toBe(false);
+  it("holds a kind for a folder on the computer a place is, whose threads run in it as they do on this computer", () => {
+    expect(WorkspaceKind.safeParse("place").success).toBe(true);
+    expect(WORKSPACE_KIND_WORDS.place).toMatchObject({ inFolder: true, copiesFolder: false, driven: false });
   });
 });
 

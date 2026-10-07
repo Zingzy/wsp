@@ -128,6 +128,11 @@ function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number
       const input = typeof frame["stdin"] === "string" ? Buffer.from(frame["stdin"], "base64").toString("utf8") : "";
       const said = answer?.(cmd);
       if (said !== undefined) return void c.say({ id: frame["id"], ok: true, exitCode: said.exitCode, stdout: said.stdout ?? "", stderr: "", truncated: false });
+      // An add's claim of a folder in the login's home takes the name it asks for, and its clone waits where the
+      // test holds the checkout.
+      const claim = /mkdir '([^']+)'"\$n"/.exec(cmd);
+      if (claim !== null) return void c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: `${claim[1]}\n`, stderr: "", truncated: false });
+      if (cmd.includes("git clone")) await checkouts?.created;
       // gh with no token on its input reads its own login there, and this computer has none.
       if (cmd.includes("gh auth status") && !input.includes("GH_TOKEN=")) return void c.say({ id: frame["id"], ok: true, exitCode: 1, stdout: "You are not logged into any GitHub hosts. To log in, run: gh auth login\n", stderr: "", truncated: false });
       const gh = cmd.includes("gh auth status") ? "github.com\n  - Logged in to github.com account dev (GH_TOKEN)\n  - Token scopes: 'gist', 'read:org', 'repo'\n" : "";

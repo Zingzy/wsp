@@ -59,6 +59,22 @@ export function asLogin(t: TargetLogin, line: string): string {
   return t.runAs === undefined ? inner : `runuser -u ${shellQuote(t.runAs)} -- bash -c ${shellQuote(inner)}`;
 }
 
+/** How long the login's own shell is given to print its PATH: a shell that sources a version manager on a busy
+ * computer can pass five seconds, the same bound the host gives its own login shell. */
+const LOGIN_SHELL_S = 15;
+
+/** The PATH the login's own login shell gives it on Linux, read as that login: what its agents and tools answer to
+ * when the person logs in there. Nothing where the shell fails, runs past its bound or prints none, which leaves
+ * the PATH the computer reported. The last line is the PATH, since an rc file that greets the person prints first. */
+export async function loginShellPath(machine: Pick<Machine, "exec">, t: TargetLogin): Promise<string | undefined> {
+  if (t.platform !== "linux") return undefined;
+  const line = `s=$(getent passwd ${shellQuote(t.user)} | cut -d: -f7); timeout ${LOGIN_SHELL_S} "\${s:-/bin/sh}" -ilc 'printf %s "$PATH"' < /dev/null 2> /dev/null`;
+  const res = await machine.exec(asLogin(t, line), { timeoutMs: (LOGIN_SHELL_S + 5) * 1000 }).catch(() => undefined);
+  if (res === undefined || res.exitCode !== 0) return undefined;
+  const path = (res.stdout.split("\n").at(-1) ?? "").trim();
+  return path === "" ? undefined : path;
+}
+
 const firstLine = (r: { exitCode: number; stdout: string; stderr: string }): string => (r.stderr || r.stdout).trim().split("\n")[0] || `exit ${r.exitCode}`;
 
 /** Lands bytes for that login and hands `use` the staged file's path and its folder's: the bytes land by the

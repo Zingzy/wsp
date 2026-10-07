@@ -781,6 +781,9 @@ export interface KindModule {
   backend: (record: WorkspaceRecord) => MachineBackend;
   /** How a turn's process is launched on this workspace's machine, under the limits the registry hands every turn. */
   execStream: (entry: LiveWorkspace, opts?: MachineExecOptions, waiting?: TurnWaiting) => ExecStreamFactory;
+  /** Refuses a folder's record on this kind before it is written, where nothing a thread there does would run as it
+   * should; absent on a kind that takes every folder. */
+  admitFolder?: (record: Pick<WorkspaceRecord, "kind" | "place" | "name">) => Promise<void>;
   /** The folder a turn and a command start in on this kind when the caller names none; undefined leaves it to the
    * machine's own road, which for a guest is the home the login shell lands in. A reading of the record, since a
    * workspace on this computer is the copy its record names. */
