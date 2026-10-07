@@ -189,10 +189,14 @@ describe("the ledger of what was used", () => {
     const { usage } = ledger();
     await usage.add(turn({ at: NOON, agent: "claude", model: "claude-opus-5", source: "wsp" }));
     await usage.add(turn({ at: NOON, agent: "claude", model: "claude-opus-5", source: "log" }));
-    const used = await usage.used({ range: "day", split: "agent", label: labelOf, logsOn: "zingzy's MacBook Pro" });
-    expect(used.rows.map(r => [r.key, r.tokens.input])).toEqual([["claude", 2_000]]);
-    expect(used.logs).toEqual({ agents: ["agent:claude"], computer: "zingzy's MacBook Pro" });
-    const without = await usage.used({ range: "day", split: "agent", label: labelOf, outside: false, logsOn: "zingzy's MacBook Pro" });
+    await usage.add(turn({ at: NOON, agent: "codex", source: "log", computer: "pl_spoo" }));
+    const used = await usage.used({ range: "day", split: "agent", label: labelOf });
+    expect(used.rows.map(r => [r.key, r.tokens.input])).toEqual([
+      ["claude", 2_000],
+      ["codex", 1_000],
+    ]);
+    expect(used.logs).toEqual({ agents: ["agent:claude", "agent:codex"], computers: ["computer:here", "computer:pl_spoo"] });
+    const without = await usage.used({ range: "day", split: "agent", label: labelOf, outside: false });
     expect([without.rows.map(r => [r.key, r.tokens.input]), without.logs]).toEqual([[["claude", 1_000]], undefined]);
   });
 
@@ -217,11 +221,27 @@ describe("work read from the logs", () => {
       turn({ at: NOON, agent: "claude", model: "claude-opus-5", session: "s-wsp", source: "log", tokens: { input: 100, output: 10 } }),
       turn({ at: NOON, agent: "claude", model: "claude-opus-5", session: "s-outside", source: "log", tokens: { input: 7, output: 3 } }),
     ];
-    await usage.fileLogs(logs);
-    await usage.fileLogs(logs);
+    await usage.fileLogs(logs, ["here"]);
+    await usage.fileLogs(logs, ["here"]);
     const rows = (await usage.used({ range: "day", split: "agent", label: labelOf })).rows;
     // The wsp turn once and the outside session once, in one row.
     expect(rows.map(r => [r.key, r.tokens.input, r.tokens.output])).toEqual([["claude", 107, 13]]);
+  });
+
+  it("replaces each computer's rows only when that computer was read, so a computer not read keeps what it last logged", async () => {
+    const { usage } = ledger();
+    const log = (computer: string, session: string, input: number) => turn({ at: NOON, agent: "claude", model: "claude-opus-5", computer, session, source: "log", tokens: { input, output: 1 } });
+    await usage.fileLogs([log("here", "s-here", 10), log("pl_spoo", "s-spoo", 20)], ["here", "pl_spoo"]);
+    // spoo asleep: this computer's read replaces this computer's rows and spoo's stand.
+    await usage.fileLogs([log("here", "s-here", 15)], ["here"]);
+    const byComputer = async () => (await usage.used({ range: "day", split: "computer", label: labelOf })).rows.map(r => [r.key, r.tokens.input]);
+    expect(await byComputer()).toEqual([
+      ["pl_spoo", 20],
+      ["here", 15],
+    ]);
+    // A read of spoo that found nothing takes its rows off.
+    await usage.fileLogs([], ["pl_spoo"]);
+    expect(await byComputer()).toEqual([["here", 15]]);
   });
 });
 
@@ -246,6 +266,17 @@ describe("what each account may still use", () => {
     const second = await usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", road: "named", computer: "here", limit: { ...reading, windows: [{ kind: "session", usedPercent: 75 }] } });
     expect(second.before).toEqual(first.after);
     expect(second.after.windows).toEqual([{ kind: "session", usedPercent: 75 }]);
+  });
+
+  it("keeps a reading taken earlier, as one read off a log is, at its own moment, and never over a newer one", async () => {
+    const { usage } = ledger();
+    const file = (usedPercent: number, at?: number) => usage.limit({ key: "codex@pl_spoo", agent: "codex", label: "Codex signed in on spoo", road: "own", computer: "pl_spoo", limit: { windows: [{ kind: "session", usedPercent }] }, ...(at !== undefined ? { at } : {}) });
+    await file(30, NOON - 600_000);
+    expect((await usage.limits())[0]).toMatchObject({ windows: [{ kind: "session", usedPercent: 30 }], readAt: NOON - 600_000 });
+    await file(50);
+    const older = await file(20, NOON - 60_000);
+    expect(older.after).toBe(older.before);
+    expect((await usage.limits())[0]).toMatchObject({ windows: [{ kind: "session", usedPercent: 50 }], readAt: NOON });
   });
 
   it("keeps what a reading leaves out: the plan a later reading does not name stays", async () => {
@@ -360,7 +391,7 @@ describe("an account's key and label", () => {
   it("keeps the label each account was filed under, so an account split reads it and never takes the key apart", async () => {
     const { usage } = ledger();
     await usage.add(turn({ at: NOON, account: "codex:maya@example.com", accountLabel: "maya@example.com" }));
-    await usage.fileLogs([turn({ at: NOON, account: "claude@here", accountLabel: "Claude Code on zingzy's MacBook Pro", agent: "claude", source: "log" })]);
+    await usage.fileLogs([turn({ at: NOON, account: "claude@here", accountLabel: "Claude Code on zingzy's MacBook Pro", agent: "claude", source: "log" })], ["here"]);
     expect(Object.fromEntries(await usage.accountLabels())).toEqual({ "codex:maya@example.com": "maya@example.com", "claude@here": "Claude Code on zingzy's MacBook Pro" });
   });
 });

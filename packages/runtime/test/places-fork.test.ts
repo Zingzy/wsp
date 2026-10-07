@@ -533,6 +533,7 @@ describe("a fork on a computer you joined", () => {
     "ports.watch",
     "sys.watch",
     "sys.history",
+    "usage.logs",
     "proc.watch",
     "proc.unwatch",
     "proc.inspect",

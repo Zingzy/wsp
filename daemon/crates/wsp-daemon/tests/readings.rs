@@ -608,3 +608,35 @@ async fn sys_history_answers_the_kept_minutes_folded_into_steps_and_refuses_a_ra
     }
     c.close().await;
 }
+
+#[tokio::test]
+async fn usage_logs_reads_the_home_this_daemon_serves_and_refuses_a_store_it_cannot_name() {
+    let home = tempfile::tempdir().unwrap();
+    let rollout = home.path().join(".codex/sessions/2026/09/29/rollout-a.jsonl");
+    std::fs::create_dir_all(rollout.parent().unwrap()).unwrap();
+    let lines = [
+        json!({ "timestamp": "2026-09-29T09:00:00.000Z", "type": "session_meta", "payload": { "id": "t1", "cwd": "/w/proj" } }),
+        json!({ "timestamp": "2026-09-29T09:00:01.000Z", "type": "turn_context", "payload": { "model": "gpt-5.5" } }),
+        json!({ "timestamp": "2026-09-29T09:01:00.000Z", "type": "event_msg", "payload": { "type": "token_count", "info": { "total_token_usage": { "input_tokens": 100, "output_tokens": 5 } }, "rate_limits": { "primary": { "used_percent": 42.0, "window_minutes": 300, "resets_at": 1_790_690_000 } } } }),
+    ];
+    std::fs::write(&rollout, lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+    let at = home.path().to_path_buf();
+    let d = start(move |o| o.home = Some(at)).await;
+    let mut c = Client::connect(d.addr).await;
+    let res =
+        c.request("usage.logs", json!({ "stores": [{ "agent": "codex", "format": "codex-rollout", "root": "~/.codex/sessions" }] })).await;
+    assert_eq!(res["ok"], true, "{res}");
+    assert_eq!(
+        res["rows"],
+        json!([{ "agent": "codex", "session": "t1", "at": 1_790_672_460_000_i64, "model": "gpt-5.5", "folder": "/w/proj", "tokens": { "input": 100, "output": 5, "cached": 0, "cacheWrite": 0, "reasoning": 0 } }])
+    );
+    assert_eq!(
+        res["limits"],
+        json!([{ "agent": "codex", "at": 1_790_672_460_000_i64, "primary": { "usedPercent": 42.0, "windowDurationMins": 300, "resetsAt": 1_790_690_000 } }])
+    );
+    let refused = c
+        .request("usage.logs", json!({ "stores": [{ "agent": "hermes", "format": "hermes-sqlite", "root": "~/.hermes/state.db" }] }))
+        .await;
+    assert_eq!((refused["ok"].clone(), refused["code"].clone()), (json!(false), json!("bad-request")), "{refused}");
+    c.close().await;
+}

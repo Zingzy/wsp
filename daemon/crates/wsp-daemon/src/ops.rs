@@ -24,9 +24,10 @@ use crate::manifest::RecordInput;
 use crate::paths::OpError;
 use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
+use crate::roads::guest_road_serves;
 use crate::tunnel::Tunnels;
 mod runner;
-use crate::{bring_back, frame_text as text, fs, git, hosts, paths, readings, ssh, tunnel, Ctx, Listener, Outbound, Outgoing};
+use crate::{bring_back, frame_text as text, fs, git, hosts, paths, readings, ssh, tunnel, usage_logs, Ctx, Listener, Outbound, Outgoing};
 use runner::Runner;
 
 type Detach = Box<dyn FnOnce() + Send>;
@@ -40,20 +41,6 @@ pub(crate) enum Road {
     Inbound,
     Link,
     Workspace(String),
-}
-
-/// Which of the guest road's five ops a socket on this road serves. A guest process lives inside a machine wsp
-/// forked and inside a workspace on a computer somebody owns, so its two ops are served on the inbound socket of
-/// a daemon inside a machine and on a workspace's own socket, and nowhere else. The host is on the inbound socket
-/// of a daemon inside a machine and on the other end of the link of a place's daemon, so its three are served
-/// there: a client holding the token of a computer somebody owns cannot take the sessions its host watches.
-fn guest_road_serves(road: &Road, place: bool, op: &str) -> bool {
-    let guests = matches!(op, "guest.open" | "guest.send");
-    match road {
-        Road::Workspace(_) => guests,
-        Road::Inbound => !place,
-        Road::Link => place && !guests,
-    }
 }
 
 /// What one authed socket holds between frames.
@@ -336,6 +323,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "tunnel.close"
             | "sys.watch"
             | "sys.history"
+            | "usage.logs"
             | "proc.watch"
             | "proc.unwatch"
             | "proc.inspect"
@@ -1188,6 +1176,7 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, read.await)
         }
+        DaemonOp::UsageLogs { stores } => answer(id, usage_logs::serve(&conn.road, ctx, stores).await),
         DaemonOp::ProcWatch => {
             let watched = async {
                 let sampler = ctx.proc_sampler()?;
@@ -1512,6 +1501,7 @@ mod tests {
             "ssh.start",
             "sys.watch",
             "sys.history",
+            "usage.logs",
             "proc.watch",
             "proc.unwatch",
             "proc.inspect",

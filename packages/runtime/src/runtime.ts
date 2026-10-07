@@ -406,7 +406,6 @@ export {
   type AdoptedMachine,
   type SweepResult,
   type OriginStatusApi,
-  type LogUsageRow,
   type UsageDoor,
 } from "./types/wiring.js";
 export * from "./types/api.js";

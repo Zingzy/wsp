@@ -344,8 +344,14 @@ async fn settled(ms: u64) {
 
 /// Asks one op on the held socket and reads frames until its reply lands; events seen on the way are kept.
 async fn ask(held: &mut (Held, Seal), id: u64, op: &str, events: &mut Vec<Value>) -> Value {
+    ask_with(held, json!({"id": id, "op": op}), events).await
+}
+
+/// Sends one whole frame on the held socket and reads frames until the reply under its id lands.
+async fn ask_with(held: &mut (Held, Seal), frame: Value, events: &mut Vec<Value>) -> Value {
+    let id = frame["id"].as_u64().unwrap();
     let (ws, seal) = held;
-    let out = seal.seal(&json!({"id": id, "op": op}).to_string());
+    let out = seal.seal(&frame.to_string());
     ws.send(Message::Binary(out.into())).await.unwrap();
     loop {
         let msg = tokio::time::timeout(Duration::from_secs(5), ws.next()).await.expect("an answer").unwrap().unwrap();
@@ -738,6 +744,31 @@ async fn on_the_link_the_machine_ops_are_the_runtimes_to_answer_and_inbound_the_
     // An op that does something to a workspace is still the link's alone.
     inbound.send(Message::text(json!({"id": 3, "op": "machine.kill", "machineId": "wsp-x"}).to_string())).await.unwrap();
     assert_eq!(reply_with_id(&mut inbound, 3).await, json!({"id": 3, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD}));
+}
+
+#[tokio::test]
+async fn on_the_link_usage_logs_reads_the_agent_stores_under_the_places_home_and_its_own_door_refuses_it() {
+    let key = place_pair();
+    let mut host = fake_place_host(HostOpts { key: Some(key), ..HostOpts::default() }).await;
+    let place = place_file(&[&host.url], &host.public_key, &place_pair().private_key_pem);
+    let transcript = place.home.path().join(".claude/projects/-home-dev-proj/s1.jsonl");
+    std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+    let line = json!({ "type": "assistant", "timestamp": "2026-09-29T10:00:00.000Z", "cwd": "/home/dev/proj", "message": { "id": "msg_1", "model": "claude-opus-5", "usage": { "input_tokens": 7, "output_tokens": 2 } } });
+    std::fs::write(&transcript, format!("{line}\n")).unwrap();
+    let d = place_daemon(&place, |_| {}).await;
+    let mut ws = host.held().await;
+    let mut events = Vec::new();
+    let stores = json!([{ "agent": "claude", "format": "claude-jsonl", "root": "~/.claude/projects" }, { "agent": "codex", "format": "codex-rollout", "root": "~/.codex/sessions" }]);
+    let answer = ask_with(&mut ws, json!({ "id": 41, "op": "usage.logs", "stores": stores }), &mut events).await;
+    assert_eq!(
+        answer,
+        json!({ "id": 41, "ok": true, "rows": [{ "agent": "claude", "session": "s1", "at": 1_790_676_000_000_i64, "model": "claude-opus-5", "folder": "/home/dev/proj", "tokens": { "input": 7, "output": 2, "cached": 0, "cacheWrite": 0, "reasoning": 0 } }], "limits": [] })
+    );
+    // A client holding the box's own token is not its host: the person's agent stores are read for the host alone.
+    let (mut inbound, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{}/", d.port)).await.unwrap();
+    inbound.send(Message::text(json!({"id": 1, "op": "auth", "token": "link-token"}).to_string())).await.unwrap();
+    inbound.send(Message::text(json!({"id": 2, "op": "usage.logs", "stores": stores}).to_string())).await.unwrap();
+    assert_eq!(reply_with_id(&mut inbound, 2).await, json!({"id": 2, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD}));
 }
 
 /// The reply to one request off a socket, the events before it skipped.

@@ -30,7 +30,7 @@ pub use checkpoint::{checkpoint_copy_part, checkpoint_id_ok, checkpoint_prefix, 
 pub use copy::{Carried, CopyAsk, CopyReport, CopyRoadName, WorktreeRemoval, WorktreeReport};
 pub use enums::{
     CheckState, DaemonErrorCode, FsEntryType, FsReadEncoding, FsSearchMode, GitDiffScope, HostItemKind, MergeMethod, Mergeable, ProcSignal,
-    PtyMode, PullRequestState, ReactionContent, ReviewEvent, ReviewSide, ReviewState, WorkspaceKind,
+    PtyMode, PullRequestState, ReactionContent, ReviewEvent, ReviewSide, ReviewState, UsageLogFormat, WorkspaceKind,
 };
 pub use event::{DaemonEvent, ProcEntry, Usage};
 pub use guest::{GuestCliMessage, GuestKind, GuestOpen, GuestOpenReply, GuestStream};
@@ -61,9 +61,10 @@ pub use reply::{
     PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply,
     PullRequest, PullRequestAutoMerge, PullRequestCheck, PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile,
     PullRequestFork, PullRequestLabel, PullRequestPageCut, PullRequestReaction, PullRequestReview, PullRequestReviewComment,
-    PullRequestReviewRequest, PullRequestVerdict, Reply, SshStartReply, SysHistoryReply, SysPoint, True,
+    PullRequestReviewRequest, PullRequestVerdict, Reply, SshStartReply, SysHistoryReply, SysPoint, True, UsageLimitReading,
+    UsageLimitWindow, UsageLogRow, UsageLogsReply, UsageTokens,
 };
-pub use request::{DaemonOp, DaemonRequest, ReviewComment, DAEMON_OPS, GUEST_OPS};
+pub use request::{DaemonOp, DaemonRequest, ReviewComment, UsageStore, DAEMON_OPS, GUEST_OPS};
 pub use shell::shell_quote;
 pub use shim::guest_wsp_shim;
 pub use validate::{is_http_url, is_plain_path, is_under_path, RelayPort};

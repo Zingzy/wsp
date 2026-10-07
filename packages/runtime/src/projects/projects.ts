@@ -406,9 +406,22 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       try {
         const kind = ctx.moduleOf(entry.record.kind);
         const landed = await kind.import(entry, o, report);
-        // The workspace's own project is its record's; a folder landed beside it is browsable too, and neither is
-        // written onto the record, which names one project and nothing else.
-        await ctx.rootsWrite(entry.record.machineId, () => kind.roots(entry, [...new Set([ctx.projectHeld(entry.record.project).path, landed.result.dest])]));
+        // A folder landed beside the workspace's own project is browsable too: the record keeps it beside the one
+        // project it names, so every later write of the roots file, a restarted host's included, lists it. Named on
+        // the record before the write, so a write queued behind this one lists it too, and taken back if the machine
+        // refuses the file: this import's folder alone, since another import may have added its own meanwhile.
+        const dest = landed.result.dest;
+        const had = entry.record.landed?.includes(dest) === true;
+        entry.record.landed = [...new Set([...(entry.record.landed ?? []), dest])];
+        try {
+          await ctx.writeDaemonRoots(entry, true);
+        } catch (e) {
+          const kept = had ? entry.record.landed : entry.record.landed.filter(d => d !== dest);
+          if (kept.length > 0) entry.record.landed = kept;
+          else delete entry.record.landed;
+          throw e;
+        }
+        await ctx.persist(entry.record);
         report("done", landed.done);
         return landed.result;
       } catch (e) {
