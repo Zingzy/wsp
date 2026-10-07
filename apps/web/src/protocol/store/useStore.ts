@@ -838,12 +838,8 @@ export const useStore = create<State>((set, get) => {
     async setPlace(placeId, ask, reset) {
       const api = get().api;
       if (api?.placesSet === undefined) return;
-      try {
-        const place = await api.placesSet(placeId, ask, reset);
-        set(s => ({ places: s.places.map(p => (p.id === placeId ? place : p)) }));
-      } catch (e) {
-        noticeFailure(e);
-      }
+      const place = await api.placesSet(placeId, ask, reset);
+      set(s => ({ places: s.places.map(p => (p.id === placeId ? place : p)) }));
     },
     applyWorkspace(workspace) {
       flushFrame();

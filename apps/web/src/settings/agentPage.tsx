@@ -8,7 +8,7 @@
 // agents.setup. Every answer is read back off the host; a refusal is its own
 // sentence. A variable's value is typed once into a password field and is
 // never drawn, kept or sent anywhere but that one set.
-import { useEffect, useState, type DragEvent, type ReactNode } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { GripVerticalIcon, XIcon } from "lucide-react";
 import { ACCESS_CHOICES, accessRefusal, agentEnvRefusal, commandWords, configDirSignInLine, effortsFor, modelIdRefusal, modelOf, shapeModels, shellLine, withCustomModels, type AccessChoice, type AgentDefaultsPatch, type AgentSetupSet, type HarnessCatalog, type ModelPicker } from "@wsp/protocol";
 import { agentName, catalogEntry } from "@wsp/catalog";
@@ -17,7 +17,6 @@ import { Spaced } from "../components/ui/spaced.js";
 import { useAgentsReport } from "../components/agents/useAgentsReport.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { Button } from "../components/ui/button.js";
-import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { Input } from "../components/ui/input.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
@@ -25,7 +24,6 @@ import { Skeleton } from "../components/ui/skeleton.js";
 import { Switch } from "../components/ui/switch.js";
 import { cn } from "../lib/utils.js";
 import { movedBefore } from "../sidebar/NounSwitcher.js";
-import { failureOf } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
 import { AgentsControls, UpdateButton, newThreadDefaults, planWord, signInHead, usePickedPlace } from "./agents.js";
 import { AGENTS_PAGE_WORDS as W } from "./format.js";
@@ -33,17 +31,7 @@ import { CARD_INSET, ROW_FLOOR, SELECT_WIDTH } from "./layout.js";
 import { placeName } from "./places.js";
 import { CARD_SURFACE, Card, HeadRow, Row } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
-import { RefusalSlot } from "./sheetParts.js";
-
-/** A refusal as the host said it: what happened, and what to do about it where it said that too. */
-type Refusal = { readonly said: string; readonly fix?: string };
-/** What a write answered: nothing where the host took it, its refusal where it did not. */
-type Written = Refusal | null;
-
-const refusalOf = (e: unknown): Refusal => {
-  const failure = failureOf(e);
-  return { said: failure.said, ...(failure.fix === undefined ? {} : { fix: failure.fix }) };
-};
+import { ChangeButton, FIELD, FieldSheet, RefusalSlot, Sheet, sheetWrite, type Refusal, type Written } from "./sheetParts.js";
 
 /** The models an agent's picker lists, in its order, then the ones taken off it. */
 const pickerModels = (catalog: HarnessCatalog) => [...catalog.models, ...(catalog.legacyModels ?? [])];
@@ -54,101 +42,6 @@ function useSetup(placeId: string | undefined, agent: string, reread: () => void
   const setup = useStore(s => s.api?.agentsSetup);
   if (setup === undefined || placeId === undefined) return undefined;
   return change => setup(placeId, agent, change).then(reread);
-}
-
-/** A write as a sheet waits on it: nothing where the host took it, its refusal where it did not. */
-const sheetWrite = (write: Promise<void>): Promise<Written> => write.then(() => null, refusalOf);
-
-/** A sheet over the page: its title and why, what it holds, the host's refusal under that, and Cancel and Save. */
-function Sheet({ k, title, line, open, onClose, onSave, saving, refusal, putBack, children }: { k: string; title: string; line: string; open: boolean; onClose: () => void; onSave: () => void; saving: boolean; refusal: Refusal | null; putBack?: ReactNode; children: ReactNode }) {
-  return (
-    <Dialog open={open} onOpenChange={next => (next ? undefined : onClose())}>
-      <DialogPopup data-k={k}>
-        <form
-          className="flex min-h-0 flex-col"
-          onSubmit={event => {
-            event.preventDefault();
-            onSave();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{line}</DialogDescription>
-          </DialogHeader>
-          <DialogPanel className="flex flex-col gap-3 pb-0">
-            {children}
-            <RefusalSlot k={`${k}-refusal`} {...(refusal ?? {})} />
-          </DialogPanel>
-          <DialogFooter>
-            {putBack}
-            <Button type="button" variant="outline" onClick={onClose}>
-              {W.cancel}
-            </Button>
-            <Button type="submit" data-k={`${k}-save`} disabled={saving}>
-              {W.save}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogPopup>
-    </Dialog>
-  );
-}
-
-const FIELD = "h-10 w-full font-mono [&_input]:h-[38px] [&_input]:text-[13px] [&_input]:leading-[38px] sm:[&_input]:h-[38px] sm:[&_input]:text-[13px] sm:[&_input]:leading-[38px]";
-
-/** One line a person types: the program, the config folder, the launch words. Save hands the words to `save`, which
- * answers a refusal or nothing; Use its own puts the agent's own back where one is set. */
-function FieldSheet({ k, title, line, initial, placeholder, save, putBack, putBackWord, onClose }: { k: string; title: string; line: string; initial: string; placeholder: string; save: (value: string) => Promise<Written>; putBack?: () => Promise<Written>; putBackWord: string; onClose: () => void }) {
-  const [value, setValue] = useState(initial);
-  const [saving, setSaving] = useState(false);
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const run = (write: () => Promise<Written>): void => {
-    setSaving(true);
-    setRefusal(null);
-    void write().then(answer => {
-      setSaving(false);
-      if (answer === null) onClose();
-      else setRefusal(answer);
-    });
-  };
-  return (
-    <Sheet
-      k={k}
-      title={title}
-      line={line}
-      open
-      onClose={onClose}
-      onSave={() => run(() => save(value.trim()))}
-      saving={saving}
-      refusal={refusal}
-      {...(putBack === undefined
-        ? {}
-        : {
-            putBack: (
-              <Button type="button" variant="ghost" data-k={`${k}-put-back`} className="sm:me-auto" disabled={saving} onClick={() => run(putBack)}>
-                {putBackWord}
-              </Button>
-            ),
-          })}
-    >
-      <Input
-        data-k={`${k}-field`}
-        nativeInput
-        autoFocus
-        autoComplete="off"
-        spellCheck={false}
-        value={value}
-        placeholder={placeholder}
-        aria-label={title}
-        {...(refusal === null ? {} : { "aria-invalid": true })}
-        onChange={event => {
-          setValue(event.target.value);
-          setRefusal(null);
-        }}
-        className={FIELD}
-      />
-    </Sheet>
-  );
 }
 
 /** The variables every launch carries: their names, each with its remove, and a name and a value to add one. The
@@ -606,13 +499,5 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
       ) : null}
       {sheet === "env" && setupView !== undefined ? <EnvironmentSheet label={label} computer={computer} names={setupView.envNames} save={env => written({ env })()} onClose={close} /> : null}
     </>
-  );
-}
-
-function ChangeButton({ k, word, held, onClick }: { k: string; word: string; held: boolean; onClick: () => void }) {
-  return (
-    <Button size="xs" variant="outline" data-k={k} held={held} onClick={onClick}>
-      {word}
-    </Button>
   );
 }

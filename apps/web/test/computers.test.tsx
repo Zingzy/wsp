@@ -7,7 +7,7 @@
 // that adds another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_LOGIN_REFUSED_KIND, PLACE_SUDO_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { type InitJob, COPY_CURRENT, DAEMON_VERSION, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_LOGIN_REFUSED_KIND, placeSshOtherRefusal, placeSshUncheckedRefusal, usageRefusal, PLACE_SUDO_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, placeSettingDropped, setupWord, type PlaceSettings, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
@@ -23,6 +23,7 @@ import { absentOf } from "../src/settings/places.js";
 import { openImageRecipe } from "../src/settings/openAt.js";
 import { useSettingsStore, type SettingsAt } from "../src/settings/settingsStore.js";
 import { SidebarCorner } from "../src/sidebar/SidebarCorner.js";
+import { computerName } from "../src/sidebar/workspaceRows.js";
 import { shortcutLabelForCommand } from "../src/keybindings.js";
 import { currentKeybindings } from "../src/shell/useKeybindings.js";
 import { TooltipProvider } from "../src/components/ui/tooltip.js";
@@ -1043,5 +1044,135 @@ describe("the road to the page", () => {
     await settle();
     expect(useAddFlow.getState()).toMatchObject({ open: true, step: "where" });
     expect(pageAt()).toBe("computers");
+  });
+});
+
+describe("a computer's name and ssh login", () => {
+  const added: PlaceView = { ...box, road: { ssh: "root@hetzner" } };
+  const onBox: WorkspaceView = { ...workspace("ws_h", "cloud", "ctr_h"), place: "p_2" };
+  /** A host that takes a name and a login that reaches this same computer, and refuses one that reaches another. */
+  const hostSet = (asked: Array<[string, unknown]>, other: string) =>
+    computersApi({
+      agentsRead: async () => AGENTS_REPORT,
+      placesSet: async (placeId, ask) => {
+        asked.push([placeId, ask]);
+        const now = useStore.getState().places.find(p => p.id === placeId)!;
+        if (ask.ssh === other) {
+          const said = placeSshOtherRefusal(other, now.name);
+          throw new RequestError(usageRefusal(said.happened, said.fix).message, "usage", said.fix);
+        }
+        return { ...now, ...(ask.name === undefined ? {} : { name: ask.name }), ...(ask.ssh === undefined ? {} : { road: { ...now.road, ssh: ask.ssh } }) };
+      },
+    }).api;
+  const open = async (field: "name" | "ssh"): Promise<HTMLInputElement> => {
+    await act(async () => fireEvent.click(document.querySelector(`[data-settings-page] [data-k=computer-${field}-change]`)!));
+    return document.querySelector<HTMLInputElement>(`[data-k=computer-${field}-field] input, input[data-k=computer-${field}-field]`)!;
+  };
+  const save = async (field: "name" | "ssh", value: string): Promise<void> => {
+    const input = await open(field);
+    fireEvent.change(input, { target: { value } });
+    await act(async () => fireEvent.click(document.querySelector(`[data-k=computer-${field}-save]`)!));
+    await settle();
+  };
+
+  it("renames a computer on its page, and its name changes on the page, the settings sidebar, the Computers list and every row a workspace on it is named by", async () => {
+    useStore.setState({ places: [here, added], workspaces: [onBox] });
+    const asked: Array<[string, unknown]> = [];
+    await mountComputers(hostSet(asked, ""), { kind: "computer", id: "p_2" });
+    expect(descriptionOf("computer-name")).toBe("hetzner");
+    expect((await open("name")).value).toBe("hetzner");
+    fireEvent.click(document.querySelector("[data-k=computer-name] button:not([type=submit])")!);
+    await save("name", "  hetzner-fsn ");
+    expect(asked).toEqual([["p_2", { name: "hetzner-fsn" }]]);
+    expect(document.querySelector("[data-k=computer-name]")).toBeNull();
+    expect(descriptionOf("computer-name")).toBe("hetzner-fsn");
+    expect(document.querySelector("[data-settings-page] [data-k=computer-head] [data-settings-title]")?.textContent).toBe("hetzner-fsn");
+    expect(document.querySelector('[data-slot=sidebar] [data-row-id="computer:p_2"]')?.textContent).toContain("hetzner-fsn");
+    expect(computerName(useStore.getState().places, { workspace: onBox, status: null })).toBe("hetzner-fsn");
+    await act(async () => useSettingsStore.getState().go({ kind: "group", group: "computers" }));
+    await settle();
+    expect(nameOf("p_2")).toBe("hetzner-fsn");
+  });
+
+  it("saves a new ssh login the host reads this same computer over, and keeps the old one with the host's refusal under the field for one that reaches another machine", async () => {
+    useStore.setState({ places: [here, added], workspaces: [] });
+    const asked: Array<[string, unknown]> = [];
+    await mountComputers(hostSet(asked, "root@10.0.0.9"), { kind: "computer", id: "p_2" });
+    expect(descriptionOf("computer-ssh")).toBe("root@hetzner");
+
+    await save("ssh", "root@10.0.0.9");
+    const slot = document.querySelector("[data-k=computer-ssh-refusal]")!;
+    expect(slot.textContent).toBe("root@10.0.0.9 reaches a computer that is not hetzner, so nothing was saved. Give the login that reaches hetzner itself.");
+    expect(slot.className).toContain("text-destructive-foreground");
+    expect(document.querySelector("[data-k=computer-ssh-field]")?.getAttribute("aria-invalid")).toBe("true");
+    expect(descriptionOf("computer-ssh")).toBe("root@hetzner");
+    expect(useStore.getState().places.find(p => p.id === "p_2")?.road?.ssh).toBe("root@hetzner");
+
+    const input = document.querySelector<HTMLInputElement>("[data-k=computer-ssh-field] input, input[data-k=computer-ssh-field]")!;
+    fireEvent.change(input, { target: { value: "root@203.0.113.7" } });
+    expect(document.querySelector("[data-k=computer-ssh-refusal]")?.textContent).toBe("");
+    await act(async () => fireEvent.click(document.querySelector("[data-k=computer-ssh-save]")!));
+    await settle();
+    expect(asked).toEqual([["p_2", { ssh: "root@10.0.0.9" }], ["p_2", { ssh: "root@203.0.113.7" }]]);
+    expect(document.querySelector("[data-k=computer-ssh]")).toBeNull();
+    expect(descriptionOf("computer-ssh")).toBe("root@203.0.113.7");
+    expect(useStore.getState().places.find(p => p.id === "p_2")?.road?.ssh).toBe("root@203.0.113.7");
+  });
+
+  it("holds Save on a blank name or login, so Enter or a press sends nothing, and draws the typed name in the row's own sans", async () => {
+    useStore.setState({ places: [here, { ...box, id: "p_3", name: "vps" }], workspaces: [] });
+    const asked: Array<[string, unknown]> = [];
+    await mountComputers(hostSet(asked, ""), { kind: "computer", id: "p_3" });
+    const name = await open("name");
+    const field = name.closest("[data-slot=input-control]")!;
+    expect(field.className).not.toContain("font-mono");
+    expect(field.className).not.toContain("text-[13px]");
+    fireEvent.change(name, { target: { value: "   " } });
+    expect(document.querySelector("[data-k=computer-name-save]")?.hasAttribute("data-held")).toBe(true);
+    await act(async () => fireEvent.submit(name.closest("form")!));
+    fireEvent.change(name, { target: { value: "" } });
+    await act(async () => fireEvent.click(document.querySelector("[data-k=computer-name-save]")!));
+    expect(document.querySelector("[data-k=computer-name]")).not.toBeNull();
+    fireEvent.click(document.querySelector("[data-k=computer-name] button:not([type=submit])")!);
+    await settle();
+    const ssh = await open("ssh");
+    expect(ssh.value).toBe("");
+    expect(document.querySelector("[data-k=computer-ssh-save]")?.hasAttribute("data-held")).toBe(true);
+    await act(async () => fireEvent.submit(ssh.closest("form")!));
+    expect(asked).toEqual([]);
+    fireEvent.change(ssh, { target: { value: "root@vps" } });
+    expect(document.querySelector("[data-k=computer-ssh-save]")?.hasAttribute("data-held")).toBe(false);
+  });
+
+  it("says what it checks in the slot while the host dials a new login, and the host's word once the dial's bound passes", async () => {
+    useStore.setState({ places: [here, added], workspaces: [] });
+    let refuse: (e: Error) => void = () => {};
+    const api = computersApi({ agentsRead: async () => AGENTS_REPORT, placesSet: () => new Promise((_, no) => (refuse = no)) }).api;
+    await mountComputers(api, { kind: "computer", id: "p_2" });
+    await save("ssh", " root@10.255.255.1 ");
+    const slot = (): Element => document.querySelector("[data-k=computer-ssh-refusal]")!;
+    expect(slot().querySelector("[data-k=waiting]")?.textContent).toBe("Checking that root@10.255.255.1 reaches hetzner");
+    expect(document.querySelector<HTMLButtonElement>("[data-k=computer-ssh-save]")?.disabled).toBe(true);
+    const said = placeSshUncheckedRefusal("root@10.255.255.1", "hetzner", "ssh root@10.255.255.1 was not answered in 20s");
+    await act(async () => refuse(new RequestError(usageRefusal(said.happened, said.fix).message, "usage", said.fix)));
+    await settle();
+    expect(slot().querySelector("[data-k=waiting]")).toBeNull();
+    expect(slot().textContent).toBe(`${said.happened}. ${said.fix}`);
+    expect(descriptionOf("computer-ssh")).toBe("root@hetzner");
+  });
+
+  it("sends nothing for a value left as it was, says a computer joined with a code has no login, and offers neither on the computer the app runs on or a cloud", async () => {
+    useStore.setState({ places: [here, { ...box, id: "p_3", name: "vps" }, solari], workspaces: [] });
+    const asked: Array<[string, unknown]> = [];
+    await mountComputers(hostSet(asked, ""), { kind: "computer", id: "p_3" });
+    expect(descriptionOf("computer-ssh")).toBe(COMPUTER_PAGE_WORDS.sshNone);
+    await save("name", "vps");
+    expect(asked).toEqual([]);
+    expect(document.querySelector("[data-k=computer-name]")).toBeNull();
+    for (const id of ["here", "solari"]) {
+      await act(async () => useSettingsStore.getState().go({ kind: "computer", id }));
+      await settle();
+      expect(document.querySelector("[data-settings-card=computer-name-login]"), id).toBeNull();
+    }
   });
 });

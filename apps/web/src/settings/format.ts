@@ -24,6 +24,9 @@ export const SETTINGS_WORDS = {
   backTo: (group: string): string => `Back to ${group}`,
   restore: "Restore defaults",
   resetRow: "Back to the default",
+  save: "Save",
+  cancel: "Cancel",
+  change: "Change",
   appearance: "Appearance",
   theme: "Theme",
   mode: "Mode",
@@ -342,7 +345,7 @@ export const AGENTS_PAGE_WORDS = {
   /** An id the person added that the agent's own list of every model it runs leaves out; still run as named. */
   notInList: (agent: string): string => `Not in ${agent}'s list`,
   edit: "Edit",
-  change: "Change",
+  change: SETTINGS_WORDS.change,
   howItRuns: "How it runs",
   program: "Program",
   configFolder: "Config folder",
@@ -351,8 +354,8 @@ export const AGENTS_PAGE_WORDS = {
   argumentsCount: (n: number): string => (n === 0 ? "No arguments." : `${n} ${n === 1 ? "argument" : "arguments"}.`),
   environment: "Environment",
   variablesCount: (n: number): string => (n === 0 ? "No variables." : `${n} ${n === 1 ? "variable" : "variables"}, values hidden.`),
-  save: "Save",
-  cancel: "Cancel",
+  save: SETTINGS_WORDS.save,
+  cancel: SETTINGS_WORDS.cancel,
   putBack: (agent: string): string => `Use ${agent}'s own`,
   programSheet: (agent: string, computer: string): string => `The program run in ${agent}'s place on ${computer}: a path, or a word on its PATH.`,
   configSheet: (agent: string, computer: string): string => `The folder on ${computer} ${agent} keeps its config, sessions and sign-in in, under that computer's home.`,
@@ -544,6 +547,12 @@ export const COMPUTER_PAGE_WORDS = {
     `A thread here may open threads of its own, up to ${machines === undefined ? "" : `${machines} ${machines === 1 ? "machine" : "machines"} and `}${depth === 1 ? "one level deep" : `${depth} levels deep`}.`,
   levelsTitle: "Levels deep",
   levelsLine: "1 lets the thread you start open threads, 2 lets those open their own.",
+  nameTitle: "Name",
+  nameSheet: (name: string): string => `What ${name} is called in every list. Its projects and threads stay on it.`,
+  sshTitle: "SSH login",
+  sshNone: "It joined with a code and has no login.",
+  sshSheet: (name: string): string => `The login wsp uses to reach ${name}, as user@host.`,
+  sshChecking: (ssh: string, name: string): string => `Checking that ${ssh} reaches ${name}`,
 } as const;
 
 /** The Limits tab's banked resets line: what is banked, and the one act that spends one after asking. */
