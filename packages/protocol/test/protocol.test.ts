@@ -2075,10 +2075,25 @@ describe("bringing work back", () => {
     expect(wire.BringBackResult.parse(child)).toEqual(child);
   });
 
-  it("a thread works on its own project alone, and the refusal names both", () => {
-    expect(wire.spawnProjectRefusal("thread_a1b2c3d4", "landing", "docs")).toBe(
-      `this request came out of thread ${wire.threadWord("thread_a1b2c3d4")} on landing; a thread works on its own project alone, and docs is another`,
+  it("a thread works on its own repository's projects alone, and the refusal names both and what to do", () => {
+    expect(wire.refusalLine(wire.spawnRepositoryRefusal("thread_a1b2c3d4", "landing", "docs"), wire.SPAWN_REPOSITORY_FIX)).toBe(
+      `thread ${wire.threadWord("thread_a1b2c3d4")} works on landing, and docs is a project of another repository; a thread starts children on its own repository's projects alone. Name a project of the same repository, or ask the person to start this one.`,
     );
+    // The road out of a workspace outside the tree is what a run does on that project's kind of computer.
+    expect(wire.spawnReachFix("my lab", true)).toBe(`Start a child on my lab instead with wsp run 'my lab' "<message>", which forks a machine in your own tree.`);
+    expect(wire.spawnReachFix("my lab", false)).toBe(`Start a child in my lab's folder instead with wsp run 'my lab' "<message>", which opens a thread there in your own tree.`);
+    expect(wire.refusalLine(wire.spawnFolderRefusal("thread_a1b2c3d4", "lab-two"), wire.SPAWN_FOLDER_FIX)).toBe(
+      `thread ${wire.threadWord("thread_a1b2c3d4")} may not start children in lab-two: it is a folder the person keeps of this repository, and a thread started there would stand outside your tree. Name a project wsp projects lists, or ask the person to start this one.`,
+    );
+    expect(wire.refusalLine(wire.spawnRepositoryWorkspaceRefusal("thread_a1b2c3d4", "landing", "nightly"), wire.SPAWN_REPOSITORY_WORKSPACE_FIX)).toBe(
+      `thread ${wire.threadWord("thread_a1b2c3d4")} works on landing, and the workspace nightly holds another repository; a thread reaches its own repository's workspaces alone. Name a workspace of your own tree or a project of your own repository, or ask the person.`,
+    );
+    // Exec starts nothing, so its refusals say what the word is and name exec on the thread's own machine as the road.
+    expect(wire.refusalLine(wire.execOutsideRefusal("thread_a1b2c3d4", "lab-two", "folder"), wire.execOutsideFix("my lab"))).toBe(
+      `thread ${wire.threadWord("thread_a1b2c3d4")} may not exec in lab-two: it is a folder the person keeps of this repository, outside your tree. Run the command in your own tree with wsp exec 'my lab' -- <command>, or ask the person.`,
+    );
+    expect(wire.execOutsideRefusal("thread_a1b2c3d4", "docs", "project")).toBe(`thread ${wire.threadWord("thread_a1b2c3d4")} may not exec in docs: it is a project of another repository, outside your tree`);
+    expect(wire.execOutsideRefusal("thread_a1b2c3d4", "nightly", "workspace")).toBe(`thread ${wire.threadWord("thread_a1b2c3d4")} may not exec in nightly: it is a workspace of another repository, outside your tree`);
     // Bringing work back is one of the acts a thread may ask for, and it is named in the table like the rest.
     expect(wire.SPAWN_ACTS_ALLOWED).toContain("bring_back");
     expect(wire.SPAWN_ACTS["bring_back"]).toBe("bring its work back");

@@ -10,6 +10,7 @@ import {
   githubLinkOf,
   projectForRepo,
   lineInDiff,
+  ownerRepoOf,
   reviewFromReply,
   reviewTaskPrompt,
   startName,
@@ -79,6 +80,15 @@ const issue = (over: Partial<IssueRead> = {}): IssueRead => ({
   ...over,
 });
 const fromIssue: WorkspaceFrom = { kind: "issue", repo: "Zingzy/wsp-pr-lab", number: 5, url: "https://github.com/Zingzy/wsp-pr-lab/issues/5", title: "Add a greeting line to notes.txt" };
+
+describe("ownerRepoOf", () => {
+  it("reads one owner and name off every spelling of a remote, a trailing slash and a .git ending no part of it", () => {
+    for (const remote of ["https://github.com/acme/lab", "https://github.com/acme/lab.git", "https://github.com/acme/lab/", "https://github.com/acme/lab.git/", "git@github.com:acme/lab.git"]) {
+      expect(ownerRepoOf(remote)).toBe("acme/lab");
+    }
+    expect(ownerRepoOf("https://github.com/")).toBeUndefined();
+  });
+});
 
 describe("fromTaskPrompt", () => {
   it("carries the title, the body, the link and, for an issue, the Closes line the pull request should say", () => {

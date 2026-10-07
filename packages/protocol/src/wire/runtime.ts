@@ -240,8 +240,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("workspaces.list") }),
   /** The workspace a person's word names, by id or by name, off the same reading workspaces.list serves: a name no
    * workspace here carries is refused as absent, and one this caller may not drive by the rule that hides it, so a
-   * verb never denies a workspace the listing just showed. Replies with { workspace }. */
-  z.object({ id: reqId, op: z.literal("workspaces.resolve"), ref: z.string() }),
+   * verb never denies a workspace the listing just showed. `verb` is exec when exec names it, so a thread's refusal
+   * speaks of exec; absent, it speaks of starting children, which a run naming a project falls through to. Replies
+   * with { workspace }. */
+  z.object({ id: reqId, op: z.literal("workspaces.resolve"), ref: z.string(), verb: z.literal("exec").optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.get"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.nap"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.wake"), workspaceId: z.string() }),
@@ -908,6 +910,10 @@ export const THREAD_OPS: readonly string[] = [
   "capabilities.get",
   "workspaces.landing",
   "workspaces.create",
+  // The projects a thread may start children on, its own and its repository's on every computer that forks
+  // machines, and what a thread there starts on; the host answers a thread those and no other.
+  "projects.list",
+  "projects.defaults",
   "workspaces.list",
   // Every verb a thread runs names its workspace as a person does, so the door that reads a name is open to the
   // same tokens the list is: the tree rule refuses the names outside it here exactly as it hides them there.

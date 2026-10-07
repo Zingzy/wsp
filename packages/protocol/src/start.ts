@@ -33,9 +33,10 @@ export function githubLinkOf(text: string): GithubLink | undefined {
   return { host: "github.com", repo: `${owner}/${name}`, kind, number: Number(number), url: `https://github.com/${owner}/${name}/${path}/${number}` };
 }
 
-/** The `owner/repo` an https or ssh remote of a known host names, or nothing where the remote names no path. */
+/** The `owner/repo` an https or ssh remote of a known host names, or nothing where the remote names no path; a
+ * trailing slash and a .git ending are no part of the name. */
 export function ownerRepoOf(remote: string): string | undefined {
-  const path = remote.replace(/^[a-z+]+:\/\//, "").replace(/^[^@/]+@/, "").replace(/\.git$/, "").split(/[/:]/).slice(1).join("/");
+  const path = remote.replace(/^[a-z+]+:\/\//, "").replace(/^[^@/]+@/, "").replace(/\/+$/, "").replace(/\.git$/, "").split(/[/:]/).slice(1).join("/");
   return path === "" ? undefined : path;
 }
 

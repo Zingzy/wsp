@@ -1296,7 +1296,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, workspaces: (await rt.workspaces.list(origin)).map(handed) });
               return;
             case "workspaces.resolve":
-              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.resolve(msg.ref, origin)) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.resolve(msg.ref, origin, msg.verb)) });
               return;
             case "workspaces.get":
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.get(msg.workspaceId, origin)) });

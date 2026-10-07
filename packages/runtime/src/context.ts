@@ -264,6 +264,8 @@ export interface RulesArea {
   readonly drives: (record: { kind: WorkspaceKind; machineId?: string }, caller: Caller | undefined) => boolean;
   readonly opensIn: (record: WorkspaceRecord, scope: ThreadScope | undefined) => boolean;
   readonly projectOfScope: (scope: ThreadScope) => string | undefined;
+  readonly ofThreadsRepository: (scope: ThreadScope, project: string) => boolean;
+  readonly projectReached: (scope: ThreadScope, project: string) => boolean;
   readonly refusalFor: (record: WorkspaceLike | undefined, caller: Caller | undefined) => string | undefined;
   readonly refuseRelayed: (record: WorkspaceLike | undefined, caller: Caller | undefined) => void;
   readonly refuseNamed: (workspaceId: string, caller: Caller | undefined) => void;
@@ -687,7 +689,7 @@ export interface ProjectsArea {
   readonly copyImport: (entry: LiveWorkspace, o: ProjectImportOptions, report: ImportReport) => Promise<ImportLanded>;
   readonly landingKind: (computer: string, at: MachineBackend | undefined) => ProjectLanding["kind"];
   readonly landingDeps: (computer: string) => Promise<{ deps: LandingDeps; at: MachineBackend | undefined; placeId: string | undefined }>;
-  readonly projectsDoor: { seedPlan(source: string): Promise<SeedPlan>; add(o: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice; }, origin?: Caller): Promise<ProjectView & { notice?: string; }>; list(): Promise<ProjectView[]>; computers(): Promise<{ id: string; name: string; }[]>; resolve(ref: string, origin?: Caller): Promise<ProjectView>; remove(id: string, origin?: Caller): Promise<{ said: string; }>; };
+  readonly projectsDoor: { seedPlan(source: string): Promise<SeedPlan>; add(o: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice; }, origin?: Caller): Promise<ProjectView & { notice?: string; }>; list(origin?: Caller): Promise<ProjectView[]>; computers(): Promise<{ id: string; name: string; }[]>; resolve(ref: string, origin?: Caller): Promise<ProjectView>; remove(id: string, origin?: Caller): Promise<{ said: string; }>; };
   readonly projects: Runtime["projects"];
 }
 

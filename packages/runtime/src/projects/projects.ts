@@ -8,7 +8,7 @@ import { INLINE_EXEC_MS, BUILDER_LABEL, CREATED_AT_LABEL, OWNER_LABEL, WSP_LABEL
 import type { HarnessCatalog, ProjectAddStage, ProjectExportStage, ProjectSource, ProjectView, ProjectPlan, SeedChoice, SeedPlan, Caller } from "@wsp/protocol";
 import { projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "../project-landing.js";
 import { projectSource } from "../project-sources.js";
-import { scopeOf } from "@wsp/protocol";
+import { refusal, scopeOf, spawnFolderRefusal, spawnRepositoryRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX } from "@wsp/protocol";
 import { addedProjectOn, addingProjectLine, actionRefusal, kindWords, fmtBytes, notFoundRefusal, claudeProjectKey, folderOnCopyRefusal, cloneIntoNeeded, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, leftBehindLine, projectInUseRefusal, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, bareFolder, copiesFolder, kindForComputer, shellQuote, underProject, workspaceState, HERE_PLACE_ID, noSuchPlaceRefusal } from "@wsp/protocol";
 import { GITHUB_TOKEN_ENV } from "@wsp/engine";
 import { resolveThreadDefaults, withCustomModels } from "@wsp/protocol";
@@ -327,9 +327,11 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       }
     },
 
-    async list(): Promise<ProjectView[]> {
+    async list(origin?: Caller): Promise<ProjectView[]> {
       await ctx.ready();
-      return [...projectsHeld.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      // A thread is served the projects it may start children on, so the listing and the start read one rule.
+      const scope = scopeOf(origin);
+      return [...projectsHeld.values()].filter(p => scope === undefined || ctx.projectReached(scope, p.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     },
 
     async computers(): Promise<{ id: string; name: string }[]> {
@@ -341,14 +343,17 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       await ctx.ready();
       const all = [...projectsHeld.values()];
       const found = all.find(p => p.id === ref) ?? all.find(p => p.name === ref);
-      // A thread works on the project its own workspace holds: every other word reads as absent here, so a word
-      // that names another project and one that names nothing are one sentence and neither says what else stands.
-      // A thread whose workspace this host no longer holds works on none, so every word reads the same for it.
+      // A thread works on its own project and its repository's on computers that fork machines. A project the
+      // person holds that it may not use is refused by the rule that says why, another repository's or a folder
+      // the person keeps of its own, in words that carry the word it typed; a word naming nothing, and every word
+      // for a thread whose workspace this host no longer holds, read as absent.
       const scope = scopeOf(origin);
       if (scope !== undefined) {
         const mine = ctx.projectOfScope(scope);
-        if (found === undefined || mine === undefined || found.id !== mine) throw notFoundRefusal(bareNoSuchProjectLine(ref));
-        return found;
+        if (found === undefined || mine === undefined) throw notFoundRefusal(bareNoSuchProjectLine(ref));
+        if (ctx.projectReached(scope, found.id)) return found;
+        if (ctx.ofThreadsRepository(scope, found.id)) throw refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
+        throw refusal(spawnRepositoryRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_FIX, "usage");
       }
       if (found === undefined) throw notFoundRefusal(noSuchProjectLine(ref, all.map(p => p.name)));
       return found;
@@ -379,7 +384,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
     add: projectsDoor.add,
     seedPlan: projectsDoor.seedPlan,
     list: projectsDoor.list,
-    async defaults() {
+    async defaults(origin) {
       const prefs = await ctx.preferences.get();
       const runs = (id: string): boolean => adapters[id] !== undefined;
       const catalogOf = (id: string): HarnessCatalog | undefined => {
@@ -387,7 +392,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
         return table === undefined ? undefined : withCustomModels(table, prefs.agentDefaults[id]?.models);
       };
       const firstAgent = CATALOG_AGENTS.find(a => runs(a.id))?.id ?? DEFAULT_AGENT.id;
-      const held = await projectsDoor.list();
+      const held = await projectsDoor.list(origin);
       return Object.fromEntries(held.map(p => [p.id, resolveThreadDefaults({ firstAgent, catalogOf, runs, prefs, ...(prefs.projectDefaults[p.id] !== undefined ? { project: prefs.projectDefaults[p.id] } : {}) })]));
     },
     computers: projectsDoor.computers,

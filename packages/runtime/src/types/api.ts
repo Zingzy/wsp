@@ -135,7 +135,7 @@ export interface Runtime {
      * person or an agent comes through here, so what the listing shows and what a verb accepts are one thing. A name
      * nothing here carries is refused as absent, and one the caller may not drive with the sentence of the rule that
      * hides it rather than as missing. */
-    resolve(ref: string, origin?: Caller): Promise<WorkspaceView>;
+    resolve(ref: string, origin?: Caller, verb?: "exec"): Promise<WorkspaceView>;
     nap(id: string, origin?: Caller): Promise<WorkspaceView>;
     wake(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Stops a wake that is asking the provider again on its own, and answers with the record it leaves behind. The

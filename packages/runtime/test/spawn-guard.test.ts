@@ -33,7 +33,10 @@ import { HERE_PLACE_ID,
   nameTakenRefusal,
   noWorkspaceRefusal,
   parentProjectRefusal,
-  spawnProjectRefusal,
+  refusalLine,
+  spawnRepositoryRefusal,
+  SPAWN_REPOSITORY_FIX,
+  spawnReachFix,
   spawnReachRefusal,
   threadWord,
   type Caller,
@@ -258,7 +261,7 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
-  it("a thread works on its own project alone: another project's create and another project's workspace are both refused by it", async () => {
+  it("a thread works on its own repository's projects alone: another repository's create and its workspace are both refused by it", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory });
     const mine = await projectOn(rt);
@@ -268,9 +271,9 @@ describe("agents spawning agents", () => {
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
     const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
-    // A project word the thread's own workspace does not hold is absent to it, and so is every workspace of one:
-    // both read as missing rather than naming the project or the workspace the thread may not have.
-    await expect(createOn(rt, { project: other.id, name: "elsewhere" }, asThread(scope))).rejects.toThrow(bareNoSuchProjectLine(other.id));
+    // A project of another repository is refused by that rule, naming it, so a lead learns why; a workspace of one
+    // a verb found by id still reads as missing.
+    await expect(createOn(rt, { project: other.id, name: "elsewhere" }, asThread(scope))).rejects.toThrow(refusalLine(spawnRepositoryRefusal(rootThread, mine.name, other.id), SPAWN_REPOSITORY_FIX));
     for (const reach of [
       () => rt.sessions.start(theirs.id, { prompt: "hi" }, asThread(scope)),
       () => rt.workspaces.get(theirs.id, asThread(scope)),
@@ -280,14 +283,14 @@ describe("agents spawning agents", () => {
       await expect(reach()).rejects.not.toThrow(other.name);
     }
     // The person still reads which rule hid it, since what this host holds is theirs.
-    expect(await rt.workspaces.originRefusal(theirs.id, asThread(scope))).toBe(spawnProjectRefusal(rootThread, mine.name, other.name));
+    expect(await rt.workspaces.originRefusal(theirs.id, asThread(scope))).toBe(spawnRepositoryRefusal(rootThread, mine.name, other.name));
     // Its own workspace is still its own, and the listing shows that one and no other project's.
     expect((await rt.workspaces.list(asThread(scope))).map(w => w.name)).toEqual(["lead"]);
     held.end(0);
     await rt.close();
   });
 
-  it("a thread's landing resolves its own project alone, and the refusal names no other", async () => {
+  it("a thread's landing resolves its own repository's projects alone, refuses another repository's by that rule, and reads a word naming none as absent", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory });
     const mine = await projectOn(rt);
@@ -298,19 +301,39 @@ describe("agents spawning agents", () => {
     const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
     // Its own project answers as it does for the person.
     expect((await rt.workspaces.landing({ project: mine.id }, asThread(scope))).name).toBe((await rt.workspaces.landing({ project: mine.id })).name);
-    for (const word of [other.id, other.name, "nothing-here"]) {
-      const refusal = rt.workspaces.landing({ project: word }, asThread(scope));
-      await expect(refusal).rejects.toThrow(bareNoSuchProjectLine(word));
-      await expect(refusal).rejects.not.toThrow(other.name === word ? "this host holds" : other.name);
+    for (const word of [other.id, other.name]) {
+      await expect(rt.workspaces.landing({ project: word }, asThread(scope))).rejects.toThrow(refusalLine(spawnRepositoryRefusal(rootThread, mine.name, word), SPAWN_REPOSITORY_FIX));
     }
-    // A create naming another project reads the same sentence, and the person still reads every project by name.
-    await expect(createOn(rt, { project: other.id, name: "elsewhere" }, asThread(scope))).rejects.toThrow(bareNoSuchProjectLine(other.id));
+    // What a thread there starts on is read for its own repository's projects alone; the person reads every one.
+    expect(Object.keys(await rt.projects.defaults(asThread(scope)))).toEqual([mine.id]);
+    expect(Object.keys(await rt.projects.defaults()).sort()).toEqual([mine.id, other.id].sort());
+    const absent = rt.workspaces.landing({ project: "nothing-here" }, asThread(scope));
+    await expect(absent).rejects.toThrow(bareNoSuchProjectLine("nothing-here"));
+    await expect(absent).rejects.not.toThrow("this host holds");
+    // A create naming another repository's project reads the same rule, and the person still reads every project by name.
+    await expect(createOn(rt, { project: other.id, name: "elsewhere" }, asThread(scope))).rejects.toThrow(refusalLine(spawnRepositoryRefusal(rootThread, mine.name, other.id), SPAWN_REPOSITORY_FIX));
     await expect(rt.workspaces.landing({ project: "nothing-here" })).rejects.toThrow(noSuchProjectLine("nothing-here", [mine.name, other.name]));
     held.end(0);
     await rt.close();
   });
 
-  it("a thread's landing over the wire reads its own project and no other", async () => {
+  it("one repository is one whatever its remote's spelling: a .git ending, letter case and a trailing slash aside", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory });
+    const mine = await projectOn(rt, undefined, "https://github.com/acme/lab.git", { name: "wsp" });
+    const spellings = ["https://github.com/acme/lab", "https://github.com/ACME/Lab/", "https://github.com/acme/lab.git/", "git@github.com:acme/lab.git"];
+    for (const [n, url] of spellings.entries()) await projectOn(rt, undefined, url, { name: `wsp-${n}` });
+    await projectOn(rt, undefined, "https://github.com/acme/lab-other", { name: "other" });
+    const ws = await createOn(rt, { project: mine.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    expect((await rt.projects.list(asThread(scope))).map(p => p.name)).toEqual(["wsp", "wsp-0", "wsp-1", "wsp-2", "wsp-3"]);
+    held.end(0);
+    await rt.close();
+  });
+
+  it("a thread's landing over the wire reads its own repository's projects and refuses another's by that rule", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory });
     const mine = await projectOn(rt);
@@ -323,7 +346,8 @@ describe("agents spawning agents", () => {
       expect((await client.request("workspaces.landing", { project: mine.id }))["ok"]).toBe(true);
       const refused = await client.request("workspaces.landing", { project: other.name });
       expect(refused["ok"]).toBe(false);
-      expect(refused["error"]).toBe(bareNoSuchProjectLine(other.name));
+      expect(refused["error"]).toBe(refusalLine(spawnRepositoryRefusal(handle.view().threadId!, mine.name, other.name), SPAWN_REPOSITORY_FIX));
+      expect((await client.request("workspaces.landing", { project: "nothing-here" }))["error"]).toBe(bareNoSuchProjectLine("nothing-here"));
       const mine2 = await WsClient.connect(srv.port, { token: "secret" });
       expect(String((await mine2.request("workspaces.landing", { project: "nothing-here" }))["error"])).toBe(noSuchProjectLine("nothing-here", [mine.name, other.name]));
       mine2.close();
@@ -423,7 +447,12 @@ describe("agents spawning agents", () => {
     // The start has to miss both visible ids, which a random pair shares for several characters now and then.
     let len = 6;
     while ([mine.id, forked.id].some(id => id.startsWith(theirs.id.slice(0, len)))) len++;
-    for (const word of ["theirs", theirs.id, theirs.id.slice(0, len), "nobody"]) {
+    // A whole name or id the person holds is refused by the tree rule and the road to a child of the thread's own;
+    // a start of an id and a word naming nothing read as absent, since those are how a thread would walk this host.
+    for (const word of ["theirs", theirs.id]) {
+      await expect(rt.workspaces.resolve(word, asThread(scope))).rejects.toThrow(refusalLine(spawnReachRefusal("t_root", word), spawnReachFix(mine.project.name, true)));
+    }
+    for (const word of [theirs.id.slice(0, len), "nobody"]) {
       await expect(rt.workspaces.resolve(word, asThread(scope))).rejects.toThrow(noWorkspaceRefusal(word));
     }
     // Every id of this host starts ws_, so the start a thread would walk the whole host with answers off its own

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_json::Value;
 
-use super::named::{absolute_folder, awake, params, workspace_of};
+use super::named::{absolute_folder, awake, params, workspace_for_exec};
 use super::{input, Answer, Refused, Tool};
 use crate::failure::Failure;
 use crate::host::Host;
@@ -66,7 +66,7 @@ async fn call(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let In { workspace, argv, cwd } = input(NAME, arguments)?;
     let asked = absolute_folder(cwd.as_deref())?.map(str::to_owned);
     let client = host.client().await?;
-    let target = awake(&client, &workspace_of(&client, &workspace).await?, NAME).await?.workspace;
+    let target = awake(&client, &workspace_for_exec(&client, &workspace).await?, NAME).await?.workspace;
     let mut frames = client.frames();
     let mut run = params([("workspaceId", Value::from(target.id.as_str())), ("argv", Value::from(argv))]);
     if let Some(folder) = asked {
