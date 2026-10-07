@@ -177,6 +177,12 @@ export function startName(kind: "start" | "review", number: number, title: strin
   return name.slice(0, NAME_MAX).trimEnd();
 }
 
+/** The workspace's name off the task: its first line, cut at a few words, since the row has room for little more. */
+export function nameOfTask(task: string): string {
+  const words = task.trim().split("\n")[0]!.split(/\s+/).filter(Boolean);
+  return words.slice(0, 5).join(" ").slice(0, 40).trimEnd();
+}
+
 /** The name itself where no workspace has it, else the name with the first number after it none has. */
 export function takenNameAfter(name: string, taken: ReadonlySet<string>): string {
   if (!taken.has(name)) return name;

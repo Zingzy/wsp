@@ -77,11 +77,14 @@ import {
   kindForComputer,
   isLocalWorkspace,
   threadOnMachineLine,
+  nameOfTask,
+  takenNameAfter,
+  ThreadDefaults,
 } from "@wsp/protocol";
 import { mainWorktreeOf } from "../repo-root.js";
 import { SERVICE_WAIT_MS } from "../host-lock.js";
 import { type Frame, type HostClient, stoppedUnder, HOST_RESTARTING_LINE, hostBack, untilSettled, pushedFrames, type Flags, type VerbDeps, type VerbContext, PICK_FLAGS, flag, absoluteFolder, accessWordOf, under, otherVersion, threadIdOf, openedThreadSaid } from "./client.js";
-import { workspaces, threads, workspaceOf, threadOf, projectsOf, projectOf, projectsHere } from "./workspaces-help.js";
+import { workspaces, threads, workspaceOf, threadOf, projectsOf, projectOf, projectsHere, createFor } from "./workspaces-help.js";
 import type { TurnOut } from "./io.js";
 
 const sessionEvent = (f: Frame): f is Frame & SessionEvent => typeof f.type === "string" && f.type.startsWith("session.");
@@ -156,19 +159,22 @@ export function pickFlags(flags: Flags): Picks {
  * catalog does not list. Named a workspace, this asks that workspace's own machine, the same lists the app's composer
  * shows and the start itself will check against, so a model only that machine's config knows (a provider the agent is
  * routed to) is not refused here for being absent from a table. On a workspace that is not running the table answers,
- * and the start on the machine checks the rest. A start on this computer mints and wakes nothing, so its picks are
- * left to the start, which reads them against the agent's own lists here before it makes a folder. */
-export async function checkedStart(client: HostClient, task: string, harness: string | undefined, picks: Picks, workspaceId?: string): Promise<void> {
+ * and the start on the machine checks the rest. A start that forks a machine for `forkOf`, a project's id, has no
+ * machine to ask yet, so the table answers for the agent that project's threads start on. A start on this computer
+ * mints and wakes nothing, so its picks are left to the start, which reads them against the agent's own lists here
+ * before it makes a folder. */
+export async function checkedStart(client: HostClient, task: string, harness: string | undefined, picks: Picks, workspaceId?: string, forkOf?: string): Promise<void> {
   if (task.trim() === "") throw usageRefusal(EMPTY_MESSAGE_LINE, "Put it in quotes after the flags.");
   const { harnesses } = await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list", workspaceId === undefined ? undefined : { workspaceId });
-  const table = harnesses.find(c => (harness === undefined ? c.isDefault === true : c.harness === harness));
+  const agent = harness ?? (forkOf === undefined ? undefined : (await projectDefaultsOf(client))[forkOf]?.agent.value);
+  const table = harnesses.find(c => (agent === undefined ? c.isDefault === true : c.harness === agent));
   if (table === undefined && harness !== undefined) {
     // An agent the host runs that is off on this workspace's computer is the start's to refuse, naming that computer.
     const all = workspaceId === undefined ? harnesses : (await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list")).harnesses;
     if (all.some(c => c.harness === harness)) return;
     throw usageRefusal(noAdapterLine(harness, all.map(c => c.harness)), "Name one of those with --agent.");
   }
-  if (workspaceId === undefined) return;
+  if (workspaceId === undefined && forkOf === undefined) return;
   const asked = picksOf(picks);
   try {
     startPicks(table, asked, true);
@@ -177,6 +183,11 @@ export async function checkedStart(client: HostClient, task: string, harness: st
   }
   const refused = asked.access === undefined || table === undefined ? null : accessWordRefusal(table, asked.access);
   if (refused !== null) throw refused;
+}
+
+/** What every project starts a new thread on, by project id, each value with where it came from. */
+export async function projectDefaultsOf(client: HostClient): Promise<Record<string, ThreadDefaults>> {
+  return z.record(z.string(), ThreadDefaults).parse((await client.request<{ defaults: unknown }>("projects.defaults")).defaults);
 }
 
 /** The person's view preferences as the host keeps them: the last project per workspace and the last target. */
@@ -191,9 +202,17 @@ export interface FolderTarget {
   opened: (threadId: string, folder?: string) => string;
 }
 
-/** Where a run goes: the project named when it is on this computer, else the box machine the word names, which goes
- * on as before; with no word, beside the thread asking, or the project whose folder, or a worktree of whose repo,
- * the caller's own folder is in. */
+/** A run on a project that lives on a box or a cloud account: a machine forked for it once the start is checked. */
+export interface ForkTarget {
+  fork: Pick<ProjectView, "id" | "name" | "computer">;
+}
+
+type RunTarget = FolderTarget | ForkTarget | { workspace: WorkspaceOut; opened?: (threadId: string, folder?: string) => string };
+
+/** Where a run goes: the project named when it is on this computer, a new machine of the project named when it lives
+ * on a box or a cloud account and no machine carries its name, else the machine the word names, which goes on as
+ * before; with no word, beside the thread asking, or the project whose folder, or a worktree of whose repo, the
+ * caller's own folder is in. */
 export async function runTarget(
   client: HostClient,
   ref: string | undefined,
@@ -201,7 +220,7 @@ export async function runTarget(
   env: VerbDeps["env"],
   elsewhere: boolean | undefined,
   where: { branch?: string | undefined; cwd?: string | undefined },
-): Promise<FolderTarget | { workspace: WorkspaceOut; opened?: (threadId: string, folder?: string) => string }> {
+): Promise<RunTarget> {
   const asked = { ...(where.branch !== undefined ? { branch: where.branch } : {}), ...(where.cwd !== undefined ? { cwd: where.cwd } : {}) };
   const said = (name: string | undefined) => (threadId: string, folder?: string): string =>
     folder === undefined ? `thread ${threadId}` : threadOpenedLine(threadId, name, homeShortened(folder, homedir()));
@@ -212,6 +231,7 @@ export async function runTarget(
       return { here: { project: { id: project.id, name: project.name, path: full?.path ?? "" }, ...asked }, opened: said(project.name) };
     }
     if (where.branch !== undefined) throw usageRefusal(BRANCH_HERE_ONLY_LINE, "Name a project on this computer.");
+    if (project !== undefined && !(await workspaces(client)).some(w => w.name === ref)) return { fork: project };
     return { workspace: await workspaceOf(client, ref) };
   }
   // A line out of a thread carries the thread's own token, and with no project named it runs beside that thread.
@@ -222,6 +242,20 @@ export async function runTarget(
   if (project === undefined) throw usageRefusal(noThreadTargetLine("<project>"), "Run wsp projects to read the names.");
   const inside = callerCwd !== undefined && !under(callerCwd, project.path);
   return { here: { project, ...asked, ...(inside && where.cwd === undefined && where.branch === undefined ? { cwd: callerCwd } : {}) }, opened: said(project.name) };
+}
+
+/** A machine forked for a run on a project elsewhere, the way the app's New thread makes one: named off the task, with
+ * a number after it where a machine already has that name, as wsp start numbers one. The stages it streams go to
+ * `say`. Called last, once everything else on the line has been read, so a refusal costs no machine. */
+export async function forkFor(client: HostClient, project: ForkTarget["fork"], task: string, say: (line: string) => void): Promise<WorkspaceOut> {
+  const taken = new Set((await workspaces(client)).map(w => w.name));
+  const out = {
+    emit: (_: unknown, line?: string) => {
+      if (line !== undefined) say(line);
+    },
+    stream: (text: string) => say(text.trimEnd()),
+  };
+  return (await createFor(client, out, project, takenNameAfter(nameOfTask(task), taken))).workspace;
 }
 
 /** The project on this computer a folder is in: the one whose folder holds it, the deepest where two do, else the one
@@ -269,15 +303,18 @@ export async function worktreeFor(client: HostClient, project: string, branch: s
  * the runtime's one rule, the same one the app's composer reads. notify names who every turn's end on it is told,
  * each a thread or NOTIFY_ME. The one place both doors, the command line and the MCP server, put the token of the
  * turn they are running inside on a start: it is what the host reads NOTIFY_ME against, and there is none when the
- * caller is not a turn; the environment it is read off is the caller's, handed in, never this process's. */
-export function openingOf(env: VerbDeps["env"], at: Pick<WorkspaceView, "id"> | FolderTarget, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: readonly string[]; title?: string; files?: readonly string[]; elsewhere?: boolean } = {}): Record<string, unknown> {
+ * caller is not a turn; the environment it is read off is the caller's, handed in, never this process's. A fork's
+ * start carries no workspace until its machine stands, so the files are read before that machine is made. */
+export function openingOf(env: VerbDeps["env"], at: Pick<WorkspaceView, "id"> | FolderTarget | ForkTarget, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: readonly string[]; title?: string; files?: readonly string[]; elsewhere?: boolean } = {}): Record<string, unknown> {
   const cwd = absoluteFolder("here" in at ? at.here.cwd : opts.cwd);
   const attachments = filesFrom(opts.files ?? [], opts.elsewhere);
   const turnToken = turnTokenOf(env);
   return {
     ...("here" in at
       ? { ...(at.here.project !== undefined ? { project: at.here.project.id } : {}), ...(at.here.branch !== undefined ? { branch: at.here.branch } : {}) }
-      : { workspaceId: at.id }),
+      : "fork" in at
+        ? {}
+        : { workspaceId: at.id }),
     prompt,
     ...(cwd !== undefined ? { cwd } : {}),
     ...(opts.harness !== undefined ? { harness: opts.harness } : {}),

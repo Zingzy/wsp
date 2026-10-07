@@ -86,11 +86,11 @@
           "workspaceId": "ws-1"
         },
         {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
+          "op": "sessions.list"
         },
         {
-          "op": "sessions.list"
+          "op": "workspaces.wake",
+          "workspaceId": "ws-1"
         },
         {
           "op": "sessions.start",
@@ -592,10 +592,6 @@
         {
           "op": "harnesses.list",
           "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
         }
       ]
     },
@@ -626,10 +622,6 @@
         {
           "op": "harnesses.list",
           "workspaceId": "ws-1"
-        },
-        {
-          "op": "workspaces.wake",
-          "workspaceId": "ws-1"
         }
       ],
       "guest": {
@@ -644,10 +636,6 @@
           },
           {
             "op": "harnesses.list",
-            "workspaceId": "ws-1"
-          },
-          {
-            "op": "workspaces.wake",
             "workspaceId": "ws-1"
           }
         ]
@@ -852,6 +840,183 @@
       "asked": [
         {
           "op": "projects.list"
+        }
+      ]
+    },
+    {
+      "case": "a project on another computer forks a machine named off the task",
+      "arguments": {
+        "project": "site",
+        "message": "fix the login page now please",
+        "detach": true
+      },
+      "replies": {
+        "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}},{\"id\":\"p-2\",\"name\":\"site\",\"computer\":\"pl-attic\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/root/site\",\"git\":{\"top\":\"/Users/me/wsp\"}}]}",
+        "workspaces.list": "{\"id\":1,\"ok\":true,\"workspaces\":[{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"},{\"id\":\"ws-2\",\"name\":\"fix the login page now\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}]}",
+        "projects.defaults": "{\"id\":1,\"ok\":true,\"defaults\":{\"p-2\":{\"agent\":{\"value\":\"claude\",\"from\":\"default\"}}}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-5\",\"name\":\"fix the login page now 2\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-2\",\"name\":\"site\",\"path\":\"/root/site\",\"computer\":\"pl-attic\"},\"home\":\"/root\"}}",
+        "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-5\",\"name\":\"fix the login page now 2\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-2\",\"name\":\"site\",\"path\":\"/root/site\",\"computer\":\"pl-attic\"},\"home\":\"/root\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"startedBy\":\"agent\"},\"outcome\":\"started\",\"turnId\":\"turn-9\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.list"
+        },
+        {
+          "op": "workspaces.list"
+        },
+        {
+          "op": "harnesses.list"
+        },
+        {
+          "op": "projects.defaults"
+        },
+        {
+          "op": "workspaces.list"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "p-2"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "p-2",
+          "name": "fix the login page now 2"
+        },
+        {
+          "op": "workspaces.wake",
+          "workspaceId": "ws-5"
+        },
+        {
+          "op": "sessions.start",
+          "prompt": "fix the login page now please",
+          "workspaceId": "ws-5",
+          "startedBy": "agent",
+          "requestId": "<request id>"
+        }
+      ]
+    },
+    {
+      "case": "a fork's model read against the project's own agent",
+      "arguments": {
+        "project": "site",
+        "message": "t",
+        "model": "claude-opus-5-5"
+      },
+      "replies": {
+        "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}},{\"id\":\"p-2\",\"name\":\"site\",\"computer\":\"pl-attic\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/root/site\",\"git\":{\"top\":\"/Users/me/wsp\"}}]}",
+        "workspaces.list": "{\"id\":1,\"ok\":true,\"workspaces\":[{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}]}",
+        "projects.defaults": "{\"id\":1,\"ok\":true,\"defaults\":{\"p-2\":{\"agent\":{\"value\":\"codex\",\"from\":\"project\"}}}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"model \\\"claude-opus-5-5\\\" is not one codex takes; one of: GPT-5 (gpt-5); that list is wsp's built-in one, since no agent there described itself, and the agent on that computer may take more. Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"model \\\"claude-opus-5-5\\\" is not one codex takes; one of: GPT-5 (gpt-5); that list is wsp's built-in one, since no agent there described itself, and the agent on that computer may take more. Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.list"
+        },
+        {
+          "op": "workspaces.list"
+        },
+        {
+          "op": "harnesses.list"
+        },
+        {
+          "op": "projects.defaults"
+        }
+      ]
+    },
+    {
+      "case": "a fork's file that is not there",
+      "arguments": {
+        "project": "site",
+        "message": "t",
+        "files": [
+          "no-such-shot.png"
+        ]
+      },
+      "replies": {
+        "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}},{\"id\":\"p-2\",\"name\":\"site\",\"computer\":\"pl-attic\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/root/site\",\"git\":{\"top\":\"/Users/me/wsp\"}}]}",
+        "workspaces.list": "{\"id\":1,\"ok\":true,\"workspaces\":[{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}]}",
+        "projects.defaults": "{\"id\":1,\"ok\":true,\"defaults\":{}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"there is no file at no-such-shot.png on this computer. Name a file that is already here.\"}],\"structuredContent\":{\"error\":\"there is no file at no-such-shot.png on this computer. Name a file that is already here.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.list"
+        },
+        {
+          "op": "workspaces.list"
+        },
+        {
+          "op": "harnesses.list"
+        },
+        {
+          "op": "projects.defaults"
+        }
+      ],
+      "guest": {
+        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a path on this line would be read on the person's computer, not on the machine the line was typed on. Name a file on the machine the line runs on, or none.\"}],\"structuredContent\":{\"error\":\"a path on this line would be read on the person's computer, not on the machine the line was typed on. Name a file on the machine the line runs on, or none.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+        "asked": [
+          {
+            "op": "projects.list"
+          },
+          {
+            "op": "workspaces.list"
+          },
+          {
+            "op": "harnesses.list"
+          },
+          {
+            "op": "projects.defaults"
+          }
+        ]
+      }
+    },
+    {
+      "case": "a project elsewhere with a machine of its name",
+      "arguments": {
+        "project": "site",
+        "message": "t",
+        "detach": true
+      },
+      "replies": {
+        "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}},{\"id\":\"p-2\",\"name\":\"site\",\"computer\":\"pl-attic\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/root/site\",\"git\":{\"top\":\"/Users/me/wsp\"}}]}",
+        "workspaces.list": "{\"id\":1,\"ok\":true,\"workspaces\":[{\"id\":\"ws-1\",\"name\":\"site\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}]}",
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"claude\",\"label\":\"Claude Code\",\"source\":\"harness\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"claude-sonnet-5\",\"label\":\"Sonnet 5\",\"isDefault\":true},{\"value\":\"claude-opus-5-5\",\"label\":\"Opus 5.5\",\"efforts\":[\"high\",\"max\"]},{\"value\":\"claude-haiku\",\"label\":\"Haiku\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"claude-3\",\"label\":\"Claude 3\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":true},{\"harness\":\"codex\",\"label\":\"Codex\",\"source\":\"table\",\"version\":\"2.1.0\",\"models\":[{\"value\":\"gpt-5\",\"label\":\"GPT-5\",\"isDefault\":true}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true},{\"value\":\"max\",\"label\":\"Max\"}],\"contextWindows\":[],\"permissionModes\":[{\"value\":\"acceptEdits\",\"label\":\"Accept edits\"},{\"value\":\"bypassPermissions\",\"label\":\"Bypass \u0085\",\"isDefault\":true}],\"access\":{\"auto-edit\":\"acceptEdits\",\"full\":\"bypassPermissions\"},\"steers\":true,\"renames\":true,\"images\":true,\"isDefault\":false}]}",
+        "workspaces.wake": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-9\",\"threadId\":\"thread-9d8c7b6a5f4e\",\"startedBy\":\"agent\"},\"outcome\":\"started\",\"turnId\":\"turn-9\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-9d8c7b6a5f4e\"}],\"structuredContent\":{\"threadId\":\"thread-9d8c7b6a5f4e\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"outcome\":\"started\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.list"
+        },
+        {
+          "op": "workspaces.list"
+        },
+        {
+          "op": "workspaces.resolve",
+          "ref": "site"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "workspaces.wake",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.start",
+          "workspaceId": "ws-1",
+          "prompt": "t",
+          "startedBy": "agent",
+          "requestId": "<request id>"
         }
       ]
     },

@@ -140,17 +140,26 @@ pub fn walk(from: &Path) -> Walked {
     walked
 }
 
-/// A size as a person reads it in a refusal.
+/// A size as a person reads it in a refusal: `fmtBytes` in packages/protocol/src/words/units.ts, whole KB and MB
+/// rounded half up and GB to one place unless whole, in integers so a tie rounds as JavaScript's does.
 pub fn bytes_word(bytes: u64) -> String {
-    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
-    const MB: f64 = 1024.0 * 1024.0;
-    let n = bytes as f64;
-    if n >= GB {
-        format!("{:.1} GB", n / GB)
-    } else if n >= MB {
-        format!("{:.0} MB", n / MB)
+    const KB: u128 = 1 << 10;
+    const MB: u128 = 1 << 20;
+    const GB: u128 = 1 << 30;
+    let n = u128::from(bytes);
+    if n < KB {
+        format!("{n} B")
+    } else if n < MB {
+        format!("{} KB", (n + KB / 2) / KB)
+    } else if n < GB {
+        format!("{} MB", (n + MB / 2) / MB)
     } else {
-        format!("{bytes} bytes")
+        let tenths = (n * 10 + GB / 2) / GB;
+        if tenths.is_multiple_of(10) {
+            format!("{} GB", tenths / 10)
+        } else {
+            format!("{}.{} GB", tenths / 10, tenths % 10)
+        }
     }
 }
 
@@ -590,10 +599,12 @@ mod tests {
     }
 
     #[test]
-    fn the_size_words_read_as_a_person_writes_them() {
-        assert_eq!(bytes_word(512), "512 bytes");
-        assert_eq!(bytes_word(3 * 1024 * 1024), "3 MB");
-        assert_eq!(bytes_word(6 * 1024 * 1024 * 1024), "6.0 GB");
+    fn the_size_words_read_as_the_shared_case_file_writes_them() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/contract/formats.json");
+        let cases: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        for case in cases["bytes"].as_array().expect("formats.json holds no bytes") {
+            assert_eq!(bytes_word(case[0].as_u64().unwrap()), case[1], "bytes {case}");
+        }
     }
 
     #[test]

@@ -36,7 +36,7 @@ pub fn plural(n: usize, noun: &str) -> String {
 
 /// `fmtCost`.
 pub fn cost(usd: f64) -> String {
-    format!("${}", js::to_fixed(usd, 2))
+    format!("${}", js::to_locale_fixed(usd, 2))
 }
 
 /// `fmtTokens`.
@@ -146,18 +146,18 @@ mod tests {
     }
 
     #[test]
-    fn durations_read_as_the_chat_footer_writes_them() {
-        for (ms, want) in [
-            (0.4, "1ms"),
-            (999.4, "999ms"),
-            (1_250.0, "1.3s"),
-            (9_960.0, "10s"),
-            (12_400.0, "12s"),
-            (60_000.0, "1m"),
-            (492_000.0, "8m 12s"),
-            (-1.0, "0ms"),
-        ] {
-            assert_eq!(duration(ms), want, "{ms}");
+    fn durations_plurals_and_costs_read_as_the_shared_case_file_writes_them() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/contract/formats.json");
+        let cases: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let section = |name: &str| cases[name].as_array().unwrap_or_else(|| panic!("formats.json holds no {name}")).clone();
+        for case in section("durations") {
+            assert_eq!(duration(case[0].as_f64().unwrap()), case[1], "durations {case}");
+        }
+        for case in section("plural") {
+            assert_eq!(plural(case[0].as_u64().unwrap() as usize, case[1].as_str().unwrap()), case[2], "plural {case}");
+        }
+        for case in section("cost") {
+            assert_eq!(cost(case[0].as_f64().unwrap()), case[1], "cost {case}");
         }
     }
 
