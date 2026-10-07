@@ -1,5 +1,5 @@
 // Vitest 2.x workspace: each entry runs under its own config/environment.
-// Node packages + wspx use the root node config; apps/web carries its own
+// Node packages use the root node config; apps/web carries its own
 // vite config (react plugin + jsdom) so React component tests get a DOM.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -39,7 +39,7 @@ export default [
     resolve: { alias },
     test: {
       name: "node",
-      include: ["packages/*/test/**/*.test.ts", "infra/*/test/**/*.test.ts", "apps/wspx/**/*.test.ts", "apps/desktop/test/**/*.test.ts"],
+      include: ["packages/*/test/**/*.test.ts", "infra/*/test/**/*.test.ts", "apps/desktop/test/**/*.test.ts"],
       environment: "node",
       // Anything a test writes to the OS-local config dir (the install id) lands here, never in the developer's own.
       env: { XDG_CONFIG_HOME: join(RUN_TMPDIR, "wsp-test-config"), ...TEST_ENV },

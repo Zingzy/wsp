@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applySlatePatch, parseSlatePatch, evaluateSlateExpression, parseSlate, printSlate, runSlateBatch, sketchSlate, slateCatalog, slateStartValues, validateSlate,
-  SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES, type SlateDoc, type SlateJson, type SlateValues,
+  SLATE_EXAMPLES, SLATE_PIECES, type SlateDoc, type SlateJson, type SlateValues,
 } from "../../src/slate/index.js";
 import { fmtDuration } from "../../src/format.js";
 
@@ -24,14 +24,14 @@ const ev = (expr: string, values: Record<string, SlateJson> = {}, now?: number):
 describe("the richer kit", () => {
   it("validates, sketches and prints back every new piece and prop", () => {
     const text = slate([
-      `    <heading level="title" icon="gauge">Gold</heading>`,
+      `    <heading level="title">Gold</heading>`,
       `    <heading level="label">Feed</heading>`,
-      `    <grid columns={3} gap="loose" align="center" pad="tight" surface="inset"><number label="A" value={1} icon="zap" trend={$hist} /><number label="B" value={2} unit={concat('of ', 'x')} /><number label="C" value={3} /></grid>`,
-      `    <section title="Feed" icon="activity" surface="inset" pad="loose" align="center"><text icon="clock">Every minute</text></section>`,
-      `    <column pad="none" surface="plain" align="end"><button label="Go" icon="play" onPress={set($pick, 1)} /></column>`,
-      `    <facts><fact label={concat('Sp', 'ot')} value={1} icon="tag" /></facts>`,
+      `    <grid columns={3} gap="loose" align="center" pad="tight" surface="inset"><number label="A" value={1} trend={$hist} /><number label="B" value={2} unit={concat('of ', 'x')} /><number label="C" value={3} /></grid>`,
+      `    <section title="Feed" surface="inset" pad="loose" align="center"><text>Every minute</text></section>`,
+      `    <column pad="none" surface="plain" align="end"><button label="Go" onPress={set($pick, 1)} /></column>`,
+      `    <facts><fact label={concat('Sp', 'ot')} value={1} /></facts>`,
       `    <status tone="good">Live</status>`,
-      `    <chip icon="git-branch">main</chip>`,
+      `    <chip>main</chip>`,
       `    <ring label="Done" value={3} max={4} format="fraction" tone="good" note="almost" />`,
       `    <chart label="Line" items={[{ at: '2026-10-04T12:00:00Z', v: 1 }, { at: '2026-10-04T12:01:00Z', v: 2 }, { at: '2026-10-04T12:02:00Z', v: 3 }]} x={item.at} value={item.v} format="usd" height="small" />`,
       `    <sparkline label="Load" values={$hist} />`,
@@ -43,7 +43,7 @@ describe("the richer kit", () => {
     const doc = compiled(text);
     for (const type of ["heading", "grid", "status", "chip", "ring", "chart", "sparkline", "bars", "choices"]) expect(Object.values(doc.pieces).some(p => p.type === type), type).toBe(true);
     const sketch = sketchSlate(doc, { ...slateStartValues(doc), pick: 2 });
-    expect(sketch).toContain("# Gold  [heading-1 heading icon=gauge]");
+    expect(sketch).toContain("# Gold  [heading-1 heading]");
     expect(sketch).toContain("FEED");
     expect(sketch).toContain("grid of 3");
     expect(sketch).toContain("A  1  trend 1 to 3");
@@ -69,15 +69,12 @@ describe("the richer kit", () => {
     expect(codes(slate(`    <bars label="Price" items={$hist} name={item.at} value={item} />`))).toEqual(["W003"]);
   });
 
-  it("warns of a misspelt icon with the nearest name, and writes the slate anyway", () => {
-    const misspelt = parseSlate(slate(`    <text icon="gaueg">x</text>`));
-    expect(misspelt.errors).toEqual([]);
-    expect(misspelt.document).toBeDefined();
-    expect(misspelt.warnings).toMatchObject([{ code: "W016", piece: "text-1", prop: "icon", fix: `icon="gauge"` }]);
-    expect(misspelt.warnings[0]!.message).toContain("did you mean gauge?");
-    expect(parseSlate(slate(`    <button label="x" icon="GitBranchIcon" onPress={set($pick, 1)} />`)).warnings).toMatchObject([{ code: "W016", fix: `icon="git-branch"` }]);
-    expect(parseSlate(slate(`    <text icon={$pick}>x</text>`)).errors).toEqual([]);
-    expect(slateCatalog("icons")).toContain(SLATE_ICONS.join(" "));
+  it("takes no icon on any piece: icon= is a prop the kit does not know", () => {
+    for (const piece of [`<text icon="gauge">x</text>`, `<heading icon="gauge">x</heading>`, `<chip icon="git-branch">main</chip>`, `<button label="x" icon="play" onPress={set($pick, 1)} />`]) {
+      expect(parseSlate(slate(`    ${piece}`)).errors.map(p => [p.code, p.prop]), piece).toEqual([["T302", "icon"]]);
+    }
+    expect(parseSlate(slate(`    <facts><fact label="a" value="b" icon="tag" /></facts>`)).errors.map(p => [p.code, p.prop])).toEqual([["T302", "facts[0].icon"]]);
+    expect(slateCatalog("icons")).toContain("icons is not in the catalog");
   });
 
   it("keeps a rolling history with record literals, append and last(list, n)", () => {
@@ -98,7 +95,7 @@ describe("the richer kit", () => {
     expect(codes(`<slate><value name="qs" start={[{ q: "a" }]} /><value name="i" start={0} /><column><text>{$qs[$i].q}</text></column></slate>`)).toEqual([]);
   });
 
-  it("draws the example: a heading, numbers with icons, an inset section, a status, a chip, a ring and a chart fed by a history", () => {
+  it("draws the example: a heading, numbers, an inset section, a status, a chip, a ring and a chart fed by a history", () => {
     const doc = compiled(GOLD);
     let values: SlateValues = slateStartValues(doc);
     for (const [at, price] of [[1000, 2400.5], [61000, 2401.25], [121000, 2399]] as const) {

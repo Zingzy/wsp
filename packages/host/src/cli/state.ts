@@ -24,7 +24,7 @@ function isDevCheckout(cwd: string): boolean {
   }
 }
 
-/** The state a checkout of wsp marks: it shares its `.wsp` state with wspx. One spelling of the rule, since the bin
+/** The state a checkout of wsp marks: its own `.wsp` state. One spelling of the rule, since the bin
  * and the desktop both apply it. */
 export function devCheckoutState(cwd: string): string | undefined {
   return isDevCheckout(cwd) ? join(cwd, ".wsp", "state.json") : undefined;

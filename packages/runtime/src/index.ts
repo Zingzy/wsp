@@ -17,20 +17,18 @@ export * from "./tunnel.js";
 export * from "./place-forward.js";
 export * from "./harness-catalog.js";
 export * from "./adapters.js";
-// Re-exported so clients (wspx) can wire a backend without importing the
+// Re-exported so clients can wire a backend without importing the
 // engine directly; the runtime is the only layer that drives it.
 export {
   BROWSER_SHIM_PATH,
   SolariBackend,
   TOOLS_PATH,
-  applyDotfiles,
   describeAge,
   goldenHead,
   type SolariBackendOptions,
   type GoldenManifest,
   type GoldenVersion,
   type Machine,
-  type DotfilesResult,
   type ReapFailure,
   type ReapResult,
   type ReapedMachine,

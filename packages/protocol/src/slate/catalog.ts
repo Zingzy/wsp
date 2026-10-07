@@ -3,7 +3,6 @@
 // The index and a piece's entry stay under their token budgets in limits.ts; slateTokens is the estimate the tests hold.
 import { SLATE_FUNCTIONS, SLATE_PIPE_STEPS } from "./expr.js";
 import { SLATE_EXAMPLES } from "./examples.js";
-import { SLATE_ICONS } from "./icons.js";
 import { SLATE_PIECES, SLATE_TONES, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
 import { nearest } from "./problems.js";
 import { sketchSlate } from "./sketch.js";
@@ -94,13 +93,13 @@ function index(): string {
     "Rules:",
     ...SLATE_RULES.map((r, i) => `${i + 1}. ${r}`),
     SLATE_INDEX_EXAMPLE,
-    "More: slate_catalog <piece, source, runs, patch, functions, steps, handlers, icons or examples>.",
+    "More: slate_catalog <piece, source, runs, patch, functions, steps, handlers or examples>.",
   ].join("\n");
 }
 
 function specText(spec: SlatePropSpec): string {
   const tones = Array.isArray(spec.type) && (spec.type as readonly string[]).join() === SLATE_TONES.join();
-  const type = tones ? "tone" : Array.isArray(spec.type) ? (spec.type as readonly string[]).join("|") : spec.type === "text" ? "text or number" : spec.type === "path" ? "$run" : spec.type === "icon" ? "icon name" : (spec.type as string);
+  const type = tones ? "tone" : Array.isArray(spec.type) ? (spec.type as readonly string[]).join("|") : spec.type === "text" ? "text or number" : spec.type === "path" ? "$run" : (spec.type as string);
   const marks = [
     spec.required === true ? "required" : undefined,
     spec.binds === "yes" ? "formula" : spec.binds === "state" ? (spec.literal === true ? "two-way $value or a literal start" : "two-way $value") : spec.binds === "item" ? "per row" : undefined,
@@ -217,12 +216,11 @@ function entry(name: string): string {
     case "steps": case "pipes": case "pipe": return stepsEntry();
     case "handlers": return handlersEntry();
     case "examples": return SLATE_EXAMPLES.map(e => `${e.title}:\n${e.text}`).join("\n\n");
-    case "icons": case "icon": return `icon="<name>" or icon={formula}; a name off this list draws none. Lucide names: ${SLATE_ICONS.join(" ")}`;
     default: {
-      const options = [...Object.keys(SLATE_PIECES), ...Object.keys(SLATE_SOURCES), "runs", "functions", "steps", "handlers", "patch", "icons", "examples"];
+      const options = [...Object.keys(SLATE_PIECES), ...Object.keys(SLATE_SOURCES), "runs", "functions", "steps", "handlers", "patch", "examples"];
       const fix = nearest(n, options);
       // A guessed name answers the index too: small models asked for "dashboards" or "rows" and never saw a piece.
-      return `${n} is not in the catalog${fix !== undefined ? `; did you mean ${fix}?` : "."} Ask for a piece, a source, runs, patch, functions, steps, handlers, icons or examples; a server's tools are the host's to answer. The whole index:\n\n${index()}`;
+      return `${n} is not in the catalog${fix !== undefined ? `; did you mean ${fix}?` : "."} Ask for a piece, a source, runs, patch, functions, steps, handlers or examples; a server's tools are the host's to answer. The whole index:\n\n${index()}`;
     }
   }
 }
