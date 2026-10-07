@@ -18,6 +18,11 @@ pub struct PlaceDaemonPaths {
     pub run_dir: PathBuf,
     pub put_dir: PathBuf,
     pub open_socket: PathBuf,
+    /// The socket a thread running on this computer itself opens its wsp sessions on, the login's alone.
+    pub guest_socket: PathBuf,
+    /// Where the wsp that dials it sits, first on such a thread's PATH: the place's own, never `~/.wsp/bin`, where
+    /// the app and the install line keep the person's wsp on the same login.
+    pub guest_bin: PathBuf,
     pub manifest_path: PathBuf,
     pub profile_file: PathBuf,
     pub unit_dir: PathBuf,
@@ -49,6 +54,8 @@ pub fn place_daemon_paths(home: &Path) -> PlaceDaemonPaths {
         run_dir: wsp.join("run"),
         put_dir: wsp.join("put"),
         open_socket: wsp.join("open.sock"),
+        guest_socket: wsp.join("daemon.sock"),
+        guest_bin: wsp.join("place-bin"),
         manifest_path: wsp.join("manifest.json"),
         profile_file: wsp.join("profile.sh"),
         unit_dir: at.join(".config/systemd/user"),
@@ -112,6 +119,9 @@ pub fn place_owned_paths(home: &Path) -> Vec<PathBuf> {
         at.roots_path,
         at.profile_file,
         at.open_socket,
+        at.guest_socket,
+        at.guest_bin.join("wsp"),
+        at.guest_bin,
         at.run_dir,
         at.port_file,
         at.bin_dir.join("wsp-open"),

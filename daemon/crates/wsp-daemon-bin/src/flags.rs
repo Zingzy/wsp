@@ -285,6 +285,21 @@ mod tests {
     }
 
     #[test]
+    fn the_door_verb_takes_its_door_and_hands_the_rest_on_untouched() {
+        let at = |args: &[&str]| match parse(args).unwrap().verb {
+            Some(Verb::WspDoor { unit, door, line }) => (unit, door, line),
+            other => panic!("expected the door verb, got {other:?}"),
+        };
+        let verb = wsp_frames::COMPUTER_WSP_VERB;
+        assert_eq!(at(&[verb, "/root/.wsp/daemon.sock", "mcp"]), (None, PathBuf::from("/root/.wsp/daemon.sock"), vec!["mcp".to_owned()]));
+        assert_eq!(at(&[verb, "/d", "run", "--port", "9", "--unit", "x", "--help"]).2, ["run", "--port", "9", "--unit", "x", "--help"]);
+        assert_eq!(at(&[verb, "/d"]).2, Vec::<String>::new());
+        // The unit the daemon's shim names sits ahead of the door; one after it is the line's own.
+        let named = at(&[verb, wsp_frames::COMPUTER_WSP_UNIT_FLAG, "wsp-place-ecffdb75.service", "/d", "mcp"]);
+        assert_eq!(named, (Some("wsp-place-ecffdb75.service".to_owned()), PathBuf::from("/d"), vec!["mcp".to_owned()]));
+    }
+
+    #[test]
     fn the_wsp_verb_hands_the_whole_line_on_untouched() {
         let line = |args: &[&str]| match parse(args).unwrap().verb {
             Some(Verb::Wsp { line }) => line,

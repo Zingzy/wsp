@@ -16,6 +16,7 @@ mod guest;
 mod hosts;
 mod inbox;
 mod link;
+mod mac_model;
 mod manifest;
 mod mode;
 mod ops;
@@ -54,6 +55,7 @@ use tokio::net::{TcpListener, UnixListener};
 use tokio::sync::mpsc;
 use wsp_frames::{numbers, DaemonEvent};
 
+use crate::ops::Road;
 use crate::paths::OpError;
 
 /// What a daemon is started with: one field per flag the binary takes, so the harness and the deploy scripts spell
@@ -281,6 +283,9 @@ pub(crate) struct Ctx {
     pub(crate) history: Arc<readings_history::History>,
     /// What each agent store file came to at its last usage.logs, for as long as this daemon runs.
     pub(crate) usage_logs: Arc<usage_logs::UsageCache>,
+    /// What became of the door on this computer itself: nothing where it stands, why where it does not. Unset on a
+    /// daemon that is no place, which binds none.
+    pub(crate) computer_door: std::sync::OnceLock<Option<String>>,
 }
 
 /// One workspace's door: the task accepting on the socket inside that workspace, which a stop ends, and the
@@ -347,6 +352,7 @@ impl Ctx {
             keys: AtomicU64::new(1),
             history,
             usage_logs: Arc::default(),
+            computer_door: std::sync::OnceLock::new(),
         })
     }
 
@@ -393,10 +399,39 @@ impl Ctx {
         // The count is the workspace's own and not one door's: a door replaced after this daemon restarted takes
         // the count on, since the sockets the one before it is serving are still that workspace's sockets.
         let sockets = doors.get(id).map_or_else(|| Arc::new(AtomicUsize::new(0)), |held| Arc::clone(&held.sockets));
-        let task = tokio::spawn(door::serve_workspace(listener, ctx, workspace, Arc::clone(&sockets)));
+        let task = tokio::spawn(door::serve_guests(listener, ctx, Road::Workspace(workspace), Arc::clone(&sockets)));
         if let Some(old) = doors.insert(id.to_owned(), WorkspaceDoor { task, sockets }) {
             old.task.abort();
         }
+    }
+
+    /// The door on this computer itself, for a thread of the person's that runs here as the login it was joined
+    /// with: a socket in wsp's own folder under that login's home, the login's alone, and the wsp beside it that a
+    /// turn finds first on its PATH and that dials it and nothing else. Bound at every start, so a daemon updated in
+    /// place serves it and the wsp names the binary that runs now. A session opened on it names no workspace: the
+    /// host reads which thread it is off the token it carries. What became of it is kept for the report, since a
+    /// thread launched with the tools on a door that is not there would show them failed.
+    fn open_computer_door(self: &Arc<Self>) {
+        let home = place::place_home(self.options.home.as_deref());
+        let at = wsp_frames::place_daemon_paths(&home);
+        let opened = (|| {
+            let listener = relay::listen_open_socket(&at.guest_socket).map_err(|e| format!("{}: {e}", at.guest_socket.display()))?;
+            owned_by_home(&at.guest_socket, &home).map_err(|e| format!("{}: {e}", at.guest_socket.display()))?;
+            write_wsp_shim(self.options.runtime_helper.as_deref(), &at.guest_bin, &at.guest_socket, own_unit().as_deref())
+                .map_err(|e| format!("{}: {e}", at.guest_bin.join("wsp").display()))?;
+            Ok::<_, String>(listener)
+        })();
+        let kept = match opened {
+            Ok(listener) => {
+                tokio::spawn(door::serve_guests(listener, Arc::clone(self), Road::Computer, Arc::new(AtomicUsize::new(0))));
+                None
+            }
+            Err(e) => {
+                self.log(&format!("this computer's threads have no wsp tools: {e}"));
+                Some(e)
+            }
+        };
+        let _ = self.computer_door.set(kept);
     }
 
     /// The door goes with the workspace it was inside: this ends the loop, and the file it was bound on is the
@@ -566,6 +601,10 @@ impl Daemon {
     /// Accepts until a leave answered on the link ends the daemon; each socket gets its own task and its own door.
     /// A place file turns the outbound link on beside the listener.
     pub async fn run(self) -> io::Result<()> {
+        // Before the link, whose report says whether this computer's threads have the wsp tools.
+        if self.ctx.is_place() {
+            self.ctx.open_computer_door();
+        }
         if self.ctx.options.place_file.is_some() {
             let port = self.local_addr().port();
             tokio::spawn(link::run(Arc::clone(&self.ctx), port));
@@ -697,6 +736,55 @@ fn owner_only(at: &Path) -> std::io::Result<()> {
     fchmodat(nix::fcntl::AT_FDCWD, at, Mode::from_bits_truncate(0o600), FchmodatFlags::NoFollowSymlink).map_err(std::io::Error::from)
 }
 
+/// The computer's door made the login's alone: owned by whoever owns the home it sits under, and that owner's
+/// mode, the name changed and never what a link at it names.
+fn owned_by_home(at: &Path, home: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let owner = std::fs::metadata(home)?;
+    nix::unistd::fchownat(
+        nix::fcntl::AT_FDCWD,
+        at,
+        Some(nix::unistd::Uid::from_raw(owner.uid())),
+        Some(nix::unistd::Gid::from_raw(owner.gid())),
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map_err(std::io::Error::from)?;
+    owner_only(at)
+}
+
+/// The wsp a thread on this computer runs: two lines onto this binary naming the door, in the place's own folder, which
+/// no workspace mounts and no app or install line writes, written through its descriptor so a link at the name is
+/// taken off rather than written through.
+#[cfg(target_os = "linux")]
+fn write_wsp_shim(helper: Option<&Path>, bin: &Path, door: &Path, unit: Option<&str>) -> std::io::Result<()> {
+    let exe = helper.map_or_else(std::env::current_exe, |helper| Ok(helper.to_path_buf()))?;
+    std::fs::create_dir_all(bin)?;
+    let shim = wsp_frames::computer_wsp_shim(&exe.to_string_lossy(), &door.to_string_lossy(), unit);
+    wsp_runtime::bundle::write_file_in(bin, "wsp", shim.as_bytes(), 0o755).map_err(|e| std::io::Error::other(e.to_string()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn write_wsp_shim(_: Option<&Path>, _: &Path, _: &Path, _: Option<&str>) -> std::io::Result<()> {
+    Err(std::io::Error::other("this daemon writes the wsp for a computer's threads on Linux only"))
+}
+
+/// The systemd unit this daemon runs under, the one the join wrote, read off its own cgroup rather than worked out
+/// again from the home: what a person restarts to bind the door again. Nothing where it runs under no such unit.
+pub(crate) fn own_unit() -> Option<String> {
+    unit_in(&std::fs::read_to_string("/proc/self/cgroup").ok()?)
+}
+
+/// The unit a cgroup v2 line names when it is the system service the join writes, `wsp-place-<tag>.service` under
+/// the system slice. Anything else is nothing: a restart of a login's user manager, or of a user unit the system
+/// manager does not know, is no fix to hand a person.
+fn unit_in(cgroup: &str) -> Option<String> {
+    let path = cgroup.lines().find_map(|line| line.strip_prefix("0::"))?;
+    let mut parts = path.trim_start_matches('/').split('/');
+    let (Some("system.slice"), Some(unit)) = (parts.next(), parts.next()) else { return None };
+    let tag = unit.strip_prefix("wsp-place-")?.strip_suffix(".service")?;
+    (!tag.is_empty() && tag.bytes().all(|b| b.is_ascii_alphanumeric())).then(|| unit.to_owned())
+}
+
 fn resolved_root(root: Option<&Path>) -> String {
     let given = root.map(Path::to_path_buf).or_else(|| std::env::var_os("HOME").map(PathBuf::from)).unwrap_or_else(|| PathBuf::from("/"));
     paths::absolute(&given).to_string_lossy().into_owned()
@@ -705,6 +793,24 @@ fn resolved_root(root: Option<&Path>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_unit_is_the_system_service_the_join_writes_and_nothing_else() {
+        assert_eq!(unit_in("0::/system.slice/wsp-place-ecffdb75.service\n").as_deref(), Some("wsp-place-ecffdb75.service"));
+        assert_eq!(unit_in("0::/system.slice/wsp-place-ecffdb75.service/daemon\n").as_deref(), Some("wsp-place-ecffdb75.service"));
+        // A place unit from before places were system units sits in a login's user manager, where systemctl without
+        // --user finds no such unit.
+        assert_eq!(unit_in("0::/user.slice/user-0.slice/user@0.service/app.slice/wsp-place-b0c27c4c.service/daemon\n"), None);
+        // A daemon started by hand from a login's shell: the deepest service is that login's whole user manager.
+        assert_eq!(
+            unit_in("0::/user.slice/user-1000.slice/user@1000.service/app.slice/run-rc119036e08074b0c9a83888367f5f4ef.scope\n"),
+            None
+        );
+        assert_eq!(unit_in("0::/user.slice/user-0.slice/session-3.scope\n"), None);
+        assert_eq!(unit_in("0::/system.slice/ssh.service\n"), None);
+        assert_eq!(unit_in("0::/system.slice/wsp-place-a b.service\n"), None);
+        assert_eq!(unit_in("1:name=systemd:/system.slice/wsp-place-ecffdb75.service\n"), None);
+    }
 
     #[test]
     fn a_door_is_made_its_owners_alone_and_a_link_at_its_name_moves_nothing() {

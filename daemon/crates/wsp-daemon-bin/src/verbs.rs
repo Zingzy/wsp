@@ -37,6 +37,17 @@ pub(crate) enum Verb {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         line: Vec<String>,
     },
+    /// The wsp a thread on a computer somebody joined runs: the whole line goes to the host over the door named,
+    /// the socket that computer's daemon binds for its threads, and over nothing else.
+    #[command(disable_help_flag = true)]
+    WspDoor {
+        /// The unit the daemon serving that door runs under, which the refusal for a door that is gone names.
+        #[arg(long)]
+        unit: Option<String>,
+        door: PathBuf,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        line: Vec<String>,
+    },
     /// The wsp command on the computer the host runs on: a `wsp mcp` line that names its state is served by this
     /// binary's own tool server where it carries one, and every other line runs as the wsp the words after
     /// --wsp-argv name, which is also the wsp the tool server brings a host up with and runs the recipe tools as.
@@ -270,6 +281,7 @@ pub(crate) fn run(verb: Verb) -> i32 {
                 Path::new(numbers::GUEST_DAEMON_SOCKET_PATH),
             )
         }
+        Verb::WspDoor { unit, door, line } => wsp_guest::run_at_door(&line, &|name| std::env::var(name).ok(), &door, unit.as_deref()),
         Verb::Forward { wsp_argv, line } => {
             #[cfg(feature = "mcp")]
             if let Some(served) = served_here(&line, &wsp_argv) {

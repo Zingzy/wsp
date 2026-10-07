@@ -39,7 +39,7 @@ fn remove_walked(parent: &std::os::fd::OwnedFd, name: &std::ffi::OsStr) -> Remov
     let Ok(meta) = nix::sys::stat::fstatat(parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) else {
         return Removed::Absent;
     };
-    let directory = nix::sys::stat::SFlag::from_bits_truncate(meta.st_mode).contains(nix::sys::stat::SFlag::S_IFDIR);
+    let directory = wsp_runtime::file_type::is_folder(meta.st_mode);
     let deep = directory && empty_folder(parent, name, 0);
     let flag = if directory { nix::unistd::UnlinkatFlags::RemoveDir } else { nix::unistd::UnlinkatFlags::NoRemoveDir };
     match nix::unistd::unlinkat(parent, name, flag) {
@@ -60,7 +60,7 @@ const EMPTY_DEPTH: usize = 64;
 /// something in it lay deeper than `EMPTY_DEPTH`.
 fn empty_folder(parent: &impl std::os::fd::AsFd, name: &std::ffi::OsStr, depth: usize) -> bool {
     use nix::fcntl::{AtFlags, OFlag};
-    use nix::sys::stat::{fstatat, Mode, SFlag};
+    use nix::sys::stat::{fstatat, Mode};
     use nix::unistd::{unlinkat, UnlinkatFlags};
     if depth >= EMPTY_DEPTH {
         return true;
@@ -77,7 +77,7 @@ fn empty_folder(parent: &impl std::os::fd::AsFd, name: &std::ffi::OsStr, depth: 
     for name in names {
         let name = std::ffi::OsStr::from_bytes(name.as_bytes());
         let Ok(meta) = fstatat(&folder, name, AtFlags::AT_SYMLINK_NOFOLLOW) else { continue };
-        if SFlag::from_bits_truncate(meta.st_mode).contains(SFlag::S_IFDIR) {
+        if wsp_runtime::file_type::is_folder(meta.st_mode) {
             deep |= empty_folder(&folder, name, depth + 1);
             let _ = unlinkat(&folder, name, UnlinkatFlags::RemoveDir);
         } else {
@@ -147,6 +147,19 @@ pub(crate) fn prune_empty(home: &Path, from: &Path) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// A socket's type bits hold a folder's among them, so a folder of wsp's holding the door a daemon bound read its
+    /// socket as a folder, could not take it, and stayed whole on a computer that left.
+    #[test]
+    fn a_folder_holding_a_socket_goes_whole() {
+        let home = tempfile::tempdir().unwrap();
+        let wsp = home.path().join(".wsp");
+        std::fs::create_dir_all(wsp.join("bin")).unwrap();
+        std::fs::write(wsp.join("bin/wsp"), "#!/bin/sh\n").unwrap();
+        let _door = std::os::unix::net::UnixListener::bind(wsp.join("daemon.sock")).unwrap();
+        assert!(matches!(remove_under_home(home.path(), Path::new(".wsp")), Removed::Gone));
+        assert!(!wsp.exists());
+    }
 
     /// A path this walk will not take is no path of wsp's, and the leave says nothing of it: the sentence for a
     /// path left standing names a link, and a path reaching out of the home holds none.

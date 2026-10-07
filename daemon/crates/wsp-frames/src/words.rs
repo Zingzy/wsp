@@ -98,6 +98,18 @@ pub fn guest_no_daemon_line(port: impl std::fmt::Display) -> String {
     format!("this machine's wsp daemon is not answering on 127.0.0.1:{port}")
 }
 
+/// What a wsp typed on a computer somebody joined says when the door its daemon binds for that computer's threads is
+/// not there or will not take the session: the computer by its own name, and the restart that binds the door again.
+/// The unit is the one the join wrote, which the shim carries; a daemon in no such unit names no command, and the
+/// computer is added again to get one.
+pub fn guest_no_door_line(computer: &str, door: &std::path::Path, unit: Option<&str>) -> String {
+    let fix = unit.map_or_else(
+        || "remove this computer from wsp and add it again".to_owned(),
+        |unit| format!("restart wsp's daemon there with systemctl restart {unit}"),
+    );
+    format!("wsp on {computer} reaches no daemon: nothing answers at {}; {fix}", door.display())
+}
+
 /// What a request is answered with when the host's socket went before the host answered it, the words the command
 /// line's own dial says a host that went in.
 pub const HOST_CLOSED: &str = "the host closed the connection";

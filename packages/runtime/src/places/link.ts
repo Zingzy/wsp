@@ -297,7 +297,7 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
       const held = folderMachines.get(placeId);
       const machine = held?.key === key ? held.machine : new PlaceFolderMachine(linkTo(placeId), { id: placeId, home, ...(path !== undefined && path !== "" ? { path } : {}) });
       if (held?.machine !== machine) folderMachines.set(placeId, { key, machine });
-      return { machine, home, shape: record.report.shape };
+      return { machine, home, shape: record.report.shape, tools: record.report.wspDoor === true };
     },
 
     async forkingBackend(placeId) {

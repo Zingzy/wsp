@@ -92,7 +92,8 @@ describe("a thread on a project of a computer the person joined", () => {
     // A restart of that computer's daemon takes every process in its unit's cgroup, setsid or not, so the run's
     // setsid starts in a scope named for the run under wsp.slice.
     const unit = `wsp-run-${launched[0]!.slice(launched[0]!.lastIndexOf("/") + 1)}.scope`;
-    expect(launch.cmd).toContain(`systemd-run --scope --quiet --collect --slice=wsp.slice --unit='${unit}' -- setsid bash '${launched[0]}'.sh`);
+    // The wsp that computer's daemon writes for its threads goes in front of the login's own PATH for the turn.
+    expect(launch.cmd).toContain(`PATH='/root/.wsp/place-bin':"$PATH" systemd-run --scope --quiet --collect --slice=wsp.slice --unit='${unit}' -- setsid bash '${launched[0]}'.sh`);
     await rt.sessions.interrupt(run.view().id);
     await expect.poll(() => seen.kills.length).toBeGreaterThan(0);
     expect(seen.kills[0]).toContain("kill -TERM -- -$P");

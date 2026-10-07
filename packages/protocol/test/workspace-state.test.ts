@@ -192,12 +192,12 @@ describe("what a workspace's kind changes about its words", () => {
     expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: true, inFolder: true, agents: true, onDelete: { asked: "computer is left as it is", done: expect.any(Function) } });
     // A folder on a computer the person joined: its threads run in it as they do here, and nothing is driven, copied
     // or billed; its row reads the computer's own name, since its size is that computer's.
-    expect(kindWords("place")).toEqual({ machine: JOINED_COMPUTER, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, inFolder: true, agents: false, onDelete: { asked: "computer is left as it is", done: expect.any(Function) } });
+    expect(kindWords("place")).toEqual({ machine: JOINED_COMPUTER, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, inFolder: true, agents: true, onDelete: { asked: "computer is left as it is", done: expect.any(Function) } });
     // The machines wsp forks and this computer run agents that drive this host, each over its own road.
     expect(agentsMayDrive("cloud")).toBe(true);
     expect(agentsMayDrive("local")).toBe(true);
-    // A thread in a folder on a joined computer is handed no wsp tools, so a switch there would open nothing.
-    expect(agentsMayDrive("place")).toBe(false);
+    // A thread in a folder on a joined computer reaches the wsp tools through the door that computer's daemon binds.
+    expect(agentsMayDrive("place")).toBe(true);
     // Which kind of source a computer's projects come from: this computer copies a folder of yours beside itself and
     // clones a repo into a folder you name first, and a machine wsp forks takes a repo any of the three ways it can be
     // named and a folder here it clones and seeds from. Whether the folder is copied here is its own word, since a

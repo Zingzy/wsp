@@ -330,16 +330,24 @@ export function kindsArea(ctx: RuntimeContext): KindsArea {
             // The same detached run a machine's turn is, on the computer itself as its login, under wsp's own folder
             // in that login's home rather than a folder every account there shares, and in a scope of its own, since
             // the daemon that starts it is restarted by every update.
-            execStream: (entry, o, waiting) => machineExecStream(entry.machine, { reading: machineReading, runDir: placeDaemonPaths(placeOf(entry.record).home).runDir, launchUnder: turnScope, ...o }, waiting),
+            execStream: (entry, o, waiting) => {
+              const at = placeDaemonPaths(placeOf(entry.record).home);
+              // wsp's own folder goes in front of the login's PATH for the turn alone, so the wsp it finds is the one
+              // that computer's daemon writes for its threads.
+              const launchUnder = (base: string): string => `PATH=${shellQuote(at.guestBin)}:"$PATH" ${turnScope(base)}`;
+              return machineExecStream(entry.machine, { reading: machineReading, runDir: at.runDir, launchUnder, ...o }, waiting);
+            },
             folder: record => ctx.checkoutOf(record),
             home: (entry, id) => placeAgentHome(entry.record, placeOf(entry.record).home, id),
             homeDir: record => placeOf(record).home,
             env: (entry, id) => placeEnv(entry.record, id),
             loginStands: (entry, id) => entry.record.place !== undefined && placeDoor.signInsAt(entry.record.place)?.[id] === "signed-in",
             relayed: () => true,
-            // Nothing yet: the wsp on that computer's own PATH dials a host of its own there, and no session of the
-            // computer itself rides its daemon up to this host.
-            wspMcp: () => undefined,
+            // The word, as a fork's: the PATH above finds the wsp that computer's daemon writes beside the socket it
+            // binds for its threads, which carries the session up the link this host already holds. Only where its
+            // report says that door stands: a daemon older than it, or one that could not bind it, has no such wsp,
+            // and a launch naming one shows the tools failed or finds another wsp that dials a host of its own.
+            wspMcp: entry => (entry.record.place !== undefined && placeDoor.folderComputer(entry.record.place)?.tools === true ? { command: "wsp", args: ["mcp"] } : undefined),
             turnReach: () => ({}),
             turnRoad: "relayed",
             keepsAgents: false,

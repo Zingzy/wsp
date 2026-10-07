@@ -79,6 +79,15 @@ export const PlaceReport = z.object({
    * workspace on it shares. Absent from a report a daemon older than this field sent, which is unknown and not
    * none; a name that walks out of that folder is refused, since the host joins it onto a folder of its own. */
   logins: z.array(z.string().max(200).refine(isUnderPath, "a name under a folder")).max(64).optional(),
+  /** Whether a thread on that computer itself reaches the wsp tools: its daemon bound the socket for those threads
+   * under the login's home and wrote the wsp beside it that dials it. Absent from a daemon older than that door,
+   * whose threads are launched with no wsp tools. */
+  wspDoor: z.boolean().optional(),
+  /** When it does not, why, in the daemon's own words. */
+  wspDoorBlocked: z.string().optional(),
+  /** The systemd unit its daemon runs under, the one the join wrote, read off its own cgroup: what the person
+   * restarts to open the door again. Absent where the daemon runs under no unit. */
+  daemonUnit: z.string().max(256).regex(/^[\w@.:-]+\.service$/).optional(),
   /** Which of the host's addresses this link reached; the address a turn on the place is told to dial back. */
   dialed: z.string().refine(isHttpUrl, "http or https URL"),
 });

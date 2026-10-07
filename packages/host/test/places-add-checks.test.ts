@@ -41,6 +41,10 @@ describe("what a failed add takes back off a box, run by a real shell", () => {
     writeFileSync(at.placeLog, "");
     writeFileSync(at.placeFound, "");
     mkdirSync(workFolderIn(home), { recursive: true });
+    // What the daemon writes at its start for the threads on that computer: the door and the wsp beside it.
+    writeFileSync(at.guestSocket, "");
+    mkdirSync(at.guestBin, { recursive: true });
+    writeFileSync(join(at.guestBin, "wsp"), "#!/bin/sh\n");
   }
 
   /** The add's writes under this home alone: the unit and the workspace profile are the box's, and no test writes /etc. */
@@ -52,17 +56,21 @@ describe("what a failed add takes back off a box, run by a real shell", () => {
   it("takes what the add wrote and leaves every file and folder the home held before it", () => {
     const home = tmp("undo-held");
     const at = placeDaemonPaths(home);
-    // Their own bin folder with a tool in it, their login file, and a wsp folder a host on this login keeps its state in.
+    // Their own bin folder with a tool in it, their login file, and a wsp folder a host on this login keeps its state
+    // in, with the wsp command the app or the install line keeps beside it.
     mkdirSync(at.binDir, { recursive: true });
     writeFileSync(join(at.binDir, "mytool"), "#!/bin/sh\n");
     writeFileSync(join(home, ".profile"), "export EDITOR=vi\n");
     mkdirSync(at.wsp, { recursive: true });
+    mkdirSync(join(at.wsp, "bin"));
     writeFileSync(join(at.wsp, "state.json"), "{}\n");
+    writeFileSync(join(at.wsp, "bin", "wsp"), "#!/bin/sh\nexec /opt/wsp/wsp \"$@\"\n");
     const { place, writes } = underHome(home);
     const found = addFound(bash(addFoundScript(place, writes, "systemctl")), writes.length)!;
     wroteTheAdd(home);
     expect(bash(addUndoScript(place, writes, found, "true", true))).toContain(DAEMON_GONE_LINE);
-    expect(readdirSync(at.wsp)).toEqual(["state.json"]);
+    expect(readdirSync(at.wsp).sort()).toEqual(["bin", "state.json"]);
+    expect(readFileSync(join(at.wsp, "bin", "wsp"), "utf8")).toBe("#!/bin/sh\nexec /opt/wsp/wsp \"$@\"\n");
     expect(readdirSync(at.binDir)).toEqual(["mytool"]);
     expect(readFileSync(join(home, ".profile"), "utf8")).toBe("export EDITOR=vi\n");
     expect(existsSync(join(home, ".config"))).toBe(false);

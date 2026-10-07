@@ -495,7 +495,7 @@ export interface PlaceDoor {
    * command run as the owner of the home it was joined with, and that home. Answered without a read, from the
    * record, so a thread's record is held while the computer is away and every call on it then rejects with
    * PlaceAbsentError. Nothing for a place that is no computer this host holds. */
-  folderComputer(placeId: string): { machine: PlaceFolderMachine; home: string; shape: { cpu: number; memMb: number } } | undefined;
+  folderComputer(placeId: string): { machine: PlaceFolderMachine; home: string; shape: { cpu: number; memMb: number }; tools: boolean } | undefined;
   /** Whether a place is a computer the person joined, which is what makes a project on it a folder there. */
   joined(placeId: string): boolean;
   /** The same, asked of the place itself where this host has not heard yet: one frame, remembered on the record, so

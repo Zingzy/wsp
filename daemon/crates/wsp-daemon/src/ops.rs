@@ -26,22 +26,13 @@ use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::roads::guest_road_serves;
 use crate::tunnel::Tunnels;
+mod road;
 mod runner;
 use crate::{bring_back, frame_text as text, fs, git, hosts, paths, readings, ssh, tunnel, usage_logs, Ctx, Listener, Outbound, Outgoing};
+pub(crate) use road::Road;
 use runner::Runner;
 
 type Detach = Box<dyn FnOnce() + Send>;
-
-/// Which road a socket came in on: dialled by a client of this machine, opened outward by this place to its host,
-/// or opened inside one workspace this computer runs, on that workspace's own socket. The leave op and every
-/// machine op but the two read-only ones are the link's alone, and a socket inside a workspace reaches nothing of
-/// the computer that workspace sits on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Road {
-    Inbound,
-    Link,
-    Workspace(String),
-}
 
 /// What one authed socket holds between frames.
 pub(crate) struct Conn {
@@ -84,7 +75,7 @@ impl Conn {
     pub(crate) fn workspace(&self) -> Option<String> {
         match &self.road {
             Road::Workspace(id) => Some(id.clone()),
-            Road::Inbound | Road::Link => None,
+            Road::Inbound | Road::Link | Road::Computer => None,
         }
     }
 
@@ -204,7 +195,7 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
         }
     }
     let op = frame.get("op").and_then(Value::as_str);
-    if matches!(conn.road, Road::Workspace(_)) {
+    if conn.road.guests() {
         // A socket inside a workspace answers ping and the guest's own two ops and refuses every other op this
         // daemon knows, the machine ops and the two place ops among them: nothing inside a workspace reads the
         // computer it sits on, lists its neighbours or drives anything there.
