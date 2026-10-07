@@ -1386,12 +1386,14 @@ describe("the tone table owns every work glyph", () => {
     tool: workEntry("tool", { toolLifecycleStatus: "completed" }),
     notice: workEntry("notice", { sourceActivityKind: "runtime.notify" }),
     error: workEntry("error"),
+    compaction: workEntry("compaction", { sourceActivityKind: "harness.compaction" }),
   };
   const settledDrawing = {
     thinking: { glyph: "lucide-brain", iconClass: "flex size-6 shrink-0 items-center justify-center text-foreground", labelClass: "min-w-0 flex-1 truncate text-secondary-label" },
     tool: { glyph: "lucide-zap", iconClass: "flex size-6 shrink-0 items-center justify-center text-icon-muted", labelClass: "min-w-0 flex-1 truncate text-secondary-label" },
     notice: { glyph: "lucide-info", iconClass: "flex size-6 shrink-0 items-center justify-center text-icon-muted", labelClass: "min-w-0 flex-1 truncate font-mono text-muted-foreground" },
     error: { glyph: "lucide-circle-alert", iconClass: "flex size-6 shrink-0 items-center justify-center text-icon-muted", labelClass: "min-w-0 flex-1 truncate text-secondary-label" },
+    compaction: { glyph: "lucide-minimize2", iconClass: "flex size-6 shrink-0 items-center justify-center text-icon-muted", labelClass: "min-w-0 flex-1 truncate text-secondary-label" },
   } satisfies Record<WorkLogTone, ReturnType<typeof drawn>>;
 
   it.each(Object.keys(settledDrawing) as WorkLogTone[])("a settled %s row draws its glyph and colours as before", async tone => {

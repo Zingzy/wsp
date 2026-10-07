@@ -251,12 +251,15 @@ const serverScript = (name, tools) => {
   return `while IFS= read -r line; do\n  ${id}\n  case "$line" in\n    *'"method":"initialize"'*) ${hello} ;;\n    *'"method":"tools/list"'*) ${listed} ;;\n  esac\ndone`;
 };
 
-/** A stand-in's answer to a side question: the result line a print-mode run ends on, after the fixture's wait, so a
- * shot can catch the sheet still asking and a later one the answer. */
-const asideScript = aside =>
-  aside === undefined
-    ? ""
-    : `case " $* " in\n  *" --fork-session "*) sleep ${aside.afterS}; printf '%s\\n' ${shellQuote(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: aside.text }))}; exit 0 ;;\nesac\n`;
+/** A stand-in's answer to a side question: each piece of its words as a partial message line after its wait, then the
+ * result line a print-mode run ends on after the fixture's last wait, so shots catch the sheet asking, streaming and
+ * answered. */
+const asideScript = aside => {
+  if (aside === undefined) return "";
+  const piece = text => JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }, parent_tool_use_id: null });
+  const pieces = (aside.pieces ?? []).map(([s, text]) => `sleep ${s}; printf '%s\\n' ${shellQuote(piece(text))}; `).join("");
+  return `case " $* " in\n  *" --fork-session "*) ${pieces}sleep ${aside.afterS}; printf '%s\\n' ${shellQuote(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: aside.text }))}; exit 0 ;;\nesac\n`;
+};
 
 /** A stand-in's answer to a commit message asked of it: the question comes on stdin with the person's customizations
  * off and no side question's fork, and the draft is the print-mode result after the fixture's wait. */

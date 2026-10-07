@@ -707,7 +707,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       return { hits: found.sort((a, b) => b.last - a.last).map(f => f.hit) };
     },
 
-    async aside(sessionId, question, origin) {
+    async aside(sessionId, question, origin, askId) {
       await ctx.ready();
       if (question.trim() === "") throw new Error(BLANK_ASIDE_LINE);
       const s = sessions.get(sessionId);
@@ -721,12 +721,13 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const { harness, adapter: bare } = await ctx.launchAdapterFor(entry, latest.harness, undefined, undefined, servers);
       if (bare.aside === undefined) throw new Error(asideUnsupportedLine(harness));
       if (latest.claudeSessionId === undefined) throw new Error(ASIDE_NO_SESSION_LINE);
-      const ask = { session: latest.claudeSessionId, question, ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}), ...(latest.model !== undefined ? { model: latest.model } : {}) };
+      const threadId = threadKeyOf(latest);
+      const onText = askId === undefined ? undefined : (text: string): void => bus.pass({ type: "aside.text", workspaceId: latest.workspaceId, threadId, askId, text });
+      const ask = { session: latest.claudeSessionId, question, ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}), ...(latest.model !== undefined ? { model: latest.model } : {}), ...(onText !== undefined ? { onText } : {}) };
       if (bare.asideServers !== true || bare.mcpServers !== true) return { text: (await bare.aside(ask)).text };
       // A copy that loads the thread's servers is launched with the thread's own wsp server and the pair it dials
       // with, since a harness resuming a session that announced a server it no longer has tells the model so, and the
       // answer opens on it. The harness keeps every tool off; the token goes back the moment the answer is in.
-      const threadId = threadKeyOf(latest);
       const { scoped, env: launchEnv, wsp } = await threadLaunch(entry, threadId, ctx.rootOf(threadId), { aside: true });
       try {
         const { adapter } = ctx.adapterFor(entry, harness, launchEnv, undefined, servers);

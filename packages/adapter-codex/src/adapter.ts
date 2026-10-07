@@ -302,10 +302,12 @@ function turnTokensOf(seen: UsageSeen): TurnTokens {
     return total !== undefined && before !== undefined ? total - before : count(seen.last[key]);
   };
   const fields = Object.fromEntries(BREAKDOWN.flatMap(([name, key]) => (field(key) === undefined ? [] : [[name, field(key)!]])));
-  // A compaction's own usage line reports no input or output, only what the thread holds after it, as its total.
-  const held = count(seen.last.totalTokens) ?? (count(seen.last.inputTokens) ?? 0) + (count(seen.last.outputTokens) ?? 0);
-  return { input: 0, output: 0, ...fields, context: held, ...(seen.window !== undefined ? { window: seen.window } : {}) };
+  return { input: 0, output: 0, ...fields, context: heldOf(seen.last), ...(seen.window !== undefined ? { window: seen.window } : {}) };
 }
+
+/** What the model held at one call, off its usage. A compaction's own usage line reports no input or output, only
+ * what the thread holds after it, as its total. */
+const heldOf = (last: Record<string, unknown>): number => count(last.totalTokens) ?? (count(last.inputTokens) ?? 0) + (count(last.outputTokens) ?? 0);
 
 /** A window's reset as ms epoch: the server sends unix seconds, as the rollout's resets_at is. */
 const resetMs = (value: number): number => (value < 1e11 ? value * 1000 : value);
@@ -523,6 +525,16 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     let turnResult: TurnResult | undefined;
     let lastText: string | undefined;
     let usage: UsageSeen | undefined;
+    /** A compaction from its item's start until it is said: what the thread held before it, off the usage line the
+     * resume sent, and after it, off the first usage line once it started, which 0.155.1 sends inside the item and
+     * an earlier recording after it (measured 2026-10-05). */
+    let compaction: { before?: number; after?: number; ended: boolean } | undefined;
+    const sayCompacted = (): void => {
+      if (compaction === undefined) return;
+      const { before, after } = compaction;
+      emit({ type: "turn.compacted", sessionId: threadId, ...(before !== undefined ? { before } : {}), ...(after !== undefined ? { after } : {}) });
+      compaction = undefined;
+    };
     /** The account's plan windows as last read, with the sign-in account/read named, merged across rolling updates. */
     let rateLimits: Record<string, unknown> | undefined;
     let account: { id?: string; label?: string; plan?: string } = {};
@@ -904,6 +916,11 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           if (item.type === "commandExecution") commands[done ? "delete" : "add"](item.id);
           if (item.type === "fileChange") changesById.set(item.id, item.changes);
           if (done && item.type === "agentMessage") lastText = str(item.text);
+          if (item.type === "contextCompaction") {
+            compaction ??= { ...(usage !== undefined ? { before: heldOf(usage.last) } : {}), ended: false };
+            if (done) compaction.ended = true;
+            if (done && compaction.after !== undefined) sayCompacted();
+          }
           childSigns(item, done);
           for (const delta of itemDeltas(done, item, threadId)) emit(delta);
           break;
@@ -913,9 +930,13 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           const total = rec(reported?.total) ?? {};
           const last = rec(reported?.last);
           if (last === undefined) break;
-          emit({ type: "turn.usage", sessionId: threadId, tokens: (count(last.inputTokens) ?? 0) + (count(last.outputTokens) ?? 0), ...(emittedAtMs !== undefined ? { at: emittedAtMs } : {}) });
           const window = count(reported?.modelContextWindow);
+          emit({ type: "turn.usage", sessionId: threadId, tokens: (count(last.inputTokens) ?? 0) + (count(last.outputTokens) ?? 0), context: heldOf(last), ...(window !== undefined ? { window } : {}), ...(emittedAtMs !== undefined ? { at: emittedAtMs } : {}) });
           usage = { before: usage?.before ?? totalBefore(total, last), total, last, ...(window !== undefined ? { window } : {}) };
+          if (compaction !== undefined && compaction.after === undefined) {
+            compaction.after = heldOf(last);
+            if (compaction.ended) sayCompacted();
+          }
           break;
         }
         case "account/rateLimits/updated": {
@@ -959,6 +980,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           const error = str(rec(turn?.error)?.message);
           if (rec(turn?.error)?.codexErrorInfo === USAGE_LIMIT_CODE) usageLimited = true;
           leadEnd = { status: str(turn?.status) ?? "failed", ...(error !== undefined ? { error } : {}) };
+          sayCompacted();
           settleLead();
           break;
         }

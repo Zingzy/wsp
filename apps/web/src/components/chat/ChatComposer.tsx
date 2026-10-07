@@ -565,12 +565,17 @@ export function ChatComposer({
   const askAside = useCallback(
     (question: string) => {
       const method = api?.askAside;
-      if (method === undefined || latestRow === null) return;
-      const id = useAsideStore.getState().ask(workspaceId, question);
-      void method(latestRow.id, question).then(
-        result => useAsideStore.getState().answer(workspaceId, id, { answer: result.text }),
-        (err: unknown) => useAsideStore.getState().answer(workspaceId, id, { error: err instanceof Error ? err.message : String(err) }),
-      );
+      if (api === null || method === undefined || latestRow === null) return;
+      const { id, askId } = useAsideStore.getState().ask(workspaceId, question);
+      const off = api.subscribe(e => {
+        if (e.type === "aside.text" && e.askId === askId) useAsideStore.getState().grow(workspaceId, askId, e.text);
+      });
+      void method(latestRow.id, question, askId)
+        .then(
+          result => useAsideStore.getState().answer(workspaceId, id, { answer: result.text }),
+          (err: unknown) => useAsideStore.getState().answer(workspaceId, id, { error: err instanceof Error ? err.message : String(err) }),
+        )
+        .finally(off);
     },
     [api, latestRow, workspaceId],
   );

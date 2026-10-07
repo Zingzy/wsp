@@ -52,10 +52,10 @@ export type ToolLifecycleItemType =
 export type ProviderRequestKind = "command" | "file-read" | "file-change" | "mcp-elicitation";
 
 /** A row's tone picks its glyph and colours from one table; notice is a fact the runtime states (a cut, a line told), never an outcome. */
-export type WorkLogTone = "thinking" | "tool" | "notice" | "error";
+export type WorkLogTone = "thinking" | "tool" | "notice" | "error" | "compaction";
 
 /** Which wire event produced a work row; the copied rows key chrome on it. */
-export type WorkLogSourceKind = "tool.started" | "tool.completed" | "reasoning" | "runtime.error" | "runtime.notify" | "runtime.resume" | "runtime.starting" | "harness.note";
+export type WorkLogSourceKind = "tool.started" | "tool.completed" | "reasoning" | "runtime.error" | "runtime.notify" | "runtime.resume" | "runtime.starting" | "harness.note" | "harness.compaction";
 
 export interface WorkLogEntry {
   readonly id: string;
@@ -194,6 +194,9 @@ export interface TurnSummary {
   /** What the turn read and wrote, and what the model held at its end, as its agent counted them; null on a turn whose
    * agent reported none. */
   readonly tokens: TurnTokens | null;
+  /** What the agent held after its latest call this turn, and the most it can hold where its agent said, read while
+   * the turn runs and kept by a turn that ended with no result; absent before its first call. */
+  readonly held?: { readonly context: number; readonly window?: number };
   /** What the turn changed in its folder, between the snapshots at its launch and its end; null on one that changed nothing. */
   readonly changes: TurnChanges | null;
   readonly error: string | null;

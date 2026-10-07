@@ -3,7 +3,7 @@
 // Differs from upstream: store hooks are props (threadKey replaces the route and thread refs, expansion state is local, checkpoint data and callbacks arrive as optional props); rows come from the adapter; attachments, subagent rows, citations, user-message decorations, artifact templates, editor menus and the load-earlier header are removed.
 import { indicatesFailure, isToolLike, type ToolGroupSummaryKind, workEntryKind, type WorkLogTone } from "../adapt";
 import { memo, use, useState, type KeyboardEvent, type ReactNode } from "react";
-import { BotIcon, BrainIcon, ChevronDownIcon, CircleAlertIcon, EyeIcon, GlobeIcon, HammerIcon, InfoIcon, type LucideIcon, SearchIcon, SquarePenIcon, TerminalIcon, WrenchIcon, ZapIcon } from "lucide-react";
+import { BotIcon, BrainIcon, ChevronDownIcon, CircleAlertIcon, EyeIcon, GlobeIcon, HammerIcon, InfoIcon, type LucideIcon, Minimize2Icon, SearchIcon, SquarePenIcon, TerminalIcon, WrenchIcon, ZapIcon } from "lucide-react";
 import { workEntryDisplayLabel, workEntryLabelText, type WorkEntryLabel } from "../MessagesTimeline.logic";
 import { cn } from "../../../lib/utils";
 import { formatWorkspaceRelativePath } from "../../../lib/filePathDisplay";
@@ -125,6 +125,7 @@ export const WORK_TONES: Record<WorkLogTone, WorkToneStyle> = {
   tool: { Glyph: ZapIcon, iconClass: "text-icon-muted", labelClass: "text-secondary-label" },
   notice: { Glyph: InfoIcon, iconClass: "text-icon-muted", labelClass: "font-mono text-muted-foreground" },
   error: { Glyph: CircleAlertIcon, iconClass: "text-foreground", labelClass: "text-secondary-label" },
+  compaction: { Glyph: Minimize2Icon, iconClass: "text-icon-muted", labelClass: "text-secondary-label" },
 };
 
 function buildToolCallExpandedBody(

@@ -29,7 +29,7 @@ export const buildFor = (home, cloud) => {
 
 /** The folder a project on this computer sits in: under the work folder of the home the host runs in, never beside
  * the person's own checkouts. */
-const projectDest = name => join(HOME, "wsp-work", name);
+export const projectDest = name => join(HOME, "wsp-work", name);
 
 /** Every stamp hangs off the hour this run started in rather than a date written here: the app words a
  * thread's time as a distance from now, and a fixed date would drift into the future and read "now" on
@@ -86,7 +86,12 @@ export const HERE_AGENTS = {
       version: "2.1.283 (Claude Code)",
       status: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }),
       aside: {
-        afterS: 8,
+        afterS: 4,
+        /** The words the answer arrives in before its result, each after its wait, so a shot catches it streaming. */
+        pieces: [
+          [3, "I'm in the spoo folder on this computer. "],
+          [1, "You last asked why the short links were 302ing twice, "],
+        ],
         text: "I'm in the spoo folder on this computer. You last asked why the short links were 302ing twice, and I moved the trailing-slash rewrite ahead of the canonical host check so each form redirects once.",
       },
       /** What the agent drafts when a commit message is asked of it, after the same wait so a shot can catch the box

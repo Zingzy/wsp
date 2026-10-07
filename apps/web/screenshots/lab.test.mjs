@@ -287,6 +287,7 @@ describe("the fixtures a lab serves", () => {
       "review-posted": "no cloud",
       rewind: "no cloud",
       replies: "no cloud",
+      meter: "no cloud",
       usage: "no cloud",
     });
     // Every fixture with a cloud machine names the cloud it is standing in for, and no fixture without one does.
@@ -449,6 +450,7 @@ describe("the provider a fixture's host runs under", () => {
       "review-posted": "none",
       rewind: "none",
       replies: "fake",
+      meter: "none",
       usage: "none",
     });
   });

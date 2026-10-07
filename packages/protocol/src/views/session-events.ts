@@ -358,6 +358,30 @@ export const SessionPlanEvent = z.object({
 });
 export type SessionPlanEvent = z.infer<typeof SessionPlanEvent>;
 
+/** The agent compacted its own context: what the model held before and after it, each where the agent said. `line`
+ * counts the turn's compactions apart from its deltas, so a run re-read from its first byte writes each once, and a
+ * run a host from before these rows left writes every one it never wrote. */
+export const SessionCompactedEvent = z.object({
+  type: z.literal("session.compacted"),
+  ...sessionScope,
+  before: z.number().optional(),
+  after: z.number().optional(),
+  line: z.number().int().positive().optional(),
+});
+export type SessionCompactedEvent = z.infer<typeof SessionCompactedEvent>;
+
+/** What the thread's own agent held after one of its calls, and the most it can hold where the harness says. Each
+ * call's passes by on the bus and is kept nowhere, so the meter reads it while the turn runs; the transcript holds
+ * one, the last, for a turn whose result names none (stopped, cut, failed after a call) and for one still running
+ * when its host closed. */
+export const SessionContextEvent = z.object({
+  type: z.literal("session.context"),
+  ...sessionScope,
+  context: z.number(),
+  window: z.number().optional(),
+});
+export type SessionContextEvent = z.infer<typeof SessionContextEvent>;
+
 /** One permission prompt the harness raised, relayed into the chat as its own row. The prompt blocks the turn until
  * sessions.answer names an option or the turn itself ends, so the row is what the thread is waiting on for as long
  * as the turn lives. */
@@ -463,6 +487,8 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionCheckpointEvent,
   SessionChangesEvent,
   SessionPlanEvent,
+  SessionCompactedEvent,
+  SessionContextEvent,
   SessionRunEvent,
   SessionMovedEvent,
   SessionBehindEvent,

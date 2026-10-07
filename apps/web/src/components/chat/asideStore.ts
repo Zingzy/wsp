@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The side question standing in each workspace's right panel, in memory only:
-// the question, then the host's answer or refusal, on a tab of its own beside
-// the panel's others. Closing it takes the tab away and puts the panel back as
-// it was, shut again if the question opened it, and an answer landing after the
-// close, or after a newer question, lands nowhere.
+// the question, then the answer's words as the harness writes them, then the
+// host's whole answer or refusal, on a tab of its own beside the panel's others.
+// Closing it takes the tab away and puts the panel back as it was, shut again if
+// the question opened it, and an answer landing after the close, or after a
+// newer question, lands nowhere.
 import { create } from "zustand";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../../rightPanelStore";
 
 export interface Aside {
   readonly id: number;
+  /** The id the question goes to the host with, which each piece of its answer comes back under. */
+  readonly askId: string;
   readonly question: string;
+  /** When it was asked, as an ISO time, which the elapsed seconds count from. */
+  readonly askedAt: string;
+  /** The answer's words so far, until the whole answer lands. */
+  readonly partial?: string;
   readonly answer?: string;
   readonly error?: string;
   /** Whether the panel was open before the question, so closing it knows whether to shut the panel again. */
@@ -21,7 +28,9 @@ export interface Aside {
 interface AsideState {
   byWorkspace: Record<string, Aside>;
   /** Stands a question on its tab in the workspace's panel and answers with the id its answer must carry. */
-  ask(workspaceId: string, question: string): number;
+  ask(workspaceId: string, question: string): Aside;
+  /** Adds a piece of the standing question's answer, by its askId; one for a question no longer standing lands nowhere. */
+  grow(workspaceId: string, askId: string, text: string): void;
   answer(workspaceId: string, id: number, reply: { answer: string } | { error: string }): void;
   close(workspaceId: string): void;
 }
@@ -37,9 +46,17 @@ export const useAsideStore = create<AsideState>()((set, get) => ({
     const was = selectWorkspaceRightPanelState(panel.byWorkspaceId, workspaceId);
     const standing = get().byWorkspace[workspaceId];
     const before = standing === undefined ? { panelWasOpen: was.isOpen, activeBefore: was.activeSurfaceId } : { panelWasOpen: standing.panelWasOpen, activeBefore: standing.activeBefore };
-    set(s => ({ byWorkspace: { ...s.byWorkspace, [workspaceId]: { id, question, ...before } } }));
+    const aside: Aside = { id, askId: crypto.randomUUID(), question, askedAt: new Date().toISOString(), ...before };
+    set(s => ({ byWorkspace: { ...s.byWorkspace, [workspaceId]: aside } }));
     panel.open(workspaceId, "aside");
-    return id;
+    return aside;
+  },
+  grow(workspaceId, askId, text) {
+    set(s => {
+      const standing = s.byWorkspace[workspaceId];
+      if (standing?.askId !== askId || standing.answer !== undefined || standing.error !== undefined) return s;
+      return { byWorkspace: { ...s.byWorkspace, [workspaceId]: { ...standing, partial: (standing.partial ?? "") + text } } };
+    });
   },
   answer(workspaceId, id, reply) {
     set(s => {

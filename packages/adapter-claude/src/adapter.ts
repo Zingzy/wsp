@@ -7,7 +7,7 @@ import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW,
 import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, interruptLine, modeOptionOn, setModeLine, stopTaskLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
-import { asideAnswer, asideCommand, forkCleanupCommand } from "./aside.js";
+import { asideAnswer, asideCommand, asideTextOf, forkCleanupCommand } from "./aside.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
@@ -400,10 +400,13 @@ function withContext(result: TurnResult, context: number | undefined, initModel:
   return { ...result, ...(tokens !== undefined ? { tokens } : {}), ...(model !== undefined ? { model } : {}) };
 }
 
-/** What the model held after a compaction the CLI ran mid-turn, off its own boundary line. */
-function compactedTo(event: Record<string, unknown>): number | undefined {
+/** What the model held before and after a compaction the CLI ran, off its own boundary line. */
+function compactedTo(event: Record<string, unknown>): { before?: number; after: number } | undefined {
   if (str(event.type) !== "system" || str(event.subtype) !== "compact_boundary") return undefined;
-  return num(rec(event.compact_metadata)?.post_tokens);
+  const metadata = rec(event.compact_metadata);
+  const after = num(metadata?.post_tokens);
+  const before = num(metadata?.pre_tokens);
+  return after === undefined ? undefined : { ...(before !== undefined ? { before } : {}), after };
 }
 
 /** The last lines the process printed that were not stream-json events: the CLI's stderr shares the log. */
@@ -990,8 +993,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (heldReply === undefined && !sawResult && drainedNotice(event)) continue;
           const after = compactedTo(event);
           if (after !== undefined) {
-            heldContext = after;
+            heldContext = after.after;
             compacted = true;
+            onEvent({ type: "turn.compacted", sessionId: claudeSessionId, ...after });
           }
           const call = str(event.type) === "assistant" && event.is_api_error_message !== true ? rec(event.message) : undefined;
           const callUsage = rec(call?.usage);
@@ -999,7 +1003,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (callUsage !== undefined && callId !== undefined && !drawn.has(callId)) {
             drawn.add(callId);
             const at = typeof event.timestamp === "string" ? Date.parse(event.timestamp) : NaN;
-            onEvent({ type: "turn.usage", sessionId: claudeSessionId, tokens: heldTokens(callUsage), ...(Number.isFinite(at) ? { at } : {}) });
+            const drew = heldTokens(callUsage);
+            const own = str(event.parent_tool_use_id) === undefined;
+            onEvent({ type: "turn.usage", sessionId: claudeSessionId, tokens: drew, ...(own ? { context: drew } : {}), ...(Number.isFinite(at) ? { at } : {}) });
           }
           const usage = str(event.type) === "assistant" && str(event.parent_tool_use_id) === undefined ? rec(rec(event.message)?.usage) : undefined;
           if (usage !== undefined && event.is_api_error_message !== true) heldContext = heldTokens(usage);
@@ -1337,6 +1343,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (text.length > 0 && said.push(text) > STDERR_TAIL_LINES) said.shift();
           continue;
         }
+        const piece = answer === undefined ? asideTextOf(event) : undefined;
+        if (piece !== undefined) q.onText?.(piece);
         if (event.type !== "result" || answer !== undefined || drainedNotice(event)) continue;
         answer = asideAnswer(event);
         stream.closeInput();

@@ -110,6 +110,12 @@ export function turnSettledLine(result: TurnResult, spendWord?: string): string 
   return [result.status, ...turnSettledParts(result, undefined, spendWord)].join("  ");
 }
 
+/** A compaction's line in the thread, with what the model held before and after it where the agent said. */
+export function compactedLine(before: number | undefined, after: number | undefined): string {
+  if (after === undefined) return "Compacted the context";
+  return before === undefined ? `Compacted the context to ${fmtTokens(after)} tokens` : `Compacted the context, ${fmtTokens(before)} to ${fmtTokens(after)} tokens`;
+}
+
 /** The agent's step list as a read transcript's row says it: the count done, then one task line per step. */
 export function planStepsLine(steps: ReadonlyArray<{ text: string; state: "pending" | "working" | "done" }>): string {
   const done = steps.filter(s => s.state === "done").length;

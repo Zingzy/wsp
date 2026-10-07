@@ -541,8 +541,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("sessions.search"), query: z.string() }),
   /** A question asked beside a thread, answered by the thread's harness on a copy of its session with no tools, off the
    * thread's latest row: its folder, its model and its agent. Replies with a SessionAsideResult. Nothing is recorded:
-   * the transcript, the rows and the harness's own session are as they were. Takes any of the thread's session ids. */
-  z.object({ id: reqId, op: z.literal("sessions.aside"), sessionId: z.string(), question: z.string() }),
+   * the transcript, the rows and the harness's own session are as they were. Takes any of the thread's session ids.
+   * With askId, the answer's words go by as aside.text events under that id while the harness writes them. */
+  z.object({ id: reqId, op: z.literal("sessions.aside"), sessionId: z.string(), question: z.string(), askId: z.string().optional() }),
   /** Rewinds a thread to the end of one of its turns: the turns after it leave the transcript and, where the harness
    * cuts its own history, the conversation, and with files the copy's tree goes back to that turn's checkpoint after
    * the tree as it stands is checkpointed. undo instead puts back the files the thread's last rewind replaced. */

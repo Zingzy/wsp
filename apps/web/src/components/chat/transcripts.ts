@@ -89,6 +89,12 @@ export function comesAfter(held: SessionEvent, arriving: SessionEvent): boolean 
   return held.at > arriving.at;
 }
 
+/** Where an arriving reading of what the agent holds replaces the one its turn already has: each of the agent's calls
+ * passes one, and only the latest is read. -1 for any other event, and for a turn's first reading. */
+export function heldReading(events: ReadonlyArray<SessionEvent>, e: SessionEvent): number {
+  return e.type === "session.context" ? events.findLastIndex(held => held.type === "session.context" && held.turnId === e.turnId) : -1;
+}
+
 /** Where a live event goes among the ones held: after every row that does not come after it. */
 export function liveIndex(events: ReadonlyArray<SessionEvent>, e: SessionEvent): number {
   let index = events.length;
@@ -228,6 +234,11 @@ export function createTranscripts(clock: () => number = Date.now) {
     let through = Math.max(was?.through ?? 0, reply.pos);
     for (const e of waiting.get(threadId) ?? []) {
       if (e.pos !== undefined && e.pos <= through) continue;
+      const reading = heldReading(rows.events, e);
+      if (reading >= 0) {
+        rows = { events: rows.events.with(reading, e), arrivals: rows.arrivals.with(reading, at) };
+        continue;
+      }
       const index = liveIndex(rows.events, e);
       rows = { events: [...rows.events.slice(0, index), e, ...rows.events.slice(index)], arrivals: [...rows.arrivals.slice(0, index), at, ...rows.arrivals.slice(index)] };
       if (e.pos !== undefined) through = e.pos;
@@ -415,8 +426,14 @@ export function createTranscripts(clock: () => number = Date.now) {
       dropped.add(e);
       return;
     }
-    const index = liveIndex(t.events, e);
     const at = now();
+    const reading = heldReading(t.events, e);
+    if (reading >= 0) {
+      arrived.set(e, at);
+      put({ ...t, events: t.events.with(reading, e), arrivals: t.arrivals.with(reading, at) });
+      return;
+    }
+    const index = liveIndex(t.events, e);
     arrived.set(e, at);
     put({
       ...t,
