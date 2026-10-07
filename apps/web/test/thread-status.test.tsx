@@ -9,7 +9,7 @@ import { ThreadStatus } from "../src/components/status/ThreadStatus.js";
 import { threadStatusOf } from "../src/components/status/threadStatusOf.js";
 import { WorkingSince } from "../src/components/status/WorkingSince.js";
 
-const thread = (over: Partial<ThreadStatusInput> = {}): ThreadStatusInput => ({ status: "completed", asking: null, startedAt: null, unread: false, ...over });
+const thread = (over: Partial<ThreadStatusInput> = {}): ThreadStatusInput => ({ status: "completed", asking: null, startedAt: null, unread: false, limit: null, resumeAt: null, ...over });
 const slot = (container: HTMLElement): HTMLElement => container.querySelector<HTMLElement>("[data-thread-status]")!;
 
 describe("threadStatusOf", () => {
@@ -30,7 +30,9 @@ describe("threadStatusOf", () => {
   });
 
   it("the registry ends on the kind every thread reads as, so no thread falls through it", () => {
-    expect(THREAD_STATUS_KINDS.map(k => k.id)).toEqual(["needs-you", "working", "failed", "done", "resting"]);
+    expect(THREAD_STATUS_KINDS.map(k => k.id)).toEqual(["needs-you", "working", "limited", "resuming", "failed", "done", "resting"]);
+    expect(threadStatusOf(thread({ status: "failed", limit: { resetsAt: 1 } })).id).toBe("limited");
+    expect(threadStatusOf(thread({ status: "failed", limit: { resetsAt: 1 }, resumeAt: 1 })).id).toBe("resuming");
     expect(THREAD_STATUS_KINDS.at(-1)!.is(thread({ status: "failed", asking: "x" }))).toBe(true);
   });
 });

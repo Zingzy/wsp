@@ -177,6 +177,18 @@
               "setupRefusal": {
                 "type": "string"
               },
+              "limit": {
+                "type": "object",
+                "properties": {
+                  "resetsAt": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "resumeAt": {
+                "type": "number"
+              },
               "costUsd": {
                 "type": "number"
               },
@@ -494,6 +506,18 @@
               },
               "setupRefusal": {
                 "type": "string"
+              },
+              "limit": {
+                "type": "object",
+                "properties": {
+                  "resetsAt": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "resumeAt": {
+                "type": "number"
               },
               "costUsd": {
                 "type": "number"

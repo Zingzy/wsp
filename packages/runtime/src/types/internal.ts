@@ -499,6 +499,9 @@ export interface ThreadRecord {
   section?: ThreadPlacement;
   /** The anchor a rewind kept, held until the next turn of a harness that cuts on its next resume has taken it. */
   resumeAt?: string;
+  /** Resume at reset, armed on the turn a usage limit stopped: the reset it goes on at, ms epoch, and that turn's id,
+   * so a newer turn leaves it nothing to resume. */
+  limitResume?: { at: number; turnId: string };
   /** The checkpoint of the files as they stood before the last rewind that moved them, which Undo rewind restores,
    * held until the thread's next turn ends. */
   rewound?: { before: string; at: number };

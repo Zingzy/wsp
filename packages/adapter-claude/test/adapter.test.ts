@@ -1575,6 +1575,34 @@ describe("ClaudeAdapter reads the plan's limits Claude Code prints", () => {
   it("drops an event that reads no utilization for any window", async () => {
     expect(await limits([limitLine({ status: "allowed", rateLimitType: "five_hour", resetsAt: 1_790_700_000 }), limitLine({ status: "allowed" })])).toEqual([]);
   });
+  describe("a turn the plan's usage limit stopped", () => {
+    // A spent window as the event's declared shape gives it, then a result flagged as an error with the sentence the
+    // owner saw; not a recording of a real limit.
+    const stopped = JSON.stringify({ type: "result", subtype: "success", is_error: true, duration_ms: 1, result: "You've hit your limit \u00b7 resets 1pm", session_id: SID });
+    async function result(lines: string[]) {
+      const exec = scriptedExec([init, ...lines, stopped]);
+      return createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" }).start({ prompt: "go", onEvent: () => {} }).finished;
+    }
+
+    it("carries the limit with the last reset of the windows the readings rejected", async () => {
+      const done = await result([
+        limitLine({ status: "rejected", rateLimitType: "five_hour", utilization: 1, resetsAt: 1_790_700_000, overageStatus: "rejected", isUsingOverage: false }),
+        limitLine({ status: "rejected", rateLimitType: "seven_day", resetsAt: 1_791_200_000 }),
+      ]);
+      expect(done).toMatchObject({ status: "failed", limit: { resetsAt: 1_791_200_000_000 } });
+    });
+
+    it("carries the limit with no reset where a rejected window named none", async () => {
+      const done = await result([limitLine({ status: "rejected", rateLimitType: "five_hour", resetsAt: 1_790_700_000 }), limitLine({ status: "rejected", rateLimitType: "seven_day" })]);
+      expect(done.limit).toEqual({});
+    });
+
+    it("carries none where overage runs on past the window, or a later reading allowed it again", async () => {
+      expect(await result([limitLine({ status: "rejected", rateLimitType: "five_hour", resetsAt: 1_790_700_000, overageStatus: "allowed" })])).not.toHaveProperty("limit");
+      expect(await result([limitLine({ status: "rejected", rateLimitType: "five_hour", resetsAt: 1_790_700_000 }), limitLine({ status: "allowed", rateLimitType: "five_hour", utilization: 0.1 })])).not.toHaveProperty("limit");
+      expect(await result([])).not.toHaveProperty("limit");
+    });
+  });
 });
 
 describe("a person's setup for Claude Code on a computer", () => {

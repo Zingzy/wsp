@@ -16,7 +16,7 @@ import { answerPrompt } from "./answerPrompt.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { workspaceWord } from "@wsp/protocol";
+import { USAGE_WORDS, workspaceWord } from "@wsp/protocol";
 import { Button } from "../ui/button";
 import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { TreeRows } from "../../tree/TreeRows.js";
@@ -229,8 +229,11 @@ export function ChatView({
     [workspaceId],
   );
   // A turn that completed says so by its reply standing, and one that failed in words by the row those words stand
-  // in; any other ending keeps its own line, since the state word is the news.
-  const settledOnReply = view.settled?.state === "completed" || (view.settled?.state === "error" && view.settled.error !== null);
+  // in; any other ending keeps its own line, since the state word is the news. A turn a usage limit stopped says the
+  // Usage page's own word for it, in the muted ink: it is news, not a fault, and the strip over the composer carries
+  // the way on.
+  const settledOnReply =
+    view.settled?.state === "completed" || (view.settled?.state === "error" && view.settled.error !== null && (view.settled.limit ?? null) === null);
   // What the machine needs from the person, said here on the thread they are reading and nowhere else.
   const machine = useMachineLine(workspaceId);
   const footer = thread.hydrated ? (
@@ -370,11 +373,12 @@ const TURN_STATUS: Record<TurnSummary["state"], string> = {
 /** A turn that ended any way but completed says how, in one word: the fold above it says how long it worked, and a
  * price is not the line's to say. */
 function SettledFooter({ turn }: { turn: TurnSummary }) {
+  const limited = (turn.limit ?? null) !== null;
   return (
     <Facts
       data-testid="settled-footer"
-      parts={[TURN_STATUS[turn.state]]}
-      className={cn("w-full px-1 pb-2 font-mono text-[11px] tabular-nums", turn.state !== "completed" ? "text-destructive" : "text-muted-foreground")}
+      parts={[limited ? USAGE_WORDS.reached : TURN_STATUS[turn.state]]}
+      className={cn("w-full px-1 pb-2 font-mono text-[11px] tabular-nums", turn.state !== "completed" && !limited ? "text-destructive" : "text-muted-foreground")}
     />
   );
 }

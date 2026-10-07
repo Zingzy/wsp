@@ -2,8 +2,10 @@
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import { OWNER_LABEL, goldenHead, isMissing, readGone, sightMachine, type Machine, type MachineBackend, isNoProvider, isPlaceAbsent } from "@wsp/engine";
-import { type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts } from "@wsp/protocol";
+import { type ProjectView, type SessionView, type Caller, type WorkspacePhase, ThreadPlacement, ThreadScope, WorkspaceOrigin, notTheLeadsChildRefusal, foldThreads, threadKeyOf, threadWord, scopeOf, goneWords, NO_IMAGE_YET, noWorkspaceRefusal, notFoundRefusal, goneUnconfirmedLine, type GoneSeenBy, copiesFolder, kindForComputer, RUN_GONE_LINE, HERE_PLACE_ID, workspaceLands, type ThreadFacts, refusal, LIMIT_RESUME_PROMPT, heldUntil } from "@wsp/protocol";
 import { keyOf } from "../agent-setup.js";
+import { harnessCatalog } from "../harness-catalog.js";
+import { accountOnComputer } from "../usage.js";
 import { phaseLeavingGone, providerSaid } from "../status.js";
 import type { WorkspaceRecord, LiveWorkspace, FoundMachine } from "../types/wiring.js";
 import { WORKSPACES, PROJECTS, TRANSCRIPTS, SESSIONS, READS, READS_ID, RESTARTED_REASON, goneLogLine, restartCutLine, turnWritten, type TranscriptRecord, type TurnLive, type TurnAsked, readAsked, readScope, readRoad, type ThreadRecord, type SessionIndexRecord, BUILDERS, OWNER, HELD_TTL_MS, pidAlive, type BuilderRecord, type LiveBuilder, deadMachine, isAbsentMachine, absentMachine, type StoredBuilder } from "../types/internal.js";
@@ -310,9 +312,12 @@ export function bootArea(ctx: RuntimeContext): BootArea {
             ...(typeof held.snoozedUntil === "number" ? { snoozedUntil: held.snoozedUntil } : {}),
             ...(placed.success ? { section: placed.data } : {}),
             ...(typeof held.resumeAt === "string" ? { resumeAt: held.resumeAt } : {}),
+            ...(typeof held.limitResume?.at === "number" && typeof held.limitResume.turnId === "string" ? { limitResume: { at: held.limitResume.at, turnId: held.limitResume.turnId } } : {}),
             ...(typeof held.rewound?.before === "string" && typeof held.rewound.at === "number" ? { rewound: { before: held.rewound.before, at: held.rewound.at } } : {}),
           });
           if (typeof held.snoozedUntil === "number") wakeAt(threadId, held.snoozedUntil);
+          const armed = threadRecords.get(threadId)?.limitResume;
+          if (armed !== undefined) ctx.resumeOnReset(threadId, armed.at);
         }
         if (!Array.isArray(index.sessions)) {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
@@ -482,6 +487,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
         ...(marks?.snoozedUntil === undefined ? {} : marks.snoozedUntil > clock.now() ? { snoozedUntil: marks.snoozedUntil } : { wokeAt: marks.snoozedUntil }),
         ...(marks?.section !== undefined ? { section: marks.section } : {}),
         ...(marks?.rewound !== undefined ? { rewoundAt: marks.rewound.at } : {}),
+        ...(marks?.limitResume !== undefined && marks.limitResume.turnId === s.turnId ? { resumeAt: marks.limitResume.at } : {}),
       };
     });
   };
@@ -530,6 +536,10 @@ export function bootArea(ctx: RuntimeContext): BootArea {
       // A thread the person settled is done with: its kept agent goes now rather than at the end of the keep.
       if (next.settledAt !== undefined) ctx.reapKept(threadId);
       if (next.snoozedUntil !== undefined) wakeAt(threadId, next.snoozedUntil);
+      if ("limitResume" in stamps) {
+        if (next.limitResume !== undefined) ctx.resumeOnReset(threadId, next.limitResume.at);
+        else ctx.resumeTimers.get(threadId)?.();
+      }
       touched.set(workspaceId, [...(touched.get(workspaceId) ?? []), threadId]);
     }
     for (const [workspaceId, ids] of touched) {
@@ -544,6 +554,56 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     const now = clock.now();
     const standing = [...new Set([row.threadId, row.rootThreadId])].filter((id): id is string => id !== undefined && (threadRecords.get(id)?.snoozedUntil ?? 0) > now);
     if (standing.length > 0) void mark(standing, { snoozedUntil: now }, undefined).catch((e: unknown) => console.warn(`snooze not ended for ${standing.join(", ")}: ${e instanceof Error ? e.message : String(e)}`));
+  };
+  /** Arms Resume at reset on each thread, at the reset its latest turn's usage limit named, or cancels it. Every
+   * thread is read before any moves, so one the caller cannot reach or with no such reset arms nothing. */
+  const armResume = async (threadIds: readonly string[], on: boolean, origin: Caller | undefined): Promise<void> => {
+    if (!on) return mark(threadIds, { limitResume: undefined }, origin);
+    await ready();
+    const arms = await Promise.all(
+      threadIds.map(async threadId => {
+        const latest = [...sessions.values()].filter(s => threadKeyOf(s.view) === threadId).at(-1);
+        if (latest === undefined || (await entryOfRow(latest.view, origin)) === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
+        const at = latest.view.limit?.resetsAt;
+        if (at === undefined) throw refusal(`thread ${threadWord(threadId)} is not stopped at a usage limit with a known reset,`, "so there is nothing to resume at; send it a message to go on now.", "usage");
+        return { threadId, arm: { at, turnId: latest.turnId } };
+      }),
+    );
+    for (const { threadId, arm } of arms) await mark([threadId], { limitResume: arm }, origin);
+  };
+  /** Resume at reset, come due: the stopped turn goes on unless by now the thread was taken away or settled, a newer
+   * turn ran on it, something on it waits on the person, or its plan's latest reading still holds the agent past the
+   * reset, in which case the row takes the new reset and nothing is sent. The arm goes either way. Never a banked
+   * reset: the turn waits out the plan's own window. */
+  const resumeAfterLimit = async (threadId: string): Promise<void> => {
+    await ready();
+    const record = threadRecords.get(threadId);
+    const arm = record?.limitResume;
+    if (record === undefined || arm === undefined) return;
+    const latest = [...sessions.values()].filter(s => threadKeyOf(s.view) === threadId).at(-1);
+    const entry = live.get(record.workspaceId);
+    const stands = record.settledAt === undefined && entry !== undefined && latest !== undefined && latest.turnId === arm.turnId && latest.view.limit !== undefined;
+    const facts = stands ? threadFacts(threadId) : undefined;
+    const waits = ctx.leadAsks.has(threadId) || facts?.asking !== undefined || facts?.waitingOn !== undefined;
+    const held = stands && !waits ? await heldPast(entry!, latest!.view.harness) : undefined;
+    // Dropped only now, so a host that stops inside the reads above still holds the arm and runs this again at load;
+    // an arm cancelled or moved meanwhile is no longer this one's to act on.
+    const current = threadRecords.get(threadId);
+    if (current?.limitResume !== arm) return;
+    delete current.limitResume;
+    if (held !== undefined) latest!.view.limit = { resetsAt: held };
+    await ctx.persistSessions(record.workspaceId);
+    bus.emit({ type: "thread.marked", workspaceId: record.workspaceId, threadIds: [threadId] });
+    if (!stands || waits || held !== undefined) return;
+    await ctx.sessionsApi.start(record.workspaceId, { prompt: LIMIT_RESUME_PROMPT, thread: threadId, afterLimit: arm.at });
+  };
+  /** The reset the latest reading of an agent's account on that workspace's computer still holds it behind, now;
+   * undefined where nothing holds it or no reading says. */
+  const heldPast = async (entry: LiveWorkspace, harness: string): Promise<number | undefined> => {
+    const limits = await ctx.ledger.limits().catch(() => []);
+    const vaulted = ctx.vaultedFor(harness, ctx.moduleOf(entry.record.kind).loginStands(entry, harness));
+    const { key } = accountOnComputer({ agent: harness, agentName: harnessCatalog(harness)?.label ?? harness, computer: { id: ctx.usageComputerOf(entry.record), name: ctx.computerOf(entry) }, limits, vaulted });
+    return heldUntil(limits.find(l => l.key === key)?.windows ?? [], clock.now());
   };
   /** Whether a thread of the caller's tree stands on that workspace, which is what lets a child list and read the
    * transcript of the workspace its lead runs on; a caller that is no thread reads workspaces by their own rule. */
@@ -587,7 +647,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
   };
   return {
     refreshBuilders, isHeldAway, rereadHeld, hydrateWorkspace, ready, entryOf, childOf, reachesRow, entryOfRow,
-    listedRows, threadFacts, pushHead, mark, endSnoozeFor, treeStandsOn, computerRows, nameOfComputer, imageHeadOrNone,
+    listedRows, threadFacts, pushHead, mark, endSnoozeFor, armResume, resumeAfterLimit, treeStandsOn, computerRows, nameOfComputer, imageHeadOrNone,
     imageHead, landingPlace,
   };
 }

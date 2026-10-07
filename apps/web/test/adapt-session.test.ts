@@ -235,6 +235,18 @@ describe("deriveSession: streaming states", () => {
     expect(deriveSession([start, done, end]).workEntries.filter(w => w.sourceActivityKind === "runtime.resume")).toEqual([]);
   });
 
+  it("a turn a usage limit stopped is failed with its limit on the turn, and the agent's words make no error row", () => {
+    const m = deriveSession([start, { type: "session.done", ...scope, result: { status: "failed", error: "You've hit your limit", limit: { resetsAt: 1_790_700_000_000 } } }, end]);
+    expect(m.latestTurn).toMatchObject({ state: "error", limit: { resetsAt: 1_790_700_000_000 } });
+    expect(m.workEntries.filter(w => w.tone === "error")).toEqual([]);
+  });
+
+  it("a start Resume at reset opened draws no message for its words to the agent, only the notice row", () => {
+    const m = deriveSession([{ ...start, prompt: "Your usage limit has reset.", afterLimit: 1_790_700_000_000 } as SessionEvent, done, end]);
+    expect(m.messages.filter(x => x.role === "user")).toEqual([]);
+    expect(m.workEntries.filter(w => w.sourceActivityKind === "runtime.resume").map(w => [w.label, w.tone])).toEqual([["resumed at the reset", "notice"]]);
+  });
+
   it("createdAt: the wire's at wins, then the caller's clock, then empty", () => {
     const wire = deriveSession(CHAT_STREAM, { at: () => "1999-01-01T00:00:00Z" });
     expect(wire.messages[0]?.createdAt).toBe("2026-09-01T01:31:30.612Z");

@@ -210,7 +210,7 @@ export function ThreadTile({
   const status = settled || snoozed ? RESTING : threadStatusOf(thread);
   // A working or read row recedes unless it is the one open, as T3 Code's shouldRecede; a row that calls for the
   // person keeps the foreground ink, and the label keeps its hue either way.
-  const recede = !active && (status === RESTING || status.id === "working");
+  const recede = !active && (status === RESTING || status.id === "working" || status.id === "resuming");
   const card = tileCardLines({
     title: thread.title,
     place,

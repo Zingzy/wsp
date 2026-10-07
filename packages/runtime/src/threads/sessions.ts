@@ -400,7 +400,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
             return device !== undefined ? { scopeDeviceId: device } : {};
           })(),
           ...(launchKey !== undefined ? { keep: { launch: kept?.launch ?? launchKey } } : {}),
-          opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(o.via !== undefined ? { via: o.via } : {}), ...(afterCut ? { afterCut } : {}), ...(opens ? { opensThread: true } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
+          opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(o.via !== undefined ? { via: o.via } : {}), ...(afterCut ? { afterCut } : {}), ...(o.afterLimit !== undefined ? { afterLimit: o.afterLimit } : {}), ...(opens ? { opensThread: true } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
           asked: { prompt: handed, ...(picks.effort !== undefined ? { effort: picks.effort } : {}), ...(handed !== o.prompt ? { typed: o.prompt } : {}) },
           ...(imagesDir !== undefined ? { imagesDir } : {}),
           ...(snapshot !== undefined ? { snapshot } : {}),
@@ -436,6 +436,11 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         // announces itself and at its end.
         if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}) });
         const thread = threadRecords.get(threadId)!;
+        // A newer turn leaves Resume at reset nothing to resume.
+        if (thread.limitResume !== undefined) {
+          delete thread.limitResume;
+          ctx.resumeTimers.get(threadId)?.();
+        }
         if (filesFolder !== undefined && !(thread.filesIn ?? []).includes(filesFolder)) threadRecords.set(threadId, { ...thread, filesIn: [...(thread.filesIn ?? []), filesFolder] });
         launched();
         // The turn is running; what the record failed to remember must not read as a start that failed.
@@ -671,15 +676,13 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
 
     async mark(threadIds, marks, origin) {
       const at = clock.now();
-      await ctx.mark(
-        threadIds,
-        {
-          ...(marks.pinned !== undefined ? { pinnedAt: marks.pinned ? at : undefined } : {}),
-          ...(marks.snoozedUntil === undefined ? {} : marks.snoozedUntil === null ? { snoozedUntil: undefined } : { snoozedUntil: marks.snoozedUntil, readAt: at }),
-          ...(marks.section !== undefined ? { section: marks.section ?? undefined } : {}),
-        },
-        origin,
-      );
+      if (marks.resumeAtReset !== undefined) await ctx.armResume(threadIds, marks.resumeAtReset, origin);
+      const stamps = {
+        ...(marks.pinned !== undefined ? { pinnedAt: marks.pinned ? at : undefined } : {}),
+        ...(marks.snoozedUntil === undefined ? {} : marks.snoozedUntil === null ? { snoozedUntil: undefined } : { snoozedUntil: marks.snoozedUntil, readAt: at }),
+        ...(marks.section !== undefined ? { section: marks.section ?? undefined } : {}),
+      };
+      if (marks.resumeAtReset === undefined || Object.keys(stamps).length > 0) await ctx.mark(threadIds, stamps, origin);
     },
 
     async restore(threadIds, origin) {

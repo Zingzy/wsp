@@ -385,6 +385,8 @@ export interface Runtime {
         mcpServers?: Readonly<Record<string, McpServerSpec>>;
         /** The line a thread opened on a pull request is told first: the worktree holding the branch was left behind it. */
         behind?: string;
+        /** Set by Resume at reset alone: the reset this turn goes on at, stamped on its session.start. */
+        afterLimit?: number;
       },
       origin?: Caller,
     ): Promise<SessionHandle>;

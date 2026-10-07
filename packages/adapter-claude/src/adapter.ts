@@ -676,6 +676,28 @@ function limitOf(info: Record<string, unknown> | undefined): HarnessLimit | unde
   return { windows, ...(status !== undefined ? { status } : {}) };
 }
 
+/** Moves the windows a turn's readings say stop the agent: a rejected window with no overage to run on stops it until
+ * its reset (epoch seconds, kept in ms), and any other reading of that window takes the stop back. */
+function noteRejected(info: Record<string, unknown> | undefined, rejected: Map<string, number | undefined>): void {
+  if (info === undefined) return;
+  const type = str(info.rateLimitType) ?? "";
+  const overage = info.isUsingOverage === true || str(info.overageStatus) === "allowed" || str(info.overageStatus) === "allowed_warning";
+  if (str(info.status) !== "rejected" || overage) {
+    rejected.delete(type);
+    return;
+  }
+  const resetsAt = num(info.resetsAt);
+  rejected.set(type, resetsAt === undefined ? undefined : resetsAt * 1000);
+}
+
+/** A failed turn the plan's rejected windows stopped, with the limit on it: the reset is the last of theirs, and
+ * unknown where any of them named none. */
+function withLimit(result: TurnResult, rejected: ReadonlyMap<string, number | undefined>): TurnResult {
+  if (result.status !== "failed" || rejected.size === 0) return result;
+  const resets = [...rejected.values()];
+  return { ...result, limit: resets.every((r): r is number => r !== undefined) ? { resetsAt: Math.max(...resets) } : {} };
+}
+
 /** Whether the turn settled inside `ms`. */
 async function settlesWithin(turn: Promise<unknown>, ms: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -749,6 +771,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     /** What the model held after its last call, the agent's own and never a subagent's: the last reply's usage, or a
      * compaction's figure where one came after it. The result's usage sums the turn, so it cannot say this. */
     let heldContext: number | undefined;
+    /** The windows this turn's readings said stop the agent, by the CLI's name for each, with its reset where named. */
+    const rejected = new Map<string, number | undefined>();
     /** Set once the CLI wrote a compaction's boundary this turn: /compact answers with no words and no call, and the
      * compaction is the whole of what it did, so its result is no empty answer. */
     let compacted = false;
@@ -818,7 +842,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       onEvent({ type: "turn.anchor", sessionId, anchor });
     };
 
-    const deliver = (result: TurnResult, sessionId = claudeSessionId): void => {
+    const deliver = (reply: TurnResult, sessionId = claudeSessionId): void => {
+      const result = withLimit(reply, rejected);
       if (settleTimer !== undefined) clearTimeout(settleTimer);
       settleTimer = undefined;
       heldReply = undefined;
@@ -978,6 +1003,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           }
           const usage = str(event.type) === "assistant" && str(event.parent_tool_use_id) === undefined ? rec(rec(event.message)?.usage) : undefined;
           if (usage !== undefined && event.is_api_error_message !== true) heldContext = heldTokens(usage);
+          if (str(event.type) === "rate_limit_event") noteRejected(rec(event.rate_limit_info), rejected);
           const cause = apiErrorCause(event);
           if (cause !== undefined) {
             refusalCause = cause;
