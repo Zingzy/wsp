@@ -32,7 +32,7 @@ import { ZoomIndicator } from "./ZoomIndicator.js";
 
 type PreviewSurface = Extract<RightPanelSurface, { kind: "preview" }>;
 
-const UNFRAMEABLE = "Only ports on this task can be framed here, like localhost:3000.";
+export const UNFRAMEABLE = "Only ports on the thread's computer can be framed here, like localhost:3000.";
 
 export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; surface: PreviewSurface }) {
   const tabId = surface.resourceId;

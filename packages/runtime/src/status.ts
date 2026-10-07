@@ -155,6 +155,8 @@ export interface StatusApi {
   watch(opts?: StatusWatchOptions): () => void;
   /** Whether a watcher holds it now, which is a window open on this host. */
   watched(): boolean;
+  /** Polls these workspaces now, between ticks, and pushes each row that moved, while a watcher holds the poll. */
+  poll(ids: readonly string[]): Promise<void>;
   /** The workspace's cost ticks since metering began, across host restarts, folded to the rate changes and the newest tick. */
   history(workspaceId: string): Promise<WorkspaceCostEvent[]>;
   /** What each row of the places list has cost since midnight and since the first of the month, over every workspace
@@ -809,11 +811,12 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     });
   }
 
-  const pollTick = async (): Promise<void> => {
-    const records = await o.records();
+  const pollTick = async (only?: ReadonlySet<string>): Promise<void> => {
+    const records = (await o.records()).filter(r => only === undefined || only.has(r.id));
     const statuses = await statusesOf(records, { reconcile: "on-failure" });
-    // A record written, marked or moved to another machine while its poll was in flight pushed its own row since; the poll's older row would put back what the record has left.
-    const stamp = (r: StatusRecord): string => `${r.generation} ${r.machineId} ${r.unreached ?? ""}`;
+    // A record written, marked or moved to another machine while its poll was in flight pushed its own row since, and so
+    // did one whose computer left or dialled back in: the poll's older row would put back what the record has left.
+    const stamp = (r: StatusRecord): string => `${r.generation} ${r.machineId} ${r.unreached ?? ""} ${r.away ?? ""}`;
     const built = new Map(records.map(r => [r.id, stamp(r)]));
     const now = new Map((await o.records()).map(r => [r.id, stamp(r)]));
     o.onPolled?.(statuses.filter(status => now.get(status.id) === built.get(status.id)));
@@ -884,5 +887,9 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     });
   };
 
-  return { list, watch, watched: () => watchers > 0, history, spend };
+  const poll: StatusApi["poll"] = async ids => {
+    if (watchers > 0 && ids.length > 0) await pollTick(new Set(ids)).catch((e: unknown) => console.warn("status poll tick failed", e));
+  };
+
+  return { list, watch, watched: () => watchers > 0, poll, history, spend };
 }

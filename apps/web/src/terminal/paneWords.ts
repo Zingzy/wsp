@@ -11,9 +11,27 @@ import { repoAbsence } from "../adapt/git.js";
 import { useOutOfMemoryReading } from "../machine/live.js";
 import { useCapabilities, usePlaces, useStatus, useStore, useWorkspace } from "../protocol/store.js";
 import { absenceOf } from "../settings/places.js";
-import { computerName } from "../sidebar/workspaceRows.js";
+import { computerName, computerOf } from "../sidebar/workspaceRows.js";
 import { gitStatus } from "./daemon-fs.js";
 import { getTerminals, NOT_OPENED_YET, onTerminals, type TerminalWire } from "./link.js";
+
+/** The person's own computer a workspace runs on, by its own name: the one the app runs on, or one they added. A
+ * machine a cloud lends is no computer of theirs and has no name of theirs, so it reads as none. */
+export function ownComputerName(places: readonly PlaceView[], workspace: WorkspaceView | null, status: WorkspaceStatus | null): string | undefined {
+  if (workspace === null) return undefined;
+  const at = computerOf(places, { workspace, status });
+  if (!isLocalWorkspace(workspace) && at?.kind !== "computer") return undefined;
+  const name = computerName(places, { workspace, status });
+  return name === "" ? undefined : name;
+}
+
+/** The same name off the store, for a surface that draws no pane of its own. */
+export function useOwnComputerName(workspaceId: string): string | undefined {
+  const workspace = useWorkspace(workspaceId);
+  const status = useStatus(workspaceId);
+  const places = usePlaces();
+  return useMemo(() => ownComputerName(places, workspace, status), [places, workspace, status]);
+}
 
 /** A link's pane state off the store's record of its workspace: the one reading useTerminalPane and useLinkDown
  * both take, so two surfaces cannot say two things about one link. */
@@ -22,9 +40,9 @@ function paneOf(input: { workspace: WorkspaceView | null; status: WorkspaceStatu
   const view = status ?? workspace;
   const local = workspace !== null && isLocalWorkspace(workspace);
   // What this link's sentences name: the person's own computer by its name once the places list holds it, else the
-  // workspace, which on a machine wsp forked is that machine's own name.
-  const computer = workspace === null ? "" : computerName(input.places, { workspace, status });
-  const where = local && computer !== "" ? computer : (workspace?.name ?? "");
+  // workspace, which on a machine a cloud lends is that machine's own name.
+  const own = ownComputerName(input.places, workspace, status);
+  const where = own ?? workspace?.name ?? "";
   return terminalPaneState({
     state: view === null ? "running" : workspaceStateOf(view, status),
     reach: status?.reach.state ?? null,
@@ -34,6 +52,7 @@ function paneOf(input: { workspace: WorkspaceView | null; status: WorkspaceStatu
     local,
     absent: absenceOf(input.places, workspace, status, null),
     ...(where === "" ? {} : { where }),
+    ...(own === undefined ? {} : { computer: own }),
   });
 }
 

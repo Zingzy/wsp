@@ -331,7 +331,7 @@ describe("command palette", () => {
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
     fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: ">pause" } });
-    fireEvent.click(await screen.findByText("Pause task"));
+    fireEvent.click(await screen.findByText("Pause api"));
     await waitFor(() => expect(api.nap).toHaveBeenCalledWith("ws_a"));
     expect(palette()).toBeNull();
   });

@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One directory listing per folder, shared by the tree, the breadcrumb menus
-// and the composer's folder picker: each folder is fetched the first time
+// One directory listing per folder, shared by the Files pane's tree and its
+// breadcrumb menus, its only reader: each folder is fetched the first time
 // something asks for it and again on demand, under the daemon's per-folder
 // cap. The last good listing of a folder stays up through a refresh or a
-// failed one.
-import { useCallback, useSyncExternalStore } from "react";
+// failed one, and a failed one is asked again when the link comes back.
+import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useAbsentComputer } from "../protocol/store.js";
 import { fsList } from "../terminal/daemon-fs.js";
 import type { TerminalWire } from "../terminal/link.js";
+import { useLinkWord } from "../terminal/paneWords.js";
 import { toProjectEntries, type ProjectEntry } from "./entries.js";
 import { useDaemonWire } from "./wire.js";
 
@@ -42,6 +44,11 @@ class WorkspaceListing {
   ensure(wire: TerminalWire, dir: string): void {
     if (this.#levels.has(dir)) return;
     void this.load(wire, dir);
+  }
+
+  /** Asks again for every folder whose last read failed. */
+  retryFailed(wire: TerminalWire): void {
+    for (const [dir, level] of this.#levels) if (level.error !== null) void this.load(wire, dir);
   }
 
   load(wire: TerminalWire, dir: string): Promise<void> {
@@ -100,6 +107,13 @@ export function useWorkspaceListing(workspaceId: string): WorkspaceListingHandle
     fn => listing.onChange(fn),
     () => listing.levels(),
   );
+  const link = useLinkWord(workspaceId);
+  const away = useAbsentComputer(workspaceId) !== null;
+  // A read made while the link was down or the computer away failed for that reason alone, and nothing else asks
+  // again: the effect that asked first keys on the folder, which has not moved.
+  useEffect(() => {
+    if (wire && link === "live" && !away) listing.retryFailed(wire);
+  }, [wire, listing, link, away]);
   const ensure = useCallback((dir: string) => { if (wire) listing.ensure(wire, dir); }, [wire, listing]);
   const refresh = useCallback((dir: string) => { if (wire) void listing.load(wire, dir); }, [wire, listing]);
   return { levels, ensure, refresh };
