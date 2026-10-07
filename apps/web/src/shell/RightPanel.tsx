@@ -29,6 +29,7 @@ import { useAppDark } from "../settings/theme.js";
 import { PANE_KINDS, paneOf, type PaneContext, type RightPanelKind } from "../panes.js";
 import { isOpenable, useRightPanelStore, type RightPanelSurface, type WorkspaceRightPanelState } from "../rightPanelStore.js";
 import { HERE_KEY } from "../terminal/computer.js";
+import { getTerminals } from "../terminal/link.js";
 import { openPanelTerminal } from "./shellCommands.js";
 import { useTerminalSurfaces, WorkspaceTerminalPanel } from "../components/WorkspaceTerminalPanel.js";
 import { AsideSurface } from "../components/chat/AsideSurface.js";
@@ -39,7 +40,7 @@ interface PaneView<K extends RightPanelKind> {
   /** How the pane opens when the store cannot open it alone. */
   open?(workspaceId: string): void;
   /** How the pane's tab closes when what it shows has to go with it. */
-  close?(workspaceId: string): void;
+  close?(workspaceId: string, surface: Extract<RightPanelSurface, { kind: K }>): void;
 }
 
 /** What each pane kind draws, the one line per kind the registry in panes.ts cannot hold without importing every
@@ -52,6 +53,12 @@ const PANE_VIEWS: { readonly [K in RightPanelKind]: PaneView<K> } = {
   terminal: {
     Surface: ({ workspaceId, surface }) => <WorkspaceTerminalPanel workspaceId={workspaceId} surface={surface} />,
     open: workspaceId => void openPanelTerminal(workspaceId),
+    // Killed before the tab goes: a pty no tab claims is the drawer's, which would adopt it as a second shell.
+    close: (workspaceId, surface) => {
+      const terminals = getTerminals(workspaceId);
+      for (const id of surface.terminalIds) void terminals?.close(id);
+      useRightPanelStore.getState().closeSurface(workspaceId, surface.id);
+    },
   },
   diff: {
     Surface: ({ workspaceId, theme }) => (
@@ -144,7 +151,7 @@ export function RightPanel({
       onActivate={surface => activateSurface(workspaceId, surface.id)}
       onCloseSurface={surface => {
         const closes = viewOf(surface.kind).close;
-        if (closes) closes(workspaceId);
+        if (closes) closes(workspaceId, surface);
         else closeSurface(workspaceId, surface.id);
       }}
       onAdd={kind => {
