@@ -2,6 +2,7 @@
 // Draws one slate from its engine: each piece is a host keyed by id that subscribes to its own redraws, reads its
 // `when`, resolves its props and hands them to the view its type registers. A piece that throws draws one quiet line
 // in its place; a type this build does not know draws its fallback.
+import { KeycapFilter } from "./pieces/keycap.js";
 import { createContext, memo, useContext, useMemo, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import type { SlateJson } from "@wsp/protocol/slate";
 import { RenderErrorBoundary } from "../components/RenderErrorBoundary.js";
@@ -47,6 +48,8 @@ export interface PieceView {
   saysRefreshing?: true;
   /** Takes the slate's one accent when it names no tone. */
   accent?: true;
+  /** Paths the view reads beyond its props, so the engine redraws it and holds their sources while it is drawn. */
+  reads?: (piece: SlatePiece) => readonly string[];
 }
 
 /** A flag of a piece view that is either fixed or read off the piece's place. */
@@ -101,6 +104,7 @@ export function SlateView({ engine, views, runner, sender }: SlateScope) {
     <Scope.Provider value={scope}>
       {/* The settings pages' locked look and a 16 px inset, so the cards and lines a slate borrows draw as they do there. */}
       <div data-slate={engine.threadId} data-locked="" className="group/settings flex min-w-0 flex-col [--settings-inset:16px]">
+        <KeycapFilter />
         <PieceHost id={doc.root} />
       </div>
     </Scope.Provider>

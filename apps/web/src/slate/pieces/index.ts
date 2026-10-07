@@ -7,6 +7,9 @@ import { bars } from "./bars.js";
 import { button } from "./button.js";
 import { chart } from "./chart.js";
 import { diagram } from "./diagram.js";
+import { donut } from "./donut.js";
+import { timeline } from "./timeline.js";
+import { treemap } from "./treemap.js";
 import { chip } from "./chip.js";
 import { choices } from "./choices.js";
 import { checklist } from "./checklist.js";
@@ -31,6 +34,6 @@ import { text } from "./text.js";
 import { toggle } from "./toggle.js";
 
 export const SLATE_VIEWS: PieceViews = Object.fromEntries(
-  [column, row, grid, section, heading, text, markdown, number, meter, ring, chart, diagram, sparkline, bars, status, chip, facts, table, checklist, output, button, input, select, choices, toggle, empty].map(view => [view.type, view]),
+  [column, row, grid, section, heading, text, markdown, number, meter, ring, chart, donut, timeline, treemap, diagram, sparkline, bars, status, chip, facts, table, checklist, output, button, input, select, choices, toggle, empty].map(view => [view.type, view]),
 );
 registerViews(SLATE_VIEWS);

@@ -253,8 +253,8 @@ describe("the richer kit in the renderer", () => {
   });
 
   it("draws every new piece's catalog example without a failure", () => {
-    const declared = `<value name="hist" start={[1, 2, 3]} /><value name="pick" start={null} /><value name="up" start={true} /><value name="done" start={1} /><value name="steps" start={[1, 2]} /><value name="q" start={{ options: ["a", "b"], answer: "a" }} />`;
-    for (const type of ["heading", "grid", "status", "chip", "ring", "chart", "sparkline", "bars", "choices"]) {
+    const declared = `<value name="hist" start={[1, 2, 3]} /><value name="pick" start={null} /><value name="up" start={true} /><value name="done" start={1} /><value name="steps" start={[1, 2]} /><value name="q" start={{ options: ["a", "b"], answer: "a" }} /><value name="countries" start={[{ name: "India", n: 41 }]} /><run name="stats" cmd="true" />`;
+    for (const type of ["heading", "grid", "status", "chip", "ring", "chart", "donut", "timeline", "treemap", "sparkline", "bars", "choices"]) {
       const { view } = draw(compiled(`<slate>${declared}<column>${SLATE_PIECES[type]!.example}</column></slate>`));
       expect(view.container.querySelector(`[data-slate-type="${type}"]`), type).not.toBeNull();
       expect(view.container.querySelector("[data-slate-failed]"), type).toBeNull();

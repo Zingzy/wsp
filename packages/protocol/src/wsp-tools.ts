@@ -30,7 +30,7 @@ export function launchHasSlate(servers: Readonly<Record<string, Pick<McpServerSp
 export const SLATE_BRIEF = [
   "wsp slate. This session is a wsp thread with a slate, a live panel beside this conversation that the person sees. Before any other work, decide whether the request belongs on the slate. It does when the person:",
   "- wants to see, watch, monitor or keep an eye on something, or a result kept fresh or refreshed on a schedule (\"refresh hourly\", \"live\", \"what's unread\");",
-  "- wants a dashboard, a form to fill in, a checklist or walkthrough to tick off, or a flow laid out (a diagram);",
+  "- wants a dashboard, a form to fill in, a checklist or walkthrough to tick off, or something drawn: a chart over time, a donut of shares, a timeline of a run's steps, a treemap of sizes or a flow laid out as a diagram;",
   "- asks for a button or control the project has no UI for: the slate is that UI.",
   "Then your first tool call is mcp__wsp__slate_catalog, then mcp__wsp__slate_write. Do not draw it with another tool or skill, write an HTML page, or answer in chat instead.",
   "On the slate, a value that changes comes from a <run>: a cmd, or tool=\"server.tool\" for an MCP tool. Never call that tool yourself and type its numbers in.",

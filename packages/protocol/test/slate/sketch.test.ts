@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseSlate, runSlateBatch, sketchSlate, slateCatalog, slateStartValues, slateTokens, SLATE_EXAMPLES, SLATE_LIMITS, SLATE_PIECES, SLATE_SOURCES, type SlateDoc, type SlateJson } from "../../src/slate/index.js";
-import { SLATE_INDEX_EXAMPLE } from "../../src/slate/catalog.js";
+import { SLATE_INDEX_EXAMPLE, slateTakesFigures } from "../../src/slate/catalog.js";
 import { SPEC_EXAMPLES } from "./examples.js";
 
 const now = Date.parse("2026-10-04T12:00:00Z");
@@ -166,7 +166,7 @@ describe("the catalog", () => {
       const line = index.split("\n").find(l => l.startsWith(`${p.type}: `))!;
       for (const [k, spec] of Object.entries(p.props)) {
         if (Object.values(p.items).some(i => i.prop === k) || k === "pad" || k === "surface") continue;
-        const values = Array.isArray(spec.type) && !["tone", "emphasis", "align"].includes(k) ? `(${(spec.type as readonly string[]).join("|")})` : "";
+        const values = Array.isArray(spec.type) && !["tone", "emphasis", "align"].includes(k) && !slateTakesFigures(spec) ? `(${(spec.type as readonly string[]).join("|")})` : "";
         expect(line, `${p.type}.${k}`).toMatch(new RegExp(`(^|[ ;])${k}${spec.required === true ? "!" : ""}${values.replace(/[()|]/g, c => `\\${c}`)}( |;|$)`));
       }
     }
@@ -202,6 +202,9 @@ describe("the sketch says what the person sees", () => {
   };
   /** A prop the person sees only in some state, and that state: a placeholder while empty, an answer once picked. */
   const SHOWN_WHEN: Record<string, Record<string, SlateJson>> = { placeholder: { value: "" }, answer: { options: ["Alpha", "Beta"], value: "Alpha" } };
+  /** What a piece draws beyond its required props, so each prop has a mark to change: a chart plots value or a
+   * <series>, a figure of 40 reads alike in every format, and a span with no start waits whatever the clock says. */
+  const DRAWS: Record<string, Record<string, SlateJson>> = { chart: { value: 40 }, treemap: { value: 12345 }, donut: { value: 12345 }, timeline: { start: 1_759_000_000_000 } };
   const fresh = (type: string): Record<string, SlateJson> => {
     const m = SLATE_PIECES[type]!;
     const props: Record<string, SlateJson> = {};
@@ -232,7 +235,7 @@ describe("the sketch says what the person sees", () => {
       for (const [name, spec] of Object.entries(m.props)) {
         if (spec.unseen !== undefined) continue;
         const [a, b] = pair(name, spec);
-        const base = { ...fresh(type), ...SHOWN_WHEN[name] };
+        const base = { ...fresh(type), ...DRAWS[type], ...SHOWN_WHEN[name] };
         expect(sketchOf(type, { ...base, [name]: a }), `${type}.${name}`).not.toBe(sketchOf(type, { ...base, [name]: b }));
       }
       for (const [kind, item] of Object.entries(m.items)) {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// How a chart labels its axes, read by the window that draws it and the sketch that tells the agent what it drew.
+// How a chart labels its axes, a timeline reads its spans and a donut its parts, read by the window that draws them and
+// the sketch that tells the agent what it drew.
 import { fmtClock } from "../format.js";
 import type { SlateJson } from "./types.js";
 
@@ -37,3 +38,33 @@ export function slateAxisWord(x: SlateJson | undefined): string {
   if (typeof x === "string" && /^\d{4}-\d{2}-\d{2}T/.test(x) && Number.isFinite(Date.parse(x))) return fmtClock(Date.parse(x)).slice(0, 5);
   return x === undefined || x === null ? "" : typeof x === "string" ? x : JSON.stringify(x);
 }
+
+/** A time as a slate reads one: ms, or a string Date.parse takes; anything else is not a time. */
+export function slateTime(value: SlateJson | undefined): number | undefined {
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== "string" || value.trim() === "") return undefined;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+export const SLATE_SPAN_STATES = ["done", "running", "failed", "waiting"] as const;
+export type SlateSpanState = (typeof SLATE_SPAN_STATES)[number];
+
+/** A span's state: the one given, else waiting with no start, running with no end and done with both. */
+export function slateSpanState(given: SlateJson | undefined, start: number | undefined, end: number | undefined): SlateSpanState {
+  if (typeof given === "string" && (SLATE_SPAN_STATES as readonly string[]).includes(given)) return given as SlateSpanState;
+  return start === undefined ? "waiting" : end === undefined ? "running" : "done";
+}
+
+/** The most parts a donut names; past that, the smallest are summed as Other. */
+export const SLATE_DONUT_PARTS = 5;
+
+/** A donut's parts, biggest first, a negative or missing value as 0, and past five parts the rest as one Other. */
+export function slateShares(given: ReadonlyArray<{ name: string; value: number }>): Array<{ name: string; value: number; other?: true }> {
+  const all = given.map(p => ({ name: p.name, value: Number.isFinite(p.value) ? Math.max(0, p.value) : 0 })).sort((a, b) => b.value - a.value);
+  if (all.length <= SLATE_DONUT_PARTS) return all;
+  return [...all.slice(0, SLATE_DONUT_PARTS), { name: "Other", value: all.slice(SLATE_DONUT_PARTS).reduce((sum, p) => sum + p.value, 0), other: true }];
+}
+
+/** The earliest a slate time is taken to mean: a number before it is most likely seconds read as milliseconds. */
+export const SLATE_TIME_FLOOR = Date.UTC(2000, 0, 1);
