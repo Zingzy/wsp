@@ -7,7 +7,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { CATALOG_AGENTS, MCP_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, hookFiles } from "@wsp/catalog";
 import { DETECTORS, expand, isSecretName, nodeHost, type Manifest } from "@wsp/collect";
 import { writeOwn } from "@wsp/own-file";
 import { issuesLine, noSuchRecipeRefusal, RECIPE_NAME_REFUSAL, RecipeFile, recipeCanon, recipeSlug, toolRowId, type RecipeOptions, type ResolvedRecipe } from "@wsp/protocol";
@@ -151,6 +151,14 @@ export function agentOwnPaths(id: string): string[] {
   return a.configPaths.filter(p => !apart.has(p));
 }
 
+/** The scripts an agent's hooks run, absolute, read off its settings as they stand on this computer. */
+function hookScripts(id: string, home: string): string[] {
+  const hooks = CATALOG_AGENTS.find(entry => entry.id === id)?.hooks;
+  if (hooks === undefined) return [];
+  const settings = expand({ home }, hooks.file);
+  return existsSync(settings) ? hookFiles(hooks, readFileSync(settings, "utf8"), home) : [];
+}
+
 /** Where on this computer each row a change can reach a computer from is read, by item key, and what it reads as
  * now: a skill at its real path, a config's files after their cuts, an agent's own files, the entry a server has in
  * the file its agent keeps them in. The resolve reads these and the watcher watches them; a CLI's version comes off
@@ -174,7 +182,7 @@ export function itemSources(file: RecipeFile, home: string): { key: string; path
     if (file.configs[id] !== undefined) out.push({ key: `configs/${id}`, paths: CONFIG_PATHS[id].map(at), digest: () => configDigest(configTexts(id, home)) });
   }
   for (const id of Object.keys(file.agents)) {
-    const paths = agentOwnPaths(id).map(at);
+    const paths = [...agentOwnPaths(id).map(at), ...hookScripts(id, home)];
     out.push({ key: `agents/${id}`, paths, digest: () => pathsDigest(paths) });
   }
   return out;
