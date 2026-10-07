@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::js;
 use crate::record::fill;
 use crate::tools::said::turns;
-use crate::words::{cost, duration, plural, title_line};
+use crate::words::{cost, duration, plural, title_line, tokens};
 
 /// A row of a read: who spoke, when the runtime recorded it, and the text.
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,9 +36,31 @@ pub struct TurnResult {
     #[serde(default)]
     pub cost_usd: Option<f64>,
     #[serde(default)]
+    pub tokens: Option<Tokens>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
     pub text: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct Tokens {
+    pub input: f64,
+    pub output: f64,
+}
+
+#[derive(Deserialize)]
+struct Step {
+    text: String,
+    state: String,
+}
+
+#[derive(Deserialize)]
+struct ChangedFile {
+    additions: f64,
+    deletions: f64,
 }
 
 #[derive(Deserialize)]
@@ -76,6 +98,18 @@ struct Event {
     to: Option<String>,
     #[serde(default)]
     fresh: Option<bool>,
+    #[serde(default)]
+    before: Option<f64>,
+    #[serde(default)]
+    after: Option<f64>,
+    #[serde(default)]
+    steps: Option<Vec<Step>>,
+    #[serde(default)]
+    files: Option<Vec<ChangedFile>>,
+    #[serde(default)]
+    others: Option<Vec<serde::de::IgnoredAny>>,
+    #[serde(default)]
+    shared: Option<bool>,
 }
 
 const NO_RESULT_LINE: &str = "turn ended without a result";
@@ -83,8 +117,18 @@ const NO_RESULT_LINE: &str = "turn ended without a result";
 /// The events of this thread that a read folds, in order; an event of another kind, or one that does not read as its
 /// kind's shape, is no row of it.
 fn of_thread(events: &[Box<RawValue>], thread_id: &str) -> Vec<Event> {
-    const READ: [&str; 7] =
-        ["session.start", "session.steer", "session.delta", "session.done", "session.end", "session.moved", "session.behind"];
+    const READ: [&str; 10] = [
+        "session.start",
+        "session.steer",
+        "session.delta",
+        "session.done",
+        "session.end",
+        "session.moved",
+        "session.behind",
+        "session.compacted",
+        "session.plan",
+        "session.changes",
+    ];
     events
         .iter()
         .filter_map(|raw| serde_json::from_str::<Event>(raw.get()).ok())
@@ -113,6 +157,8 @@ pub fn messages(events: &[Box<RawValue>], thread_id: &str) -> Vec<Message> {
     let mut calls: Vec<(String, Call)> = Vec::new();
     let mut saw_text = false;
     let mut replied = false;
+    let mut steps_row: Option<usize> = None;
+    let mut plan_row: Option<usize> = None;
     fn say(rows: &mut Vec<Message>, open: &mut Option<(usize, Option<String>)>, who: &str, at: Option<&RawValue>, text: String) -> usize {
         *open = None;
         rows.push(message(who, at, text));
@@ -139,6 +185,8 @@ pub fn messages(events: &[Box<RawValue>], thread_id: &str) -> Vec<Message> {
                 calls.clear();
                 saw_text = false;
                 replied = false;
+                steps_row = None;
+                plan_row = None;
                 if let Some(prompt) = event.prompt {
                     say(&mut rows, &mut open, "person", at, prompt);
                 }
@@ -218,6 +266,33 @@ pub fn messages(events: &[Box<RawValue>], thread_id: &str) -> Vec<Message> {
             }
             "session.end" if !replied => {
                 turn(&mut rows, &mut open, &mut calls, &mut saw_text, at, &failed(event.reason.as_ref()));
+            }
+            "session.compacted" => {
+                say(&mut rows, &mut open, "tool", at, compacted_line(event.before, event.after));
+            }
+            "session.plan" => {
+                if let Some(steps) = &event.steps {
+                    let line = plan_steps_line(steps);
+                    match steps_row {
+                        Some(row) => rows[row].text = line,
+                        None => steps_row = Some(say(&mut rows, &mut open, "tool", at, line)),
+                    }
+                }
+                if let Some(text) = event.text {
+                    match plan_row {
+                        Some(row) => rows[row].text = text,
+                        None => plan_row = Some(say(&mut rows, &mut open, "agent", at, text)),
+                    }
+                }
+            }
+            "session.changes" => {
+                // The count lands after the turn's end, and reads with the turn's work above that end.
+                let row = message("tool", at, turn_changes_line(&event));
+                match rows.last() {
+                    Some(last) if last.who == "turn" => rows.insert(rows.len() - 1, row),
+                    _ => rows.push(row),
+                }
+                open = None;
             }
             _ => {}
         }
@@ -302,10 +377,55 @@ pub fn turn_end_line(result: &TurnResult) -> String {
     if let Some(usd) = result.cost_usd {
         parts.push(cost(usd));
     }
+    if let Some(model) = result.model.as_ref().filter(|m| !m.is_empty()) {
+        parts.push(model.clone());
+    }
+    if let Some(used) = &result.tokens {
+        parts.push(format!("{} in", tokens(used.input)));
+        parts.push(format!("{} out", tokens(used.output)));
+    }
     let settled = parts.join("  ");
     match result.error.as_ref().filter(|_| result.status != "completed") {
         Some(failure) => format!("{settled}: {failure}"),
         None => settled,
+    }
+}
+
+/// `compactedLine`.
+fn compacted_line(before: Option<f64>, after: Option<f64>) -> String {
+    match (before, after) {
+        (_, None) => "Compacted the context".to_owned(),
+        (None, Some(after)) => format!("Compacted the context to {} tokens", tokens(after)),
+        (Some(before), Some(after)) => format!("Compacted the context, {} to {} tokens", tokens(before), tokens(after)),
+    }
+}
+
+/// `planStepsLine`.
+fn plan_steps_line(steps: &[Step]) -> String {
+    let done = steps.iter().filter(|s| s.state == "done").count();
+    let mut lines = vec![format!("Plan: {done} of {} steps done", steps.len())];
+    for step in steps {
+        let tick = if step.state == "done" { "x" } else { " " };
+        let working = if step.state == "working" { " (working)" } else { "" };
+        lines.push(format!("- [{tick}] {}{working}", step.text));
+    }
+    lines.join("\n")
+}
+
+/// `turnChangesLine`.
+fn turn_changes_line(event: &Event) -> String {
+    let files = event.files.as_deref().unwrap_or_default();
+    let added = js::number(files.iter().map(|f| f.additions).sum());
+    let taken = js::number(files.iter().map(|f| f.deletions).sum());
+    let count = format!("{}, +{added} -{taken}", plural(files.len(), "file"));
+    if let Some(others) = &event.others {
+        let own = if files.is_empty() { "No files from this thread's edits".to_owned() } else { format!("Changed {count}") };
+        return if others.is_empty() { own } else { format!("{own}; {} also changed in this folder", plural(others.len(), "file")) };
+    }
+    if event.shared == Some(true) {
+        format!("{} changed in this folder, +{added} -{taken}; other threads worked in it too", plural(files.len(), "file"))
+    } else {
+        format!("Changed {count}")
     }
 }
 
@@ -437,6 +557,30 @@ mod tests {
         ]);
         let rows: Vec<(String, String)> = messages(&e, "t").into_iter().map(|m| (m.who, m.text)).collect();
         let want = [("person", "go"), ("agent", "Looking"), ("tool", "read /a"), ("turn", "completed  Worked for 1.3s  $0.13")];
+        assert_eq!(rows, want.map(|(a, b)| (a.to_owned(), b.to_owned())));
+    }
+
+    #[test]
+    fn a_plan_rewrites_its_rows_in_place_and_the_changes_read_above_the_turns_end() {
+        let e = events(&[
+            r#"{"type":"session.start","threadId":"t","turnId":"1","prompt":"go"}"#,
+            r#"{"type":"session.plan","threadId":"t","steps":[{"text":"a","state":"working"},{"text":"b","state":"pending"}]}"#,
+            r#"{"type":"session.plan","threadId":"t","text":"draft"}"#,
+            r#"{"type":"session.plan","threadId":"t","steps":[{"text":"a","state":"done"},{"text":"b","state":"working"}]}"#,
+            r#"{"type":"session.plan","threadId":"t","text":"final"}"#,
+            r#"{"type":"session.compacted","threadId":"t","before":154321,"after":4270}"#,
+            r#"{"type":"session.done","threadId":"t","turnId":"1","result":{"status":"completed","model":"m","tokens":{"input":999500,"output":12}}}"#,
+            r#"{"type":"session.changes","threadId":"t","from":"a","to":"b","moved":[],"files":[{"path":"x","kind":"modified","additions":3,"deletions":1},{"path":"y","kind":"added","additions":2,"deletions":0}]}"#,
+        ]);
+        let rows: Vec<(String, String)> = messages(&e, "t").into_iter().map(|m| (m.who, m.text)).collect();
+        let want = [
+            ("person", "go"),
+            ("tool", "Plan: 1 of 2 steps done\n- [x] a\n- [ ] b (working)"),
+            ("agent", "final"),
+            ("tool", "Compacted the context, 154k to 4.27k tokens"),
+            ("tool", "Changed 2 files, +5 -1"),
+            ("turn", "completed  m  1M in  12 out"),
+        ];
         assert_eq!(rows, want.map(|(a, b)| (a.to_owned(), b.to_owned())));
     }
 
