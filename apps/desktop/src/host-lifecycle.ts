@@ -85,7 +85,7 @@ export function hostTokenMatches(statePath: string, digest: string): boolean {
 const wontAttach = (statePath: string, lock: HostLock, why: string): Error =>
   new Error(`a host (pid ${lock.pid}) holds ${lockPathFor(statePath)} on port ${lock.port} but ${why}: stop that process or run wsp down, then open wsp again`);
 
-/** The bin's rule, read from the bin: a checkout of wsp in cwd marks a dev run whose .wsp state is shared with wspx. It
+/** The bin's rule, read from the bin: a checkout of wsp in cwd marks a dev run on the checkout's own .wsp state. It
  * holds for a development run and nothing else, since a packaged app is launched from a folder it did not choose,
  * and WSP_HOME names the home over it in every case, which is what the locate doc says. */
 export function statePathIn(home: string, launch: Launch): string {

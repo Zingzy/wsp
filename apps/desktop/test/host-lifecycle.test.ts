@@ -1030,7 +1030,7 @@ describe("statePathIn", () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  it("shares the checkout's state with wspx when a development run is launched from a checkout of wsp", () => {
+  it("uses the checkout's state when a development run is launched from a checkout of wsp", () => {
     expect(statePathIn(home, { packaged: false, cwd })).toBe(join(cwd, ".wsp", "state.json"));
   });
 
@@ -1075,7 +1075,7 @@ describe("userDataIn", () => {
     expect(userDataIn({ packaged: true, cwd, env: custom })).not.toBe(userDataIn({ packaged: true, cwd }));
   });
 
-  it("follows the state file a development run shares with wspx, which sits in the checkout", () => {
+  it("follows the state file a development run uses, which sits in the checkout", () => {
     writeFileSync(join(cwd, "package.json"), `${JSON.stringify({ name: "wsp", private: true })}\n`);
     expect(userDataIn({ packaged: false, cwd })).toBe(join(cwd, ".wsp", "desktop"));
     // WSP_HOME wins over the checkout, packaged or not, as the state file does.

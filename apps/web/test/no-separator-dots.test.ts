@@ -9,7 +9,6 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const SCANNED = [
   "apps/web/src",
   "apps/desktop/src",
-  "apps/wspx/src",
   ...readdirSync(join(ROOT, "packages"), { withFileTypes: true })
     .filter(entry => entry.isDirectory() && existsSync(join(ROOT, "packages", entry.name, "src")))
     .map(entry => `packages/${entry.name}/src`),
