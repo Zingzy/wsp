@@ -11,6 +11,9 @@ import { usageResets, type ResetPlace } from "../usage-reset.js";
 import { type WorkspaceRecord, type LiveWorkspace, LOG_READ_EVERY_MS, RESET_EXEC_MS, type UsageDoor } from "../types/wiring.js";
 import type { RuntimeContext, UsageArea } from "../context.js";
 
+/** How long this computer's sign-ins, read off every agent's own commands, answer a usage read before they are read again. */
+const SIGN_INS_HELD_MS = 60_000;
+
 export function usageArea(ctx: RuntimeContext): UsageArea {
   const { opts, store, local, placeDoor, bus, clock, projectsHeld, setups, placeAway, sessions } = ctx;
   /** Why a machine cannot be asked anything at all this tick: it stands on a computer that is not connected. Every
@@ -87,12 +90,24 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
     );
   };
 
-  /** This computer's own sign-ins, read off its agents since no report carries them; a read that fails lists none. */
-  const hereSignIns = (): Promise<Record<string, AgentSignInState>> =>
-    (opts.agentsReader?.read({ kind: "here" }, { latest: false }) ?? Promise.resolve(undefined)).then(
+  /** This computer's own sign-ins, read off its agents since no report carries them, held a minute and shared while a
+   * read is out; a read that fails lists none. Each read runs every agent's own version and status command, and a
+   * usage read per live slate ran one each, about forty a minute (2026-10-06). */
+  let heldSignIns: { at: number; value: Promise<Record<string, AgentSignInState>> } | undefined;
+  const hereSignIns = (): Promise<Record<string, AgentSignInState>> => {
+    const now = clock.now();
+    if (heldSignIns !== undefined && now - heldSignIns.at < SIGN_INS_HELD_MS) return heldSignIns.value;
+    const value = (opts.agentsReader?.read({ kind: "here" }, { latest: false }) ?? Promise.resolve(undefined)).then(
       read => (read === undefined ? {} : Object.fromEntries(read.agents.flatMap(a => (a.signIn === "signed-in" || a.signIn === "vault-key" ? [[a.id, a.signIn]] : [])))),
       () => ({}),
     );
+    heldSignIns = { at: now, value };
+    return value;
+  };
+  // A sign-in that landed shows in usage at once rather than after the hold runs out.
+  bus.on("agents.changed", () => {
+    heldSignIns = undefined;
+  });
 
   const usageAccounts = async (): Promise<AccountsAnswer> => {
     const places = (await placeDoor?.list(clock.now())) ?? [];

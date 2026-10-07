@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 import { catalogEntry, versionOf } from "@wsp/catalog";
 import { nodeHost, type Host } from "@wsp/collect";
 import type { ExecResult, Machine } from "@wsp/engine";
 import { controlNameRefusal, placeProvisionPaths } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentHome, SECRET, type AgentHome } from "../../collect/test/agent-home.js";
-import { READER_CLOSED, agentsReader } from "../src/agents-reader.js";
+import { READER_CLOSED, agentsReader, eachScript } from "../src/agents-reader.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 const roots: string[] = [];
@@ -263,6 +264,31 @@ describe("the agents report off this computer and off a workspace", () => {
     const reader = agentsReader({ vault: () => ({}), here: () => here(at) });
     expect((await reader.read({ kind: "here", projects: [] })).projects).toEqual([]);
     expect(await reader.read({ kind: "here" })).not.toHaveProperty("projects");
+  });
+});
+
+describe("the probe batch on a computer with no timeout command, as a Mac is", () => {
+  it("ends a probe that hangs at its own bound, its children with it, and keeps each quick probe's code and output", async () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-batch-"));
+    roots.push(root);
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    for (const tool of ["sh", "perl", "mktemp", "cat", "head", "rm", "sleep"]) symlinkSync(execFileSync("/bin/sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim(), join(bin, tool));
+    const pids = join(root, "pids");
+    const hung = `echo $$ >> '${pids}'; sh -c 'echo $$ >> ${pids}; exec sleep 30' & sleep 30; wait`;
+    // The probe sleeps 30 s, past the test's own timeout, so the batch returns only where the bound ended it.
+    const { stdout } = await promisify(execFile)(join(bin, "sh"), ["-c", eachScript(2), "sh", hung, "printf fast", "printf slow; exit 7"], { encoding: "utf8", env: { PATH: bin } });
+    const records = stdout.split("\x1e").slice(1, 4).map(r => r.split("\x1f"));
+    expect(records).toEqual([["137", ""], ["0", "fast"], ["7", "slow"]]);
+    const alive = readFileSync(pids, "utf8").split("\n").filter(l => l !== "").filter(pid => {
+      try {
+        process.kill(Number(pid), 0);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    expect(alive).toEqual([]);
   });
 });
 
