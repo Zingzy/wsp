@@ -963,11 +963,12 @@ describe("serveRuntime workspaces.exec", () => {
       { type: "exec.exit", execId, exitCode: 3 },
     ]);
     expect(other.events.filter(e => String(e.type).startsWith("exec."))).toEqual([]);
-    // The command travels base64-encoded inside the launch script, each word quoted for the machine's shell, after
-    // the same exports a harness turn gets.
+    // The command travels base64-encoded inside the launch script, each word quoted for the machine's shell, and the
+    // same environment a harness turn gets rides the launch ahead of setsid, never the script on the machine's disk.
     const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
     const script = Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8");
-    expect(script).toContain("export CLAUDE_CONFIG_DIR='/root/.claude'\nexport PATH='/usr/bin'\n");
+    expect(launch).toContain("export CLAUDE_CONFIG_DIR='/root/.claude'\nexport PATH='/usr/bin'\nsetsid bash ");
+    expect(script).not.toContain("export ");
     expect(script).toContain("'sh' '-c' 'printf '\\''one\\ntwo\\n'\\''; exit 3'\n");
 
     const missing = await c.request("workspaces.exec", { workspaceId: "ws_nope", argv: ["true"] });
@@ -996,7 +997,7 @@ describe("serveRuntime workspaces.exec", () => {
     // The reply says where it ran, so a client prints that rather than restating the rule the runtime holds.
     expect(inFolder["cwd"]).toBe("/root/work/my proj");
     await until(() => c.events.some(e => e.type === "exec.exit" && e["execId"] === inFolder["execId"]));
-    expect(scripts().at(-1)).toContain("export PATH='/usr/bin'\ncd '/root/work/my proj' && 'git' 'status'\necho $? > ");
+    expect(scripts().at(-1)).toContain("\ncd '/root/work/my proj' && 'git' 'status'\necho $? > ");
 
     const bare = await c.request("workspaces.exec", { workspaceId, argv: ["git", "status"] });
     expect(bare.ok).toBe(true);
@@ -1004,7 +1005,7 @@ describe("serveRuntime workspaces.exec", () => {
     const held = (created["workspace"] as { project: { path: string } }).project.path;
     expect(bare["cwd"]).toBe(held);
     await until(() => c.events.some(e => e.type === "exec.exit" && e["execId"] === bare["execId"]));
-    expect(scripts().at(-1)).toContain(`export PATH='/usr/bin'\ncd '${held}' && 'git' 'status'\necho $? > `);
+    expect(scripts().at(-1)).toContain(`\ncd '${held}' && 'git' 'status'\necho $? > `);
     c.close();
   });
 

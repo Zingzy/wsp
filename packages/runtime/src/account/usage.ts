@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { CATALOG_AGENTS, type ThreadAgent, loginHomeIn, sharedOn } from "@wsp/catalog";
 import { type DaemonFrame, THIS_COMPUTER, underProject, absentComputer, HERE_PLACE_ID, isJoinedComputer, workspacePlace, RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, resetNoLoginsLine, USAGE_WORDS, outsideWspLine, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type AgentSignInState, type ResetAnswer, type UsageSplit } from "@wsp/protocol";
+import { envInput, withEnvFromInput } from "@wsp/engine";
 import { NO_PLACE_DOOR } from "../places.js";
 import { harnessCatalog, modelLabel } from "../harness-catalog.js";
 import { PLAN_RESETS } from "../adapters.js";
@@ -132,17 +133,22 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
     };
   };
 
-  /** One reset script on one computer: this one as a child of this host, a joined one over its link. */
-  const resetRun = async (place: ResetPlace, script: string): Promise<string> => {
+  /** One reset script on one computer: this one as a child of this host, a joined one over its link. The variables
+   * the person set for the agent never go in the script: here they ride the spawn, since the script lands in a file,
+   * and there the exec's input, since its command line is one every login on that computer can read. */
+  const resetRun = async (place: ResetPlace, script: string, agent: string): Promise<string> => {
     if (place.kind === "box") {
       if (placeDoor === undefined) throw new Error(NO_PLACE_DOOR);
-      return (await placeDoor.exec(place.id, script, { timeoutMs: RESET_EXEC_MS })).stdout;
+      const path = (await placeDoor.reportOf(place.id))?.login["PATH"];
+      const env = { ...(path !== undefined ? { PATH: path } : {}), ...setups.launchOf(place.id, agent).env };
+      return (await placeDoor.exec(place.id, withEnvFromInput(script), { timeoutMs: RESET_EXEC_MS, stdin: envInput(env) })).stdout;
     }
     if (local === undefined) throw new Error(absentComputer(place.name, null).sentence);
-    // The PATH and the home alone, as the road below reads them: the script exports what else it needs, and the
-    // variables that keep a thread's shells on its own wsp belong to threads.
+    // The PATH and the home alone of this computer's own, as the road below reads them, and the variables the person
+    // set for the agent, which ride the spawn since the script lands in a file; the variables that keep a thread's
+    // shells on its own wsp belong to threads.
     const { PATH, HOME } = local.env();
-    const stream = local.execStream({ idleMs: RESET_EXEC_MS, deadlineMs: RESET_EXEC_MS })(script, { env: { ...(PATH !== undefined ? { PATH } : {}), ...(HOME !== undefined ? { HOME } : {}) } });
+    const stream = local.execStream({ idleMs: RESET_EXEC_MS, deadlineMs: RESET_EXEC_MS })(script, { env: { ...(PATH !== undefined ? { PATH } : {}), ...(HOME !== undefined ? { HOME } : {}), ...setups.launchOf(place.id, agent).env } });
     const lines: string[] = [];
     for await (const line of stream.lines) lines.push(line);
     await stream.exited;
@@ -168,12 +174,12 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
     road: async (agent, at) => {
       const setup = setups.launchOf(at.id, agent);
       const launch = setup.launch?.program !== undefined ? { launch: { program: setup.launch.program } } : {};
+      // The script exports nothing of the setup's: the run carries those variables itself.
+      const env = {};
       if (at.kind === "here") {
         if (local === undefined) throw new Error(absentComputer(at.name, null).sentence);
-        return { home: setup.configDir ?? local.home(agent), env: { PATH: local.env()["PATH"], ...setup.env }, ...launch };
+        return { home: setup.configDir ?? local.home(agent), env, ...launch };
       }
-      const report = await placeDoor?.reportOf(at.id);
-      const env = { PATH: report?.login["PATH"], ...setup.env };
       if (setup.configDir !== undefined) return { home: setup.configDir, env, ...launch };
       const logins = (await placeDoor?.list(clock.now()))?.find(v => v.id === at.id)?.logins;
       const shared = sharedOn(agent);

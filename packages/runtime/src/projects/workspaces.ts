@@ -6,7 +6,7 @@ import { NotFirstLifeError, RestoreUnfinishedError, ResumeUnansweredError, golde
 import type { ProjectGolden, ProjectView, WorkspaceProject } from "@wsp/protocol";
 import { noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitRunLogReply, GitPrMergeReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, type TreeRecord, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, type PullRequestItem, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, AUTO_MERGE_OFF_LINE, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, scopeOf, spawnActRefusal, spawnGoldenRefusal, workspaceIdOf } from "@wsp/protocol";
 import { isLocalWorkspace, kindWords, noCommandsYetLine, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, kindForComputer, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, workspaceState, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix } from "@wsp/protocol";
-import { putFiles } from "@wsp/engine";
+import { harnessExec, putFiles } from "@wsp/engine";
 import { ownerRepoOf } from "@wsp/protocol";
 import { providerSaid } from "../status.js";
 import { harnessCatalog, smallestModel } from "../harness-catalog.js";
@@ -747,7 +747,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       try {
         const answer = await adapter.draftFor(
           { promptFile, ...(model !== undefined ? { model } : {}) },
-          command => entry.machine.exec(command, { timeoutMs: TITLE_MAKE_TIMEOUT_MS }).then(res => res.stdout),
+          harnessExec(entry.machine, TITLE_MAKE_TIMEOUT_MS),
         );
         const message = answer === null ? null : commitMessage(answer);
         return message === null ? { message: null, note: DRAFT_NOTES.noAnswer } : { message };

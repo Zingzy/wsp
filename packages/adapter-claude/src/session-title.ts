@@ -9,9 +9,8 @@
 // last custom-title, so the newest record does not decide it; the person's
 // rename wins wherever in the file it sits.
 
-import { generatedTitle, programWord, shellQuote } from "@wsp/protocol";
+import { ENV_FROM_INPUT, generatedTitle, programWord, shellQuote } from "@wsp/protocol";
 import type { AgentLaunch, SessionRenameWrite } from "@wsp/protocol";
-import { buildEnv } from "./landmines.js";
 
 const AI_TITLE = '"type":"ai-title"';
 const CUSTOM_TITLE = '"type":"custom-title"';
@@ -69,14 +68,14 @@ export function parseSessionTitle(stdout: string): string | null {
  * where a --safe-mode question against that same store answers the title), so on a computer whose person signed in
  * rather than exported a key every title question came back an error while their own turns ran. The same
  * environment as a session, the login's config dir included, so the question reads the sign-in a turn there reads
- * and never runs as a nested Claude Code.
+ * and never runs as a nested Claude Code: `buildEnv` is the input it reads that environment off.
  */
-export function titleForCommand(options: { prompt: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
-  const env = buildEnv({ base: options.baseEnv });
-  const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
-  const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
-  return `cd ~ && ${clean}; printf '%s' ${shellQuote(options.prompt)} | ${questionLine(options.model, options.launch)}`;
+export function titleForCommand(options: { prompt: string; model?: string; launch?: AgentLaunch }): string {
+  return `cd ~ && ${CLEAN}; printf '%s' ${shellQuote(options.prompt)} | ${questionLine(options.model, options.launch)}`;
 }
+
+/** Inherited Claude Code marks dropped, then the question's own environment read off its input. */
+const CLEAN = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; ${ENV_FROM_INPUT}`;
 
 /** The print-mode question as the title asks it: the person's customizations off, no tool, and their sign-in read. */
 const questionLine = (model: string | undefined, launch: AgentLaunch | undefined): string =>
@@ -87,11 +86,8 @@ const questionLine = (model: string | undefined, launch: AgentLaunch | undefined
  * with no thread, no tool and the person's customizations off, reading the question from the file the runtime put on
  * the machine, since a diff is longer than any command line may be.
  */
-export function draftForCommand(options: { promptFile: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
-  const env = buildEnv({ base: options.baseEnv });
-  const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
-  const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
-  return `cd ~ && ${clean}; ${questionLine(options.model, options.launch)} < ${shellQuote(options.promptFile)}`;
+export function draftForCommand(options: { promptFile: string; model?: string; launch?: AgentLaunch }): string {
+  return `cd ~ && ${CLEAN}; ${questionLine(options.model, options.launch)} < ${shellQuote(options.promptFile)}`;
 }
 
 /** The message out of the print-mode answer, its result field whole; null when the CLI errored or answered nothing. */

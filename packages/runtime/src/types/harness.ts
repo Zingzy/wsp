@@ -8,6 +8,7 @@ import type {
   AttachmentRoad,
   ExecStreamFactory,
   HarnessCatalogAnswer,
+  HarnessExec,
   ScreenCommand,
   PermissionOutcome,
   SessionRenamer,
@@ -198,7 +199,7 @@ export interface HarnessAdapter {
   readonly waitsForPrompt?: true;
   /** Asks the binary on the workspace's machine what it takes: its lists, its own words for why it has none, or null
    * when it does not answer at all; absent, the table alone answers and nothing runs. */
-  probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
+  probeCatalog?(exec: HarnessExec): Promise<HarnessCatalogAnswer>;
   /** Reads the harness's own title for a session out of its store on the machine; absent on a harness that keeps none. */
   sessionTitle?: SessionTitleReader;
   /** Writes a person's name for a session into that same store; absent on a harness that keeps no name of a person's. */

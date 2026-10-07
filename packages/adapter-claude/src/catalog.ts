@@ -6,9 +6,8 @@
 // CLI spells a 1M context as a "[1m]" suffix on the model. Measured on
 // 2.1.257: one line, exit 0 on stdin EOF, no API call.
 
-import { programWord, shellQuote } from "@wsp/protocol";
+import { ENV_FROM_INPUT, programWord } from "@wsp/protocol";
 import type { AgentLaunch, HarnessCatalogModelProbe, HarnessCatalogProbe, ScreenCommand } from "@wsp/protocol";
-import { buildEnv } from "./landmines.js";
 
 const SEP = "__WSP_CATALOG_SEP__";
 const INIT_REQUEST = JSON.stringify({ type: "control_request", request_id: "init", request: { subtype: "initialize", hooks: {} } });
@@ -39,15 +38,13 @@ type ClaudeModel = HarnessCatalogModelProbe & { efforts: string[]; contextWindow
  * handshake answers in about a second and the user's SessionStart hooks do not run
  * on a probe. `cd ~` for the same reason as a session: guest exec carries no HOME.
  * The handshake still writes .claude.json into the config dir it sees, so the probe
- * runs under the same environment as a session, the login's config dir included, and
- * drops every inherited CLAUDE_CODE_* mark the way the session env does (the exec
- * shell is bash).
+ * runs under the same environment as a session, the login's config dir included, read
+ * off its input once every inherited CLAUDE_CODE_* mark is dropped the way the session
+ * env drops them (the exec shell is bash): `buildEnv` is that input.
  */
-export function catalogProbeCommand(options: { baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch } = {}): string {
+export function catalogProbeCommand(options: { launch?: AgentLaunch } = {}): string {
   const claude = programWord("claude", options.launch);
-  const env = buildEnv({ base: options.baseEnv });
-  const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
-  const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
+  const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; ${ENV_FROM_INPUT}`;
   const handshake = `printf '%s\\n' "${INIT_REQUEST.replaceAll('"', '\\"')}" | ${claude} -p --bare --output-format stream-json --input-format stream-json --verbose`;
   return `cd ~ && ${clean}; ${claude} --version; echo ${SEP}; ${claude} --help; echo ${SEP}; ${handshake}`;
 }

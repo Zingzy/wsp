@@ -140,9 +140,9 @@ describe("a person's setup for Codex on a computer", () => {
 
   it("the probe, a title and a draft run the program and none of the launch words", () => {
     for (const line of [
-      catalogProbeCommand({ home: "/root/.codex", launch }),
-      titleForCommand({ home: "/root/.codex", prompt: "name it", launch }),
-      draftForCommand({ home: "/root/.codex", promptFile: "/tmp/ask", launch }),
+      catalogProbeCommand({ launch }),
+      titleForCommand({ prompt: "name it", launch }),
+      draftForCommand({ promptFile: "/tmp/ask", launch }),
     ]) {
       expect(line).toContain("'/opt/codex' ");
       expect(line).not.toMatch(/(^|[;&] *)codex /);

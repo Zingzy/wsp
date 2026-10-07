@@ -341,6 +341,11 @@ export function catalogRefused(answer: HarnessCatalogAnswer): answer is HarnessC
   return answer !== null && "refused" in answer;
 }
 
+/** One command on the machine a harness runs on, answering its stdout. `env` is what the command reads off its input
+ * with ENV_FROM_INPUT, so a key or a token is never a word of the command's text, which on a computer somebody owns
+ * is a command line every login there can read. */
+export type HarnessExec = (command: string, env?: Readonly<Record<string, string>>) => Promise<string>;
+
 /**
  * Reads what the harness itself calls one of its sessions, from the harness's own store on the machine: the title
  * it generated, overridden by whatever the person renamed the session to inside the harness. The id is the session
@@ -348,7 +353,7 @@ export function catalogRefused(answer: HarnessCatalogAnswer): answer is HarnessC
  * shell line goes to `exec` and its stdout is the answer. Null when the store keeps no title for that id, and when
  * it holds no such session at all; absent on an adapter whose harness keeps no title.
  */
-export type SessionTitleReader = (harnessSessionId: string, exec: (command: string) => Promise<string>) => Promise<string | null>;
+export type SessionTitleReader = (harnessSessionId: string, exec: HarnessExec) => Promise<string | null>;
 
 /**
  * What a rename came to in the harness's own store. written: the store took the name. no-session: the store answered
@@ -365,7 +370,7 @@ export type SessionRenameWrite = { kind: "written" } | { kind: "no-session" } | 
  * `exec`, whose stdout says which of the three answers it is. Absent on an adapter whose harness keeps no name of a
  * person's.
  */
-export type SessionRenamer = (harnessSessionId: string, title: string, exec: (command: string) => Promise<string>) => Promise<SessionRenameWrite>;
+export type SessionRenamer = (harnessSessionId: string, title: string, exec: HarnessExec) => Promise<SessionRenameWrite>;
 
 /** What a thread's title is asked for from: its opening turn's words, the reply where the caller has one (the runtime
  * asks at the turn's start and has none), and the model the question runs on, the cheapest the harness's catalog
@@ -383,7 +388,7 @@ export interface TitleTurn {
  * keeps the words its opening turn seeded it with. Absent on an adapter whose CLI cannot answer a question without a
  * thread.
  */
-export type SessionTitleMaker = (turn: TitleTurn, exec: (command: string) => Promise<string>) => Promise<string | null>;
+export type SessionTitleMaker = (turn: TitleTurn, exec: HarnessExec) => Promise<string | null>;
 
 /** What a commit message is drafted from: the file on the machine holding the question protocol's draftPrompt wrote,
  * which rides the CLI's stdin since a diff is longer than any command line may be, and the model the question runs
@@ -398,7 +403,7 @@ export interface DraftAsk {
  * CLI with no thread and no tool on the question in the file, and its stdout parsed back to a message. Null when the
  * CLI refused or answered nothing. Absent on an adapter whose CLI cannot answer a question without a thread.
  */
-export type CommitDrafter = (ask: DraftAsk, exec: (command: string) => Promise<string>) => Promise<string | null>;
+export type CommitDrafter = (ask: DraftAsk, exec: HarnessExec) => Promise<string | null>;
 
 /** A question asked beside a thread: the harness's own session it is asked of, as that harness keys it, the words,
  * the folder and model the thread's latest turn ran at, where the row knows them, and the MCP servers a turn of the

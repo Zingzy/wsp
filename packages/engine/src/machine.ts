@@ -96,6 +96,8 @@ export interface Machine {
    * you own and by a workspace on it, whose frames carry them; every other backend has a byte road of its own and
    * ignores them. */
   exec(cmd: string, opts?: { timeoutMs?: number; idempotencyKey?: string; stdin?: Uint8Array }): Promise<ExecResult>; // always REST path
+  /** Set on a machine whose exec hands `stdin` to the command; absent where the backend drops it. */
+  readonly takesStdin?: true;
   /** A command that may run for minutes: started detached on the guest and read until it exits or the deadline
    * kills it; the result is shaped like exec's. */
   run(script: string, opts: RunOptions): Promise<ExecResult>;
