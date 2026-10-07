@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, TOOLS_PATH, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, editJson, GUEST_HOME, installEnv, installHomes, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_BIN, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, parseJsonc, ROAD_MODULES, roadModule, ROADS, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, atCatalogPin, belowLine, pinnedNote, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, editJson, GUEST_HOME, installEnv, installHomes, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_BIN, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, parseJsonc, ROAD_MODULES, roadModule, ROADS, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -669,6 +669,8 @@ export interface ToolInstall {
   /** The version the row asks for, off its road, so a presence read can compare; absent where the road installs
    * what its source serves. */
   asks?: string;
+  /** Where the computer's Node is older than `node`, the version the step installs instead, which a presence read asks. */
+  below?: { node: string; asks?: string };
   /** The one line a person reads while the step runs: the manager's command, or where a download comes from. Absent, cmd is read. */
   shown?: string;
   /** What the result says beside the install once it lands: a road no golden build has proven yet, a version the road could not pin. */
@@ -823,11 +825,6 @@ export const GUEST_USER_ENV: Readonly<Record<string, string>> = { HOME: GUEST_HO
  * map it exports, so a road cannot spell it its own way. */
 export const EXEC_ENV = `export ${shellLine(Object.entries(GUEST_USER_ENV).map(([name, value]) => `${name}=${value}`))}`;
 const withPath = (cmd: string, path: string, prefix?: string): string => `${pathLine(path, prefix)}\n${cmd}`;
-
-/** Where a login shell reads the tools PATH: a thread's terminal is one, and it inherits nothing from the stages. */
-export const PROFILE_PATH_FILE = "/etc/profile.d/wsp-golden.sh";
-/** The base stage writes it on every golden, so a machine that never bootstraps Homebrew still answers `cargo`. */
-export const PROFILE_PATH_LINE = `printf '%s\\n' ${shellQuote(PATH_LINE)} > ${PROFILE_PATH_FILE}`;
 
 /** After the tools loop: dependencies no formula needs any more (a failed formula
  * left a 2.4 GB llvm@21 behind), then the bottle cache and old kegs (5.5 GB measured). */
@@ -1004,24 +1001,22 @@ const releaseRoad = (r: Pick<PlannedRoad, "source" | "pin">): InstallRoad => ({ 
 /** What a tools row installs by, with the command it puts on PATH where known: a catalog row its entry's road at the
  * row's version where the road pins one (noted when no golden build has proven the road, or when the version could not
  * be pinned), a tap formula with no Linux bottle its GitHub release when this Mac's Homebrew (`brew`) names one, any
- * other formula row the brew road, a manager row its manager's road at the row's version; nothing for a row no road
- * installs. A road carries the pin the row's first install recorded. The one resolver the plan and the digest read. */
+ * other formula row the brew road, a manager row its manager's road at the row's version; a package the catalog pins
+ * never below its pin (`atCatalogPin`). A road carries its first install's pin. The plan, digest and Behind read this. */
 export function rowRoad(e: RecipeEntry, brew: BrewTable): PlannedRow | undefined {
   const pkg = packageOf(e);
   const known = catalogToolOf(e);
   if (known !== undefined) {
     const mod = roadModule(known.installRoad);
-    const road = e.version !== undefined && mod.at !== undefined ? mod.at(known.installRoad, e.version) : known.installRoad;
-    // A road the catalog pinned installs that pin on every machine, so a row asking another version is told which
-    // one it gets; a road that takes no version at all is told it installs the source's current one.
+    const at = atCatalogPin(e.version !== undefined && mod.at !== undefined ? mod.at(known.installRoad, e.version) : known.installRoad, e.version);
+    // A road that takes no version installs the catalog's pinned release, or the source's current one, whatever the row asked.
     const pinned = "version" in known.installRoad ? known.installRoad.version : undefined;
-    const asked = e.version !== undefined && mod.at === undefined && e.version !== pinned;
     const notes = [
       ...(known.source.road === "unmeasured" ? [UNMEASURED_ROAD] : []),
-      ...(asked ? [pinned !== undefined ? `asked ${e.version}, installed at the catalog's pinned ${pinned}` : `${e.version} asked, installed ${mod.words} at its current version`] : []),
+      ...(at.note !== undefined ? [at.note] : e.version !== undefined && mod.at === undefined && e.version !== pinned ? [pinned !== undefined ? pinnedNote(e.version, pinned) : `${e.version} asked, installed ${mod.words} at its current version`] : []),
     ];
     const after = installAfter(known);
-    return { road: { ...road, ...pinOf(e) }, bin: known.bin, ...(after !== undefined ? { after } : {}), ...(notes.length > 0 ? { note: notes.join("; ") } : {}) };
+    return { road: { ...at.road, ...pinOf(e) }, bin: known.bin, ...(after !== undefined ? { after } : {}), ...(notes.length > 0 ? { note: notes.join("; ") } : {}), ...(at.pinned !== undefined ? { pinned: at.pinned } : {}), ...(at.below !== undefined ? { below: { node: at.below.node, road: { ...at.below.road, ...pinOf(e) } } } : {}) };
   }
   const release = releaseFor(e, brew);
   if (release !== undefined) return { road: releaseRoad(release), bin: release.name };
@@ -1031,14 +1026,18 @@ export function rowRoad(e: RecipeEntry, brew: BrewTable): PlannedRow | undefined
   const manager = ROADS.find(m => e.id.startsWith(toolRowPrefix(m)));
   const fromRow = manager === undefined ? undefined : rowRoadReader(manager);
   if (fromRow === undefined) return undefined;
-  const road = fromRow({ name: pkg, ...(e.version !== undefined ? { version: e.version } : {}), paths: e.paths, label: e.label });
+  const { road, pinned, note, below } = atCatalogPin(fromRow({ name: pkg, ...(e.version !== undefined ? { version: e.version } : {}), paths: e.paths, label: e.label }), e.version);
   const bin = roadModule(road).bin?.(road);
-  return { road, ...(bin !== undefined ? { bin } : {}) };
+  return { road, ...(bin !== undefined ? { bin } : {}), ...(note !== undefined ? { note } : {}), ...(pinned !== undefined ? { pinned } : {}), ...(below !== undefined ? { below } : {}) };
 }
 
 export interface PlannedRow {
   road: InstallRoad;
   bin?: string;
+  /** The catalog's pin, where it won over the version the row asked. */
+  pinned?: string;
+  /** The row's own road, for a computer whose Node is older than the pin's engines take. */
+  below?: { node: string; road: InstallRoad };
   /** What the catalog says the row runs on top of; a row outside the catalog takes its road's word. */
   after?: string;
   note?: string;
@@ -1250,7 +1249,8 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     }
     const after = afterDep(depOf(planned), planned.road.road);
     const bin = planned.bin ?? packageOf(e);
-    installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...roadReads(planned.road, bin, prefix), ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}), ...asksOf(planned.road), pin: pinReadOf(planned.road, bin, prefix) });
+    const below = planned.below === undefined ? {} : { cmd: withPath(belowLine(planned.road, planned.below, bin, installHomes(prefix)), path, prefix), below: { node: planned.below.node, ...asksOf(planned.below.road) } };
+    installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...below, ...roadReads(planned.road, bin, prefix), ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}), ...asksOf(planned.road), pin: pinReadOf(planned.road, bin, prefix) });
   };
   // A catalog row that is a manager's own toolchain is planned with that manager, not again with the road it takes.
   const asManager = (id: string): boolean => [...managers.values()].some(m => m.row?.e.id === id);

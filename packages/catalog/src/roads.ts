@@ -333,8 +333,15 @@ export const HERMES_INSTALL = [
 export const PLAYWRIGHT = { version: "1.62.1" } as const;
 
 /** The global first, then Playwright's installer for its Chromium and the Debian packages the browser needs; that
- * installer reads the apt index itself. */
-export const PLAYWRIGHT_INSTALL = [APT_ENV, `npm install -g playwright@${PLAYWRIGHT.version}`, "playwright install --with-deps chromium"].join("\n");
+ * installer reads the apt index itself. Where npm's own folder is on no PATH yet (a builder whose Node is nvm's, which
+ * the seal then puts on the image's PATH), the installer is found there, never under the home a computer somebody
+ * owns shares with every workspace on it. */
+export const PLAYWRIGHT_INSTALL = [
+  APT_ENV,
+  `npm install -g playwright@${PLAYWRIGHT.version}`,
+  `command -v playwright >/dev/null || { b="$(npm prefix -g)/bin"; case "$b" in ${GUEST_HOME}/*) ;; *) PATH="$b:$PATH" ;; esac; }`,
+  "playwright install --with-deps chromium",
+].join("\n");
 
 /** Swift by swift.org's Debian 12 toolchain tarball; swift.org signs it and publishes no sum, so the sums are the
  * tarballs' own as read on 2026-09-07 (https://www.swift.org/install/linux/debian/12/). */

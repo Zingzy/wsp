@@ -47,6 +47,7 @@ import {
   shellInstallFor,
   toolNames,
   toolInstallsFor,
+  pathLine,
   toolUninstall,
   brewHousekeeping,
   TOOLS_PATH,
@@ -57,7 +58,9 @@ import {
   type RecipeEntry,
 } from "../src/golden-import.js";
 import { BREW, BREW_PREFIX, BREW_REAL, BREW_REPO, KUBECTL, LINUXBREW_HOME, LINUXBREW_SHIM, MAC_ONLY, catalogEntry } from "@wsp/catalog";
-import { HOMEBREW_PREFIX, shellQuote } from "@wsp/protocol";
+import { HOMEBREW_PREFIX, TOOL_PREFIX, compareVersions, probePath, shellQuote } from "@wsp/protocol";
+import { GUEST_HOME } from "@wsp/catalog";
+import { presenceTests } from "../src/provision.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): RecipeEntry => ({
@@ -1233,6 +1236,123 @@ describe("catalog rows", () => {
     expect(get("tools/catalog/gh").cmd).toContain("releases/download/v2.101.0/");
     expect(get("tools/catalog/tmux").cmd).toMatch(/\napt-get install -y -qq tmux$/);
     expect(get("tools/catalog/tmux").note).toBe(`${UNMEASURED_ROAD}; 3.5a asked, installed by apt at its current version`);
+  });
+
+  it("the catalog's pin wins over an older version on any road a row names the tool by", () => {
+    const pin = (id: string) => (catalogEntry(id)!.installRoad as { version: string }).version;
+    const pnpm = pin("pnpm");
+    const t = toolInstallsFor([
+      row({ rung: "tools", id: "tools/npm/pnpm", label: "pnpm", version: "10.34.5" }),
+      row({ rung: "tools", id: "tools/brew/pnpm", label: "pnpm", version: "10.34.5", linux: "yes" }),
+      catalog("pnpm", { version: "10.34.5" }),
+      row({ rung: "tools", id: "tools/npm/wrangler", label: "wrangler", version: "4.1.0" }),
+    ]);
+    const get = (id: string) => t.installs.find(i => i.id === id)!;
+    for (const id of ["tools/npm/pnpm", "tools/brew/pnpm", "tools/catalog/pnpm"]) {
+      expect(get(id).cmd, id).toMatch(new RegExp(`\\nnpm install -g pnpm@${pnpm.replace(/\./g, "\\.")}$`, "m"));
+      expect(get(id).asks, id).toBe(pnpm);
+      expect(get(id).note, id).toContain(`asked 10.34.5, installed at the catalog's pinned ${pnpm}`);
+    }
+    // A tool the catalog does not pin keeps the version the row asked for.
+    expect(get("tools/npm/wrangler").cmd).toMatch(/^npm install -g wrangler@4\.1\.0$/m);
+    expect(get("tools/npm/wrangler").note).toBeUndefined();
+  });
+
+  it("a row asking a newer version than the catalog pins keeps its own: the pin is a floor, never a downgrade", () => {
+    const pinned = (catalogEntry("agent-browser")!.installRoad as { version: string }).version;
+    expect(compareVersions("0.40.0", pinned)).toBeGreaterThan(0);
+    const t = toolInstallsFor([row({ rung: "tools", id: "tools/npm/agent-browser", label: "agent-browser", version: "0.40.0" }), catalog("agent-browser", { version: "0.40.0" })]);
+    const get = (id: string) => t.installs.find(i => i.id === id)!;
+    for (const id of ["tools/npm/agent-browser", "tools/catalog/agent-browser"]) {
+      expect(get(id).cmd, id).toMatch(/^npm install -g agent-browser@0\.40\.0$/m);
+      expect(get(id).note ?? "", id).not.toContain("pinned");
+    }
+  });
+
+  it("the pin installs only where the computer's Node takes it: on an older Node the row keeps its own version, and the presence read holds the row to that one", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-pin-node-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    const stubs = join(dir, "stubs");
+    mkdirSync(stubs);
+    const log = join(dir, "npm.log");
+    writeStub(join(stubs, "npm"), `#!/bin/sh\necho "$*" >> ${shellQuote(log)}\n`);
+    const node = (version: string) => writeStub(join(stubs, "node"), `#!/bin/sh\necho v${version}\n`);
+    const sh = (script: string): number | null => spawnSync("bash", ["-c", script.replace(/^export PATH=/, `export PATH=${stubs}:`)], { encoding: "utf8" }).status;
+    const pin = (catalogEntry("pnpm")!.installRoad as { version: string }).version;
+    // A box's plan, on the order and under the prefix its job runs with, for each road a row names pnpm by.
+    const t = toolInstallsFor(
+      [row({ rung: "tools", id: "tools/npm/pnpm", label: "pnpm", version: "10.34.5" }), row({ rung: "tools", id: "tools/brew/pnpm", label: "pnpm", version: "10.34.5", linux: "yes" }), catalog("pnpm", { version: "10.34.5" })],
+      new Map(),
+      [],
+      probePath(GUEST_HOME),
+      TOOL_PREFIX,
+    );
+    for (const step of t.installs.filter(i => i.label === "pnpm")) {
+      expect(step.note, step.id).toContain(`asked 10.34.5, installed at the catalog's pinned ${pin}, or 10.34.5 where the computer's Node is older than 22.13, which pnpm ${pin} needs`);
+      for (const [version, installs] of [["20.20.2", "10.34.5"], ["22.12.0", "10.34.5"], ["22.13.0", pin], ["24.18.1", pin]] as const) {
+        node(version);
+        rmSync(log, { force: true });
+        expect(sh(step.cmd), `${step.id} on Node ${version}`).toBe(0);
+        expect(readFileSync(log, "utf8"), `${step.id} on Node ${version}`).toBe(`install -g pnpm@${installs}\n`);
+        // Present where the version on the computer is the one this Node takes, and stale otherwise.
+        for (const have of ["10.34.5", pin]) {
+          const read = presenceTests({ ...step, pin: { ...step.pin!, read: `echo ${have}` } }).at(-1)!;
+          expect(sh(`export PATH=/usr/bin:/bin\n${read}`), `${step.id} with ${have} on Node ${version}`).toBe(have === installs ? 0 : 1);
+        }
+      }
+      // A node that answers no version takes nothing newer than the row asked.
+      writeStub(join(stubs, "node"), "#!/bin/sh\nexit 127\n");
+      rmSync(log, { force: true });
+      sh(step.cmd);
+      expect(readFileSync(log, "utf8")).toBe("install -g pnpm@10.34.5\n");
+    }
+  });
+
+  it("a box's npm step is main's one install line: nothing is linked, npm's folder is never read, and a prefix and a command planted in the shared home change nothing root runs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-box-npm-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    const t = toolInstallsFor([row({ rung: "tools", id: "tools/npm/wrangler", label: "wrangler", version: "4.1.0" })], new Map(), [], probePath(GUEST_HOME), TOOL_PREFIX);
+    const step = t.installs.find(i => i.id === "tools/npm/wrangler")!;
+    expect(step.cmd).toBe(`${pathLine(probePath(GUEST_HOME), TOOL_PREFIX)}\nnpm install -g wrangler@4.1.0`);
+    // The home every workspace on the box writes: an npmrc moving npm's prefix into it, and a command planted there
+    // under a name root runs, linked into a package folder npm is about to replace.
+    const home = join(dir, "home");
+    mkdirSync(join(home, ".p", "bin"), { recursive: true });
+    mkdirSync(join(home, ".p", "lib", "node_modules", "wrangler"), { recursive: true });
+    spawnSync("sh", ["-c", `printf 'prefix=%s\\n' "$1/.p" > "$1/.npmrc"; ln -s "$1/.p/lib/node_modules/wrangler/planted" "$1/.p/bin/git"`, "sh", home]);
+    const stubs = join(dir, "stubs");
+    mkdirSync(stubs);
+    const log = join(dir, "npm.log");
+    // npm as root's job meets it: it takes the prefix the home's npmrc names, and says every call it got.
+    writeStub(join(stubs, "npm"), `#!/bin/sh\necho "$*" >> ${shellQuote(log)}\np="$(sed -n 's/^prefix=//p' "$HOME/.npmrc")"\n[ "$1 $2" = "install -g" ] && mkdir -p "$p/lib/node_modules/wrangler"\nexit 0\n`);
+    const before = spawnSync("ls", ["-la", LOCAL_BIN], { encoding: "utf8" }).stdout;
+    const res = spawnSync("bash", ["-c", step.cmd.replace(/^export PATH=/, `export PATH=${stubs}:`)], { env: { HOME: home }, encoding: "utf8" });
+    expect(res.status).toBe(0);
+    // One call, the install: the step's cost is npm's alone, however many commands npm's folder holds.
+    expect(readFileSync(log, "utf8")).toBe("install -g wrangler@4.1.0\n");
+    expect(spawnSync("ls", ["-la", LOCAL_BIN], { encoding: "utf8" }).stdout).toBe(before);
+    // The planted name answers nowhere on the order a workspace and the job run on.
+    const git = spawnSync("bash", ["-c", `export PATH=${probePath(GUEST_HOME)}; command -v git`], { env: { HOME: home }, encoding: "utf8" }).stdout.trim();
+    expect(git.startsWith(home)).toBe(false);
+  });
+
+  it("Playwright's installer reaches the command npm put in its own folder where that folder is on no PATH, and never one under the shared home", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-playwright-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    const stubs = join(dir, "stubs");
+    const prefix = join(dir, "nvm");
+    mkdirSync(stubs);
+    mkdirSync(join(prefix, "bin"), { recursive: true });
+    const log = join(dir, "playwright.log");
+    writeStub(join(stubs, "npm"), `#!/bin/sh\n[ "$1 $2" = "prefix -g" ] && echo "\${STUB_PREFIX:-${prefix}}"\nexit 0\n`);
+    writeStub(join(prefix, "bin", "playwright"), `#!/bin/sh\necho "$*" >> ${shellQuote(log)}\n`);
+    const script = (catalogEntry("playwright")!.installRoad as { script: string }).script;
+    const run = (env: Record<string, string>) => spawnSync("bash", ["-c", `export PATH=${stubs}:/usr/bin:/bin\n${script}`], { env, encoding: "utf8" }).status;
+    expect(run({})).toBe(0);
+    expect(readFileSync(log, "utf8")).toBe("install --with-deps chromium\n");
+    // A prefix under the home a box shares with every workspace is not looked in: the installer is not found.
+    rmSync(log);
+    expect(run({ STUB_PREFIX: `${GUEST_HOME}/.p` })).toBe(127);
   });
 
   it("a catalog row installs the artifact the catalog pinned and checks the sum beside it, whatever a recipe recorded", () => {

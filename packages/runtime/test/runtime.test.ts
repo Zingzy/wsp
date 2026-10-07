@@ -9,7 +9,7 @@ import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@ws
 import { diskFullLine, execFailedLine, imageServedWaitLine, machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape } from "@wsp/protocol";
 import { HOST_TOKEN_ENV, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, DISK_SYNC_CMD, DISK_USE_CMD, ExecFailedError, GuestUnusableError, KILL_ASKS, MachineUnreachableError, TOOLS_PATH, type ExecResult, type GoldenDelta, type GoldenImport } from "@wsp/engine";
-import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
+import { AGENTS_BIN, DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, daemonTokenFor, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
@@ -303,6 +303,42 @@ describe("runtime", () => {
     await createOn(rt, { golden: "snap_g", name: "own", envs: { FOO: "1", HOME: "/home/dev" } });
     expect(backend.machines[0]!.spec.envs).toEqual(GUEST_LOGIN_ENV);
     expect(backend.machines[1]!.spec.envs).toEqual({ HOME: "/home/dev", USER: "root", PATH: TOOLS_PATH, IS_SANDBOX: "1", DISABLE_AUTOUPDATER: "1", FOO: "1" });
+  });
+
+  it("a fork of a version whose seal read npm's own folder carries it first on its PATH, and so does every turn there, a host restarted between them included", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const npmBin = "/opt/nvm/versions/node/v24.18.1/bin";
+    const version = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", setupSha: "s", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 }, npmBin };
+    await store.put("goldens", copyKey("default", "big"), { head: 1, versions: [version] });
+    const contexts: HarnessAdapterContext[] = [];
+    const scripted: HarnessAdapterFactory = ctx => {
+      contexts.push(ctx);
+      return {
+        steers: false,
+        start: ({ onEvent }) => {
+          const sessionId = "22222222-2222-4222-8222-222222222222";
+          const result: TurnResult = { status: "completed", text: "done" };
+          const finished = (async () => {
+            for (const e of [{ type: "session.start", sessionId }, { type: "turn.done", sessionId, result }, { type: "session.end", sessionId, exitCode: 0, sawResult: true }] as AdapterEvent[]) onEvent(e);
+            return result;
+          })();
+          return { localId: sessionId, finished, interrupt: async () => {} };
+        },
+      };
+    };
+    const rt = createRuntime({ backend, store, adapters: { claude: scripted } });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "x" });
+    expect(backend.machines[0]!.spec.envs?.["PATH"]).toBe(`${AGENTS_BIN}:${npmBin}:${TOOLS_PATH}`);
+    await (await rt.sessions.start(ws.id, { prompt: "hi" })).finished;
+    const again = createRuntime({ backend, store, adapters: { claude: scripted } });
+    await (await again.sessions.start(ws.id, { prompt: "again" })).finished;
+    expect(contexts.length).toBeGreaterThan(1);
+    for (const ctx of contexts) expect(ctx.env["PATH"]).toBe(`${AGENTS_BIN}:${npmBin}:${TOOLS_PATH}`);
+    // A version that read none keeps the tools PATH as it is.
+    const plain = await createOn(rt, { golden: "snap_g", name: "plain" });
+    expect(backend.machines.at(-1)!.spec.envs?.["PATH"]).toBe(TOOLS_PATH);
+    expect(plain.id).not.toBe(ws.id);
   });
 
   it("wake after the paused machine vanished settles it gone and forks nothing; the rebuild that follows forks the golden with the workspace's envs", async () => {

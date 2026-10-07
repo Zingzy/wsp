@@ -5,7 +5,7 @@
 // does not already satisfy, then the machine context. Nothing here knows how
 // the computer is reached: it drives a Machine, which for a box is that
 // computer over the link its daemon holds.
-import { COMPILER_ROW, ROAD_MODULES, catalogEntry, catalogIdOfRow } from "@wsp/catalog";
+import { COMPILER_ROW, ROAD_MODULES, catalogEntry, catalogIdOfRow, nodeAtLeast } from "@wsp/catalog";
 import { TOOL_PREFIX, agentOfRow, plural, presentElsewhereLine, provisionServersLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { markersOf, pagedReads } from "./exec-detached.js";
 import { baseInstalls, installBase } from "./golden-base.js";
@@ -130,8 +130,8 @@ const PRESENT = "wsp-present";
  * One read per step, since a read is about a second and a page of them has the inline exec's bound to answer
  * inside: a formula's check and its version read are the same `brew list` under `su`, and a page of eight rows
  * asked twice each is sixteen of them against twenty seconds, whose exec failing reads nothing present and
- * installs all eight again. */
-export function presenceTests(step: ToolInstall): string[] {
+ * installs all eight again. With `any`, the doctor's: a version is read and any one answers. */
+export function presenceTests(step: ToolInstall, versions: "asked" | "any" = "asked"): string[] {
   const tests: string[] = [];
   const own = step.present ?? step.check;
   if (own !== undefined) tests.push(`( ${own} ) >/dev/null 2>&1`);
@@ -139,7 +139,8 @@ export function presenceTests(step: ToolInstall): string[] {
   const version = step.pin?.read;
   if (version !== undefined && (step.asks !== undefined || tests.length === 0)) {
     const read = `"$( ( ${version} ) 2>/dev/null | head -n 1 | tr -d '[:space:]' )"`;
-    tests.push(step.asks === undefined ? `[ -n ${read} ]` : `[ ${read} = ${shellQuote(step.asks)} ]`);
+    const is = (asks: string | undefined): string => (asks === undefined || versions === "any" ? `[ -n ${read} ]` : `[ ${read} = ${shellQuote(asks)} ]`);
+    tests.push(step.below === undefined || versions === "any" ? is(step.asks) : `if ${nodeAtLeast(step.below.node)}; then ${is(step.asks)}; else ${is(step.below.asks)}; fi`);
   }
   return tests;
 }
@@ -156,9 +157,9 @@ export interface PresentRead {
  * under its managers' knobs: a row's version read is its manager's own command and answers about the folder that
  * manager was told to keep its tools in. A page that could not be made says nothing is present in it, which
  * installs those steps again rather than skipping one that is not there. */
-export async function presentSteps(machine: Machine, steps: readonly ToolInstall[], path: string = TOOLS_PATH, prefix?: string): Promise<Map<string, PresentRead>> {
+export async function presentSteps(machine: Machine, steps: readonly ToolInstall[], path: string = TOOLS_PATH, prefix?: string, versions: "asked" | "any" = "asked"): Promise<Map<string, PresentRead>> {
   const asked = steps.flatMap(step => {
-    const tests = presenceTests(step);
+    const tests = presenceTests(step, versions);
     return tests.length === 0 ? [] : [{ step, tests }];
   });
   const present = new Map<string, PresentRead>();

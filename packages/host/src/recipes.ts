@@ -9,6 +9,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync }
 import { dirname, join } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, hookFiles } from "@wsp/catalog";
 import { DETECTORS, expand, isSecretName, nodeHost, type Host, type Manifest } from "@wsp/collect";
+import { rowRoad } from "@wsp/engine";
 import { writeOwn } from "@wsp/own-file";
 import { issuesLine, noSuchRecipeRefusal, RECIPE_NAME_REFUSAL, RecipeFile, recipeCanon, recipeSlug, toolRowId, withoutWspOwn, type RecipeOptions, type ResolvedRecipe } from "@wsp/protocol";
 import type { RecipeShelf } from "@wsp/runtime";
@@ -220,7 +221,9 @@ function pathsDigest(paths: readonly string[]): string {
 export async function resolveRecipe(file: RecipeFile, reading: RecipeReading): Promise<ResolvedRecipe> {
   const items: Record<string, string> = {};
   const tools = Object.keys(file.clis).length === 0 ? [] : await reading.tools();
-  const versions = new Map(tools.map(e => [e.id, e.version ?? ""]));
+  // The version a row installs, which is the catalog's pin where it wins over this computer's: a computer set up
+  // before the pin moved reads Behind, and its next sync brings the pin.
+  const versions = new Map(tools.map(e => [e.id, rowRoad(e, new Map())?.pinned ?? e.version ?? ""]));
   for (const [name, row] of Object.entries(file.clis)) items[`clis/${name}`] = versions.get(toolRowId(row.via, name)) ?? "";
   for (const source of itemSources(file, reading.home)) items[source.key] = source.digest();
   return { file, items };

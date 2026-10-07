@@ -61,6 +61,10 @@ export const GoldenVersion = z.object({
   size: WorkspaceSize.optional(),
   /** The browser shim was on the machine when it was sealed, so its forks can be told BROWSER; versions sealed before it existed have no flag and get none. */
   browserShim: z.boolean().optional(),
+  /** The folder npm's global installs put their commands in, where it is on no PATH the tools PATH names (a provider's
+   * Node under nvm): read once on the builder at the seal, it leads the image's profile and the PATH every fork of
+   * this version hands a thread, behind the pinned agents' folder. Absent where npm's folder is already on that PATH, and on versions sealed before it. */
+  npmBin: z.string().optional(),
   /** The sign-ins the builder was asked for and how each ended, so the app can say what a fork carries. */
   logins: z.array(GoldenLogin).optional(),
   /** Every tool the import skipped or failed to install, by name with the cause and reason, so a workspace can say why
@@ -95,6 +99,15 @@ export const GoldenVersion = z.object({
   imageHash: z.string().length(64).optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
+
+/** The folder a seal that read npm's own folder links the native claude into, so the claude wsp installed answers
+ * ahead of the npm copy the provider keeps in npm's folder. The pinned commands themselves stay in /usr/local/bin,
+ * which cannot lead: the provider keeps its own pnpm there. */
+export const AGENTS_BIN = "/opt/wsp-agents/bin";
+
+/** A PATH with the folder npm's global installs went to ahead of it, and the pinned agents' folder ahead of that,
+ * where a version's seal read one. */
+export const onNpmBin = (npmBin: string | undefined, path: string): string => (npmBin === undefined ? path : `${AGENTS_BIN}:${npmBin}:${path}`);
 
 export const GoldenManifest = z.object({ head: z.number(), versions: z.array(GoldenVersion) });
 export type GoldenManifest = z.infer<typeof GoldenManifest>;

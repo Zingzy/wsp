@@ -8,7 +8,7 @@
 // through a hook per agent without any file of the person's being touched. A
 // hook the person's own file already claims is left alone and named in the result.
 import { BREW_PREFIX, CATALOG_AGENTS, CONTEXT_MARKER, MODE, SKILL_NAME, agentName, type AgentContext, type AgentEntry, type ContextHooks, type ContextOutcomeKind, type GuestFile, type GuestRoots } from "@wsp/catalog";
-import { ANOTHER_AGENT_WORDS, backgroundWorkWords, RUN_BLOCK_WORDS, TURN_END_WORDS, fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
+import { ANOTHER_AGENT_WORDS, backgroundWorkWords, RUN_BLOCK_WORDS, TURN_END_WORDS, fmtBytes, onNpmBin, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { SHELL_READ } from "./machine-facts.js";
 import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
@@ -303,7 +303,7 @@ export interface ContextInput {
   /** Absent on a golden builder, which is not a workspace. */
   workspace?: { name: string };
   /** Absent while the golden is being built, before its version exists. */
-  golden?: Pick<GoldenVersion, "version" | "createdAt" | "setupSha">;
+  golden?: Pick<GoldenVersion, "version" | "createdAt" | "setupSha" | "npmBin">;
   probe: ContextProbe;
   facts: BuildFacts;
   /** The agent this render is for; absent for the shared source files, which state nothing agent-specific. */
@@ -336,7 +336,7 @@ export function renderMachineContext(input: ContextInput): string {
   machine.push(`- Linux${probe.kernel !== undefined ? ` ${probe.kernel}` : ""}, user root, home /root. macOS apps, casks and Mac App Store apps are not here.`);
   if (probe.versions.length > 0) machine.push(`- On every wsp machine: ${probe.versions.map(v => `${v.name} ${v.version}`).join(", ")}.`);
   if (probe.has.has("brew")) machine.push(`- Homebrew is at ${BREW_PREFIX}.`);
-  if (probe.has.has("golden-path")) machine.push(`- Login shells get their PATH from /etc/profile.d/wsp-golden.sh: ${TOOLS_PATH}`);
+  if (probe.has.has("golden-path")) machine.push(`- Login shells get their PATH from /etc/profile.d/wsp-golden.sh: ${onNpmBin(input.golden?.npmBin, TOOLS_PATH)}`);
   const containers = ["docker", "podman"].filter(b => probe.has.has(b));
   if (!probe.overlay) machine.push(`- Containers do not run here: the kernel has no overlayfs${containers.length === 0 ? ", and Docker and Podman are not installed" : ""}. Install services natively.`);
   else if (containers.length === 0) machine.push("- Docker and Podman are not installed.");
@@ -468,7 +468,7 @@ export interface ContextOutcome {
 
 export interface ApplyContextOptions {
   workspace?: { name: string };
-  golden?: Pick<GoldenVersion, "version" | "createdAt" | "setupSha">;
+  golden?: Pick<GoldenVersion, "version" | "createdAt" | "setupSha" | "npmBin">;
   /** What this run installed or set aside, folded into the facts the guest keeps. */
   result?: ImportResult;
   roots?: GuestRoots;

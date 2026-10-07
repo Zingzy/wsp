@@ -1591,7 +1591,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "status": undefined,
   },
   {
-    "argument": "3 lines",
+    "argument": "4 lines",
     "configPaths": 0,
     "covers": [
       "chromium",

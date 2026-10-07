@@ -130,6 +130,16 @@ describe("a resolved recipe", () => {
     expect(recipeHash(await resolveRecipe(LAPTOP, reading([{ id: "tools/brew/gh", version: "2.81.0" }])))).not.toBe(recipeHash(await resolveRecipe(LAPTOP, reading(tools))));
   });
 
+  it("holds a CLI the catalog pins above this computer's version to the pin, so a computer that applied the older one reads Behind; one ahead keeps its own", async () => {
+    const pin = (catalogEntry("pnpm")!.installRoad as { version: string }).version;
+    const file = RecipeFile.parse({ ...LAPTOP, clis: { pnpm: { via: "npm" }, "agent-browser": { via: "npm" } } });
+    const resolved = await resolveRecipe(file, reading([{ id: "tools/npm/pnpm", version: "10.34.5" }, { id: "tools/npm/agent-browser", version: "0.40.0" }]));
+    expect(resolved.items["clis/pnpm"]).toBe(pin);
+    expect(resolved.items["clis/agent-browser"]).toBe("0.40.0");
+    // A computer set up before the pin moved applied this computer's own version, so it is out of step until it syncs.
+    expect(recipeHash({ ...resolved, items: { ...resolved.items, "clis/pnpm": "10.34.5" } })).not.toBe(recipeHash(resolved));
+  });
+
   it("reads a symlinked skill where it lives, so an edit through its target moves the hash", async () => {
     const real = join(dir, "checkout", "unslop");
     mkdirSync(real, { recursive: true });
