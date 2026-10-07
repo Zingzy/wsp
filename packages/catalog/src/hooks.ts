@@ -94,6 +94,11 @@ export function placeWord(word: string, home: string, place: HookPlacer): Placed
   return to === undefined ? { left: word } : { word: to, carried: { from: path, to } };
 }
 
+/** Every path under home a settings file's hooks run, absolute, once each: what a copy of that file carries. */
+export function hookFiles(hooks: HookCarry, text: string, home: string): string[] {
+  return hooks.carry(text, home, abs => abs).carried.flatMap(c => (c.from.startsWith(`${home}/`) ? [c.from] : []));
+}
+
 type Rewritten = { command: string; carried: { from: string; to: string }[] } | { left: string };
 
 /** The command with the first word of each simple command, and the script an interpreter runs, rewritten to its
