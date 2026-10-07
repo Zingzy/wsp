@@ -138,6 +138,19 @@ describe("the laws on the branch merged with origin/main", () => {
     expect(untouched(work)).toBe(before);
   });
 
+  it("runs the size check on the merge too, as the landing does", () => {
+    const size = 'import { readdirSync } from "node:fs";\nif (readdirSync("notes").length > 3) { console.error("notes holds too many files"); process.exit(1); }\n';
+    const { origin, work, runs } = clone(RECORD, { "scripts/file-size-check.mjs": size });
+    commit(work, { "notes/two.md": "two\n" }, "feature");
+    expect(laws(work, runs).out).toContain("PASS  the size check");
+
+    commit(origin, { "notes/three.md": "three\n" }, "main moves");
+    const run = laws(work, runs);
+    expect(run.status, run.out).toBe(1);
+    expect(run.out).toContain("PASS  the laws");
+    expect(run.out).toContain("FAIL  the size check: notes holds too many files");
+  });
+
   it("runs on the folder itself while the branch holds origin/main", () => {
     const { work, runs } = clone();
     commit(work, { "notes/two.md": "two\n" }, "feature");
