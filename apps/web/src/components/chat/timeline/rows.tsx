@@ -264,9 +264,8 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
 }) {
   if (!turnSummary) return null;
   const checkpointFiles = turnSummary.files;
-  // A turn that only moved HEAD still shows the one line naming the move, and one that changed nothing of its own
-  // still shows what else changed in its folder.
-  if (checkpointFiles.length === 0 && turnSummary.moved.length === 0 && (turnSummary.others?.length ?? 0) === 0) return null;
+  // A turn that changed nothing of its own still shows what else changed in its folder.
+  if (checkpointFiles.length === 0 && (turnSummary.others?.length ?? 0) === 0) return null;
 
   return (
     <AssistantChangedFilesSectionInner
@@ -278,7 +277,7 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
   );
 });
 
-/** Inner component that only mounts when the turn changed files or moved HEAD,
+/** Inner component that only mounts when the turn's folder changed files,
  *  so its hooks run unconditionally (no hooks after early return). */
 function AssistantChangedFilesSectionInner({
   turnSummary,
@@ -297,7 +296,6 @@ function AssistantChangedFilesSectionInner({
     <ChangedFilesCard
       turnId={turnSummary.turnId}
       files={checkpointFiles}
-      moved={turnSummary.moved}
       {...(turnSummary.others !== undefined ? { others: turnSummary.others } : {})}
       folder={turnSummary.folder === true}
       allDirectoriesExpanded={allDirectoriesExpanded}

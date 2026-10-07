@@ -47,7 +47,7 @@ const events: SessionEvent[] = [
 const model = deriveSession(events);
 const changes = model.turns[0]!.changes!;
 const reply = model.timeline.findLast(e => e.kind === "message")!;
-const summary = { turnId: scoped.turnId, files: changes.files, moved: changes.moved, ...(changes.others !== undefined ? { others: changes.others } : { folder: true as const }) };
+const summary = { turnId: scoped.turnId, files: changes.files, ...(changes.others !== undefined ? { others: changes.others } : { folder: true as const }) };
 
 const patchOf = (path: string, lines: number): string =>
   [`diff --git a/${path} b/${path}`, "new file mode 100644", "--- /dev/null", `+++ b/${path}`, `@@ -0,0 +1,${lines} @@`, ...Array.from({ length: lines }, (_, n) => `+line ${n + 1}`), ""].join("\n");
