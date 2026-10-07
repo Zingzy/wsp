@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { type Capabilities, type PreferencesPatch, type ProjectView, type McpServerSpec, type Caller, type WorkspaceAgents, type WorkspaceKind, ThreadScope, phaseHoldsSlot, SPAWN_ACTS_ALLOWED, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, type SpawnAct, forksNoMachines, kindWords, NO_PROVIDER_LINE, providerCannotRefusal, machineWord, noWorkspaceRefusal, notFoundRefusal, type WorktreeFolder, copiesFolder, relayedRecordRefusal, relayedRefusal, undrivenRefusal, workspaceState, HERE_PLACE_ID } from "@wsp/protocol";
+import { type Capabilities, type PreferencesPatch, type ProjectView, type McpServerSpec, type Caller, type WorkspaceAgents, type WorkspaceKind, ThreadScope, phaseHoldsSlot, SPAWN_ACTS_ALLOWED, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnRepositoryRefusal, spawnReachRefusal, type SpawnAct, forksNoMachines, kindWords, NO_PROVIDER_LINE, providerCannotRefusal, machineWord, noWorkspaceRefusal, notFoundRefusal, type WorktreeFolder, copiesFolder, kindForComputer, relayedRecordRefusal, relayedRefusal, undrivenRefusal, workspaceState, HERE_PLACE_ID } from "@wsp/protocol";
 import type { WorkspaceRecord, LiveWorkspace } from "../types/wiring.js";
 import { PROJECTS, type WorkspaceLike } from "../types/internal.js";
 import type { RuntimeContext, RulesArea } from "../context.js";
@@ -78,6 +78,18 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
   /** Which project a thread works on: the one its own workspace holds. A thread whose workspace this host no longer
    * holds works on none, and the project rule then has nothing to compare and leaves the tree rule to refuse. */
   const projectOfScope = (scope: ThreadScope): string | undefined => live.get(scope.workspaceId)?.record.project;
+  /** Whether a project is of the repository a thread works on, which is what a create demands of a child, since a
+   * child starts on its lead's branch and lands its work back in it. A thread whose workspace this host no longer
+   * holds works on none. */
+  const ofThreadsRepository = (scope: ThreadScope, project: string): boolean => {
+    const mine = projectOfScope(scope);
+    return mine !== undefined && (project === mine || ctx.sameRepository(ctx.projectHeld(mine), ctx.projectHeld(project)));
+  };
+  /** Whether a thread may name a project to start children on: its own, or one of its repository on a computer that
+   * forks machines, where the child gets a machine of its own. Another folder of it on this computer is the
+   * person's, and a thread started there would stand outside the tree. */
+  const projectReached = (scope: ThreadScope, project: string): boolean =>
+    ofThreadsRepository(scope, project) && (project === projectOfScope(scope) || !copiesFolder(kindForComputer(ctx.projectHeld(project).computer)));
   /** The rule as a sentence: what this request is refused with for that record, or nothing when it may drive it.
    * A record this host does not hold, which a port forward's target may be since the host forwards a builder's
    * ports too, is nobody's to refuse for. The project rule is read before the tree rule and answers first: a
@@ -88,15 +100,16 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
     const scope = scopeOf(caller);
     if (scope === undefined) return undefined;
     const mine = projectOfScope(scope);
-    if (mine !== undefined && record.project !== undefined && record.project !== mine) {
-      return spawnProjectRefusal(scope.threadId, ctx.projectHeld(mine).name, ctx.projectHeld(record.project).name);
+    if (mine !== undefined && record.project !== undefined && !ofThreadsRepository(scope, record.project)) {
+      return spawnRepositoryRefusal(scope.threadId, ctx.projectHeld(mine).name, ctx.projectHeld(record.project).name);
     }
     return !inTree(record, scope) ? spawnReachRefusal(scope.threadId, record.name) : undefined;
   };
   /** The rule as the caller reads it. A person is told which rule hid the workspace, since what this host holds is
    * theirs; a thread is told absence and nothing more, since a sentence naming a workspace or a project outside its
    * tree is how a thread learns what else stands here. No word rides the thread's: every verb that reaches this
-   * found the workspace itself rather than being handed it. */
+   * found the workspace itself rather than being handed it. The name door, `workspaces.resolve`, differs: a whole
+   * word the thread typed is refused by its rule there, carrying that word and nothing else. */
   const refuseRelayed = (record: WorkspaceLike | undefined, caller: Caller | undefined): void => {
     const line = refusalFor(record, caller);
     if (line === undefined) return;
@@ -210,7 +223,7 @@ export function rulesArea(ctx: RuntimeContext): RulesArea {
   const treeOf = (scope: ThreadScope | undefined): { parentThreadId?: string; rootThreadId?: string } =>
     scope === undefined ? {} : { parentThreadId: scope.threadId, rootThreadId: scope.rootThreadId };
   return {
-    rememberProject, rememberTarget, refuseCannot, pauses, refusePauseless, holdsSlot, drives, opensIn, projectOfScope,
+    rememberProject, rememberTarget, refuseCannot, pauses, refusePauseless, holdsSlot, drives, opensIn, projectOfScope, ofThreadsRepository, projectReached,
     refusalFor, refuseRelayed, refuseNamed, held, listedFor, refuseRecording, agentsOf, parentOf, rootOf, agentsReach,
     spawnGuard, treeOf,
   };

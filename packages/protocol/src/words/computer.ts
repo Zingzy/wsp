@@ -255,15 +255,59 @@ export function spawnDepthRefusal(threadId: string, depth: number, cap: number, 
   return `thread ${threadWord(threadId)} is ${depth} deep under its root and ${"computer" in held ? "this computer" : "its workspace"} allows ${cap}, so a thread this deep may not spawn; ${raise}`;
 }
 
-/** The one sentence a thread is refused with for naming a project that is not the one its own workspace holds: a
- * thread works on one project, so the workspace it forks and the workspace it reaches are both of that project. */
-export function spawnProjectRefusal(threadId: string, project: string, other: string): string {
-  return `this request came out of thread ${threadWord(threadId)} on ${project}; a thread works on its own project alone, and ${other} is another`;
+/** The one sentence a thread is refused with for naming a project of another repository than the one its own
+ * workspace holds. A child is a second checkout of its lead's repository on the lead's branch, so a thread starts
+ * children on that repository's projects and on no other. A thread's refusal carries the word it typed. */
+export function spawnRepositoryRefusal(threadId: string, project: string, other: string): string {
+  return `thread ${threadWord(threadId)} works on ${project}, and ${other} is a project of another repository; a thread starts children on its own repository's projects alone`;
+}
+
+/** What a thread does about that refusal. */
+export const SPAWN_REPOSITORY_FIX = "Name a project of the same repository, or ask the person to start this one.";
+
+/** The one sentence a thread is refused with for naming a workspace of another repository: the word it typed and
+ * nothing of the workspace's own, since its project is one the thread may not see. */
+export function spawnRepositoryWorkspaceRefusal(threadId: string, project: string, word: string): string {
+  return `thread ${threadWord(threadId)} works on ${project}, and the workspace ${word} holds another repository; a thread reaches its own repository's workspaces alone`;
+}
+
+/** What a thread does about that refusal, whichever verb named the workspace. */
+export const SPAWN_REPOSITORY_WORKSPACE_FIX = "Name a workspace of your own tree or a project of your own repository, or ask the person.";
+
+/** The one sentence a thread is refused with for naming a folder the person keeps of its repository on a computer
+ * that copies folders: a thread started there runs in the person's folder and stands outside the tree, so a thread
+ * starts children on its own project and its repository's box and cloud projects alone. */
+export function spawnFolderRefusal(threadId: string, word: string): string {
+  return `thread ${threadWord(threadId)} may not start children in ${word}: it is a folder the person keeps of this repository, and a thread started there would stand outside your tree`;
+}
+
+/** What a thread does about that refusal. */
+export const SPAWN_FOLDER_FIX = "Name a project wsp projects lists, or ask the person to start this one.";
+
+/** The one sentence a thread's exec is refused with for naming a workspace or a project the person holds that stands
+ * outside its tree: what the word is, in the word typed alone. Exec starts nothing, so it speaks of no child. */
+export function execOutsideRefusal(threadId: string, word: string, is: "folder" | "project" | "workspace"): string {
+  const what = is === "folder" ? "a folder the person keeps of this repository" : `a ${is} of another repository`;
+  return `thread ${threadWord(threadId)} may not exec in ${word}: it is ${what}, outside your tree`;
+}
+
+/** What a thread does about a refused exec: run it on a machine of its own tree, the one it runs on first. */
+export function execOutsideFix(own: string): string {
+  return `Run the command in your own tree with ${shellLine(["wsp", "exec", own, "--"])} <command>, or ask the person.`;
 }
 
 /** The one sentence a thread is refused with for reaching a workspace outside its own tree. */
 export function spawnReachRefusal(threadId: string, name: string): string {
   return `thread ${threadWord(threadId)} may drive the workspace it runs on and the ones it forked, and ${name} is neither`;
+}
+
+/** What a thread does about a workspace outside its tree: a child on that workspace's project, in the words of what a
+ * run does there, a machine of its own on a box or a cloud and a thread in the folder on a computer that copies one. */
+export function spawnReachFix(project: string, forks: boolean): string {
+  const line = `${shellLine(["wsp", "run", project])} "<message>"`;
+  return forks
+    ? `Start a child on ${project} instead with ${line}, which forks a machine in your own tree.`
+    : `Start a child in ${project}'s folder instead with ${line}, which opens a thread there in your own tree.`;
 }
 
 /** The one sentence a fork is refused with when the workspace it would be a child of did not say which branch it

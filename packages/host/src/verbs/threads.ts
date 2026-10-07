@@ -402,7 +402,7 @@ export const THREAD_VERBS: readonly Verb[] = [
       const [ref, ...words] = ctx.args;
       if (ref === undefined || words.length === 0) throw usageRefusal("wsp exec takes a workspace, then -- and the command.", usageIs(ctx));
       const client = await ctx.client();
-      const { workspace } = await awake(client, await workspaceOf(client, ref), "exec", line => ctx.io.error(line));
+      const { workspace } = await awake(client, await workspaceOf(client, ref, "exec"), "exec", line => ctx.io.error(line));
       const folder = absoluteFolder(flag(ctx.flags, "cwd"));
       const { exit, ranIn } = await execOn(client, workspace.id, words, folder, e => {
         if (e.type === "exec.output") ctx.out.emit(e, e.text);
@@ -420,7 +420,7 @@ export const THREAD_VERBS: readonly Verb[] = [
       call: async ({ workspace: ref, argv, cwd: folder }, deps) => {
         const asked = absoluteFolder(folder);
         const client = await deps.client();
-        const { workspace: target } = await awake(client, await workspaceOf(client, ref), "exec", QUIET_LINE);
+        const { workspace: target } = await awake(client, await workspaceOf(client, ref, "exec"), "exec", QUIET_LINE);
         const output: string[] = [];
         const { exit, ranIn } = await execOn(client, target.id, argv, asked, e => {
           if (e.type === "exec.output") output.push(e.text);

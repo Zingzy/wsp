@@ -5,7 +5,7 @@
 // answers against a host over the fake runtime with the object the command
 // line prints under --json, its text that object as jsonLine(obj, 2), byte for
 // byte. The binary is the one WSP_MCP_BIN names, built with the mcp feature.
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CLOUD_ENV, EXIT_CODES, HOST_TOKEN_ENV, HOST_URL_ENV, jsonLine, scopedNoPairLine } from "@wsp/protocol";
+import { CLOUD_ENV, EXIT_CODES, execOutsideFix, execOutsideRefusal, HERE_PLACE_ID, HOST_TOKEN_ENV, HOST_URL_ENV, jsonLine, refusalLine, scopedNoPairLine, spawnRepositoryRefusal, SPAWN_REPOSITORY_FIX, TURN_TOKEN_ENV } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type PlaceWiring } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, serve } from "../src/cli.js";
@@ -31,8 +31,9 @@ import { c1Escaped } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { WORKSPACE_CALLED } from "./mcp-binary-workspaces.js";
 import { mcpBinNamed, ownEnv, served } from "./stdio-session.js";
-import { stubBackend } from "./stub-backend.js";
-import { captured, copyingFake, fakeDaemonStart, PAGE } from "./verbs-fixture.js";
+import { stubBackend, withDaemonRoads } from "./stub-backend.js";
+import { branchDaemons } from "../../runtime/test/stub-backend.js";
+import { captured, copyingFake, fakeDaemonStart, heldAgent, PAGE } from "./verbs-fixture.js";
 
 const MCP_BIN = mcpBinNamed(process.env["WSP_MCP_BIN"]);
 
@@ -422,6 +423,75 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
         } else if (row.heldHere !== true && row.error !== true) expect(result.content).toEqual([{ type: "text", text: jsonLine(printed, 2) }]);
       }
       if (here !== "") expect(answered).toBe(here);
+    });
+  });
+  describe("a lead thread on this computer whose tool server is the binary", () => {
+    let handle: HostHandle | undefined;
+    let runtime: Runtime;
+    let held: ReturnType<typeof heldAgent>;
+
+    beforeEach(async () => {
+      const webDir = join(dir, "web");
+      mkdirSync(join(webDir, "assets"), { recursive: true });
+      writeFileSync(join(webDir, "index.html"), PAGE);
+      vi.stubEnv("HOME", env["HOME"]!);
+      vi.stubEnv("WSP_HOME", env["WSP_HOME"]!);
+      const store = memoryStore();
+      await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
+      held = heldAgent(true);
+      const here: { url?: string } = {};
+      runtime = createRuntime({
+        statePath,
+        backend: withDaemonRoads(stubBackend()),
+        daemonChannel: branchDaemons().open,
+        store,
+        adapters: { claude: held.adapter },
+        local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, statePath, copyingFake()),
+        agents: { here, wspMcp: { command: "wsp", args: ["mcp"] } },
+      });
+      handle = await serve(captured(), { port: 0, statePath, webDir, runtime, here });
+    });
+    afterEach(async () => {
+      await handle?.close();
+      handle = undefined;
+      vi.unstubAllEnvs();
+    });
+
+    it("lists its repository's projects, starts a child on a cloud one with notify me, and refuses another repository's by the rule, in exec's own words for exec", async () => {
+      const repo = join(dir, "repo");
+      mkdirSync(repo, { recursive: true });
+      execFileSync("git", ["init", "-q", "-b", "main", repo]);
+      execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
+      execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@github.com:dev/lab.git"]);
+      const mac = await runtime.projects.add({ source: repo, on: HERE_PLACE_ID, name: "lab" });
+      const cloud = await runtime.projects.add({ source: "https://github.com/dev/lab.git", on: "default", name: "lab-cloud" });
+      await runtime.projects.add({ source: "https://github.com/dev/other.git", on: "default", name: "other-cloud" });
+      const folder = await runtime.workspaces.create({ project: mac.id, name: "lab", agents: { spawn: true } });
+      const turn = await runtime.sessions.start(folder.id, { prompt: "coordinate" });
+      const lead = turn.view().threadId!;
+      const launch = held.envs[0]!;
+      const pair = { [HOST_URL_ENV]: launch[HOST_URL_ENV]!, [HOST_TOKEN_ENV]: launch[HOST_TOKEN_ENV]!, [TURN_TOKEN_ENV]: launch[TURN_TOKEN_ENV]! };
+      const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], { ...env, ...pair }, [
+        callOf(1, "projects"),
+        callOf(2, "run", { project: "lab-cloud", message: "build it", notify: ["me"], detach: true }),
+        callOf(3, "run", { project: "other-cloud", message: "build it", detach: true }),
+        callOf(4, "exec", { workspace: "other-cloud", argv: ["true"] }),
+      ]);
+      expect(code).toBe(0);
+      const [listed, ran, refused, execRefused] = out.map(line => (JSON.parse(line) as { result: { structuredContent: Record<string, unknown>; isError?: boolean } }).result);
+      expect((listed!.structuredContent["projects"] as { name: string }[]).map(p => p.name)).toEqual(["lab", "lab-cloud"]);
+      expect(ran!.isError).toBeUndefined();
+      const child = ran!.structuredContent["threadId"] as string;
+      const row = (await runtime.sessions.list()).find(r => r.threadId === child)!;
+      expect(row).toMatchObject({ parentThreadId: lead, rootThreadId: lead });
+      expect((await runtime.workspaces.list()).find(w => w.id === row.workspaceId)?.project.id).toBe(cloud.id);
+      expect(refused).toMatchObject({ isError: true, structuredContent: { error: refusalLine(spawnRepositoryRefusal(lead, "lab", "other-cloud"), SPAWN_REPOSITORY_FIX), class: "usage" } });
+      // Exec starts nothing, so the binary's exec tool is refused in exec's words with the road on the lead's own machine.
+      expect(execRefused).toMatchObject({ isError: true, structuredContent: { error: refusalLine(execOutsideRefusal(lead, "other-cloud", "project"), execOutsideFix("lab")), class: "usage" } });
+      held.release(1, "Built it.");
+      await vi.waitFor(() => expect(held.steered).toEqual([`thread ${child.slice(0, 8)} finished (completed): Built it.`]));
+      held.release(0, "read it");
+      await turn.finished;
     });
   });
 });
