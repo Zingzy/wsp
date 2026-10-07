@@ -205,7 +205,7 @@
     "recipes_show": "wsp recipes show <name>",
     "recipes_save": "wsp recipes save <name> --from <computer>",
     "recipes_remove": "wsp recipes remove <name>",
-    "usage": "wsp usage [--range day|week|month] [--by agent|account|computer|project|model]",
+    "usage": "wsp usage [--range day|week|month] [--by agent|account|computer|project|model|source]",
     "agents": "wsp agents [<workspace>] [--on <computer>]",
     "skills": "wsp skills [<workspace>] [--on <computer>]",
     "skills_search": "wsp skills search <query> [--limit <n>]",

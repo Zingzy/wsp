@@ -57,7 +57,7 @@ const CURSOR = "a recorded Cursor turn; the call id is cut short";
 /** Every recorded id or real home the fixtures and test sources still carry, in whichever file, as many times as count
  * says, each with why it stays. */
 const ALLOWED: readonly Allowed[] = [
-  { text: "e16ed170-8257-4668-879e-fe836341633c", count: 29, why: "the session id of a recorded Claude Code stream, shared by its subagent turns, which the adapter tests match on" },
+  { text: "e16ed170-8257-4668-879e-fe836341633c", count: 39, why: "the session id of a recorded Claude Code stream, shared by its subagent and WebFetch turns, which the adapter tests match on" },
   { text: "0f0d5872-9c1a-4e56-8a3b-7d2c4f6e9b01", count: 1, why: CLAUDE_STREAM },
   { text: "1a2b3c4d-0001-4aaa-8bbb-000000000001", count: 1, why: CLAUDE_STREAM },
   { text: "1a2b3c4d-0002-4aaa-8bbb-000000000002", count: 1, why: CLAUDE_STREAM },
@@ -72,6 +72,8 @@ const ALLOWED: readonly Allowed[] = [
   { text: "toolu_01WspFixAgentB", count: 8, why: SUBAGENTS },
   { text: "toolu_01WspFixBashA", count: 3, why: SUBAGENTS },
   { text: "toolu_01WspFixBashB", count: 2, why: SUBAGENTS },
+  { text: "toolu_01WspFixSearch1", count: 3, why: "a synthetic tool id in a recorded WebFetch turn, pairing the call with its result" },
+  { text: "toolu_01WspFixFetch1", count: 3, why: "a synthetic tool id in a recorded WebFetch turn, pairing the call with its result" },
   { text: "5b3d3ddb-86d6-47ba-b216-0a510284d8b6", count: 5, why: TITLES },
   { text: "11111111-1111-4111-8111-111111111111", count: 2, why: TITLES },
   { text: "7c6f56dc-c585-42a0-b6e8-783665c45546", count: 1, why: CLAUDE_PROBE },

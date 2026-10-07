@@ -57,6 +57,24 @@ describe("the ledger of what was used", () => {
     ]);
   });
 
+  it("keeps a row's tokens that came with no cost apart only once the row also holds a reported cost, and prices them at list", async () => {
+    const list = 600 * 5e-6 + 400 * 5e-7 + 100 * 3e-5;
+    for (const order of [["bare", "reported", "bare"], ["reported", "bare", "bare"]] as const) {
+      const { usage } = ledger();
+      for (const [i, kind] of order.entries()) {
+        await usage.add(turn({ at: NOON - 3_600_000 + i * 60_000, ...(kind === "reported" ? { costUsd: 0.5 } : {}) }));
+        const [row] = (await usage.day("2026-09-29"))!.rows;
+        // A row of bare tokens alone prices all of them at list, so it carries no apart count.
+        if (i === 0) expect(row!.unreported).toBeUndefined();
+      }
+      const [row] = (await usage.day("2026-09-29"))!.rows;
+      expect(row).toMatchObject({ turns: 3, costReported: 0.5, unreported: { input: 2_000, output: 200, cached: 800, cacheWrite: 0, reasoning: 0 } });
+      const [used] = (await usage.used({ range: "day", split: "agent", label: labelOf })).rows;
+      expect(used!.costReported).toBe(0.5);
+      expect(used!.costList).toBeCloseTo(2 * list, 12);
+    }
+  });
+
   it("folds a day, a week and a month, each reaching back over its own days and no further", async () => {
     const { usage } = ledger();
     for (const back of [0, 3, 6, 7, 29, 30]) await usage.add(turn({ at: NOON - back * DAY, tokens: { input: 100, output: 10 } }));
