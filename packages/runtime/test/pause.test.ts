@@ -7,7 +7,7 @@
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MoveUnansweredError, ResumeUnansweredError } from "@wsp/engine";
-import { ALREADY_RUNNING, machineWord, moveTimedOutLine, providerCannotRefusal, RESUME_UNANSWERED, sendRefusal, workspaceState, workspaceWord, type AdapterEvent, type EventUnion, type SessionEvent } from "@wsp/protocol";
+import { ALREADY_RUNNING, machineWord, moveTimedOutLine, providerCannotRefusal, RESUME_UNANSWERED, sendRefusal, workspaceState, workspaceStateLine, workspaceStateOf, workspaceWord, type AdapterEvent, type WorkspaceListing, type EventUnion, type SessionEvent } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type RuntimeOptions } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
@@ -505,6 +505,68 @@ describe("a pause the runtime did not start", () => {
     expect(events.map(e => e.type)).toContain("workspace.napped");
     expect(events.map(e => e.type)).toContain("workspace.woken");
   });
+
+  // A Boat box restoring from a nap reads running while its daemon has not started, for minutes: a paused reading kept
+  // from before the wake must not answer for the woken machine.
+  const ROADS = ["resumed by the wake", "found running by the wake"] as const;
+  async function wokenAfterAListing(road: (typeof ROADS)[number]) {
+    const backend = stubBackend();
+    // Boat's: a stop that keeps the disk and kills every process.
+    backend.capabilities.pauseMode = "disk";
+    const { factory } = hangingAdapter();
+    const rt = createRuntime({
+      backend,
+      store: memoryStore(),
+      adapters: { claude: factory },
+      status: { costIntervalMs: 60_000, pollIntervalMs: 5, promptMs: 10, probeTimeoutMs: 50 },
+    });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const m = backend.machines[0]!;
+    await rt.workspaces.nap(ws.id);
+    await darkReach(backend);
+    // What the app's status subscription asks when it connects: the provider, for every machine, the napping one
+    // included.
+    expect((await rt.status.list()).find(s => s.id === ws.id)).toMatchObject({ machineState: "paused" });
+    if (road === "found running by the wake") m.paused = false;
+    expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");
+    return { rt, backend, events, ws, m };
+  }
+
+  for (const road of ROADS) {
+    it(`a turn started on a machine ${road}, whose daemon is not up yet, runs on through the polls: a paused reading from its nap does not stop it`, async () => {
+      const { rt, events, ws, m } = await wokenAfterAListing(road);
+      const woken = events.length;
+      const handle = await rt.sessions.start(ws.id, { prompt: "review" });
+      const stop = rt.status.watch();
+      try {
+        // The poll that finds the daemon silent pushes the row; an adoption of a pause it read would follow within ms.
+        await until(() => events.slice(woken).some(e => e.type === "workspace.status" && e.status.id === ws.id && e.status.reach.state !== "reachable"), 5_000);
+        await new Promise(r => setTimeout(r, 100));
+      } finally {
+        stop();
+      }
+      expect(events.slice(woken).filter(e => e.type === "workspace.napped")).toEqual([]);
+      expect(ends(events.slice(woken))).toEqual([]);
+      expect(handle.view().status).toBe("running");
+      expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+      expect(m.paused).toBe(false);
+    });
+
+    it(`a wake of a machine ${road}, whose daemon is not up yet, lists it up and not answering, never stopped`, async () => {
+      const { rt, backend, ws } = await wokenAfterAListing(road);
+      const srv = await serveRuntime(rt, { port: 0, authToken: "t" });
+      try {
+        // The op wsp wake prints its last line from.
+        const res = await wsRequest(srv.port, "t", { op: "status.list" });
+        const listed = (res as unknown as { statuses: WorkspaceListing[] }).statuses.find(s => s.id === ws.id)!;
+        expect(workspaceStateLine("a", workspaceStateOf(listed, listed), backend.capabilities.pauseMode)).toBe("a is up and not answering yet");
+      } finally {
+        await srv.close();
+      }
+    });
+  }
 });
 
 // The backend settles its own pause and resume, on its own budgets and with its own reads of the machine: the runtime

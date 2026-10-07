@@ -408,6 +408,27 @@ describe("idle policy in the runtime", () => {
     await napping(rt, ws.id);
   });
 
+  for (const road of ["resumed by the wake", "found running by the wake"] as const) {
+    it(`a turn started on a machine ${road} holds it awake for as long as it runs`, async () => {
+      const held = heldSession();
+      const { rt, backend, fc } = testRuntime({ adapters: { claude: held.factory } });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      fc.advance(WINDOW);
+      await napping(rt, ws.id);
+      if (road === "found running by the wake") backend.machines[0]!.paused = false;
+      expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");
+      await rt.sessions.start(ws.id, { prompt: "review" });
+      fc.advance(WINDOW * 3);
+      await settled();
+      expect(await phaseOf(rt, ws.id)).toBe("running");
+      expect(backend.machines[0]!.paused).toBe(false);
+      held.end();
+      await until(async () => (await rt.status.list())[0]!.idleAt !== undefined);
+      fc.advance(WINDOW);
+      await napping(rt, ws.id);
+    });
+  }
+
   it("off means never; a per-workspace window beats the default", async () => {
     const { rt, fc } = testRuntime({ idle: { defaultWindowMs: 20 * 60_000 } });
     const off = await createOn(rt, { golden: "snap_g", name: "off", idleWindowMs: null });
