@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -7,6 +7,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { execDetached, type ExecResult } from "@wsp/engine";
+
+/** The detached launch starts its run under setsid, which macOS lacks; detached runs only start on Linux machines. */
+const noSetsid = spawnSync("sh", ["-c", "command -v setsid"]).status !== 0;
 import { DAEMON_VERSION, PERMISSION_ALLOW, RUN_GONE_LINE, TURN_TOKEN_ENV, foldThreads, threadWordOf, type AdapterEvent, type Caller, type ExecStream, type SessionView, type TurnResult } from "@wsp/protocol";
 import { TRANSCRIPTS_HELD, createRuntime, type HarnessAdapterFactory, type HarnessSession, type ProjectLander } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -579,7 +582,7 @@ describe("a turn the host comes back to", () => {
     await rt2.close();
   });
 
-  it("a command run detached on a machine whose runs are being swept finishes, and the sweep does not end it", async () => {
+  it.skipIf(noSetsid)("a command run detached on a machine whose runs are being swept finishes, and the sweep does not end it", async () => {
     // Real bash in a private folder: the sweep lists and reaps that folder alone, never the machine's own run folder.
     const dir = mkdtempSync(join(tmpdir(), "wsp-sweep-"));
     const runDir = join(dir, "wsp-run");
@@ -699,7 +702,7 @@ describe("a turn the host comes back to", () => {
     }
   }, 20_000);
 
-  it("a daemon the reach poll puts back on a machine whose runs are being swept is deployed, not ended by the sweep", async () => {
+  it.skipIf(noSetsid)("a daemon the reach poll puts back on a machine whose runs are being swept is deployed, not ended by the sweep", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-sweep-"));
     const runDir = join(dir, "wsp-run");
     mkdirSync(runDir);
