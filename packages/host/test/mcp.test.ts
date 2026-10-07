@@ -253,6 +253,22 @@ describe("the MCP server over the host", () => {
     expect((nowhere.structured as { error?: string } | undefined)?.error ?? nowhere.text).toContain(noThreadTargetLine("<project>"));
   });
 
+  it("run on a project that lives elsewhere and has no machine forks one, named off the message, and follows its first turn there", async () => {
+    expect(await rt.workspaces.list()).toEqual([]);
+    const opened = await call("run", { project: cloud.name, message: "write the release notes" });
+    expect(opened).toMatchObject({ isError: false });
+    const [made] = await rt.workspaces.list();
+    expect(made).toMatchObject({ name: "write the release notes", project: { id: cloud.id } });
+    const [thread] = await rt.sessions.list(made!.id);
+    expect(opened.structured).toMatchObject({ threadId: thread!.threadId, workspaceId: made!.id, text: "re: write the release notes" });
+  });
+
+  it("run on a project elsewhere checks its picks before it forks, so a model the agent does not take makes no machine", async () => {
+    const refused = await call("run", { project: cloud.name, message: "write the release notes", model: "no-such-model" });
+    expect(refused.isError).toBe(true);
+    expect(await rt.workspaces.list()).toEqual([]);
+  });
+
   it.runIf(CLOUD_ON)("fork takes size as <cpu>x<memGb>, which reaches the machine; one the provider does not offer is a tool error naming the list", async () => {
     const big = await call("new", { name: "big", size: "2x8" });
     expect(big.isError).toBe(false);

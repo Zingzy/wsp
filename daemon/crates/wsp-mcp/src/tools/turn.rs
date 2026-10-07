@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::named::{absolute_folder, awake, history, params, thread_of, threads, workspace_of, Thread, Woken, Workspace};
-use super::said::{fmt_bytes, fmt_uptime, js_trim, turns};
+use super::said::{fmt_bytes, fmt_uptime, js_space, js_trim, turns};
 use super::wait::TurnResult;
 use super::{input, Answer, Refused, Tool};
 use crate::client::Client;
@@ -258,14 +258,17 @@ fn checked_against(catalog: &Catalog, picks: &Picks) -> Result<(), Unlisted> {
     Ok(())
 }
 
-/// Refuses, before a machine is woken for it, what the runtime would refuse once it was there: an empty task, an
-/// agent the host has no adapter for, a pick the agent's catalog does not list.
+/// Refuses, before a machine is woken or forked for it, what the runtime would refuse once it was there: an empty
+/// task, an agent the host has no adapter for, a pick the agent's catalog does not list. A start that forks a machine
+/// for `fork_of`, a project's id, has no machine to ask yet, so the host's table answers for the agent that project's
+/// threads start on.
 pub(super) async fn checked_start(
     client: &Client,
     task: &str,
     harness: Option<&str>,
     picks: &Picks,
     workspace_id: Option<&str>,
+    fork_of: Option<&str>,
 ) -> Result<(), Failure> {
     let words = turns();
     if js_trim(task).is_empty() {
@@ -277,7 +280,12 @@ pub(super) async fn checked_start(
     }
     let asked = workspace_id.map_or_else(Map::new, |id| params([("workspaceId", Value::from(id))]));
     let Listed { harnesses } = client.request("harnesses.list", asked).await?;
-    let table = harnesses.iter().find(|c| harness.map_or(c.is_default == Some(true), |h| c.harness == h));
+    let agent = match (harness, fork_of) {
+        (Some(harness), _) => Some(harness.to_owned()),
+        (None, Some(project)) => project_agent(client, project).await?,
+        (None, None) => None,
+    };
+    let table = harnesses.iter().find(|c| agent.as_deref().map_or(c.is_default == Some(true), |h| c.harness == h));
     if let (None, Some(harness)) = (table, harness) {
         // An agent the host runs that is off on this workspace's computer is the start's to refuse, naming it.
         let all = match workspace_id {
@@ -306,6 +314,24 @@ pub(super) async fn checked_start(
         Some(said) => Err(Failure::usage(fill(&words.picks.access_refused, &[("said", &said)]))),
         None => Ok(()),
     }
+}
+
+/// The agent a new thread on a project starts on, as the host resolves it.
+async fn project_agent(client: &Client, project: &str) -> Result<Option<String>, Failure> {
+    #[derive(Deserialize)]
+    struct Pick {
+        value: String,
+    }
+    #[derive(Deserialize)]
+    struct Defaults {
+        agent: Pick,
+    }
+    #[derive(Deserialize)]
+    struct Answered {
+        defaults: HashMap<String, Defaults>,
+    }
+    let Answered { mut defaults } = client.request("projects.defaults", Map::new()).await?;
+    Ok(defaults.remove(project).map(|d| d.agent.value))
 }
 
 /// The repo a folder on this computer is in: the nearest folder up the tree holding a .git entry.
@@ -409,6 +435,8 @@ enum Target {
         cwd: Option<String>,
     },
     Box(Workspace),
+    /// A project on a box or a cloud account: a machine forked for it once the rest of the call is read.
+    Fork(ProjectRow),
 }
 
 /// The projects a caller may name: the host's own list, and for a caller the host answers as a thread, which reads
@@ -454,7 +482,8 @@ fn project_of_folder(projects: Vec<ProjectRow>, folder: &Path, here: &str) -> Op
 }
 
 /// Where a run goes, as packages/host/src/verbs.ts `runTarget` decides: the project named when it is on this
-/// computer, else the box workspace the word names; with no word, beside the thread asking, or the project whose
+/// computer, a new machine of the project named when it lives elsewhere and no machine carries its name, else the
+/// workspace the word names; with no word, beside the thread asking, or the project whose
 /// folder, or a worktree of whose repo, the server's own folder is in. A guest's folder is on its machine, so a guest
 /// names what it means.
 async fn run_target(
@@ -468,7 +497,8 @@ async fn run_target(
     let here = super::workspace::words().here_place_id;
     if let Some(named) = named {
         let listed = projects_here(client).await.unwrap_or_default();
-        if let Some(project) = listed.into_iter().find(|p| p.id == named || p.name == named).filter(|p| p.computer == here) {
+        let project = listed.into_iter().find(|p| p.id == named || p.name == named);
+        if let Some(project) = project.clone().filter(|p| p.computer == here) {
             #[derive(Deserialize)]
             struct Resolved {
                 #[allow(dead_code)]
@@ -479,6 +509,11 @@ async fn run_target(
         }
         if branch.is_some() {
             return Err(Failure::usage(words.branch_here_only.clone()));
+        }
+        if let Some(project) = project {
+            if !workspace_names(client).await?.iter().any(|n| n == named) {
+                return Ok(Target::Fork(project));
+            }
         }
         return Ok(Target::Box(workspace_of(client, named).await?));
     }
@@ -510,6 +545,55 @@ async fn run_target(
         (cwd, _) => cwd,
     };
     Ok(Target::Here { project: Some(project), branch, cwd })
+}
+
+/// The names of every workspace the caller can see.
+async fn workspace_names(client: &Client) -> Result<Vec<String>, Failure> {
+    #[derive(Deserialize)]
+    struct Named {
+        name: String,
+    }
+    #[derive(Deserialize)]
+    struct Listed {
+        workspaces: Vec<Named>,
+    }
+    let Listed { workspaces } = client.request("workspaces.list", Map::new()).await?;
+    Ok(workspaces.into_iter().map(|w| w.name).collect())
+}
+
+/// A workspace's name off the task, as packages/protocol's `nameOfTask` cuts it: the first five words of its first
+/// line, cut at 40 UTF-16 units, never ending in a space.
+fn name_of_task(task: &str) -> String {
+    let first = js_trim(task).split('\n').next().unwrap_or_default();
+    let words: Vec<&str> = first.split(js_space).filter(|w| !w.is_empty()).take(5).collect();
+    let mut name = String::new();
+    let mut units = 0;
+    for c in words.join(" ").chars() {
+        units += c.len_utf16();
+        if units > 40 {
+            break;
+        }
+        name.push(c);
+    }
+    name.trim_end_matches(js_space).to_owned()
+}
+
+/// The name itself where no workspace has it, else the name with the first number after it none has.
+fn taken_name_after(name: &str, taken: &[String]) -> String {
+    if !taken.iter().any(|t| t == name) {
+        return name.to_owned();
+    }
+    (2..).map(|n| format!("{name} {n}")).find(|candidate| !taken.iter().any(|t| t == candidate)).unwrap_or_default()
+}
+
+/// A machine forked for a run on a project elsewhere, as packages/host's `forkFor` makes one: named off the task, with
+/// a number after it where a machine already has that name. Called last, once the rest of the call is read, so a
+/// refusal costs no machine.
+async fn fork_for(client: &Client, project: &ProjectRow, task: &str) -> Result<Workspace, Failure> {
+    let name = taken_name_after(&name_of_task(task), &workspace_names(client).await?);
+    let project = super::create::Project { id: project.id.clone(), name: project.name.clone(), computer: project.computer.clone() };
+    let created = super::create::create_for(client, &project, &name, super::create::Asked::default()).await?;
+    super::workspace::read(&created.workspace, "workspaces.create")
 }
 
 /// The files a call names, read off this computer and carried as bytes, so nothing on the machine reaches back for the
@@ -903,33 +987,46 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
         input("run", arguments)?;
     let client = host.client().await?;
     let picks = Picks { model, effort, access, fast };
+    // Everything the call names is read before a machine is forked or woken for it, so a refusal costs none.
     let read = async {
         let target = run_target(&host, &client, project.as_deref(), branch, cwd.clone()).await?;
-        let on = match &target {
-            Target::Box(found) => Some(found.id.as_str()),
-            Target::Here { .. } => None,
+        let (on, fork_of) = match &target {
+            Target::Box(found) => (Some(found.id.as_str()), None),
+            Target::Fork(project) => (None, Some(project.id.as_str())),
+            Target::Here { .. } => (None, None),
         };
-        checked_start(&client, &message, agent.as_deref(), &picks, on).await?;
-        let woken = match &target {
-            Target::Box(found) => Some(awake(&client, found, "send").await?),
-            Target::Here { .. } => None,
-        };
+        checked_start(&client, &message, agent.as_deref(), &picks, on, fork_of).await?;
         let notify = notify_of(&client, notify.as_deref().unwrap_or_default()).await?;
-        Ok((target, woken, notify))
+        let folder = match &target {
+            Target::Here { cwd: here, .. } => here.as_deref(),
+            _ => cwd.as_deref(),
+        };
+        absolute_folder(folder)?;
+        let attachments = files_from(files.as_deref().unwrap_or_default(), host.args().guest)?;
+        let (target, woken) = match target {
+            Target::Fork(project) => {
+                let made = fork_for(&client, &project, &message).await?;
+                let woken = awake(&client, &made, "send").await?;
+                (Target::Box(made), Some(woken))
+            }
+            Target::Box(found) => {
+                let woken = awake(&client, &found, "send").await?;
+                (Target::Box(found), Some(woken))
+            }
+            here => (here, None),
+        };
+        Ok((target, woken, notify, attachments))
     }
     .await;
-    let (target, woken, notify) = before_sending(&client, read)?;
-    let attachments_of = || files_from(files.as_deref().unwrap_or_default(), host.args().guest);
-    let (mut start, opened, attachments) = match target {
-        Target::Box(_) => {
+    let (target, woken, notify, attachments) = before_sending(&client, read)?;
+    let (mut start, opened) = match target {
+        Target::Box(_) | Target::Fork(_) => {
             let folder = absolute_folder(cwd.as_deref())?;
-            let attachments = attachments_of()?;
             let woken = woken.as_ref().map_or("", |w| w.workspace.id.as_str());
-            (opening(&host, woken, &message, agent, folder, notify), None, attachments)
+            (opening(&host, woken, &message, agent, folder, notify), None)
         }
         Target::Here { project, branch, cwd } => {
             let folder = absolute_folder(cwd.as_deref())?;
-            let attachments = attachments_of()?;
             let mut at = Map::new();
             if let Some(project) = &project {
                 at.insert("project".to_owned(), Value::from(project.id.as_str()));
@@ -937,7 +1034,7 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
             if let Some(branch) = branch {
                 at.insert("branch".to_owned(), Value::from(branch));
             }
-            (opening_at(&host, at, &message, agent, folder, notify), Some(Opened { project: project.map(|p| p.name) }), attachments)
+            (opening_at(&host, at, &message, agent, folder, notify), Some(Opened { project: project.map(|p| p.name) }))
         }
     };
     if let Some(title) = title {
@@ -981,7 +1078,7 @@ async fn send(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let picks = Picks { model, effort, access: None, fast };
     let read = async {
         let thread: Thread = thread_of(&client, &thread).await?;
-        checked_start(&client, &message, Some(&thread.harness), &picks, Some(&thread.workspace_id)).await?;
+        checked_start(&client, &message, Some(&thread.harness), &picks, Some(&thread.workspace_id), None).await?;
         awake(&client, &workspace_of(&client, &thread.workspace_id).await?, "send").await?;
         Ok(thread)
     }
@@ -1071,6 +1168,17 @@ mod tests {
         assert!(refused.said.starts_with("M one has no fast mode"), "{}", refused.said);
         assert_eq!(refused.offered, None);
         assert!(checked_against(&catalog(None), &Picks::default()).is_ok());
+    }
+
+    #[test]
+    fn a_fork_is_named_off_the_task_as_the_protocol_names_one() {
+        assert_eq!(name_of_task("  fix the login page now please\nand more"), "fix the login page now");
+        let cut_on_a_space = format!("{} and the rest of it", "a".repeat(39));
+        assert_eq!(name_of_task(&cut_on_a_space), "a".repeat(39));
+        assert_eq!(name_of_task("a\u{85}b c"), "a\u{85}b c");
+        let taken = ["fix it".to_owned(), "fix it 2".to_owned()];
+        assert_eq!(taken_name_after("fix it", &taken), "fix it 3");
+        assert_eq!(taken_name_after("other", &taken), "other");
     }
 
     #[test]
