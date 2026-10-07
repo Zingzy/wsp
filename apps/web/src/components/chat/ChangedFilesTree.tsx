@@ -14,7 +14,6 @@ import {
   FileIcon,
   FolderIcon,
   FolderClosedIcon,
-  GitBranchIcon,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
@@ -23,7 +22,6 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {};
-const EMPTY_MOVED: ReadonlyArray<string> = [];
 const NO_FILES: ReadonlyArray<TurnDiffFileChange> = [];
 
 const changedFiles = (n: number): string => `${n} changed file${n === 1 ? "" : "s"}`;
@@ -31,8 +29,6 @@ const changedFiles = (n: number): string => `${n} changed file${n === 1 ? "" : "
 export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   turnId: TurnId;
   files: ReadonlyArray<TurnDiffFileChange>;
-  /** Each HEAD move the turn did not write, one quiet line with no files of its own. */
-  moved?: ReadonlyArray<string>;
   /** What else changed in the same folder meanwhile, whoever wrote it, listed under the turn's own files. */
   others?: ReadonlyArray<TurnDiffFileChange>;
   /** Other threads worked in the folder and the agent named none of its edits, so files are the folder's. */
@@ -42,21 +38,10 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   onToggleAllDirectories: () => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  const { turnId, files, moved = EMPTY_MOVED, others = NO_FILES, folder = false, allDirectoriesExpanded, resolvedTheme, onToggleAllDirectories, onOpenTurnDiff } = props;
+  const { turnId, files, others = NO_FILES, folder = false, allDirectoriesExpanded, resolvedTheme, onToggleAllDirectories, onOpenTurnDiff } = props;
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
   const hasDirectories = [...files, ...others].some((file) => /[/\\]/.test(file.path));
-  const movedLines =
-    moved.length === 0 ? null : (
-      <div data-changed-files-moved="" className={cn("flex flex-col gap-0.5", files.length === 0 ? "mt-4" : "px-3 pb-1 pt-0.5")}>
-        {moved.map((line, index) => (
-          <span key={`${index}:${line}`} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <GitBranchIcon aria-hidden className="size-3 shrink-0" />
-            {line}
-          </span>
-        ))}
-      </div>
-    );
-  if (files.length === 0 && others.length === 0) return movedLines;
+  if (files.length === 0 && others.length === 0) return null;
 
   return (
     <div className="@container/changed-files mt-4 rounded-lg bg-secondary dark:bg-input/20" data-changed-files-state="tree">
@@ -101,8 +86,6 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           </Tooltip>
         </div>
       </div>
-      {movedLines}
-      {folder && <p className="px-3 pb-1 text-meta text-muted-foreground">Other threads worked here too</p>}
       {files.length > 0 && (
         <div className="p-2">
           <ChangedFilesTree
