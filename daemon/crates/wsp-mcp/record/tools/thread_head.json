@@ -1061,6 +1061,89 @@
                 "properties": {
                   "type": {
                     "type": "string",
+                    "const": "session.compacted"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "before": {
+                    "type": "number"
+                  },
+                  "after": {
+                    "type": "number"
+                  },
+                  "line": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.context"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "context": {
+                    "type": "number"
+                  },
+                  "window": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "context"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
                     "const": "session.run"
                   },
                   "workspaceId": {
@@ -2428,6 +2511,89 @@
                   "type",
                   "workspaceId",
                   "sessionId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.compacted"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "before": {
+                    "type": "number"
+                  },
+                  "after": {
+                    "type": "number"
+                  },
+                  "line": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session.context"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/workspaceId"
+                  },
+                  "sessionId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/sessionId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/at"
+                  },
+                  "turnId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/turnId"
+                  },
+                  "threadId": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/threadId"
+                  },
+                  "pos": {
+                    "$ref": "#/properties/events/items/anyOf/0/properties/pos"
+                  },
+                  "context": {
+                    "type": "number"
+                  },
+                  "window": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "type",
+                  "workspaceId",
+                  "sessionId",
+                  "context"
                 ],
                 "additionalProperties": false
               },

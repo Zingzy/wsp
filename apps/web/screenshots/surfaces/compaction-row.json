@@ -1,0 +1,11 @@
+{
+  "at": "/",
+  "fixture": "meter",
+  "steps": [
+    "390:key:Escape",
+    "390:sidebar=trigger",
+    "row-id=thread:compact",
+    "390:key:Escape"
+  ],
+  "wait": "timeline-row-kind=work"
+}

@@ -441,8 +441,9 @@ export interface Runtime {
      * words around it, off the transcripts this host holds. */
     search(query: string, origin?: Caller): Promise<SessionSearchResult>;
     /** Asks the thread's harness a question beside the thread, off the thread's latest row, and records nothing. Takes
-     * any of the thread's session ids. Refused where the harness never announced a session or takes no side question. */
-    aside(sessionId: string, question: string, origin?: Caller): Promise<SessionAsideResult>;
+     * any of the thread's session ids. Refused where the harness never announced a session or takes no side question.
+     * With askId, each piece of the answer passes by as an aside.text event under it while the harness writes it. */
+    aside(sessionId: string, question: string, origin?: Caller, askId?: string): Promise<SessionAsideResult>;
     /** Rewinds a thread to the end of one of its turns, or with undo puts back the files its last rewind replaced.
      * Refused whole, before anything is written, on a working thread, one whose threads under it run, the latest
      * turn, files a turn kept no checkpoint of, and a workspace that is the person's own folder. */

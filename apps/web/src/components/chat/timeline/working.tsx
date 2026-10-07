@@ -84,7 +84,7 @@ export function ThinkingTimelineRow() {
 // ---------------------------------------------------------------------------
 
 /** Live "Working for Xs" label. */
-function WorkingTimer({ createdAt }: { createdAt: string }) {
+export function WorkingTimer({ createdAt }: { createdAt: string }) {
   const textRef = useRef<HTMLSpanElement>(null);
   const initialText = formatWorkingTimerNow(createdAt);
 

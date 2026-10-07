@@ -650,6 +650,9 @@ export type ProjectAddEvent = z.infer<typeof ProjectAddEvent>;
 
 /** Something the host did on its own that the person hears once, in a sentence of its own. */
 export const HostNoticeEvent = z.object({ type: z.literal("host.notice"), message: z.string() });
+/** A piece of a side question's answer as the harness writes it, under the askId the question carried. Passes by and
+ * is kept nowhere: the reply to sessions.aside carries the whole answer. */
+export const AsideTextEvent = z.object({ type: z.literal("aside.text"), workspaceId: z.string(), threadId: z.string().optional(), askId: z.string(), text: z.string() });
 export type HostNoticeEvent = z.infer<typeof HostNoticeEvent>;
 
 /** A project's record was dropped. */

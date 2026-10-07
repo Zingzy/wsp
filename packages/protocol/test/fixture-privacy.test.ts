@@ -57,7 +57,7 @@ const CURSOR = "a recorded Cursor turn; the call id is cut short";
 /** Every recorded id or real home the fixtures and test sources still carry, in whichever file, as many times as count
  * says, each with why it stays. */
 const ALLOWED: readonly Allowed[] = [
-  { text: "e16ed170-8257-4668-879e-fe836341633c", count: 33, why: "the session id of a recorded Claude Code stream, shared by its subagent and compact turns, which the adapter tests match on" },
+  { text: "e16ed170-8257-4668-879e-fe836341633c", count: 29, why: "the session id of a recorded Claude Code stream, shared by its subagent turns, which the adapter tests match on" },
   { text: "0f0d5872-9c1a-4e56-8a3b-7d2c4f6e9b01", count: 1, why: CLAUDE_STREAM },
   { text: "1a2b3c4d-0001-4aaa-8bbb-000000000001", count: 1, why: CLAUDE_STREAM },
   { text: "1a2b3c4d-0002-4aaa-8bbb-000000000002", count: 1, why: CLAUDE_STREAM },

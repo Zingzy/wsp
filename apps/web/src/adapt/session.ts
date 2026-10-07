@@ -7,7 +7,7 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import { AFTER_CUT_LINE, LIMIT_WORDS, NOTIFY_ME, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
+import { AFTER_CUT_LINE, LIMIT_WORDS, NOTIFY_ME, compactedLine, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
   PermissionPrompt,
@@ -433,6 +433,18 @@ export function createSessionFold(): SessionFold {
           ...row,
           permission: { ...row.permission, outcome: event.outcome, optionId: event.optionId ?? null },
         });
+        return;
+      }
+      case "session.context": {
+        const t = turnFor(event, at);
+        t.summary = { ...t.summary, held: { context: event.context, ...(event.window !== undefined ? { window: event.window } : {}) } };
+        turns[turns.length - 1] = t.summary;
+        return;
+      }
+      case "session.compacted": {
+        const t = turnFor(event, at);
+        closeOpenMessage(t);
+        addWork(t, { createdAt: at, label: compactedLine(event.before, event.after), tone: "compaction", sourceActivityKind: "harness.compaction" }, at);
         return;
       }
       case "session.changes": {

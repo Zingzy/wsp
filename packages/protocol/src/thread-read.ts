@@ -9,7 +9,7 @@
 // to megabytes.
 import { z } from "zod";
 import { threadMovedLine } from "./projects.js";
-import { NEWER_TURN_LINE, fmtClock, notifyBody, notifyReply, planStepsLine, toolActivityLine, toolDoneLine, turnChangesLine, turnEndLine } from "./format.js";
+import { NEWER_TURN_LINE, compactedLine, fmtClock, notifyBody, notifyReply, planStepsLine, toolActivityLine, toolDoneLine, turnChangesLine, turnEndLine } from "./format.js";
 import type { SessionEvent, SessionPermissionEvent, TurnResult } from "./index.js";
 
 /** Who a row of a read is: the message that opened or steered a turn, the agent's own words, one tool call, or the
@@ -139,6 +139,9 @@ export function threadMessages(events: ReadonlyArray<SessionEvent>, threadId: st
       case "session.end":
         // A turn the runtime ended before the harness replied: the read says so where the transcript has no result.
         if (!replied) turn(event.at, { status: "failed", error: event.reason ?? NO_RESULT_LINE });
+        continue;
+      case "session.compacted":
+        say("tool", event.at, compactedLine(event.before, event.after));
         continue;
       case "session.plan":
         if (event.steps !== undefined) {

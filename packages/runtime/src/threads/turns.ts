@@ -69,7 +69,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
   }): SessionHandle => {
     const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, notifyRoad, turnToken, scopeDeviceId } = t;
     const workspaceId = entry.record.id;
-    const { lines: deltasWritten, subagents: subagentsWritten, reply: recordedReply, started: startWritten, changes: changesWritten } = t.written ?? { lines: 0, subagents: 0, started: false, changes: false };
+    const { lines: deltasWritten, subagents: subagentsWritten, compactions: compactionsWritten, reply: recordedReply, started: startWritten, changes: changesWritten } = t.written ?? { lines: 0, subagents: 0, compactions: 0, started: false, changes: false };
     /** What the turn changed, read once at the first of its reply and its exit. */
     let changesRead = changesWritten;
     /** The paths the agent's own tool calls wrote, read off every call including the ones a re-opened run reads past. */
@@ -106,6 +106,20 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
     let replaying = deltasWritten;
     let subagentRows = subagentsWritten;
     let replayingSubagents = subagentsWritten;
+    let compactionRows = compactionsWritten;
+    let replayingCompactions = compactionsWritten;
+    /** What the agent held after its latest call, which passes by on the bus as each call reports it. */
+    let held: { context: number; window?: number } | undefined;
+    /** Set once the turn's result named what the agent held, which the meter then reads off the result. */
+    let resultHeld = false;
+    /** The one row of what the agent held a turn writes, where its result names none: a turn stopped, cut or failed
+     * after a call, and one a closing host still holds running, so the next window reads the meter off the
+     * transcript rather than waiting on the agent's next call. */
+    const writeHeld = (): void => {
+      if (held === undefined || resultHeld) return;
+      ctx.record({ type: "session.context", workspaceId, sessionId: view.claudeSessionId ?? view.id, turnId, threadId, ...held });
+    };
+    ctx.heldAtClose.add(writeHeld);
     let ended = false;
     /** The harness's own name for where this turn ended, kept with the turn's checkpoint once it is over. */
     let anchor: string | undefined;
@@ -118,6 +132,8 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
     const turnOver = (): void => {
       if (over) return;
       over = true;
+      ctx.heldAtClose.delete(writeHeld);
+      writeHeld();
       const undone: string[] = [];
       for (const [id, held] of threadRecords) {
         if (held.workspaceId !== workspaceId || held.rewound === undefined) continue;
@@ -323,6 +339,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           });
           return;
         case "turn.done": {
+          if (event.result.tokens?.context !== undefined) resultHeld = true;
           // A reply already written stands, and the gate comes before the status is taken: what the run says on the
           // way round again is the reply this turn already gave, and nothing later may overwrite it.
           if (replyRecorded) {
@@ -420,6 +437,17 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
         case "turn.usage":
           // Only a run re-read after a restart reads the agent's stamp, and only against its own other stamps.
           ctx.burn.add({ account: ctx.usageAccountOf(entry, view.harness, turnAccount).key, threadId, tokens: event.tokens, ...(t.written !== undefined && event.at !== undefined ? { replayed: { run: turnId, at: event.at } } : {}) });
+          if (event.context !== undefined) {
+            held = { context: event.context, ...(event.window !== undefined ? { window: event.window } : {}) };
+            bus.pass({ type: "session.context", workspaceId, sessionId, turnId, threadId, at: clock.now(), ...held });
+          }
+          return;
+        case "turn.compacted":
+          if (replayingCompactions > 0) {
+            replayingCompactions--;
+            return;
+          }
+          ctx.record({ type: "session.compacted", workspaceId, sessionId, turnId, threadId, line: ++compactionRows, ...(event.before !== undefined ? { before: event.before } : {}), ...(event.after !== undefined ? { after: event.after } : {}) });
           return;
         case "turn.plan":
           ctx.record({ type: "session.plan", workspaceId, sessionId, turnId, threadId, ...(event.steps !== undefined ? { steps: event.steps } : {}), ...(event.text !== undefined ? { text: event.text } : {}) });

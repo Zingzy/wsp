@@ -81,6 +81,9 @@ export type AdapterEvent =
       cwd?: string;
     }
   | { type: "turn.done"; sessionId: string; result: TurnResult }
+  /** The agent compacted its own context, sent once per compaction: what the model held before and after it, each
+   * where the harness said. */
+  | { type: "turn.compacted"; sessionId: string; before?: number; after?: number }
   /** The agent's step list whole each time it changes, or the plan it proposed as Markdown; read off whichever tool
    * or item the agent keeps them in, which draws no tool row of its own. */
   | { type: "turn.plan"; sessionId: string; steps?: PlanStep[]; text?: string }
@@ -114,10 +117,15 @@ export type AdapterEvent =
     }
   | {
       /** The tokens one model call of this turn drew, a subagent's included, sent as the harness reports each call: what
-       * the account it runs on is drawing right now. Read by the runtime alone. */
+       * the account it runs on is drawing right now. The runtime alone reads the draw; what the agent holds passes to
+       * the thread's meter, as session.context. */
       type: "turn.usage";
       sessionId: string;
       tokens: number;
+      /** What the thread's own agent holds after this call, and the most it can hold where the harness says; absent on
+       * a subagent's call. */
+      context?: number;
+      window?: number;
       /** When the call was made, ms epoch, on the clock of the machine the agent runs on. A run re-read after a host
        * restart replays its old calls, and the host reads this only there, against the run's other stamps. */
       at?: number;
@@ -401,6 +409,8 @@ export interface AsideQuestion {
   cwd?: string;
   model?: string;
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** Handed each piece of the answer as the harness writes it, where it writes in pieces. */
+  onText?: (text: string) => void;
 }
 
 /** The harness's answer to a side question, and what it reported spending on it where it reports usage. */

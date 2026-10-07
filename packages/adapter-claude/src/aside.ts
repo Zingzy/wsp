@@ -34,7 +34,7 @@ export interface AsideCommandOptions {
  * included, and is kept from acting by other flags: --tools '' empties the built-in set, --disallowedTools 'mcp__*'
  * takes every MCP tool off the list while its server stays connected, and disableAllHooks keeps a SessionStart hook
  * from running a command on the copy. The question is the one stream-json user line on stdin, the same channel a
- * turn takes.
+ * turn takes. Partial messages are on, so the answer's words are read as the model writes them rather than at its end.
  */
 export function asideCommand(options: AsideCommandOptions): string {
   const { session, fork, configDir, cwd, model, mcpServers, memoryDir } = options;
@@ -44,6 +44,7 @@ export function asideCommand(options: AsideCommandOptions): string {
     "--input-format stream-json",
     "--output-format stream-json",
     "--verbose",
+    "--include-partial-messages",
     "--tools ''",
     "--disallowedTools 'mcp__*'",
     ...settingsFlag({ disableAllHooks: true, ...memorySettings(memoryDir) }),
@@ -62,6 +63,17 @@ export function forkCleanupCommand(options: { fork: string; configDir: string })
   if (!UUID_RE.test(options.fork)) throw new Error(`session identifier must be a UUID, got "${options.fork}"`);
   const projects = shellQuote(`${options.configDir}/projects`);
   return `rm -rf ${projects}/*/${options.fork}.jsonl ${projects}/*/${options.fork}`;
+}
+
+/** A piece of the answer's words off a partial message line; undefined for every other line. */
+export function asideTextOf(event: Record<string, unknown>): string | undefined {
+  if (event.type !== "stream_event") return undefined;
+  const inner = event.event;
+  if (typeof inner !== "object" || inner === null || (inner as Record<string, unknown>).type !== "content_block_delta") return undefined;
+  const delta = (inner as Record<string, unknown>).delta;
+  if (typeof delta !== "object" || delta === null) return undefined;
+  const { type, text } = delta as Record<string, unknown>;
+  return type === "text_delta" && typeof text === "string" && text !== "" ? text : undefined;
 }
 
 /** The answer a result event carries, or the CLI's own words for why it gave none. */

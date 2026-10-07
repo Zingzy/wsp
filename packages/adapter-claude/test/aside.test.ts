@@ -82,6 +82,7 @@ describe("asideCommand", () => {
       "--input-format stream-json",
       "--output-format stream-json",
       "--verbose",
+      "--include-partial-messages",
       "--tools ''",
       "--disallowedTools 'mcp__*'",
       `--settings '{"disableAllHooks":true}'`,
@@ -185,6 +186,23 @@ describe("the adapter's aside", () => {
     expect(exec.calls[1]!.env).toMatchObject({ PATH: "/bin" });
     expect(exec.order.indexOf("exited 1")).toBeLessThan(exec.order.indexOf("launch 2"));
     expect(exec.calls).toHaveLength(2);
+  });
+
+  it("hands each piece of the answer on as the CLI writes it, and still answers the whole result", async () => {
+    // The partial message lines 2.1.289 prints under --include-partial-messages, a thinking piece among them.
+    const delta = (index: number, delta: Record<string, unknown>) => JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", index, delta }, session_id: FORK, parent_tool_use_id: null });
+    const exec = scripted([
+      JSON.stringify({ type: "system", subtype: "init", session_id: FORK, tools: [] }),
+      JSON.stringify({ type: "stream_event", event: { type: "message_start", message: { id: "m1" } }, session_id: FORK }),
+      delta(0, { type: "thinking_delta", thinking: "the folder" }),
+      delta(1, { type: "text_delta", text: "You are in " }),
+      delta(1, { type: "text_delta", text: "/root/spoo" }),
+      JSON.stringify(RESULT),
+    ]);
+    const pieces: string[] = [];
+    const answer = await adapter(exec.factory).aside!({ session: SESSION, question: "which folder?", onText: text => pieces.push(text) });
+    expect(pieces).toEqual(["You are in ", "/root/spoo"]);
+    expect(answer.text).toBe(RESULT.result);
   });
 
   it("answers with the question's result, past the empty one a resume gives a background command the thread left running", async () => {

@@ -674,7 +674,8 @@ export interface Api {
   searchMessages?(query: string): Promise<SessionSearchResult>;
   /** Asks the thread's agent a question beside the thread, by any of its session ids, on a copy of its session the
    * host keeps nowhere. Optional so fixtures that never ask one need not fake it; a client without it offers no /btw. */
-  askAside?(sessionId: string, question: string): Promise<SessionAsideResult>;
+  /** With askId, the answer's pieces go by as aside.text events under it before the whole answer resolves. */
+  askAside?(sessionId: string, question: string, askId?: string): Promise<SessionAsideResult>;
   /** Rewinds a thread to the end of one of its turns, with the files or the conversation alone. Optional so fixtures
    * that never rewind need not fake it; a client without it offers no Rewind to here. */
   rewindThread?(threadId: string, turnId: string, files: boolean): Promise<SessionRewindResult>;
@@ -1007,7 +1008,7 @@ export function makeApi(c: ProtocolClient): Api {
     restoreThreads: async threadIds => void (await c.request("sessions.restore", { threadIds })),
     // Parsed, not trusted: a hit names a thread the palette opens.
     searchMessages: async query => SessionSearchResult.parse(await c.request<Record<string, unknown>>("sessions.search", { query })),
-    askAside: async (sessionId, question) => SessionAsideResult.parse(await c.request<Record<string, unknown>>("sessions.aside", { sessionId, question })),
+    askAside: async (sessionId, question, askId) => SessionAsideResult.parse(await c.request<Record<string, unknown>>("sessions.aside", { sessionId, question, ...(askId !== undefined ? { askId } : {}) })),
     rewindThread: async (threadId, turnId, files) => SessionRewindResult.parse(await c.request<Record<string, unknown>>("sessions.rewind", { threadId, turnId, files })),
     undoRewind: async threadId => SessionRewindResult.parse(await c.request<Record<string, unknown>>("sessions.rewind", { threadId, undo: true })),
     // Parsed, not trusted: the block draws the step the thread holds, which a newer host may have widened.

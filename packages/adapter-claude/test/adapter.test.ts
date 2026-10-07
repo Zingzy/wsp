@@ -1486,16 +1486,23 @@ describe("what a rewind needs of a Claude Code turn", () => {
   });
 });
 
-describe("what the model held after a compaction", () => {
-  it("is the compaction's own post figure where it came after the last reply's usage", async () => {
-    const raw = readFileSync(new URL("./fixtures/compact-turn.jsonl", import.meta.url), "utf8");
-    const exec = scriptedExec(raw.split("\n").filter((line) => line.trim().length > 0));
+/** A recording's lines as Claude Code printed them, its provenance line left out and its session swapped for the
+ * fixture's own, so a test resuming FIXTURE_SESSION_ID reads them as that session's. */
+function recorded(name: string): string[] {
+  const lines = readFileSync(new URL(`./fixtures/${name}.jsonl`, import.meta.url), "utf8").split("\n").filter(line => line.trim().length > 0 && !line.includes('"_fixture_provenance"'));
+  const session = (JSON.parse(lines[0]!) as { session_id: string }).session_id;
+  return lines.map(line => line.replaceAll(session, FIXTURE_SESSION_ID));
+}
+
+describe("a compaction Claude Code ran by itself mid-session", () => {
+  it("says the compaction with both figures, and the reply after it is what the model then held", async () => {
+    const exec = scriptedExec(recorded("compact-turn"));
     const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
-    const { onEvent } = collect();
-    const result = await adapter.start({ prompt: "keep going", onEvent }).finished;
-    expect(result.tokens?.context).toBe(31_250);
-    expect(result.tokens?.window).toBe(1_000_000);
-    expect(result.model).toBe("claude-opus-5-5[1m]");
+    const { events, onEvent } = collect();
+    const result = await adapter.start({ prompt: "keep going", resume: FIXTURE_SESSION_ID, onEvent }).finished;
+    expect(events.filter(e => e.type === "turn.compacted")).toEqual([{ type: "turn.compacted", sessionId: FIXTURE_SESSION_ID, before: 106_883, after: 15_322 }]);
+    expect(result.tokens?.context).toBe(20_995);
+    expect(result.tokens?.window).toBe(200_000);
   });
 });
 
@@ -1647,9 +1654,9 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
   const run = async (lines: string[], resume?: string) => {
     const exec = scriptedExec(lines);
     const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
-    const { onEvent } = collect();
+    const { events, onEvent } = collect();
     const done = await adapter.start({ prompt: "x", ...(resume !== undefined ? { resume } : {}), onEvent }).finished;
-    return { done, command: exec.calls[0]?.command ?? "" };
+    return { done, events, command: exec.calls[0]?.command ?? "" };
   };
 
   it("a resumed turn costs its result's total less the total the session's transcript saved before it", async () => {
@@ -1679,25 +1686,18 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
   });
 
   it("a compaction inside the turn leaves the running total running: the turn still costs what it gained", async () => {
-    const compacted = `{"type":"system","subtype":"compact_boundary","session_id":"${FIXTURE_SESSION_ID}","compact_metadata":{"trigger":"auto","pre_tokens":180000,"post_tokens":12000}}`;
+    const compacted = recorded("compact-turn").find(line => line.includes('"compact_boundary"'))!;
     const { done } = await run([saved(352.3259844), init, compacted, result(370.679875)], FIXTURE_SESSION_ID);
     expect(done.costUsd).toBeCloseTo(18.3538906, 6);
   });
 
   it("a /compact turn says what the model holds after the compaction, though its result reports no call at all", async () => {
-    // 2.1.289's answer to a headless /compact on a resumed session (recorded 2026-10-05): the status lines, init, the
-    // boundary with what the model holds after it, and a result whose usage is all zeros.
-    const lines = [
-      `{"type":"system","subtype":"status","status":"compacting","session_id":"${FIXTURE_SESSION_ID}"}`,
-      `{"type":"system","subtype":"status","status":null,"compact_result":"success","session_id":"${FIXTURE_SESSION_ID}"}`,
-      init,
-      `{"type":"system","subtype":"compact_boundary","session_id":"${FIXTURE_SESSION_ID}","compact_metadata":{"trigger":"manual","pre_tokens":25442,"post_tokens":2691,"cumulative_dropped_tokens":22751,"duration_ms":10192}}`,
-      `{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"},"session_id":"${FIXTURE_SESSION_ID}","parent_tool_use_id":null,"isReplay":true}`,
-      JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 0, duration_ms: 10_400, result: "", session_id: FIXTURE_SESSION_ID, usage: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 } }),
-    ];
-    const { done } = await run(lines, FIXTURE_SESSION_ID);
+    // 2.1.291's answer to a headless /compact on a resumed session: the status lines, init, the boundary with what
+    // the model held before and after it, the CLI's own line, and a result whose usage is all zeros.
+    const { done, events } = await run(recorded("compact-command"), FIXTURE_SESSION_ID);
     expect(done.status).toBe("completed");
-    expect(done.tokens?.context).toBe(2_691);
+    expect(done.tokens?.context).toBe(1_152);
+    expect(events.filter(e => e.type === "turn.compacted")).toEqual([{ type: "turn.compacted", sessionId: FIXTURE_SESSION_ID, before: 44_560, after: 1_152 }]);
   });
 
   it("a total under the saved one started again from nothing, so the turn cost the whole of it", async () => {
@@ -1726,7 +1726,7 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
     ]);
   });
 
-  it("says what each model call drew once per message, a subagent's included, though every block of a message repeats its usage", async () => {
+  it("says what each model call drew once per message, a subagent's included, and what the agent's own call left it holding", async () => {
     const said = (id: string, usage: Record<string, number>, parent: string | null = null) =>
       JSON.stringify({ type: "assistant", message: { id, role: "assistant", content: [{ type: "text", text: "x" }], usage }, parent_tool_use_id: parent, session_id: FIXTURE_SESSION_ID, timestamp: `2026-10-01T10:00:0${id.slice(-1)}.000Z` });
     const exec = scriptedExec([
@@ -1740,7 +1740,7 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
     const { events, onEvent } = collect();
     await adapter.start({ prompt: "x", onEvent }).finished;
     expect(events.filter(e => e.type === "turn.usage")).toEqual([
-      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 1_245, at: Date.parse("2026-10-01T10:00:01.000Z") },
+      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 1_245, context: 1_245, at: Date.parse("2026-10-01T10:00:01.000Z") },
       { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 10, at: Date.parse("2026-10-01T10:00:02.000Z") },
     ]);
   });

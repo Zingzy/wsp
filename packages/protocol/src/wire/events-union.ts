@@ -8,12 +8,12 @@ import { UsageAlertEvent } from "../plan-alerts.js";
 import { SessionSlateEvent, SlateRunEvent, SlateValuesEvent } from "../slate/wire.js";
 import { ReleaseChangedEvent } from "../release.js";
 import { sequenced } from "./helpers.js";
-import { SessionBehindEvent, SessionChangesEvent, SessionCheckpointEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent, SessionHeldEvent, SessionMovedEvent, SessionNotifyEvent, SessionPermissionClosedEvent, SessionPermissionEvent, SessionPlanEvent, SessionQueuedEvent, SessionRunEvent, SessionStartEvent, SessionStartingEvent, SessionSteerEvent, SessionSubagentEvent } from "../views/session-events.js";
+import { SessionBehindEvent, SessionChangesEvent, SessionCheckpointEvent, SessionDeltaEvent, SessionDoneEvent, SessionEndEvent, SessionHeldEvent, SessionMovedEvent, SessionNotifyEvent, SessionPermissionClosedEvent, SessionPermissionEvent, SessionPlanEvent, SessionCompactedEvent, SessionContextEvent, SessionQueuedEvent, SessionRunEvent, SessionStartEvent, SessionStartingEvent, SessionSteerEvent, SessionSubagentEvent } from "../views/session-events.js";
 import { InboxFileEvent, PortCloseEvent, PortOpenEvent, WorkspaceAgentsEvent, WorkspaceCostEvent, WorkspaceCreatedEvent, WorkspaceCreatingEvent, WorkspaceDeletedEvent, WorkspaceGoneEvent, WorkspaceLookEvent, WorkspaceNappedEvent, WorkspaceRenamedEvent, WorkspaceReviewEvent, WorkspaceStatusEvent, WorkspaceUpgradedEvent, WorkspaceViewedEvent, WorkspaceWokenEvent } from "../views/workspace-events.js";
 import { ProjectExportEvent, ProjectImportEvent } from "../views/project-bundle.js";
 import { PreferencesChangedEvent, ThreadHeadEvent, ThreadMarkedEvent, ThreadRewoundEvent } from "../views/preferences.js";
 import { GoldenStageEvent } from "../views/golden-image.js";
-import { ForwardCloseEvent, ForwardOpenEvent, HostNoticeEvent, PlaceAbsentEvent, PlaceChangedEvent, PlaceJoinedEvent, PlacePendingEvent, PlacePresentEvent, PlaceRemovedEvent, PlaceSetupEvent, PlaceStageEvent, PlaceSyncEvent, ProjectAddedEvent, ProjectAddEvent, ProjectRemovedEvent, RecipesChangedEvent } from "../views/place.js";
+import { AsideTextEvent, ForwardCloseEvent, ForwardOpenEvent, HostNoticeEvent, PlaceAbsentEvent, PlaceChangedEvent, PlaceJoinedEvent, PlacePendingEvent, PlacePresentEvent, PlaceRemovedEvent, PlaceSetupEvent, PlaceStageEvent, PlaceSyncEvent, ProjectAddedEvent, ProjectAddEvent, ProjectRemovedEvent, RecipesChangedEvent } from "../views/place.js";
 
 export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceCreatingEvent.extend(sequenced),
@@ -41,6 +41,8 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionCheckpointEvent.extend(sequenced),
   SessionChangesEvent.extend(sequenced),
   SessionPlanEvent.extend(sequenced),
+  SessionCompactedEvent.extend(sequenced),
+  SessionContextEvent.extend(sequenced),
   SessionRunEvent.extend(sequenced),
   SessionMovedEvent.extend(sequenced),
   SessionBehindEvent.extend(sequenced),
@@ -83,6 +85,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   AgentsChangedEvent.extend(sequenced),
   UsageAlertEvent.extend(sequenced),
   HostNoticeEvent.extend(sequenced),
+  AsideTextEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
