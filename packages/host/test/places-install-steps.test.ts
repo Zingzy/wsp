@@ -710,7 +710,10 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       const backend = new SshBackend({ transport, hostKey: async () => BOX_KEY, knownHosts: async () => ({}), hostName: async reach => reach.host });
       const target = GUEST_DAEMON_TARGETS.find(t => t.uname === said)!;
       const install = placeInstaller({ backend, ...assets(tmp(`road-${said}`), [target]) });
-      expect(await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {})).toMatchObject({ name: "box" });
+      const kept: (string | undefined)[] = [];
+      expect(await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"], beforeDeploy: async (_undo, _ssh, key) => void kept.push(key) }, () => {})).toMatchObject({ name: "box" });
+      // The key the box answered with is written down beside the undo, which runs on no box answering with another.
+      expect(kept).toEqual([BOX_KEY]);
       const deploy = ran.find(script => script.includes(`case "$(uname -m)" in`))!;
       expect(deploy).toContain(arm);
       expect(deploy).not.toContain(gone);
