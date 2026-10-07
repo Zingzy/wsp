@@ -36,6 +36,7 @@ import type {
   ExecStream,
   ExecStreamFactory,
   HarnessCatalogAnswer,
+  HarnessExec,
   McpServerSpec,
   PermissionAsk,
   PermissionOutcome,
@@ -181,7 +182,7 @@ export interface CodexAdapter {
   /** A start takes promptAfter: the server touches no file before turn/start hands it the prompt. */
   readonly waitsForPrompt: true;
   /** Makes the binary describe itself under the same home as a session, without running a turn. */
-  probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
+  probeCatalog(exec: HarnessExec): Promise<HarnessCatalogAnswer>;
   /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */
   sessionTitle: SessionTitleReader;
   /** Names the thread through the app server's own rename, which writes the column that read takes. */
@@ -1271,8 +1272,10 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
 
   const attach = deps.exec.attach?.bind(deps.exec);
 
-  const probeCatalog = (exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer> =>
-    exec(catalogProbeCommand({ home: deps.home, baseEnv: deps.baseEnv, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) })).then(stdout => parseCatalogProbe(stdout, deps.login));
+  const launch = deps.launch !== undefined ? { launch: deps.launch } : {};
+  /** What every question outside a turn reads off its input: the session's own environment, never words of its text. */
+  const questionEnv = (): Record<string, string> => buildEnv({ base: deps.baseEnv, home: deps.home });
+  const probeCatalog = (exec: HarnessExec): Promise<HarnessCatalogAnswer> => exec(catalogProbeCommand(launch), questionEnv()).then(stdout => parseCatalogProbe(stdout, deps.login));
 
   return {
     start,
@@ -1308,26 +1311,24 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     probeCatalog,
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
     renameSession: (threadId, title, exec) =>
-      exec(renameCommand({ home: deps.home, threadId, title, baseEnv: deps.baseEnv, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) })).then(parseRename),
+      exec(renameCommand({ threadId, title, ...launch }), questionEnv()).then(parseRename),
     titleFor: (turn, exec) =>
       exec(
         titleForCommand({
-          home: deps.home,
           prompt: titlePrompt(turn.opening, turn.reply),
           ...(turn.model !== undefined ? { model: turn.model } : {}),
-          ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
-          ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
+          ...launch,
         }),
+        questionEnv(),
       ).then(parseTitleFor),
     draftFor: (ask, exec) =>
       exec(
         draftForCommand({
-          home: deps.home,
           promptFile: ask.promptFile,
           ...(ask.model !== undefined ? { model: ask.model } : {}),
-          ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
-          ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
+          ...launch,
         }),
+        questionEnv(),
       ).then(parseDraftFor),
     env,
   };

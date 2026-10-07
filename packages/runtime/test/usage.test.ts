@@ -2,7 +2,8 @@
 // The usage records as the runtime keeps them: a turn's end files its tokens
 // under the sign-in its machine ran it with, a limit the harness printed files
 // that account's reading, and the two answers never add one into the other.
-import { mkdtempSync, rmSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -440,6 +441,50 @@ describe("spending a banked reset", () => {
       const consume = server.requests().find(r => r["method"] === "account/rateLimitResetCredit/consume");
       expect(consume?.["params"]).toEqual({ idempotencyKey: expect.stringMatching(/^[0-9a-f-]{36}$/) });
       expect((await rt.usage.accounts()).accounts.find(a => a.key === "codex:acct_7f3a")).toMatchObject({ windows: [{ kind: "session", usedPercent: 0 }], credits: { count: 1 } });
+    } finally {
+      server.remove();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("carries a launch variable the person set for the agent in the run's environment, never in a file under the run folder", async () => {
+    const server = fakeAppServer({
+      "account/read": { result: { account: { type: "chatgpt", email: "dev@example.com", planType: "plus" }, requiresOpenaiAuth: true } },
+      "account/rateLimits/read": [limits(100, 2), limits(0, 1)],
+      "account/rateLimitResetCredit/consume": { result: { outcome: "reset" } },
+    });
+    const root = mkdtempSync(join(tmpdir(), "wsp-usage-reset-"));
+    const runDir = join(root, "runs");
+    const key = `sk-x-${randomBytes(8).toString("hex")}`;
+    const row = (id: string) => ({ id, name: id, installed: true, road: "own", signIn: "signed-in", signInRoad: "terminal", wspTools: false });
+    /** At each launch, the variable as the run's environment holds it and every file under the run folder holding it. */
+    const launches: { env: string | undefined; holding: string[] }[] = [];
+    const local = fakeLocal(root);
+    try {
+      rt = createRuntime({
+        backend: stubBackend(),
+        store: memoryStore(),
+        // Only an agent this host runs takes a setup; the reset itself starts no turn of it.
+        adapters: { codex: turning({ status: "completed", text: "" }) },
+        pricesFetch: async () => ({}),
+        local: {
+          ...local,
+          execStream: o => (command, options) => {
+            const stream = local.execStream(o)(command, options);
+            const files = readdirSync(runDir, { recursive: true, withFileTypes: true }).filter(e => e.isFile());
+            launches.push({ env: options.env["CODEX_GATEWAY_TOKEN"], holding: files.filter(e => readFileSync(join(e.parentPath, e.name), "utf8").includes(key)).map(e => e.name) });
+            return stream;
+          },
+          home: id => (id === "codex" ? server.home : join(root, `.${id}`)),
+          env: () => ({ PATH: server.path, HOME: root }),
+        },
+        agentsReader: { read: async () => ({ home: root, user: "maya", agents: [row("codex")], skills: [], servers: [], refused: [] }) as never, tools: async () => ({ auth: "open", readAt: "2026-09-25T12:00:00.000Z" }) as never },
+      });
+      await rt.agents.setup(HERE_PLACE_ID, "codex", { env: { CODEX_GATEWAY_TOKEN: key } });
+      expect(await rt.usage.reset({ account: "codex@here" })).toMatchObject({ outcome: "reset" });
+      // The read, then the spend that reads again after it.
+      expect(launches).toHaveLength(2);
+      for (const launch of launches) expect(launch).toEqual({ env: key, holding: [] });
     } finally {
       server.remove();
       rmSync(root, { recursive: true, force: true });

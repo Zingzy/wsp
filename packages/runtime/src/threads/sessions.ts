@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { CATALOG_AGENTS, serverValuesOf } from "@wsp/catalog";
+import { harnessExec } from "@wsp/engine";
 import {
   type SessionEvent, type SessionInterruptOutcome, type SessionInterruptResult, type SessionStartOutcome,
   type SessionSearchResult, type SessionView, type StartPicks, type TurnImage, type TurnResult, foldThreads,
@@ -650,7 +651,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       if (write === undefined) return { outcome: "unsupported" };
       // The store is keyed by the harness's own id, so a thread whose harness never announced one has nothing to name.
       if (harnessSessionId === undefined) return { outcome: "no-session" };
-      const wrote = await ctx.writeSession(harnessSessionId, () => write(harnessSessionId, named, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)));
+      const wrote = await ctx.writeSession(harnessSessionId, () => write(harnessSessionId, named, harnessExec(entry.machine, SESSION_TITLE_TIMEOUT_MS)));
       // A store that refused the write says nothing about which sessions it has, so its own line travels as the answer.
       if (wrote.kind === "failed") return { outcome: "failed", error: wrote.error };
       if (wrote.kind === "no-session") return { outcome: "no-session" };

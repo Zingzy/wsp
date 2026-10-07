@@ -11,6 +11,10 @@ export function inFolder(cwd: string | undefined, command: string): string {
   return `cd ${cwd === undefined ? "~" : shellQuote(cwd)} && ${command}`;
 }
 
+/** What a script reads its environment with: every NUL-ended NAME=value on its input, exported in bash. A command
+ * puts it where its own variables belong, after any line that clears inherited ones. */
+export const ENV_FROM_INPUT = "while IFS= read -r -d '' wsp_kv; do export \"$wsp_kv\"; done; unset wsp_kv";
+
 /** The characters sh reads as themselves anywhere in a word; anything else in a word gets it quoted. */
 const BARE_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
 

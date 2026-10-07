@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,7 +39,9 @@ describe("machineExecStream", () => {
     for await (const line of stream.lines) lines.push(line);
     expect(lines).toEqual(['{"type":"system","subtype":"init"}', '{"type":"assistant"}', '{"type":"result"}']);
     expect(await stream.exited).toBe(0);
-    expect(guest.getScript()).toContain("export CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
+    // The environment rides the launch, ahead of the setsid that starts the script under it, and never the script.
+    expect(guest.getLaunch()).toContain("export CLAUDE_CONFIG_DIR='/root/.claude-cfg'\nsetsid bash ");
+    expect(guest.getScript()).not.toContain("CLAUDE_CONFIG_DIR");
     expect(guest.getScript()).toContain("claude -p 'hi' </dev/null");
   });
 
@@ -134,7 +137,7 @@ describe("machineExecStream", () => {
     expect(await stream.exited).toBe(0);
     const launch = launchCalls(guest.calls);
     expect(launch).toHaveLength(1);
-    expect(launch[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\numask 077\nmkdir '\/tmp\/wsp-run\/[0-9a-f]{12}\.d' 2>\/dev\/null \|\| \{ \[ -d '\/tmp\/wsp-run\/[0-9a-f]{12}\.d' \] && \{ echo WSP_LAUNCHED; exit 0; \}; echo 'no run folder on this machine: \/tmp\/wsp-run\/[0-9a-f]{12}\.d' >&2; exit 1; \}\nset -o pipefail\nprintf %s '[A-Za-z0-9+/=]+' \| base64 -d > '\/tmp\/wsp-run\/[0-9a-f]{12}\.sh' \|\| exit 1\nsetsid bash /);
+    expect(launch[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\numask 077\nmkdir '\/tmp\/wsp-run\/[0-9a-f]{12}\.d' 2>\/dev\/null \|\| \{ \[ -d '\/tmp\/wsp-run\/[0-9a-f]{12}\.d' \] && \{ echo WSP_LAUNCHED; exit 0; \}; echo 'no run folder on this machine: \/tmp\/wsp-run\/[0-9a-f]{12}\.d' >&2; exit 1; \}\nset -o pipefail\nprintf %s '[A-Za-z0-9+/=]+' \| base64 -d > '\/tmp\/wsp-run\/[0-9a-f]{12}\.sh' \|\| exit 1\nexport CLAUDE_CONFIG_DIR='\/root\/\.claude-cfg'\nsetsid bash /);
     expect(solariBody(launch[0]!)).toBeLessThanOrEqual(EXEC_BODY_MAX);
   });
 
@@ -151,15 +154,15 @@ describe("machineExecStream", () => {
     const launch = launchCalls(guest.calls);
     expect(launch.filter(c => c.endsWith("echo WSP_PIECE"))).toHaveLength(4);
     expect(launch).toHaveLength(5);
-    // Every piece is written under the mask too: it holds the same bytes as the script it is cut from, the turn's
-    // provider key among them, and it waits on disk until the last exec joins the pieces and removes them.
+    // Every piece is written under the mask too: it holds the same bytes as the script it is cut from, and it waits
+    // on disk until the last exec joins the pieces and removes them.
     for (const piece of launch.filter(c => c.endsWith("echo WSP_PIECE"))) {
       const lines = piece.split("\n");
       expect(lines[1]).toBe("umask 077");
       expect(lines[2]!.startsWith("printf %s ")).toBe(true);
     }
     // The exit file is written under the same base as the script, and its path is quoted like every other.
-    expect(guest.getScript()).toBe(`${workScoreLine()}\nexport CLAUDE_CONFIG_DIR='/root/.claude-cfg'\n${BIG_COMMAND}\necho $? > '${launch.at(-1)!.match(/> '([^']*)\.sh'/)![1]}'.exit\n`);
+    expect(guest.getScript()).toBe(`${workScoreLine()}\n${BIG_COMMAND}\necho $? > '${launch.at(-1)!.match(/> '([^']*)\.sh'/)![1]}'.exit\n`);
   });
 
   it("makes every file of a run under the login's own mask, from the claim folder down", async () => {
@@ -180,7 +183,7 @@ describe("machineExecStream", () => {
     const guest = scriptGuest(backend, [{ append: "hi\n", exit: 0 }, {}]);
     const stream = machineExecStream(machine, { pollMs: 5 })("claude -p 'hi'", { env: { PATH: "/root/.local/bin:/usr/bin" } });
     for await (const _ of stream.lines) void _;
-    expect(guest.getScript().split("\n").slice(0, 3)).toEqual([workScoreLine(), "export PATH='/root/.local/bin:/usr/bin'", "claude -p 'hi'"]);
+    expect(guest.getScript().split("\n").slice(0, 2)).toEqual([workScoreLine(), "claude -p 'hi'"]);
   });
 
   it("reassembles multi-byte characters split across poll boundaries", async () => {
@@ -747,23 +750,29 @@ afterEach(() => {
 });
 
 /** This machine's bash as the guest; setsid is perl's setpgrp where the OS has none and base64 loses -w0. */
-function localGuest(): { machine: Machine; runDir: string } {
+/** `stdin` makes it a machine whose exec hands the command its input, as a computer you own does; without it the
+ * input is dropped, as a provider's exec drops it. `calls` is the text of every exec, in order. */
+function localGuest(o: { stdin?: boolean } = {}): { machine: Machine; runDir: string; calls: string[] } {
   const dir = mkdtempSync(join(tmpdir(), "wsp-machine-exec-"));
   dirs.push(dir);
+  const calls: string[] = [];
   // Functions, not shim files: macOS assesses a freshly written executable at its first exec, 110 ms idle, seconds under load.
   const prelude = existsSync("/proc/1/stat")
     ? ""
     : `setsid() { exec perl -e 'setpgrp(0, 0); exec @ARGV or die $!' -- "$@"; }\nbase64() { local a=(); for x in "$@"; do [ "$x" = "-w0" ] || a+=("$x"); done; /usr/bin/base64 "\${a[@]}"; }\n`;
   const machine = {
     id: "local",
-    exec: (cmd: string) =>
+    ...(o.stdin === true ? { takesStdin: true } : {}),
+    exec: (cmd: string, opts?: { stdin?: Uint8Array }) =>
       new Promise<ExecResult>(resolve => {
-        execFile("bash", ["-c", `${prelude}${cmd}`], { maxBuffer: 16 * 1024 * 1024 }, (e, stdout, stderr) => {
+        calls.push(cmd);
+        const child = execFile("bash", ["-c", `${prelude}${cmd}`], { maxBuffer: 16 * 1024 * 1024 }, (e, stdout, stderr) => {
           resolve({ exitCode: e === null ? 0 : ((e as { code?: number }).code ?? 1), stdout, stderr });
         });
+        child.stdin?.end(o.stdin === true && opts?.stdin !== undefined ? Buffer.from(opts.stdin) : undefined);
       }),
   } as unknown as Machine;
-  return { machine, runDir: join(dir, "run") };
+  return { machine, runDir: join(dir, "run"), calls };
 }
 
 describe("machineExecStream attaching to a run its process did not launch", () => {
@@ -943,6 +952,87 @@ describe("machineExecStream over this machine's bash", () => {
     expect(lines).toEqual(["hi"]);
     expect(readFileSync(marks, "utf8")).toBe("ran\n");
   });
+});
+
+describe("machineExecStream keeping a key off the machine's disk", () => {
+  /** Every file under the run folder that holds `value`, read whole. */
+  const holding = (runDir: string, value: string): string[] =>
+    readdirSync(runDir, { recursive: true, withFileTypes: true })
+      .filter(e => e.isFile())
+      .map(e => join(e.parentPath, e.name))
+      .filter(path => readFileSync(path, "utf8").includes(value));
+
+  it.each([
+    { road: "a machine that takes stdin, where no exec text holds it either", stdin: true },
+    { road: "a provider's machine, whose exec drops stdin", stdin: false },
+  ])("a turn and an exec launched with a key reach it in their environment, and no file under the run folder holds it, on $road", async ({ stdin }) => {
+    const { machine, runDir, calls } = localGuest({ stdin });
+    const key = `sk-ant-x-${randomBytes(8).toString("hex")}`;
+    const gate = join(runDir, "..", "gate");
+    const factory = machineExecStream(machine, { pollMs: 20, runDir });
+    const seen = 'case "$ANTHROPIC_API_KEY" in sk-ant-x-*) echo "seen ${#ANTHROPIC_API_KEY}";; esac';
+    // A turn as an agent's launch makes one, its prompt on an input channel; an exec as the exec verb makes one.
+    const turn = factory(`${seen}; read -r line; echo "got $line"`, { env: { ANTHROPIC_API_KEY: key }, input: ["hello"] });
+    const exec = factory(`${seen}; while [ ! -f ${shellQuote(gate)} ]; do sleep 0.05; done`, { env: { ANTHROPIC_API_KEY: key } });
+    try {
+      const turnLines = turn.lines[Symbol.asyncIterator]();
+      const execLines = exec.lines[Symbol.asyncIterator]();
+      expect(await turnLines.next()).toEqual({ value: `seen ${key.length}`, done: false });
+      expect(await turnLines.next()).toEqual({ value: "got hello", done: false });
+      expect(await execLines.next()).toEqual({ value: `seen ${key.length}`, done: false });
+
+      // Both are running, the turn on its open channel and the exec on its gate, with every file of theirs on disk.
+      expect(holding(runDir, key)).toEqual([]);
+      // On a computer you own the launch's text is a world-readable command line; a provider's single-login machine
+      // keeps it there, and the image keeps it out of the logs.
+      if (stdin) expect(calls.filter(cmd => cmd.includes(key))).toEqual([]);
+
+      writeFileSync(gate, "");
+      expect(await execLines.next()).toEqual({ value: undefined, done: true });
+      turn.closeInput();
+      expect(await turnLines.next()).toEqual({ value: undefined, done: true });
+      expect([await exec.exited, await turn.exited]).toEqual([0, 0]);
+      expect(readdirSync(runDir)).toEqual([]);
+    } finally {
+      // A stream on this road reaps its run only while something reads it.
+      for (const stream of [turn, exec]) {
+        stream.kill();
+        await (async () => {
+          for await (const _ of stream.lines) void _;
+        })().catch(() => undefined);
+      }
+    }
+  }, 20_000);
+
+  it("a script an older host wrote with the key in it is gone once its run ends, read or swept", async () => {
+    const { machine, runDir } = localGuest();
+    const key = `sk-ant-x-${randomBytes(8).toString("hex")}`;
+    const gate = join(runDir, "..", "gate");
+    /** A run as a host before this one launched it: the environment as export lines at the top of its script. */
+    const older = async (id: string, command: string): Promise<string> => {
+      const b = shellQuote(join(runDir, id));
+      const script = `export ANTHROPIC_API_KEY=${shellQuote(key)}\n${command}\necho $? > ${b}.exit\n`;
+      const res = await machine.exec(`umask 077; mkdir -p ${shellQuote(runDir)} ${b}.d && printf %s ${shellQuote(script)} > ${b}.sh && { setsid bash ${b}.sh > ${b}.log 2>&1 & echo $! > ${b}.pid; }`);
+      expect(res.exitCode).toBe(0);
+      const pid = Number(readFileSync(`${join(runDir, id)}.pid`, "utf8").trim());
+      children.push(pid);
+      return join(runDir, id);
+    };
+    const read = await older("aaaaaaaaaaaa", `while [ ! -f ${shellQuote(gate)} ]; do sleep 0.05; done; echo done`);
+    const ended = await older("bbbbbbbbbbbb", "echo done");
+    await vi.waitFor(() => expect(readFileSync(`${ended}.exit`, "utf8").trim()).toBe("0"), { timeout: 5_000 });
+    expect(holding(runDir, key).sort()).toEqual([`${read}.sh`, `${ended}.sh`]);
+
+    // The host that comes next re-opens the run its rows hold and sweeps the one they do not.
+    const next = machineExecStream(machine, { pollMs: 20, runDir });
+    const attached = (await next.attach!(read, { input: false, startedAt: Date.now() })) as ExecStream;
+    expect(await next.sweep!([read])).toEqual([ended]);
+    writeFileSync(gate, "");
+    const lines: string[] = [];
+    for await (const l of attached.lines) lines.push(l);
+    expect([lines, await attached.exited]).toEqual([["done"], 0]);
+    expect(readdirSync(runDir)).toEqual([]);
+  }, 20_000);
 });
 
 describe("machineExecStream reaping a real turn's process group", () => {

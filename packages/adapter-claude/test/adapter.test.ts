@@ -251,13 +251,14 @@ describe("ClaudeAdapter over the recorded fixture", () => {
 
   it("probes the catalog through the exec it is handed, under the session's config dir, and reads the answer", async () => {
     const adapter = createClaudeAdapter({ exec: scriptedExec([]).factory, configDir: "/root/.claude-cfg", baseEnv: GUEST_ENV });
-    const ran: string[] = [];
-    const probe = await adapter.probeCatalog(async command => {
-      ran.push(command);
+    const ran: { command: string; env: Readonly<Record<string, string>> | undefined }[] = [];
+    const probe = await adapter.probeCatalog(async (command, env) => {
+      ran.push({ command, env });
       return readFileSync(new URL("./fixtures/catalog-probe.txt", import.meta.url), "utf8");
     });
     expect(ran).toHaveLength(1);
-    expect(ran[0]).toContain("CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
+    expect(ran[0]!.env).toMatchObject({ CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
+    expect(ran[0]!.command).not.toContain("CLAUDE_CONFIG_DIR");
     expect(probe?.version).toBe("2.1.257");
     expect(probe?.models.map(m => m.slug)).toContain("claude-opus-5");
     expect(await adapter.probeCatalog(async () => "garbage\n")).toBeNull();

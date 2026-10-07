@@ -2,7 +2,7 @@
 import { homedir } from "node:os";
 import { dirname, join, posix, resolve as resolvePathOn } from "node:path";
 import { CATALOG_AGENTS, DEFAULT_AGENT, installsOnFirstRun } from "@wsp/catalog";
-import { INLINE_EXEC_MS, landBytes, agentHomes } from "@wsp/engine";
+import { INLINE_EXEC_MS, harnessExec, landBytes, agentHomes } from "@wsp/engine";
 import {
   type AttachmentRoad, type HarnessCatalog, type Preferences, type SessionView, type TitleSource, type Attachment,
   type TurnImage, threadKeyOf, isLocalWorkspace, catalogRefused, imagePathIn, noAdapterLine, shellQuote,
@@ -74,7 +74,7 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     const catalog = holdAsk(firstRunHere(entry, table.harness)
       .then(installs => {
         skipped = installs;
-        return installs ? null : probe(command => machine.exec(command, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS }).then(res => res.stdout));
+        return installs ? null : probe(harnessExec(machine, CATALOG_PROBE_TIMEOUT_MS));
       })
       // A binary that named why it described nothing keeps the table's lists and lends the footer its words.
       .then(
@@ -126,7 +126,7 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     // builds its command (the codex guard does), and one row's store read may never cost the listing or the turn
     // that asked for it. Nothing here rejects, so both callers may leave it unawaited.
     pending.done = confineSetup(entry, view.harness)
-      .then(() => read(sessionId, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)))
+      .then(() => read(sessionId, harnessExec(entry.machine, SESSION_TITLE_TIMEOUT_MS)))
       // The window opens when the store answered, before the answer is kept: a row that shows the title is a read
       // that is over, so a listing that sees one waits on nothing.
       .finally(() => {
@@ -206,7 +206,7 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     // Started inside a promise and never on this stack, as the store read is: an adapter that refuses the id throws
     // where it builds its command, and naming a thread may never cost the turn that asked for it.
     return confineSetup(entry, view.harness)
-      .then(() => ctx.writeSession(sessionId, () => write(sessionId, title, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout))))
+      .then(() => ctx.writeSession(sessionId, () => write(sessionId, title, harnessExec(entry.machine, SESSION_TITLE_TIMEOUT_MS))))
       .then(
         wrote => {
           if (wrote.kind === "failed") console.warn(noNameWriteLogLine(sessionId, entry.record.id, wrote.error));
@@ -238,7 +238,7 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     if (ctx.state.closing) return;
     const title = await adapter.titleFor(
       { opening: view.prompt, ...(model !== undefined ? { model } : {}) },
-      command => entry.machine.exec(command, { timeoutMs: TITLE_MAKE_TIMEOUT_MS }).then(res => res.stdout),
+      harnessExec(entry.machine, TITLE_MAKE_TIMEOUT_MS),
     );
     if (title === null) {
       console.warn(noMadeTitleLogLine(threadId, entry.record.id, "the harness answered with no title"));

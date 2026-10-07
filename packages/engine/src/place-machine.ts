@@ -39,6 +39,7 @@ export function placePartBoundMs(bytes: number, floorMs: number = INLINE_EXEC_MS
 export class PlaceMachine implements Machine {
   readonly id: string;
   readonly kind: MachineKind = "sandbox";
+  readonly takesStdin = true;
   private readonly home: string;
 
   constructor(

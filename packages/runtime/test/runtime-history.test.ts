@@ -2,7 +2,7 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { catalogProbeCommand, parseCatalogProbe } from "@wsp/adapter-claude";
+import { buildEnv, catalogProbeCommand, parseCatalogProbe } from "@wsp/adapter-claude";
 import { diskFullLine } from "@wsp/protocol";
 import { foldThreads, type AdapterEvent, type EventUnion, type SessionEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { DISK_USE_CMD } from "@wsp/engine";
@@ -71,7 +71,7 @@ describe("runtime session history", () => {
     const finished = new Promise<TurnResult>(r => (finish = r));
     const adapter: HarnessAdapterFactory = ctx => ({
       steers: false,
-      probeCatalog: exec => exec(catalogProbeCommand({ baseEnv: ctx.env })).then(parseCatalogProbe),
+      probeCatalog: exec => exec(catalogProbeCommand(), buildEnv({ base: ctx.env })).then(parseCatalogProbe),
       start: o => {
         onEvent = o.onEvent;
         lastStart = o;
@@ -457,7 +457,8 @@ describe("runtime session history", () => {
       expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk"]);
       expect(probes(backend)).toHaveLength(1);
       // The probe is the adapter's line under the guest's login, so it runs under the guest's config dir, never HOME.
-      expect(probes(backend)[0]).toContain("CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
+      // A provider's exec drops stdin, so on its single-login machine the login's variables are piped in from the text.
+      expect(probes(backend)[0]).toContain("'CLAUDE_CONFIG_DIR=/root/.claude-cfg'");
       await rt.close();
     });
 

@@ -447,16 +447,18 @@ describe("spending a banked reset on a computer you joined", () => {
 
   /** A joined computer holding a Codex login, answering each reset script it is asked to run, and the account a turn
    * there read before. */
-  async function holding(): Promise<{ client: WsClient; placeId: string; ran: string[] }> {
+  async function holding(): Promise<{ client: WsClient; placeId: string; ran: string[]; inputs: string[] }> {
     const store = memoryStore();
     const { hostKey } = await serving({ store });
     const ran: string[] = [];
+    const inputs: string[] = [];
     const answers = (c: WsClient): void => {
       saysItsFacts(() => ({ ...PLACE_FACTS, logins: LOGINS }), { count: 0 })(c);
       c.onFrame(raw => {
-        const frame = raw as unknown as { id?: number; op?: string; cmd?: string };
+        const frame = raw as unknown as { id?: number; op?: string; cmd?: string; stdin?: string };
         if (frame.op !== "exec" || !String(frame.cmd).includes("app-server")) return;
         ran.push(String(frame.cmd));
+        inputs.push(Buffer.from(frame.stdin ?? "", "base64").toString("utf8"));
         c.say({ id: frame.id, ok: true, exitCode: 0, stderr: "", stdout: (String(frame.cmd).includes("rateLimitResetCredit/consume") ? SPEND : READ).join("\n") });
       });
     };
@@ -464,17 +466,16 @@ describe("spending a banked reset on a computer you joined", () => {
     sockets.push(client.ws);
     await until(async () => (await placesOf()).find(p => p.id === placeId)?.logins === LOGINS);
     await store.put("limits", "codex:acct_a", { key: "codex:acct_a", agent: "codex", label: "a@example.com", road: "named", plan: "plus", windows: [{ kind: "session", usedPercent: 100 }], readAt: Date.now(), computers: [placeId] });
-    return { client, placeId, ran };
+    return { client, placeId, ran, inputs };
   }
 
   it("reads the account and then spends on that computer, under the login its workspaces share and the PATH it reported", async () => {
-    const { ran } = await holding();
+    const { ran, inputs } = await holding();
     expect(await ctx.runtime!.usage.reset({ account: "codex:acct_a" })).toMatchObject({ outcome: "reset", said: "Reset used: Codex with ChatGPT Plus on srv's windows start again now, 1 left", account: { key: "codex:acct_a", credits: { count: 1 } } });
     expect(ran).toHaveLength(2);
-    for (const cmd of ran) {
-      expect(cmd).toContain(`CODEX_HOME='${LOGINS}/codex'`);
-      expect(cmd).toContain("PATH='/opt/codex/bin:/usr/bin'");
-    }
+    for (const cmd of ran) expect(cmd).toContain(`CODEX_HOME='${LOGINS}/codex'`);
+    // The PATH it reported rides each script's input with the rest of the launch variables, never its text.
+    for (const input of inputs) expect(input.split("\0")).toContain("PATH=/opt/codex/bin:/usr/bin");
     expect(ran[0]).not.toContain("rateLimitResetCredit/consume");
     expect(ran[1]).toContain("rateLimitResetCredit/consume");
   });

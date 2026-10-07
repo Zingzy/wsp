@@ -91,6 +91,7 @@ async function runShell(root: string, env: Readonly<Record<string, string | unde
 export class LocalMachine implements Machine {
   readonly id = LOCAL_MACHINE_ID;
   readonly kind = "sandbox" as const;
+  readonly takesStdin = true;
   readonly streamUrl = undefined;
   /** Read once: the system does not change its name while the host runs. */
   private os: Promise<string> | undefined;

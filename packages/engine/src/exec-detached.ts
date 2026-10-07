@@ -143,6 +143,8 @@ export interface PutFilesOptions {
   /** Lines the last exec runs once every file is on disk. */
   after?: string[];
   timeoutMs?: number;
+  /** Bytes for the last exec's own input, on a machine that takes them; the pieces before it carry none. */
+  stdin?: Uint8Array;
 }
 
 /** The file beside an appended path that says which append landed last, holding that append's own key: exec honours
@@ -215,7 +217,7 @@ export async function putFiles(machine: Machine, files: GuestWrite[], opts: PutF
       throw new Error(`a piece did not land on ${machine.id}: nothing came back saying ${HANDSHAKE.piece}, the word the guest prints once a piece is written; ${machineAnswer(res)}`);
     }
   }
-  const last = await machine.exec(execs.at(-1)!, { timeoutMs, idempotencyKey: `${upload}/last` });
+  const last = await machine.exec(execs.at(-1)!, { timeoutMs, idempotencyKey: `${upload}/last`, ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}) });
   return { ...last, pieces: execs.length - 1 };
 }
 

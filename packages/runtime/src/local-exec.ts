@@ -78,7 +78,6 @@ const GRACE_POLL_MS = 200;
  * every handle that arrives from a store before it reaches a path or a signal, since a value that has been to a file
  * on disk is no longer this code's. */
 const RUN_ID = /^[0-9a-f]{12}$/;
-const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** The line that ends one run's input channel. The pump forwards every line written before it and then goes, so the
  * command reads EOF after the last message and never in front of one; ending the pump by a signal instead took the
@@ -209,13 +208,13 @@ function signalPid(pid: number, sig: NodeJS.Signals): void {
 }
 
 /** What a run's own folder and its files are readable by: the person whose turn it is and nobody else on this
- * computer. A Mac has other logins on it, and a run's script carries the whole launch environment. */
+ * computer. A Mac has other logins on it, and a run's files carry the person's messages and the agent's output. */
 const OWNER_DIR = 0o700;
 const OWNER_FILE = 0o600;
 
 /** One of a run's files, made owner-only from its first byte. `wx` is what makes that true rather than hoped for:
  * the mode is only applied to a file this call creates, so a path that somehow already exists fails the launch
- * instead of writing a turn's environment into a file somebody else made. */
+ * instead of writing a turn's messages into a file somebody else made. */
 function writeOwned(path: string, text: string): void {
   writeFileSync(path, text, { mode: OWNER_FILE, flag: "wx" });
 }
@@ -608,10 +607,6 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     mkdirSync(runDir, { recursive: true, mode: OWNER_DIR });
     // The claim is the one path that says a run is on this computer, and mkdir is what makes it exist at once.
     mkdirSync(`${base}.d`, { mode: OWNER_DIR });
-    const exports = Object.entries(env)
-      .filter(([k]) => ENV_KEY.test(k))
-      .map(([k, v]) => `export ${k}=${shellQuote(v)}`)
-      .join("\n");
     // The command runs in a subshell, so a turn whose own line ends in `exit` leaves the script standing and its
     // code still reaches the exit file: a run whose code nobody wrote reads as a run that answered nothing.
     // Stdin is a pipe only the backgrounded pump holds: node on macOS never reads the end of a named fifo (2026-10-03).
@@ -620,11 +615,11 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         ? `( ${command}\n)\necho $? > ${shellQuote(`${base}.exit`)}\n`
         : `( ${command}\n) < <(tail -n +1 -f ${shellQuote(`${base}.in`)} | { while IFS= read -r l; do [ "$l" = ${shellQuote(endMarker(base))} ] && break; printf '%s\\n' "$l"; done; } &)\n` +
           `echo $? > ${shellQuote(`${base}.exit`)}\n`;
-    // The three files that carry what a turn is: the script holds the whole launch environment as export lines,
-    // the provider key and the turn's own token among them, the input channel holds every message a person sends
-    // and the log holds everything the agent prints. The mode goes on at the open, never by a chmod after it: a
-    // file that is readable for one moment has been read.
-    writeOwned(`${base}.sh`, `${exports}\n${body}`);
+    // The three files that carry what a turn is: the script holds the command, the input channel holds every
+    // message a person sends and the log holds everything the agent prints. The mode goes on at the open, never by
+    // a chmod after it: a file that is readable for one moment has been read. The environment, the provider key and
+    // the turn's own token among it, reaches the process at the spawn alone and is never written here.
+    writeOwned(`${base}.sh`, body);
     const seed = input?.map(line => `${line}\n`).join("");
     if (seed !== undefined) writeOwned(`${base}.in`, inputAfter === undefined ? seed : "");
     // On disk rather than in this process, so a host that goes before the seed is due leaves it for the next one.
