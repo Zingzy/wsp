@@ -15,6 +15,9 @@ import {
   absentComputer,
   floorFailedLine,
   GITHUB_SKIPPED_LINE,
+  AT_ITS_TERMINAL,
+  waitsForInstallLine,
+  installingFirstLine,
   NEEDS_GITHUB_LINE,
   WAITS_ON_GITHUB_LINE,
   SETUP_LOG_TAIL_BYTES,
@@ -32,6 +35,10 @@ import {
   recipeFolderGoneLine,
   pluginsKeptLine,
   setupRowFix,
+  signInThereFix,
+  signInWithFix,
+  noCopyLine,
+  copiedFromLine,
   placeProvisionPaths,
   placeProvisioningLine,
   EXEC_DEADLINE_EXIT,
@@ -41,7 +48,6 @@ import {
   DAEMON_VERSION,
   SIGN_IN_WAIT_MS,
   SIGNED_IN_THERE,
-  FROM_THE_VAULT,
   setupLines,
   seedChoiceFrom,
   readJoinToken,
@@ -53,13 +59,14 @@ import {
   type PlaceView,
   type PlaceReport,
   type SeedChoice,
+  type RecipeOptions,
   type SeedPlan,
   heldPlaceScript,
   placeFileText,
 } from "@wsp/protocol";
 import { loginSignIn } from "@wsp/catalog";
 import type { EngineStep, ProvisionOn, ProvisionPlan, ProvisionStage } from "@wsp/engine";
-import type { AgentsActs, SignInRun } from "../src/agents-read.js";
+import type { AgentsActs, SignInAsk, SignInRun } from "../src/agents-read.js";
 import type { HarnessAdapterFactory, RecipeShelf, SeedWiring } from "../src/runtime.js";
 import { ADD_STOPPED_LINE, PlaceProvisioningError, type PlaceUndo, newPlaceKeyPair, type PlaceKeyPair, type PlaceProvisioner, type PlaceRecord, type PlaceUpdater, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
 import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
@@ -189,6 +196,7 @@ function provisioner(
     rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>>;
     /** Rows a step says as it reaches them, before it is held. */
     said?: Partial<Record<EngineStep, PlaceProvisionRow[]>>;
+    installs?: EngineStep[];
     plan?: ProvisionPlan;
     hold?: EngineStep;
     holds?: EngineStep[];
@@ -230,6 +238,8 @@ function provisioner(
       ons.set(step, on);
       stage(`${step} under way`);
       for (const row of o.said?.[step] ?? []) stage(`${row.label}: ${row.outcome}`, undefined, { ...row, step });
+      // A tool not there yet is said as the install loop says one it starts: its label and where it stands.
+      if (o.installs?.includes(step) === true) for (const [i, row] of (rows[step] ?? []).entries()) stage(`${row.label} (${i + 1}/${rows[step]?.length ?? 0})`, { label: row.label, index: i + 1, of: rows[step]?.length ?? 0 });
       if (o.hold === step) await held;
       await each.get(step)?.at;
       if (o.throws?.step === step) throw o.throws.error;
@@ -758,6 +768,28 @@ describe("a computer added with its picks", () => {
     expect(ended(frames).map(f => f.end)).toEqual(["ready"]);
   });
 
+  it("says a step's end and a late sign-in only once the record holds them, so a list read on the frame is never behind it", async () => {
+    const p = provisioner({ holds: ["clis"] });
+    const s = signIns();
+    const { frames } = await hosting({ provision: p.wired, acts: s.acts });
+    const reads: Promise<{ frame: PlaceSetupEvent; row: PlaceView | undefined }>[] = [];
+    runtime!.events.on("place.setup", e => {
+      const frame = e as PlaceSetupEvent;
+      if (frame.landed !== undefined || (frame.line !== undefined && frame.line.state !== "running")) reads.push(runtime!.places!.list(Date.now()).then(rows => ({ frame, row: rows.find(r => r.id === frame.placeId) })));
+    });
+    const { place } = await runtime!.places!.add({ addId: "a_read", address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
+    s.end("codex", { state: "signed-in" });
+    p.let("clis");
+    await until(() => ended(frames).length === 1);
+    const read = await Promise.all(reads);
+    expect(read.some(r => r.frame.landed === "signins/codex")).toBe(true);
+    for (const { frame, row } of read) {
+      if (frame.landed !== undefined) expect(row?.setup?.waiting.map(w => w.row)).not.toContain(frame.landed);
+      if (frame.line !== undefined) expect(row?.setup?.steps.find(l => l.step === frame.line!.step)?.state).toBe(frame.line.state);
+    }
+  });
+
   it("stamps a running step with when it started, on the record and on its frame", async () => {
     const fc = fakeClock();
     const p = provisioner({ holds: ["clis"] });
@@ -927,8 +959,9 @@ describe("a computer added with its picks", () => {
       ["github", "github"],
       ["folders/gone", "folders"],
     ]);
-    // Each says what to do beside what happened, in the words of the computer it is on.
-    expect(row.applied?.rows.filter(r => r.outcome === "failed").map(r => r.fix)).toEqual([setupRowFix({ step: "github" }, "spoo"), setupRowFix({ step: "folders" }, "spoo")]);
+    // Each says what to do beside what happened, in the words of the computer it is on: a GitHub sign-in with nothing
+    // to copy signs in on that computer instead.
+    expect(row.applied?.rows.filter(r => r.outcome === "failed").map(r => r.fix)).toEqual([signInThereFix("spoo"), setupRowFix({ step: "folders" }, "spoo")]);
     expect(placeWord(row, null).word).toBe("Needs you");
     expect(ended(frames)[0]?.end).toBe("needs-you");
   });
@@ -1098,12 +1131,14 @@ describe("a computer added with its picks", () => {
     const s = signIns();
     const repo = privateRepo();
     const cmds: string[] = [];
-    const { frames } = await hosting({ local: true, provision: provisioner().wired, acts: s.acts, cmds, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : undefined) });
+    const p = provisioner();
+    const { frames } = await hosting({ local: true, provision: p.wired, acts: s.acts, cmds, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : undefined) });
     const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: repo, keep: [] } }, configs: { github: { signin: "machine" } } });
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
-    // gh's own login, one page and one code, on the row the GitHub step stands on.
+    // gh's own login, one page and one code, on the row the GitHub step stands on, which put gh on once.
     expect(s.started).toEqual(["gh"]);
+    expect(p.ran.filter(step => step === "github")).toEqual(["github"]);
     await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
     expect((await rowOf(place.id)).setup?.waiting).toEqual([expect.objectContaining({ row: "github", label: "GitHub", url: "https://auth.example/gh/1", code: "CODE-1" })]);
     // The folder stands on its own row while it waits, which its clone replaces.
@@ -1143,6 +1178,26 @@ describe("a computer added with its picks", () => {
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "installed", step: "folders" });
     expect((await runtime!.projects.list()).map(p => [p.computer, p.source])).toEqual([[place.id, { kind: "folder", path: folder }]]);
+  });
+
+  it("writes what a folder's clone and seed say to the folders step's own log as they go, while the step still runs", async () => {
+    const { folder, seed } = seededFolder();
+    let clone = (): void => {};
+    const created = new Promise<void>(resolve => (clone = resolve));
+    const cmds: string[] = [];
+    await hosting({ provision: provisioner().wired, checkouts: { created }, seed, cmds });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: folder, keep: [] } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.steps.some(l => l.step === "folders" && l.state === "running") === true);
+    const at = placeProvisionPaths("/home/maya");
+    const written = (cmd: string): string => Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(cmd)![1]!, "base64").toString("utf8");
+    const folderLines = (): string[] => cmds.filter(c => c.includes(at.log) && c.includes("printf")).flatMap(c => written(c).split("\n")).filter(l => / \[folders\] app: /.test(l));
+    await until(() => folderLines().length > 0);
+    expect((await rowOf(place.id)).setup?.steps.find(l => l.step === "folders")?.state).toBe("running");
+    expect(folderLines()[0]?.endsWith(` from ${folder}.`)).toBe(true);
+    clone();
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await until(() => folderLines().some(l => / \[folders\] app: Cloning /.test(l)));
   });
 
   it("refuses a fork there while its folders clone, the setup's own clone going on past it", async () => {
@@ -1458,6 +1513,26 @@ describe("a host that stops in the middle of a setup", () => {
   });
 });
 
+describe("what a computer can be set up from", () => {
+  it("offers an agent's sign-in from the vault only where the vault holds its token or key", async () => {
+    const r = shelf(LAPTOP, {});
+    // As the host's options give them: Claude Code's one way is the token minted here, Codex's the copy or its login.
+    const options: RecipeOptions = { agents: [{ id: "claude", name: "Claude Code", signins: ["vault"] }, { id: "codex", name: "Codex", signins: ["vault", "machine"] }], mcp: [], clis: [], skills: [], plugins: [], configs: [] };
+    await hosting({ provision: provisioner().wired, recipes: { ...r.recipes, options: async () => options }, vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x" } });
+    expect((await runtime!.recipes!.options()).agents.map(a => [a.id, a.signins])).toEqual([
+      ["claude", ["vault"]],
+      ["codex", ["machine"]],
+    ]);
+    await stopHost();
+    await hosting({ provision: provisioner().wired, recipes: { ...r.recipes, options: async () => options }, vault: {} });
+    // With nothing to copy Claude Code has no choice left here: the picks say its token road, pasted on its row.
+    expect((await runtime!.recipes!.options()).agents.map(a => [a.id, a.signins])).toEqual([
+      ["claude", []],
+      ["codex", ["machine"]],
+    ]);
+  });
+});
+
 describe("what the picks weigh before Set up", () => {
   it("weighs the picks on this computer against the room the computer last said it has, by a pending add or the computer", async () => {
     await hosting({ provision: provisioner().wired });
@@ -1501,6 +1576,226 @@ describe("a step the person skips for now", () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")?.outcome).toBe("skipped");
     expect(ended(frames).at(-1)?.end).toBe("ready");
+  });
+
+  it("lands a skipped sign-in as signed in once the person signs it in on that computer afterwards, and says the row changed", async () => {
+    const s = signIns();
+    await hosting({ provision: provisioner().wired, acts: s.acts });
+    const changed: PlaceView[] = [];
+    runtime!.events.on("place.changed", e => void changed.push((e as { place: PlaceView }).place));
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
+    await runtime!.places!.skip(place.id, "signins/codex");
+    await runtime!.agents.signIn({ placeId: place.id }, { agent: "codex" }, () => {});
+    await until(() => s.started.length === 2);
+    s.end("codex", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")?.outcome === "installed");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "installed", note: SIGNED_IN_THERE, step: "signins" });
+    expect(changed.at(-1)?.applied?.rows.find(r => r.id === "signins/codex")?.outcome).toBe("installed");
+  });
+
+  it("lands a skipped GitHub sign-in once gh signs in on that computer afterwards", async () => {
+    const s = signIns();
+    await hosting({ provision: provisioner().wired, acts: s.acts });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, configs: { github: { signin: "skip" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "github")?.outcome).toBe("skipped");
+    await runtime!.agents.signIn({ placeId: place.id }, { agent: "gh" }, () => {});
+    await until(() => s.started.includes("gh"));
+    s.end("gh", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "github")?.outcome === "installed");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "installed", note: SIGNED_IN_THERE });
+  });
+
+  it("writes the setup through to its end though a listener of one of its frames throws", async () => {
+    const { frames } = await hosting({ provision: provisioner().wired });
+    runtime!.events.on("place.setup", e => {
+      const line = (e as PlaceSetupEvent).line;
+      if (line?.step === "context" && line.state === "done") throw new Error("a listener that throws");
+    });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(() => ended(frames).length > 0);
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+  });
+
+  it("puts no gh on for a GitHub row set aside, so a gh that would not install there leaves it skipped and the computer Ready", async () => {
+    const p = provisioner({ rows: { github: [{ id: "github/gh", label: "GitHub CLI", outcome: "failed", note: "E: Unable to locate package gh" }] } });
+    await hosting({ provision: p.wired });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, configs: { github: { signin: "skip" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(p.ran).not.toContain("github");
+    const row = await rowOf(place.id);
+    expect(row.applied?.rows.filter(r => r.step === "github").map(r => [r.id, r.outcome, r.note])).toEqual([["github", "skipped", GITHUB_SKIPPED_LINE]]);
+    expect(placeWord(row, null).word).toBe("Ready");
+  });
+
+  it("puts gh on first when the GitHub row's Sign in starts on a computer with none, says so on that sign-in, then signs in", async () => {
+    const s = signIns();
+    const p = provisioner({ rows: { github: [{ id: "github/gh", label: "GitHub CLI", outcome: "installed" }] }, installs: ["github"] });
+    await hosting({ provision: p.wired, acts: s.acts });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, configs: { github: { signin: "skip" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(p.ran).not.toContain("github");
+    const steps: Record<string, unknown>[] = [];
+    await runtime!.agents.signIn({ placeId: place.id }, { agent: "gh" }, e => void steps.push(e));
+    await until(() => s.started.includes("gh"));
+    expect(p.ran).toContain("github");
+    // Planned for the GitHub step alone, from the computer's own picks with GitHub signed in there.
+    expect(p.picked.at(-1)?.configs.github).toEqual({ signin: "machine" });
+    expect(steps[0]).toMatchObject({ state: "running", said: installingFirstLine("GitHub CLI") });
+    // On the record as the setup's own gh would be, so a recipe that drops GitHub later takes it off again.
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "github/gh")).toMatchObject({ outcome: "installed", step: "github" });
+    s.end("gh", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "github")?.outcome === "installed");
+    // The engine's rows carry no step: a later run, which keeps only the rows of the steps that ended, keeps it too.
+    const again = await runtime!.places!.setUp(place.id, {});
+    await until(async () => (await rowOf(place.id)).setup?.addId === again.addId && (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "github/gh")).toMatchObject({ outcome: "installed", step: "github" });
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "installed", note: SIGNED_IN_THERE });
+    expect(p.ran.filter(s => s === "github")).toHaveLength(1);
+  });
+
+  it("says nothing of installing gh on the GitHub row's sign-in where gh is there already", async () => {
+    const s = signIns();
+    const p = provisioner({ rows: { github: [{ id: "github/gh", label: "GitHub CLI", outcome: "present" }] } });
+    await hosting({ provision: p.wired, acts: s.acts });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, configs: { github: { signin: "skip" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const steps: Record<string, unknown>[] = [];
+    await runtime!.agents.signIn({ placeId: place.id }, { agent: "gh" }, e => void steps.push(e));
+    await until(() => s.started.includes("gh"));
+    expect(steps.map(e => e["said"])).not.toContain(installingFirstLine("GitHub CLI"));
+    // gh the person had there is theirs: no row says wsp put it on.
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "github/gh")).toBeUndefined();
+  });
+
+  it("puts gh on first where the command line asks for gh's line on a computer with none, so wsp add --sign-in gh runs where gh is", async () => {
+    const p = provisioner({ rows: { github: [{ id: "github/gh", label: "GitHub CLI", outcome: "installed" }] }, installs: ["github"] });
+    await hosting({ provision: p.wired, acts: signIns().acts });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, configs: { github: { signin: "skip" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(p.ran).not.toContain("github");
+    const line = await runtime!.agents.signInLine({ placeId: place.id }, { agent: "gh" });
+    expect(line.command).toBe("gh login");
+    expect(p.ran).toContain("github");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "github/gh")).toMatchObject({ outcome: "installed", step: "github" });
+  });
+
+  it("refuses the command line's gh line where gh would not install there, in gh's own words, and the computer still reads Ready", async () => {
+    const p = provisioner({ rows: { github: [{ id: "github/gh", label: "GitHub CLI", outcome: "failed", note: "apt-get install gh\nE: Unable to locate package gh" }] } });
+    await hosting({ provision: p.wired, acts: signIns().acts });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, configs: { github: { signin: "skip" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await expect(runtime!.agents.signInLine({ placeId: place.id }, { agent: "gh" })).rejects.toThrow("E: Unable to locate package gh");
+    const row = await rowOf(place.id);
+    expect(row.applied?.rows.filter(r => r.step === "github").map(r => [r.id, r.outcome])).toEqual([["github", "skipped"]]);
+    expect(placeWord(row, null).word).toBe("Ready");
+  });
+
+  it("says a gh that would not install on the GitHub row's sign-in alone: no login runs, and the computer still reads Ready", async () => {
+    const s = signIns();
+    const p = provisioner({ rows: { github: [{ id: "github/gh", label: "GitHub CLI", outcome: "failed", note: "apt-get install gh\nE: Unable to locate package gh" }] } });
+    await hosting({ provision: p.wired, acts: s.acts });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, configs: { github: { signin: "skip" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const steps: Record<string, unknown>[] = [];
+    await runtime!.agents.signIn({ placeId: place.id }, { agent: "gh" }, e => void steps.push(e));
+    await until(() => steps.some(e => e["state"] === "failed"));
+    expect(steps.at(-1)).toMatchObject({ state: "failed", said: "E: Unable to locate package gh" });
+    expect(s.started).not.toContain("gh");
+    const row = await rowOf(place.id);
+    expect(row.applied?.rows.filter(r => r.step === "github").map(r => [r.id, r.outcome])).toEqual([["github", "skipped"]]);
+    expect(placeWord(row, null).word).toBe("Ready");
+  });
+
+  it("leaves OpenCode's sign-in, which asks the person to pick, for them at its own terminal there: no login runs and nothing fails", async () => {
+    const s = signIns();
+    await hosting({ provision: provisioner({ rows: { agents: [{ id: "agents/opencode", label: "OpenCode", outcome: "installed" }] } }).wired, acts: s.acts });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { opencode: { signin: "machine" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const row = await rowOf(place.id);
+    expect(s.started).toEqual([]);
+    expect(row.setup?.waiting).toEqual([]);
+    expect(row.applied?.rows.find(r => r.id === "signins/opencode")).toMatchObject({ outcome: "skipped", note: AT_ITS_TERMINAL, step: "signins" });
+    expect(placeWord(row, null).word).toBe("Ready");
+  });
+
+  it("lands OpenCode's row signed in once the sign-in run at its terminal there ends signed in", async () => {
+    const s = signIns();
+    const asks: SignInAsk[] = [];
+    const acts: AgentsActs = { ...s.acts, signIn: async (on, ask) => (asks.push(ask), s.acts.signIn(on, ask)) };
+    await hosting({ provision: provisioner({ rows: { agents: [{ id: "agents/opencode", label: "OpenCode", outcome: "installed" }] } }).wired, acts });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: RecipeFile.parse({ name: "laptop", agents: { opencode: { signin: "machine" } } }) }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await runtime!.agents.signIn({ placeId: place.id }, { agent: "opencode", terminal: true }, () => {});
+    await until(() => s.started.includes("opencode"));
+    expect(asks).toEqual([{ agent: "opencode", terminal: true }]);
+    s.end("opencode", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/opencode")?.outcome === "installed");
+  });
+
+  it("leaves a sign-in there waiting on its agent where that agent did not install, with no login run where nothing can answer it", async () => {
+    const s = signIns();
+    await hosting({ provision: provisioner({ rows: { agents: [{ id: "agents/codex", label: "Codex", outcome: "failed", note: "npm ERR! 404" }] } }).wired, acts: s.acts });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { codex: { signin: "machine" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state !== "running");
+    expect(s.started).toEqual([]);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "skipped", note: waitsForInstallLine("Codex") });
+  });
+
+  it("lands a sign-in the person set aside once its token is in this host's vault, as a run still going would", async () => {
+    const vault: Record<string, string> = {};
+    const s = signIns();
+    const acts: AgentsActs = { ...s.acts, key: async (_agent, key) => void (vault["CLAUDE_CODE_OAUTH_TOKEN"] = key) };
+    await hosting({ provision: provisioner().wired, acts, vault });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await runtime!.places!.skip(place.id, "signins/claude");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")?.outcome).toBe("skipped");
+    await runtime!.agents.key("claude", "sk-ant-oat01-x");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "present", note: copiedFromLine("zingzys-mac") });
+  });
+
+  it("keeps a sign-in landed while the setup still runs: the run lands it among its own rows, so its next write keeps it", async () => {
+    const changed: PlaceView[] = [];
+    const p = provisioner({ holds: ["mcp"] });
+    await hosting({ provision: p.wired });
+    runtime!.events.on("place.changed", e => void changed.push((e as { place: PlaceView }).place));
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, clis: { jq: { via: "brew" } }, configs: { github: { signin: "skip" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "github")?.outcome === "skipped");
+    expect((await rowOf(place.id)).setup?.state).toBe("running");
+    await runtime!.places!.loginLanded(place.id, "gh");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "installed", note: SIGNED_IN_THERE, label: "GitHub", step: "github" });
+    expect(changed.at(-1)?.applied?.rows.find(r => r.id === "github")?.outcome).toBe("installed");
+    p.let("mcp");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "github")?.outcome).toBe("installed");
+  });
+
+  it("lands a sign-in that had nothing to copy once its token is in this host's vault, which every turn there reads", async () => {
+    const vault: Record<string, string> = {};
+    const s = signIns();
+    const acts: AgentsActs = { ...s.acts, key: async (_agent, key) => void (vault["CLAUDE_CODE_OAUTH_TOKEN"] = key) };
+    await hosting({ provision: provisioner().wired, acts, vault });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    // Claude Code has no login to run on a computer, so its fix is the token, not a sign-in there.
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "failed", note: noCopyLine("Claude Code", "zingzys-mac"), fix: signInWithFix("Claude Code", "token") });
+    await runtime!.agents.key("claude", "sk-ant-oat01-x");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/claude")).toMatchObject({ outcome: "present", note: copiedFromLine("zingzys-mac"), label: "Claude Code", step: "signins" });
   });
 
   it("skips a sign-in whose page ran out, after its login there ended", async () => {
@@ -1737,7 +2032,7 @@ describe("a computer that follows a recipe", () => {
     r.move({ ...V1, agents: { ...V1.agents, codex: { signin: "vault" } } }, ITEMS, "h11");
     await runtime!.places!.recipeChanged("laptop");
     await until(async () => (await rowOf(place.id)).applied?.hash === "h11");
-    expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "signins/codex")).toMatchObject({ outcome: "present", note: FROM_THE_VAULT });
+    expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "signins/codex")).toMatchObject({ outcome: "present", note: copiedFromLine("zingzys-mac") });
   });
 
   it("keeps an agent its setup installed as wsp's when a later sync's agents step finds it already there", async () => {
@@ -2090,6 +2385,31 @@ describe("a computer that follows a recipe", () => {
     const projects = await runtime!.projects.list();
     expect(projects.map(p => p.source)).toEqual([{ kind: "folder", path: other }]);
     expect((await runtime!.places!.remove(place.id)).removed).toBe(true);
+  });
+
+  it("keeps a sign-in that lands while a sync runs signed in once the sync writes its rows back", async () => {
+    const s = signIns();
+    const p = provisioner();
+    const V = RecipeFile.parse({ ...V1, agents: { codex: { signin: "machine" } } });
+    const r = shelf(V, ITEMS);
+    await hosting({ provision: p.wired, recipes: r.recipes, acts: s.acts });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: V, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await runtime!.places!.skip(place.id, "signins/codex");
+    await new Promise(resolve => setTimeout(resolve, 20));
+    p.ran.length = 0;
+    p.arm("skills");
+    r.move({ ...V, skills: { ...V.skills, why: { from: "~/.claude/skills" } } }, { ...ITEMS, "skills/why": "d2" }, "h2");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(() => p.ran.includes("skills"));
+    expect((await rowOf(place.id)).sync?.state).toBe("running");
+    // The sync copied the rows as it started and writes them all back as it ends.
+    await runtime!.places!.loginLanded(place.id, "codex");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")?.outcome).toBe("installed");
+    p.let("skills");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h2");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "installed", note: SIGNED_IN_THERE, label: "Codex" });
   });
 
   it("runs a change that landed mid-sync once more at its end", async () => {

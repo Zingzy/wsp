@@ -1939,7 +1939,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 if (queued !== null) queued.push(event);
                 else if (ws.readyState === ws.OPEN) send(event);
               };
-              const ask = msg.op === "servers.signIn" ? { agent: msg.agent, server: msg.name } : { agent: msg.agent };
+              const ask = msg.op === "servers.signIn" ? { agent: msg.agent, server: msg.name } : { agent: msg.agent, ...(msg.terminal === true ? { terminal: true } : {}) };
               const { signInId, leave } = await rt.agents.signIn(msg.target, ask, emit, origin);
               if (signIns.has(signInId)) {
                 leave();

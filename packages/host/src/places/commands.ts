@@ -19,7 +19,7 @@ import { dialHost, hostPlatform, table, type DialOpts, type HostClient } from ".
 import type { HostStarter } from "../host-start.js";
 import { envFileFor, writeEnvFile } from "../env-keys.js";
 import { openWaits, watchSetup, type SetupWatch } from "../setup-follow.js";
-import { ADD_FLAGS_REFUSAL, SIGN_IN_FLAGS_REFUSAL, addLines, addRefusal, addableProviders, boxNotSignedInLine, boxReplacesLine, boxSignedInLine, noPlaceLine, onePlace, placeNoLoginsLine, providerPlaceLine, removeLines, signInAgentRefusal, signsInOnComputer } from "./add-words.js";
+import { ADD_FLAGS_REFUSAL, SIGN_IN_FLAGS_REFUSAL, addLines, addRefusal, addableProviders, boxNotSignedInLine, boxReplacesLine, boxSignedInLine, noPlaceLine, onePlace, placeNoLoginsLine, providerPlaceLine, removeLines, signInAgentRefusal, signInRowCommand, signsInOnComputer } from "./add-words.js";
 import type { AddFlags, SshWordReader } from "./add-words.js";
 import { hostKeyHere } from "./this-computer.js";
 
@@ -253,7 +253,7 @@ export async function followSetup(client: HostClient, placeId: string, watch: Se
 function setupEndLines(followed: SetupFollowed): string[] {
   const { computer } = followed;
   if (computer.setup === undefined) return [];
-  return setupLines(computer.name, computer.setup, computer.applied);
+  return setupLines(computer.name, computer.setup, computer.applied, row => signInRowCommand(computer.name, row));
 }
 
 /** What the line exits with once a setup it followed is over: 1 where a step that blocks stopped it, 0 at Ready and

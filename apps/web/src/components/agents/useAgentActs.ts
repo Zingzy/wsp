@@ -32,9 +32,12 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
     current.current = targetKey;
     setFlows(f => (f.targetKey === targetKey ? f : { targetKey, of: {} }));
     const held = running.current;
+    const begun = runs.current;
     return () => {
       for (const run of held.values()) run.stop?.();
       held.clear();
+      // A start the host answers after this is no run of anything shown, so its answer stops it.
+      begun.clear();
     };
   }, [targetKey]);
   const shown = flows.targetKey === targetKey ? flows.of : {};
@@ -64,6 +67,7 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
       // What the flow reserves room for rides every step, so its height holds whatever state the host reports.
       const finish = { ...(begin.finish === undefined ? {} : { finish: begin.finish }), ...(begin.pastes === true ? { pastes: true } : {}) };
       put(rowId, () => ({ kind: "run", state: "running", ...finish }));
+      const target = JSON.parse(targetKey) as AgentsTarget;
       const step = (e: AgentsSignInEvent): void => {
         if (runs.current.get(rowId) !== run) return;
         if (e.state === "signed-in") {
@@ -84,9 +88,10 @@ export function useAgentActs(target: AgentsTarget | null): AgentActs | undefined
           ...(e.code !== undefined ? { code: e.code } : {}),
           ...(e.paste !== undefined ? { paste: e.paste } : was?.kind === "run" && was.paste !== undefined ? { paste: was.paste } : {}),
           ...(e.said !== undefined ? { said: e.said } : {}),
+          ...(e.ptyId !== undefined && "placeId" in target ? { pty: { placeId: target.placeId, ptyId: e.ptyId } } : was?.kind === "run" && was.pty !== undefined && state !== "failed" ? { pty: was.pty } : {}),
         }));
       };
-      api.agentsSignIn(JSON.parse(targetKey) as AgentsTarget, begin.agent, begin.server, step).then(
+      api.agentsSignIn(target, begin.agent, begin.server, step, begin.terminal).then(
         handle => {
           if (current.current !== targetKey || runs.current.get(rowId) !== run) return handle.stop();
           running.current.set(rowId, handle);

@@ -8,10 +8,15 @@
 // under itself with its acts. When every row is done, Next opens the ready
 // page: a wash of the theme's hero ink from the top edge behind the box's name
 // and the one act.
-import { CheckIcon, ExternalLinkIcon, ListChecksIcon, ServerIcon } from "lucide-react";
+import { CheckIcon, ExternalLinkIcon, ListChecksIcon, ServerIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { fmtBytes, fmtDuration, HERE_PLACE_ID, hereName, recipeCounts, recipeSummary, type PlaceSetupStep, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions, type SshHostSuggestion } from "@wsp/protocol";
+import { fmtBytes, fmtDuration, HERE_PLACE_ID, hereName, recipeCounts, recipeSummary, type AgentsTarget, type PlaceSetupStep, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions, type SshHostSuggestion } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
+import { ActButton } from "../../components/agents/agentsParts.js";
+import { AGENTS_LIST_WORDS, agentSignInStart, catalogSignInRow, signInAct, type RowAct, type RowsContext } from "../../components/agents/agentsRows.js";
+import { SignInFlowView } from "../../components/agents/SignInFlowView.js";
+import { useAgentActs } from "../../components/agents/useAgentActs.js";
+import { useAgentsReport } from "../../components/agents/useAgentsReport.js";
 import { AddButton } from "../../components/ui/add-button.js";
 import { Button } from "../../components/ui/button.js";
 import { Dialog, DialogDescription, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../../components/ui/dialog.js";
@@ -35,13 +40,14 @@ import { placeName } from "../places.js";
 import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
 import { CopyRow, DeviceCode, RefusalSlot } from "../sheetParts.js";
-import { STEP_TITLES, askedHostKey, askedSudo, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
-import { everything, folderKey, fromRecipe, githubPick, noPicks, tickUsedClis } from "./choices.js";
+import { STEP_TITLES, askedHostKey, askedSudo, closeAdd, connect, firstCloseOf, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
+import { everything, folderKey, fromRecipe, githubPick, noPicks, servable, tickUsedClis } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
 import { checkRows, opensLog, runningMs, setupCount, setupRows, setupStanding, stepLogs, type StepLine } from "./setup.js";
 import { STEP_BODY, STEP_HEAD, STEP_WIDTH, StepFoot } from "./StepDialog.js";
 import { RetryActs, SkipAct, StepRow, useNow } from "./StepRow.js";
+import { keyTakenAt } from "../../keyOwners.js";
 
 const sshLogin = (host: SshHostSuggestion): string => [host.user, host.hostName ?? host.alias].filter(Boolean).join("@");
 
@@ -331,10 +337,15 @@ function StepLog({ lines }: { lines: readonly string[] | undefined }) {
 }
 
 /** The steps of a setup with what each row asks: Retry where a row did not land, Skip where it is an item the host can
- * set aside, the wait where a sign-in does. A step that ran opens on a click to its last lines of output, and one that
- * failed stands open until it is closed. */
+ * set aside, the wait where a sign-in does, and Sign in on the computer where a sign-in was skipped or failed, its
+ * page and code drawn under the row as the computer's own Sign-ins draw them. A step that ran opens on a click to its
+ * last lines of output, and one that failed stands open until it is closed. */
 export function SetupList({ place, id = "setup", rows = setupRows(place, placeName(place)) }: { place: PlaceView; id?: string; rows?: readonly StepLine[] }) {
   const api = useStore(s => s.api);
+  const box = placeName(place);
+  const target = useMemo<AgentsTarget>(() => ({ placeId: place.id }), [place.id]);
+  const signIns = useAgentActs(target);
+  const { report } = useAgentsReport(rows.some(row => row.signIn !== undefined) ? target : null);
   const [refused, setRefused] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
   const [turned, setTurned] = useState<ReadonlyMap<string, boolean>>(new Map());
@@ -350,20 +361,43 @@ export function SetupList({ place, id = "setup", rows = setupRows(place, placeNa
   };
   const retry = (): void => ask(() => retrySetup(api, place.id));
   const skip = (row: string) => (): void => ask(() => skipRow(api, place.id, row));
-  const acts = (row: StepLine): ReactNode =>
-    row.state !== "failed" || row.wait !== undefined ? undefined : (
+  const ctx: RowsContext = { where: "box", computer: box, heldWhy: null, ...(signIns === undefined ? {} : { acts: signIns }) };
+  // How it signs in there is the agents list's own rule, off that computer's report row where one is read.
+  const signInOf = (row: StepLine) => {
+    const road = row.signIn === undefined ? undefined : (report?.agents.find(a => a.id === row.signIn) ?? catalogSignInRow(row.signIn));
+    const start = road === undefined ? undefined : agentSignInStart(road, ctx);
+    return start === undefined ? undefined : signInAct(row.id, start, ctx);
+  };
+  // A sign-in drawn under its row is closed by Cancel there, never by the Sign in that opened it; one that failed
+  // offers its Sign in again.
+  const actOf = (row: StepLine, signIn: NonNullable<ReturnType<typeof signInOf>>): RowAct => {
+    if (signIn.act.id !== "sign-in") return signIn.act;
+    if (signIn.flow !== undefined && signIn.flow.flow.kind !== "run" && signIns !== undefined) return { id: "cancel", label: AGENTS_LIST_WORDS.cancel, icon: XIcon, run: () => signIns.cancel(row.id) };
+    return { ...signIn.act, label: ADD_COMPUTER_WORDS.signInOn(box) };
+  };
+  const acts = (row: StepLine): ReactNode => {
+    const signIn = signInOf(row);
+    const signInButton = signIn === undefined ? null : <ActButton act={actOf(row, signIn)} k="sign-in" />;
+    if (row.state === "skipped") return signInButton ?? undefined;
+    if (row.state !== "failed" || row.wait !== undefined) return undefined;
+    return (
       <>
-        <RetryActs onRetry={retry} busy={busy} />
+        {signInButton ?? <RetryActs onRetry={retry} busy={busy} />}
         {row.sub === true ? <SkipAct word={ADD_COMPUTER_WORDS.skip} onSkip={skip(row.id)} busy={busy} /> : null}
       </>
     );
+  };
+  const flowOf = (row: StepLine): ReactNode => {
+    const flow = signInOf(row)?.flow;
+    return flow === undefined ? undefined : <SignInFlowView view={flow} label={row.name} reserve={false} />;
+  };
   const toggle = (row: StepLine) => (opensLog(row) ? { open: isOpen(row), onToggle: () => setTurned(was => new Map(was).set(row.id, !isOpen(row))) } : { open: false });
   return (
     <>
       <Grid id={id}>
         {rows.map(row => (
           <StepRow key={row.id} row={row} acts={acts(row)} toggle={toggle(row)}>
-            {row.wait !== undefined ? <WaitBlock row={row} onRetry={retry} onSkip={skip(row.id)} busy={busy} /> : isOpen(row) && logs !== null ? <StepLog lines={logs[row.id as PlaceSetupStep]} /> : undefined}
+            {row.wait !== undefined ? <WaitBlock row={row} onRetry={retry} onSkip={skip(row.id)} busy={busy} /> : (flowOf(row) ?? (isOpen(row) && logs !== null ? <StepLog lines={logs[row.id as PlaceSetupStep]} /> : undefined))}
           </StepRow>
         ))}
       </Grid>
@@ -418,13 +452,19 @@ function ReadyPage({ place, onStart, onClose }: { place: PlaceView; onStart: () 
   );
 }
 
-/** The foot's left: the auto-save check, drawn in again on every save, and the one line. Keyed on the save count so a
- * landed save remounts it and its stroke draws in once more; nothing moves at rest. */
+/** How often the saved line's check draws in again at most: a run of ticks is one save said, not one flash a click. */
+const SAVED_EVERY_MS = 4000;
+
+/** The foot's left: the auto-save check and the one line. Keyed on the save it last drew for, so a save landing a few
+ * seconds after the last one drawn remounts it and its stroke draws in once more; a save inside that wait draws
+ * nothing, and nothing moves at rest. */
 function SavedLine() {
   const n = useAddFlow(s => s.saves);
+  const drawn = useRef({ n, at: Date.now() });
+  if (n !== drawn.current.n && Date.now() - drawn.current.at >= SAVED_EVERY_MS) drawn.current = { n, at: Date.now() };
   return (
     <span data-k="saved" className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-      <CheckIcon key={n} aria-hidden className="autosave-check size-3.5 shrink-0" />
+      <CheckIcon key={drawn.current.n} aria-hidden className="autosave-check size-3.5 shrink-0" />
       {ADD_COMPUTER_WORDS.saved}
     </span>
   );
@@ -488,6 +528,13 @@ export function AddComputerDialog() {
     setPicks(api, everything(flow.picks?.name ?? box, flow.options, projects.filter(p => p.computer === HERE_PLACE_ID), projectLooks));
   }, [flow.step, flow.options, flow.from, flow.saves, flow.picks, api, box, projects, projectLooks]);
 
+  // A sign-in the picks name that this computer cannot serve moves onto one it can, before anything is set up from it.
+  useEffect(() => {
+    if (flow.picks === null || flow.options === null) return;
+    const next = servable(flow.picks, flow.options);
+    if (next !== flow.picks) setPicks(api, next);
+  }, [flow.picks, flow.options, api]);
+
   if (!flow.open) return null;
 
   const keyAsked = flow.step === "checks" ? askedHostKey(job) : undefined;
@@ -495,7 +542,7 @@ export function AddComputerDialog() {
   const picks = flow.picks ?? noPicks(box);
   const change = (next: RecipeFile): void => setPicks(api, next);
   const close = (): void => {
-    if (flow.step === "running" && place !== undefined && setupStanding(place) === "running") {
+    if (flow.step === "running" && place?.setup !== undefined && setupStanding(place) === "running" && firstCloseOf(place.setup.addId)) {
       const placeId = place.id;
       addNotice({ kind: "note", text: ADD_COMPUTER_WORDS.keepsGoing, where: box, action: { word: "Open", run: () => openSetup(placeId) } });
     }
@@ -690,7 +737,7 @@ export function AddComputerDialog() {
   const saved = PICK_STEPS.has(view as AddStep);
 
   return (
-    <Dialog open onOpenChange={open => (open ? undefined : close())}>
+    <Dialog open onOpenChange={(open, how) => (open || (how.reason === "escape-key" && keyTakenAt(how.event.target, "Escape")) ? undefined : close())}>
       <DialogPopup data-add-computer={view} initialFocus={view === "where" || view === "hostkey" ? undefined : false} className={cn(STEP_WIDTH, "[--settings-inset:16px] sm:h-[640px]")}>
         {view === "ready" && place !== undefined ? (
           <>

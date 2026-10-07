@@ -8,12 +8,13 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DAEMON_VERSION, placeCurrentLine, placeProvisioningLine, type PlaceProvisionRow, type PlaceSetup, PlaceReport, placeDaemonPaths, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, type PlaceView, type SignInLine } from "@wsp/protocol";
+import { AT_ITS_TERMINAL, DAEMON_VERSION, waitsForInstallLine, placeCurrentLine, placeProvisioningLine, type PlaceProvisionRow, type PlaceSetup, PlaceReport, placeDaemonPaths, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { type PlaceUpdateRequest } from "@wsp/runtime";
 import { type SshRiding } from "@wsp/engine";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noPlaceSystemLine } from "../src/daemon-binary.js";
 import { loginFilesStep, profileSourceLine, sshDaemonPlace } from "../src/doctor.js";
 import { addCommand, UPDATE_FLAGS_REFUSAL, placeNoUpdateRoadLine, placeUnit, PLACE_NO_KEEP_LINE, PLACE_UPDATED_LINE, placeLoginFilesFailedLine, placeUpdateFailedLine, placeUpdateScript, placeUpdater, updatedLines, SIGN_IN_FLAGS_REFUSAL, placeNoLoginsLine, boxReplacesLine } from "../src/places.js";
+import { signInAgentRefusal, signInRowCommand } from "../src/places/add-words.js";
 import { placeService } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS } from "../src/service.js";
@@ -100,6 +101,25 @@ describe("wsp add <place> --sign-in <agent>", () => {
     expect(run.asked).toEqual([{ agent: "gemini", line: { command: "gemini login" } }]);
     expect(io.lines.join("\n")).toContain("Gemini CLI is signed in on spoo.");
     expect(io.lines.join("\n")).not.toContain("shares that login");
+  });
+
+  it("signs gh in on the computer too, which a setup's GitHub row names as the line that signs it in there", async () => {
+    const io = captured();
+    const run = signingIn({ signedIn: true });
+    landed.length = 0;
+    expect(await addCommand(io, opts(tmp("signin-gh")), ["spoo"], { signIn: "gh" }, run.deps)).toBe(0);
+    expect(run.asked).toEqual([{ agent: "gh", line: { command: "gh login" } }]);
+    expect(landed).toEqual([{ placeId: "p_1", agent: "gh" }]);
+    expect(signInRowCommand("spoo", { id: "github", label: "GitHub" })).toBe("wsp add spoo --sign-in gh");
+    expect(signInRowCommand("spoo", { id: "signins/codex", label: "Codex" })).toBe("wsp add spoo --sign-in codex");
+    expect(signInRowCommand("spoo", { id: "signins/opencode", label: "OpenCode", note: AT_ITS_TERMINAL })).toBe("wsp add spoo --sign-in opencode");
+    // Claude Code has no login to run there: its token goes in this host's vault, which every turn there reads.
+    expect(signInRowCommand("spoo", { id: "signins/claude", label: "Claude Code" })).toBe("wsp agents key claude");
+    expect(signInRowCommand("spoo", { id: "tools/brew/jq", label: "jq" })).toBeUndefined();
+    // Codex did not install there, so no login runs until a Retry puts it on.
+    expect(signInRowCommand("spoo", { id: "signins/codex", label: "Codex", note: waitsForInstallLine("Codex") })).toBeUndefined();
+    // gh is a tool and not an agent, and the refusal says so.
+    expect(signInAgentRefusal("jq")).toMatch(/^wsp add --sign-in takes an agent with a sign-in to run on a computer, or gh for GitHub, and jq is neither: name .*codex.* or gh\.$/);
   });
 
   it("answers a sign-in that did not land with what the tool said and the line that runs it again", async () => {

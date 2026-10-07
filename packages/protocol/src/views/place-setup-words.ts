@@ -112,9 +112,10 @@ export function placeStateOf(place: PlaceView, absent: AbsentComputer | null, sp
 }
 
 /** The lines a terminal prints once a setup is over: what this run installed by name, how many rows it found
- * already there, an earlier setup's included, then every row that failed or was set aside with its reason, every
- * sign-in still waiting, and what stopped the job where one did. */
-export function setupLines(name: string, setup: PlaceSetup, applied: PlaceApplied | undefined): string[] {
+ * already there, an earlier setup's included, then every row that failed or was set aside with its reason and what to
+ * do about it, every sign-in still waiting, and what stopped the job where one did. `command` is the command line's
+ * own line for a row, such as the sign-in it runs on that computer, which the app's words never carry. */
+export function setupLines(name: string, setup: PlaceSetup, applied: PlaceApplied | undefined, command: (row: PlaceProvisionRow) => string | undefined = () => undefined): string[] {
   const rows = applied?.rows ?? [];
   const of = (outcome: PlaceProvisionRow["outcome"]): PlaceProvisionRow[] => rows.filter(r => r.outcome === outcome);
   const installed = of("installed").filter(r => r.earlier !== true);
@@ -123,10 +124,11 @@ export function setupLines(name: string, setup: PlaceSetup, applied: PlaceApplie
     installed.length === 0 ? "nothing installed" : `${installed.length} installed: ${nameList(installed.map(r => r.label))}`,
     ...(present.length > 0 ? [`${present.length} already there`] : []),
   ];
+  const toDo = (r: PlaceProvisionRow): string[] => [r.fix, command(r)].flatMap(line => (line === undefined ? [] : [`    ${line}`]));
   return [
     `${name}: ${tally.join(", ")}`,
-    ...of("failed").map(r => `  x ${r.label}: ${r.note ?? "no reason recorded"}`),
-    ...of("skipped").map(r => `  - ${r.label}: ${r.note ?? "set aside"}`),
+    ...of("failed").flatMap(r => [`  x ${r.label}: ${r.note ?? "no reason recorded"}`, ...toDo(r)]),
+    ...of("skipped").flatMap(r => [`  - ${r.label}: ${r.note ?? "set aside"}`, ...toDo(r)]),
     ...setup.waiting.map(w => `  ? ${waitLine(w)}`),
     ...(setup.said === undefined ? [] : [`${name}: ${setup.said}`]),
   ];
@@ -147,13 +149,22 @@ export const CHOOSE_FIX = "Choose what goes on it in the app's Add a computer, o
  * minutes, and the codes the tools print run out in about fifteen. */
 export const SIGN_IN_WAIT_MS = 10 * 60_000;
 
-/** What a setup's rows say about where a sign-in came from. */
-export const FROM_THE_VAULT = "from this computer's vault, handed to every run there";
+/** What a setup's rows say about where a sign-in came from, in the person's words: they never read how wsp keeps a
+ * sign-in or which command it runs. `here` is the computer the host runs on, by its own name. */
+export const copiedFromLine = (here: string): string => `copied from ${here}`;
 export const SIGNED_IN_THERE = "signed in on that computer";
-export const NO_SIGN_IN_ROAD = "this host runs no sign-in on a computer; sign in from the app or with wsp add <computer> --sign-in <agent>";
-export const NO_FOLDER_ROAD = "this host moves no folder to a computer; add it with wsp add <folder> --on <computer>";
-export const NO_GITHUB_TOKEN_LINE = "this computer's vault holds no GitHub token: gh auth login here, then retry";
-export const noVaultTokenLine = (agent: string): string => `this computer's vault holds no token or key for ${agent}: wsp agents key ${agent}, then retry`;
+/** A sign-in that asks the person to pick, which the setup leaves for them: it runs at its own terminal on that
+ * computer once they sign it in. */
+export const AT_ITS_TERMINAL = "signs in at its own terminal on that computer";
+/** A sign-in on that computer whose agent did not install there, which has nothing to run until it does. */
+export const waitsForInstallLine = (name: string): string => `waits for ${name} to install`;
+export const NO_SIGN_IN_ROAD = "this host cannot run a sign-in on that computer; sign in from its page in Settings";
+export const NO_FOLDER_ROAD = "this host cannot move a folder to that computer; add the project from its page in Settings";
+export const noCopyLine = (name: string, here: string): string => `${here} has no ${name} sign-in to copy`;
+/** What to do about a sign-in that had nothing to copy: sign it in on the computer itself where it has a login
+ * there, else hand it the token or key it takes. */
+export const signInThereFix = (computer: string): string => `Sign in on ${computer} instead.`;
+export const signInWithFix = (name: string, word: "token" | "key"): string => `Sign in with a ${name} ${word} instead.`;
 /** What a row the recipe took out says where a file of it stays, since the person has written it there since, and
  * where its files could not be taken off at all. */
 export const editedThereLine = (name: string, kept: readonly string[]): string => `${nameList(kept)} ${kept.length === 1 ? "was" : "were"} edited on ${name}, so ${kept.length === 1 ? "it stays" : "they stay"} and wsp no longer manages ${kept.length === 1 ? "it" : "them"}`;

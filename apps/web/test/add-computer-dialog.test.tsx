@@ -5,9 +5,12 @@
 // has and kept on the pending add as they move, the summary's Set up with a
 // recipe saved, the running steps with a sign-in's wait and Retry, the ready
 // page, and closing mid-setup said as a notice.
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PLACE_HOST_KEY_KIND, PLACE_SUDO_KIND, RecipeFile, type AgentRow, type AgentsReport, type PlaceAddJob, type PlaceAddStep, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
+import { AT_ITS_TERMINAL, PLACE_HOST_KEY_KIND, closedBeforeSignInLine, PLACE_SUDO_KIND, RecipeFile, SKIPPED_FOR_NOW, copiedFromLine, noCopyLine, signInThereFix, signInWithFix, type AgentsSignInEvent, type AgentsTarget, type AgentRow, type AgentsReport, type PlaceAddJob, type PlaceAddStep, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
 import { RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
@@ -18,12 +21,18 @@ import { useRecipes } from "../src/settings/recipesStore.js";
 import { stepLogs } from "../src/settings/add/setup.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
+
+/** Every command's first word: the parity test holds the skill to name every line of the host's command table as
+ * `wsp <words>`, and the host's own sources import nothing a DOM test can load. */
+const VERBS = [...new Set([...readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../skills/wsp/SKILL.md"), "utf8").matchAll(/`wsp ([a-z][a-z-]*)/g)].map(m => m[1]!))];
+const WSP_COMMAND = new RegExp(`wsp (${VERBS.join("|")})\\b`);
 
 const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true, present: true, takesForks: false };
 const studio: PlaceView = { id: "p_studio", kind: "computer", name: "studio", default: false, present: true, diskFreeBytes: 61 * 1024 ** 3 };
 const OPTIONS: RecipeOptions = {
   agents: [
-    { id: "claude", name: "Claude Code", signins: ["vault", "machine"] },
+    { id: "claude", name: "Claude Code", signins: ["vault"] },
     { id: "codex", name: "Codex", signins: ["machine"] },
   ],
   mcp: [{ name: "context7", agents: ["claude", "codex"] }],
@@ -152,8 +161,9 @@ describe("Add a computer, from the address to Set up", () => {
     expect(note("disk")).toContain("61 GB free");
     stage(addId, "reach", "done");
     stage(addId, "wsp", "done");
-    stage(addId, "join", "done", undefined, studio.id);
     act(() => useStore.setState({ places: [here, studio] }));
+    act(() => fake.joined());
+    await settle();
     await act(async () => fake.joined());
     await settle();
     expect(rows().every(([, state]) => state === "done")).toBe(true);
@@ -397,7 +407,7 @@ describe("Add a computer's picks read the host's facts", () => {
   const FACTS: RecipeOptions = {
     ...OPTIONS,
     agents: [
-      { id: "claude", name: "Claude Code", signins: ["vault", "machine"], kind: "token", bytes: 230 * MB },
+      { id: "claude", name: "Claude Code", signins: ["vault"], kind: "token", bytes: 230 * MB },
       { id: "codex", name: "Codex", signins: ["machine"], kind: "device", bytes: 40 * MB },
     ],
     mcp: [
@@ -791,7 +801,8 @@ describe("Add a computer while the setup runs", () => {
     mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
     act(() => openSetup(studio.id));
     await settle();
-    expect(title()).toBe("studio needs you");
+    // A skill that did not land waits on nobody: the computer reads Ready, as its row on the list does, and the row offers Retry.
+    expect(title()).toBe("studio is ready");
     const row = dialog()!.querySelector<HTMLElement>("[data-step-row='skills/b']")!;
     expect(row.querySelector("[data-k=step-refusal]")?.textContent).toBe("a link inside points at a folder");
     await press(row.querySelector("[data-k=retry]"));
@@ -926,7 +937,7 @@ describe("Add a computer while the setup runs", () => {
     }
   });
 
-  it("draws every step a frame says is running with its own crab", async () => {
+  it("draws every step a frame says is running with its own spinner", async () => {
     useStore.setState({ places: [here, placed(RUNNING)] });
     mountSettings({ api: host().api, at: { kind: "group", group: "computers" } });
     act(() => openSetup(studio.id));
@@ -989,5 +1000,382 @@ describe("Add a computer while the setup runs", () => {
     await settle();
     expect(step()).toBe("agents");
     expect(dialog()!.querySelector("[data-k=back]")).toBeNull();
+  });
+});
+
+describe("Add a computer, the running sheet as the host has it", () => {
+  const placed = (setup: PlaceSetup, applied?: PlaceView["applied"]): PlaceView => ({ ...studio, setup, ...(applied === undefined ? {} : { applied }) });
+  const DONE: PlaceSetup = { ...RUNNING, state: "done", finishedAt: "2026-10-03T10:16:00.000Z", steps: [{ step: "floor", state: "done" }, { step: "agents", state: "done" }, { step: "signins", state: "done" }, { step: "github", state: "done" }], waiting: [] };
+  // The owner's run: the Codex sign-in had nothing to copy, and GitHub was skipped.
+  const OWNERS_RUN: PlaceView["applied"] = {
+    hash: "h",
+    at: "x",
+    rows: [
+      { id: "signins/claude", label: "Claude Code", outcome: "present", step: "signins", note: copiedFromLine("zingzy's MacBook Pro") },
+      { id: "signins/codex", label: "Codex", outcome: "failed", step: "signins", note: noCopyLine("Codex", "zingzy's MacBook Pro"), fix: signInThereFix("studio") },
+      { id: "github", label: "GitHub", outcome: "skipped", step: "github", note: SKIPPED_FOR_NOW },
+    ],
+  };
+  const signInHost = (over: Partial<Api> = {}, o: { late?: boolean } = {}) => {
+    const asked: { target: AgentsTarget; agent: string; terminal?: boolean }[] = [];
+    const opened: unknown[] = [];
+    const told: ((e: AgentsSignInEvent) => void)[] = [];
+    const stopped: string[] = [];
+    let answer: () => void = () => {};
+    const fake = host({
+      agentsSignIn: async (target: AgentsTarget, agent: string, _server: string | undefined, onStep: (e: AgentsSignInEvent) => void, terminal?: boolean) => {
+        asked.push({ target, agent, ...(terminal === undefined ? {} : { terminal }) });
+        told.push(onStep);
+        // The host's answer held back until the test lets it go, as a slow host's would be.
+        if (o.late === true) await new Promise<void>(r => (answer = r));
+        // A sign-in in the person's own terminal names its pty there; any other prints its page and code.
+        queueMicrotask(() => onStep(terminal === true ? { type: "agents.signIn", signInId: "si_1", state: "running", ptyId: "pty_9" } : { type: "agents.signIn", signInId: "si_1", state: "waiting", url: "https://github.com/login/device", code: "ABCD-1234" }));
+        return { signInId: "si_1", stop: () => void stopped.push(agent), off: () => {} };
+      },
+      // The link to the computer the terminal attaches over is asked for and never answers here.
+      daemon: {
+        ...noDaemonApi,
+        open: async (target: unknown) => {
+          opened.push(target);
+          return new Promise<never>(() => {});
+        },
+      },
+      ...over,
+    } as Partial<Api>);
+    return { ...fake, signIns: asked, opened, stopped, tell: (e: Omit<AgentsSignInEvent, "type" | "signInId">) => act(() => told.at(-1)?.({ type: "agents.signIn", signInId: "si_1", ...e })), answer: () => answer() };
+  };
+
+  it("reads done when the host's setup is done and waits on nothing, a failed sign-in and a skipped GitHub included", async () => {
+    useStore.setState({ places: [here, placed(DONE, OWNERS_RUN)] });
+    mountSettings({ api: host().api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    expect(title()).toBe("studio is ready");
+    expect(primary().textContent).toBe("Next");
+  });
+
+  it("reads a skipped sign-in as skipped with Sign in on the computer, which starts that sign-in there and draws its code", async () => {
+    const fake = signInHost();
+    useStore.setState({ places: [here, placed(DONE, OWNERS_RUN)] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    const github = (): HTMLElement => dialog()!.querySelector<HTMLElement>("[data-step-row='github']")!;
+    expect(github().dataset["state"]).toBe("skipped");
+    expect(github().querySelector("[data-state-mark]")?.getAttribute("data-state-mark")).toBe("skipped");
+    expect(github().textContent).toContain("Skipped.");
+    expect(github().querySelector("[data-k=sign-in]")?.textContent).toBe("Sign in on studio");
+    await press(github().querySelector("[data-k=sign-in]"));
+    await settle();
+    expect(fake.signIns).toEqual([{ target: { placeId: studio.id }, agent: "gh" }]);
+    expect(github().querySelector("[data-k=sign-in-code]")?.textContent).toBe("ABCD-1234");
+  });
+
+  it("offers Sign in on the computer on a sign-in that failed, in place of a Retry that would fail the same way", async () => {
+    const fake = signInHost();
+    useStore.setState({ places: [here, placed(DONE, OWNERS_RUN)] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    const codex = dialog()!.querySelector<HTMLElement>("[data-step-row='signins/codex']")!;
+    expect(codex.dataset["state"]).toBe("failed");
+    expect([...codex.querySelectorAll("button")].map(b => b.textContent)).toEqual(["Sign in on studio", "Skip"]);
+    await press(codex.querySelector("[data-k=sign-in]"));
+    expect(fake.signIns).toEqual([{ target: { placeId: studio.id }, agent: "codex" }]);
+  });
+
+  it("offers Sign in on a GitHub row skipped early while the setup still runs, since the run lands it among its rows", async () => {
+    const fake = signInHost();
+    const running: PlaceSetup = { ...DONE, state: "running", steps: [...DONE.steps, { step: "clis", state: "running" }] };
+    useStore.setState({ places: [here, placed(running, OWNERS_RUN)] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    const github = dialog()!.querySelector<HTMLElement>("[data-step-row='github']")!;
+    expect(github.dataset["state"]).toBe("skipped");
+    await press(github.querySelector("[data-k=sign-in]"));
+    expect(fake.signIns).toEqual([{ target: { placeId: studio.id }, agent: "gh" }]);
+  });
+
+  // What the host offers on an empty vault: Claude Code's sign-in is a token minted here and nothing else, so the
+  // vault was its one choice, and it has none; the rest keep the login they run there.
+  const EMPTY_VAULT: RecipeOptions = {
+    ...OPTIONS,
+    agents: [
+      { id: "claude", name: "Claude Code", signins: [], kind: "token" },
+      { id: "codex", name: "Codex", signins: ["machine"], kind: "device" },
+      { id: "cursor", name: "Cursor", signins: ["machine"], kind: "key" },
+      { id: "opencode", name: "OpenCode", signins: ["machine"], kind: "key" },
+    ],
+  };
+  const boxReport = (): AgentsReport => ({
+    target: { placeId: studio.id },
+    home: "/root",
+    user: "root",
+    readAt: "x",
+    agents: [
+      { id: "claude", name: "Claude Code", installed: true, road: "wsp", signIn: "none", signInRoad: "token", wspTools: false },
+      { id: "opencode", name: "OpenCode", installed: true, road: "wsp", signIn: "none", signInRoad: "terminal", wspTools: false },
+    ],
+    skills: [],
+    servers: [],
+    refused: [],
+  });
+
+  it("signs Claude Code in with a token pasted on its row where this computer had none to copy, as the computer's Sign-ins do", async () => {
+    const keyed: { agent: string; key: string }[] = [];
+    const fake = host({ agentsRead: async () => boxReport(), agentsKey: async (agent: string, key: string) => void keyed.push({ agent, key }) } as Partial<Api>);
+    const run: PlaceView["applied"] = { hash: "h", at: "x", rows: [{ id: "signins/claude", label: "Claude Code", outcome: "failed", step: "signins", note: noCopyLine("Claude Code", "zingzy's MacBook Pro"), fix: signInWithFix("Claude Code", "token") }] };
+    useStore.setState({ places: [here, placed(DONE, run)] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    const claude = (): HTMLElement => dialog()!.querySelector<HTMLElement>("[data-step-row='signins/claude']")!;
+    expect(claude().textContent).toContain("Sign in with a Claude Code token instead.");
+    expect([...claude().querySelectorAll("button")].map(b => b.textContent)).toEqual(["Sign in on studio", "Skip"]);
+    await press(claude().querySelector("[data-k=sign-in]"));
+    expect(claude().querySelector("[data-k=sign-in-mint]")?.textContent).toBe("claude setup-token");
+    // The paste stands under the row with Cancel to close it, and no empty refusal room above that.
+    expect([...claude().querySelectorAll("[data-k=sign-in], [data-k=skip]")].map(b => b.textContent)).toEqual(["Cancel", "Skip"]);
+    expect(claude().querySelector("[data-k=sign-in-refused]")).toBeNull();
+    fireEvent.change(claude().querySelector("[data-k=sign-in-key]")!, { target: { value: "sk-ant-oat01-x" } });
+    await press(claude().querySelector("[data-k=sign-in-save]"));
+    expect(keyed).toEqual([{ agent: "claude", key: "sk-ant-oat01-x" }]);
+  });
+
+  it("opens OpenCode's sign-in in place as its own terminal on the computer, since it asks which provider: no line to copy", async () => {
+    const fake = signInHost({ agentsRead: async () => boxReport() } as Partial<Api>);
+    // The row as the setup lands it for a login that asks the person to pick.
+    const run: PlaceView["applied"] = { hash: "h", at: "x", rows: [{ id: "signins/opencode", label: "OpenCode", outcome: "skipped", step: "signins", note: AT_ITS_TERMINAL }] };
+    useStore.setState({ places: [here, placed(DONE, run)] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    const opencode = (): HTMLElement => dialog()!.querySelector<HTMLElement>("[data-step-row='signins/opencode']")!;
+    expect(opencode().dataset["state"]).toBe("skipped");
+    expect(opencode().textContent).toContain("Signs in at its own terminal on studio.");
+    await press(opencode().querySelector("[data-k=sign-in]"));
+    await settle();
+    expect(fake.signIns).toEqual([{ target: { placeId: studio.id }, agent: "opencode", terminal: true }]);
+    expect(opencode().querySelector("[data-k=sign-in-terminal]")).not.toBeNull();
+    expect(opencode().querySelector("[data-k=sign-in-line]")).toBeNull();
+    await waitFor(() => expect(fake.opened).toEqual([{ placeId: studio.id }]));
+    // The flow it opened is closed from its row, not opened again.
+    expect([...opencode().querySelectorAll("button")].map(b => b.textContent)).toEqual(["Cancel"]);
+  });
+
+  it("says a terminal sign-in the person left as left, with Sign in again under it and no empty line over it", async () => {
+    const fake = signInHost({ agentsRead: async () => boxReport() } as Partial<Api>);
+    const run: PlaceView["applied"] = { hash: "h", at: "x", rows: [{ id: "signins/opencode", label: "OpenCode", outcome: "skipped", step: "signins", note: AT_ITS_TERMINAL }] };
+    useStore.setState({ places: [here, placed(DONE, run)] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    const opencode = (): HTMLElement => dialog()!.querySelector<HTMLElement>("[data-step-row='signins/opencode']")!;
+    await press(opencode().querySelector("[data-k=sign-in]"));
+    await settle();
+    // Esc in OpenCode's picker, which quits it: the host reads no sign-in there.
+    fake.tell({ state: "failed", said: closedBeforeSignInLine("OpenCode") });
+    expect(opencode().querySelector("[data-k=sign-in-refused]")?.textContent).toBe("OpenCode closed before it signed in.");
+    expect(opencode().querySelector("[data-sign-in-line]")).toBeNull();
+    expect(opencode().textContent).not.toMatch(/exit/);
+    expect([...opencode().querySelectorAll("button")].map(b => b.textContent)).toContain("Sign in on studio");
+  });
+
+  it("gives Esc pressed in a terminal sign-in to that terminal and keeps the sheet open; Esc anywhere else in it closes it", async () => {
+    const fake = signInHost({ agentsRead: async () => boxReport() } as Partial<Api>);
+    const run: PlaceView["applied"] = { hash: "h", at: "x", rows: [{ id: "signins/opencode", label: "OpenCode", outcome: "skipped", step: "signins", note: AT_ITS_TERMINAL }] };
+    useStore.setState({ places: [here, placed(DONE, run)] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    const opencode = (): HTMLElement => dialog()!.querySelector<HTMLElement>("[data-step-row='signins/opencode']")!;
+    await press(opencode().querySelector("[data-k=sign-in]"));
+    await settle();
+    const terminal = opencode().querySelector<HTMLElement>("[data-k=sign-in-terminal]")!;
+    act(() => void fireEvent.keyDown(terminal, { key: "Escape" }));
+    await settle();
+    expect(dialog()).not.toBeNull();
+    expect(fake.stopped).toEqual([]);
+    act(() => void fireEvent.keyDown(opencode(), { key: "Escape" }));
+    await settle();
+    expect(dialog()).toBeNull();
+  });
+
+  it("stops a sign-in the host answers only after the sheet closed, rather than leave it waiting on that computer", async () => {
+    const fake = signInHost({ agentsRead: async () => boxReport() } as Partial<Api>, { late: true });
+    const run: PlaceView["applied"] = { hash: "h", at: "x", rows: [{ id: "signins/opencode", label: "OpenCode", outcome: "skipped", step: "signins", note: AT_ITS_TERMINAL }] };
+    useStore.setState({ places: [here, placed(DONE, run)] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    await press(dialog()!.querySelector("[data-step-row='signins/opencode'] [data-k=sign-in]"));
+    await press(dialog()!.querySelector("[data-k=close]"));
+    expect(dialog()).toBeNull();
+    expect(fake.stopped).toEqual([]);
+    fake.answer();
+    await settle();
+    expect(fake.stopped).toEqual(["opencode"]);
+  });
+
+  it("never ticks an agent silently where this computer can serve none of its choices: it says the road it has", async () => {
+    const fake = host({ recipesOptions: async () => EMPTY_VAULT } as Partial<Api>);
+    useStore.setState({ places: [here, studio] });
+    const pending: PendingComputer = { id: "a_9", address: "studio", step: "choosing", placeId: studio.id, startedAt: "x", choices: RecipeFile.parse({ name: "studio", agents: { claude: {}, codex: { signin: "machine" }, opencode: { signin: "machine" } } }) };
+    localStorage.setItem("wsp:add-reached", JSON.stringify({ a_9: "agents" }));
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openPending(pending, 0));
+    await settle();
+    const claude = dialog()!.querySelector<HTMLElement>("[data-pick-row='claude']")!;
+    expect(ticked("claude")).toBe(true);
+    expect(claude.querySelector("[role=combobox]")).toBeNull();
+    expect(claude.textContent).toContain("Signs in with a token you paste once it is set up.");
+    // OpenCode's login asks which provider, so it signs in at its own terminal there once the add is through.
+    expect(dialog()!.querySelector<HTMLElement>("[data-pick-row='opencode']")!.textContent).toContain("Signs in at its own terminal on studio once it is set up.");
+    expect(dialog()!.querySelector<HTMLElement>("[data-pick-row='codex']")!.textContent).not.toContain("own terminal");
+  });
+
+  it("moves a recipe's sign-in this computer cannot serve onto one it can, before anything is set up", async () => {
+    const fake = host({ recipesOptions: async () => EMPTY_VAULT } as Partial<Api>);
+    useStore.setState({ places: [here, studio] });
+    const pending: PendingComputer = { id: "a_9", address: "studio", step: "choosing", placeId: studio.id, startedAt: "x", recipe: "laptop", choices: RecipeFile.parse({ name: "studio", agents: { claude: { signin: "vault" }, codex: { signin: "vault" } } }) };
+    localStorage.setItem("wsp:add-reached", JSON.stringify({ a_9: "agents" }));
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openPending(pending, 1));
+    await settle();
+    await waitFor(() => expect(useAddFlow.getState().picks?.agents).toEqual({ claude: {}, codex: { signin: "machine" } }));
+  });
+
+  it("reopens an add closed while its install runs on that install's checks, not the address", async () => {
+    const fake = host();
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openAdd());
+    await settle();
+    act(() => useAddFlow.setState({ address: "studio" }));
+    await press(primary());
+    const addId = useAddFlow.getState().addId!;
+    stage(addId, "connect", "done", "Ubuntu 24.04");
+    stage(addId, "root", "running");
+    act(() => closeAdd());
+    act(() => openPending({ id: addId, address: "studio", step: "check", startedAt: "x", choices: RecipeFile.parse({ name: "studio" }) }, 1));
+    await settle();
+    expect(step()).toBe("checks");
+    expect(dialog()!.querySelector("[data-step-row='root']")?.getAttribute("data-state")).toBe("working");
+    // Joined while closed, before any pick: its checks again, and Continue goes on to the first pick.
+    act(() => closeAdd());
+    act(() => useStore.setState({ places: [here, studio] }));
+    act(() => fake.joined());
+    await settle();
+    act(() => openPending({ id: addId, address: "studio", step: "floor", placeId: studio.id, startedAt: "x", choices: RecipeFile.parse({ name: "studio" }) }, 1));
+    await settle();
+    expect(step()).toBe("checks");
+    await press(primary());
+    expect(step()).toBe("agents");
+  });
+
+  it("reopens a pending add whose computer's setup started on its running steps", async () => {
+    useStore.setState({ places: [here, placed(RUNNING)] });
+    mountSettings({ api: host().api, at: { kind: "group", group: "computers" } });
+    localStorage.setItem("wsp:add-reached", JSON.stringify({ a_1: "clis" }));
+    act(() => openPending({ id: "a_1", address: "studio", step: "choosing", placeId: studio.id, startedAt: "x", choices: RecipeFile.parse({ name: "studio" }) }, 1));
+    await settle();
+    expect(step()).toBe("running");
+  });
+
+  it("says the setup keeps going once a setup, not on every close", async () => {
+    useStore.setState({ places: [here, placed({ ...RUNNING, addId: "a_once" })] });
+    mountSettings({ api: host().api, at: { kind: "group", group: "computers" } });
+    const before = useNotices.getState().notices.length;
+    for (let i = 0; i < 3; i++) {
+      act(() => openSetup(studio.id));
+      await settle();
+      await press(dialog()!.querySelector("[data-k=close]"));
+    }
+    expect(useNotices.getState().notices.slice(before).map(n => n.text)).toEqual(["Setup keeps going. wsp pings you when it needs you."]);
+  });
+
+  it("draws the saved line's check in again at most once in a few seconds, however fast the picks move", async () => {
+    const fake = host();
+    useStore.setState({ places: [here, studio] });
+    const pending: PendingComputer = { id: "a_s", address: "studio", step: "choosing", placeId: studio.id, startedAt: "x", choices: RecipeFile.parse({ name: "studio", agents: { claude: { signin: "vault" } } }) };
+    localStorage.setItem("wsp:add-reached", JSON.stringify({ a_s: "agents" }));
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openPending(pending, 0));
+    await settle();
+    const check = (): Element | null => dialog()!.querySelector("[data-k=saved] svg");
+    const first = check();
+    expect(first).not.toBeNull();
+    for (const on of [false, true, false, true]) {
+      await press(dialog()!.querySelector("[data-pick-row='codex'] [role=checkbox]"));
+      expect(ticked("codex")).toBe(on ? false : true);
+    }
+    expect(check()).toBe(first);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + 5000);
+    try {
+      await press(dialog()!.querySelector("[data-pick-row='codex'] [role=checkbox]"));
+      expect(check()).not.toBe(first);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("draws no crab on a setup row: a running step shows the plain spinner", async () => {
+    useStore.setState({ places: [here, placed({ ...RUNNING, steps: [...RUNNING.steps, { step: "clis", state: "running" }, { step: "folders", state: "running" }] })] });
+    mountSettings({ api: host().api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    const working = [...dialog()!.querySelectorAll<HTMLElement>("[data-step-row][data-state=working]")];
+    expect(working.map(r => r.dataset["stepRow"])).toEqual(["agents", "clis", "folders"]);
+    expect(dialog()!.querySelector("[data-crab]")).toBeNull();
+    expect(working.every(r => r.querySelector("[data-state-mark=working] .animate-spin") !== null)).toBe(true);
+  });
+
+  it("names no vault, no wsp command and no dialling back in any of its words, through the checks and the running rows", async () => {
+    const said: string[] = [];
+    const fake = host();
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openAdd());
+    await settle();
+    act(() => useAddFlow.setState({ address: "studio" }));
+    await press(primary());
+    const addId = useAddFlow.getState().addId!;
+    for (const s of ["connect", "chip", "root", "system", "disk", "reach"] as const) stage(addId, s, "done");
+    said.push(dialog()!.textContent ?? "");
+    act(() => closeAdd());
+    // Claude Code's row here had nothing to copy, over the owner's run where it copied.
+    const rows = [
+      { id: "signins/claude", label: "Claude Code", outcome: "failed" as const, step: "signins" as const, note: noCopyLine("Claude Code", "zingzy's MacBook Pro"), fix: signInWithFix("Claude Code", "token") },
+      { id: "signins/opencode", label: "OpenCode", outcome: "skipped" as const, step: "signins" as const, note: AT_ITS_TERMINAL },
+      { id: "folders/app", label: "app", outcome: "failed" as const, step: "folders" as const, note: "private; needs GitHub to clone", fix: "Sign GitHub in on studio, then retry." },
+      ...OWNERS_RUN!.rows,
+    ];
+    const signing = signInHost({ agentsRead: async () => boxReport() } as Partial<Api>);
+    cleanup();
+    mountSettings({ api: signing.api, at: { kind: "group", group: "computers" } });
+    useStore.setState({ places: [here, placed(DONE, { ...OWNERS_RUN!, rows: rows.filter((r, at) => rows.findIndex(x => x.id === r.id) === at) })] });
+    act(() => openSetup(studio.id));
+    await settle();
+    said.push(dialog()!.textContent ?? "");
+    // Each row's Sign in pressed in turn, what it opens under the row read too.
+    const pressed: string[] = [];
+    for (;;) {
+      const next = [...dialog()!.querySelectorAll<HTMLElement>("[data-step-row]")].find(row => !pressed.includes(row.dataset["stepRow"]!) && row.querySelector("[data-k=sign-in]")?.textContent?.startsWith("Sign in") === true);
+      if (next === undefined) break;
+      pressed.push(next.dataset["stepRow"]!);
+      await press(next.querySelector("[data-k=sign-in]"));
+      await settle();
+      said.push(dialog()!.textContent ?? "");
+    }
+    expect(pressed.sort()).toEqual(["github", "signins/claude", "signins/codex", "signins/opencode"]);
+    for (const words of said) {
+      expect(words).not.toMatch(/vault/i);
+      // textContent runs one element's words into the next with no space, so no word boundary stands before wsp.
+      expect(words).not.toMatch(WSP_COMMAND);
+      expect(words).not.toMatch(/dial/i);
+    }
+    expect(said.join(" ")).toContain("Connects back");
+    // The verbs come whole off the command table, the two the last review slipped past it included.
+    expect(VERBS).toEqual(expect.arrayContaining(["add", "agents", "computers", "init", "mcp", "remove", "servers", "recipes"]));
   });
 });

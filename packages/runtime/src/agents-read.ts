@@ -4,8 +4,9 @@
 // reading the agents, skills and servers off it is the host's, since the
 // catalog's readers live there. A read never wakes a machine.
 import { randomBytes } from "node:crypto";
-import { AgentsReport, HERE_PLACE_ID, type McpServerSpec as LaunchServer, type PlaceProvisionRow, ptyBareOn, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
+import { AgentsReport, GITHUB_CLI, HERE_PLACE_ID, installingFirstLine, refusal, toolNotInstalledFix, toolNotInstalledLine, lastLine, type McpServerSpec as LaunchServer, type PlaceProvisionRow, ptyBareOn, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
+import { catalogEntry } from "@wsp/catalog";
 import type { DaemonChannel } from "./daemon-channel.js";
 import type { McpServerSpec } from "./slate-mcp.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
@@ -77,6 +78,10 @@ export interface PtyLink {
 export interface SignInAsk {
   agent: string;
   server?: string;
+  /** Run in a pty there that the person's own terminal attaches to, for a login that asks them to pick. */
+  terminal?: boolean;
+  /** The caller put the login's tool on that computer itself, as a setup's own step does: nothing goes on first. */
+  toolThere?: boolean;
 }
 
 /** What one watched sign-in is handed: the link its pty runs over, where its steps go, where it hands the writer a
@@ -270,7 +275,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   const running = new Map<string, Running>();
   /** The one sign-in of an agent, or of one server, on a target, by that pair: a second start joins it. */
   const starting = new Map<string, Promise<{ signInId: string; run: Running }>>();
-  const keyOf = (target: AgentsTarget, ask: SignInAsk): string => JSON.stringify([target, ask.agent, ask.server ?? null]);
+  const keyOf = (target: AgentsTarget, ask: SignInAsk): string => JSON.stringify([target, ask.agent, ask.server ?? null, ask.terminal === true]);
   const follow = (signInId: string, run: Running, emit: (event: AgentsSignInEvent) => void): { signInId: string; leave(): void } => {
     if (!run.followers.has(emit)) {
       run.followers.add(emit);
@@ -350,6 +355,20 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     const ws = await o.workspace(target.workspaceId, origin);
     if (ws.phase === "napping") return { napping: ws.name };
     return ws.local ? { kind: "here", projects: [ws.project] } : { kind: "machine", machine: ws.machine, projects: [ws.project], ...(o.relayed?.() === true ? { relayed: true } : {}), ...(ws.stores !== undefined ? { stores: ws.stores } : {}) };
+  };
+  /** gh's login on a computer runs only where gh is, and the setup puts none there for a GitHub row set aside: the app's
+   * sign-in and the command line's line both put it on here first. `installing` is told only once an install starts;
+   * the answer is what a failed install said last. */
+  const ghFirst = async (target: AgentsTarget, ask: SignInAsk, installing: () => void): Promise<string | undefined> => {
+    if (!("placeId" in target) || ask.server !== undefined || ask.toolThere === true || ask.agent !== GITHUB_CLI) return undefined;
+    let told = false;
+    const rows = await o.places()?.ghThere(target.placeId, (_detail, at, row) => {
+      if (told || at === undefined || row !== undefined) return;
+      told = true;
+      installing();
+    });
+    const failed = rows?.find(r => r.outcome === "failed");
+    return failed === undefined ? undefined : (lastLine(failed.note ?? "") ?? `${failed.label} did not install`);
   };
   const reads = {
     async read(target: AgentsTarget, origin?: Caller): Promise<AgentsReport> {
@@ -439,7 +458,12 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         };
         // A tool's own login types its code on the terminal; only a server's browser flow returns to a callback port.
         const forward = ask.server !== undefined ? forwardOf(target) : undefined;
-        void plan({ link, emit: step, typing: write => (write === undefined ? delete run.type : (run.type = write)), stop: stopped, ...(forward !== undefined ? { forward } : {}) })
+        const go = async (): Promise<void> => {
+          const failed = await ghFirst(target, ask, () => step({ state: "running", said: installingFirstLine(catalogEntry(GITHUB_CLI)?.name ?? GITHUB_CLI) }));
+          if (failed !== undefined) return step({ state: "failed", said: failed });
+          await plan({ link, emit: step, typing: write => (write === undefined ? delete run.type : (run.type = write)), stop: stopped, ...(forward !== undefined ? { forward } : {}) });
+        };
+        void go()
           .catch((e: unknown) => step({ state: "failed", said: e instanceof Error ? e.message : String(e) }))
           .finally(async () => {
             forward?.close();
@@ -447,8 +471,9 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
             if (starting.get(key) === begun) starting.delete(key);
             channel.close();
             log(`sign-in ${signInId} ended: ${what}: ${stoppedBy ? "stopped" : (run.last?.state ?? "failed")}`);
-            // That computer lists its logins only when it dials, so a landed one is written here before the reports read again.
-            if ("placeId" in target && ask.server === undefined && run.last?.state === "signed-in") {
+            // That computer lists its logins only when it dials, so a landed one is written here before the reports read
+            // again. A sign-in stopped (a skip in the setup) lands nothing, whatever its tool said after.
+            if ("placeId" in target && ask.server === undefined && !stoppedBy && run.last?.state === "signed-in") {
               try {
                 await o.places()?.loginLanded(target.placeId, ask.agent);
               } catch (e) {
@@ -483,11 +508,15 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
       const acts = actsOf();
       const on = await onOf(target, origin);
       if ("napping" in on) throw usage(nappingSignInRefusal(on.napping));
+      const failed = await ghFirst(target, ask, () => undefined);
+      const gh = catalogEntry(GITHUB_CLI)?.name ?? GITHUB_CLI;
+      if (failed !== undefined) throw refusal(toolNotInstalledLine(gh, failed), toolNotInstalledFix(gh));
       return SignInLine.parse(await acts.signInLine(on, ask));
     },
     async key(agent, key) {
       await actsOf().key(agent, key);
       changed();
+      await o.places()?.keyLanded(agent);
     },
     skillsSearch: (q, limit = SKILLS_SEARCH_LIMIT) => skillsOf().search(q, limit).then(hits => hits.map(h => SkillHit.parse(h))),
     skillsGet: async skill => SkillPreview.parse(await skillsOf().get(skill)),

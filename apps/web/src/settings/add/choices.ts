@@ -91,6 +91,21 @@ export function tickFolder(picks: RecipeFile, key: string, row: RecipeFile["fold
   return { ...picks, folders };
 }
 
+/** The picks with every sign-in moved onto one the options offer, the way a row ticked now would sign in: a saved
+ * recipe may name a way this computer cannot serve, such as a sign-in to copy that it does not hold. Picks that need
+ * no move come back as they were. */
+export function servable(picks: RecipeFile, options: RecipeOptions): RecipeFile {
+  let next = picks;
+  for (const [agent, row] of Object.entries(picks.agents)) {
+    const offered = options.agents.find(a => a.id === agent)?.signins;
+    if (offered === undefined || row.signin === undefined || offered.includes(row.signin)) continue;
+    next = { ...next, agents: { ...next.agents, [agent]: offered[0] === undefined ? {} : { signin: offered[0] } } };
+  }
+  const github = options.configs.find(c => c.id === "github")?.signins;
+  if (picks.configs.github !== undefined && github !== undefined && !github.includes(githubPick(picks)) && github[0] !== undefined) next = setGitHub(next, github[0]);
+  return next;
+}
+
 /** How one agent signs in. */
 export const signIn = (picks: RecipeFile, agent: string, signin: RecipeSignIn): RecipeFile => ({ ...picks, agents: { ...picks.agents, [agent]: { signin } } });
 

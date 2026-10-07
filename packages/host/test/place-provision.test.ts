@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Manifest } from "@wsp/collect";
 import { TOOL_PREFIX, catalogEntry } from "@wsp/catalog";
-import { MCP_ID_PREFIX, TOOLS_PATH, probePath, type Recipe } from "@wsp/protocol";
+import { MCP_ID_PREFIX, TOOLS_PATH, probePath, type Recipe, type RecipeFile } from "@wsp/protocol";
 import { AGENT_NODE_STEP, closeAgentFiles, oncePathsOf, pathLine, provisionFiles, provisionMcp, type ProvisionPlan } from "@wsp/engine";
 import { nodeHost } from "@wsp/collect";
 import { boxGuest, cleanGuests } from "../../engine/test/box-guest.js";
@@ -298,6 +298,18 @@ describe("a computer's picks planned for a sync", () => {
     expect(light.skills?.lands.map(l => l.dest)).toEqual([".claude/skills/unslop"]);
     await planner.setup(picks, { home }, new Set(["skills", "clis"]));
     expect(reads).toBe(1);
+  });
+
+  it("puts gh on for a GitHub row that signs in, none for one set aside, whose Sign in puts it on, and none where gh is a CLI", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-place-gh-plan-"));
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    const planner = placeProvisioner({ statePath: join(dir, "state.json"), home, platform: "linux", collect: async (): Promise<Manifest> => FIXTURE, brew: async () => new Map() });
+    const picks = (configs: RecipeFile["configs"], clis: RecipeFile["clis"] = {}): RecipeFile => ({ name: "laptop", agents: {}, mcp: {}, clis, skills: {}, plugins: {}, folders: {}, configs });
+    expect((await planner.setup(picks({ github: { signin: "machine" } }), { home }, new Set(["github"]))).github?.map(t => t.id)).toEqual(["github/gh"]);
+    expect((await planner.setup(picks({ github: { signin: "skip" } }), { home }, new Set(["github"]))).github).toBeUndefined();
+    expect((await planner.setup(picks({ github: { signin: "machine" } }, { gh: { via: "brew" } }), { home }, new Set(["github"]))).github).toBeUndefined();
+    expect((await planner.setup(picks({}), { home }, new Set(["github"]))).github).toBeUndefined();
   });
 });
 

@@ -693,8 +693,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * the one already running for that agent there, one per agent per target; its progress is pushed as agents.signIn
    * events to the sockets following it alone, which is what a page and its code are for, and the sign-in stops when
    * the last of them goes. Refused for a row that asks the person to pick, which runs in their terminal, for a row
-   * whose login is a token or key this host keeps, and for a name holding a control character. */
-  z.object({ id: reqId, op: z.literal("agents.signIn"), target: AgentsTarget, agent: z.string() }),
+   * whose login is a token or key this host keeps, and for a name holding a control character. With `terminal`, a
+   * row that asks the person to pick runs too, in a pty there the page attaches to, whose id the first frame names. */
+  z.object({ id: reqId, op: z.literal("agents.signIn"), target: AgentsTarget, agent: z.string(), terminal: z.boolean().optional() }),
   /** The same for one MCP server of that agent's config, by the harness's own command for it. */
   z.object({ id: reqId, op: z.literal("servers.signIn"), target: AgentsTarget, agent: z.string(), name: z.string() }),
   /** Types what a sign-in's page handed back into that sign-in's own pty, with the Enter the person would press. */

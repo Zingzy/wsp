@@ -135,7 +135,18 @@ export const ADD_COMPUTER_WORDS = {
   saved: "Saved, you can finish later",
   restDone: "Everything else is done.",
   keepsGoing: "Setup keeps going. wsp pings you when it needs you.",
+  /** The act a sign-in that was skipped or failed offers: its own sign-in, run on the computer. */
+  signInOn: (box: string): string => `Sign in on ${box}`,
   signInLater: "You can sign in later in Settings.",
+  /** An agent ticked with nothing here to copy and no sign-in to run there: the token or key it takes, pasted on its
+   * row once the setup reaches it. */
+  pasteOnceSetUp: (word: "token" | "key"): string => `Signs in with a ${word} you paste once it is set up.`,
+  /** An agent whose login asks you to pick: it signs in at its own terminal on the computer, drawn on its row. */
+  atItsTerminalOnceSetUp: (box: string): string => `Signs in at its own terminal on ${box} once it is set up.`,
+  atItsTerminal: (box: string): string => `Signs in at its own terminal on ${box}.`,
+  /** A sign-in on the computer whose agent is still installing there, or did not install. */
+  waitsForInstall: (name: string): string => `Waits for ${name} to install.`,
+  notSignedInYet: "Not signed in yet.",
   skipForNow: "Skip for now",
   skip: "Skip",
   /** A private repository ticked while GitHub is skipped: the box cannot clone it. */
@@ -161,7 +172,7 @@ export const ADD_COMPUTER_WORDS = {
   diskShort: (box: string, free: string, needed: string, kept: string): { said: string; fix: string } => ({ said: `${box} has ${free} free; these picks need ${needed}, and wsp keeps ${kept} free there.`, fix: `Untick some rows, or free room on ${box}.` }),
   unmeasured: (n: number): string => `${n} picked ${n === 1 ? "row was" : "rows were"} not measured`,
   tabOpened: "A tab opened in your browser.",
-  dialledBack: "Dialled back.",
+  installed: "Installed and connected.",
   addCloud: "Add a cloud",
   replace: "Replace",
   signInsOn: (computer: string): string => `Sign-ins on ${computer}`,

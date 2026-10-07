@@ -9,9 +9,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Machine } from "@wsp/engine";
-import { HERE_PLACE_ID, addToolsHereRefusal, controlSignInRefusal, noVaultKeyRefusal, notTokenRefusal, serverSignInCopyRefusal, shellQuote, signInTerminalRefusal, signInVaultRefusal, type AgentsSignInEvent } from "@wsp/protocol";
+import { HERE_PLACE_ID, addToolsHereRefusal, closedBeforeSignInLine, controlSignInRefusal, signInUncheckedLine, noVaultKeyRefusal, notTokenRefusal, serverSignInCopyRefusal, shellQuote, signInTerminalRefusal, signInVaultRefusal, type AgentsSignInEvent } from "@wsp/protocol";
 import type { AgentsOn, SignInForward } from "@wsp/runtime";
-import { hostActs, pagesOnPty, planSignIn, watchSignIn } from "../src/agents-signin.js";
+import { hostActs, pagesOnPty, planSignIn, terminalSignIn, watchSignIn } from "../src/agents-signin.js";
+import { signInPrepareLine } from "../src/place-signin.js";
 import { openerCommand } from "../src/relay.js";
 import { CLI_VERBS, runVerb, type HostClient } from "../src/verbs.js";
 import { fakePtyLink, type FakePty } from "./fake-pty-link.js";
@@ -124,6 +125,94 @@ describe("the line a sign-in runs where it stands", () => {
       await expect(planSignIn(counted, ask, { terminal: true })).rejects.toThrow(controlSignInRefusal);
     }
     expect(probed).toBe(0);
+  });
+});
+
+describe("a sign-in in the person's own terminal", () => {
+  const run = async (plan: Awaited<ReturnType<typeof planSignIn>>, status: () => boolean) => {
+    const link = fakePtyLink();
+    link.script = (pty, line) => {
+      if (!line.includes("WSP_STATUS")) return;
+      link.data(pty, `${status() ? "1 credentials" : "0 credentials"}\r\nWSP_STATUS 0\r\n`);
+      link.exit(pty, 0);
+    };
+    const steps: Omit<AgentsSignInEvent, "type" | "signInId">[] = [];
+    let stop: () => void = () => {};
+    const done = terminalSignIn(plan, { link, emit: s => void steps.push(s), typing: () => {}, stop: new Promise<void>(r => (stop = r)) }, { capMs: 5_000 });
+    await new Promise(r => setTimeout(r, 10));
+    return { link, steps, done, stop: () => stop() };
+  };
+
+  it("runs a login that asks the person to pick in a pty there whose id it names, as the pty's own command, and reads its status once it ends", async () => {
+    let signedIn = false;
+    const plan = await planSignIn(rootBox(), { agent: "opencode" }, { terminal: true });
+    const t = await run(plan, () => signedIn);
+    const [login] = t.link.ptys;
+    // The line is the pty's own, so nothing of how it runs is typed onto the person's screen.
+    expect(login!.created).toMatchObject({ shell: "bash", run: plan.line.command });
+    expect(login!.writes).toEqual([]);
+    expect(login!.attached).toBe(true);
+    expect(t.steps).toEqual([{ state: "running", ptyId: login!.id }]);
+    signedIn = true;
+    t.link.exit(login!, 0);
+    await t.done;
+    expect(t.steps.at(-1)).toEqual({ state: "signed-in" });
+    expect(login!.killed).toBe(true);
+  });
+
+  it("ends failed where the person left the tool without signing in, and where the sign-in was stopped", async () => {
+    const plan = await planSignIn(rootBox(), { agent: "opencode" }, { terminal: true });
+    const left = await run(plan, () => false);
+    left.link.exit(left.link.ptys[0]!, 1);
+    await left.done;
+    // What happened in the person's words: they left OpenCode, which no exit code says.
+    expect(left.steps.at(-1)).toEqual({ state: "failed", said: closedBeforeSignInLine("OpenCode") });
+    const stopped = await run(plan, () => false);
+    stopped.stop();
+    await stopped.done;
+    expect(stopped.steps.at(-1)?.state).toBe("failed");
+    expect(stopped.link.ptys[0]!.killed).toBe(true);
+  });
+
+  it("says the sign-in could not be checked, not that the person left, where its status read could not run there", async () => {
+    const plan = await planSignIn(rootBox(), { agent: "opencode" }, { terminal: true });
+    const t = await run(plan, () => true);
+    const op = t.link.op.bind(t.link);
+    // The link drops as the login ends: the status read opens no terminal there.
+    t.link.op = async (name, extra) => (name === "pty.create" ? Promise.reject(new Error("daemon connection closed 1006")) : op(name, extra));
+    t.link.exit(t.link.ptys[0]!, 0);
+    await t.done;
+    expect(t.steps.at(-1)).toEqual({ state: "failed", said: signInUncheckedLine("OpenCode") });
+  });
+
+  it("a refused or failed step before the login ends the sign-in failed with one sentence naming the computer, and never opens the pty", async () => {
+    const plan = await planSignIn({ ...rootBox(), name: "hetzner" } as AgentsOn, { agent: "codex" }, { terminal: true });
+    expect(plan.line.prepare).toBe("mkdir -p '/wsp/logins/codex'");
+    for (const [reply, said] of [
+      [{ ok: false, error: "exec is not served on this channel" }, "exec is not served on this channel"],
+      [{ ok: true, exitCode: 1, stdout: "", stderr: "mkdir: cannot create directory '/wsp/logins/codex': Permission denied\n", truncated: false }, "mkdir: cannot create directory '/wsp/logins/codex': Permission denied"],
+    ] as const) {
+      const link = fakePtyLink();
+      link.answerExec = () => reply;
+      const steps: Omit<AgentsSignInEvent, "type" | "signInId">[] = [];
+      await terminalSignIn(plan, { link, emit: s => void steps.push(s), typing: () => {}, stop: new Promise<void>(() => {}) }, { capMs: 5_000 });
+      expect(steps).toEqual([{ state: "failed", said: signInPrepareLine("hetzner", said) }]);
+      expect(link.ops.filter(o => o.op === "pty.create")).toEqual([]);
+    }
+  });
+
+  it("is the road the host's sign-in takes when the app asks for its terminal, where a watched one refuses that login", async () => {
+    const acts = hostActs({ vaultFile: "/nowhere/.env", home: () => "/nowhere", wspServer: () => ({ command: "wsp", args: [] }) });
+    await expect(acts.signIn(rootBox(), { agent: "opencode" })).rejects.toThrow(signInTerminalRefusal("OpenCode", "wsp agents signin opencode"));
+    const go = await acts.signIn(rootBox(), { agent: "opencode", terminal: true });
+    const link = fakePtyLink();
+    const steps: Omit<AgentsSignInEvent, "type" | "signInId">[] = [];
+    let stop: () => void = () => {};
+    const done = go({ link, emit: s => void steps.push(s), typing: () => {}, stop: new Promise<void>(r => (stop = r)) });
+    await new Promise(r => setTimeout(r, 10));
+    expect(steps[0]).toEqual({ state: "running", ptyId: link.ptys[0]!.id });
+    stop();
+    await done;
   });
 });
 

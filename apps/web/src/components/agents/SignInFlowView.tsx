@@ -5,8 +5,10 @@
 // for a sign-in whose page can hand one back; or the wait on the browser
 // where the harness takes the redirect itself; a token or key is pasted under
 // the line that mints it; a
-// row only the person can finish shows the line for their terminal. A failure
-// lands in the refusal slot in the tool's own words.
+// login that asks the person to pick runs in a terminal drawn in place, and a
+// row only the person can finish elsewhere shows the line for their terminal.
+// A failure lands in the refusal slot in the tool's own words; `reserve`
+// keeps that slot's room while it is empty, where a list would otherwise move.
 import { CheckIcon, ExternalLinkIcon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "../ui/button.js";
@@ -15,10 +17,11 @@ import { Spinner } from "../ui/spinner.js";
 import { CopyRow, DeviceCode, RefusalSlot } from "../../settings/sheetParts.js";
 import { SignInCode } from "../../settings/recipe/SignInCode.js";
 import { AGENTS_LIST_WORDS, type FlowView } from "./agentsRows.js";
+import { SignInTerminal } from "./SignInTerminal.js";
 
 const LABEL = "text-xs text-muted-foreground";
 
-export function SignInFlowView({ view, label }: { view: FlowView; label: string }) {
+export function SignInFlowView({ view, label, reserve = true }: { view: FlowView; label: string; reserve?: boolean }) {
   const { flow } = view;
   const [key, setKey] = useState("");
   if (flow.kind === "copy") {
@@ -68,7 +71,14 @@ export function SignInFlowView({ view, label }: { view: FlowView; label: string 
             </Button>
           </div>
         </div>
-        <RefusalSlot k="sign-in-refused" {...(flow.refused !== undefined ? { said: flow.refused } : {})} />
+        {reserve || flow.refused !== undefined ? <RefusalSlot k="sign-in-refused" {...(flow.refused !== undefined ? { said: flow.refused } : {})} /> : null}
+      </div>
+    );
+  }
+  if (flow.pty !== undefined && flow.state !== "failed") {
+    return (
+      <div data-k="sign-in-flow" className="flex flex-col gap-2">
+        <SignInTerminal placeId={flow.pty.placeId} ptyId={flow.pty.ptyId} />
       </div>
     );
   }
@@ -80,32 +90,45 @@ export function SignInFlowView({ view, label }: { view: FlowView; label: string 
       </Button>
     );
   const browser = flow.finish === "callback" && flow.state !== "failed";
+  // Where no room is kept, a failed flow with no page draws no line: an empty one would stand over the failure.
+  const line = reserve || flow.state !== "failed" || flow.url !== undefined;
   return (
     <div data-k="sign-in-flow" className="flex flex-col gap-2">
-      <div data-sign-in-line className="flex h-10 items-center gap-3">
-        {browser ? (
-          <>
-            <Spinner className="size-3.5 text-muted-foreground" />
-            <span data-k="sign-in-browser" className="text-xs text-muted-foreground">
-              {AGENTS_LIST_WORDS.finishInBrowser}
-            </span>
-            {openPage(AGENTS_LIST_WORDS.openPage)}
-          </>
-        ) : flow.url === undefined ? (
-          flow.state === "running" ? <Spinner className="size-3.5 text-muted-foreground" /> : null
-        ) : (
-          <>
-            {flow.code === undefined ? null : <DeviceCode code={flow.code} />}
-            {openPage(AGENTS_LIST_WORDS.open)}
-          </>
-        )}
-      </div>
+      {line ? (
+        <div data-sign-in-line className="flex h-10 items-center gap-3">
+          {browser ? (
+            <>
+              <Spinner className="size-3.5 text-muted-foreground" />
+              <span data-k="sign-in-browser" className="text-xs text-muted-foreground">
+                {AGENTS_LIST_WORDS.finishInBrowser}
+              </span>
+              {openPage(AGENTS_LIST_WORDS.openPage)}
+            </>
+          ) : flow.url === undefined ? (
+            flow.state === "running" ? (
+              <>
+                <Spinner className="size-3.5 text-muted-foreground" />
+                {flow.said === undefined ? null : (
+                  <span data-k="sign-in-said" className="text-xs text-muted-foreground">
+                    {flow.said}
+                  </span>
+                )}
+              </>
+            ) : null
+          ) : (
+            <>
+              {flow.code === undefined ? null : <DeviceCode code={flow.code} />}
+              {openPage(AGENTS_LIST_WORDS.open)}
+            </>
+          )}
+        </div>
+      ) : null}
       {flow.pastes === true || flow.paste === true ? (
         <div data-sign-in-line className="flex h-10 items-center">
           {flow.paste === true && flow.state === "waiting" ? <SignInCode label={label} onCode={view.code} {...(flow.finish !== undefined ? { ask: AGENTS_LIST_WORDS.landedAddress } : {})} /> : null}
         </div>
       ) : null}
-      <RefusalSlot k="sign-in-refused" {...(flow.state === "failed" && flow.said !== undefined ? { said: flow.said } : {})} />
+      {reserve || flow.state === "failed" ? <RefusalSlot k="sign-in-refused" {...(flow.state === "failed" && flow.said !== undefined ? { said: flow.said } : {})} /> : null}
     </div>
   );
 }

@@ -2,9 +2,9 @@
 
 import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { ALREADY_JOINED_LINE, isHttpUrl, PLACE_LEAVE_LINE, fmtPrice, joinRoads, PlaceView, type PlaceFile, fmtBytes, fmtDuration, shellQuote, BACK_OVER_SSH, backUrl, dialsBackWord, PLACE_SUDO_KIND, refusal, twoPlacesRefusal, relayUrlOf, TOOL_PREFIX } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, GITHUB_CLI, signInOfRow, waitsForInstallLine, type PlaceProvisionRow, isHttpUrl, PLACE_LEAVE_LINE, fmtPrice, joinRoads, PlaceView, type PlaceFile, fmtBytes, fmtDuration, shellQuote, BACK_OVER_SSH, backUrl, dialsBackWord, PLACE_SUDO_KIND, refusal, twoPlacesRefusal, relayUrlOf, TOOL_PREFIX } from "@wsp/protocol";
 import { prefixVolume, SSH_LINE_CAP, boxWord, keyFingerprint, type SshReach, type SshSudo } from "@wsp/engine";
-import { CATALOG_AGENTS, agentName, hasLogin, sharedOn } from "@wsp/catalog";
+import { CATALOG_AGENTS, agentName, hasLogin, keyEnvOf, mintsToken, sharedOn } from "@wsp/catalog";
 import { cappedLine } from "../doctor.js";
 import { guestDaemonTarget, guestSystem, noGuestDaemonLine, noPlaceSystemLine, type DaemonTarget } from "../daemon-binary.js";
 import { joinStanding, sweptLine } from "../place-report.js";
@@ -172,10 +172,24 @@ export const SIGN_IN_FLAGS_REFUSAL =
   "wsp add --sign-in names a computer already in this wsp, so it takes none of the flags a join takes. Drop them, or drop --sign-in to join a computer.";
 
 /** The agents with a sign-in to run on a computer, off the catalog's rows: a token or key this host keeps is none. */
-export const signsInOnComputer = (): string[] => CATALOG_AGENTS.filter(a => hasLogin(a.signIn)).map(a => a.id);
+const loginAgents = (): string[] => CATALOG_AGENTS.filter(a => hasLogin(a.signIn)).map(a => a.id);
 
-/** The refusal for an agent with no sign-in to run on a computer. The list is the catalog's own. */
-export const signInAgentRefusal = (agent: string): string => `wsp add --sign-in takes an agent with a sign-in to run on a computer, which ${agent} is not: ${signsInOnComputer().join(", ")}.`;
+/** What wsp add --sign-in signs in on a computer: those agents, and gh, which a setup's GitHub row signs in there. */
+export const signsInOnComputer = (): string[] => [...loginAgents(), GITHUB_CLI];
+
+/** The command line's own line under a setup's sign-in row that did not land: the sign-in run on that computer, or
+ * the token or key this host keeps for an agent with none to run there. */
+export function signInRowCommand(computer: string, row: Pick<PlaceProvisionRow, "id" | "label" | "note">): string | undefined {
+  const id = signInOfRow(row.id);
+  // A sign-in waiting on its agent's install has nothing to run there until a Retry puts the agent on.
+  if (id === undefined || row.note === waitsForInstallLine(row.label)) return undefined;
+  if (signsInOnComputer().includes(id)) return `wsp add ${computer} --sign-in ${id}`;
+  const signIn = CATALOG_AGENTS.find(a => a.id === id)?.signIn;
+  return signIn !== undefined && (mintsToken(signIn) || keyEnvOf(signIn) !== undefined) ? `wsp agents key ${id}` : undefined;
+}
+
+/** The refusal for a name with no sign-in to run on a computer. The agents are the catalog's own. */
+export const signInAgentRefusal = (agent: string): string => `wsp add --sign-in takes an agent with a sign-in to run on a computer, or gh for GitHub, and ${agent} is neither: name ${loginAgents().join(", ")} or ${GITHUB_CLI}.`;
 
 /** A computer that has not told this host where it keeps the logins its workspaces share. It says so on every
  * link, so the two causes left are a computer that is not connected and one whose agent is older than the one

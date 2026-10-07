@@ -246,6 +246,15 @@ export const PlaceProvisionRow = z.object({
 });
 export type PlaceProvisionRow = z.infer<typeof PlaceProvisionRow>;
 
+/** The GitHub step's one row, and the CLI whose login signs it in on a computer. */
+export const GITHUB_ROW = "github";
+export const GITHUB_CLI = "gh";
+const SIGN_IN_ROW = "signins/";
+/** The sign-ins step's row for one agent. */
+export const signInRowId = (agent: string): string => `${SIGN_IN_ROW}${agent}`;
+/** The catalog id whose login a row stands for: an agent's under the sign-ins step, gh for the GitHub row, else none. */
+export const signInOfRow = (id: string): string | undefined => (id.startsWith(SIGN_IN_ROW) ? id.slice(SIGN_IN_ROW.length) : id === GITHUB_ROW ? GITHUB_CLI : undefined);
+
 /** The rows of a job counted by kind, for the word above. */
 export function provisionCounts(rows: readonly PlaceProvisionRow[]): Partial<Record<PlaceProvisionKind, number>> {
   const counts: Partial<Record<PlaceProvisionKind, number>> = {};

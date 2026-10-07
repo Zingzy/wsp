@@ -197,7 +197,9 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       return { ...plan, remembered: true, files: plan.files.map(f => ({ ...f, ticked: f.kind !== "never" && remembered.files.includes(f.path) })) };
     },
 
-    async add(o: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice; id?: string; createdAt?: string }, origin?: Caller): Promise<ProjectView & { notice?: string }> {
+    /** `report` hears each line the add says as it goes, beside the stream every client watches: a caller that
+     * keeps its own log of the add, as a computer's setup does. */
+    async add(o: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice; id?: string; createdAt?: string; report?: (line: string) => void }, origin?: Caller): Promise<ProjectView & { notice?: string }> {
       await ctx.ready();
       // A project is this computer's to record: the folder and the computer named are read here, and a machine
       // that asked would be naming paths on a computer it cannot see.
@@ -279,6 +281,7 @@ export function projectsArea(ctx: RuntimeContext): ProjectsArea {
       const began = clock.now();
       const report = (stage: ProjectAddStage, message: string): void => {
         bus.emit({ type: "project.add", projectId: project.id, computer, stage, message, elapsedMs: clock.now() - began });
+        o.report?.(message);
       };
       // Work runs on the computer when the add has something of the person's to put there, which is a seed: the
       // clone, the files they ticked, the install and, on a provider, the image every workspace of the project
