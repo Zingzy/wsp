@@ -1,28 +1,30 @@
 # wsp
 
-Your setup, on cloud machines, for coding agents.
+Your setup, on your computers, for coding agents.
 
-The site is [wspx.vercel.app](https://wspx.vercel.app). The docs are [wsp.apidocumentation.com](https://wsp.apidocumentation.com).
+The site is [usewsp.com](https://usewsp.com). The docs are [wsp.apidocumentation.com](https://wsp.apidocumentation.com).
 
-wsp reads your computer once, builds a machine that has what it has (your agents, your tools, your sign-ins), and forks workspaces from it in about twenty seconds. Coding agents work inside those workspaces as threads. You read and answer them from the app, the command line, or another agent over MCP.
+wsp runs coding agents (Claude Code, Codex, OpenCode, Cursor) as threads on your own computers: the Mac you sit at, and any Linux box you add over ssh. A thread works in your project's folder, the way the agent would in a terminal there. You start threads, read them and answer them from the app, the command line, or from another agent over MCP, and every one of them shows in the same sidebar.
 
-![The wsp app: workspaces and their threads on the left, a thread and its composer in the center, a terminal and a browser tab on the machine to the right](docs/screenshots/app.png)
+![The wsp app: threads in the sidebar, the new thread composer in the center](docs/screenshots/app.png)
 
 ## What it does
 
-- **One image of your machine.** The agents you use, the tools they run, your logins, sealed once into a golden image on the machine provider. Rebuild it when your setup changes.
-- **Forks in seconds.** Every workspace is a fork of that image, with your setup already there. Forks are live clones: what was running on the source is running on the fork.
-- **Agents as threads.** Claude Code and Codex run headless on the machine. Start a thread with a task, read its reply, send the next message, stop it. Threads get real titles and you can rename them, in wsp and in the agent's own session list.
-- **Agents starting agents.** An agent on your computer drives wsp over MCP: it forks a workspace, opens a Claude Code thread there, starts a Codex thread beside it, reads both back. Everything it does shows in your sidebar.
-- **The machine, in the app.** A terminal that uses your Ghostty config, the ports it listens on as browser tabs, its processes, its files, its cost and state.
-- **Naps and wakes.** An idle workspace naps with its RAM intact and wakes on the next message. A machine the provider loses is rebuilt from the image with your files back.
-- **Your keys never leave a machine you own.** wsp runs on your own computer, or on a box you own, and talks to the provider with your key. There is no hosted service in between.
+- **Threads in your project.** A thread runs in the project's folder on its computer. Several threads share the folder; a thread on another branch gets a git worktree wsp makes, with your `.env` files and installed dependencies carried in.
+- **Any agent, any model.** Pick the agent, the model, how hard it thinks and how far it may go without asking, per thread. Answer its questions and permission prompts from the app.
+- **Agents starting agents.** A thread can start threads of its own, with the same agent or another one, beside it in the same folder. They show as its children in the sidebar, and each one's last reply comes back to the thread that started it.
+- **Computers you own.** Add a Linux box over ssh and wsp puts your setup on it: your agents, the command-line tools they use, their skills, MCP servers and plugins, your sign-ins and your projects. Then start threads there the same way.
+- **Everything about a thread, beside it.** A terminal in its folder, its dev server in a browser tab, its changes with commit, push and pull request, its files, its processes, the computer's load, and the slate: a panel the agent builds for the thread, live, from trackers to forms with buttons.
+- **What your agents use.** A usage page with each agent account's plan limits and what was used, by agent, project and computer.
+- **Your keys stay on your computers.** The host runs on your Mac, not on a service of ours, and your sign-ins live on the computers that use them.
+
+![A thread that started threads of its own: its children in the sidebar and in its transcript, and the board it built on the slate](docs/screenshots/threads.png)
 
 ## Before you start
 
 - macOS, or Linux on x64.
-- A [Solari](https://console.getsolari.com) account and API key. Solari provides the machines; they cost money while they run and nap on their own when idle.
-- A way for Claude Code to sign in: an Anthropic API key, or a Claude subscription you log in with on the machine during the first run. Codex signs in the same way.
+- An agent you already use and are signed in to: Claude Code, Codex, OpenCode or Cursor.
+- For a box you add: Linux you can reach over ssh as root, with systemd and cgroup v2.
 
 ## Install
 
@@ -32,45 +34,70 @@ curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | sh
 
 On a Mac this puts wsp.app in Applications and opens it; on Linux it puts the AppImage in `~/Applications`. Either way the `wsp` command lands in `~/.wsp/bin`, on PATH in a new terminal. Each download comes from this repo's releases and is checked against the sha256 GitHub publishes for it. `WSP_VERSION=1.2.3` installs that release; running it again upgrades in place.
 
+The desktop bundles for macOS and Linux are also on the [releases page](https://github.com/wsp-labs/wsp/releases).
+
 With Node 22 or newer, this installs the command line alone:
 
 ```sh
 npm i -g @wsp-labs/wsp
 ```
 
-### Let your agent set it up
+This README describes the next release, 0.3.0. Until it is out, build from source (below) to run what is here.
 
-Give your agent the wsp tools, then ask it to set you up:
+## First run
+
+Open the app. It finds the agents on your Mac and serves your projects from there. Add a project (any folder, a git repo or not) and start a thread from the composer.
+
+The same from a terminal:
+
+```sh
+wsp add ~/code/api                                   # a project: a folder on this computer
+wsp run api "fix the flaky terminal test"            # a thread in that folder
+wsp run api --branch fix/flaky "write the failing test first"   # a thread in a worktree on that branch
+wsp threads                                          # who is working, where, on which branch
+```
+
+`wsp send <thread> "<message>"` is a thread's next message and `wsp stop <thread>` ends its turn. `wsp thread read <thread>` prints what it said. The first line that needs a host starts one; `wsp down` stops it.
+
+## Add a computer
+
+In the app: Settings, then Computers, then Add a computer. Name the box as you reach it over ssh (an alias from your `~/.ssh/config` works), and wsp checks it, installs itself there, and sets it up from your Mac's setup or a saved recipe, one step at a time. Or from a terminal:
+
+```sh
+wsp add root@my-box
+```
+
+![Settings, Computers: the Mac and a box added over ssh, with their cores, memory and threads](docs/screenshots/computers.png)
+
+`wsp computers` lists your computers; `wsp computers set <computer>` renames one, moves its ssh login, and sets how many threads run there at once. `wsp remove <computer>` takes a box out and removes what wsp put there.
+
+## For your agents
+
+Give your agent the wsp tools and skill:
 
 ```sh
 wsp mcp install --agent claude     # or codex, gemini, opencode
 ```
 
-Then, in that agent: *"set up wsp for me"*. It reads what you use on this computer, writes the recipe, asks you about the heavy rows, builds the image, and hands you each sign-in link as the build reaches it. Sign-ins finish in your browser.
+After the agent restarts, it can open threads, start threads on other agents and models beside it, read their replies and send them messages, all of it in your sidebar. In the agent: *"use wsp to start a Codex thread on api that reviews the open pull request"*.
 
-### Or do it yourself
+## The command line
 
-```sh
-wsp init
+```
+wsp add <user@host|folder|url>  a computer over ssh, or a project
+wsp computers                   your computers: this one, each box you added
+wsp remove <computer>           take a computer out
+wsp projects                    your projects, each on its computer
+wsp threads [<project>]         who is working, in which folder, branch and computer
+wsp run <project> "<message>"   an agent works in the project's folder
+wsp send <thread> "<message>"   the thread's next message
+wsp stop <thread>               end the thread's running turn
+wsp delete <thread>             gone with its turns; the folder stays
+wsp status                      whether a host serves, and where
+wsp mcp                         the verbs as tools for agents on this computer
 ```
 
-One screen at a time: the agents on this computer, their tools, what else to bring from this computer, sign-ins, wsp for your own agents, then the build; a screen with nothing to pick is skipped. Everything is ticked from what you actually use; Enter through every screen takes the defaults. Nothing leaves your disk before the confirm.
-
-![wsp init: the agents screen, ticked from what this computer runs](docs/screenshots/init.png)
-
-Useful flags: `--yes` takes every default and asks nothing. `--recipe <path>` builds from a recipe an agent wrote. `--non-interactive --json` prints one JSON line per sign-in and build stage, for an agent driving the setup. `--state <path>` and `--port <n>` keep a second setup apart from the first.
-
-## Every day
-
-```sh
-wsp new api                  # a workspace from your image
-wsp import api ~/code/api    # put a folder in it
-wsp run api "fix the flaky terminal test"
-```
-
-The first line that needs a host starts one and says so; `wsp down` stops it. `wsp up` is for a host you want to watch in a terminal, and `wsp up --service` keeps one up across logins. The desktop app installs the host as your computer's own service on its first launch; bundles for macOS and Linux are on the [releases page](https://github.com/wsp-labs/wsp/releases).
-
-`wsp --help` is sixteen words on five nouns: image, place, workspace, thread, project. Every command is `wsp <verb> <workspace> ...`, the workspace first. `wsp --help agent` has the verbs your agents use and `wsp host --help` the roads to a host on another computer. The command line and the MCP tools are the same verbs; the app's palette runs them too.
+`wsp --help` lists them all, `wsp <verb> --help` gives a verb's flags, and `wsp --help agent` has the ones your agents use. The command line and the MCP tools are the same verbs.
 
 <!-- renames:start -->
 ### Renamed in 0.3.0
@@ -114,17 +141,17 @@ Start the Linux AppImage from a terminal in the folder it downloaded to: `chmod 
 
 ## What is next
 
-Spaces: one workspace at a time in the sidebar, with its own tint. Images in threads. Pi and Gemini threads.
+Threads on a box you added run in the project's folder there, the same as on your Mac. A thread on your Mac starts a child on one of your boxes, sends it the work it has so far, and gets the result back as a branch.
 
 ## Building from source
 
 ```sh
 git clone https://github.com/wsp-labs/wsp.git && cd wsp
 pnpm install && pnpm build
-pnpm wsp init
+pnpm wsp --help
 ```
 
-`pnpm test` runs without any key. The laws the code follows are in [CONTRIBUTING.md](CONTRIBUTING.md); how a browser reaches a workspace is in [docs/reach.md](docs/reach.md); cutting a release is [docs/release.md](docs/release.md).
+`pnpm test` runs without any key. The laws the code follows are in [CONTRIBUTING.md](CONTRIBUTING.md); how a browser reaches a computer is in [docs/reach.md](docs/reach.md); cutting a release is [docs/release.md](docs/release.md).
 
 ## Issues
 
