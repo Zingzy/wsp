@@ -834,12 +834,56 @@
         "message": "t"
       },
       "replies": {
+        "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}},{\"id\":\"p-2\",\"name\":\"site\",\"computer\":\"pl-attic\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/root/site\",\"git\":{\"top\":\"/Users/me/wsp\"}}]}",
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"attic-work\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"default\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"p-1\",\"name\":\"wsp\",\"path\":\"/root/wsp\",\"computer\":\"here\"},\"home\":\"/root\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--branch takes a project on this computer, where wsp makes worktrees. Name a project on this computer.\"}],\"structuredContent\":{\"error\":\"--branch takes a project on this computer, where wsp makes worktrees. Name a project on this computer.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.list"
+        },
+        {
+          "op": "workspaces.resolve",
+          "ref": "attic-work"
+        }
+      ]
+    },
+    {
+      "case": "a branch for a project on another computer",
+      "arguments": {
+        "project": "site",
+        "branch": "x",
+        "message": "t"
+      },
+      "replies": {
         "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}},{\"id\":\"p-2\",\"name\":\"site\",\"computer\":\"pl-attic\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/root/site\",\"git\":{\"top\":\"/Users/me/wsp\"}}]}"
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--branch takes a project on this computer, where wsp makes worktrees. Name a project on this computer.\"}],\"structuredContent\":{\"error\":\"--branch takes a project on this computer, where wsp makes worktrees. Name a project on this computer.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "projects.list"
+        }
+      ]
+    },
+    {
+      "case": "a branch for a project the thread may not use",
+      "arguments": {
+        "project": "lab-two",
+        "branch": "x",
+        "message": "t"
+      },
+      "replies": {
+        "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"id\":\"p-1\",\"name\":\"wsp\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/Users/me/wsp\",\"git\":{\"top\":\"/Users/me/wsp\"}},{\"id\":\"p-2\",\"name\":\"site\",\"computer\":\"pl-attic\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/wsp\"},\"path\":\"/root/site\",\"git\":{\"top\":\"/Users/me/wsp\"}}]}",
+        "workspaces.resolve": "{\"id\":1,\"ok\":false,\"error\":\"thread thread-7 may not start children in lab-two: it is a folder the person keeps of this repository, and a thread started there would stand outside your tree. Name a project wsp projects lists, or ask the person to start this one.\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-7 may not start children in lab-two: it is a folder the person keeps of this repository, and a thread started there would stand outside your tree. Name a project wsp projects lists, or ask the person to start this one.\"}],\"structuredContent\":{\"error\":\"thread thread-7 may not start children in lab-two: it is a folder the person keeps of this repository, and a thread started there would stand outside your tree. Name a project wsp projects lists, or ask the person to start this one.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.list"
+        },
+        {
+          "op": "workspaces.resolve",
+          "ref": "lab-two"
         }
       ]
     },
