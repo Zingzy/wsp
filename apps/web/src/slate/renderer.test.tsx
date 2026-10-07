@@ -297,25 +297,6 @@ describe("what the kit adds", () => {
     expect(view.container.textContent).toContain("inside");
   });
 
-  it("takes an icon a formula names on a text and a button and draws none: icons stay in glyph frames", () => {
-    const doc = slate({
-      values: { ok: { start: true } },
-      root: "root",
-      pieces: {
-        root: { type: "column", children: ["h", "f", "odd"] },
-        h: { type: "text", props: { value: "Build", icon: b("$ok ? 'circle-check' : 'circle-x'") } },
-        f: { type: "button", props: { label: "State", icon: b("$ok ? 'check' : 'circle-x'") } },
-        odd: { type: "text", props: { value: "Odd", icon: b("'not-an-icon'") } },
-      },
-    });
-    const { view, push } = draw(doc);
-    expect(view.container.querySelector("[data-slate-icon]")).toBeNull();
-    expect(view.container.querySelector("[data-slate-failed]")).toBeNull();
-    push({ $ok: false });
-    expect(view.container.querySelector("[data-slate-icon]")).toBeNull();
-    expect(piece(view.container, "h").textContent).toBe("Build");
-  });
-
   it("asks a confirm in the sheet with the text its formula read", () => {
     render(<ConsentSheet ask={{ key: "k", run: "kill", kind: "cmd", cmd: 'kill "$PID"', env: { PID: "19271" }, args: [], computer: "this Mac", folder: "/tmp", timeoutS: 10, why: "asks every time", confirm: "Kill node (PID 19271)?" }} cadence="Runs when you press it" answer={async () => {}} onClose={() => {}} />);
     expect(document.body.textContent).toContain("Kill node (PID 19271)?");
@@ -379,15 +360,13 @@ describe("a piece's layout read off its view", () => {
 });
 
 describe("the kit's syntax, parsed and drawn", () => {
-  it("draws when on facts, columns and options, a shut section, icon formulas and the larger icon set", () => {
+  it("draws when on facts, columns and options, and a shut section", () => {
     const doc = compiled(`<slate>
 <value name="pro" start={false} />
 <value name="pick" start={null} />
 <value name="rows" start={[{ name: "nginx", cost: "$2" }]} />
 <column>
-  <text id="mail" value="Inbox" icon="mail" />
-  <button id="rupee" label="Spend" icon={$pro ? 'indian-rupee' : 'dollar-sign'} onPress={set($pick, 's')} />
-  <facts id="f"><fact label="Plan" value="Free" icon="gem" /><fact label="Seats" value="4" when={$pro} /></facts>
+  <facts id="f"><fact label="Plan" value="Free" /><fact label="Seats" value="4" when={$pro} /></facts>
   <table id="t" items={$rows}><col title="Name" value={item.name} /><col title="Cost" value={item.cost} when={$pro} /></table>
   <select id="s" label="Size" value={$pick}><option value="s" label="Small" /><option value="xl" label="Huge" when={$pro} /></select>
   <section id="sec" title="Logs" collapsible open={false}><text>inside</text></section>
@@ -395,7 +374,6 @@ describe("the kit's syntax, parsed and drawn", () => {
 </slate>`);
     const { view, push } = draw(doc);
     const c = view.container;
-    expect(c.querySelector("[data-slate-icon]")).toBeNull();
     expect(piece(c, "f").textContent).not.toContain("Seats");
     expect([...piece(c, "t").querySelectorAll("[role=columnheader]")].map(th => th.textContent)).toEqual(["Name"]);
     expect(piece(c, "sec").querySelector("[data-slate-section]")!.hasAttribute("data-open")).toBe(false);

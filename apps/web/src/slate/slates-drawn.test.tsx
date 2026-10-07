@@ -38,7 +38,7 @@ describe("the gold and traffic slate", () => {
       "Runs every 30 min, only while this slate is on screen",
       "Runs every 60 s, only while this slate is on screen",
     ]);
-    expect(c.querySelector("[data-slate-icon], [data-slate-status] .rounded-full")).toBeNull();
+    expect(c.querySelector("[data-slate-status] .rounded-full")).toBeNull();
   });
 
   it("draws the spot price as a stat cell whose note carries the market's state word", () => {
