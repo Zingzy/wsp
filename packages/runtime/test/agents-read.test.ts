@@ -201,7 +201,7 @@ describe("the sign-ins on a computer or a workspace", () => {
     expect(opened).toEqual([]);
     const second = await t.api.signIn(target, { agent: "codex", server: "notion" }, () => {});
     await tick();
-    expect(t.planned[1]!.on).toMatchObject({ kind: "box", relayed: true });
+    expect(t.planned[1]!.on).toMatchObject({ kind: "box", name: "spoo", relayed: true });
     expect(opened).toHaveLength(1);
     expect(t.handed[1]).toBe(opened[0]);
     expect(asked).toContainEqual(target);

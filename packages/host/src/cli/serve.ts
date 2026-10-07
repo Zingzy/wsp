@@ -25,7 +25,7 @@ import { alsoHere } from "../scan.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "../relay.js";
 import { addressLines, hostTokenPath, lockPathFor, programGone, releaseLock, rewriteLock, startedByEnv, STARTED_BY_ENV, takeLock, type HostStarted } from "../host-lock.js";
 import { starterFor } from "../host-start.js";
-import { restartRoads, type RestartingHost, type RestartRoad } from "../restart.js";
+import { hostRoadOf, restartRoads, type RestartingHost, type RestartRoad } from "../restart.js";
 import { stopRecordedConnector } from "../connector.js";
 import { admittedDevices, readRelayRecord, relayOnLoopbackLine, startRelay } from "../relay-link.js";
 import { wspHome } from "../hosts.js";
@@ -343,6 +343,7 @@ export async function hostFor(
         log: line => io.log(line),
       }),
       ...(restart !== undefined ? { restart } : {}),
+      road: hostRoadOf(run, started),
       failed: usage.failed,
       ...(usageOff !== undefined ? { productUsageOff: usageOff } : {}),
     });

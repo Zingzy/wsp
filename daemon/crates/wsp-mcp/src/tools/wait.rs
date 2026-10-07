@@ -263,12 +263,13 @@ pub struct RestartOut {
 /// would not bring it back refuses the ask in its own words, before anything stops.
 async fn restart(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let RestartIn {} = input("restart", arguments)?;
-    let client = host.client().await?;
+    // Past the release check, as `wsp restart` dials: the restart is the fix the release refusal names.
+    let client = host.client_any_release().await?;
     client.request::<Value>("host.restart", Map::new()).await?;
     if tokio::time::timeout(start_wait(), client.closed()).await.is_err() {
         return Err(Failure::new(turns().host_did_not_stop.clone()).into());
     }
-    let back = host.back_within(start_wait()).await?;
+    let back = host.back_within_any_release(start_wait()).await?;
     let running: Vec<String> =
         threads(&back, None).await?.iter().filter(|t| t.status == "running").map(|t| t.runtime_id().to_owned()).collect();
     let words = &turns().restarted;

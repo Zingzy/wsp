@@ -78,6 +78,7 @@ pub struct Words {
     /// Each catalog entry's name by its id: what a line calls an agent.
     pub agent_names: HashMap<String, String>,
     pub other_version: String,
+    pub release: Release,
     pub no_such_place: String,
     pub places_fix: String,
     pub aimed_usage: String,
@@ -126,6 +127,29 @@ pub struct Words {
     pub usages: HashMap<String, String>,
     pub defaults: crate::tools::defaults::Words,
     pub add: crate::tools::add::Words,
+}
+
+/// The sentence a line and a host of two releases meet, in the node command line's words, with the line each install
+/// road moves onto a release by.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Release {
+    pub said: String,
+    pub host_here: String,
+    pub host_at: String,
+    pub restart: String,
+    pub reopen_app: String,
+    pub restart_up: String,
+    pub init_finish: String,
+    pub update_there: String,
+    pub update_here: String,
+    pub roads: HashMap<String, String>,
+    /// Paths of the binary on each road, with the road the node line reads off each.
+    #[cfg(test)]
+    pub road_samples: HashMap<String, String>,
+    /// Pairs of releases with the sign of the node line's order of them.
+    #[cfg(test)]
+    pub order_samples: Vec<(String, String, i64)>,
 }
 
 pub fn words() -> Words {

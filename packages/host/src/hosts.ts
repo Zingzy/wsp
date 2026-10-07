@@ -282,11 +282,17 @@ export function stateIgnoredLine(where: string): string {
   return `--state names a file on this computer and this line runs against ${where}, which serves its own, so it is not read.`;
 }
 
+/** What a --host typed with an empty word reads: one sentence naming the flag and how to name a host. */
+export const emptyHostRefusal = (): Error => usageRefusal("--host was given an empty word, which names no host.", "Name one as wsp hosts lists it, or leave the flag off.");
+
 /** The host a line names outright: the --host word, then WSP_HOST, and nothing when neither names one. Read apart
  * from the fallbacks below it because a line that answers about this computer (wsp status) moves only when a
  * person named a host, while a verb, which has a host to speak to either way, follows the fallbacks too. */
 export function namedHost(pick: HostPick = {}): AimElsewhere | undefined {
   const env = pick.env ?? process.env;
+  // An empty WSP_HOST is a shell that set nothing, but an empty word after --host was typed, and falling through to
+  // the environment or this computer would run the line somewhere the person did not name.
+  if (pick.host !== undefined && pick.host.trim() === "") throw emptyHostRefusal();
   const named = [pick.host, env["WSP_HOST"]].map(w => w?.trim()).find(w => w !== undefined && w !== "");
   return named === undefined ? undefined : aimAt(named, pick.home ?? wspHome(env), env);
 }

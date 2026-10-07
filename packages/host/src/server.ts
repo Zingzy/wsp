@@ -32,6 +32,7 @@ import { NO_PROVIDER } from "./providers.js";
 import type { ReleaseWatch } from "./release.js";
 import { describeStorage, noProviderStorageLine } from "./storage.js";
 import { VERSION } from "./version.js";
+import type { HostRoad } from "./restart.js";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
 // implementation); re-exported so host consumers keep their imports.
@@ -96,6 +97,8 @@ export interface HostOptions {
   release?: ReleaseWatch;
   /** How this host restarts itself for host.restart; absent, the op is refused. */
   restart?: RestartDoor;
+  /** How this host comes back, which it names beside its release to every socket it lets in. */
+  road?: HostRoad;
   /** Told of every op that answered with an error, for the usage counts. */
   failed?: (op: string, e: unknown) => void;
   /** Why the usage counts are off whatever the switch says, which the page says on the Privacy switch. */
@@ -593,6 +596,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   // page and the protocol share one port and a client that reached the app through one forwarded port has both.
   try {
     rtServer = await serveRuntime(rt, {
+      released: { version: VERSION, ...(opts.road !== undefined ? { road: opts.road } : {}) },
       attach: [server, ...doorListeners],
       originAllowed: originAllows,
       ownRoad: req => ownRoad(req, doorSockets),

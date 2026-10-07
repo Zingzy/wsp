@@ -7,7 +7,7 @@ import { useId } from "react";
 import { ActivityIcon, AppWindowIcon, CpuIcon, LaptopIcon, MemoryStickIcon } from "lucide-react";
 import { Chips, type ChipItem } from "../ui/chips.js";
 import { ComputerGlyph } from "../../settings/ComputerGlyph.js";
-import { HERE_PLACE_ID, diskTone, fmtBytesOfTotal, fmtMemGb, fmtSize, kindWords, readingRoad, workspaceKind, workspaceStateOf, workspaceWord, type SizeTone, type SysSample, type WorkspaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, diskTone, fmtBytesOfTotal, fmtCpus, fmtMemGb, fmtSize, kindWords, readingRoad, workspaceKind, workspaceStateOf, workspaceWord, type SizeTone, type SysSample, type WorkspaceView } from "@wsp/protocol";
 import { runAction } from "../../actions/contextMenu.js";
 import { actionIfAny, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
@@ -188,7 +188,7 @@ function Facts({ workspace }: { workspace: WorkspaceView }) {
       items={[
         { text: state, icon: ActivityIcon },
         { text: whereRuns(places, { workspace, status }), icon: LaptopIcon },
-        status ? { text: `${status.size.cpu} ${kindWords(workspaceKind(workspace)).cpu}`, icon: CpuIcon } : null,
+        status ? { text: fmtCpus(status.size.cpu, kindWords(workspaceKind(workspace)).cpu), icon: CpuIcon } : null,
         status ? { text: fmtMemGb(status.size.memMb), icon: MemoryStickIcon } : null,
       ]}
       path={workspace.project.path}
@@ -204,7 +204,7 @@ function HereFacts() {
       items={[
         { text: placeName(place), glyph: <ComputerGlyph place={place} className="size-3 text-muted-foreground" /> },
         place.os === undefined ? null : { text: place.os, icon: AppWindowIcon },
-        place.shape ? { text: `${place.shape.cpu} cores`, icon: CpuIcon } : null,
+        place.shape ? { text: fmtCpus(place.shape.cpu, "cores"), icon: CpuIcon } : null,
         place.shape ? { text: fmtMemGb(place.shape.memMb), icon: MemoryStickIcon } : null,
       ]}
     />

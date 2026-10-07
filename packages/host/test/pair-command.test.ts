@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { EXIT_CODES, pairToken, SEAL_UNSERVED } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { deviceLines, deviceRoadWord, deviceRoleWord, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
-import { hostSideOnlyFix, hostSideOnlyLine, type HostAim } from "../src/hosts.js";
+import { aimedHost, hostSideOnlyFix, hostSideOnlyLine, type HostAim } from "../src/hosts.js";
 import { cli, HOST_COMMANDS, HOST_FLAG, type CliIO } from "../src/cli.js";
 import { dialAddress } from "../src/host-lock.js";
 import { doorAddresses } from "../src/server.js";
@@ -254,6 +254,22 @@ describe("a host side command aimed at a host on another computer", () => {
 
   it("wsp host pair takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
     await typed(["host", "pair", "--host", "box"], "host pair");
+  });
+
+  it("an empty --host word is refused in one sentence naming the flag, on wsp host pair and on a verb, while an empty WSP_HOST reads as unset", async () => {
+    const said = "--host was given an empty word, which names no host. Name one as wsp hosts lists it, or leave the flag off.";
+    for (const argv of [["host", "pair", "--host", ""], ["host", "devices", "--host", "  "], ["computers", "--host", ""], ["status", "--host", ""], ["mcp", "install", "--agent", "claude", "--host", ""]]) {
+      const errors: string[] = [];
+      const code = await cli([...argv], io([], errors), undefined, { WSP_HOME: homeWithBox(), WSP_HOST: "box" });
+      expect(code, `wsp ${argv.join(" ")}`).toBe(EXIT_CODES.usage);
+      expect(errors, `wsp ${argv.join(" ")}`).toHaveLength(1);
+      expect(errors[0], `wsp ${argv.join(" ")}`).toMatch(/--host was given an empty word, which names no host. Name one as wsp hosts lists it, or leave the flag off\.$/);
+    }
+    // The environment's empty word is a shell that set nothing: the line falls to the account's one host as before.
+    const home = homeWithBox();
+    expect(aimedHost(join(home, "nowhere", "state.json"), { env: { WSP_HOST: "" }, home })).toMatchObject({ kind: "alias", alias: "box" });
+    expect(aimedHost(join(home, "nowhere", "state.json"), { env: { WSP_HOST: "   " }, home })).toMatchObject({ kind: "alias", alias: "box" });
+    expect(() => aimedHost(join(home, "nowhere", "state.json"), { host: "", env: { WSP_HOST: "box" }, home })).toThrow(said);
   });
 
   it("the plumbing answers under wsp host alone: the old top level word is no command, and pair still runs at the host's own terminal", async () => {

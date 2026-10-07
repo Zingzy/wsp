@@ -11,7 +11,7 @@
 // so nothing here filters again.
 import { ServerIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { HERE_PLACE_ID, NO_RECIPE, absentRoad, pendingWord, type PendingComputer, awayMsOf, fmtMemGb, foldThreads, isLocalWorkspace, workspaceStateOf, workspaceWord, type AbsentComputer, type AgentsReport, type PlaceView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, NO_RECIPE, absentRoad, pendingWord, type PendingComputer, awayMsOf, fmtCpus, fmtMemGb, foldThreads, isLocalWorkspace, workspaceStateOf, workspaceWord, type AbsentComputer, type AgentsReport, type PlaceView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { computerActions } from "../actions/computerActions.js";
 import { openContextMenu } from "../actions/contextMenu.js";
 import { resolveActions } from "../actions/registry.js";
@@ -451,7 +451,7 @@ function RemoveLine({ place, ctx, onRemoved }: { place: PlaceView; ctx: Settings
 }
 
 /** A computer's facts of one kind on one line: its system, cores and memory, as it last reported them. */
-const shapeLine = (place: PlaceView): string => [place.os, place.shape === undefined ? undefined : `${place.shape.cpu} cores`, place.shape === undefined ? undefined : fmtMemGb(place.shape.memMb)].filter((part): part is string => part !== undefined && part !== "").join(", ");
+const shapeLine = (place: PlaceView): string => [place.os, place.shape === undefined ? undefined : fmtCpus(place.shape.cpu, "cores"), place.shape === undefined ? undefined : fmtMemGb(place.shape.memMb)].filter((part): part is string => part !== undefined && part !== "").join(", ");
 
 /** The recipe a computer follows, its changes reaching it on their own; None where it follows none. A move is the
  * host's: its answer stands on the computer's row, and the recipes are read again for who follows each. */

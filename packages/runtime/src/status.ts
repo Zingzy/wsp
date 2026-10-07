@@ -188,6 +188,8 @@ export interface StatusRecord extends WorkspaceView {
   /** Present on a machine that answers for its own daemon: the reach is asked of it rather than dialled from here,
    * and the route above is then only what the app is handed to dial. */
   daemonAnswers?: (opts?: { timeoutMs?: number }) => Promise<boolean>;
+  /** The machine's own prompt for that road, where its round trip is not one HTTP GET's. */
+  daemonAnswersPromptMs?: number;
   providerState: () => Promise<MachineState>;
   /** The host's own word on the machine; absent on backends without one. */
   metrics?: () => Promise<void>;
@@ -621,7 +623,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
 
     return Promise.all(
       records.map(async (r): Promise<WorkspaceStatus> => {
-        const { size, idleAt, daemonReach, daemonAnswers, providerState, metrics, facts, exec, generation, away, unreached, ...view } = r;
+        const { size, idleAt, daemonReach, daemonAnswers, daemonAnswersPromptMs, providerState, metrics, facts, exec, generation, away, unreached, ...view } = r;
         void away;
         void unreached;
         void providerState;
@@ -665,7 +667,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
           // dial, and a mint that fails says nothing about the guest: on such a machine the route is a road out of
           // this computer, not the daemon's own word.
           route = daemonReach === undefined ? undefined : await daemonReach().catch(() => undefined);
-          probed = await askDaemon(daemonAnswers, probe, clock.now);
+          probed = await askDaemon(daemonAnswers, daemonAnswersPromptMs === undefined ? probe : { ...probe, promptMs: daemonAnswersPromptMs }, clock.now);
         } else if (daemonReach !== undefined) {
           try {
             route = await daemonReach();

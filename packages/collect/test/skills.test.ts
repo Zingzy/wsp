@@ -127,6 +127,24 @@ describe("the skills on a computer", () => {
     expect(await detectSkills(failed, await skillRoots(host))).toEqual({ skills: [], refused: ["skills: the folders could not be read"] });
   });
 
+  it("a project whose links could not be told is not read, and each of its folders says so rather than going missing", async () => {
+    const { host, project } = fixture();
+    const blind: Host = { ...host, exec: { ...host.exec, run: async (cmd, args, o) => (args[1]?.includes("linked()") ? undefined : host.exec.run(cmd, args, o)) } };
+    const read = await detectSkills(blind, await skillRoots(blind, { projects: [{ id: "pr_app", name: "app", path: project }] }));
+    expect(read.skills.filter(s => s.scope === "project")).toEqual([]);
+    expect(read.refused).toContain("skills: ~/code/app/.claude/skills was not read, since whether it links out of the repo could not be told");
+    expect(read.refused.every(l => l.startsWith("skills: ~/code/app/") && l.endsWith("could not be told"))).toBe(true);
+  });
+
+  it("a project whose folder is not on the computer reads no skills there and says nothing of them", async () => {
+    const { host, home } = fixture();
+    for (const path of [join(home, "code", "gone"), join(home, "code", "gone", "deeper")]) {
+      const read = await detectSkills(host, await skillRoots(host, { projects: [{ id: "pr_gone", name: "gone", path }] }));
+      expect(read.skills.filter(s => s.scope === "project"), path).toEqual([]);
+      expect(read.refused, path).toEqual([]);
+    }
+  });
+
   it("reads a frontmatter's plain, quoted, folded and continued values", () => {
     expect(skillFrontmatter('name: "a b"\ndescription: >-\n  one\n  two\nother: x')).toEqual({ name: "a b", description: "one two" });
     expect(skillFrontmatter("name: c\ndescription: starts here\n  and goes on")).toEqual({ name: "c", description: "starts here and goes on" });

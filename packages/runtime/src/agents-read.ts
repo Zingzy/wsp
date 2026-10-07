@@ -21,7 +21,7 @@ export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale" | "rea
 export type AgentsOn =
   | { kind: "here"; projects?: readonly AgentsProject[] }
   /** `relayed`: this host forwards that computer's sign-in callback port from this computer. */
-  | { kind: "box"; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string; relayed?: boolean; projects?: readonly AgentsProject[] }
+  | { kind: "box"; name?: string; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string; relayed?: boolean; projects?: readonly AgentsProject[] }
   /** `relayed`: this host forwards the workspace's sign-in callback port from this computer. */
   | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; projects?: readonly AgentsProject[]; relayed?: boolean };
 
@@ -325,6 +325,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
       const login = { ...(report?.login["HOME"] !== undefined ? { HOME: report.login["HOME"] } : {}), ...(report?.login["PATH"] !== undefined ? { PATH: report.login["PATH"] } : {}) };
       return {
         kind: "box",
+        name: row.name,
         machine,
         login,
         ...(signIns !== undefined ? { signIns } : {}),

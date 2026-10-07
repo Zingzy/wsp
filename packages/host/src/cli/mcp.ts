@@ -7,6 +7,7 @@ import { authRefusal, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG,
 import { alsoHere } from "../scan.js";
 import { wrap } from "../init-layout.js";
 import type { HostStarter } from "../host-start.js";
+import { emptyHostRefusal } from "../hosts.js";
 import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, toolServerLine, type RunningWsp } from "../mcp-install.js";
 import { COMMON_FLAG_WORDS, failed, HELP_WIDTH, helpPage, jsonAsked } from "../verbs.js";
 import type { CliIO } from "./io.js";
@@ -29,6 +30,7 @@ export async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string
     io.log(mcpPage(words[0] === "install"));
     return 0;
   }
+  if (values.host !== undefined && values.host.trim() === "") return failed(io, jsonAsked(argv), emptyHostRefusal());
   if (values["no-slate"] === true && values.scoped !== true) return failed(io, jsonAsked(argv), usageRefusal(`--no-slate goes with ${SCOPED_MCP_ARG}: it is for a thread another thread started`, usage));
   // Ahead of every reading of the state: a scoped server missing its pair would otherwise dial this computer's host
   // on the host's own token, which is acting as the person.

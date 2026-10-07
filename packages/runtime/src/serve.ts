@@ -136,6 +136,8 @@ export interface ForwardsSource {
 export { LOOPBACK, WS_PATH } from "@wsp/protocol";
 
 export interface ServeOptions {
+  /** The release this host runs and how it comes back, named on every answer that lets a socket in. */
+  released?: { version: string; road?: string };
   /** A port of the runtime's own, for a runtime served with no page in front of it. A host names none and hands its
    * servers in `attach`, so the page and the protocol share one port. */
   port?: number;
@@ -338,59 +340,12 @@ function bundlerFrom(opts: ServeOptions): (source: string) => ProjectBundler {
   };
 }
 
-function landerFrom(opts: ServeOptions): () => ProjectLander {
+/** A door the host may not have wired, read when an op needs it: the door, or that op's refusal naming what is missing. */
+function doorFrom<K extends keyof ServeOptions>(opts: ServeOptions, key: K, missing: string): () => NonNullable<ServeOptions[K]> {
   return () => {
-    if (opts.landing === undefined) throw new Error("this runtime cannot write folders on this computer");
-    return opts.landing;
-  };
-}
-
-function foldersFrom(opts: ServeOptions): () => HostFolders {
-  return () => {
-    if (opts.folders === undefined) throw new Error("this runtime cannot browse the folders on this computer");
-    return opts.folders;
-  };
-}
-
-function imageExportFrom(opts: ServeOptions): () => ImageExporter {
-  return () => {
-    if (opts.imageExport === undefined) throw new Error("this runtime cannot write an export on this computer");
-    return opts.imageExport;
-  };
-}
-
-function initFrom(opts: ServeOptions): () => InitDoor {
-  return () => {
-    if (opts.init === undefined) throw new Error("this runtime has no init job; the host that serves the app wires one");
-    return opts.init;
-  };
-}
-
-function releaseFrom(opts: ServeOptions): () => ReleaseDoor {
-  return () => {
-    if (opts.release === undefined) throw new Error("this runtime does not read the newest release");
-    return opts.release;
-  };
-}
-
-function editorFrom(opts: ServeOptions): () => HostEditor {
-  return () => {
-    if (opts.editor === undefined) throw new Error("this runtime cannot open an editor on this computer");
-    return opts.editor;
-  };
-}
-
-function sshFrom(opts: ServeOptions): () => HostSsh {
-  return () => {
-    if (opts.ssh === undefined) throw new Error("this runtime cannot carry an editor's ssh from this computer");
-    return opts.ssh;
-  };
-}
-
-function terminalConfigFrom(opts: ServeOptions): () => HostTerminalConfig {
-  return () => {
-    if (opts.terminalConfig === undefined) throw new Error("this runtime cannot read the terminal config on this computer");
-    return opts.terminalConfig;
+    const door = opts[key];
+    if (door === undefined) throw new Error(missing);
+    return door as NonNullable<ServeOptions[K]>;
   };
 }
 
@@ -422,16 +377,17 @@ const startedOut = (made: StartResult): StartResult => ({ ...made, workspace: ha
 
 export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<RuntimeServer> {
   const bundler = bundlerFrom(opts);
-  const lander = landerFrom(opts);
-  const folders = foldersFrom(opts);
-  const terminalConfig = terminalConfigFrom(opts);
-  const editor = editorFrom(opts);
-  const ssh = sshFrom(opts);
-  const release = releaseFrom(opts);
-  const init = initFrom(opts);
-  const imageExport = imageExportFrom(opts);
+  const lander = doorFrom(opts, "landing", "this runtime cannot write folders on this computer");
+  const folders = doorFrom(opts, "folders", "this runtime cannot browse the folders on this computer");
+  const terminalConfig = doorFrom(opts, "terminalConfig", "this runtime cannot read the terminal config on this computer");
+  const editor = doorFrom(opts, "editor", "this runtime cannot open an editor on this computer");
+  const ssh = doorFrom(opts, "ssh", "this runtime cannot carry an editor's ssh from this computer");
+  const release = doorFrom(opts, "release", "this runtime does not read the newest release");
+  const init = doorFrom(opts, "init", "this runtime has no init job; the host that serves the app wires one");
+  const imageExport = doorFrom(opts, "imageExport", "this runtime cannot write an export on this computer");
   if (!opts.authToken) throw new Error("serveRuntime refuses to start without an auth token");
   const now = opts.now ?? Date.now;
+  const released = opts.released ?? {};
   const ticketTtlMs = opts.ticketTtlMs ?? 300_000;
   const pairTtlMs = opts.pairTtlMs ?? PAIR_CODE_TTL_MS;
   const tickets = new Map<string, Ticket>();
@@ -870,7 +826,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             authed = true;
             throughDoor();
             bind(device.device);
-            send({ id: msg.id, ok: true, deviceId: device.deviceId, deviceToken: device.deviceToken });
+            send({ id: msg.id, ok: true, deviceId: device.deviceId, deviceToken: device.deviceToken, ...released });
             return;
           }
           if (msg.op !== "auth") return refuse(UNAUTHORIZED);
@@ -895,7 +851,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             // the same token must not, or every request beyond loopback would rewrite the whole state file.
             void opts.devices?.seen(who.device.id, now()).catch(() => undefined);
           } else me = who;
-          send({ id: msg.id, ok: true });
+          send({ id: msg.id, ok: true, ...released });
           return;
         }
 
@@ -915,7 +871,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         try {
           switch (msg.op) {
             case "auth":
-              send({ id: msg.id, ok: true });
+              send({ id: msg.id, ok: true, ...released });
               return;
             case "pair.issue": {
               // A code lets a stranger in, so only the process that already holds this host's own token, over a

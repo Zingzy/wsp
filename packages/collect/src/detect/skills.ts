@@ -16,6 +16,9 @@ export interface SkillRootAt {
   agent?: string;
   /** The project a project folder is in, its path absolute. */
   project?: AgentsProject;
+  /** Why nothing under this folder is read, as the list's refusal line says it: a project's folder that links out of
+   * the repo, or one the read could not tell. */
+  skipped?: string;
 }
 
 export interface SkillsRead {
@@ -145,25 +148,58 @@ export function skillMdFrontmatter(text: string): SkillFront {
   return skillFrontmatter(lines.slice(1, end === -1 ? undefined : end).join("\n"));
 }
 
-/** Prints each folder given after the project that is a link or sits under one inside the project. */
+/** The one rule for whether a folder sits under a link: a shell function, `linked <path> <top> [<real top>]`, that
+ * prints the first folder above <path> and below <top> that is a link, tab, where it points, and returns 0; else 1.
+ * Given <real top>, the realpath of <top>, a link that resolves inside it is passed over, so a project's skills
+ * folder counts as linked only where it leads out of the project. The read of a project's folders and the install
+ * into one both run it, so neither keeps a second copy of the rule. */
+export const SKILL_LINK_ABOVE = [
+  "linked() {",
+  "  p=${1%/*}",
+  '  while [ -n "$p" ] && [ "$p" != "$2" ] && [ "$p" != / ]; do',
+  '    if [ -L "$p" ]; then',
+  '      if [ -n "$3" ] && r=$(realpath "$p" 2>/dev/null); then case $r/ in "$3"/*) p=${p%/*}; continue;; esac; fi',
+  "      printf '%s\\t%s\\n' \"$p\" \"$(readlink \"$p\")\"",
+  "      return 0",
+  "    fi",
+  "    p=${p%/*}",
+  "  done",
+  "  return 1",
+  "}",
+].join("\n");
+
 const LINKED_SCRIPT = [
+  SKILL_LINK_ABOVE,
   'p=$1; shift',
+  // A project folder that is not on this computer holds no skills folder to judge, and realpath fails on it.
+  "[ -d \"$p\" ] || { printf '\\036END\\n'; exit 0; }",
+  'b=$(realpath "$p") || exit 1',
   'for r in "$@"; do',
-  '  s=$r',
-  '  while [ "${#s}" -gt "${#p}" ]; do',
-  "    if [ -L \"$s\" ]; then printf '%s\\n' \"$r\"; break; fi",
-  '    s=${s%/*}',
-  '  done',
+  '  l=$(linked "$r/." "$p" "$b") && printf \'%s\\t%s\\n\' "$r" "$l"',
   'done',
   "printf '\\036END\\n'",
 ].join("\n");
 
-/** The project's skills folders that are the repo's links: a repo that links one out would hand its skills acts the
- * person's own folders. Every one of them, when the answer does not come back whole. */
-async function linkedInside(host: Host, project: string, dirs: readonly string[]): Promise<Set<string>> {
+/** The project's skills folders that sit under a link out of the project, each with that link and where it points: a
+ * repo that links one out would hand its skills acts the person's own folders. Nothing when the answer does not come
+ * back whole, which leaves every one of them unread. */
+async function linkedOut(host: Host, project: string, dirs: readonly string[]): Promise<Map<string, { link: string; to: string }> | undefined> {
   const said = await host.exec.run("sh", ["-c", LINKED_SCRIPT, "sh", project, ...dirs], { timeoutMs: 20_000 });
-  if (said === undefined || !said.trimEnd().endsWith(END)) return new Set(dirs);
-  return new Set(said.split("\n").filter(l => dirs.includes(l)));
+  if (said === undefined || !said.trimEnd().endsWith(END)) return undefined;
+  const out = new Map<string, { link: string; to: string }>();
+  for (const line of said.split("\n")) {
+    const [dir = "", link = "", to = ""] = line.split("\t");
+    if (dirs.includes(dir)) out.set(dir, { link, to });
+  }
+  return out;
+}
+
+/** What the list says of a project's skills folder it does not read: where it links out of the repo, or that the
+ * read could not tell. */
+function skippedLine(host: Host, dir: string, at: { link: string; to: string } | undefined): string {
+  const folder = tilde(host.home, dir);
+  if (at === undefined) return `skills: ${folder} was not read, since whether it links out of the repo could not be told`;
+  return `skills: ${folder} links out of the repo${at.link === dir ? "" : ` through ${tilde(host.home, at.link)}`}, to ${at.to}, so its skills are not read`;
 }
 
 /** The folders every catalog agent loads skills from on that computer, absolute, each once: an agent's own folder
@@ -183,8 +219,10 @@ export async function skillRoots(host: Host, o: { agents?: readonly AgentEntry[]
   await Promise.all(
     (o.projects ?? []).map(async project => {
       const at = (r: { dir: string }): string => posix.join(project.path, r.dir);
-      const linked = await linkedInside(host, project.path, [...new Set(agents.flatMap(a => a.skillRoots.project.map(at)))]);
-      for (const a of agents) add(a.skillRoots.project.map((r, i) => ({ dir: at(r), own: i === 0 })).filter(r => !linked.has(r.dir)), "project", a.id, project);
+      const dirs = [...new Set(agents.flatMap(a => a.skillRoots.project.map(at)))];
+      const linked = await linkedOut(host, project.path, dirs);
+      for (const a of agents) add(a.skillRoots.project.map((r, i) => ({ dir: at(r), own: i === 0 })), "project", a.id, project);
+      for (const dir of dirs) if (linked === undefined || linked.has(dir)) out.set(dir, { ...out.get(dir)!, skipped: skippedLine(host, dir, linked?.get(dir)) });
     }),
   );
   const plugins = agents.filter(a => a.pluginSkills !== undefined);
@@ -199,11 +237,13 @@ export async function skillRoots(host: Host, o: { agents?: readonly AgentEntry[]
 /** Every skill under the roots, one row per folder name and kind with every folder it lives in. A folder whose name starts
  * with a dot, one without a SKILL.md, and a skill inside another skill's folder are not skills. An answer cut short
  * is a refusal naming it, never a list that silently stops. */
-export async function detectSkills(host: Host, roots: readonly SkillRootAt[]): Promise<SkillsRead> {
-  if (roots.length === 0) return { skills: [], refused: [] };
+export async function detectSkills(host: Host, all: readonly SkillRootAt[]): Promise<SkillsRead> {
+  const outside = all.flatMap(r => (r.skipped === undefined ? [] : [r.skipped]));
+  const roots = all.filter(r => r.skipped === undefined);
+  if (roots.length === 0) return { skills: [], refused: outside };
   const said = await host.exec.run("sh", ["-c", SCRIPT, "sh", ...roots.map(r => r.dir)], { timeoutMs: 20_000 });
-  if (said === undefined) return { skills: [], refused: ["skills: the folders could not be read"] };
-  const refused = said.trimEnd().endsWith(END) ? [] : ["skills: the answer was cut short, so the list is not whole"];
+  if (said === undefined) return { skills: [], refused: ["skills: the folders could not be read", ...outside] };
+  const refused = [...(said.trimEnd().endsWith(END) ? [] : ["skills: the answer was cut short, so the list is not whole"]), ...outside];
   const rootOf = new Map(roots.map(r => [r.dir, r]));
   const found: { root: SkillRootAt; dir: string; link: string; off: boolean; head: string }[] = [];
   for (const record of said.split("\x1e").slice(1)) {

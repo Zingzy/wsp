@@ -32,6 +32,7 @@ export function statusArea(ctx: RuntimeContext): StatusArea {
         ...(ctx.unreachedOf(e) !== undefined ? { unreached: ctx.unreachedOf(e)! } : {}),
         ...(ctx.moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => ctx.moduleOf(e.record.kind).daemonRoad(e) } : {}),
         ...(e.machine.daemonAnswers !== undefined ? { daemonAnswers: e.machine.daemonAnswers.bind(e.machine) } : {}),
+        ...(e.machine.daemonAnswersPromptMs !== undefined ? { daemonAnswersPromptMs: e.machine.daemonAnswersPromptMs } : {}),
         providerState: () => e.machine.state(),
         ...(e.machine.metrics !== undefined ? { metrics: e.machine.metrics.bind(e.machine) } : {}),
         // A machine the poll last found unreachable is not asked what it is: over ssh that read is a dial of its

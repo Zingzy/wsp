@@ -400,5 +400,5 @@ Such a package is a row of its own, so the build installs it by the road the pla
 - Export refuses an existing folder; `--replace` overwrites it on purpose (#224).
 - A resumed thread runs in the folder its session started in, whatever folder is followed in the app (#236).
 - A send carries its own request id, so two clients sending the same text do not adopt each other's turn (#239).
-- The MCP server and the command line refuse a host of another version in one line; restart it with wsp up (#290).
+- The command line and both tool servers refuse a host of another release in one line naming both releases and what to run on the older end: `wsp restart` for an older host here, which the restart line and tool reach past the check.
 - Not here yet: a GitHub credential on the machine outside a sign-in during init (#279).
