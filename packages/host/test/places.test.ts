@@ -120,10 +120,10 @@ describe("a join the host never answered", () => {
 describe("what wsp add prints with no argument", () => {
   it("names the line to type on that computer at every address this host answers on, and the other two roads", () => {
     const token = joinToken("7QK3M2VD", `SHA256:${"b".repeat(43)}`);
-    const lines = addLines(token, 600_000, 0, ["http://192.168.1.20:4400"], "p_ab12cd34.singhi.me").join("\n");
+    const lines = addLines(token, 600_000, 0, ["http://192.168.1.20:4400"], "p_ab12cd34.usewsp.com").join("\n");
     // One word beside --code on every address: the code the host will spend and the key it will prove.
     expect(lines).toContain(`wsp join http://192.168.1.20:4400 --code ${token}`);
-    expect(lines).toContain(`wsp join https://p_ab12cd34.singhi.me --code ${token}`);
+    expect(lines).toContain(`wsp join https://p_ab12cd34.usewsp.com --code ${token}`);
     expect(lines).toContain("spent by the first join");
     expect(lines).toContain("wsp add user@host");
     for (const id of addableProviders()) expect(lines).toContain(`wsp add ${id}`);

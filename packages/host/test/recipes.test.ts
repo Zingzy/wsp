@@ -165,6 +165,20 @@ describe("a resolved recipe", () => {
     expect((await resolveRecipe(LAPTOP, reading())).items["agents/claude"]).not.toBe(before.items["agents/claude"]);
   });
 
+  it("moves an agent's item for an edit to a script a hook in its settings runs", async () => {
+    mkdirSync(join(home, ".claude", "hooks"), { recursive: true });
+    const hooks = { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "~/.claude/hooks/commit-batching" }, { type: "command", command: "~/.claude/hooks/no-secret-print" }] }] };
+    writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ hooks }));
+    writeFileSync(join(home, ".claude", "hooks", "commit-batching"), "#!/bin/sh\nexit 0\n");
+    writeFileSync(join(home, ".claude", "hooks", "no-secret-print"), "#!/bin/sh\nexit 0\n");
+    const before = (await resolveRecipe(LAPTOP, reading())).items["agents/claude"];
+    writeFileSync(join(home, ".claude", "hooks", "no-secret-print"), "#!/bin/sh\nexit 2\n");
+    const after = (await resolveRecipe(LAPTOP, reading())).items["agents/claude"];
+    expect(after).not.toBe(before);
+    writeFileSync(join(home, ".claude", "hooks", "commit-batching"), "#!/bin/sh\nexit 2\n");
+    expect((await resolveRecipe(LAPTOP, reading())).items["agents/claude"]).not.toBe(after);
+  });
+
   it("moves no hash when this computer gains a tool the recipe does not hold", async () => {
     const tools = [{ id: "tools/brew/gh", version: "2.80.0" }];
     const before = recipeHash(await resolveRecipe(LAPTOP, reading(tools)));

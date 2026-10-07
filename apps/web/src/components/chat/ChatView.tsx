@@ -141,9 +141,9 @@ export function ChatView({
   const turnDiffs = useMemo(
     () =>
       new Map<MessageId, TurnDiffSummary>(
-        diffPlacesRef.current.map(({ messageId, turn, changes: { files, moved, others, shared } }) => [
+        diffPlacesRef.current.map(({ messageId, turn, changes: { files, others, shared } }) => [
           messageId,
-          { turnId: turn, files, moved, ...(others !== undefined ? { others } : shared === true ? { folder: true as const } : {}) },
+          { turnId: turn, files, ...(others !== undefined ? { others } : shared === true ? { folder: true as const } : {}) },
         ]),
       ),
     [diffKey],

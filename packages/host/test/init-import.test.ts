@@ -9,7 +9,7 @@ import { gunzipSync } from "node:zlib";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
-import { GUARD_BEGIN, GUARD_END, nodeHost, type ManifestEntry, withIgnoreUnknown } from "@wsp/collect";
+import { GUARD_BEGIN, GUARD_END, detectAgents, nodeHost, type ManifestEntry, withIgnoreUnknown } from "@wsp/collect";
 import { NODE_RELEASES, planFiles, type PlannedFile, type StagedFile } from "@wsp/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CLAUDE_INSTALL, GOLDEN_SMOKE, GUEST_HOME, MCP_SERVERS_JSON } from "@wsp/catalog";
@@ -471,6 +471,36 @@ describe("packPlan", () => {
     expect(plain.skipped).toEqual([]);
     expect(plain.leftBehind).toBeUndefined();
     expect(readFileSync(join(extract(plain.tar), ".claude-cfg", "settings.json"), "utf8")).toBe('{"model": "opus", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo done"}]}]}}');
+  });
+
+  it("the scanned Claude row copies the scripts its hooks run as its own files, so the copy holds both and an edit to one moves the recipe hash", async () => {
+    const home = laptop();
+    mkdirSync(join(home, ".claude", "hooks"), { recursive: true });
+    writeFileSync(join(home, ".claude", "hooks", "commit-batching"), "#!/bin/sh\nexit 0\n");
+    writeFileSync(join(home, ".claude", "hooks", "no-secret-print"), "#!/bin/sh\nexit 0\n");
+    const settings = `${JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          { matcher: "Bash", hooks: [{ type: "command", command: "~/.claude/hooks/commit-batching", timeout: 10 }, { type: "command", command: "~/.claude/hooks/no-secret-print" }] },
+          { hooks: [{ type: "command", command: "/usr/bin/true" }, { type: "command", command: "jq -r .tool_input.command" }] },
+          { hooks: [{ type: "command", command: "~/.ssh/id_ed25519" }] },
+        ],
+      },
+    }, null, 2)}\n`;
+    writeFileSync(join(home, ".claude", "settings.json"), settings);
+    const scan = async (): Promise<ManifestEntry> => (await detectAgents({ ...nodeHost(), home })).find(r => r.id === "agents/claude")!;
+    const claude = await scan();
+    expect(claude.paths).toEqual(["~/.claude/settings.json", "~/.claude/hooks/commit-batching", "~/.claude/hooks/no-secret-print", "~/.ssh/id_ed25519"]);
+    const imp = importFor([claude], { home, secrets: new Map(), platform: "darwin" });
+    expect(imp.files?.lands.map(l => l.dest)).toEqual([".claude-cfg/settings.json", ".claude-cfg/hooks/commit-batching", ".claude-cfg/hooks/no-secret-print"]);
+    const dir = extract((await imp.files!.pack()).tar);
+    for (const name of ["commit-batching", "no-secret-print"]) expect(readFileSync(join(dir, ".claude-cfg", "hooks", name), "utf8")).toBe("#!/bin/sh\nexit 0\n");
+    expect(JSON.parse(readFileSync(join(dir, ".claude-cfg", "settings.json"), "utf8")).hooks.PreToolUse).toEqual([
+      { matcher: "Bash", hooks: [{ type: "command", command: "/root/.claude-cfg/hooks/commit-batching", timeout: 10 }, { type: "command", command: "/root/.claude-cfg/hooks/no-secret-print" }] },
+      { hooks: [{ type: "command", command: "/usr/bin/true" }, { type: "command", command: "jq -r .tool_input.command" }] },
+    ]);
+    writeFileSync(join(home, ".claude", "hooks", "no-secret-print"), "#!/bin/sh\nexit 2\n");
+    expect(importFor([await scan()], { home, secrets: new Map(), platform: "darwin" }).recipeHash).not.toBe(imp.recipeHash);
   });
 
   it("a hook is judged by the file it points at: a link to a script under home travels as its bytes, one to a private key comes out and is listed as left behind", async () => {

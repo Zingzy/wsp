@@ -19,9 +19,9 @@ import { savedEnv } from "./env-keys.js";
 declare const __WSP_POSTHOG_KEY__: string | undefined;
 declare const __WSP_POSTHOG_HOST__: string | undefined;
 
-/** The project key and the capture host a release build baked in; empty and PostHog's US host everywhere else. */
+/** The project key and the capture host a release build baked in; empty and PostHog's EU host everywhere else. */
 export const BUILT_POSTHOG_KEY = typeof __WSP_POSTHOG_KEY__ === "string" ? __WSP_POSTHOG_KEY__ : "";
-export const BUILT_POSTHOG_HOST = typeof __WSP_POSTHOG_HOST__ === "string" && __WSP_POSTHOG_HOST__ !== "" ? __WSP_POSTHOG_HOST__ : "https://us.i.posthog.com";
+export const BUILT_POSTHOG_HOST = typeof __WSP_POSTHOG_HOST__ === "string" && __WSP_POSTHOG_HOST__ !== "" ? __WSP_POSTHOG_HOST__ : "https://eu.i.posthog.com";
 
 export const ANALYTICS_FLUSH_MS = 10_000;
 export const ANALYTICS_BATCH = 20;
