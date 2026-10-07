@@ -12,8 +12,6 @@
   "packages/engine/src/golden-import.ts": 1582,
   "packages/host/src/doctor.ts": 2023,
   "packages/host/src/init.ts": 1748,
-  "packages/protocol/src/index.ts": 8038,
-  "packages/runtime/src/runtime.ts": 13762,
   "packages/runtime/src/serve.ts": 2289,
   "packages/runtime/src/slates.ts": 1648
 }
