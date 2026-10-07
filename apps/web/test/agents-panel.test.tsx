@@ -136,6 +136,12 @@ describe("the agents", () => {
     expect(panel().textContent).not.toContain(W.openInTerminal);
   });
 
+  it("says a version that could not be read, and nothing a failed --version printed", () => {
+    const { version: _v, ...codex } = AGENTS_REPORT.agents.find(a => a.id === "codex")!;
+    drawPanel({ report: { ...AGENTS_REPORT, agents: AGENTS_REPORT.agents.map(a => (a.id === "codex" ? { ...codex, versionUnread: true as const } : a)) } });
+    expect(descriptionOf("codex")).toBe("version unreadable");
+  });
+
   it("marks a newer version before the state, its version on the hover", () => {
     drawPanel({ report: { ...AGENTS_REPORT, agents: AGENTS_REPORT.agents.map(a => (a.id === "claude" ? { ...a, update: { to: "2.1.290", command: "claude update" } } : a)) } });
     expect(rowOf("claude").querySelector("[data-k=agent-update]")?.getAttribute("aria-label")).toBe("Update to 2.1.290");

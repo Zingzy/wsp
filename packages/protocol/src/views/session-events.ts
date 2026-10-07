@@ -229,6 +229,9 @@ export const AGENT_STARTING_MS = 4_000;
 /** The word an agent's row takes in place of its version where its command installs it on its first run. */
 export const FIRST_RUN_WORD = "installs on first run";
 
+/** The word in its place where the command's `--version` exited non-zero, whose output is an error and not a version. */
+export const VERSION_UNREAD_WORD = "version unreadable";
+
 /** What a thread says while that start waits: short enough to stand whole on a phone's one line. */
 export const agentStartingLine = (agent: string, installs: boolean): string => (installs ? `${agent} ${FIRST_RUN_WORD}` : `Starting ${agent}`);
 

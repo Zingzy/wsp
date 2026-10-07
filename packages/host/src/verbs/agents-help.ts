@@ -27,6 +27,7 @@ import {
   SKILL_PREVIEW_BYTES,
   agentSignInWord,
   FIRST_RUN_WORD,
+  VERSION_UNREAD_WORD,
   usageRefusal,
   Preferences,
   ProjectView,
@@ -127,7 +128,7 @@ function reportTail(r: AgentsReport): string[] {
 export function agentRowLines(r: AgentsReport): string[] {
   const word = (a: AgentRow): string => (!a.installed ? "not found" : a.signIn === "unknown" ? "sign-in unknown" : agentSignInWord(a.signIn));
   const update = (a: AgentRow): string => (a.update === undefined ? "-" : `${a.update.to}: ${a.update.command}`);
-  return [...table([["AGENT", "VERSION", "LATEST", "SIGN-IN", "WSP TOOLS", "UPDATE", "PATH"], ...r.agents.map(a => [a.name, a.version ?? (a.installsOnFirstRun === true ? FIRST_RUN_WORD : "-"), a.latest ?? "-", word(a), a.wspTools ? "yes" : "no", update(a), a.path ?? "-"])]), ...reportTail(r)];
+  return [...table([["AGENT", "VERSION", "LATEST", "SIGN-IN", "WSP TOOLS", "UPDATE", "PATH"], ...r.agents.map(a => [a.name, a.version ?? (a.installsOnFirstRun === true ? FIRST_RUN_WORD : a.versionUnread === true ? VERSION_UNREAD_WORD : "-"), a.latest ?? "-", word(a), a.wspTools ? "yes" : "no", update(a), a.path ?? "-"])]), ...reportTail(r)];
 }
 
 /** Where a skill or a server stands, as both tables print it: its scope, or the project it is a project's of by name. */

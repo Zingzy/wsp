@@ -162,6 +162,9 @@ export function updateOf(row: Pick<AgentRow, "id" | "version">, latest: string |
   return command !== undefined && have !== undefined && to !== undefined && compareVersions(have, to) < 0 ? { to, command } : undefined;
 }
 
+/** A version read whose command exited non-zero. */
+const UNREAD = Symbol("unread");
+
 /** What a box's own report already says, which is read there once per dial and not asked again. */
 interface BoxSaid {
   signIns?: Record<string, AgentSignInState>;
@@ -192,14 +195,14 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
   const installed = onPath.filter(a => !installs.has(a.id));
   const box = o.box;
   const [versions, statuses] = await Promise.all([
-    box?.versions !== undefined ? Promise.resolve(installed.map(a => box.versions?.[a.id])) : each(host, installed.map(a => `${shellQuote(a.bin)} --version`)).then(r => r.map(s => s?.output.split("\n")[0])),
+    box?.versions !== undefined ? Promise.resolve(installed.map(a => box.versions?.[a.id])) : each(host, installed.map(a => `${shellQuote(a.bin)} --version`)).then(r => r.map(s => (s === undefined ? undefined : s.code !== 0 ? UNREAD : s.output.split("\n")[0]))),
     box !== undefined ? Promise.resolve([]) : each(host, installed.map(a => a.signIn.status?.typed ?? a.signIn.status?.command ?? "false")),
   ]);
   const rows: AgentRow[] = agents.map(a => {
     const { found, path, via } = at.get(a.id)!;
     const i = installed.indexOf(a);
     const said = i < 0 ? undefined : versions[i];
-    const version = said === undefined || said.trim() === "" ? undefined : agentVersionWord(said);
+    const version = said === undefined || said === UNREAD || said.trim() === "" ? undefined : agentVersionWord(said);
     const status = i < 0 ? undefined : statuses[i];
     const pinned = a.latest === undefined ? undefined : strictVersion(versionOf(a.installRoad) ?? "");
     const ownLogin = box === undefined && status !== undefined && a.signIn.status !== undefined && a.signIn.status.signedIn(status.output, status.code);
@@ -217,6 +220,7 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
       ...(pinned !== undefined ? { pinned } : {}),
       road: !found ? "none" : path === undefined ? "shim" : path.startsWith(`${TOOL_PREFIX}/`) ? "wsp" : "own",
       ...(installs.has(a.id) ? { installsOnFirstRun: true as const } : {}),
+      ...(said === UNREAD ? { versionUnread: true as const } : {}),
       ...(path !== undefined ? { path: tilde(host.home, path) } : {}),
       ...(via !== undefined ? { via } : {}),
       signIn: !found ? "none" : signIn,
