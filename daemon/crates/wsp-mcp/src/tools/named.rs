@@ -139,12 +139,21 @@ fn workspace_out(value: &Value) -> Option<Workspace> {
 
 /// A workspace as a person names it, by id or by the name exactly one carries; the host reads the name.
 pub async fn workspace_of(client: &Client, named: &str) -> Result<Workspace, Failure> {
+    resolved(client, params([("ref", Value::from(named))])).await
+}
+
+/// The same for exec, which the host's refusal to a thread then speaks of, since exec starts no child.
+pub async fn workspace_for_exec(client: &Client, named: &str) -> Result<Workspace, Failure> {
+    resolved(client, params([("ref", Value::from(named)), ("verb", Value::from("exec"))])).await
+}
+
+async fn resolved(client: &Client, asked: Map<String, Value>) -> Result<Workspace, Failure> {
     #[derive(Deserialize)]
     struct Resolved {
         #[serde(default)]
         workspace: Value,
     }
-    let resolved: Resolved = client.request("workspaces.resolve", params([("ref", Value::from(named))])).await?;
+    let resolved: Resolved = client.request("workspaces.resolve", asked).await?;
     workspace_out(&resolved.workspace).ok_or_else(|| other_version("workspaces.resolve"))
 }
 

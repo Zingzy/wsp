@@ -127,8 +127,8 @@ export async function threads(client: HostClient, workspaceId?: string): Promise
 /** A workspace as a person names it: by id, else by its name when exactly one carries it. The host reads the name off
  * the same list it prints, so a workspace the listing shows is never denied here as absent, and one this caller may
  * not drive is refused in the words of the rule that hides it. */
-export async function workspaceOf(client: HostClient, ref: string): Promise<WorkspaceOut> {
-  const { workspace } = await client.request<{ workspace?: unknown }>("workspaces.resolve", { ref });
+export async function workspaceOf(client: HostClient, ref: string, verb?: "exec"): Promise<WorkspaceOut> {
+  const { workspace } = await client.request<{ workspace?: unknown }>("workspaces.resolve", { ref, ...(verb !== undefined ? { verb } : {}) });
   const read = WorkspaceOut.safeParse(workspace);
   if (!read.success) throw new Error(otherVersion("workspaces.resolve"));
   return read.data;
@@ -802,9 +802,9 @@ export async function createFor(
   }
 }
 
-/** The projects a caller may name, by the door it is allowed: the host's own list for a person's terminal, and for
- * a caller the host answers as a thread, which reads its own tree and not the person's records, the projects its
- * own workspaces hold. */
+/** The projects a caller may name, as the host's list answers it: every one for a person's terminal, and for a
+ * thread its own and its repository's on computers that fork machines. A host from before threads could list
+ * projects refuses the list, and a thread there names the projects its own workspaces hold. */
 export async function projectsHere(client: HostClient): Promise<Pick<ProjectView, "id" | "name" | "computer">[]> {
   const held = await projectsOf(client).catch(() => undefined);
   if (held !== undefined) return held;

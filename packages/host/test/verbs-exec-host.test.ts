@@ -7,7 +7,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, HERE_PLACE_ID, runForTheList, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EXIT_CODES, HOST_STOPPING_LINE, UP_RESTART_LINE, noReplyLine, notifyLine, RuntimeRequest, WorkspaceView } from "@wsp/protocol";
+import { noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, HERE_PLACE_ID, runForTheList, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, execOutsideFix, refusalLine, spawnReachRefusal, EXIT_CODES, HOST_STOPPING_LINE, UP_RESTART_LINE, noReplyLine, notifyLine, RuntimeRequest, WorkspaceView } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { cli } from "../src/cli.js";
@@ -345,15 +345,16 @@ describe("wsp verbs over the host: wait, read, exec and the host itself", () => 
       expect((await line("send", kid.threadId!, "and the rest")).code).toBe(0);
     });
 
-    it("a workspace the caller's reach hides reads to a thread exactly as one that does not exist", async () => {
+    it("a workspace the caller's reach hides is refused by the tree rule by its whole name or id, and reads as absent by the start of an id", async () => {
       const alpha = await leadWorkspace();
       await h.run("new", "beta");
       const beta = (await h.rt.workspaces.list()).find(w => w.name === "beta")!;
       await asThread(alpha, "t_lead");
-      // Every word for beta reads as absent: the name, the whole id and the start of one alike, so walking this
-      // host's ids tells a thread nothing about what stands outside its tree.
-      expect((await line("exec", "beta", "--", "uname")).io.errors).toEqual([`wsp exec: ${noWorkspaceRefusal("beta")}`]);
-      expect((await line("exec", beta.id, "--", "uname")).io.errors).toEqual([`wsp exec: ${noWorkspaceRefusal(beta.id)}`]);
+      // A whole name or id the person holds is refused by the rule in the word typed, with exec's road on the thread's
+      // own machine; the start of an id reads as absent, so walking this host's ids by prefix tells a thread nothing.
+      const outside = (word: string): string => `wsp exec: ${refusalLine(spawnReachRefusal("t_lead", word), execOutsideFix("alpha"))}`;
+      expect((await line("exec", "beta", "--", "uname")).io.errors).toEqual([outside("beta")]);
+      expect((await line("exec", beta.id, "--", "uname")).io.errors).toEqual([outside(beta.id)]);
       // The start has to miss alpha's id too, which a random pair shares for several characters now and then.
       let n = 6;
       while (alpha.id.startsWith(beta.id.slice(0, n))) n++;

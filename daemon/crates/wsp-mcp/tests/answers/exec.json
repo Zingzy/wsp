@@ -28,7 +28,8 @@
       "asked": [
         {
           "op": "workspaces.resolve",
-          "ref": "attic-work"
+          "ref": "attic-work",
+          "verb": "exec"
         },
         {
           "op": "workspaces.wake",
@@ -68,7 +69,8 @@
       "asked": [
         {
           "op": "workspaces.resolve",
-          "ref": "ws-1"
+          "ref": "ws-1",
+          "verb": "exec"
         },
         {
           "op": "workspaces.wake",
@@ -106,7 +108,8 @@
       "asked": [
         {
           "op": "workspaces.resolve",
-          "ref": "ws-1"
+          "ref": "ws-1",
+          "verb": "exec"
         },
         {
           "op": "workspaces.wake",
@@ -149,7 +152,8 @@
       "asked": [
         {
           "op": "workspaces.resolve",
-          "ref": "ws-1"
+          "ref": "ws-1",
+          "verb": "exec"
         }
       ]
     },
@@ -168,7 +172,8 @@
       "asked": [
         {
           "op": "workspaces.resolve",
-          "ref": "nope"
+          "ref": "nope",
+          "verb": "exec"
         }
       ]
     }

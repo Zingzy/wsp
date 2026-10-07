@@ -5,7 +5,7 @@ import { GUEST_HOME, remoteHost } from "@wsp/catalog";
 import { NotFirstLifeError, RestoreUnfinishedError, ResumeUnansweredError, goldenHead, isMissing, readGone, MachineAliveError, answerOf, diskUse, projectSnapshotName, syncDisk } from "@wsp/engine";
 import type { ProjectGolden, ProjectView, WorkspaceProject } from "@wsp/protocol";
 import { noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitRunLogReply, GitPrMergeReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, type TreeRecord, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, type PullRequestItem, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, AUTO_MERGE_OFF_LINE, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, scopeOf, spawnActRefusal, spawnGoldenRefusal, workspaceIdOf } from "@wsp/protocol";
-import { isLocalWorkspace, kindWords, noCommandsYetLine, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, kindForComputer, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, workspaceState, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix } from "@wsp/protocol";
+import { isLocalWorkspace, kindWords, noCommandsYetLine, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, kindForComputer, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, workspaceState, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, refusal, execOutsideFix, execOutsideRefusal, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX } from "@wsp/protocol";
 import { harnessExec, putFiles } from "@wsp/engine";
 import { ownerRepoOf } from "@wsp/protocol";
 import { providerSaid } from "../status.js";
@@ -164,7 +164,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       return ctx.listedFor(origin).map(e => ctx.view(e.record));
     },
 
-    async resolve(ref, origin) {
+    async resolve(ref, origin, verb) {
       await ctx.ready();
       const scope = scopeOf(origin);
       const rows = scope === undefined ? ctx.held() : ctx.listedFor(origin);
@@ -177,7 +177,34 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       if (started.length > 1) throw new Error(idPrefixRefusal(ref, started.map(e => e.record.id)));
       const entry = exact ?? started[0];
       if (entry === undefined) {
-        if (scope !== undefined) throw notFoundRefusal(noWorkspaceRefusal(ref));
+        if (scope !== undefined) {
+          // A whole id or name the person holds outside the thread's tree, a workspace's or a project's, is refused
+          // by the rule that keeps it out, so a lead learns what to do instead, in words that carry the word the
+          // thread typed and nothing of the workspace it may not see. A word that names nothing, or only starts an
+          // id, reads as absent. A run names a project here when the thread's listing did not carry it, and the
+          // project door refuses one the thread may not use in its own words. Exec starts nothing, so its refusal
+          // says what the word is and its road is exec on the machine the thread runs on.
+          const mine = ctx.projectOfScope(scope);
+          const own = verb === "exec" && mine !== undefined ? ctx.live.get(scope.workspaceId)?.record.name : undefined;
+          const execFix = own === undefined ? undefined : execOutsideFix(own);
+          const outside = (is: "folder" | "project" | "workspace", fix: string): Error => refusal(execOutsideRefusal(scope.threadId, ref, is), fix, "usage");
+          const theirs = ctx.held().find(e => e.record.id === ref) ?? ctx.held().find(e => e.record.name === ref);
+          if (theirs !== undefined && mine !== undefined && ctx.refusalFor(theirs.record, origin) !== undefined) {
+            const project = ctx.projectHeld(theirs.record.project);
+            if (!ctx.ofThreadsRepository(scope, project.id)) throw execFix !== undefined ? outside("workspace", execFix) : refusal(spawnRepositoryWorkspaceRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_WORKSPACE_FIX, "usage");
+            if (!ctx.projectReached(scope, project.id)) throw execFix !== undefined ? outside("folder", execFix) : refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
+            throw refusal(spawnReachRefusal(scope.threadId, ref), execFix ?? spawnReachFix(project.name, !copiesFolder(kindForComputer(project.computer))), "usage");
+          }
+          if (execFix !== undefined) {
+            const held = [...ctx.projectsHeld.values()];
+            const project = held.find(p => p.id === ref) ?? held.find(p => p.name === ref);
+            if (project !== undefined && !ctx.projectReached(scope, project.id)) throw outside(ctx.ofThreadsRepository(scope, project.id) ? "folder" : "project", execFix);
+          }
+          await ctx.projectsDoor.resolve(ref, origin).catch((e: unknown) => {
+            if ((e as { kind?: unknown }).kind !== "not-found") throw e;
+          });
+          throw notFoundRefusal(noWorkspaceRefusal(ref));
+        }
         const failed = [...ctx.failedCreates.values()].find(v => v.id === ref || v.name === ref);
         if (failed !== undefined) return failed;
         // A computer somebody joined is a place, and a place is no workspace: the word is answered with the road to

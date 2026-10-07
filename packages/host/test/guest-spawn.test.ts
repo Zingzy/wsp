@@ -5,13 +5,16 @@
 // dialling the pair its launch carries. The road a thread takes to open a
 // thread beside it, on another machine or on a branch, and where each nests.
 import { execFileSync } from "node:child_process";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentsOffRefusal, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LOOPBACK, MCP_SERVER_NAME, SCOPED_MCP_ARG, TURN_TOKEN_ENV, type ThreadView, type WorkspaceView } from "@wsp/protocol";
+import { agentsOffRefusal, EXIT_CODES, execOutsideFix, execOutsideRefusal, noWorkspaceRefusal, refusalLine, spawnFolderRefusal, spawnReachFix, spawnReachRefusal, spawnRepositoryRefusal, spawnRepositoryWorkspaceRefusal, SPAWN_FOLDER_FIX, SPAWN_REPOSITORY_FIX, SPAWN_REPOSITORY_WORKSPACE_FIX, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LOOPBACK, MCP_SERVER_NAME, SCOPED_MCP_ARG, TURN_TOKEN_ENV, type Caller, type ThreadView, type WorkspaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, serve } from "../src/cli.js";
+import { mcpServer } from "../src/mcp.js";
 import { guestKinds } from "../src/guest-tools.js";
 import { guestDoor, type GuestDoor, type GuestLink } from "../src/guest.js";
 import type { HostHandle } from "../src/server.js";
@@ -214,5 +217,188 @@ describe("the wsp command a thread on this computer runs", () => {
     held.release(0, "mine");
     await lead.finished;
     await theirs.finished;
+  });
+});
+
+describe("a lead thread on this computer starting children on a cloud computer", () => {
+  let dir: string;
+  let statePath: string;
+  let rt: Runtime;
+  let handle: HostHandle | undefined;
+  let held: ReturnType<typeof heldAgent>;
+  let mcp: Client | undefined;
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-lead-cloud-"));
+    const webDir = join(dir, "web");
+    mkdirSync(join(webDir, "assets"), { recursive: true });
+    writeFileSync(join(webDir, "assets", "app.js"), "console.log('app')\n");
+    writeFileSync(join(webDir, "index.html"), PAGE);
+    statePath = join(dir, "state", "state.json");
+    vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_guest_key");
+    vi.stubEnv("HOME", join(dir, "user"));
+    vi.stubEnv("WSP_HOME", join(dir, "home"));
+    const store = memoryStore();
+    await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
+    held = heldAgent(true);
+    const here: { url?: string } = {};
+    rt = createRuntime({
+      statePath,
+      backend: withDaemonRoads(stubBackend()),
+      daemonChannel: branchDaemons().open,
+      store,
+      adapters: { claude: held.adapter },
+      local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, statePath, copyingFake()),
+      agents: { here, wspMcp: { command: "wsp", args: ["mcp"] } },
+    });
+    handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt, here });
+    vi.stubEnv("SOLARI_API_KEY", "");
+  });
+  afterEach(async () => {
+    await mcp?.close();
+    mcp = undefined;
+    await handle?.close();
+    handle = undefined;
+    vi.unstubAllEnvs();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function thread(env: Readonly<Record<string, string>>, ...argv: string[]): Promise<{ code: number; io: Captured }> {
+    const io = captured();
+    return { code: await cli(argv, io, undefined, { ...env, HOME: join(dir, "agent"), WSP_HOME: join(dir, "agent", ".wsp") }), io };
+  }
+  const json = <T>(io: Captured): T => JSON.parse(io.lines.at(-1)!) as T;
+
+  /** A lead on this computer's folder of dev/lab, the same repository on the cloud as lab-cloud, and another one there. */
+  async function lead(): Promise<{ threadId: string; launch: Record<string, string>; cloud: string; finished: Promise<unknown> }> {
+    const repo = join(dir, "repo");
+    mkdirSync(repo);
+    execFileSync("git", ["init", "-q", "-b", "main", repo]);
+    execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
+    execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@github.com:dev/lab.git"]);
+    const mac = await rt.projects.add({ source: repo, on: HERE_PLACE_ID, name: "lab" });
+    const cloud = await rt.projects.add({ source: "https://github.com/dev/lab.git", on: "default", name: "lab-cloud" });
+    await rt.projects.add({ source: "https://github.com/dev/other.git", on: "default", name: "other-cloud" });
+    const folder = await rt.workspaces.create({ project: mac.id, name: "lab", agents: { spawn: true } });
+    const turn = await rt.sessions.start(folder.id, { prompt: "coordinate" });
+    const launch = held.envs[0]!;
+    return { threadId: turn.view().threadId!, launch: { [HOST_URL_ENV]: launch[HOST_URL_ENV]!, [HOST_TOKEN_ENV]: launch[HOST_TOKEN_ENV]!, [TURN_TOKEN_ENV]: launch[TURN_TOKEN_ENV]! }, cloud: cloud.id, finished: turn.finished };
+  }
+
+  it("wsp run on a cloud project of the lead's repository forks a machine for the child, lists it, and wakes the lead at its end", async () => {
+    const { threadId, launch, cloud, finished } = await lead();
+    // The projects a thread may start children on are its own repository's, on every computer, and no other.
+    const projects = json<{ projects: { name: string }[] }>((await thread(launch, "projects", "--json")).io);
+    expect(projects.projects.map(p => p.name)).toEqual(["lab", "lab-cloud"]);
+    const ran = await thread(launch, "run", "lab-cloud", "--notify", "me", "--detach", "build it", "--json");
+    expect(ran.code).toBe(0);
+    // The fork's stages are the progress a person reads on stderr; the child's copy starts on the lead's branch.
+    expect(ran.io.errors.at(-1)).toContain("starts on work as pushed");
+    const child = json<{ threadId: string }>(ran.io).threadId;
+    const row = (await rt.sessions.list()).find(r => r.threadId === child)!;
+    expect(row).toMatchObject({ parentThreadId: threadId, rootThreadId: threadId });
+    expect((await rt.workspaces.list()).find(w => w.id === row.workspaceId)).toMatchObject({ project: { id: cloud }, kind: expect.not.stringMatching(/^local$/) });
+    const listed = json<{ threads: ThreadView[] }>((await thread(launch, "threads", "--json")).io);
+    expect(listed.threads.map(t => t.threadId)).toContain(child);
+    held.release(1, "Built it.");
+    await vi.waitFor(() => expect(held.steered).toEqual([`thread ${child.slice(0, 8)} finished (completed): Built it.`]));
+    held.release(0, "read it");
+    await finished;
+  });
+
+  it("the run tool on that project does the same from the lead's own tool server, and the child's finished line reaches the lead", async () => {
+    const { threadId, launch, cloud, finished } = await lead();
+    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    await mcpServer(statePath, { env: { ...launch, HOME: join(dir, "agent"), WSP_HOME: join(dir, "agent", ".wsp") }, scoped: true }).connect(toServer);
+    mcp = new Client({ name: "lead", version: "0.0.0" });
+    await mcp.connect(toClient);
+    const ran = await mcp.callTool({ name: "run", arguments: { project: "lab-cloud", message: "build it", notify: ["me"], detach: true } });
+    expect(ran.isError).not.toBe(true);
+    const child = (ran.structuredContent as { threadId: string }).threadId;
+    const row = (await rt.sessions.list()).find(r => r.threadId === child)!;
+    expect(row).toMatchObject({ parentThreadId: threadId, rootThreadId: threadId });
+    expect((await rt.workspaces.list()).find(w => w.id === row.workspaceId)?.project.id).toBe(cloud);
+    held.release(1, "Built it.");
+    const line = `thread ${child.slice(0, 8)} finished (completed): Built it.`;
+    await vi.waitFor(() => expect(held.steered).toEqual([line]));
+    expect((await rt.sessions.history(row.workspaceId)).find(e => e.type === "session.notify")).toMatchObject({ threadId: child, notify: threadId, text: line });
+    // The exec tool speaks of exec, as the command line does.
+    const exec = await mcp.callTool({ name: "exec", arguments: { workspace: "other-cloud", argv: ["true"] } });
+    expect(exec.isError).toBe(true);
+    expect(JSON.stringify(exec.content)).toContain(refusalLine(execOutsideRefusal(threadId, "other-cloud", "project"), execOutsideFix("lab")));
+    held.release(0, "read it");
+    await finished;
+  });
+
+  it("a lead on a cloud machine reads the person's folder of its repository here as theirs: unlisted and refused by that rule", async () => {
+    const { finished } = await lead();
+    const cloud = (await rt.projects.list()).find(p => p.name === "lab-cloud")!;
+    const ws = await rt.workspaces.create({ project: cloud.id, name: "cloud-lead", agents: { spawn: true } });
+    const turn = await rt.sessions.start(ws.id, { prompt: "coordinate from the cloud" });
+    const threadId = turn.view().threadId!;
+    const asLead: Caller = { origin: "relayed", by: { kind: "thread", threadId, workspaceId: ws.id, rootThreadId: threadId } };
+    expect((await rt.projects.list(asLead)).map(p => p.name)).toEqual(["lab-cloud"]);
+    const folder = refusalLine(spawnFolderRefusal(threadId, "lab"), SPAWN_FOLDER_FIX);
+    await expect(rt.projects.resolve("lab", asLead)).rejects.toThrow(folder);
+    await expect(rt.workspaces.resolve("lab", asLead)).rejects.toThrow(folder);
+    await expect(rt.workspaces.resolve("lab", asLead, "exec")).rejects.toThrow(refusalLine(execOutsideRefusal(threadId, "lab", "folder"), execOutsideFix("cloud-lead")));
+    held.release(1, "done");
+    await turn.finished;
+    held.release(0, "read it");
+    await finished;
+  });
+
+  it("a name the thread may not use is refused by its rule and fix in the word it typed, never as no workspace", async () => {
+    const { threadId, launch, cloud, finished } = await lead();
+    const says = async (...argv: string[]): Promise<string> => (await thread(launch, ...argv)).io.errors.join("\n");
+    const ran = await thread(launch, "run", "other-cloud", "--notify", "me", "--detach", "build it");
+    expect(ran.code).toBe(EXIT_CODES.usage);
+    expect(ran.io.errors.join("\n")).toBe(`wsp run: ${refusalLine(spawnRepositoryRefusal(threadId, "lab", "other-cloud"), SPAWN_REPOSITORY_FIX)}`);
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["lab"]);
+    // A machine the person made on the lead's own repository is outside the lead's tree: refused by that rule, with
+    // the road to a child of its own. Named by its whole id, the sentence carries the id and never the name.
+    const theirs = await rt.workspaces.create({ project: cloud, name: "theirs" });
+    expect(await says("run", "theirs", "--detach", "build it")).toBe(`wsp run: ${refusalLine(spawnReachRefusal(threadId, "theirs"), spawnReachFix("lab-cloud", true))}`);
+    const byId = await says("run", theirs.id, "--detach", "build it");
+    expect(byId).toBe(`wsp run: ${refusalLine(spawnReachRefusal(threadId, theirs.id), spawnReachFix("lab-cloud", true))}`);
+    expect(byId).not.toContain("theirs");
+    // A machine on another repository's project is refused as a workspace of another repository, in the word typed
+    // and never its project's name, for every verb that reads a name.
+    const other = (await rt.projects.list()).find(p => p.name === "other-cloud")!;
+    const nightly = await rt.workspaces.create({ project: other.id, name: "nightly" });
+    const foreign = (word: string): string => refusalLine(spawnRepositoryWorkspaceRefusal(threadId, "lab", word), SPAWN_REPOSITORY_WORKSPACE_FIX);
+    expect(await says("run", "nightly", "--detach", "build it")).toBe(`wsp run: ${foreign("nightly")}`);
+    // Exec starts nothing: its refusals say what the word is, and the road is exec on the lead's own machine.
+    const execs = (word: string, is: "folder" | "project" | "workspace"): string => `wsp exec: ${refusalLine(execOutsideRefusal(threadId, word, is), execOutsideFix("lab"))}`;
+    const execNightly = await thread(launch, "exec", "nightly", "--", "true");
+    expect(execNightly.code).toBe(EXIT_CODES.usage);
+    expect(execNightly.io.errors.join("\n")).toBe(execs("nightly", "workspace"));
+    const foreignById = await says("exec", nightly.id, "--", "true");
+    expect(foreignById).toBe(execs(nightly.id, "workspace"));
+    expect(foreignById).not.toMatch(/nightly|other-cloud/);
+    expect(await says("exec", "other-cloud", "--", "true")).toBe(execs("other-cloud", "project"));
+    expect(await says("exec", "theirs", "--", "true")).toBe(`wsp exec: ${refusalLine(spawnReachRefusal(threadId, "theirs"), execOutsideFix("lab"))}`);
+    expect((await thread(launch, "exec", "lab", "--", "true")).code).toBe(0);
+    // A worktree the person made on the lead's own folder is outside the tree too, and the road there opens a thread
+    // in the folder, which forks nothing.
+    const mac = (await rt.projects.list()).find(p => p.name === "lab")!;
+    await rt.workspaces.worktree({ project: mac.id, branch: "feat" });
+    const tree = (await rt.workspaces.list()).find(w => w.worktree?.branch === "feat")!;
+    expect(await says("run", tree.name, "--detach", "build it")).toBe(`wsp run: ${refusalLine(spawnReachRefusal(threadId, tree.name), spawnReachFix("lab", false))}`);
+    expect(await says("run", "nothing-here", "--detach", "build it")).toBe(`wsp run: ${noWorkspaceRefusal("nothing-here")}`);
+    // Another folder of the same repository on this computer is the person's: a thread started there would stand
+    // outside the tree, so it is not listed, it is refused by that rule, and no worktree is made in it.
+    const sibling = join(dir, "sibling");
+    execFileSync("git", ["clone", "-q", join(dir, "repo"), sibling]);
+    execFileSync("git", ["-C", sibling, "remote", "set-url", "origin", "git@github.com:dev/lab.git"]);
+    await rt.projects.add({ source: sibling, on: HERE_PLACE_ID, name: "lab-two" });
+    expect(json<{ projects: { name: string }[] }>((await thread(launch, "projects", "--json")).io).projects.map(p => p.name)).toEqual(["lab", "lab-cloud"]);
+    expect(await says("run", "lab-two", "--detach", "build it")).toBe(`wsp run: ${refusalLine(spawnFolderRefusal(threadId, "lab-two"), SPAWN_FOLDER_FIX)}`);
+    expect(await says("exec", "lab-two", "--", "true")).toBe(execs("lab-two", "folder"));
+    const worktree = await thread(launch, "worktree", "lab-two", "kid");
+    expect(worktree.code).toBe(EXIT_CODES.usage);
+    expect(worktree.io.errors.join("\n")).toBe(`wsp worktree: ${refusalLine(spawnFolderRefusal(threadId, "lab-two"), SPAWN_FOLDER_FIX)}`);
+    held.release(0, "read it");
+    await finished;
   });
 });
