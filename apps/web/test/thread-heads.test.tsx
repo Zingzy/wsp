@@ -188,6 +188,9 @@ describe("a thread the page holds", () => {
     fireEvent.click(threadRow("make me a simple server"));
     expect(center().getByText("Added GET /health.")).toBeDefined();
     expect(center().queryByText(TRANSCRIPT_LOADING)).toBeNull();
+    // The thread left stays hidden and inert until the next one has painted.
+    expect(center().getByText("Checking the keychain.").closest("[inert]")).not.toBeNull();
+    await act(() => new Promise<void>(resolve => requestAnimationFrame(() => setTimeout(resolve))));
     expect(center().queryByText("Checking the keychain.")).toBeNull();
   });
 
