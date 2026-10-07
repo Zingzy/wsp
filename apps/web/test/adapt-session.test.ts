@@ -440,9 +440,46 @@ describe("deriveMessagesTimelineRows", () => {
     expect(r[2]).toMatchObject({ kind: "work-toggle", hasFailure: true, summary: "Ran 1 command" });
   });
 
-  it("an interrupted turn is labelled as stopped by the user", () => {
-    const r = rows([start, tool("Bash", { command: "sleep 9" }), result("", false), { type: "session.done", ...scope, result: { status: "interrupted", durationMs: 4000 } }, end]);
-    expect(r[1]).toMatchObject({ kind: "turn-fold", label: "You stopped after 4.0s" });
+  describe("a turn the person stopped", () => {
+    const one = { ...scope, turnId: "turn_1" };
+    const two = { ...scope, turnId: "turn_2" };
+    const said: SessionEvent[] = [
+      { ...start, ...one },
+      { type: "session.delta", ...one, kind: "text", text: "alpha", messageId: "msg_1" },
+      { ...tool("Bash", { command: "echo one" }), ...one },
+      { ...result("one"), ...one },
+      { type: "session.delta", ...one, kind: "text", text: "beta", messageId: "msg_2" },
+    ];
+    const stopped: SessionEvent[] = [{ type: "session.done", ...one, result: { status: "interrupted", durationMs: 4000 } }, { ...end, ...one }];
+    const next: SessionEvent[] = [
+      { type: "session.start", ...two, prompt: "go on" },
+      { type: "session.delta", ...two, kind: "text", text: "gamma", messageId: "msg_3" },
+      { ...done, ...two },
+      { ...end, ...two },
+    ];
+    const shown = (events: ReadonlyArray<SessionEvent>) =>
+      rows(events).flatMap(x => (x.kind === "message" ? [`${x.message.role}: ${x.message.text}`] : x.kind === "work-toggle" ? [x.summary] : x.kind === "turn-fold" ? [x.label] : []));
+
+    it("keeps every message, call and result it wrote in view and says under them that it was stopped, before the next turn's", () => {
+      expect(shown([...said, ...stopped, ...next])).toEqual(["user: do it", "assistant: alpha", "Ran 1 command", "assistant: beta", "You stopped after 4.0s", "user: go on", "assistant: gamma"]);
+    });
+
+    it("keeps what was already shown of a message still streaming when the stop landed", () => {
+      const streaming: SessionEvent[] = [...said, { type: "session.delta", ...one, kind: "text", text: " and bet", messageId: "msg_2" }];
+      expect(shown(streaming)).toContain("assistant: beta and bet");
+      expect(shown([...streaming, ...stopped])).toEqual([...shown(streaming), "You stopped after 4.0s"]);
+    });
+
+    it("says it was stopped under its last row, past a message the person steered in", () => {
+      const steered: SessionEvent[] = [...said.slice(0, 2), { type: "session.steer", ...one, prompt: "use two" }, ...said.slice(2), ...stopped];
+      expect(shown(steered)).toEqual(["user: do it", "assistant: alpha", "user: use two", "Ran 1 command", "assistant: beta", "You stopped after 4.0s"]);
+    });
+
+    it("says it was stopped under its last call when no words came after it, and the line folds nothing", () => {
+      const r = rows([...said.slice(0, 4), ...stopped, ...next]);
+      expect(r.map(x => (x.kind === "turn-fold" ? x.label : x.kind))).toEqual(["message", "message", "work-toggle", "You stopped after 4.0s", "message", "message"]);
+      expect(r.find(x => x.kind === "turn-fold")).toMatchObject({ expanded: null });
+    });
   });
 
   it("error rows never fold or group", () => {
