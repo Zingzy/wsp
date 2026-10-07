@@ -264,8 +264,8 @@ export interface RulesArea {
   readonly drives: (record: { kind: WorkspaceKind; machineId?: string }, caller: Caller | undefined) => boolean;
   readonly opensIn: (record: WorkspaceRecord, scope: ThreadScope | undefined) => boolean;
   readonly projectOfScope: (scope: ThreadScope) => string | undefined;
-  readonly ofThreadsRepository: (scope: ThreadScope, project: string) => boolean;
-  readonly projectReached: (scope: ThreadScope, project: string) => boolean;
+  readonly ofThreadsRepository: (caller: Caller | undefined, project: string) => boolean;
+  readonly projectReached: (caller: Caller | undefined, project: string) => boolean;
   readonly refusalFor: (record: WorkspaceLike | undefined, caller: Caller | undefined) => string | undefined;
   readonly refuseRelayed: (record: WorkspaceLike | undefined, caller: Caller | undefined) => void;
   readonly refuseNamed: (workspaceId: string, caller: Caller | undefined) => void;
@@ -346,7 +346,7 @@ export interface ChannelsArea {
   readonly copyChannel: (entry: LiveWorkspace, onEvent: (event: Record<string, unknown>) => void, carries: readonly string[]) => Promise<DaemonChannel>;
   readonly leadStart: (lead: LiveWorkspace, child: string) => Promise<ChildStart>;
   readonly startChildOn: (child: LiveWorkspace, branch: string, lead: string) => Promise<string>;
-  readonly sameRepository: (a: ProjectView, b: ProjectView) => boolean;
+  readonly sameRepository: (a: ProjectView, b: ProjectView, caller: Caller | undefined) => boolean;
 }
 
 export interface RecordsArea {

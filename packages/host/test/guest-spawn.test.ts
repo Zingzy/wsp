@@ -227,6 +227,7 @@ describe("a lead thread on this computer starting children on a cloud computer",
   let handle: HostHandle | undefined;
   let held: ReturnType<typeof heldAgent>;
   let mcp: Client | undefined;
+  let restart: () => Runtime;
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-lead-cloud-"));
@@ -242,15 +243,18 @@ describe("a lead thread on this computer starting children on a cloud computer",
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     held = heldAgent(true);
     const here: { url?: string } = {};
-    rt = createRuntime({
+    const backend = withDaemonRoads(stubBackend());
+    const daemons = branchDaemons();
+    restart = () => createRuntime({
       statePath,
-      backend: withDaemonRoads(stubBackend()),
-      daemonChannel: branchDaemons().open,
+      backend,
+      daemonChannel: daemons.open,
       store,
       adapters: { claude: held.adapter },
       local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, statePath, copyingFake()),
       agents: { here, wspMcp: { command: "wsp", args: ["mcp"] } },
     });
+    rt = restart();
     handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt, here });
     vi.stubEnv("SOLARI_API_KEY", "");
   });
@@ -270,14 +274,14 @@ describe("a lead thread on this computer starting children on a cloud computer",
   const json = <T>(io: Captured): T => JSON.parse(io.lines.at(-1)!) as T;
 
   /** A lead on this computer's folder of dev/lab, the same repository on the cloud as lab-cloud, and another one there. */
-  async function lead(): Promise<{ threadId: string; launch: Record<string, string>; cloud: string; finished: Promise<unknown> }> {
+  async function lead(origin = "git@github.com:dev/lab.git", cloudRemote = "https://github.com/dev/lab.git"): Promise<{ threadId: string; launch: Record<string, string>; cloud: string; finished: Promise<unknown> }> {
     const repo = join(dir, "repo");
     mkdirSync(repo);
     execFileSync("git", ["init", "-q", "-b", "main", repo]);
     execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
-    execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@github.com:dev/lab.git"]);
+    execFileSync("git", ["-C", repo, "remote", "add", "origin", origin]);
     const mac = await rt.projects.add({ source: repo, on: HERE_PLACE_ID, name: "lab" });
-    const cloud = await rt.projects.add({ source: "https://github.com/dev/lab.git", on: "default", name: "lab-cloud" });
+    const cloud = await rt.projects.add({ source: cloudRemote, on: "default", name: "lab-cloud" });
     await rt.projects.add({ source: "https://github.com/dev/other.git", on: "default", name: "other-cloud" });
     const folder = await rt.workspaces.create({ project: mac.id, name: "lab", agents: { spawn: true } });
     const turn = await rt.sessions.start(folder.id, { prompt: "coordinate" });
@@ -400,5 +404,66 @@ describe("a lead thread on this computer starting children on a cloud computer",
     expect(worktree.io.errors.join("\n")).toBe(`wsp worktree: ${refusalLine(spawnFolderRefusal(threadId, "lab-two"), SPAWN_FOLDER_FIX)}`);
     held.release(0, "read it");
     await finished;
+  });
+
+  /** The projects the thread lists, and the project of the machine a child it runs on each one stands on. */
+  async function listsAndRuns(launch: Record<string, string>, ...projects: string[]): Promise<{ listed: string[]; childProjects: (string | undefined)[] }> {
+    const listed = json<{ projects: { name: string }[] }>((await thread(launch, "projects", "--json")).io).projects.map(p => p.name);
+    const childProjects: (string | undefined)[] = [];
+    for (const project of projects) {
+      const ran = await thread(launch, "run", project, "--detach", "build it", "--json");
+      expect(ran.io.errors.join("\n")).not.toContain("another repository");
+      expect(ran.code).toBe(0);
+      const row = (await rt.sessions.list()).find(r => r.threadId === json<{ threadId: string }>(ran.io).threadId)!;
+      childProjects.push((await rt.workspaces.list()).find(w => w.id === row.workspaceId)?.project.name);
+    }
+    return { listed, childProjects };
+  }
+  const remotes = async (): Promise<Record<string, string | undefined>> => Object.fromEntries((await rt.projects.list()).map(p => [p.name, p.remote]));
+
+  it("a lead whose folder's origin moved starts children on cloud projects recorded under the old name and the new, and no record changes", async () => {
+    const { finished, launch } = await lead("git@github.com:old/lab.git");
+    await rt.projects.add({ source: "https://github.com/Old/Lab", on: "default", name: "lab-old" });
+    await rt.projects.add({ source: "https://github.com/old/lib.git", on: "default", name: "lib-cloud" });
+    const before = await remotes();
+    execFileSync("git", ["-C", join(dir, "repo"), "remote", "set-url", "origin", "git@github.com:dev/lab.git"]);
+    expect(await listsAndRuns(launch, "lab-cloud", "lab-old")).toEqual({ listed: ["lab", "lab-cloud", "lab-old"], childProjects: ["lab-cloud", "lab-old"] });
+    expect(await remotes()).toEqual(before);
+    held.release(2, "Built it.");
+    held.release(1, "Built it.");
+    held.release(0, "read it");
+    await finished;
+  });
+
+  it("a lead whose folder's origin points at a fork changes no other project's record", async () => {
+    const { finished, launch } = await lead();
+    await rt.projects.add({ source: "https://github.com/me/lab.git", on: "default", name: "lab-fork" });
+    const before = await remotes();
+    execFileSync("git", ["-C", join(dir, "repo"), "remote", "set-url", "origin", "git@github.com:me/lab.git"]);
+    expect(await listsAndRuns(launch, "lab-cloud")).toEqual({ listed: ["lab", "lab-cloud", "lab-fork"], childProjects: ["lab-cloud"] });
+    expect(await remotes()).toEqual(before);
+    held.release(1, "Built it.");
+    held.release(0, "read it");
+    await finished;
+  });
+
+  it("a lead whose folder's origin moved still lists and reaches its child on the new name after a host restart, before it reads any project", async () => {
+    const { threadId, finished, launch } = await lead("git@github.com:old/lab.git");
+    execFileSync("git", ["-C", join(dir, "repo"), "remote", "set-url", "origin", "git@github.com:dev/lab.git"]);
+    const ran = await thread(launch, "run", "lab-cloud", "--detach", "build it", "--json");
+    expect(ran.code).toBe(0);
+    const child = (await rt.sessions.list()).find(r => r.threadId === json<{ threadId: string }>(ran.io).threadId)!.workspaceId;
+    const leadWorkspace = (await rt.sessions.list()).find(r => r.threadId === threadId)!.workspaceId;
+    held.release(1, "Built it.");
+    held.release(0, "read it");
+    await finished;
+    await handle?.close();
+    handle = undefined;
+    await rt.close();
+    rt = restart();
+    const asLead: Caller = { origin: "here", by: { kind: "thread", threadId, workspaceId: leadWorkspace, rootThreadId: threadId } };
+    expect((await rt.workspaces.list(asLead)).map(w => w.name).sort()).toEqual(["lab", (await rt.workspaces.get(child)).name].sort());
+    expect((await rt.workspaces.get(child, asLead)).id).toBe(child);
+    await rt.close();
   });
 });

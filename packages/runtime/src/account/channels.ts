@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { spawnSync } from "node:child_process";
 import { join, relative } from "node:path";
 import { remoteHost } from "@wsp/catalog";
-import { type DaemonFrame, type DaemonResponse, type DaemonReachView, type ProjectRef, type ProjectView, type WorkspaceAgents, type PlaceSettings, branchUnreadRefusal, GitPushReply, GitStatusReply, GitStartOnReply, DETACHED_HEAD, childStartedLine, forkNeedsPushLine, pushedForChildLine, uncommittedStayed, agentsFrom, placeAtLimitLine, placeSpendLimit, spendCapRefusal, THIS_COMPUTER, isLocalWorkspace, kindWords, machineWord, noSuchProjectLine, absentComputer, HERE_PLACE_ID, placeBlocked, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeServesDaemonLine, ownerRepoOf } from "@wsp/protocol";
+import { type DaemonFrame, type DaemonResponse, type DaemonReachView, type ProjectRef, type ProjectView, type WorkspaceAgents, type PlaceSettings, branchUnreadRefusal, GitPushReply, GitStatusReply, GitStartOnReply, DETACHED_HEAD, childStartedLine, forkNeedsPushLine, pushedForChildLine, uncommittedStayed, agentsFrom, placeAtLimitLine, placeSpendLimit, spendCapRefusal, THIS_COMPUTER, isLocalWorkspace, kindWords, machineWord, noSuchProjectLine, absentComputer, HERE_PLACE_ID, placeBlocked, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeServesDaemonLine, ownerRepoOf, copiesFolder, kindForComputer, type Caller } from "@wsp/protocol";
 import { groupExists } from "../local-exec.js";
 import type { DaemonChannel } from "../daemon-channel.js";
 import type { MachineExecOptions } from "../machine-exec.js";
 import type { WorkspaceRecord, LiveWorkspace } from "../types/wiring.js";
 import { DaemonRefusal, type ChildStart, type SESSION_FACTS } from "../types/internal.js";
 import type { RuntimeContext, ChannelsArea } from "../context.js";
+
+/** How long the rule's origin read may hold the host's one thread: a local git read answers in milliseconds. */
+const ORIGIN_READ_MS = 2_000;
 
 export function channelsArea(ctx: RuntimeContext): ChannelsArea {
   const { local, placeDoor, clock, projectsHeld, threadRecords, sessions, transcriptIndex, places } = ctx;
@@ -484,12 +488,34 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
     }
   };
 
-  /** Whether two projects are one repository: the same host and the same owner and name off their remotes. A project
-   * with no remote a host names is one repository with nothing but itself. */
-  const sameRepository = (a: ProjectView, b: ProjectView): boolean => {
-    const host = remoteHost(a.remote);
-    const repo = ownerRepoOf(a.remote)?.toLowerCase();
-    return host !== undefined && repo !== undefined && host === remoteHost(b.remote) && repo === ownerRepoOf(b.remote)?.toLowerCase();
+  /** The host and owner/name a remote names, lowercase; nothing for a remote no host names. */
+  const repositoryOf = (remote: string): string | undefined => {
+    const host = remoteHost(remote);
+    const repo = ownerRepoOf(remote)?.toLowerCase();
+    return host === undefined || repo === undefined ? undefined : `${host}/${repo}`;
+  };
+  /** The origin a request's thread read for its own project, keyed by that request's own caller: a listing or a
+   * stream's replay asks git once, and nothing outlives the request. */
+  const originsRead = new WeakMap<object, { project: string; remote: string }>();
+  /** A folder project here's origin as its git answers now, empty for any other project and a folder with none. Read
+   * rather than kept, since the person moves an origin with git and tells no verb, and synchronous, since the rule
+   * that asks is read on every event a thread's stream passes. */
+  const originNow = (p: ProjectView, caller: Caller | undefined): string => {
+    if (p.source.kind !== "folder" || !copiesFolder(kindForComputer(p.computer))) return "";
+    const asked = typeof caller === "object" ? originsRead.get(caller) : undefined;
+    if (asked?.project === p.id) return asked.remote;
+    const read = spawnSync("git", ["-C", p.path, "remote", "get-url", "origin"], { encoding: "utf8", timeout: ORIGIN_READ_MS });
+    const remote = read.status === 0 ? read.stdout.trim() : "";
+    if (typeof caller === "object") originsRead.set(caller, { project: p.id, remote });
+    return remote;
+  };
+  /** Whether b is of a's repository: b's saved remote names the host and owner/name a's saved remote names, or the
+   * one a's origin names, asked only when the saved remotes differ. No saved remote is rewritten, so a folder pointed
+   * at a fork moves nothing of the upstream's. A project with no remote a host names is one repository with nothing
+   * but itself. */
+  const sameRepository = (a: ProjectView, b: ProjectView, caller: Caller | undefined): boolean => {
+    const theirs = repositoryOf(b.remote);
+    return theirs !== undefined && (theirs === repositoryOf(a.remote) || theirs === repositoryOf(originNow(a, caller)));
   };
   return {
     startedAs, cutBefore, resumedFact, folderOf, accessOf, daemonNotes, homeOf, providerOf, placeIdOf, settingsAt,

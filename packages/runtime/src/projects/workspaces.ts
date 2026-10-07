@@ -80,7 +80,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
       // A child is a second checkout of its parent's repository on the branch that parent is on, so a parent holding
       // another repository has no branch this child could start from and land its work back in. The same repository
       // added on another computer is the same code, which is how a lead on this computer starts a child on a box.
-      if (parent !== undefined && parent.record.project !== project.id && !ctx.sameRepository(ctx.projectHeld(parent.record.project), project)) {
+      if (parent !== undefined && parent.record.project !== project.id && !ctx.sameRepository(ctx.projectHeld(parent.record.project), project, origin)) {
         throw Object.assign(new Error(parentProjectRefusal(parent.record.name, ctx.projectHeld(parent.record.project).name, project.name)), { kind: "invalid" });
       }
       await ctx.placeGuard((await ctx.landingPlace(project.computer)).placeId ?? places.wired);
@@ -191,14 +191,14 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
           const theirs = ctx.held().find(e => e.record.id === ref) ?? ctx.held().find(e => e.record.name === ref);
           if (theirs !== undefined && mine !== undefined && ctx.refusalFor(theirs.record, origin) !== undefined) {
             const project = ctx.projectHeld(theirs.record.project);
-            if (!ctx.ofThreadsRepository(scope, project.id)) throw execFix !== undefined ? outside("workspace", execFix) : refusal(spawnRepositoryWorkspaceRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_WORKSPACE_FIX, "usage");
-            if (!ctx.projectReached(scope, project.id)) throw execFix !== undefined ? outside("folder", execFix) : refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
+            if (!ctx.ofThreadsRepository(origin, project.id)) throw execFix !== undefined ? outside("workspace", execFix) : refusal(spawnRepositoryWorkspaceRefusal(scope.threadId, ctx.projectHeld(mine).name, ref), SPAWN_REPOSITORY_WORKSPACE_FIX, "usage");
+            if (!ctx.projectReached(origin, project.id)) throw execFix !== undefined ? outside("folder", execFix) : refusal(spawnFolderRefusal(scope.threadId, ref), SPAWN_FOLDER_FIX, "usage");
             throw refusal(spawnReachRefusal(scope.threadId, ref), execFix ?? spawnReachFix(project.name, !copiesFolder(kindForComputer(project.computer))), "usage");
           }
           if (execFix !== undefined) {
             const held = [...ctx.projectsHeld.values()];
             const project = held.find(p => p.id === ref) ?? held.find(p => p.name === ref);
-            if (project !== undefined && !ctx.projectReached(scope, project.id)) throw outside(ctx.ofThreadsRepository(scope, project.id) ? "folder" : "project", execFix);
+            if (project !== undefined && !ctx.projectReached(origin, project.id)) throw outside(ctx.ofThreadsRepository(origin, project.id) ? "folder" : "project", execFix);
           }
           await ctx.projectsDoor.resolve(ref, origin).catch((e: unknown) => {
             if ((e as { kind?: unknown }).kind !== "not-found") throw e;
