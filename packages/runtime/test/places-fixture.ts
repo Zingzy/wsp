@@ -4,7 +4,7 @@ import { afterEach, expect } from "vitest";
 import type WebSocket from "ws";
 import type { PlaceReport, PlaceView } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HostFolders, type Runtime } from "../src/runtime.js";
-import { newPlaceKeyPair, type PlaceKeyPair, type PlaceLeaver, type PlaceUpdater } from "../src/places.js";
+import { newPlaceKeyPair, type PlaceKeyPair, type PlaceLeaver, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import type { AgentsActs, AgentsReader, ServerIcons, ServersActs, SkillsActs } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -27,7 +27,7 @@ afterEach(async () => {
   ctx.runtime = undefined;
 });
 
-export async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs; serverIcons?: ServerIcons; adapters?: Record<string, HarnessAdapterFactory> } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+export async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs; serverIcons?: ServerIcons; adapters?: Record<string, HarnessAdapterFactory>; runOver?: PlaceWiring["runOver"]; back?: PlaceWiring["back"] } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   ctx.runtime = createRuntime({
@@ -40,7 +40,7 @@ export async function serving(opts: { provider?: { id: string; rateUsdPerHour: n
     ...(opts.skillsActs === undefined ? {} : { skillsActs: opts.skillsActs }),
     ...(opts.serversActs === undefined ? {} : { serversActs: opts.serversActs }),
     ...(opts.serverIcons === undefined ? {} : { serverIcons: opts.serverIcons }),
-    placeLinks: { ...wiring(hostKey, opts.provider, opts.update), ...(opts.leave === undefined ? {} : { leave: opts.leave }) },
+    placeLinks: { ...wiring(hostKey, opts.provider, opts.update), ...(opts.leave === undefined ? {} : { leave: opts.leave }), ...(opts.runOver === undefined ? {} : { runOver: opts.runOver }), ...(opts.back === undefined ? {} : { back: opts.back }) },
     ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
     ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
   });

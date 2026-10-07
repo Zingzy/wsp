@@ -475,6 +475,8 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "worktree remove force": "remove it over files no commit holds, which go with it",
   "export from": "the folder on the machine to bring home; the project registered for the folder you named without it",
   "recipes save from": "the computer whose picks the recipe is saved from, by the name wsp computers shows; it follows the recipe from then on",
+  "computers set ssh": "the login user@host the host reaches a computer you added by over ssh from now, saved only once the computer it reaches reads as that same one",
+  "computers set name": "what to call a computer you added from now, which every listing then shows; its id, its projects and its machines stay as they are",
   "computers set recipe": "the saved recipe it follows from now, by the name wsp recipes shows, or none to keep what it has and follow nothing",
   force: "build again even where the place already holds this version",
   hidden: "list the folders whose names start with a dot too",

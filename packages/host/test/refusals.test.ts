@@ -109,13 +109,17 @@ describe("what wsp says when it will not run a line", () => {
     expect(relay.code).toBe(EXIT_CODES.usage);
     expect(relay.io.errors).toEqual(["unknown command: relay. Run wsp --help for the list."]);
     // A flag wsp used to read is the parser's own unknown option, with the line's usage under it.
-    for (const argv of [["threads", "--in", "alpha"], ["run", "x", "--local"], ["run", "x", "--ssh", "maya@box"]]) {
+    for (const argv of [["threads", "--in", "alpha"], ["run", "x", "--local"]]) {
       const { code, io } = await run(...argv);
       const line = argv.join(" ");
       expect(code, line).toBe(EXIT_CODES.usage);
       expect(io.errors[0], line).toContain("Unknown option");
       expect(io.errors[0], line).toContain("usage: wsp ");
     }
+    // --ssh is read by wsp computers set again, so on run it points there rather than reading as gone.
+    const ssh = await run("run", "x", "--ssh", "maya@box");
+    expect(ssh.code).toBe(EXIT_CODES.usage);
+    expect(ssh.io.errors[0]).toContain("--ssh belongs to wsp computers set; wsp run does not read it");
     // --on is read by the lists of a computer, so on another verb it is that verb's stray flag rather than an unknown one.
     const on = await run("run", "x", "--on", "here");
     expect(on.code).toBe(EXIT_CODES.usage);

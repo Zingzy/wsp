@@ -2,7 +2,6 @@
 import { z } from "zod";
 import {
   PlaceView,
-  placeSettingsLine,
   NAP_AFTER_MAX_MS,
   napMsOf,
   TURN_LIMIT_MAX_MS,
@@ -23,7 +22,7 @@ import {
   resetQuestion,
 } from "@wsp/protocol";
 import { addComputer } from "../setup-follow.js";
-import { hostPlatform, computerLines, followLine, recipeLines, recipeShownLines, recipeSavedLine, recipeRemovedLine, oneOf, readUsage, accountNamed, usageTableLines, readComputers, SETTING_RESETS, setComputer, napAsked, turnLimitAsked, dollarsAsked, usageIs, tool, type Verb, flag, flagList } from "./client.js";
+import { hostPlatform, computerLines, computerSetLines, recipeLines, recipeShownLines, recipeSavedLine, recipeRemovedLine, oneOf, readUsage, accountNamed, usageTableLines, readComputers, SETTING_RESETS, setComputer, napAsked, turnLimitAsked, dollarsAsked, usageIs, tool, type Verb, flag, flagList } from "./client.js";
 import { agentsAsked, countAsked } from "./workspaces-help.js";
 import { confirmed, asJson } from "./io.js";
 
@@ -51,36 +50,41 @@ export const COMPUTER_VERBS: readonly Verb[] = [
   {
     name: "computers set",
     cloudFlags: ["machines", "spend"],
-    usage: "wsp computers set <computer> [--threads <n>] [--machines <n>] [--spend <usd>] [--nap <minutes>|off] [--turn-limit <hours>|off] [--spawn on|off] [--max-machines <n>] [--max-depth <n>] [--recipe <name>|none] [--reset <setting>]...",
-    about: "what you set on one of your computers: how many threads run there at once, how long a quiet machine there runs before it naps, how long one turn there may run, whether agents there may start agents, the recipe it follows<!-- cloud -->, and on a cloud how many machines at once and how much it spends a day<!-- /cloud -->; --reset takes a setting back to its default",
+    usage: "wsp computers set <computer> [--name <new>] [--ssh <login>] [--threads <n>] [--machines <n>] [--spend <usd>] [--nap <minutes>|off] [--turn-limit <hours>|off] [--spawn on|off] [--max-machines <n>] [--max-depth <n>] [--recipe <name>|none] [--reset <setting>]...",
+    about: "what you set on one of your computers: its name, the ssh login it is reached by, how many threads run there at once, how long a quiet machine there runs before it naps, how long one turn there may run, whether agents there may start agents, the recipe it follows<!-- cloud -->, and on a cloud how many machines at once and how much it spends a day<!-- /cloud -->; --reset takes a setting back to its default",
     page: "agent",
-    options: { threads: { type: "string" }, machines: { type: "string" }, spend: { type: "string" }, nap: { type: "string" }, "turn-limit": { type: "string" }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" }, recipe: { type: "string" }, reset: { type: "string", multiple: true } },
+    options: { name: { type: "string" }, ssh: { type: "string" }, threads: { type: "string" }, machines: { type: "string" }, spend: { type: "string" }, nap: { type: "string" }, "turn-limit": { type: "string" }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" }, recipe: { type: "string" }, reset: { type: "string", multiple: true } },
     run: async ctx => {
       const [ref, ...rest] = ctx.args;
       if (ref === undefined || rest.length > 0) throw usageRefusal("wsp computers set takes one computer.", usageIs(ctx));
       const recipe = flag(ctx.flags, "recipe");
+      const also = { name: flag(ctx.flags, "name"), ssh: flag(ctx.flags, "ssh"), recipe };
       const threads = flag(ctx.flags, "threads");
       const machines = flag(ctx.flags, "machines");
       const spend = flag(ctx.flags, "spend");
       const nap = flag(ctx.flags, "nap");
       const turnLimit = flag(ctx.flags, "turn-limit");
       const spawn = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"), ref);
-      const computer = await setComputer(await ctx.client(), ref, {
+      const set = {
         ...(threads !== undefined ? { threads: countAsked("--threads", threads, 1, ref) } : {}),
         ...(machines !== undefined ? { machines: countAsked("--machines", machines, 1, ref) } : {}),
         ...(spend !== undefined ? { spendPerDayUsd: dollarsAsked(spend, ref) } : {}),
         ...(nap !== undefined ? { napMs: napMsOf(napAsked(nap, ref)) } : {}),
         ...(turnLimit !== undefined ? { turnLimitMs: turnLimitMsOf(turnLimitAsked(turnLimit, ref)) } : {}),
         ...(spawn !== undefined ? { spawn } : {}),
-      }, flagList(ctx.flags, "reset").map(word => oneOf("reset", SETTING_RESETS, word, ref)!), recipe);
-      ctx.out.emit({ computer }, recipe === undefined ? placeSettingsLine(computer) : followLine(computer));
+      };
+      const reset = flagList(ctx.flags, "reset").map(word => oneOf("reset", SETTING_RESETS, word, ref)!);
+      const { computer, was } = await setComputer(await ctx.client(), ref, set, reset, also);
+      ctx.out.emit({ computer }, computerSetLines(computer, was, also, Object.keys(set).length > 0 || reset.length > 0).join("\n"));
       return 0;
     },
     tool: tool({
       description:
-        "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set); nap, the minutes a machine there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every machine there counts again from now and which the computer the app runs on does not take, since its threads run in folders; turn_limit, the hours one turn there may run before it is stopped, a send carrying it on from where it stopped (none on a computer the person owns<!-- cloud --> and 6 on a cloud<!-- /cloud --> until it is set, 0 is none), read at each turn's start; spawn, max_machines and max_depth, what the agents there may ask of this host where the folder or the machine they run in holds no switch of its own, as workspaces_agents names it for one (on, up to 3 machines and 2 levels deep, until it is set), read at every ask so one made before the change follows it<!-- cloud -->; machines and spend on a cloud, how many machines may run there at once and the dollars a day it may spend before it starts no new machine (3 and $10 until they are set)<!-- /cloud -->. A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
+        "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: name, what a computer the person added is called from now, in every listing and wherever a computer is named, its id, its projects and its machines staying as they are, refused for the computer the app runs on<!-- cloud -->, for a cloud<!-- /cloud --> and for a name another computer answers to; ssh, the login user@host the host reaches it by over ssh from now, for an update or a remove while its link is down and for the forward it dials back through, saved only once the computer that login reaches reads as this same one, its place file naming this computer and this host; threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set); nap, the minutes a machine there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every machine there counts again from now and which the computer the app runs on does not take, since its threads run in folders; turn_limit, the hours one turn there may run before it is stopped, a send carrying it on from where it stopped (none on a computer the person owns<!-- cloud --> and 6 on a cloud<!-- /cloud --> until it is set, 0 is none), read at each turn's start; spawn, max_machines and max_depth, what the agents there may ask of this host where the folder or the machine they run in holds no switch of its own, as workspaces_agents names it for one (on, up to 3 machines and 2 levels deep, until it is set), read at every ask so one made before the change follows it<!-- cloud -->; machines and spend on a cloud, how many machines may run there at once and the dollars a day it may spend before it starts no new machine (3 and $10 until they are set)<!-- /cloud -->. A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
       input: {
         computer: z.string().describe("the computer, by the name computers lists or its id"),
+        name: z.string().optional().describe("what to call a computer the person added from now"),
+        ssh: z.string().optional().describe("the login user@host the host reaches that computer by over ssh from now, saved once it reads as the same computer"),
         threads: z.number().int().min(1).optional().describe("how many threads may run on that computer at once"),
         machines: z.number().int().min(1).optional().describe("how many machines may run on that cloud at once"),
         spend: z.number().min(0).optional().describe("the dollars a day that cloud may spend before it starts no new machine"),
@@ -93,16 +97,16 @@ export const COMPUTER_VERBS: readonly Verb[] = [
         reset: z.array(z.enum(SETTING_RESETS)).optional().describe("the settings to take back to their defaults, by the same words"),
       },
       output: { computer: PlaceView },
-      call: async ({ computer: ref, threads, machines, spend, nap, turn_limit: turnLimit, spawn: on, max_machines: maxMachines, max_depth: maxDepth, recipe, reset }, deps) => {
+      call: async ({ computer: ref, name, ssh, threads, machines, spend, nap, turn_limit: turnLimit, spawn: on, max_machines: maxMachines, max_depth: maxDepth, recipe, reset }, deps) => {
         const spawn = agentsAsked(on, maxMachines, maxDepth);
-        const computer = await setComputer(await deps.client(), ref, {
+        const { computer } = await setComputer(await deps.client(), ref, {
           ...(threads !== undefined ? { threads } : {}),
           ...(machines !== undefined ? { machines } : {}),
           ...(spend !== undefined ? { spendPerDayUsd: spend } : {}),
           ...(nap !== undefined ? { napMs: napMsOf(nap) } : {}),
           ...(turnLimit !== undefined ? { turnLimitMs: turnLimitMsOf(turnLimit) } : {}),
           ...(spawn !== undefined ? { spawn } : {}),
-        }, reset ?? [], recipe);
+        }, reset ?? [], { name, ssh, recipe });
         return asJson({ computer });
       },
     }),
