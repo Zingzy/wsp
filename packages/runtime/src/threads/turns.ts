@@ -718,6 +718,8 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
       return "unreached";
     }
     if (opened === "gone") return "gone";
+    // The run was read off the machine, so the machine takes commands and needs no proof.
+    delete entry.unchecked;
     // The turn reads how much of itself is written off the transcript it is handed, the copy this open answers. A file
     // that did not read says nothing about the run, so the row is left running as it was.
     let written: SessionEvent[];

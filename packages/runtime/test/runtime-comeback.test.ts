@@ -153,6 +153,23 @@ describe("a turn the host comes back to", () => {
     await rt2.close();
   });
 
+  it("a run re-opened on a machine the restart found running off a provider read alone proves the machine takes commands: the next wake proves nothing", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId } = await hostWentDown(h, store, backend);
+    // The host went down while a wake waited on this machine, which the provider runs.
+    await store.put("workspaces", workspaceId, { ...((await store.get("workspaces", workspaceId)) as object), phase: "waking" });
+    let proofs = 0;
+    backend.machines[0]!.proveRoad = async () => void proofs++;
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+    expect(h.reopened()).toHaveLength(1);
+    expect((await rt2.workspaces.wake(workspaceId)).phase).toBe("running");
+    expect(proofs).toBe(0);
+    await rt2.close();
+  });
+
   it("the run outlives the host: the row keeps its run, stays running across the restart and completes with its reply", async () => {
     const backend = stubBackend();
     const store = memoryStore();

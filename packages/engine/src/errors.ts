@@ -32,6 +32,21 @@ export class MoveUnansweredError extends Error {}
  * the person. */
 export class ResumeUnansweredError extends MoveUnansweredError {}
 
+/** What a proof that a running machine takes commands ends with when the provider still said not yet at its backend's
+ * restore deadline: a disk that streams in behind a running reading, which a later ask may find done. Carries the
+ * provider's last refusal, its words as the message and its kind, status, code and request id. */
+export class RestoreUnfinishedError extends Error {
+  constructor(
+    readonly machineId: string,
+    said: Error,
+  ) {
+    super(said.message);
+    this.name = "RestoreUnfinishedError";
+    const { kind, status, code, requestId } = said as Partial<WspError>;
+    Object.assign(this, { kind, status, code, ...(requestId !== undefined ? { requestId } : {}) });
+  }
+}
+
 /** Thrown by a backend that refuses a snapshot of a machine that has been resumed. Typed so callers (the wizard) can
  * tell "start over" from an ordinary failure. */
 export class NotFirstLifeError extends Error {

@@ -91,6 +91,8 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
         if (refusal !== null) throw new Error(refusal);
       };
+      // A launch from any road, the app's included, meets a machine that takes commands.
+      if (entry.unchecked === true && entry.record.phase === "running") await ctx.proven(entry);
       refuse();
       // A blocked computer refuses a new turn but never a message joining one still running there, so a busy thread asks once it frees.
       let cleared = !ctx.threadRuns(threadId);

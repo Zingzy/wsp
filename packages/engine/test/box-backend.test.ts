@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { DAEMON_UNIT, stopRefusedLine } from "@wsp/protocol";
 import { writeStub } from "../../protocol/test/stub-script.js";
-import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, StopRefusedError, isMissing, type RetryClock } from "../src/errors.js";
+import { GuestUnusableError, MoveUnansweredError, RestoreUnfinishedError, ROAD_TRIES, StopRefusedError, isMissing, type RetryClock } from "../src/errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS } from "../src/exec-detached.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 import { GONE_READS, killUntilGone } from "../src/golden.js";
@@ -411,6 +411,13 @@ describe("BoxBackend against a fake Box API", () => {
     const stuck = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", { status: 409, body: ERROR(409, "box_restoring", "Box is restoring.") });
     await expect(machineOn(stuck).machine.exec("true")).rejects.toMatchObject({ code: "box_restoring" });
     expect(stuck.calls().length).toBeGreaterThan(5);
+  });
+
+  it("a proof that the box takes commands, still refused as restoring at the deadline, ends typed with the provider's request id", async () => {
+    const stuck = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", { status: 409, body: ERROR(409, "box_restoring", "Box is restoring.") });
+    const e = await machineOn(stuck).machine.proveRoad().catch((err: unknown) => err);
+    expect(e).toBeInstanceOf(RestoreUnfinishedError);
+    expect(e).toMatchObject({ kind: "conflict", status: 409, code: "box_restoring", message: "Box is restoring.", requestId: "req_b603629401be48d082e623575a1b9111" });
   });
 
   it("a box that reads ready and answers 502 to its first commands is asked again at the poll pace inside the restore budget, and past it the 502 is the caller's", async () => {

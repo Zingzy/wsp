@@ -435,6 +435,7 @@ export interface MachinesArea {
   readonly adoptPause: (entry: LiveWorkspace) => Promise<void>;
   readonly runsUnderNapping: (entry: LiveWorkspace) => Promise<boolean>;
   readonly adoptRunning: (entry: LiveWorkspace) => Promise<void>;
+  readonly proven: (entry: LiveWorkspace) => Promise<WorkspaceView>;
   readonly settleGone: (entry: LiveWorkspace, reason: string) => Promise<GoneOutcome>;
   readonly markGone: (entry: LiveWorkspace, machineId: string, reason: string) => Promise<GoneOutcome>;
   readonly rereading: Set<string>;

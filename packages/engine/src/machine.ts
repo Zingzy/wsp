@@ -124,6 +124,10 @@ export interface Machine {
    * previewUrl, which on a backend with a public edge is the same road a client takes. The caller's bound is the
    * whole call's, as it is on exec and putBytes. */
   daemonAnswers?(opts?: { timeoutMs?: number }): Promise<boolean>;
+  /** Optional: answers once the machine takes commands, on a backend whose running reading does not promise that: it
+   * asks again inside the backend's own restore budget and past it throws RestoreUnfinishedError; any other refusal is
+   * thrown as itself at once, and `signal` ends the asking. */
+  proveRoad?(signal?: AbortSignal): Promise<void>;
   /** Optional: starts the daemon inside the guest over this machine's exec road, on a provider whose restore can
    * leave the daemon's unit enabled and never started. A daemon already running is left as it is. */
   startDaemon?(): Promise<ExecResult>;

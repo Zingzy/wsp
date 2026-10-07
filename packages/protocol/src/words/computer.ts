@@ -538,6 +538,17 @@ export function wakeAskingAgainLine(ask: number, of: number, style: "long" | "sh
 /** The row's line, and what the wake ends with, when the person stopped the host asking from the row. */
 export const WAKE_STOPPED = "waking stopped; the machine is still paused";
 
+/** The row's line, and what the wake ends with, when the person stopped the host waiting for a machine the provider
+ * runs to take commands: it stays up, and the next wake waits for it again. */
+export const WAKE_STOPPED_UP = "waking stopped; the machine is up and has not taken a command yet";
+
+/** What a wake ends with when the provider runs the machine and it still refuses commands at its backend's deadline,
+ * as a Boat box does while its disk streams in behind a running reading: the provider's own words, and that a later
+ * wake waits for it again. */
+export function noCommandsYetLine(name: string, said: string): string {
+  return `${name} is up and takes no commands yet (${said}); wake it again in a minute or two`;
+}
+
 /** The row's line once the host's asking ran out and the machine is still paused there, which is the fault probed on
  * 2026-09-10: machines paused for days never resume, while a fresh pause resumes in seconds. Three facts in the order
  * a person needs them: what the provider did, that their work is where they left it, and the one road to a machine
