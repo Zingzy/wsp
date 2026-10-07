@@ -6,7 +6,8 @@
 // row two and the status on row one, every tile 52 px, a working title
 // recedes behind the rows that call for the person, the Settled fold sits shut
 // at the foot of the bare list and opens to slim rows, a toast holds a
-// long token inside its box off the sidebar, the line for a provider out of
+// long token inside its box off the sidebar, the bell stands at the header
+// row's right end and opens rows of one height newest first, the line for a provider out of
 // reach is one muted mono line under the search row at AA, collapsing the
 // sidebar leaves the page header's left padding alone, a send refusal above
 // the composer is one muted mono line in a slot the composer keeps at one
@@ -529,6 +530,42 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         const path = join(SHOTS_DIR, `notice-${theme}-${width}.png`);
         await page!.screenshot({ path });
         console.info(`notice screenshot: ${path}`);
+      }
+    }
+    await page!.setViewportSize({ width: 1200, height: 800 });
+  }, 60_000);
+
+  it("the bell stands at the right end of the header row with its count, and its list holds rows of one height newest first inside the window, at 1200 and 390, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      for (const width of [1200, 390]) {
+        await page!.setViewportSize({ width, height: 800 });
+        await page!.goto(`${base}?theme=${theme}&ws=ws_a&bell=1${width === 390 ? "&panel=closed" : ""}`);
+        const bell = page!.locator("[data-k=notices-bell]");
+        await bell.waitFor();
+        expect(await page!.locator("[data-k=notices-unread]").textContent()).toBe("3");
+        const header = await box("[data-shell-center] header");
+        const b = await box("[data-k=notices-bell]");
+        expect(b.y).toBeGreaterThanOrEqual(header.y);
+        expect(b.y + b.height).toBeLessThanOrEqual(header.y + header.height);
+        expect(header.x + header.width - (b.x + b.width)).toBeLessThan(24);
+        await page!.screenshot({ path: join(SHOTS_DIR, `bell-shut-${theme}-${width}.png`), clip: { x: 0, y: 0, width, height: 120 } });
+        await bell.click();
+        await page!.locator("[data-notices-list] [data-notice-row]").nth(2).waitFor();
+        await page!.waitForTimeout(300);
+        const rows = await page!.locator("[data-notices-list] [data-notice-row]").evaluateAll(els => els.map(el => ({ text: el.querySelector("[data-notice-row-text]")!.textContent, h: el.getBoundingClientRect().height, l: el.getBoundingClientRect().left, r: el.getBoundingClientRect().right })));
+        expect(rows.map(r => r.text)).toEqual(["A newer wsp is out", "Image sealed", expect.stringContaining("spoo was not paused")]);
+        expect(new Set(rows.map(r => r.h))).toEqual(new Set([72]));
+        for (const r of rows) {
+          expect(r.l).toBeGreaterThanOrEqual(0);
+          expect(r.r).toBeLessThanOrEqual(width);
+        }
+        expect(await page!.locator("[data-k=notices-unread]").count()).toBe(0);
+        const path = join(SHOTS_DIR, `bell-open-${theme}-${width}.png`);
+        await page!.screenshot({ path, clip: { x: 0, y: 0, width, height: 420 } });
+        console.info(`bell screenshot: ${path}`);
+        await page!.locator("[data-k=notices-clear]").click();
+        await page!.locator("[data-k=notices-empty]").waitFor();
+        await page!.screenshot({ path: join(SHOTS_DIR, `bell-empty-${theme}-${width}.png`), clip: { x: 0, y: 0, width, height: 200 } });
       }
     }
     await page!.setViewportSize({ width: 1200, height: 800 });

@@ -77,7 +77,7 @@ import { openCommandPalette } from "../../src/commandPaletteBus";
 import { openSettingsGroup } from "../../src/settings/openAt";
 import { SettingsPage } from "../../src/settings/SettingsPage";
 import { useHostNotices } from "../../src/notices/hostNotices.js";
-import { addNotice, type NoticeKind } from "../../src/notices/store.js";
+import { addNotice, useNotices, type NoticeKind } from "../../src/notices/store.js";
 import { useWorkspaceLineNotices } from "../../src/notices/workspaceLines.js";
 import { RIGHT_PANEL_WIDTH_STORAGE_KEY, useRightPanelStore } from "../../src/rightPanelStore";
 import { PR838_CLOSED, PR838_DIFF, PR838_FACT, PR838_MERGED, PR838_PAGE, pr838FactLately, pr838Lately } from "../fixtures/pr838";
@@ -661,6 +661,14 @@ const shown = params.get("ws");
 useStore.setState({ conn: "live", ...(shown !== null ? { selectedId: shown } : {}) });
 const toastAction = params.get("action");
 if (toast !== null) addNotice({ kind: (params.get("kind") as NoticeKind | null) ?? "error", text: toast, where: params.get("where") ?? "spoo", ...(toastAction === null ? {} : { action: { word: toastAction, run: () => {} } }) });
+// ?bell=1 leaves three notices of three kinds in the list with their toasts gone, the longest sentence a refusal
+// carries among them, so the bell's count and its list can be measured and photographed.
+if (params.get("bell") === "1") {
+  addNotice({ kind: "error", text: "spoo was not paused: the provider refused the request because the machine is still writing its snapshot to the volume. Try again in a minute.", where: "spoo" });
+  addNotice({ kind: "done", text: "Image sealed", where: "Solari", action: { word: "Open", run: () => {} } });
+  addNotice({ kind: "note", text: "A newer wsp is out" });
+  for (const id of useNotices.getState().toasts) useNotices.getState().dismiss(id);
+}
 // ?sidebar=<px> is the width the host's record holds, and ?spaces=1 the body it holds; the fixture's api answers no
 // preferences op, so the record is put in place here as the host's answer would put it. The shell is where the
 // surfaces behind labs are shot, so labs is on unless ?labs=0 asks for the record a host without it serves.

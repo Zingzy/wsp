@@ -20,6 +20,7 @@ import { useViewportWidth } from "../hooks/useViewportWidth.js";
 import { isDesktopMac } from "../lib/desktopShell.js";
 import { cn } from "../lib/utils.js";
 import { Notices } from "../notices/Notice.js";
+import { NoticesBell } from "../notices/NoticesBell.js";
 import { useSelectedWorkspaceId, useSettingsOpen, useStore } from "../protocol/store.js";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY, sidebarMaxWidthBeside } from "../rightPanelLayout.js";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./sidebarWidth.js";
@@ -127,6 +128,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   {panelInline ? null : layoutControls}
                 </div>
               )}
+              <NoticesBell />
             </WorkspacePageHeader>
             <div className="relative h-0">
               <Notices />
