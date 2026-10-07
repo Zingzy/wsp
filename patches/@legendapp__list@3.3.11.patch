@@ -1,0 +1,84 @@
+diff --git a/react.js b/react.js
+index 874465090398bbfb1b079e82dd175490020eaabf..d5ad2980008f5307caef0f3e9d64978a8ba73a28 100644
+--- a/react.js
++++ b/react.js
+@@ -1959,6 +1959,10 @@ function finishScrollTo(ctx) {
+       finishInitialScroll(ctx, {
+         onFinished: () => {
+           resolvePendingScroll == null ? void 0 : resolvePendingScroll();
++          if (state.pendingMaintainScrollAtEnd) {
++            state.maintainingScrollAtEnd = void 0;
++            doMaintainScrollAtEnd(ctx);
++          }
+         },
+         preserveTarget: isOffsetSession && state.props.data.length === 0 || shouldPreserveResizeTarget,
+         recalculateItems: true,
+@@ -2016,15 +2020,17 @@ function doScrollTo(ctx, params) {
+   } else {
+     state.scroll = offset;
+     const targetToken = state.scrollingTo;
+-    state.scheduledWork.timeout(
+-      () => {
+-        if (targetToken === state.scrollingTo) {
+-          finishScrollTo(ctx);
+-        }
+-      },
+-      100,
+-      "platformScrollCompletion"
+-    );
++    const finish = () => {
++      if (targetToken === state.scrollingTo) {
++        finishScrollTo(ctx);
++      }
++    };
++    const targetOffset = Math.max(0, Math.min(offset, (_b = (_a3 = scroller.getMaxScrollOffset) == null ? void 0 : _a3.call(scroller)) != null ? _b : offset));
++    if (Math.abs(((_d = (_c = scroller.getCurrentScrollOffset) == null ? void 0 : _c.call(scroller)) != null ? _d : Number.NaN) - targetOffset) <= SCROLL_END_TARGET_EPSILON) {
++      state.scheduledWork.frame(finish, "platformScrollCompletion");
++      return;
++    }
++    state.scheduledWork.timeout(finish, 100, "platformScrollCompletion");
+   }
+ }
+ function listenForScrollEnd(ctx, params) {
+diff --git a/react.mjs b/react.mjs
+index d9a4414a9295c694f9c2b71cf75268a422f897e4..0b76bc4f272df09482e0ac8fefac665126ed720b 100644
+--- a/react.mjs
++++ b/react.mjs
+@@ -1938,6 +1938,10 @@ function finishScrollTo(ctx) {
+       finishInitialScroll(ctx, {
+         onFinished: () => {
+           resolvePendingScroll == null ? void 0 : resolvePendingScroll();
++          if (state.pendingMaintainScrollAtEnd) {
++            state.maintainingScrollAtEnd = void 0;
++            doMaintainScrollAtEnd(ctx);
++          }
+         },
+         preserveTarget: isOffsetSession && state.props.data.length === 0 || shouldPreserveResizeTarget,
+         recalculateItems: true,
+@@ -1995,15 +1999,17 @@ function doScrollTo(ctx, params) {
+   } else {
+     state.scroll = offset;
+     const targetToken = state.scrollingTo;
+-    state.scheduledWork.timeout(
+-      () => {
+-        if (targetToken === state.scrollingTo) {
+-          finishScrollTo(ctx);
+-        }
+-      },
+-      100,
+-      "platformScrollCompletion"
+-    );
++    const finish = () => {
++      if (targetToken === state.scrollingTo) {
++        finishScrollTo(ctx);
++      }
++    };
++    const targetOffset = Math.max(0, Math.min(offset, (_b = (_a3 = scroller.getMaxScrollOffset) == null ? void 0 : _a3.call(scroller)) != null ? _b : offset));
++    if (Math.abs(((_d = (_c = scroller.getCurrentScrollOffset) == null ? void 0 : _c.call(scroller)) != null ? _d : Number.NaN) - targetOffset) <= SCROLL_END_TARGET_EPSILON) {
++      state.scheduledWork.frame(finish, "platformScrollCompletion");
++      return;
++    }
++    state.scheduledWork.timeout(finish, 100, "platformScrollCompletion");
+   }
+ }
+ function listenForScrollEnd(ctx, params) {

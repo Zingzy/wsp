@@ -142,6 +142,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onReachTop,
 }: MessagesTimelineProps) {
   const latestTurn = turns[turns.length - 1] ?? null;
+  // A switch keeps the list it leaves mounted until the next one paints, and that list letting go of its handle
+  // must not clear the one the next list just set.
+  const ownList = useRef<LegendListRef | null>(null);
+  const setList = useCallback(
+    (handle: LegendListRef | null) => {
+      if (handle !== null) listRef.current = handle;
+      else if (listRef.current === ownList.current) listRef.current = null;
+      ownList.current = handle;
+    },
+    [listRef],
+  );
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
   // Scroll/disclosure state outlives virtualized rows, but never the current thread.
@@ -291,13 +302,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   useLayoutEffect(() => {
     keepTimelineEndVisibleAfterOverlayGrowth({
-      timeline: listRef.current,
+      timeline: ownList.current,
       previousOverlayHeight: previousContentInsetEndAdjustmentRef.current,
       overlayHeight: contentInsetEndAdjustment,
       followingEnd: liveFollowEnabled && anchorMessageId === null,
     });
     previousContentInsetEndAdjustmentRef.current = contentInsetEndAdjustment;
-  }, [anchorMessageId, contentInsetEndAdjustment, listRef, liveFollowEnabled]);
+  }, [anchorMessageId, contentInsetEndAdjustment, liveFollowEnabled]);
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const handleAnchorReady = useCallback(
@@ -325,7 +336,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     if (settledRef.current) onReachTop?.();
   }, [onReachTop]);
   const handleScroll = useCallback(() => {
-    const state = listRef.current?.getState?.();
+    const state = ownList.current?.getState?.();
     const isAtEnd = resolveTimelineIsAtEnd(state, contentInsetEndAdjustment);
     if (isAtEnd !== undefined) {
       onIsAtEndChange(isAtEnd);
@@ -360,7 +371,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }
   }, [
     contentInsetEndAdjustment,
-    listRef,
     minimapItems,
     minimapStripMap,
     onIsAtEndChange,
@@ -515,7 +525,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           className="relative h-full min-h-0"
         >
           <LegendList<MessagesTimelineRow>
-            ref={listRef}
+            ref={setList}
             data={rows}
             keyExtractor={keyExtractor}
             getItemType={getItemType}
@@ -553,7 +563,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             stripMap={minimapStripMap}
             onSelect={(item) => {
               onManualNavigation();
-              void listRef.current?.scrollToIndex({
+              void ownList.current?.scrollToIndex({
                 index: item.rowIndex,
                 animated: true,
                 viewOffset: 24,

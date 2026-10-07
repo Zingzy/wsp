@@ -81,6 +81,9 @@ function ComposerPromptEditorInner({ value, cursor, disabled, placeholder, short
       const rootElement = editor.getRootElement();
       if (!rootElement) return;
       const boundedCursor = clampCollapsedComposerCursor(snapshotRef.current.value, nextCursor);
+      // Lexical answers a selection write by setting the DOM's selection and scrolling the caret into view, which forces
+      // a layout of the page, and a thread switch asks for focus in the frame that lays out the next transcript.
+      if (document.activeElement === rootElement && snapshotRef.current.cursor === boundedCursor && editor.getEditorState().read(() => $readSelectionOffsetFromEditorState(-1)) === boundedCursor) return;
       rootElement.focus({ preventScroll: true });
       editor.update(() => {
         $setSelectionAtComposerOffset(boundedCursor);

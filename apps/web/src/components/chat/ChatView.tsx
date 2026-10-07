@@ -251,6 +251,46 @@ export function ChatView({
     </div>
   ) : null;
 
+  // One list per thread shown: a thread drawn from what the transcripts hold replaces the last one with no loading
+  // line between, and opens at its own end rather than at the offset the last one was read to.
+  const drawn: Drawn | null =
+    setupStands || !thread.hydrated || empty
+      ? null
+      : {
+          key: thread.drawKey,
+          node: (
+            <MessagesTimeline
+              isWorking={view.running}
+              machineWait={machineWait}
+              activeTurnStartedAt={view.activeTurnStartedAt}
+              waitingOn={turnRows.at(-1)?.waitingOn ?? null}
+              listRef={listRef}
+              timelineEntries={view.entries}
+              turns={view.turns}
+              turnDiffSummaryByAssistantMessageId={turnDiffs}
+              onOpenTurnDiff={onOpenTurnDiff}
+              threadKey={threadId === null ? workspaceId : `${workspaceId}/${threadId}`}
+              onImageExpand={noopImageExpand}
+              onAnswerPermission={onAnswerPermission}
+              dockedAskId={docked?.(thread) ?? null}
+              onOpenFile={onOpenFile}
+              onIsAtEndChange={onIsAtEndChange}
+              footer={footer}
+              markdownCwd={cwd}
+              workspaceRoot={cwd}
+              resolvedTheme={appDark ? "dark" : "light"}
+              timestampFormat={timestampFormat}
+              onQuote={onQuote}
+              rewindableMessageIds={rewindableIds}
+              slatedMessageIds={slatedIds}
+              onRewind={onRewind}
+              replyRuns={replyRuns}
+              onReachTop={thread.older}
+            />
+          ),
+        };
+  const leaving = useLeaving(drawn);
+
   return (
     <div ref={rootRef} data-chat-view className="relative isolate h-full min-h-0 text-foreground [--empty-lift:calc((100%-var(--chat-composer-inset,0px)-5.5rem)/2)]">
       <div className="absolute inset-0">
@@ -269,38 +309,17 @@ export function ChatView({
               <EmptyThread name={workspace?.project.name ?? workspaceId} {...(workspace?.project?.id === undefined ? {} : { projectId: workspace.project.id })} />
             </div>
           </>
-        ) : (
-          // One list per thread shown: a thread drawn from what the transcripts hold replaces the last one with no
-          // loading line between, and opens at its own end rather than at the offset the last one was read to.
-          <MessagesTimeline
-            key={thread.drawKey}
-            isWorking={view.running}
-            machineWait={machineWait}
-            activeTurnStartedAt={view.activeTurnStartedAt}
-            waitingOn={turnRows.at(-1)?.waitingOn ?? null}
-            listRef={listRef}
-            timelineEntries={view.entries}
-            turns={view.turns}
-            turnDiffSummaryByAssistantMessageId={turnDiffs}
-            onOpenTurnDiff={onOpenTurnDiff}
-            threadKey={threadId === null ? workspaceId : `${workspaceId}/${threadId}`}
-            onImageExpand={noopImageExpand}
-            onAnswerPermission={onAnswerPermission}
-            dockedAskId={docked?.(thread) ?? null}
-            onOpenFile={onOpenFile}
-            onIsAtEndChange={onIsAtEndChange}
-            footer={footer}
-            markdownCwd={cwd}
-            workspaceRoot={cwd}
-            resolvedTheme={appDark ? "dark" : "light"}
-            timestampFormat={timestampFormat}
-            onQuote={onQuote}
-            rewindableMessageIds={rewindableIds}
-            slatedMessageIds={slatedIds}
-            onRewind={onRewind}
-            replyRuns={replyRuns}
-            onReachTop={thread.older}
-          />
+        ) : null}
+        {[leaving, drawn].map(shown =>
+          shown === null ? null : shown === leaving ? (
+            <div key={shown.key} aria-hidden inert className="absolute inset-0 [content-visibility:hidden]">
+              {shown.node}
+            </div>
+          ) : (
+            <div key={shown.key} className="absolute inset-0">
+              {shown.node}
+            </div>
+          ),
         )}
       </div>
       <div
@@ -315,6 +334,40 @@ export function ChatView({
       </div>
     </div>
   );
+}
+
+type Drawn = { readonly key: string; readonly node: ReactNode };
+
+/** The transcript a switch replaced, held hidden until the next one has painted: removing its rows inside the
+ * switch's frame put their teardown in front of that paint. Rendered as the element it last committed, so React
+ * does not render it again while it waits. A key must never come back while its list is held, which `drawKey`
+ * only growing keeps true: React would reuse the held list as the shown one, and the shared listRef would go null
+ * when the other list let go. */
+function useLeaving(drawn: Drawn | null): Drawn | null {
+  const committed = useRef<Drawn | null>(null);
+  const [shownKey, setShownKey] = useState(drawn?.key ?? null);
+  const [leaving, setLeaving] = useState<Drawn | null>(null);
+  if (shownKey !== (drawn?.key ?? null)) {
+    setShownKey(drawn?.key ?? null);
+    setLeaving(drawn === null || committed.current?.key === drawn.key ? null : committed.current);
+  }
+  useLayoutEffect(() => {
+    committed.current = drawn;
+  });
+  useEffect(() => (leaving === null ? undefined : afterPaint(() => setLeaving(null))), [leaving]);
+  return leaving;
+}
+
+/** Runs once the frame being drawn has painted: a frame callback runs before that paint, a task queued from it after. */
+function afterPaint(run: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const frame = requestAnimationFrame(() => {
+    timer = setTimeout(run);
+  });
+  return () => {
+    cancelAnimationFrame(frame);
+    clearTimeout(timer);
+  };
 }
 
 /** Rides over the composer while the reader is above the transcript's end; kept mounted so it fades both ways. */
