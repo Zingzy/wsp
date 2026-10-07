@@ -12,9 +12,10 @@ import {
   placeSshRefusal,
   placeSshOtherRefusal,
   placeSshUncheckedRefusal,
-  heldPlaceScript,
-  parsePlaceFile,
-  lastLine,
+  placeLoginOtherRefusal,
+  placeLoginUncheckedRefusal,
+  placeLoginElsewhere,
+  placeLoginElsewhereRemovedLine,
   placeSettingDropped,
   PlaceSettings,
   joinToken,
@@ -63,7 +64,7 @@ import { ownedFloorBytes, PlaceAbsentError, PlaceMachine, keyFingerprint } from 
 import { openPlaceForward } from "../place-forward.js";
 import {
   CAPS, madeBySetup, type PlaceLogin, type PlaceRecord, type PlaceStaging, type RecipeResolver, type PlaceDoor, NO_PLACE_UPDATER,
-  placeUpdateSlowLine, placeSweptOverSshLine, placeLoginRoadLine, placeSweptOverLinkLine, PlaceLoginRefusedError,
+  placeUpdateSlowLine, placeSweptOverSshLine, placeLoginRoadLine, placeSweptOverLinkLine, placeElsewhereSweptOverLinkLine, PlaceLoginRefusedError, PlaceHostKeyChangedError,
   PlaceAddTakenBackError,
 } from "./types.js";
 import {
@@ -80,7 +81,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
   const { opts, store, devices, wiring, recording, clockNow, dialWaitMs, live, kept, forwards, watchers, emit } = ctx;
   const {
     records, providerIds, recordOf, settingsOf, settingsHeld, rowIds, withCap, untilDaemonVersion, awaiting, adds,
-    putAdd, loginOf, rootOver, loginAnswers, holdBack, defaultId, inTurn, markHeld, change,
+    putAdd, loginOf, rootOver, loginAnswers, reachedOver, holdBack, defaultId, inTurn, markHeld, change,
   } = recordArea;
   const {
     waiting, woken, setting, syncing, skippers, settingNow, recipesMoved, syncFrame, setupFrame, startSetup,
@@ -110,22 +111,22 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
    * computer's id and this host's key. A computer that answers anything else, or holds no place file, is another
    * one; a login that will not stand, or a sudo that asks for a password, leaves it unread. Nothing is written. */
   const sameComputerOver = async (record: PlaceRecord, ssh: string): Promise<void> => {
-    const unchecked = (why: string): never => {
-      const said = placeSshUncheckedRefusal(ssh, record.name, why);
-      throw usageRefusal(said.happened, said.fix);
-    };
-    const home = record.report.login["HOME"];
-    if (wiring.runOver === undefined) return unchecked("this host holds no ssh road to read it over");
-    if (home === undefined) return unchecked(`${record.name} never said where its home is`);
     const login: PlaceLogin = { ssh, ...(record.road?.keyPath !== undefined ? { keyPath: record.road.keyPath } : {}) };
-    const read = await bounded(wiring.runOver(login, heldPlaceScript(home), dialWaitMs), dialWaitMs, `ssh ${ssh}`).catch((e: unknown) => unchecked(refusalParts(e).said));
-    // The read itself answers empty where no place file stands, so a failed run is the login or its sudo.
-    if (read.exitCode !== 0) return unchecked(lastLine(read.stderr) ?? `the read exited ${read.exitCode}`);
-    const file = parsePlaceFile(read.stdout);
-    if (file?.placeId !== record.id || file.hostPublicKey !== wiring.hostKey.publicKey) {
-      const said = placeSshOtherRefusal(ssh, record.name);
-      throw usageRefusal(said.happened, said.fix);
-    }
+    const read = await reachedOver(record, login);
+    const said = "unread" in read ? placeSshUncheckedRefusal(ssh, record.name, read.unread) : read.same ? undefined : placeSshOtherRefusal(ssh, record.name);
+    if (said !== undefined) throw usageRefusal(said.happened, said.fix);
+  };
+
+  /** Holds a road over a computer's own login to that computer before anything of wsp's runs over it. Answers that
+   * it stands, ssh's own line where the login itself would not stand (which reaches no machine at all), or where it
+   * reaches another machine, by its record's name where that is another computer added here. A read that did not
+   * run is refused by name, since nothing then says which machine answered. */
+  const reachesItself = async (record: PlaceRecord, login: PlaceLogin, sudoPassword?: string): Promise<{ stands: true } | { refused: string } | { elsewhere: true; other?: string }> => {
+    const read = await reachedOver(record, login, sudoPassword);
+    if ("same" in read) return read.same ? { stands: true } : { elsewhere: true, ...(read.other !== undefined ? { other: read.other } : {}) };
+    if (read.refused === true) return { refused: read.unread };
+    const said = placeLoginUncheckedRefusal(login.ssh, record.name, read.unread);
+    throw usageRefusal(said.happened, said.fix);
   };
 
   return {
@@ -185,7 +186,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
             ...asked,
             code: joinToken(code, keyFingerprint(wiring.hostKey.publicKey)),
             // Written before a byte of wsp's is sent, with what takes the install back and the login that reaches it.
-            beforeDeploy: (undo, ssh) => movePending({ ...pending, step: "wsp", undo, login: ssh }),
+            beforeDeploy: (undo, ssh, hostKey) => movePending({ ...pending, step: "wsp", undo, login: ssh, ...(hostKey !== undefined ? { hostKey } : {}) }),
           },
           stage,
         );
@@ -445,6 +446,14 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
         // The ssh road runs only where there is no link, and runs as root: where the login's sudo asks for a
         // password, it is asked for before anything goes there, as the add asks it.
         const sudoPassword = link === undefined && ssh !== undefined ? await rootOver(ssh, ask.sudoPassword, { verb: "update", name: held.name }) : undefined;
+        if (link === undefined && ssh !== undefined) {
+          const reached = await reachesItself(held, ssh, sudoPassword);
+          if ("refused" in reached) throw new PlaceLoginRefusedError(reached.refused);
+          if ("elsewhere" in reached) {
+            const said = placeLoginOtherRefusal(ssh.ssh, held, reached.other);
+            throw usageRefusal(said.happened, said.fix);
+          }
+        }
         // Asked on every update, behind or not: wsp's login files on that computer are spelled by this host, so a
         // host that moved alone writes them here and a computer joined under an older spelling takes this one.
         const landed = await wiring.update({
@@ -499,10 +508,26 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       const answers = leaver !== undefined && login !== undefined && (await loginAnswers(login));
       // The leave runs as root, and a login whose sudo asks for a password is asked for it before anything here
       // touches that computer, as the add asks it: a sweep over the link alone leaves the service behind.
-      const sudoPassword = answers ? await rootOver(login!, ask.sudoPassword, { verb: "remove", name: held.name }) : undefined;
+      // A key other than the one the add kept is a machine that is not this computer, or one rebuilt with wsp gone
+      // from it: no password goes there and nothing runs, as for a place file naming another computer.
+      let keyChanged = false;
+      const sudoPassword = answers
+        ? await rootOver(login!, ask.sudoPassword, { verb: "remove", name: held.name }).catch((e: unknown) => {
+            if (!(e instanceof PlaceHostKeyChangedError)) throw e;
+            keyChanged = true;
+            return undefined;
+          })
+        : undefined;
+      // Root is reachable now, so the place file is read before the plugins or the leave run over that login: a login
+      // repointed at another machine would run both there as root. Such a login runs nothing and the record goes all
+      // the same, or a failed add tried again would leave a record nothing could take away.
+      const reached = keyChanged ? { elsewhere: true as const } : answers ? await reachesItself(held, login!, sudoPassword) : undefined;
+      const stands = reached !== undefined && "stands" in reached;
+      const elsewhere = reached !== undefined && "elsewhere" in reached ? reached : undefined;
+      const away = elsewhere === undefined ? undefined : placeLoginElsewhere(login!.ssh, held.name, elsewhere.other);
       // Before either road sweeps: a plugin comes off by its agent's own command, which may sit in the install folder
       // the sweep takes, and nothing on that computer knows which plugins were wsp's.
-      const plugins = await pluginsOff(placeId, held, reach !== undefined, login, sudoPassword);
+      const plugins = await pluginsOff(placeId, held, reach !== undefined, stands ? login : undefined, sudoPassword);
       let swept: string[] = [];
       let note: string | undefined;
       // What the road that logs in did where it did not finish the job, for the lines about the road that followed.
@@ -512,7 +537,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       // go, and what answers over the link cannot. Running it there rather than spelling it here is what keeps one
       // copy of the sweep.
       if (leaver !== undefined && login !== undefined) {
-        if (!answers) {
+        if (!stands) {
           // The login did not stand, so nothing ran on that computer at all.
           loginRoad = { at: login.ssh };
         } else {
@@ -529,8 +554,9 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       // Either that login was never there to take or it did not finish the job, which leaves the two roads there
       // always were: the place's own sweep over the link, and the sentence for a computer nothing here reaches.
       if (note === undefined) {
+        if (away !== undefined) note = reach === undefined ? placeLoginElsewhereRemovedLine(login!.ssh, held.name, elsewhere?.other) : placeElsewhereSweptOverLinkLine(held.name, away);
         if (reach === undefined) {
-          note = loginRoad?.said === undefined ? placeStillInstalledLine(held.name) : `${placeLoginRoadLine(held.name, loginRoad.at, loginRoad.said)}; ${placeStillInstalledLine(held.name)}`;
+          note ??= loginRoad?.said === undefined ? placeStillInstalledLine(held.name) : `${placeLoginRoadLine(held.name, loginRoad.at, loginRoad.said)}; ${placeStillInstalledLine(held.name)}`;
         } else {
           try {
             // Before the folder holding the list goes with the leave: the servers wsp merged into the agents' own
@@ -538,10 +564,11 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
             const took = await unmergedOver(placeId, held);
             const answer = await reach.request("place.leave");
             swept = [...took, ...(Array.isArray(answer["swept"]) ? (answer["swept"] as unknown[]).map(String) : [])];
-            if (loginRoad !== undefined) note = placeSweptOverLinkLine(held.name, loginRoad.at, loginRoad.said);
+            if (loginRoad !== undefined && away === undefined) note = placeSweptOverLinkLine(held.name, loginRoad.at, loginRoad.said);
           } catch (e) {
             const failed = `${held.name} was connected but did not finish the sweep: ${e instanceof Error ? e.message : String(e)}; run ${PLACE_LEAVE_LINE} on that computer`;
-            note = loginRoad === undefined ? failed : `${placeLoginRoadLine(held.name, loginRoad.at, loginRoad.said)}, and ${failed}`;
+            const before = away !== undefined ? `${away}, so nothing was changed on the machine it reaches` : loginRoad === undefined ? undefined : placeLoginRoadLine(held.name, loginRoad.at, loginRoad.said);
+            note = before === undefined ? failed : `${before}, and ${failed}`;
           }
         }
       }
@@ -557,7 +584,8 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
       }
       if (reach !== undefined) cut(placeId, "removed from this host");
       // After the sweep, since the link that sweep may ride comes in through the forward.
-      if (login !== undefined && held.road?.back !== undefined) wiring.back?.release(login);
+      // Another record on the same login keeps it held: a failed add tried again leaves two, the live one among them.
+      if (login !== undefined && held.road?.back !== undefined && !(await records()).some(r => r.id !== placeId && loginOf(r)?.ssh === login.ssh)) wiring.back?.release(login);
       for (const pending of await pendingRecords()) if (pending.placeId === placeId) await dropPending(pending.id);
       await forget(placeId);
       return { removed: true, swept, ...(note !== undefined ? { note } : {}) };

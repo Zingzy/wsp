@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { NO_PLACE_INSTALLER, PLACE_LOGIN_REFUSED_KIND, PLACE_HOST_KEY_KIND, DAEMON_VERSION, joinToken, readJoinToken, placeNoLinkLine, refusal, type PlaceStageEvent } from "@wsp/protocol";
+import { NO_PLACE_INSTALLER, PLACE_LOGIN_REFUSED_KIND, PLACE_HOST_KEY_KIND, DAEMON_VERSION, joinToken, readJoinToken, placeNoLinkLine, refusal, heldPlaceScript, placeFileText, type PlaceStageEvent } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
 import { keyFingerprint } from "@wsp/engine";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, newPlaceKeyPair, type PlaceInstallRequest, type PlaceLogin, type PlaceUpdateRequest } from "../src/places.js";
@@ -297,6 +297,7 @@ describe("putting the agent on a computer over ssh", () => {
     const hostKey = newPlaceKeyPair();
     const store = memoryStore();
     const asked: PlaceUpdateRequest[] = [];
+    const ran: string[] = [];
     let joined = "";
     ctx.runtime = createRuntime({
       backend: stubBackend(),
@@ -318,6 +319,12 @@ describe("putting the agent on a computer over ssh", () => {
           asked.push(req);
           return { road: "ssh", at: "/root/.wsp/daemon/wsp-daemon" };
         },
+        // The update over ssh reads the place file first, and this box holds the one its own join wrote.
+        runOver: async (_login, script) => {
+          ran.push(script);
+          const file = placeFileText({ placeId: joined, name: "vps", hostName: "zingzys-mac", hostUrls: DOOR, hostPublicKey: hostKey.publicKey, keyPath: "/root/.wsp/place.key", joinedAt: "2026-10-07T00:00:00.000Z" });
+          return { exitCode: 0, stdout: script === heldPlaceScript(report("vps").login["HOME"]!) ? file : "", stderr: "" };
+        },
       },
       placeJoinWaitMs: 60,
       placeUpdateWaitMs: 60,
@@ -332,6 +339,7 @@ describe("putting the agent on a computer over ssh", () => {
     const updated = await ctx.runtime.places!.update(joined);
     expect(updated.daemon?.road).toBe("ssh");
     expect(asked.map(r => r.ssh)).toEqual([{ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" }]);
+    expect(ran).toEqual([heldPlaceScript(report("vps").login["HOME"]!)]);
   });
 
 });

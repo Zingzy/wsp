@@ -15,6 +15,11 @@ import {
   placeLinkTranscript,
   placeRefusalTranscript,
   sshRoadOf,
+  heldPlaceScript,
+  parsePlaceFile,
+  placeFileNames,
+  lastLine,
+  refusalParts,
   type MachineSizeOffer,
   type PlaceAddJob,
   type PlaceAuthRefusal,
@@ -22,9 +27,9 @@ import {
   type PlaceView,
   buildsImages,
 } from "@wsp/protocol";
-import type { MachineBackend } from "@wsp/engine";
+import { CHILD_TIMED_OUT, type MachineBackend } from "@wsp/engine";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret, signPlaceBytes } from "@wsp/keys";
-import { PLACES, CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, isPlaceRecord, type PlaceLogin, type PlaceChallenge } from "./types.js";
+import { PLACES, CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, isPlaceRecord, type PlaceLogin, type PlaceChallenge, PlaceLoginRefusedError } from "./types.js";
 import { bounded, ADDS_KEPT, UPDATE_POLL_MS } from "./helpers.js";
 import type { PlaceDoorContext } from "./context.js";
 
@@ -177,6 +182,29 @@ export function placeRecords(ctx: PlaceDoorContext) {
     }
   };
 
+  /** What the place file a login reaches says, read as root before anything of wsp's runs over that login: this
+   * computer where it names the record's id and this host's key, else another, by its record's name where it is
+   * another computer added here. An unread one says why, `refused` where the login itself would not stand rather
+   * than its sudo or the read. */
+  const reachedOver = async (record: PlaceRecord, login: PlaceLogin, sudoPassword?: string): Promise<{ same: true } | { same: false; other?: string } | { unread: string; refused?: true }> => {
+    const home = record.report.login["HOME"];
+    if (wiring.runOver === undefined) return { unread: "this host holds no ssh road to read it over" };
+    if (home === undefined) return { unread: `${record.name} never said where its home is` };
+    let read: { exitCode: number; stdout: string; stderr: string };
+    try {
+      read = await bounded(wiring.runOver(login, heldPlaceScript(home), dialWaitMs, sudoPassword), dialWaitMs, `ssh ${login.ssh}`);
+    } catch (e) {
+      return { unread: refusalParts(e).said, ...(e instanceof PlaceLoginRefusedError ? { refused: true as const } : {}) };
+    }
+    if (read.exitCode === CHILD_TIMED_OUT) return { unread: `the read timed out after ${Math.round(dialWaitMs / 1000)}s` };
+    // The read itself answers empty where no place file stands, so a failed run is the login or its sudo.
+    if (read.exitCode !== 0) return { unread: lastLine(read.stderr) ?? `the read exited ${read.exitCode}` };
+    const file = parsePlaceFile(read.stdout);
+    if (placeFileNames(file, [record.id], wiring.hostKey.publicKey)) return { same: true };
+    const other = (await records()).find(r => r.id !== record.id && placeFileNames(file, [r.id], wiring.hostKey.publicKey));
+    return { same: false, ...(other !== undefined ? { other: other.name } : {}) };
+  };
+
   /** The login an install in flight logged in over, by the place its code became; nothing for every computer no
    * install is putting the agent on right now, whose record already carries whatever road it has. */
   const roadOfInstall = (placeId: string): { login?: PlaceLogin; back?: PlaceBack } | undefined => {
@@ -199,7 +227,7 @@ export function placeRecords(ctx: PlaceDoorContext) {
       })().catch(() => undefined);
     };
     // The holder makes it again for as long as it is held, so a first try that failed is not the last.
-    void wiring.back.hold(login, back, { home }, moved).catch(() => undefined);
+    void wiring.back.hold(login, back, { home, computer: { id: record.id, name: record.name } }, moved).catch(() => undefined);
   };
 
   /** The one write of a place record: the store and the memory the sync roads read both move, so a backend answered
@@ -294,7 +322,7 @@ export function placeRecords(ctx: PlaceDoorContext) {
   return {
     records, wiredProvider, providerIds, providerBackend, providerRate, providerSizes, imageFacts, recordOf,
     settingsOf, settingsHeld, rowIds, withCap, untilDaemonVersion, awaiting, adds, putAdd, loginOf, rootOver,
-    loginAnswers, holdBack, keep, defaultId, inTurn, markDefault, markHeld, challenge, signedRefusal, writeSeen,
+    loginAnswers, reachedOver, holdBack, keep, defaultId, inTurn, markDefault, markHeld, challenge, signedRefusal, writeSeen,
     inRecordTurn, change,
   };
 }
