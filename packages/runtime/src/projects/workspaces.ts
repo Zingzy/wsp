@@ -1022,7 +1022,7 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
         if (event["type"] === "pty.exit" && ptys.delete(String(event["ptyId"]))) ctx.portRootsMoved(id);
         onEvent(event);
       };
-      return ctx.rootedPorts(id, ctx.checkoutOf(entry.record), ptys, await ctx.copyChannel(entry, heard, ctx.WORKSPACE_FRAMES));
+      return ctx.rootedPorts(id, ctx.checkoutOf(entry.record), ptys, ctx.ownedPtys(id, await ctx.copyChannel(entry, heard, ctx.WORKSPACE_FRAMES)));
     },
 
     async guestChannel(id, onEvent) {

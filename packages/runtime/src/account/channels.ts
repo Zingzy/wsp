@@ -204,9 +204,36 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
   const GUEST_ROAD_FRAMES = [...WORKSPACE_FRAMES, "guest.watch", "guest.reply", "guest.close", "ssh.start", "tunnel.open", "tunnel.write", "tunnel.close"];
 
   /** The ptys each local workspace's own channels opened, by pty, with the pid each leads. Every local workspace
-   * dials the one daemon this host runs and its panes list every pty there, so the one a workspace opened is the
+   * dials the one daemon this host runs, which names no workspace on a pty, so the one a workspace opened is the
    * only record of whose it is. */
   const ownPtys = new Map<string, Map<string, number>>();
+  /** The ptys each channel's owner opened on a daemon several owners dial, a local workspace's by its id and this
+   * computer's own terminal by the place's. The daemon tells these apart by no name, so without this every owner's
+   * panes would list every other's shells. Kept past a pty's exit, which a pane still shows. */
+  const ptyOwners = new Map<string, Set<string>>();
+  /** A channel whose pty.list answers only the ptys its owner opened through a channel of its own. */
+  const ownedPtys = (owner: string, channel: DaemonChannel): DaemonChannel => {
+    const mine = ptyOwners.get(owner) ?? new Set<string>();
+    ptyOwners.set(owner, mine);
+    return {
+      async send(frame) {
+        const reply = await channel.send(frame);
+        const said = reply as Record<string, unknown>;
+        if (said["ok"] !== true) return reply;
+        if (frame.op === "pty.create") mine.add(String(said["ptyId"]));
+        if (frame.op === "pty.kill") mine.delete(String((frame as Record<string, unknown>)["ptyId"]));
+        if (frame.op === "pty.list" && Array.isArray(said["ptys"])) {
+          const rows = said["ptys"] as Record<string, unknown>[];
+          const held = new Set(rows.map(row => String(row["id"])));
+          for (const id of mine) if (!held.has(id)) mine.delete(id);
+          return { ...reply, ptys: rows.filter(row => mine.has(String(row["id"]))) };
+        }
+        return reply;
+      },
+      close: () => channel.close(),
+      closed: channel.closed,
+    };
+  };
   /** Each local workspace's channels that watch ports, as the push that names that workspace's roots again. */
   const portWatchers = new Map<string, Set<() => void>>();
   /** The process group each local workspace's turns led, as the turn road launches them, kept past the turn for as
@@ -460,7 +487,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
     startedAs, cutBefore, resumedFact, folderOf, accessOf, daemonNotes, homeOf, providerOf, placeIdOf, settingsAt,
     turnLimitOf, agentsHeld, spawnAt, projectHeld, refOf, checkoutOf, computerOf, servedByItsComputer, channelOver,
     withDaemon, overChannel, onThisComputer, placeGuard, placeRefuses, copyBlocked, WORKSPACE_FRAMES, GUEST_ROAD_FRAMES,
-    ownPtys, turnGroups, armRootsRecheck, portRootsMoved, rootedPorts, copyChannel, leadStart, startChildOn,
+    ownPtys, ownedPtys, turnGroups, armRootsRecheck, portRootsMoved, rootedPorts, copyChannel, leadStart, startChildOn,
     sameRepository,
   };
 }

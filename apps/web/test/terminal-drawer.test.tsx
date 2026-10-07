@@ -321,6 +321,33 @@ describe("one owner per pty", () => {
     expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1"]);
   }, 30_000);
 
+  it("closing the panel's Terminal tab kills its pty before the tab goes, so the drawer never adopts it", async () => {
+    const { wt, count, ops } = fakeLink();
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    render(
+      <>
+        <WorkspaceTerminalDrawer workspaceId={WS} />
+        <Panel />
+      </>,
+    );
+    await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
+    await act(() => openPanelTerminal(WS));
+    await waitFor(() => expect(inputs("right-panel")).toHaveLength(1), { timeout: 15_000 });
+
+    const drawerSaw: string[][] = [];
+    const unsubscribe = useTerminalDrawerStore.subscribe(s => drawerSaw.push([...(s.byWorkspaceId[WS]?.terminalIds ?? [])]));
+    fireEvent.click(screen.getByLabelText(/^Close shell$/));
+    await waitFor(() => expect(count("pty.kill")).toBe(1));
+    unsubscribe();
+    expect(ops.find(o => o.op === "pty.kill")?.params["ptyId"]).toBe("p2");
+    expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces).toEqual([]);
+    expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1"]);
+    expect(useTerminalDrawerStore.getState().byWorkspaceId[WS]?.terminalIds).toEqual(["p1"]);
+    expect(drawerSaw.some(ids => ids.includes("p2"))).toBe(false);
+    // One terminal left: the drawer draws no side list, so no "Single" row.
+    expect(screen.queryByText(/^Single/)).toBeNull();
+  }, 30_000);
+
   it("two mounts racing for a workspace's first pty share one create", async () => {
     const { count } = fakeLink();
     useTerminalDrawerStore.getState().setOpen(WS, true);

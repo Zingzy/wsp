@@ -335,6 +335,7 @@ export interface ChannelsArea {
   readonly WORKSPACE_FRAMES: string[];
   readonly GUEST_ROAD_FRAMES: string[];
   readonly ownPtys: Map<string, Map<string, number>>;
+  readonly ownedPtys: (owner: string, channel: DaemonChannel) => DaemonChannel;
   readonly turnGroups: Map<string, Set<number>>;
   readonly armRootsRecheck: () => void;
   readonly portRootsMoved: (workspaceId: string) => void;

@@ -300,6 +300,48 @@ describe("local workspace", () => {
     channel.close();
   }, 30_000);
 
+  it("two folders on the one daemon each list only the ptys their own channels opened, and this computer's own terminal only its own", async () => {
+    // The one daemon every folder here dials, which lists every pty it holds to whoever asks.
+    const held = new Map<string, boolean>();
+    const daemonChannel = async (): Promise<DaemonChannel> => ({
+      send: async frame => {
+        if (frame.op === "pty.create") {
+          const ptyId = `pty_${held.size + 1}`;
+          held.set(ptyId, false);
+          return { id: null, ok: true, ptyId, pid: 4000 + held.size } as never;
+        }
+        if (frame.op === "pty.kill") held.delete(String((frame as Record<string, unknown>)["ptyId"]));
+        if (frame.op === "pty.list") return { id: null, ok: true, ptys: [...held].map(([id, exited], i) => ({ id, pid: 4001 + i, cols: 80, rows: 24, exited })) } as never;
+        return { id: null, ok: true } as never;
+      },
+      close: () => {},
+      closed: new Promise(() => {}),
+    });
+    const token = "cafef00d".repeat(3);
+    const daemonRoad = async () => ({ url: "http://127.0.0.1:7070", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: token });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: { ...localWiring, daemonRoad }, daemonToken: token, daemonChannel });
+    const a = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "one"))).id, name: "a" });
+    const b = await rt.workspaces.create({ project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "other"))).id, name: "b" });
+    const listed = async (channel: DaemonChannel): Promise<unknown[]> =>
+      ((await channel.send({ id: null, op: "pty.list" } as never)) as unknown as { ptys: { id: string }[] }).ptys.map(p => p.id);
+
+    const chA = await rt.workspaces.daemonChannel(a.id, () => {});
+    const chB = await rt.workspaces.daemonChannel(b.id, () => {});
+    const here = await rt.hereChannel(() => {});
+    await chA.send({ id: null, op: "pty.create" } as never);
+    await chB.send({ id: null, op: "pty.create" } as never);
+    await here.send({ id: null, op: "pty.create" } as never);
+    expect(await listed(chA)).toEqual(["pty_1"]);
+    expect(await listed(chB)).toEqual(["pty_2"]);
+    expect(await listed(here)).toEqual(["pty_3"]);
+    // A reload dials a fresh channel and still finds its own; a shell that exited stays listed, for the pane to say so.
+    held.set("pty_1", true);
+    expect(await listed(await rt.workspaces.daemonChannel(a.id, () => {}))).toEqual(["pty_1"]);
+    await chA.send({ id: null, op: "pty.kill", ptyId: "pty_1" } as never);
+    expect(await listed(chA)).toEqual([]);
+    expect(await listed(chB)).toEqual(["pty_2"]);
+  });
+
   it("an ended turn's pid leaves the roots once its group is gone, with no channel watching, so a stranger leading a group of that number is never the workspace's", async () => {
     const { factory, end } = pidAdapter();
     const sent: Record<string, unknown>[] = [];
