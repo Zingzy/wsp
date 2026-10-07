@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol/slate";
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { str, TONE_INK, toneOf, type Tone } from "./look.js";

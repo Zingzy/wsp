@@ -61,5 +61,6 @@ export type {
   WorkspaceView,
 } from "@wsp/protocol";
 export { hostIdentity, localConfigDir } from "./host-id.js";
-export * from "./slates.js";
-export * from "./slate-runs.js";
+export { SLATES } from "./lazy-slates.js";
+export type * from "./slates.js";
+export type * from "./slate-runs.js";

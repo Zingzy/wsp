@@ -4,7 +4,7 @@
 // real change, never what the figure rests as.
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseSlate, slateStartValues, type SlateJson } from "@wsp/protocol";
+import { parseSlate, slateStartValues, type SlateJson } from "@wsp/protocol/slate";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { SLATE_VIEWS } from "./pieces";

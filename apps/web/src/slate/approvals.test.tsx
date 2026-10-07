@@ -4,7 +4,8 @@
 // own key, the way one sheet at a time would. A server waiting for consent is a row of the same sheet.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseSlate, slateStartValues, type SessionView, type SlateAsk, type SlateDoc, type SlateJson } from "@wsp/protocol";
+import { type SessionView, type SlateAsk } from "@wsp/protocol";
+import { parseSlate, slateStartValues, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
 import type { Api } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { useRightPanelStore } from "../rightPanelStore";

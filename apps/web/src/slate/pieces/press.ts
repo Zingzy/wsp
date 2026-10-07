@@ -2,7 +2,7 @@
 // A press from a slate control: held until the host answers, a second press within 500 ms folded into the first,
 // and the outcome or the refusal said under the control for two seconds.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isSlateBinding, parseSlateOwnPath, type SlatePropValue } from "@wsp/protocol";
+import { isSlateBinding, parseSlateOwnPath, type SlatePropValue } from "@wsp/protocol/slate";
 import type { RaiseResult } from "../actions.js";
 
 export const COALESCE_MS = 500;

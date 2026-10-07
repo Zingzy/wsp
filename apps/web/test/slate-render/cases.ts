@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Slates the render tests open by name with ?doc=, each the smallest that shows one layout fault the matrix found.
-import type { SlateJson } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol/slate";
 
 /** Longer than any slot in a 400 px panel holds on one line. */
 export const LONG = "Requests from the Bengaluru edge to the origin over the last five minutes, by country and path";

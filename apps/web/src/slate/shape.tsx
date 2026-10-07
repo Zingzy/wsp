@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A tool or resource run's result drawn by the protocol's shape decision, the one the sketch says, through the kit's
 // own table, facts and text pieces.
-import { SLATE_RESULT_ROWS, slateResultShape, type SlateJson, type SlatePiece, type SlatePropValue, type SlateResultShape } from "@wsp/protocol";
+import { SLATE_RESULT_ROWS, slateResultShape, type SlateJson, type SlatePiece, type SlatePropValue, type SlateResultShape } from "@wsp/protocol/slate";
 import { GROUP_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { facts } from "./pieces/facts.js";

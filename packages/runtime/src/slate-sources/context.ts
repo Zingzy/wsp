@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What a host resolver reads a slate's sources off: the thread's own rows and turn results, its account, its
 // workspace's checkout, pull request and cost, and the slate's state. The runtime fills it per read.
-import type { AccountRow, Checkout, PullRequestSeen, SessionView, SlateJson, TurnResult } from "@wsp/protocol";
+import type { AccountRow, Checkout, PullRequestSeen, SessionView, TurnResult } from "@wsp/protocol";
+import type { SlateJson } from "@wsp/protocol/slate";
 
 export interface SlateSourceContext {
   threadId: string;

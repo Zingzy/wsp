@@ -2,8 +2,12 @@
   "name": "@wsp/protocol",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./slate": "./dist/slate.js"
+  },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
+    "build": "tsup --entry.index src/index.ts --entry.slate src/slate/index.ts --format esm --dts",
     "test": "vitest run packages/protocol"
   },
   "dependencies": {

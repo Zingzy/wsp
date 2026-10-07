@@ -12,6 +12,7 @@
       "@wsp/keys": ["./packages/keys/src/index.ts"],
       "@wsp/own-file": ["./packages/own-file/src/index.ts"],
       "@wsp/protocol": ["./packages/protocol/src/index.ts"],
+      "@wsp/protocol/slate": ["./packages/protocol/src/slate/index.ts"],
       "@wsp/runtime": ["./packages/runtime/src/index.ts"],
       "@wsp/host": ["./packages/host/src/index.ts"],
       "@wsp/collect": ["./packages/collect/src/index.ts"],

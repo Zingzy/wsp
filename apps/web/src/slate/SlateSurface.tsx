@@ -16,7 +16,7 @@ import { useComposerDraftStore } from "../components/chat/composerDraftStore.js"
 import { ApprovalsSheet, batchable } from "./approvals.js";
 import { askKind } from "./askKinds.js";
 import { cadenceOf, HeldRuns, LinkConsent } from "./consent.js";
-import { slateDomainKey } from "@wsp/protocol";
+import { slateDomainKey } from "@wsp/protocol/slate";
 import { DOC, RUNS } from "./engine.js";
 import { isRunRecord, type SlateApproval, type SlateAsk } from "./model.js";
 import { SLATE_VIEWS } from "./pieces/index.js";

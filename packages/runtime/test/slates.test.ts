@@ -11,7 +11,7 @@ import { LocalBackend } from "@wsp/engine";
 import { DEVICE_OPS, REWIND_NO_UNDO_LINE, THREAD_OPS, type AdapterEvent, type Caller, type EventUnion, type SlateView, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
-import { SLATES } from "../src/slates.js";
+import { SLATES } from "../src/lazy-slates.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { STARTS_PER_MINUTE } from "../src/slate-runs.js";
 import { stubBackend, testPlatform } from "./stub-backend.js";
@@ -948,9 +948,13 @@ describe("the slate v2 host, round 4", () => {
     await rt.close();
     runtimes.splice(runtimes.indexOf(rt), 1);
 
-    // The new host's own recovery, begun as it is made, arms the timer, which ticks at once.
-    const again = host(root, store, [], []);
-    await vi.waitFor(async () => expect((await again.slates.get(threadId))!.values["where"]).toMatchObject({ state: "done", runs: 2 }), { timeout: 10_000 });
+    // The new host's recovery, begun as its records load, arms the timer, which ticks at once: read off its events after
+    // a workspace list loads them, as a read of the slate would load the slate's code by itself.
+    const seen: EventUnion[] = [];
+    const again = host(root, store, [], seen);
+    await again.workspaces.list();
+    await vi.waitFor(() => expect(seen.some(e => e.type === "slate.values" && (e.values["$where"] as { runs?: number } | undefined)?.runs === 2)).toBe(true), { timeout: 10_000 });
+    expect((await again.slates.get(threadId))!.values["where"]).toMatchObject({ state: "done", runs: 2 });
     const out = String(((await again.slates.get(threadId))!.values["where"] as { out: string }).out).trim();
     expect(realpathSync(out)).toBe(realpathSync(inner));
   }, 30_000);
