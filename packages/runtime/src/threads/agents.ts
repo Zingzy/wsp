@@ -29,6 +29,15 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
    * not answer costs one exec, not one per composer mount. Past the TTL the lists held answer while the binary is
    * asked again, so a send waits on a probe only the first time a machine is asked. */
   const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
+  /** Every ask of an agent's own CLI the host set going on its own, a probe or a title question, which a close waits
+   * for: one let go on past the close runs that CLI after the host let the machine go. */
+  const agentAsks = new Set<Promise<unknown>>();
+  const holdAsk = <T>(ask: Promise<T>): Promise<T> => {
+    agentAsks.add(ask);
+    const drop = (): void => void agentAsks.delete(ask);
+    void ask.then(drop, drop);
+    return ask;
+  };
   /** Whether the agent's command on the workspace's machine is a wrapper whose first run, still to come, installs it;
    * read without running anything of the agent's. */
   const firstRunHere = (entry: LiveWorkspace, harness: string): Promise<boolean> => {
@@ -57,11 +66,12 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     const hit = catalogs.get(key);
     const now = clock.now();
     if (hit !== undefined && now - hit.at < CATALOG_TTL_MS) return hit.catalog;
+    if (ctx.state.closing) return hit?.catalog ?? Promise.resolve(known);
     // A command whose first run installs its agent is not asked: the probe would start the download and its cut at
     // the deadline would leave it running. The table answers, and the next ask looks again.
     let skipped = false;
     const probe = adapter.probeCatalog;
-    const catalog = firstRunHere(entry, table.harness)
+    const catalog = holdAsk(firstRunHere(entry, table.harness)
       .then(installs => {
         skipped = installs;
         return installs ? null : probe(command => machine.exec(command, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS }).then(res => res.stdout));
@@ -74,7 +84,7 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
           console.warn(`${table.harness} on ${machine.id}: the probe of the agent failed (${e instanceof Error ? e.message : String(e)}); wsp's built-in list answers until the next probe`);
           return known;
         },
-      );
+      ));
     void catalog.then(() => {
       if (skipped) catalogs.delete(key);
     });
@@ -225,6 +235,7 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     titlesAsked.add(threadId);
     const table = harnessCatalog(harness);
     const model = smallestModel(table === undefined ? undefined : await catalogOn(table, entry, adapter));
+    if (ctx.state.closing) return;
     const title = await adapter.titleFor(
       { opening: view.prompt, ...(model !== undefined ? { model } : {}) },
       command => entry.machine.exec(command, { timeoutMs: TITLE_MAKE_TIMEOUT_MS }).then(res => res.stdout),
@@ -459,7 +470,7 @@ export function agentsArea(ctx: RuntimeContext): AgentsArea {
     };
   };
   return {
-    catalogOn, firstRunHere, refreshTitle, sourceOf, rowsOn, carriedTitle, nameInHarness, makeTitle, titleRows, setupPlace, agentOff,
+    catalogOn, firstRunHere, refreshTitle, sourceOf, rowsOn, carriedTitle, nameInHarness, makeTitle, agentAsks, holdAsk, titleRows, setupPlace, agentOff,
     agentLabel, configFolderOn, setupRefusals, setupRefusal, homesHere, confineSetup, launchAdapterFor, defaultAgentOf,
     defaultsOn, namedMode, landImages, landFiles, dropThreadFiles, dropImages, adapterFor,
   };

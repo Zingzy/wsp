@@ -519,6 +519,8 @@ export interface AgentsArea {
   readonly carriedTitle: (threadId: string) => Pick<SessionView, "harnessTitle" | "titleSource">;
   readonly nameInHarness: (view: SessionView, title: string) => Promise<void>;
   readonly makeTitle: (view: SessionView) => Promise<void>;
+  readonly agentAsks: Set<Promise<unknown>>;
+  readonly holdAsk: <T>(ask: Promise<T>) => Promise<T>;
   readonly titleRows: (rows: readonly SessionView[]) => SessionView[];
   readonly setupPlace: (entry: LiveWorkspace) => string | undefined;
   readonly agentOff: (entry: LiveWorkspace, agent: string) => boolean;

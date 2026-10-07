@@ -5,7 +5,7 @@
 // nowhere, and shut to a thread's own token and to a paired computer. The
 // harness is a fake that answers from memory, so the runtime's own reading is
 // what is under test.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -17,6 +17,7 @@ import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend, copyingFake, createOn, testPlatform } from "./stub-backend.js";
 import { WsClient } from "./ws-client.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const SESSION = "33333333-3333-4333-8333-333333333333";
 const ANSWER = "You are in /root/b and last asked for the second thing.";
@@ -88,6 +89,8 @@ describe("a side question beside a thread", () => {
     for (const c of clients.splice(0)) c.close();
     await srv?.close();
     srv = undefined;
+    // Before the folder goes: what the runtime asks an agent's CLI on its own runs the stub in it.
+    await rt?.close();
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -143,6 +146,11 @@ describe("a side question beside a thread", () => {
       return stream;
     };
     const codex: HarnessAdapterFactory = ctx => ({ ...HARNESS_ADAPTERS.codex({ ...ctx, execStream: silent }), start: answering(asked)(ctx).start });
+    // The adapter's own probe and title question run codex on this computer: a stub that answers nothing.
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeStub(join(bin, "codex"), "#!/bin/sh\nexit 0\n");
+    localWiring.env = () => ({ PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}` });
     rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { codex }, local: localWiring, agents: { here: { url: "http://127.0.0.1:4801" }, wspMcp } });
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const turn = await rt.sessions.start(ws.id, { prompt: "the first thing", harness: "codex" });
