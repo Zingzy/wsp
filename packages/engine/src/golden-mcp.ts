@@ -6,10 +6,10 @@
 // read off the machine, edited here by the catalog format's own module, and the
 // bytes land back; the machine runs nothing of its own for it.
 import { randomBytes } from "node:crypto";
-import { BREW_PREFIX, GUEST_HOME, MAC_BIN_DIRS, MAC_BREW, configLanding, configRefusal, configSum, configWriteLine } from "@wsp/catalog";
+import { BASE_FLOOR, BREW_PREFIX, GUEST_HOME, MAC_BIN_DIRS, MAC_BREW, catalogEntry, catalogIdOfRow, configLanding, configRefusal, configSum, configWriteLine } from "@wsp/catalog";
 import type { McpEditLib, McpEditResult, McpFormat, McpMergeResult } from "@wsp/catalog";
 import { MCP_ID_PREFIX, shellQuote } from "@wsp/protocol";
-import { TOOLS_PATH, UV_INSTALL, WITHHELD_NOTE, withheld, type RecipeEntry } from "./golden-import.js";
+import { CUSTOM_PREFIX, TOOLS_PATH, UV_INSTALL, WITHHELD_NOTE, withheld, type RecipeEntry } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { landBytes } from "./land-bytes.js";
 import { type ToolResult, closing, freeNote, guardDeadlineMs, guardedRoad, reasonOf, roadLimitS } from "./golden-tools.js";
@@ -318,11 +318,35 @@ const strip = (r: Pending): McpResult => ({ id: r.id, agent: r.agent, name: r.na
 
 const tail = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
 
+/** The commands a tool row puts on that the row or the catalog names: its own, its catalog entry's and what that brings. */
+function namedCommands(row: { id: string; bin?: string }): string[] {
+  const entry = catalogEntry(catalogIdOfRow(row) ?? "");
+  return [row.bin, entry?.bin, ...(entry?.kind === "tool" ? (entry.brings ?? []).map(b => b.bin) : [])].filter((b): b is string => b !== undefined);
+}
+
+/** The row that puts a command on: the one whose named commands hold it, else a row installing one binary whose last
+ * word it is. */
+export function commandRow<R extends { id: string; bin?: string }>(command: string, rows: readonly R[]): R | undefined {
+  const name = basename(command);
+  return rows.find(r => namedCommands(r).includes(name)) ?? rows.find(r => BINARY_ROW.test(r.id) && tail(r.id) === name);
+}
+
+/** The rows a kept server needs on before the servers round looks for its command, which drops one that is not
+ * there: none for a server run through npx, uvx or uv, which is never dropped, or by a command the floor or `ready`
+ * puts on first; the row that puts its command on; else every row putting on a command nothing names, a binary row
+ * or one the person wrote, since any of them may be it. */
+export function serverNeeds<R extends { id: string; bin?: string }>(command: string, rows: readonly R[], ready: ReadonlySet<string> = new Set()): R[] {
+  const name = basename(command);
+  if (FETCHERS[name] !== undefined || ready.has(name) || BASE_FLOOR.some(e => e.bin === name || (e.brings ?? []).some(b => b.bin === name))) return [];
+  const row = commandRow(command, rows);
+  return row !== undefined ? [row] : rows.filter(r => (BINARY_ROW.test(r.id) || r.id.startsWith(CUSTOM_PREFIX)) && namedCommands(r).length === 0);
+}
+
 /** Why a server whose command the machine does not have is skipped: when the recipe has a tool row for that
  * binary, what became of the row. */
 export function absentReason(command: string, plan: McpPlan, tools: readonly ToolResult[]): string {
   const base = "command not on the machine";
-  const row = plan.tools.find(t => tail(t.id) === basename(command));
+  const row = commandRow(command, plan.tools);
   if (row === undefined) return base;
   if (!row.ticked) return `${base}; ${row.id} was not ticked${row.reason !== undefined ? ` (${row.reason})` : ""}`;
   const result = tools.find(t => t.id === row.id);

@@ -5,18 +5,21 @@ import { describe, expect, it } from "vitest";
 import { runGraph, type GraphStep } from "../src/setup-graph.js";
 
 /** Steps each held until the test lets it go, with what was running whenever one started. */
-function held(specs: { name: string; after?: string[]; lanes?: string[]; light?: boolean; stop?: boolean; throws?: boolean }[]) {
+function held(specs: { name: string; after?: string[]; marks?: string[]; lanes?: string[]; light?: boolean; stop?: boolean; throws?: boolean }[]) {
   const releases = new Map<string, () => void>();
+  const marking = new Map<string, (mark: string) => void>();
   const started: string[] = [];
   const together: string[][] = [];
-  const steps: GraphStep<string>[] = specs.map(s => ({
+  const steps: GraphStep<string, string>[] = specs.map(s => ({
     name: s.name,
     after: s.after ?? [],
+    ...(s.marks !== undefined ? { marks: s.marks } : {}),
     lanes: s.lanes ?? [],
     ...(s.light === true ? { light: true } : {}),
-    run: () =>
+    run: release =>
       new Promise((resolve, reject) => {
         started.push(s.name);
+        marking.set(s.name, release);
         releases.set(s.name, () => (s.throws === true ? reject(new Error(`${s.name} broke`)) : resolve(s.stop === true ? "stop" : "go")));
       }),
   }));
@@ -25,7 +28,11 @@ function held(specs: { name: string; after?: string[]; lanes?: string[]; light?:
     releases.get(name)!();
     await new Promise(r => setImmediate(r));
   };
-  return { steps, started, together, let: let_ };
+  const mark = async (name: string, m: string): Promise<void> => {
+    marking.get(name)!(m);
+    await new Promise(r => setImmediate(r));
+  };
+  return { steps, started, together, let: let_, mark };
 }
 
 describe("the steps after the base tools", () => {
@@ -74,6 +81,46 @@ describe("the steps after the base tools", () => {
     expect(g.started).toEqual(["agents", "skills"]);
     await g.let("skills");
     expect(await done).toEqual(["clis"]);
+  });
+
+  it("starts a step waiting on a mark once the step holding it lets it go, while that step still runs", async () => {
+    const g = held([
+      { name: "clis", marks: ["gh"] },
+      { name: "github", after: ["gh"] },
+      { name: "folders", after: ["github"] },
+    ]);
+    const done = runGraph(g.steps, 3);
+    await new Promise(r => setImmediate(r));
+    expect(g.started).toEqual(["clis"]);
+    // A mark the step does not hold lets nothing go.
+    await g.mark("clis", "other");
+    expect(g.started).toEqual(["clis"]);
+    await g.mark("clis", "gh");
+    expect(g.started).toEqual(["clis", "github"]);
+    await g.let("github");
+    expect(g.started).toEqual(["clis", "github", "folders"]);
+    await g.let("folders");
+    await g.let("clis");
+    expect(await done).toEqual([]);
+  });
+
+  it("lets a step's marks go at its end where it never let them go itself, and a mark no step holds counts as ended", async () => {
+    const g = held([{ name: "clis", marks: ["gh"] }, { name: "github", after: ["gh"] }, { name: "docs", after: ["nobody"] }]);
+    const done = runGraph(g.steps, 3);
+    await new Promise(r => setImmediate(r));
+    expect(g.started).toEqual(["clis", "docs"]);
+    await g.let("clis");
+    expect(g.started).toEqual(["clis", "docs", "github"]);
+    await g.let("docs");
+    await g.let("github");
+    expect(await done).toEqual([]);
+  });
+
+  it("answers a step waiting on a mark as never started where the step holding it never ran", async () => {
+    const g = held([{ name: "agents", stop: true }, { name: "clis", after: ["agents"], marks: ["gh"] }, { name: "github", after: ["gh"] }]);
+    const done = runGraph(g.steps, 3);
+    await g.let("agents");
+    expect(await done).toEqual(["clis", "github"]);
   });
 
   it("throws the first error once every running step ended", async () => {

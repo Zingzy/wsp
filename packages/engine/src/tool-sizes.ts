@@ -8,12 +8,9 @@
 // at a stated default for its kind. Nothing here runs a command: the host reads
 // the Mac's Homebrew and hands the table in.
 import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, CUSTOM_PREFIX, MACOS_ONLY_FORMULAE, MANAGER_STEP, agentInstallsFor, catalogToolOf, formulaOf, isTap, managerFormula, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
-import { MIB, catalogEntry, catalogToolByRoad, catalogToolFor, isRoad, sizeBytes, type RoadName } from "@wsp/catalog";
+import { MIB, NODE_BIN, catalogEntry, catalogToolByRoad, catalogToolFor, isRoad, sizeBytes, type RoadName } from "@wsp/catalog";
 import { BREW_ID_PREFIX, toolRowPrefix, type RecipeCustomRow } from "@wsp/protocol";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
-
-/** The command the catalog's Node row puts on the machine; the one name this file asks the catalog for it by. */
-const NODE_BIN = "node";
 
 /** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and
  * five agents failed to install on it (measured 2026-09-05). */
