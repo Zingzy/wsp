@@ -1,8 +1,12 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, CredentialOnBuilderError, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, promoteVersion, sealGolden, smokeTally, snapshotUntilGone, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, CredentialOnBuilderError, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, QUIET_LOGS, rollback, promoteVersion, sealGolden, smokeTally, snapshotUntilGone, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { CLAUDE_INSTALL, CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NEVER_IN_IMAGE, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
 import { credentialOnBuilderLine, diskSyncFailedLine, shellQuote, type RecipeDigest } from "@wsp/protocol";
@@ -17,6 +21,9 @@ import { goldenName } from "../src/snapshot-names.js";
 import { tarOf } from "../src/vault.js";
 import { boundedCommand } from "../src/machine-context.js";
 import { tarRead } from "./tar-read.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
+
+const modeOf = (path: string): string => (statSync(path).mode & 0o777).toString(8);
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, SnapshotProgress, TemplateRow } from "../src/machine.js";
 
 /** A fake whose kill() resolves like the provider's DELETE does: a call for
@@ -273,6 +280,49 @@ describe("interactive golden: prepare then seal", () => {
     // Node is not on the floor any more: nothing in the base stage fetches it.
     expect(floor.some(s => s.includes("nodejs.org/dist"))).toBe(false);
     expect(timeline).toEqual(["create m1"]); // alive and waiting for the person
+  });
+
+  it("a builder keeps every command line out of sudo's and systemd's logs before anything else runs on it", async () => {
+    const { backend, inline } = recordingBackend();
+    await prepareBuilder({ backend, setup: "true" });
+    const first = inline.find(e => e.id === "m1")!.cmd;
+    expect(first).toBe(QUIET_LOGS);
+  });
+
+  it("the step writes sudo's two lines once visudo passed them, a manager file the box login can read under any mask, and re-executes each running manager", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-quiet-logs-"));
+    try {
+      const etc = join(dir, "etc");
+      const bin = join(dir, "bin");
+      mkdirSync(join(etc, "sudoers.d"), { recursive: true });
+      mkdirSync(bin);
+      const asked = join(dir, "asked");
+      // The stand-ins answer as a box's own do: visudo passes what it is handed, loginctl lists the box login, and
+      // systemctl writes down what it was asked.
+      writeStub(join(bin, "visudo"), `#!/bin/sh\necho "visudo $*" >> ${shellQuote(asked)}\n`);
+      writeStub(join(bin, "loginctl"), "#!/bin/sh\necho '1000 user yes active'\n");
+      writeStub(join(bin, "systemctl"), `#!/bin/sh\necho "systemctl $*" >> ${shellQuote(asked)}\n`);
+      const script = QUIET_LOGS.replaceAll("/etc/", `${etc}/`);
+      execFileSync("bash", ["-c", `umask 077\n${script}`], { env: { PATH: `${bin}:/usr/bin:/bin` } });
+      const sudoers = join(etc, "sudoers.d", "wsp-quiet-logs");
+      // Without the session stack sudo writes no session line, whose journal entry carries the whole command.
+      expect(readFileSync(sudoers, "utf8")).toBe("Defaults !log_allowed\nDefaults !pam_session\n");
+      expect(modeOf(sudoers)).toBe("440");
+      expect(modeOf(join(etc, "systemd", "user.conf.d"))).toBe("755");
+      expect(modeOf(join(etc, "systemd", "user.conf.d", "wsp-quiet-logs.conf"))).toBe("644");
+      expect(readFileSync(join(etc, "systemd", "user.conf.d", "wsp-quiet-logs.conf"), "utf8")).toBe("[Manager]\nLogLevel=notice\n");
+      const said = readFileSync(asked, "utf8").trim().split("\n");
+      expect(said[0]).toMatch(/^visudo -cqf /);
+      expect(said.slice(1)).toEqual(["systemctl --user -M user@ daemon-reexec"]);
+
+      // A sudoers line visudo refuses is never installed, and the step fails rather than carry on.
+      rmSync(sudoers);
+      writeStub(join(bin, "visudo"), "#!/bin/sh\nexit 1\n");
+      expect(() => execFileSync("bash", ["-c", script], { env: { PATH: `${bin}:/usr/bin:/bin` }, stdio: "pipe" })).toThrow();
+      expect(existsSync(sudoers)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("the builder's createdAt is taken before the create, so the age a person reads covers the whole prepare", async () => {

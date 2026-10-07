@@ -100,6 +100,7 @@ const NEVER = Number.MAX_SAFE_INTEGER;
 export class LinkMachine implements Machine {
   readonly id: string;
   readonly kind: MachineKind;
+  readonly takesStdin = true;
   readonly streamUrl?: string;
   readonly labels?: Record<string, string>;
   readonly seen?: { state: MachineState; createdAt?: string };

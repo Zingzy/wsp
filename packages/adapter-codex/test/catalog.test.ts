@@ -4,10 +4,11 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { HarnessCatalogProbe } from "@wsp/protocol";
+import { ENV_FROM_INPUT, type HarnessCatalogProbe } from "@wsp/protocol";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 import { catalogProbeCommand, parseCatalogProbe } from "../src/catalog.js";
+import { buildEnv } from "../src/command.js";
 
 const LOGIN = "codex login --device-auth";
 const SEP = "__WSP_CATALOG_SEP__";
@@ -51,15 +52,14 @@ describe("catalogProbeCommand", () => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  it("exports the base env a turn gets, PATH included, so a probe served by a bare-PATH exec still finds the binary", () => {
-    const cmd = catalogProbeCommand({ home: "/root/.codex", baseEnv: { PATH: "/root/.local/bin:/usr/bin" } });
-    expect(cmd).toContain("PATH='/root/.local/bin:/usr/bin'");
-    expect(cmd).toContain("CODEX_HOME='/root/.codex'");
-    expect(cmd).toMatch(/^cd ~ && /);
+  it("reads the base env a turn gets off its input, PATH and CODEX_HOME included, so a probe served by a bare-PATH exec still finds the binary", () => {
+    const cmd = catalogProbeCommand();
+    expect(cmd).toMatch(new RegExp(`^cd ~ && ${ENV_FROM_INPUT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}; `));
+    expect(cmd).not.toMatch(/PATH=|CODEX_HOME=/);
   });
 
   it("asks for the version, the help and the four app-server requests, and never a turn", () => {
-    const cmd = catalogProbeCommand({ home: "/root/.codex" });
+    const cmd = catalogProbeCommand();
     expect(cmd).toContain("codex --version");
     expect(cmd).toContain("codex --help");
     expect(cmd).toContain("codex app-server");
@@ -97,7 +97,7 @@ describe("catalogProbeCommand", () => {
       ].join("\n"),
     );
     const started = Date.now();
-    const out = execFileSync("bash", ["-c", catalogProbeCommand({ home: "/root/.codex" })], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir } });
+    const out = execFileSync("bash", ["-c", catalogProbeCommand()], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir }, input: Object.entries(buildEnv({ home: "/root/.codex" })).map(([k, v]) => `${k}=${v}\0`).join("") });
     expect(out).toContain("CALL --version");
     expect(out).toContain("CALL --help");
     // The probe ran the server under the session's own home, and every request reached it while it was alive.
@@ -112,7 +112,7 @@ describe("catalogProbeCommand", () => {
   });
 
   it("refuses a relative home, as the turn env does", () => {
-    expect(() => catalogProbeCommand({ home: ".codex" })).toThrow(/absolute/);
+    expect(() => buildEnv({ home: ".codex" })).toThrow(/absolute/);
   });
 });
 

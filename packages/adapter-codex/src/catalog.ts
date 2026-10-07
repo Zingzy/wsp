@@ -9,10 +9,9 @@
 // codex-cli 0.153.0: all four answers land about 140 ms after the pipe opens,
 // no model is called.
 
-import { codexNotSignedInLine, programWord, shellQuote } from "@wsp/protocol";
+import { ENV_FROM_INPUT, codexNotSignedInLine, programWord } from "@wsp/protocol";
 import type { AgentLaunch, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe } from "@wsp/protocol";
 import { answersOf, appServerScript, initializeRequest, request, resultOf } from "./app-server-script.js";
-import { buildEnv } from "./command.js";
 
 const SEP = "__WSP_CATALOG_SEP__";
 /** Request ids, in the order the probe sends them; the parser reads each answer by its own id. */
@@ -25,14 +24,12 @@ const REQUESTS = [initializeRequest(INIT), request(MODELS, "model/list"), reques
 /**
  * The probe as one bash script for the guest, since guest exec is `bash -c` and may span lines. `cd ~` for the same
  * reason as a session: guest exec carries no HOME, and the app-server writes into the home it is pointed at, so the
- * probe runs under the session's own CODEX_HOME.
+ * probe runs under the session's own CODEX_HOME, read off its input with the rest of `buildEnv`.
  */
-export function catalogProbeCommand(options: { home: string; baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
+export function catalogProbeCommand(options: { launch?: AgentLaunch } = {}): string {
   const codex = programWord("codex", options.launch);
-  const env = buildEnv({ base: options.baseEnv, home: options.home });
-  const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   const server = appServerScript(codex, [{ lines: REQUESTS, answers: REQUESTS.length }]);
-  return `cd ~ && export ${exports}; ${codex} --version; echo ${SEP}; ${codex} --help; echo ${SEP}\n${server}`;
+  return `cd ~ && ${ENV_FROM_INPUT}; ${codex} --version; echo ${SEP}; ${codex} --help; echo ${SEP}\n${server}`;
 }
 
 /** The `[possible values: ...]` list `codex --help` prints under a flag; empty when the flag or the list is missing. */

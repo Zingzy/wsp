@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
-import type { SessionRenameWrite } from "@wsp/protocol";
+import { ENV_FROM_INPUT, type SessionRenameWrite } from "@wsp/protocol";
 import { createCodexAdapter } from "../src/adapter.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "../src/session-title.js";
 import { fakeAppServer, type Json } from "./fake-app-server.js";
@@ -18,6 +18,14 @@ import { writeStub } from "../../protocol/test/stub-script.js";
 const THREAD = "01a079b6-6f04-7f73-84d6-40e9e6885ffd";
 const SCHEMA = "create table threads (id text primary key, rollout_path text not null, cwd text not null, title text not null, name text);";
 const run = promisify(execFile);
+/** What a question reads its variables off: one NUL-ended NAME=value each. */
+const input = (env: Readonly<Record<string, string>> = {}): string => Object.entries(env).map(([k, v]) => `${k}=${v}\0`).join("");
+/** A question as the exec runs it: its variables on its input, which then closes. */
+const ask = (command: string, opts: { env: NodeJS.ProcessEnv }, env?: Readonly<Record<string, string>>): Promise<{ stdout: string }> => {
+  const running = run("bash", ["-c", command], opts);
+  running.child.stdin?.end(input(env));
+  return running;
+};
 
 const homes: string[] = [];
 afterAll(() => {
@@ -95,8 +103,8 @@ describe("the title Codex makes for a thread", () => {
         `printf '%s\\n' '{"type":"item.completed","item":{"id":"i1","type":"reasoning","text":"thinking"}}' '{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"Seed thread titles here"}}'`,
     );
     const prompt = "Name it. It's a thread's own \"words\"; nothing else.";
-    const command = titleForCommand({ home: "/root/.codex", prompt, model: "gpt-5.2" });
-    const { stdout } = await run("bash", ["-c", command], { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}`, HOME: tmpdir() } });
+    const command = titleForCommand({ prompt, model: "gpt-5.2" });
+    const { stdout } = await ask(command, { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}`, HOME: tmpdir() } });
     expect(parseTitleFor(stdout)).toBe("Seed thread titles here");
     const [argv, ...rest] = readFileSync(seen, "utf8").split("\n");
     expect(argv).toContain(`sandbox_mode="read-only"`);
@@ -106,8 +114,20 @@ describe("the title Codex makes for a thread", () => {
     expect(rest.join("\n").trim()).toBe(prompt);
   });
 
-  it("runs under the session's own CODEX_HOME, which a guest exec would not carry", () => {
-    expect(titleForCommand({ home: "/root/it's here", prompt: "name it" })).toContain(String.raw`CODEX_HOME='/root/it'\''s here'`);
+  it("runs under the session's own CODEX_HOME, which a guest exec would not carry, read off its input and never a word of its own", async () => {
+    const asked: { cmd: string; env: Readonly<Record<string, string>> | undefined }[] = [];
+    const codex = createCodexAdapter({ exec: () => { throw new Error("no turns here"); }, home: "/root/it's here", login: "codex login", baseEnv: { PATH: "/bin", GATEWAY_TOKEN: "tok-x" } });
+    const record = (cmd: string, env?: Readonly<Record<string, string>>): Promise<string> => (asked.push({ cmd, env }), Promise.resolve(""));
+    await codex.probeCatalog(record);
+    await codex.titleFor({ opening: "name it" }, record);
+    await codex.draftFor({ promptFile: "/tmp/asked" }, record);
+    await codex.renameSession(THREAD, "the name", record);
+    expect(asked).toHaveLength(4);
+    for (const { cmd, env } of asked) {
+      expect(env).toMatchObject({ CODEX_HOME: "/root/it's here", GATEWAY_TOKEN: "tok-x" });
+      expect(cmd).toContain(ENV_FROM_INPUT);
+      expect(cmd).not.toMatch(/it's here|tok-x|CODEX_HOME=/);
+    }
   });
 
   it("reads no title out of a turn that failed, said nothing, or explained itself over several lines", () => {
@@ -123,7 +143,7 @@ const NO_ROLLOUT = { error: { code: -32600, message: `no rollout found for threa
 /** The real adapter's renamer, its one shell line run under bash against the fake app server's home and PATH. */
 const renameThrough = (f: ReturnType<typeof fakeAppServer>, title: string, threadId = THREAD): Promise<SessionRenameWrite> => {
   const codex = createCodexAdapter({ exec: () => { throw new Error("no turns here"); }, home: f.home, login: "codex login", baseEnv: { PATH: f.path } });
-  return codex.renameSession(threadId, title, async command => (await run("bash", ["-c", command], { env: { PATH: "/usr/bin:/bin", HOME: tmpdir() } })).stdout);
+  return codex.renameSession(threadId, title, async (command, env) => (await ask(command, { env: { PATH: "/usr/bin:/bin", HOME: tmpdir() } }, env)).stdout);
 };
 
 describe("naming a Codex thread from wsp", () => {
@@ -161,7 +181,7 @@ describe("naming a Codex thread from wsp", () => {
   });
 
   it("refuses a thread id that is not a plain slug before anything runs", () => {
-    expect(() => renameCommand({ home: "/root/.codex", threadId: "x' or '1'='1", title: "x" })).toThrow(/plain slug/);
+    expect(() => renameCommand({ threadId: "x' or '1'='1", title: "x" })).toThrow(/plain slug/);
   });
 
 });
@@ -176,8 +196,8 @@ describe("the commit message Codex drafts", () => {
       `{ printf '%s\\n' "$*"; cat; } > ${seen}\n` +
         `printf '%s\\n' '{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"Round the total once\\n\\nIt rounded per line."}}'`,
     );
-    const command = draftForCommand({ home: "/root/.codex", promptFile: asked, model: "gpt-5.2" });
-    const { stdout } = await run("bash", ["-c", command], { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}`, HOME: tmpdir() } });
+    const command = draftForCommand({ promptFile: asked, model: "gpt-5.2" });
+    const { stdout } = await ask(command, { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}`, HOME: tmpdir() } });
     expect(parseDraftFor(stdout)).toBe("Round the total once\n\nIt rounded per line.");
     const [argv, ...rest] = readFileSync(seen, "utf8").split("\n");
     expect(argv).toContain(`sandbox_mode="read-only"`);

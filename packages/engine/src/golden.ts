@@ -12,7 +12,7 @@ import { ALREADY_APPLIED, DISK_SYNC_LINE, MCP_ID_PREFIX, credentialOnBuilderLine
 import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, TOOLS_PATH, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
-import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { INLINE_EXEC_MS, machineAnswer } from "./exec-detached.js";
 import { DiskSyncError, diskUnsettled, syncDisk } from "./disk-sync.js";
 import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, pinRead, plural, reasonOf, sweepCaches, usedBytes, withRecordedPins, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
@@ -973,6 +973,21 @@ function staged(onStage: StageListener | undefined): { stage: StageListener; cur
   };
 }
 
+/** What a builder runs first, so the builder and every machine forked from its image keep command lines off disk. A
+ * provider's exec drops stdin, so a launch's variables ride its text, and on a box that text went whole into the
+ * logs: sudo writes each command to auth.log, its PAM session lines carry the whole command in the journal's
+ * _CMDLINE field, and the box login's systemd manager logs the scope its agent starts each command in (measured on a
+ * box with journalctl -o export, every field, 2026-10-07). Without the session stack sudo's root commands keep the
+ * caller's umask, open-files limit and locale, which on a box are 022, the agent's own and LANG; only LC_ALL from
+ * /etc/default/locale drops. The sudoers lines are installed only once visudo passed them, since a line that does not
+ * parse refuses every exec after it; the manager's folder and file are the box login's to read, whatever mask the exec
+ * runs under, and a manager already running reads them once it is re-executed. */
+export const QUIET_LOGS = [
+  'if [ -d /etc/sudoers.d ] && command -v visudo >/dev/null 2>&1; then t=$(mktemp) && printf \'%s\\n\' \'Defaults !log_allowed\' \'Defaults !pam_session\' > "$t" && visudo -cqf "$t" && install -m 0440 "$t" /etc/sudoers.d/wsp-quiet-logs; s=$?; rm -f "$t"; [ $s -eq 0 ] || exit $s; fi',
+  "install -d -m 0755 /etc/systemd/user.conf.d && printf '[Manager]\\nLogLevel=notice\\n' > /etc/systemd/user.conf.d/wsp-quiet-logs.conf && chmod 0644 /etc/systemd/user.conf.d/wsp-quiet-logs.conf",
+  'for u in $(loginctl list-users --no-legend 2>/dev/null | awk \'{ print $2 }\'); do systemctl --user -M "$u@" daemon-reexec || exit 1; done',
+].join("\n");
+
 export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Builder> {
   const { stage, current } = staged(opts.onStage);
   const kind = opts.kind ?? "sandbox";
@@ -994,6 +1009,8 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
     ...envSpec(opts),
   });
   try {
+    const quiet = await machine.exec(QUIET_LOGS, { timeoutMs: INLINE_EXEC_MS });
+    if (quiet.exitCode !== 0) throw new Error(`the builder would keep every launch's command line in its logs; ${machineAnswer(quiet)}`);
     const size = await sizeBuilt(machine, asked);
     stage("deploying-daemon");
     // The floor goes on before the daemon: the deploy's own steps type the tools it puts there.

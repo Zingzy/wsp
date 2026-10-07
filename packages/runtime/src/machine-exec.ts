@@ -34,7 +34,7 @@
 // every claim on the machine that the caller did not name.
 
 import { randomBytes } from "node:crypto";
-import { HANDSHAKE, INLINE_EXEC_MS, MachineUnreachableError, MachineUnreached, RUN_DIR, execFits, isPlaceAbsent, machineAnswer, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
+import { ENV_FROM_INPUT, HANDSHAKE, INLINE_EXEC_MS, envInput, MachineUnreachableError, MachineUnreached, RUN_DIR, execFits, isPlaceAbsent, machineAnswer, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
 import { EXEC_CHUNK_BYTES, LINK_RETRY_WINDOW_MS, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS, TURN_WORK_TICKS_PER_S, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory, TurnCutRule } from "@wsp/protocol";
 
@@ -435,10 +435,12 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
   const factory: ExecStreamFactory = (command, { env, input, inputAfter }) => {
     const base = `${runDir}/${randomBytes(6).toString("hex")}`;
 
-    const exports = Object.entries(env)
-      .filter(([k]) => ENV_KEY.test(k))
-      .map(([k, v]) => `export ${k}=${shellQuote(v)}`)
-      .join("\n");
+    // The environment reaches the run as the one setsid starts it under and never sits in its script. A machine
+    // that takes stdin reads it off the launch exec's input, since its command line is world-readable there; a
+    // provider's exec drops stdin, so on those single-login machines it rides the launch's text, which the images
+    // wsp builds keep sudo and the box login's systemd manager from logging (QUIET_LOGS).
+    const named = Object.fromEntries(Object.entries(env).filter(([k]) => ENV_KEY.test(k)));
+    const envLines = machine.takesStdin === true ? [ENV_FROM_INPUT] : Object.entries(named).map(([k, v]) => `export ${k}=${shellQuote(v)}`);
     // The tail starts in a subshell so bash's job notice for its kill never lands in the log; the command's exit code
     // is written before the tail is killed, so a poll that sees it reads a finished log.
     const run =
@@ -447,7 +449,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         : `( tail -n +1 -f ${q(base)}.in > ${q(base)}.fifo & echo $! > ${q(base)}.tail )\n{ ${command}\n} < ${q(base)}.fifo\necho $? > ${q(base)}.exit\nkill $(cat ${q(base)}.tail) 2>/dev/null\n`;
     // The turn's processes are what the kernel takes first when memory runs out: the work outgrew the machine, and
     // the daemon and the guest agent are how anyone hears of it.
-    const files: GuestWrite[] = [{ path: `${base}.sh`, text: `${workScoreLine()}\n${exports}\n${run}` }];
+    const files: GuestWrite[] = [{ path: `${base}.sh`, text: `${workScoreLine()}\n${run}` }];
     if (input !== undefined) files.push({ path: `${base}.in`, text: input.map(line => `${line}\n`).join("") });
 
     // Spawn eagerly, like a local child process would, unless the seed is held: a write here is one more exec trip, so
@@ -458,12 +460,13 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second
           // a no-op. A mkdir that fails for any other reason (a run folder another login on the machine owns) fails
           // the launch: read as a replay it would answer launched and leave the reader polling a log nobody writes.
-          // Every file of the run is the login's alone from the moment it is made, not chmodded after: the script
-          // carries the turn's environment as export lines, the provider key and the thread token among them, and
-          // a machine somebody owns may carry other logins that can read a folder wsp did not make.
+          // Every file of the run is the login's alone from the moment it is made, not chmodded after: the input
+          // and the log carry the person's messages and the agent's output, and a machine somebody owns may carry
+          // other logins that can read a folder wsp did not make.
           before: ["umask 077", `mkdir ${q(claim(base))} 2>/dev/null || { [ -d ${q(claim(base))} ] && { echo ${HANDSHAKE.launched}; exit 0; }; echo ${q(`no run folder on this machine: ${claim(base)}`)} >&2; exit 1; }`],
-          after: [...(input === undefined ? [] : [`mkfifo ${q(base)}.fifo`]), `setsid bash ${q(base)}.sh > ${q(base)}.log 2>&1 & echo $! > ${q(base)}.pid; echo ${HANDSHAKE.launched}`],
+          after: [...(input === undefined ? [] : [`mkfifo ${q(base)}.fifo`]), ...envLines, `setsid bash ${q(base)}.sh > ${q(base)}.log 2>&1 & echo $! > ${q(base)}.pid; echo ${HANDSHAKE.launched}`],
           timeoutMs: execTimeoutMs,
+          ...(machine.takesStdin === true ? { stdin: envInput(named) } : {}),
         }),
       { now, sleep },
     ));

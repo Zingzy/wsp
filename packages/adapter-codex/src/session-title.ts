@@ -7,10 +7,10 @@
 // it has one, and a rename from here lands in that same column through the
 // app server. Measured on codex-cli 0.153.0 against state_5.sqlite.
 
-import { generatedTitle, inFolder, programWord, shellQuote } from "@wsp/protocol";
+import { ENV_FROM_INPUT, generatedTitle, inFolder, programWord, shellQuote } from "@wsp/protocol";
 import type { AgentLaunch, SessionRenameWrite } from "@wsp/protocol";
 import { answersOf, appServerScript, initializeRequest, notification, request } from "./app-server-script.js";
-import { buildEnv, slug } from "./command.js";
+import { slug } from "./command.js";
 
 const PROMPT_END = "WSP_PROMPT_END";
 
@@ -57,15 +57,14 @@ export function parseSessionTitle(stdout: string): string | null {
 /**
  * One shell line for the guest that asks the CLI itself to name a thread: one `codex exec` turn on the question,
  * since a one-shot answer needs none of the app server's channel. It runs read-only rather than with the sandbox off, since the answer is one line of words and nothing it could write
- * belongs to the thread it names, and under the same CODEX_HOME as a session, which a guest exec would not carry.
+ * belongs to the thread it names, and under the same CODEX_HOME as a session, which a guest exec would not carry: it
+ * reads that off its input with the rest of `buildEnv`.
  */
-export function titleForCommand(options: { home: string; prompt: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
-  const env = buildEnv({ base: options.baseEnv, home: options.home });
-  const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
+export function titleForCommand(options: { prompt: string; model?: string; launch?: AgentLaunch }): string {
   if (options.prompt.split("\n").includes(PROMPT_END)) throw new Error(`the prompt has a line that reads ${PROMPT_END}, which ends the prompt`);
   // The question rides a quoted heredoc on stdin, read by the `-` that ends the flags; the heredoc also closes stdin,
   // which codex exec otherwise waits on when it is not a terminal.
-  return `export ${exports}; ${inFolder(undefined, `${questionLine(options.model, options.launch)} <<'${PROMPT_END}'\n${options.prompt}\n${PROMPT_END}`)}`;
+  return `${ENV_FROM_INPUT}; ${inFolder(undefined, `${questionLine(options.model, options.launch)} <<'${PROMPT_END}'\n${options.prompt}\n${PROMPT_END}`)}`;
 }
 
 /** The one-shot question a title and a draft both ask: read-only, no approval asked, on the question from stdin. */
@@ -77,10 +76,8 @@ const questionLine = (model: string | undefined, launch: AgentLaunch | undefined
  * under the session's CODEX_HOME, on the question in the file the runtime put on the machine, since a diff is longer
  * than any command line may be.
  */
-export function draftForCommand(options: { home: string; promptFile: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
-  const env = buildEnv({ base: options.baseEnv, home: options.home });
-  const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
-  return `export ${exports}; ${inFolder(undefined, `${questionLine(options.model, options.launch)} < ${shellQuote(options.promptFile)}`)}`;
+export function draftForCommand(options: { promptFile: string; model?: string; launch?: AgentLaunch }): string {
+  return `${ENV_FROM_INPUT}; ${inFolder(undefined, `${questionLine(options.model, options.launch)} < ${shellQuote(options.promptFile)}`)}`;
 }
 
 /** The message out of the turn's events: the last agent message whole; null when the turn failed or said nothing. */
@@ -139,14 +136,13 @@ const NO_ROLLOUT = "no rollout found";
 /**
  * One bash script for the guest that names a thread through the app server's own `thread/name/set`. Codex writes a
  * thread's index row only once its first turn is written, so an update of the db before then changes nothing; the
- * server writes the name into the row and lists it in its own thread/list. `cd ~` and the exports first, as the
- * catalog probe does: a guest exec carries no environment of its own.
+ * server writes the name into the row and lists it in its own thread/list. `cd ~` and the environment off its input
+ * first, as the catalog probe does: a guest exec carries no environment of its own.
  */
-export function renameCommand(options: { home: string; threadId: string; title: string; baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
+export function renameCommand(options: { threadId: string; title: string; launch?: AgentLaunch }): string {
   const codex = programWord("codex", options.launch);
-  const exports = Object.entries(buildEnv({ base: options.baseEnv, home: options.home })).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   const lines = [initializeRequest(INIT), notification("initialized"), request(NAME, "thread/name/set", { threadId: slug("threadId", options.threadId), name: options.title })];
-  return `cd ~ && export ${exports}\n${appServerScript(codex, [{ lines, answers: 2 }])}`;
+  return `cd ~ && ${ENV_FROM_INPUT}\n${appServerScript(codex, [{ lines, answers: 2 }])}`;
 }
 
 /** What the write came to: codex's answer to the request, its refusal for a thread it has not written yet read as no

@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { ENV_FROM_INPUT } from "@wsp/protocol";
+import { createClaudeAdapter } from "../src/adapter.js";
 import { catalogProbeCommand, parseCatalogProbe } from "../src/catalog.js";
+import { buildEnv } from "../src/landmines.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 // Claude Code 2.1.257 on 2026-09-05: `claude --version`, `claude --help` and the initialize control response of a
@@ -22,12 +25,16 @@ describe("catalogProbeCommand", () => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  it("exports the base env a session gets, PATH included, so a probe served by a bare-PATH exec still finds the binary", () => {
-    const cmd = catalogProbeCommand({ baseEnv: { PATH: "/root/.local/bin:/usr/bin", CLAUDECODE: "1" } });
-    expect(cmd).toContain("export ");
-    expect(cmd).toContain("PATH='/root/.local/bin:/usr/bin'");
-    expect(cmd).not.toContain("CLAUDECODE=1");
-    expect(catalogProbeCommand()).not.toContain("PATH=");
+  it("reads the base env a session gets off its input, PATH included, and carries no value in its own words", async () => {
+    const asked: { cmd: string; env: Readonly<Record<string, string>> | undefined }[] = [];
+    const adapter = createClaudeAdapter({ exec: () => { throw new Error("no turns here"); }, configDir: "/root/.claude-cfg", baseEnv: { PATH: "/root/.local/bin:/usr/bin", CLAUDECODE: "1", GATEWAY_TOKEN: "tok-x" } });
+    await adapter.probeCatalog((cmd, env) => (asked.push({ cmd, env }), Promise.resolve("")));
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.env).toMatchObject({ PATH: "/root/.local/bin:/usr/bin", GATEWAY_TOKEN: "tok-x" });
+    expect(asked[0]!.env).not.toHaveProperty("CLAUDECODE");
+    // Read after the inherited marks are dropped, so the headless overrides it carries are not dropped with them.
+    expect(asked[0]!.cmd).toContain(`unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; ${ENV_FROM_INPUT}`);
+    expect(asked[0]!.cmd.replace(ENV_FROM_INPUT, "")).not.toMatch(/PATH=|tok-x|export /);
   });
 
   it("asks for the version, the help and one initialize handshake, and never a prompt", () => {
@@ -39,8 +46,6 @@ describe("catalogProbeCommand", () => {
     expect(cmd).toContain('\\"subtype\\":\\"initialize\\"');
     expect(cmd).toMatch(/^cd ~ && /);
     expect(cmd).not.toMatch(/--permission-mode|--dangerously-skip-permissions|--session-id|--resume/);
-    // IDE discovery is off, as for a session; the env the binary sees is proven by the run below.
-    expect(cmd).toContain("CLAUDE_CODE_AUTO_CONNECT_IDE='0'");
   });
 
   it("runs the binary under the session's config dir with every inherited nesting mark gone", () => {
@@ -50,8 +55,10 @@ describe("catalogProbeCommand", () => {
     const bin = join(dir, "bin");
     execFileSync("mkdir", [bin]);
     writeStub(join(bin, "claude"), "#!/bin/sh\ncat >/dev/null; echo CALL; env\n");
-    const out = execFileSync("bash", ["-c", catalogProbeCommand({ baseEnv: { CLAUDE_CONFIG_DIR: "/root/.claude-cfg" } })], {
+    const input = Object.entries(buildEnv({ base: { CLAUDE_CONFIG_DIR: "/root/.claude-cfg" } })).map(([k, v]) => `${k}=${v}\0`).join("");
+    const out = execFileSync("bash", ["-c", catalogProbeCommand()], {
       encoding: "utf8",
+      input,
       env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir, CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli", FORCE_CODE_TERMINAL: "1" },
     });
     expect(out.match(/^CALL$/gm)).toHaveLength(3);
