@@ -363,6 +363,9 @@ export interface LiveWorkspace {
   generation: number;
   /** The wake in flight, so a second caller joins it instead of resuming twice. */
   waking?: Promise<WorkspaceView>;
+  /** Running on a provider read alone, with no wake check behind it: a Boat box reads running while its disk still
+   * streams in and refuses every command until it is done, so the next wake proves it takes commands first. */
+  unchecked?: true;
   /** The nap in flight: a second nap joins it, a wake waits for it. */
   napping?: Promise<WorkspaceView>;
   /** The record following a machine the provider runs under a napping word: a second verb that read the same fact joins it. */

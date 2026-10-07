@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash, randomBytes } from "node:crypto";
-import { MachineUnreachableError, MoveUnansweredError, ResumeUnansweredError, CREATED_AT_LABEL, GOLDEN_LABEL, NAME_LABEL, OWNER_LABEL, WORKSPACE_LABEL, WSP_LABEL, Workspace, importInto, isMissing, NapRefusedError, StopRefusedError, killUntilGone, readGone, type ExecResult, type Machine, type MachineBackend, type MachineKind, type MachineShape, type MachineSpec, type MachineState, type RunOptions, type WspError, type WorkspaceHooks, type WorkspacePhase as EnginePhase, applyMachineContext, DiskSyncError, syncDisk } from "@wsp/engine";
-import { type WorkspacePhase, type WorkspaceSize, type WorkspaceView, settingFor, IDLE_REASON, ALREADY_RUNNING, goldenImage, goneWords, HOSTNAME_KEPT, hostnameSetLine, NOT_GONE, GONE_UNCHECKED, RESUME_UNANSWERED, copiesFolder, placeHoldsNoImageLine } from "@wsp/protocol";
+import { MachineUnreachableError, RestoreUnfinishedError, MoveUnansweredError, ResumeUnansweredError, CREATED_AT_LABEL, GOLDEN_LABEL, NAME_LABEL, OWNER_LABEL, WORKSPACE_LABEL, WSP_LABEL, Workspace, importInto, isMissing, NapRefusedError, StopRefusedError, killUntilGone, readGone, type ExecResult, type Machine, type MachineBackend, type MachineKind, type MachineShape, type MachineSpec, type MachineState, type RunOptions, type WspError, type WorkspaceHooks, type WorkspacePhase as EnginePhase, applyMachineContext, DiskSyncError, syncDisk } from "@wsp/engine";
+import { type WorkspacePhase, goneRefusal, notFoundRefusal, noWorkspaceRefusal, noCommandsYetLine, WAKE_STOPPED_UP, type WorkspaceSize, type WorkspaceView, settingFor, IDLE_REASON, ALREADY_RUNNING, goldenImage, goneWords, HOSTNAME_KEPT, hostnameSetLine, NOT_GONE, GONE_UNCHECKED, RESUME_UNANSWERED, copiesFolder, placeHoldsNoImageLine } from "@wsp/protocol";
 import { templateHost } from "../host-id.js";
 import { backstopMs, createIdlePolicy } from "../idle.js";
 import { POLL_INTERVAL_MS, phaseLeavingGone, providerSaid } from "../status.js";
@@ -257,6 +257,7 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
     entry.record.machineId = entry.ws.machineId;
     entry.record.firstLife = entry.ws.isFirstLife;
     delete entry.record.gone;
+    delete entry.unchecked;
     void ctx.syncDaemon(entry);
   };
 
@@ -471,6 +472,7 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
         ctx.napRefusals.delete(id);
         ctx.stopRefusals.delete(id);
         entry.record.phase = "napping";
+        delete entry.unchecked;
         await ctx.persist(entry.record);
         bus.emit({ type: "workspace.napped", workspaceId: id });
         await ctx.emitStatus(entry, "napping", reason);
@@ -501,6 +503,7 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
     entry.ws.notePaused();
     ctx.napRefusals.delete(entry.record.id);
     entry.record.phase = "napping";
+    delete entry.unchecked;
     await ctx.persist(entry.record);
     endSessions(entry.record.id, PAUSED_REASON);
     bus.emit({ type: "workspace.napped", workspaceId: entry.record.id, found: true });
@@ -520,6 +523,7 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
       try {
         entry.ws.noteRunning();
         followMachine(entry);
+        entry.unchecked = true;
         await ctx.persist(entry.record);
         bus.emit({ type: "workspace.woken", workspaceId: entry.record.id, machineId: entry.record.machineId });
         await ctx.emitStatus(entry, ctx.reachOf(entry), ALREADY_RUNNING);
@@ -551,10 +555,13 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
     }
     return markGone(entry, machineId, reason);
   };
-  /** A verdict already confirmed, written: the record, the sessions, the event and the row move together. */
+  /** A verdict already confirmed, written: the record, the sessions, the event and the row move together. A delete
+   * under way or done has the last word, so a record no longer live, or being deleted, is written nothing. */
   const markGone = async (entry: LiveWorkspace, machineId: string, reason: string): Promise<GoneOutcome> => {
     if (entry.record.phase === "gone" || entry.record.machineId !== machineId) return "moot";
+    if (live.get(entry.record.id) !== entry || entry.deleting !== undefined) return "moot";
     entry.record.phase = "gone";
+    delete entry.unchecked;
     entry.record.gone = reason;
     await ctx.persist(entry.record);
     endSessions(entry.record.id, GONE_REASON);
@@ -679,9 +686,63 @@ export function machinesArea(ctx: RuntimeContext): MachinesArea {
   for (const type of ["workspace.napped", "workspace.gone", "workspace.deleted"] as const) {
     bus.on(type, e => idle.forget((e as { workspaceId: string }).workspaceId));
   }
+
+  /** A machine running on a provider read alone answers a wake or a launch once it takes commands: a Boat box reads
+   * running while its disk streams in and refuses every command until it is done. The row reads waking meanwhile,
+   * every caller shares the one proof, and the row's stop ends it at once. A delete that took the record while the
+   * proof asked has the last word; a machine the provider no longer has takes the gone road; otherwise the record
+   * goes back to running, and only a proof that landed drops the mark. */
+  const proven = (entry: LiveWorkspace): Promise<WorkspaceView> => {
+    if (entry.waking) return entry.waking;
+    const prove = entry.machine.proveRoad?.bind(entry.machine);
+    if (prove === undefined) {
+      delete entry.unchecked;
+      return Promise.resolve(ctx.view(entry.record));
+    }
+    const stop = new AbortController();
+    entry.wakeStop = stop;
+    /** Before every write: a delete under way is waited for, and one that took the record leaves nothing to write. */
+    const stillLive = async (): Promise<void> => {
+      await entry.deleting?.catch(() => {});
+      if (live.get(entry.record.id) !== entry) throw notFoundRefusal(noWorkspaceRefusal(entry.record.name));
+    };
+    entry.waking = (async () => {
+      try {
+        await stillLive();
+        entry.record.phase = "waking";
+        await ctx.persist(entry.record);
+        await ctx.emitStatus(entry, "napping");
+        const outcome = stop.signal.aborted
+          ? ("stopped" as const)
+          : await Promise.race([
+              prove(stop.signal).then(() => "proven" as const, (e: unknown) => (e instanceof Error ? e : new Error(String(e)))),
+              new Promise<"stopped">(resolve => stop.signal.addEventListener("abort", () => resolve("stopped"), { once: true })),
+            ]);
+        await stillLive();
+        if (outcome instanceof Error && isMissing(outcome)) {
+          entry.record.phase = "running";
+          const gone = await settleGone(entry, goneWords(entry.record.machineId, { by: "wake", at: clock.now(), answer: providerSaid(outcome) }));
+          await stillLive();
+          if (settled(gone)) throw new Error(goneRefusal(entry.record.name, "wake", entry.record.gone));
+        }
+        if (outcome === "proven") delete entry.unchecked;
+        const said = outcome === "proven" ? undefined : outcome === "stopped" ? WAKE_STOPPED_UP : outcome instanceof RestoreUnfinishedError ? noCommandsYetLine(entry.record.name, outcome.message) : outcome.message;
+        entry.record.phase = "running";
+        await ctx.persist(entry.record);
+        await ctx.emitStatus(entry, ctx.reachOf(entry), said);
+        if (outcome === "proven") return ctx.view(entry.record);
+        throw outcome === "stopped" || outcome instanceof RestoreUnfinishedError ? new Error(said) : outcome;
+      } finally {
+        delete entry.waking;
+        if (entry.wakeStop === stop) delete entry.wakeStop;
+      }
+    })();
+    return entry.waking;
+  };
+
   return {
     imageMark, inflight, claiming, observed, observing, fork, unfork, followMachine, attach, endSessions, drop, napWith,
-    armLateRead, adoptPause, runsUnderNapping, adoptRunning, settleGone, markGone, rereading, adoptGone, recoverGone,
+    armLateRead, adoptPause, runsUnderNapping, adoptRunning, proven, settleGone, markGone, rereading, adoptGone, recoverGone,
     idle,
   };
 }
