@@ -68,7 +68,6 @@ const EXEMPT: &[(&str, &str, &str)] = &[
     ("wsp-daemon/src/place.rs", "take_unfound", INSTALL),
     ("wsp-daemon/src/place.rs", "take_update_part", INSTALL),
     ("wsp-daemon/src/readings_history.rs", "append", OWN),
-    ("wsp-daemon/src/relay.rs", "listen_open_socket", UNLINK),
     ("wsp-daemon/src/ssh.rs", "contain", KERNEL),
     ("wsp-daemon/src/ssh.rs", "kill_cgroup", KERNEL),
     ("wsp-daemon/src/ssh.rs", "make_private_dir", OWN),

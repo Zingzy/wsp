@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The token file is the only source, read at every auth frame so the host can rotate it while the daemon runs;
-//! an exported token or a query string never counts.
+//! an exported token or a query string never counts. It is read through a walk from the top, never by path: on a box
+//! it sits in the home of a login who could otherwise put a folder holding a token of its own where `.wsp` was.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -14,11 +15,17 @@ use crate::Ctx;
 /// host writing the file and the sockets the old token opened going.
 pub(crate) const WATCH_EVERY: Duration = Duration::from_secs(1);
 
-/// The token as the file holds it now, trimmed; nothing when the file is missing, unreadable or blank.
+/// The token as the file holds it now, trimmed; nothing when the file is missing, blank or refused.
 pub(crate) fn current_token(path: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(path).ok()?;
+    read_token(path).ok().flatten()
+}
+
+/// The token, None where the file is missing or blank, and why where the file or its folder is not this daemon's
+/// (`beneath::kept_text()`).
+pub(crate) fn read_token(path: &Path) -> std::io::Result<Option<String>> {
+    let Some(text) = crate::beneath::kept_text(path)? else { return Ok(None) };
     let token = text.trim();
-    (!token.is_empty()).then(|| token.to_owned())
+    Ok((!token.is_empty()).then(|| token.to_owned()))
 }
 
 /// Whether the token a peer sent is the one the file holds now, compared in constant time.

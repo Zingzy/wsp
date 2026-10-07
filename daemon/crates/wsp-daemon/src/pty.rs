@@ -45,6 +45,11 @@ pub(crate) fn passwd_row() -> Option<PasswdRow> {
     Some(PasswdRow { homedir: user.dir.to_string_lossy().into_owned(), username: user.name, shell: (!shell.is_empty()).then_some(shell) })
 }
 
+/// The daemon's own login by name: the passwd row's, else USER, else nothing.
+pub(crate) fn user_name() -> String {
+    passwd_row().map(|row| row.username).or_else(|| std::env::var("USER").ok()).unwrap_or_default()
+}
+
 /// The daemon's own environment, which every pty starts from.
 pub(crate) fn process_env() -> Env {
     std::env::vars_os().map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned())).collect()
@@ -97,6 +102,9 @@ pub(crate) struct PtyCreateOpts {
     pub(crate) cwd: Option<String>,
     pub(crate) env: Option<Env>,
     pub(crate) run: Option<String>,
+    pub(crate) args: Option<Vec<String>>,
+    /// The uid the terminal is handed to: the login this computer's lines run as, where the frame asked for it.
+    pub(crate) login_uid: Option<u32>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -112,6 +120,11 @@ pub(crate) struct PtyLaunch {
 /// machine is what the next terminal runs. A row without a shell, or no row, gets bash.
 pub(crate) fn pty_launch(opts: &PtyCreateOpts, base: &Env, me: Option<&PasswdRow>) -> PtyLaunch {
     let mut env = pty_env(base, opts.env.as_ref(), me);
+    if let Some((program, rest)) = opts.args.as_deref().and_then(<[String]>::split_first) {
+        let rest: Vec<&str> = rest.iter().map(String::as_str).collect();
+        let (file, args) = work_argv(program, &rest);
+        return PtyLaunch { file, args, env };
+    }
     if let Some(shell) = &opts.shell {
         let run: Vec<&str> = opts.run.as_deref().map_or_else(Vec::new, |run| vec!["-c", run]);
         let (file, args) = work_argv(shell, &run);
@@ -128,6 +141,18 @@ pub(crate) fn pty_launch(opts: &PtyCreateOpts, base: &Env, me: Option<&PasswdRow
     let args: Vec<&str> = opts.run.as_deref().map_or_else(|| vec!["-l"], |run| vec!["-l", "-i", "-c", run]);
     let (file, args) = work_argv(shell.unwrap_or("bash"), &args);
     PtyLaunch { file, args, env }
+}
+
+/// The terminal handed to the login its program runs as, as login(1) hands a session its own: a tool run as that
+/// login opens it by name to read a code typed there, which root's terminal refuses. Opened under /dev/pts, which
+/// only the kernel writes, with no link followed, and changed through that descriptor.
+fn hand_terminal(master: &dyn MasterPty, uid: u32) -> io::Result<()> {
+    use nix::fcntl::OFlag;
+    let name = master.tty_name().ok_or_else(|| io::Error::other("the terminal has no name to hand over"))?;
+    let flags = OFlag::O_RDONLY | OFlag::O_NOCTTY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+    let terminal = nix::fcntl::open(&name, flags, nix::sys::stat::Mode::empty())?;
+    nix::unistd::fchown(&terminal, Some(nix::unistd::Uid::from_raw(uid)), None)?;
+    Ok(())
 }
 
 /// HOME as the daemon has it, else the passwd row's: where a pty opens when the request names no cwd.
@@ -265,6 +290,9 @@ impl Session {
             return Err(io::Error::other(format!("cwd is not a directory: {cwd}")));
         }
         let pair = native_pty_system().openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(io::Error::other)?;
+        if let Some(uid) = opts.login_uid {
+            hand_terminal(&*pair.master, uid)?;
+        }
         let mut cmd = CommandBuilder::new(&launch.file);
         cmd.args(&launch.args);
         cmd.env_clear();
@@ -764,6 +792,44 @@ mod tests {
         assert!(!ptys.tab("pty_404", None));
         ptys.destroy(&ran.id);
         ptys.destroy(&plain.id);
+    }
+
+    #[test]
+    fn args_run_as_the_programs_own_argv_behind_the_work_score_with_no_shell_reading_a_line() {
+        let opts = PtyCreateOpts {
+            args: Some(vec!["/bin/echo".to_owned(), "two words".to_owned()]),
+            env: Some(env(&[("WSP_ASKED", "yes")])),
+            ..Default::default()
+        };
+        let launch = pty_launch(&opts, &env(&[]), Some(&me()));
+        assert_eq!(launch.file, "/bin/sh");
+        assert_eq!(launch.args, ["-c", &wrap(), "/bin/echo", "two words"]);
+        assert_eq!(launch.env["WSP_ASKED"], "yes");
+        assert!(!launch.env.contains_key("SHELL"), "no shell runs, so none is named for what it spawns");
+    }
+
+    /// The terminal of a pty whose program runs as the computer's login is that login's, and every other pty's
+    /// stays the daemon's own. Run as root this hands it to nobody; run as anyone else the uid is their own, which
+    /// still walks the road.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_pty_run_as_the_login_hands_its_terminal_to_that_login_and_no_other_pty_does() {
+        use std::os::unix::fs::MetadataExt;
+        let me = nix::unistd::getuid().as_raw();
+        let login = if me == 0 { 65534 } else { me };
+        let mut ptys = PtyManager::default();
+        let asked = |login_uid| PtyCreateOpts {
+            shell: Some("/bin/sh".to_owned()),
+            run: Some("sleep 5".to_owned()),
+            login_uid,
+            ..Default::default()
+        };
+        let home = env(&[("HOME", "/tmp")]);
+        let (handed, kept) = (ptys.create(&asked(Some(login)), &home, None).unwrap(), ptys.create(&asked(None), &home, None).unwrap());
+        let owner = |pid: u32| std::fs::metadata(format!("/proc/{pid}/fd/0")).unwrap().uid();
+        assert_eq!((owner(handed.pid), owner(kept.pid)), (login, me));
+        ptys.destroy(&handed.id);
+        ptys.destroy(&kept.id);
     }
 
     #[test]

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The pty relay against a scripted link: bytes both ways, raw mode set and
 // restored, size propagated, a printed URL shown once as a hyperlink and
-// opened here on o, the quiet status run reading only what sits between the
-// echo and the exit marker.
+// opened here on o, the quiet status run reading only what sits before the
+// exit marker, and nothing ever typed into a pty to start a command.
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 import type { Question } from "@wsp/catalog";
 import { HERE_PLACE_ID, ptyBareOn } from "@wsp/protocol";
-import { BARE_BASH, OFFER_MS, QuestionScanner, UrlScanner, hyperlink, relayPty, runQuiet, shellLine, stripOsc8, urlsIn, watchPty, type Asked, type RelayTerminal } from "../src/signin-relay.js";
+import { OFFER_MS, QuestionScanner, UrlScanner, hyperlink, relayPty, runQuiet, signInArgs, stripOsc8, urlsIn, watchPty, type Asked, type RelayTerminal } from "../src/signin-relay.js";
 import { fakePtyLink, type FakePty } from "./fake-pty-link.js";
 import { ASKED } from "./signin-questions.js";
 
@@ -95,8 +95,11 @@ describe("URL detection", () => {
     expect(hyperlink("https://a.b/c")).toBe("\x1b]8;;https://a.b/c\x1b\\https://a.b/c\x1b]8;;\x1b\\");
   });
 
-  it("types a short line that reads the staged command, removes its folder, then marks the tool starting and exec's it", () => {
-    expect(shellLine({ dir: "/tmp/wsp-line.ab12", file: "'/tmp/wsp-line.ab12/line'" })).toBe(`c=$(< '/tmp/wsp-line.ab12/line'); rm -rf -- '/tmp/wsp-line.ab12'; printf '\\036'; exec bash -c "$c"\r`);
+  it("runs a sign-in as argv: bash marks the tool starting and exec's the command, which is one argument and never a typed line", () => {
+    const command = `gh auth login --hostname 'a b' && echo "$HOME"`;
+    expect(signInArgs(command, true)).toEqual(["bash", "--noprofile", "--norc", "-c", `printf '\\036'; exec bash -c "$1"`, "bash", command]);
+    expect(signInArgs(command, false)).toEqual(["bash", "-i", "-c", `printf '\\036'; exec bash -c "$1"`, "bash", command]);
+    expect([signInArgs(undefined, true), signInArgs(undefined, false)]).toEqual([["bash", "--noprofile", "--norc"], ["bash"]]);
   });
 });
 
@@ -104,10 +107,10 @@ describe("relayPty", () => {
   it("opens bash reading no startup file on a link to a computer somebody owns, and plain bash on any other", async () => {
     const owned = Object.assign(fakePtyLink(), { bare: true });
     void relayPty({ link: owned, command: "gh auth login", terminal: terminal(), open: async () => true, timeoutMs: 60_000 });
-    expect((await firstPty(owned)).created).toEqual({ cols: 120, rows: 40, shell: "bash", run: BARE_BASH });
+    expect((await firstPty(owned)).created).toEqual({ cols: 120, rows: 40, args: signInArgs("gh auth login", true) });
     const watched = Object.assign(fakePtyLink(), { bare: true });
     void watchPty({ link: watched, command: "codex login", timeoutMs: 60_000 });
-    expect((await firstPty(watched)).created).toMatchObject({ shell: "bash", run: BARE_BASH });
+    expect((await firstPty(watched)).created).toMatchObject({ args: signInArgs("codex login", true) });
     expect(ptyBareOn({ placeId: "p_spoo" })).toBe(true);
     expect([ptyBareOn({ placeId: HERE_PLACE_ID }), ptyBareOn({ workspaceId: "ws_1" })]).toEqual([false, false]);
   });
@@ -118,10 +121,11 @@ describe("relayPty", () => {
     const opened: string[] = [];
     const run = relayPty({ link, command: "gh auth login", terminal: term, open: async u => (opened.push(u), true), timeoutMs: 60_000 });
     const pty = await firstPty(link);
-    expect(pty.created).toEqual({ cols: 120, rows: 40, shell: "bash" });
+    expect(pty.created).toEqual({ cols: 120, rows: 40, args: signInArgs("gh auth login", false) });
     await tick();
     expect(pty.attached).toBe(true);
     expect(pty.ran).toBe("gh auth login");
+    expect(link.ops.filter(o => o.op === "exec")).toEqual([]);
     expect(term.raw).toEqual([true]);
 
     link.data(pty, "? Authenticate Git with your GitHub credentials? (Y/n) ");
@@ -129,7 +133,7 @@ describe("relayPty", () => {
     term.input.write("n");
     term.input.write("\r");
     await tick();
-    expect(pty.writes.slice(1)).toEqual(["n", "\r"]);
+    expect(pty.writes).toEqual(["n", "\r"]);
 
     term.columns = 100;
     term.rows = 30;
@@ -166,7 +170,7 @@ describe("relayPty", () => {
     await tick();
     expect(opened).toEqual([url]);
     expect(consented).toBe(1);
-    expect(pty.writes.slice(1)).toEqual([]);
+    expect(pty.writes).toEqual([]);
     expect(stripVTControlCharacters(term.text())).toContain("opened on this computer");
 
     // The same URL printed again is not offered again. Enter keeps the offer (gh asks for one before it opens);
@@ -180,7 +184,7 @@ describe("relayPty", () => {
     term.input.write("x");
     term.input.write("o");
     await tick();
-    expect(pty.writes.slice(1)).toEqual(["\r", "x", "o"]);
+    expect(pty.writes).toEqual(["\r", "x", "o"]);
     expect(opened).toEqual([url, url]);
 
     link.exit(pty, 0);
@@ -225,7 +229,7 @@ describe("relayPty", () => {
     expect(opened).toEqual([printed, page]);
     expect(consented).toEqual([printed, page]);
     expect(stripVTControlCharacters(term.text())).toContain("opened the sign-in page; it returns to the machine on its own");
-    expect(pty.writes.slice(1)).toEqual([]);
+    expect(pty.writes).toEqual([]);
     link.exit(pty, 0);
     expect((await run).opened).toBe(2);
   });
@@ -247,11 +251,11 @@ describe("relayPty", () => {
     term.input.write("o");
     await tick();
     expect(opened).toEqual(["https://github.com/login/device"]);
-    expect(pty.writes.slice(1)).toEqual(["\x1b[B", "\x1b[A", "\x1bOA", "\x1bOB", "\r"]);
+    expect(pty.writes).toEqual(["\x1b[B", "\x1b[A", "\x1bOA", "\x1bOB", "\r"]);
     term.input.write("n");
     term.input.write("o");
     await tick();
-    expect(pty.writes.slice(1)).toEqual(["\x1b[B", "\x1b[A", "\x1bOA", "\x1bOB", "\r", "n", "o"]);
+    expect(pty.writes).toEqual(["\x1b[B", "\x1b[A", "\x1bOA", "\x1bOB", "\r", "n", "o"]);
     link.exit(pty, 0);
     await run;
   });
@@ -281,12 +285,12 @@ describe("relayPty", () => {
     link.data(pty, "Opening https://app.netlify.com/authorize?response_type=ticket&ticket=abc \r\n");
     term.input.write("o");
     await tick();
-    expect(pty.writes.slice(1)).toEqual([]);
+    expect(pty.writes).toEqual([]);
     expect(stripVTControlCharacters(term.text())).toContain("could not open a browser here");
     t += OFFER_MS + 1;
     term.input.write("o");
     await tick();
-    expect(pty.writes.slice(1)).toEqual(["o"]);
+    expect(pty.writes).toEqual(["o"]);
     link.exit(pty, 130);
     expect((await run).exitCode).toBe(130);
   });
@@ -375,7 +379,7 @@ describe("the questions a row declares", () => {
         link.data(pty, `SSO session name (Recommended): `);
       };
       await watchPty({ link, command: "gh auth login --web", timeoutMs: 100, questions, onQuestion: a => seen.push(a.matched) });
-      return { ran: link.ptys[0]!.ran, writes: link.ptys[0]!.writes.slice(1), seen };
+      return { ran: link.ptys[0]!.ran, writes: link.ptys[0]!.writes, seen };
     };
     expect(await run([ENTER])).toEqual({ ran: "gh auth login --web", writes: ["\r"], seen: ["Press Enter to open"] });
     expect(await run([THEIRS])).toEqual({ ran: "gh auth login --web", writes: [], seen: ["SSO session name (Recommended)"] });
@@ -394,7 +398,7 @@ describe("watchPty", () => {
       if (line.includes("; exec bash -c ")) link.exit(pty, 0);
     };
     await watchPty({ link, command: "gh auth login --web", timeoutMs: 1_000, flushMs: 5, questions: [{ asks: /Press Enter to open/, answer: "\r" }], onQuestion: a => asked.push(a.matched), onUrl: u => seen.push(u), onData: c => chunks.push(c) });
-    expect({ seen, asked, writes: link.ptys[0]!.writes.length }).toEqual({ seen: [], asked: [], writes: 1 });
+    expect({ seen, asked, writes: link.ptys[0]!.writes.length }).toEqual({ seen: [], asked: [], writes: 0 });
     expect(chunks.join("")).not.toContain("evil");
   });
 
@@ -412,9 +416,9 @@ describe("watchPty", () => {
     expect(out).toEqual({ exitCode: 0, timedOut: false, dropped: false, stopped: false });
     expect(seen).toEqual(["https://github.com/login/device", "https://github.com/settings"]);
     expect(chunks.join("")).toContain("visit https://github.com/login/device");
-    expect(link.ptys[0]!.created).toMatchObject({ cols: 200, rows: 50, shell: "bash" });
+    expect(link.ptys[0]!.created).toMatchObject({ cols: 200, rows: 50, args: signInArgs("gh auth login", false) });
     expect(link.ptys[0]!.ran).toBe("gh auth login");
-    expect(link.ptys[0]!.writes).toHaveLength(1);
+    expect(link.ptys[0]!.writes).toEqual([]);
     expect(link.ptys[0]!.killed).toBe(true);
   });
 
@@ -483,8 +487,49 @@ describe("a refused pty op", () => {
   });
 });
 
+describe("a pty a sign-in starts", () => {
+  it("is started by its args alone: across the relay, the watch and the quiet run nothing is ever typed or staged to start a command", async () => {
+    const link = fakePtyLink();
+    link.script = (pty, line) => {
+      if (line.includes("WSP_STATUS")) link.data(pty, "WSP_STATUS 0\r\n");
+      link.exit(pty, 0);
+    };
+    await relayPty({ link, command: "gh auth login", asLogin: true, terminal: terminal(), open: async () => true, timeoutMs: 1_000 });
+    await watchPty({ link, command: "codex login", asLogin: true, timeoutMs: 1_000 });
+    await runQuiet(link, "gh auth status", 1_000, { GH_CONFIG_DIR: "/x" });
+    expect(link.ptys.map(p => p.ran)).toEqual(["gh auth login", "codex login", "gh auth status"]);
+    expect(link.ptys.map(p => p.writes)).toEqual([[], [], []]);
+    expect(link.ops.filter(o => o.op === "exec" || o.op === "pty.write")).toEqual([]);
+    // A line run as the computer's login asks for its terminal to be handed to that login; the quiet run is root's.
+    expect(link.ptys.map(p => p.created["asLogin"])).toEqual([true, true, undefined]);
+  });
+
+  it("is refused on a daemon older than args, which opens a plain shell for them: that pty is ended and nothing is typed into it", async () => {
+    const link = Object.assign(fakePtyLink(), { noArgv: true });
+    const term = terminal();
+    const said = "the daemon on that computer is older than this wsp, so it opened a shell instead of the sign-in. Update wsp on that computer, then sign in again.";
+    await expect(relayPty({ link, command: "gh auth login", terminal: term, open: async () => true, timeoutMs: 60_000 })).rejects.toThrow(said);
+    await expect(watchPty({ link, command: "codex login", timeoutMs: 60_000 })).rejects.toThrow(said);
+    await expect(runQuiet(link, "gh auth status", 5_000)).rejects.toThrow(said);
+    expect(link.ptys.map(p => [p.killed, p.attached, p.writes.length])).toEqual([
+      [true, false, 0],
+      [true, false, 0],
+      [true, false, 0],
+    ]);
+    expect(term.raw).toEqual([]);
+  });
+
+  it("names the line that updates a joined computer's daemon where the link names that computer", async () => {
+    const box = Object.assign(fakePtyLink(), { noArgv: true, computer: "spoo" });
+    await expect(watchPty({ link: box, command: "codex login", timeoutMs: 60_000 })).rejects.toThrow(
+      "the daemon on that computer is older than this wsp, so it opened a shell instead of the sign-in. Run wsp add spoo --update, then sign in again.",
+    );
+    await expect(runQuiet(box, "codex login status", 5_000)).rejects.toThrow("Run wsp add spoo --update, then sign in again.");
+  });
+});
+
 describe("runQuiet", () => {
-  it("runs the status command in a promptless sh and returns only what sits between the echo and the exit marker", async () => {
+  it("runs the status command as an argument of sh and returns only what sits before the exit marker", async () => {
     const link = fakePtyLink();
     link.script = (pty, line) => {
       if (line.startsWith("gh auth status")) {
@@ -493,10 +538,9 @@ describe("runQuiet", () => {
       }
     };
     const res = await runQuiet(link, "gh auth status", 5_000);
-    expect(link.ptys[0]!.created).toEqual({ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "" } });
+    expect(link.ptys[0]!.created).toEqual({ cols: 200, rows: 50, args: ["/bin/sh", "-c", `eval "$1"; printf '\\nWSP_STATUS %s\\n' $?`, "sh", "gh auth status"], env: {} });
     expect(link.ptys[0]!.ran).toBe("gh auth status");
-    expect(link.ptys[0]!.writes).toHaveLength(1);
-    expect([...link.staged.values()]).toEqual([{ command: "gh auth status", cleared: true }]);
+    expect(link.ptys[0]!.writes).toEqual([]);
     expect(res).toEqual({ output: "github.com\n  ✓ Logged in to github.com account someone (keyring)\n  - Token: gho_****", exitCode: 1, timedOut: false, dropped: false });
     expect(link.ptys[0]!.killed).toBe(true);
   });

@@ -18,9 +18,9 @@ use wsp_frames::{
 use crate::under_home::{prune_empty, remove_under_home, Removed};
 
 /// The place file as it stands, or nothing when this computer is no place: a file that is there and is not one
-/// reads the same as none, since the one road that writes it is wsp join.
-pub(crate) fn read_place_file(path: &Path) -> Option<PlaceFile> {
-    PlaceFile::parse(&std::fs::read_to_string(path).ok()?)
+/// reads the same as none, since the one road that writes it is wsp join. A folder not the daemon's own is refused.
+pub(crate) fn read_place_file(path: &Path) -> Result<Option<PlaceFile>, String> {
+    Ok(crate::beneath::kept_text(path).map_err(|e| e.to_string())?.as_deref().and_then(PlaceFile::parse))
 }
 
 /// This place's signature over the transcript, with the pkcs8 PEM key wsp join wrote.
@@ -306,15 +306,6 @@ fn os_line() -> String {
     }
 }
 
-fn user_name() -> String {
-    nix::unistd::User::from_uid(nix::unistd::getuid())
-        .ok()
-        .flatten()
-        .map(|u| u.name)
-        .or_else(|| std::env::var("USER").ok())
-        .unwrap_or_default()
-}
-
 /// What this report is built from: the file, the home, the words the daemon was started with.
 pub(crate) struct ReportInput<'a> {
     pub(crate) file: &'a PlaceFile,
@@ -364,7 +355,7 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
         model: mac_model(),
         login: [
             ("HOME".to_owned(), input.home.to_string_lossy().into_owned()),
-            ("USER".to_owned(), user_name()),
+            ("USER".to_owned(), crate::pty::user_name()),
             ("PATH".to_owned(), path),
         ]
         .into_iter()
@@ -386,6 +377,7 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
         agent_versions: input.agent_versions.clone(),
         // Read at every dial, since a sign-in on this computer changes it between one link and the next.
         logins: Some(logins_present(input.runtime_root)),
+        login_reach: false,
     }
 }
 

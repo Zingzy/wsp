@@ -52,11 +52,17 @@ describe("wsp add <place> --sign-in <agent>", () => {
 
   const signingIn = (answer: Awaited<ReturnType<NonNullable<Parameters<typeof addCommand>[4]>["signIn"]>>, places?: PlaceView[]) => {
     const asked: { agent?: string; line: SignInLine }[] = [];
+    const linked: { placeId: string; computer?: string }[] = [];
     return {
       asked,
+      linked,
       deps: {
         ...systemPlaceDeps,
         dial: listing(places),
+        placeLink: async (_client: unknown, placeId: string, computer?: string) => {
+          linked.push({ placeId, ...(computer !== undefined ? { computer } : {}) });
+          return { link: { op: async () => ({ ok: true }), onEvent: () => () => {} }, close: async () => undefined };
+        },
         signIn: async (o: { agent?: string; line: SignInLine }) => {
           asked.push({ agent: o.agent, line: o.line });
           return answer;
@@ -75,6 +81,8 @@ describe("wsp add <place> --sign-in <agent>", () => {
     // That computer lists its logins only when it dials, so the host is told the one the tool's status said landed.
     expect(landed).toEqual([{ placeId: "p_1", agent: "codex" }]);
     expect(run.asked).toEqual([{ agent: "codex", line: { command: "codex login" } }]);
+    // The link names the computer, so a refusal to update its daemon names the line for it.
+    expect(run.linked).toEqual([{ placeId: "p_1", computer: "spoo" }]);
     expect(io.lines.join("\n")).toContain("Codex is signed in on spoo (ChatGPT); every workspace there shares that login.");
     // A row that says where that computer keeps its logins is never turned away: the host asks its backend again
     // whenever a computer dials back on another daemon, so a box that has just taken this one is ready here.

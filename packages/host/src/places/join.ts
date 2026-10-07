@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { platform } from "node:os";
 import { resolve } from "node:path";
 import { ALREADY_JOINED_LINE, JOIN_ADDRESS_LINE, PLACE_CODE_REFUSAL, JOIN_NO_KEY_REFUSAL, joinKeyRefusal, readJoinToken, PLACE_LINK_NONCE_BYTES, PlaceJoinDevice, PlaceJoinReply, type PlaceFile, type PlaceReport, placeDaemonPaths, workFolderIn, hostKeyRefusal, joinAddressOf, placeLinkTranscript, usageRefusal, wsUrlOf, PLACE_NEEDS_ROOT_LINE } from "@wsp/protocol";
@@ -67,11 +67,24 @@ const joinDeps = (): JoinDeps => ({
   now: Date.now,
 });
 
+/** The uid of the login this computer's lines run as where it is not this process's own: the owner of the home, by
+ * the rule the host hands a line to runuser by. Nothing where the home is this process's own or cannot be read. */
+export function loginUidOf(home: string, self: number | undefined = process.getuid?.()): number | undefined {
+  let owner: number;
+  try {
+    owner = statSync(home).uid;
+  } catch {
+    return undefined;
+  }
+  return owner === self ? undefined : owner;
+}
+
 /** The daemon's line on a computer joined as a place: the flags every daemon under a login takes, told the place
  * kind, then the place file it dials its host off, the home it keeps its files under and sweeps on a leave, the
  * folder its turns start in, the line that runs wsp here word by word, and the agents to look for on PATH at each
- * dial, as catalog id and command. Only the list of ids is fixed at the join; PATH is read at every dial. */
-export function placeDaemonFlags(home: string, file: string, run: RunningWsp = runningWsp()): string[] {
+ * dial, as catalog id and command. Only the list of ids is fixed at the join; PATH is read at every dial. Where the
+ * home is another login's, that login's uid, which the daemon hands its open socket and a sign-in's terminal to. */
+export function placeDaemonFlags(home: string, file: string, run: RunningWsp = runningWsp(), login: number | undefined = loginUidOf(home)): string[] {
   return [
     ...daemonFlags(sshDaemonPlace({ home, path: "" })),
     "--home",
@@ -83,6 +96,7 @@ export function placeDaemonFlags(home: string, file: string, run: RunningWsp = r
     ...wspArgvOf(run).flatMap(word => ["--wsp-argv", word]),
     "--agents",
     CATALOG_AGENTS.map(a => `${a.id}=${a.bin}`).join(","),
+    ...(login === undefined ? [] : ["--login-uid", String(login)]),
   ];
 }
 

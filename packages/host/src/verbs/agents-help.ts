@@ -229,11 +229,12 @@ export async function addTools(client: HostClient, agent: string): Promise<{ fil
   return z.object({ file: z.string() }).parse(await client.request("agents.addTools", { target: { placeId: HERE_PLACE_ID }, agent }));
 }
 
-/** Runs a sign-in the host plans for a target on that target's own terminal, shown in this one. */
-export async function signInHere(ctx: VerbContext, target: AgentsTarget, ask: { agent: string; name?: string }): Promise<BoxSignedIn> {
+/** Runs a sign-in the host plans for a target on that target's own terminal, shown in this one. `computer` is a joined
+ * computer's name, where the target is one. */
+export async function signInHere(ctx: VerbContext, target: AgentsTarget, ask: { agent: string; name?: string }, computer?: string): Promise<BoxSignedIn> {
   const client = await ctx.client();
   const { line } = await client.request<{ line: unknown }>("agents.signInLine", { target, agent: ask.agent, ...(ask.name !== undefined ? { name: ask.name } : {}) });
-  const road = await targetLink(client, target);
+  const road = await targetLink(client, target, computer);
   try {
     return await relaySignIn({
       link: road.link,

@@ -570,6 +570,14 @@ export function placeDaemonBehind(place: { daemonVersion?: number }): string | u
   return version === undefined || version >= DAEMON_VERSION ? undefined : `daemon ${version}, host ${DAEMON_VERSION}`;
 }
 
+/** What a sign-in is refused with where the daemon that opened its terminal is older than the one that runs a program
+ * as its argv: that daemon took the program for no field at all and opened a plain shell, which nothing types into. */
+export const ARGV_BEHIND_WHAT = "the daemon on that computer is older than this wsp, so it opened a shell instead of the sign-in.";
+/** The fix half: the update line for a joined computer named, and the plain ask anywhere else, since the host brings a
+ * workspace's daemon up to date itself as it connects. */
+export const argvBehindFix = (computer?: string): string =>
+  computer === undefined ? "Update wsp on that computer, then sign in again." : `Run ${placeUpdateLine(computer)}, then sign in again.`;
+
 /** The first daemon that answers fs.folders. */
 export const FS_FOLDERS_DAEMON_VERSION = 73;
 

@@ -55,7 +55,6 @@ describe("the sign-in the host planned, run on that computer's terminal and show
       l.exit(pty, 0);
     });
     expect(execsBeside(link).map(o => o.extra["cmd"])).toEqual(["mkdir -p '/wsp/logins/codex'"]);
-    expect([...link.staged.values()].every(s => s.cleared)).toBe(true);
     const [flow, status] = link.ptys;
     expect(flow!.created["env"]).toEqual({ CODEX_HOME: "/wsp/logins/codex" });
     expect(flow!.ran).toBe("codex login --device-auth");

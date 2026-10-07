@@ -365,6 +365,11 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     /** A command line the pty runs through the person's own shell and exits with: a reply's block run where it
      * stands. Such a pty is that reply's, which pty.list marks, until pty.tab hands it to the panes. */
     run: z.string().optional(),
+    /** The program the pty runs and its arguments, as its argv: no shell reads a line for it. Never beside a shell or
+     * a run. A daemon that ran them says argv on its reply; an older one takes them for no field at all. */
+    args: z.array(z.string()).optional(),
+    /** The program runs as the computer's login, the owner of its home, so the terminal is handed to that login. */
+    asLogin: z.boolean().optional(),
     machineId: z.string().optional(),
   }),
   z.object({ id: reqId, op: z.literal("pty.attach"), ptyId: z.string(), machineId: z.string().optional() }),

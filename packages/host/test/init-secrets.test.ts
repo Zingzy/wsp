@@ -134,9 +134,9 @@ describe("the secrets step", () => {
     // One read of the machine, then one write.
     expect(link.ptys).toHaveLength(2);
     expect(link.ptys[0]!.ran).toBe(readCommand());
-    expect(link.ptys[0]!.created["env"]).toEqual({ PS1: "" });
+    expect(link.ptys[0]!.created["env"]).toEqual({});
     const pty = writes(link)[0]!;
-    expect(pty.created["env"]).toEqual({ PS1: "", WSP_SECRET_LINE: `export A_KEY='pa'\\''ss word'` });
+    expect(pty.created["env"]).toEqual({ WSP_SECRET_LINE: `export A_KEY='pa'\\''ss word'` });
     expect(pty.ran).toBe(appendCommand(false));
     expect(link.ptys.every(p => p.killed)).toBe(true);
     expect(link.dials).toBe(2);
@@ -156,7 +156,7 @@ describe("the secrets step", () => {
     await t.until(`A_KEY: set in ${SH_FILE} and ${FISH_FILE} on the machine`);
     expect(await run).toEqual<SecretOutcome[]>([{ name: "A_KEY", from: "cut from ~/.config/fish/config.fish", state: "set" }]);
     const pty = writes(link)[0]!;
-    expect(pty.created["env"]).toEqual({ PS1: "", WSP_SECRET_LINE: `export A_KEY='pa'\\''ss word'`, WSP_FISH_LINE: `set -gx A_KEY 'pa\\'ss word'` });
+    expect(pty.created["env"]).toEqual({ WSP_SECRET_LINE: `export A_KEY='pa'\\''ss word'`, WSP_FISH_LINE: `set -gx A_KEY 'pa\\'ss word'` });
     expect(pty.ran).toBe(appendCommand(true));
   });
 
@@ -176,7 +176,7 @@ describe("the secrets step", () => {
     ]);
     expect(hidden).toEqual(["x"]);
     expect(writes(link)).toHaveLength(1);
-    expect(writes(link)[0]!.created["env"]).toEqual({ PS1: "", WSP_SECRET_LINE: "export B_TOKEN='x'" });
+    expect(writes(link)[0]!.created["env"]).toEqual({ WSP_SECRET_LINE: "export B_TOKEN='x'" });
   });
 
   it("a secrets file that cannot be read asks for every name and says so once", async () => {

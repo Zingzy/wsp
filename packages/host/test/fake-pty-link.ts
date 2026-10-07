@@ -1,34 +1,33 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A daemon link whose ptys are scripted: every op is recorded, typed bytes are
-// kept per pty, a complete line (ending in \r) is echoed back the way a tty
-// would, followed by what a sign-in line prints as its tool starts, and handed
-// to the script, and the test pushes output and exits. A command put in a file
-// by an exec is kept, and a typed line that reads that file records it as run.
+// kept per pty, and a pty created with args runs them as a daemon does: as it
+// is attached, the shell's own lines print first, then the mark a sign-in's
+// bash prints as its tool starts, and the line its args run, with the command
+// standing where the line reads it, is handed to the script. A complete typed
+// line (ending in \r) is echoed back the way a tty would and handed to the
+// script too; the test pushes output and exits.
 import { TOOL_STARTS, type PtyLink } from "../src/signin-relay.js";
 
-/** A typed line's read of a staged command and the removal of its folder. */
-const STAGED_READ = /^c=\$\((?:< |cat )'([^']+)\/line'\); rm -rf -- '[^']+'; /;
-
-/** What a sign-in line prints as its tool starts, as typed. */
+/** What a sign-in's bash prints as its tool starts. */
 const MARKS_TOOL = "printf '\\036'";
 
 export interface FakePty {
   id: string;
   created: Record<string, unknown>;
-  /** Every pty.write payload in order. */
+  /** Every pty.write payload in order: what was typed into the pty, and nothing it was started with. */
   writes: string[];
   attached: boolean;
   killed: boolean;
   resizes: { cols: number; rows: number }[];
   exited: boolean;
-  /** The staged command the typed line ran, once one did. */
+  /** The command its args ran, where they ran one. */
   ran?: string;
+  /** The line its args ran, the command standing where the line reads it. */
+  line?: string;
 }
 
 export interface FakePtyLink extends PtyLink {
   ops: { op: string; extra: Record<string, unknown> }[];
-  /** Each staged command by its folder, and whether that folder is still there. */
-  staged: Map<string, { command: string; cleared: boolean }>;
   ptys: FakePty[];
   /** How many links were dialled through dial(). */
   dials: number;
@@ -36,27 +35,36 @@ export interface FakePtyLink extends PtyLink {
   dial(): PtyLink;
   /** The latest dialled view goes away: closed settles and its ops reject the way a dead socket's do. */
   drop(): void;
-  /** What each pty's shell prints as it is attached, before any line is typed. */
+  /** What each pty's shell prints as it is attached, before its tool starts: an rc file's words. */
   banner?: string;
-  /** Called with each complete typed line, after its echo; a line that ran a staged command comes with that command
-   * standing where the line reads it. */
+  /** The daemon is older than args: it answers a pty.create without saying it ran them. */
+  noArgv?: boolean;
+  /** Called with the line a pty's args run as it is attached, and with each complete typed line after its echo. */
   script?: (pty: FakePty, line: string) => void;
   emit(e: Record<string, unknown>): void;
   data(pty: FakePty, text: string): void;
   exit(pty: FakePty, exitCode: number): void;
-  /** True when the pty got exactly this typed after its command line (a Ctrl-C, say). */
+  /** True when the pty got exactly this typed (a Ctrl-C, say). */
   typed(pty: FakePty, s: string): boolean;
+}
+
+/** The script after `-c` and the command it reads as $1, as `<shell> -c <script> <$0> <command>` hands them. */
+function ranBy(args: unknown): { line: string; command: string } | undefined {
+  if (!Array.isArray(args)) return undefined;
+  const at = args.indexOf("-c");
+  const script = args[at + 1];
+  const command = args[at + 3];
+  if (at < 0 || typeof script !== "string" || typeof command !== "string") return undefined;
+  return { line: script.replace('eval "$1"', command).replace('"$1"', command), command };
 }
 
 export function fakePtyLink(): FakePtyLink {
   const fns = new Set<(e: Record<string, unknown>) => void>();
   const partial = new Map<string, string>();
   let seq = 0;
-  let folders = 0;
   const views: { dropped: boolean; settle: () => void }[] = [];
   const link: FakePtyLink = {
     ops: [],
-    staged: new Map(),
     ptys: [],
     dials: 0,
     dial() {
@@ -86,14 +94,21 @@ export function fakePtyLink(): FakePtyLink {
       };
       switch (op) {
         case "pty.create": {
-          const pty: FakePty = { id: `pty_${++seq}`, created: extra, writes: [], attached: false, killed: false, resizes: [], exited: false };
+          const ran = ranBy(extra["args"]);
+          const pty: FakePty = { id: `pty_${++seq}`, created: extra, writes: [], attached: false, killed: false, resizes: [], exited: false, ...(ran !== undefined ? { ran: ran.command, line: ran.line } : {}) };
           link.ptys.push(pty);
-          return { ok: true, ptyId: pty.id, pid: 100 + seq };
+          return { ok: true, ptyId: pty.id, pid: 100 + seq, ...(extra["args"] !== undefined && link.noArgv !== true ? { argv: true } : {}) };
         }
-        case "pty.attach":
-          find().attached = true;
-          if (link.banner !== undefined) link.data(find(), link.banner);
+        case "pty.attach": {
+          const pty = find();
+          pty.attached = true;
+          if (link.banner !== undefined) link.data(pty, link.banner);
+          if (pty.line !== undefined) {
+            if (pty.line.includes(MARKS_TOOL)) link.data(pty, TOOL_STARTS);
+            link.script?.(pty, pty.line);
+          }
           return { ok: true, ptyId: extra["ptyId"] };
+        }
         case "pty.write": {
           const pty = find();
           const s = String(extra["data"]);
@@ -103,27 +118,15 @@ export function fakePtyLink(): FakePtyLink {
           partial.set(pty.id, lines.pop() ?? "");
           for (const line of lines) {
             link.data(pty, `${line}\r\n`);
-            const read = STAGED_READ.exec(line);
-            const held = read === null ? undefined : link.staged.get(read[1]!);
-            if (held !== undefined) pty.ran = held.command;
-            if (line.includes(MARKS_TOOL)) link.data(pty, TOOL_STARTS);
-            link.script?.(pty, held === undefined ? line : line.slice(read![0].length).replace('eval "$c"', held.command).replace('"$c"', held.command));
+            link.script?.(pty, line);
           }
           return { ok: true };
         }
         case "pty.resize":
           find().resizes.push({ cols: Number(extra["cols"]), rows: Number(extra["rows"]) });
           return { ok: true };
-        case "exec": {
-          if (extra["stdin"] !== undefined) {
-            const dir = `/staged/${++folders}`;
-            link.staged.set(dir, { command: Buffer.from(String(extra["stdin"]), "base64").toString("utf8"), cleared: false });
-            return { exitCode: 0, stdout: dir, stderr: "", truncated: false };
-          }
-          const cleared = /^rm -rf -- '(\/staged\/\d+)'$/.exec(String(extra["cmd"]))?.[1];
-          if (cleared !== undefined) link.staged.get(cleared)!.cleared = true;
+        case "exec":
           return { ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false };
-        }
         case "pty.kill":
           find().killed = true;
           return { ok: true };
@@ -146,13 +149,13 @@ export function fakePtyLink(): FakePtyLink {
       link.emit({ type: "pty.exit", ptyId: pty.id, exitCode });
     },
     typed(pty, s) {
-      return pty.writes.slice(1).includes(s);
+      return pty.writes.includes(s);
     },
   };
   return link;
 }
 
-/** The execs a caller ran on the link, leaving out the ones that staged a command or removed it. */
+/** The execs a caller ran on the link. */
 export function execsBeside(link: FakePtyLink): { op: string; extra: Record<string, unknown> }[] {
-  return link.ops.filter(o => o.op === "exec" && o.extra["stdin"] === undefined && !/^rm -rf -- '\/staged\//.test(String(o.extra["cmd"])));
+  return link.ops.filter(o => o.op === "exec");
 }

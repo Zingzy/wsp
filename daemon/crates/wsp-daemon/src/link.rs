@@ -173,10 +173,13 @@ pub(crate) async fn run(ctx: Arc<Ctx>, daemon_port: u16) {
     let mut attempt: u32 = 0;
     loop {
         attempt += 1;
-        let Some(file) = place::read_place_file(&link.file) else {
-            link.log(words::NO_PLACE_FILE);
-            link.wait(link.refused_retry).await;
-            continue;
+        let file = match place::read_place_file(&link.file) {
+            Ok(Some(file)) => file,
+            unread => {
+                link.log(unread.err().as_deref().unwrap_or(words::NO_PLACE_FILE));
+                link.wait(link.refused_retry).await;
+                continue;
+            }
         };
         let (mut answers, mut refusals, mut held) = (0usize, 0usize, false);
         for url in &file.host_urls {
@@ -417,8 +420,10 @@ impl Link {
         ephemerals: LinkEphemerals<'_>,
         agent_versions: &BTreeMap<String, String>,
     ) -> Result<PlaceProveRequest, String> {
-        let pem = std::fs::read_to_string(Path::new(&file.key_path)).map_err(|e| format!("{}: {e}", file.key_path))?;
-        let report = place::place_report(&ReportInput {
+        let pem = crate::beneath::kept_text(Path::new(&file.key_path))
+            .map_err(|e| format!("{}: {e}", file.key_path))?
+            .ok_or_else(|| format!("{}: no such file", file.key_path))?;
+        let mut report = place::place_report(&ReportInput {
             file,
             home: &self.home,
             wsp_argv: &self.ctx.options.wsp_argv,
@@ -430,6 +435,8 @@ impl Link {
             runtime_root: self.ctx.options.runtime_root.as_deref().unwrap_or(Path::new(wsp_runtime::DEFAULT_ROOT)),
             system_root: Path::new("/"),
         });
+        // The login this daemon handed its socket to, once a check made as that login reached it at the bind.
+        report.login_reach = self.ctx.options.login_uid.is_some();
         let signature =
             place::sign_place_bytes(&pem, &place_link_transcript(LinkRole::Place, &file.place_id, host_nonce, my_nonce, ephemerals))?;
         Ok(PlaceProveRequest::new(RequestId::from(2), signature, report))

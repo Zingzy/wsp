@@ -24,12 +24,13 @@ export interface PlaceLink {
 
 /** Opens the channel and shapes it as the pty road takes it. The host refuses this to anything but its own
  * terminal and its own window, and answers with the computer's own sentence when it is not connected. */
-export async function placeLink(client: HostClient, placeId: string): Promise<PlaceLink> {
-  return targetLink(client, { placeId });
+export async function placeLink(client: HostClient, placeId: string, computer?: string): Promise<PlaceLink> {
+  return targetLink(client, { placeId }, computer);
 }
 
-/** The same road to any target: a computer by its place id, or a workspace, whose daemon the host reads the road to. */
-export async function targetLink(client: HostClient, target: AgentsTarget): Promise<PlaceLink> {
+/** The same road to any target: a computer by its place id, or a workspace, whose daemon the host reads the road to.
+ * `computer` is a joined computer's name, which a refusal to update its daemon names. */
+export async function targetLink(client: HostClient, target: AgentsTarget, computer?: string): Promise<PlaceLink> {
   const { channel } = await client.request<{ channel: string }>("daemon.open", target);
   const readers = new Set<(e: Record<string, unknown>) => void>();
   let gone: (() => void) | undefined;
@@ -53,6 +54,7 @@ export async function targetLink(client: HostClient, target: AgentsTarget): Prom
       },
       closed,
       bare: ptyBareOn(target),
+      ...(computer !== undefined ? { computer } : {}),
     },
     close: async () => {
       off();
@@ -91,6 +93,7 @@ export async function relaySignIn(o: BoxSignIn): Promise<BoxSignedIn> {
   const outcome = await relayPty({
     link: o.link,
     command: line.command,
+    ...(line.asLogin === true ? { asLogin: true } : {}),
     terminal: o.terminal,
     open: o.open,
     ...(line.env !== undefined ? { env: line.env } : {}),

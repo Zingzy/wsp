@@ -398,6 +398,82 @@ async fn sends_place_auth_as_its_first_frame_and_proves_with_a_report_the_host_r
     assert!(report.shape.cpu > 0.0);
 }
 
+/// Whether that uid reaches the socket, asked of the kernel as that uid: search on every folder on the way, and write
+/// on the socket itself, which is what a connect needs.
+fn reaches_as(uid: u32, socket: &std::path::Path) -> bool {
+    use std::os::unix::process::CommandExt;
+    let gid = nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid)).ok().flatten().map_or(uid, |u| u.gid.as_raw());
+    let mut test = std::process::Command::new("/bin/sh");
+    test.args(["-c", "test -w \"$1\"", "sh"]).arg(socket).env_clear().uid(uid).gid(gid);
+    test.status().is_ok_and(|s| s.success())
+}
+
+/// A place told the login its lines run as hands that login the browser shim's socket and says so in its report only
+/// where that login reaches it, which is what the host offers that login a relayed sign-in on. The add leaves wsp's
+/// folder root's and 0700 (its byte road runs under umask 077), and the login must still get in; a folder others may
+/// write in keeps the socket root's and logs why; a folder the login cannot get to at all is never reported. Run as
+/// root the login is nobody; run as anyone else it is their own uid, which reaches everything here.
+#[tokio::test]
+async fn a_place_told_its_login_hands_it_the_open_socket_and_reports_it_only_where_that_login_reaches_it() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let me = nix::unistd::geteuid().as_raw();
+    let login = if me == 0 { 65534 } else { me };
+    let mode = |path: &std::path::Path, mode: u32| std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    for (case, locked, folder_mode) in [
+        ("the add's own folder", false, 0o700),
+        ("a folder others may write in", false, 0o777),
+        ("behind a folder the login cannot enter", true, 0o755),
+    ] {
+        let key = place_pair();
+        let host = fake_place_host(HostOpts { key: Some(key), ..HostOpts::default() }).await;
+        let place = place_file(&[&host.url], &host.public_key, &place_pair().private_key_pem);
+        // The login's own home, which the login can enter.
+        let home = place.home.path().canonicalize().unwrap();
+        mode(&home, 0o755);
+        let parent = if locked { home.join("locked") } else { home.clone() };
+        if locked {
+            std::fs::create_dir(&parent).unwrap();
+            mode(&parent, 0o700);
+        }
+        let folder = parent.join("wsp-open");
+        std::fs::create_dir(&folder).unwrap();
+        mode(&folder, folder_mode);
+        let socket = folder.join("open.sock");
+        let d = place_daemon(&place, |o| {
+            o.open_socket_path = Some(socket.clone());
+            o.login_uid = Some(login);
+        })
+        .await;
+        d.until_logged(|l| l == words::link_linked(&host.url)).await;
+        let proof: PlaceProveRequest = serde_json::from_value(host.proofs.lock().unwrap()[0].clone()).unwrap();
+        let reached = reaches_as(login, &socket);
+        match folder_mode {
+            // Never reported; run as anyone but root the login is the daemon itself, whose socket it still is.
+            0o777 => {
+                assert!(!proof.report.login_reach, "{case}");
+                assert_eq!(reached, me != 0, "{case}");
+                assert_eq!(std::fs::symlink_metadata(&socket).unwrap().uid(), me, "{case}");
+                assert!(d.log().iter().any(|l| l.contains("the open socket stays root's")), "{case}: {:?}", d.log());
+            }
+            _ => {
+                assert_eq!(
+                    proof.report.login_reach, reached,
+                    "{case}: the report says {} and the login reaches it: {reached}",
+                    proof.report.login_reach
+                );
+                let held = std::fs::symlink_metadata(&socket).unwrap();
+                assert_eq!((held.uid(), held.mode() & 0o777), (login, 0o600), "{case}");
+                if me == 0 {
+                    assert_eq!(reached, !locked, "{case}");
+                }
+                if !reached {
+                    assert!(d.log().iter().any(|l| l.contains("cannot reach")), "{case}: {:?}", d.log());
+                }
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn dials_the_second_address_when_the_first_refuses_the_connect_and_names_both_in_its_log() {
     let key = place_pair();

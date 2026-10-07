@@ -426,7 +426,7 @@ export const AGENT_VERBS: readonly Verb[] = [
       if (agent === undefined) throw usageRefusal("wsp servers signin needs --agent, the agent whose config names the server, as wsp servers shows it.", usageIs(ctx));
       const on = flag(ctx.flags, "on");
       const target = await agentsTarget(await ctx.client(), workspace, on, usageIs(ctx));
-      const answer = await signInHere(ctx, target, { agent, name });
+      const answer = await signInHere(ctx, target, { agent, name }, "placeId" in target ? on : undefined);
       ctx.io.log(signedInLine(name, workspace ?? on ?? THIS_COMPUTER, answer));
       return answer.signedIn ? 0 : 1;
     },

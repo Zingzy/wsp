@@ -36,5 +36,33 @@
     "cwd": "/root/project",
     "run": "npm test",
     "machineId": "wsp-a"
+  },
+  {
+    "id": 6,
+    "op": "pty.create",
+    "cols": 200,
+    "rows": 50,
+    "args": [
+      "bash",
+      "-c",
+      "printf '\\036'; exec bash -c \"$1\"",
+      "bash",
+      "gh auth login"
+    ],
+    "env": {
+      "GH_CONFIG_DIR": "/root/.config/gh"
+    },
+    "asLogin": true
+  },
+  {
+    "id": 7,
+    "op": "pty.create",
+    "cwd": "/root",
+    "args": [
+      "/bin/sh",
+      "-c",
+      "codex login status"
+    ],
+    "machineId": "wsp-a"
   }
 ]

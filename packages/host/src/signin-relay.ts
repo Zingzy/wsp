@@ -8,17 +8,22 @@
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 import type { Question } from "@wsp/catalog";
-import { hasControlChar, lastLine, shellQuote } from "@wsp/protocol";
+import { ARGV_BEHIND_WHAT, argvBehindFix, refusal } from "@wsp/protocol";
 import type { PtyLink } from "@wsp/runtime";
 
 export type { PtyLink };
 
-/** The shell a pty on a computer somebody owns is opened with: bash reading no startup file, since the home it
- * runs in is root's, the one every workspace there writes, and a profile there is a file a workspace wrote. */
-export const BARE_BASH = "exec bash --noprofile --norc";
-
-/** What a pty is created with: bash by name, and on a computer somebody owns bash that reads no startup file. */
-const ptyShell = (bare: boolean | undefined): { shell: string; run?: string } => (bare === true ? { shell: "bash", run: BARE_BASH } : { shell: "bash" });
+/** What a sign-in's pty runs, as its argv: bash by name, which marks the tool starting and exec's the command, so the
+ * pty ends with the tool whatever way it ends. The command is an argument and never a typed line: no tty line cuts it
+ * short and no prompt or echo comes before it. On a computer somebody owns bash reads no startup file, since the home
+ * it runs in is root's, the one every workspace there writes; anywhere else it reads the rc file a terminal there
+ * reads, and the mark leaves what that prints out of the tool's words. With no command it is that bash alone, for
+ * the person to type into. */
+export function signInArgs(command: string | undefined, bare: boolean | undefined): string[] {
+  const bash = bare === true ? ["bash", "--noprofile", "--norc"] : ["bash"];
+  if (command === undefined) return bash;
+  return [...bash, ...(bare === true ? [] : ["-i"]), "-c", `printf '\\036'; exec bash -c "$1"`, "bash", command];
+}
 
 export interface RelayTerminal {
   input: Readable & { isTTY?: boolean; isRaw?: boolean; setRawMode?(on: boolean): unknown };
@@ -29,6 +34,8 @@ export interface RelayOptions {
   link: PtyLink;
   /** The line the guest shell runs; the pty exits with its status. Absent: a bare shell the person exits. */
   command?: string;
+  /** The command runs as the computer's login rather than as its daemon, so the terminal is handed to that login. */
+  asLogin?: boolean;
   terminal: RelayTerminal;
   /** Opens a URL on this computer; called only when the person presses o. */
   open(url: string): Promise<boolean>;
@@ -149,45 +156,26 @@ function okOrThrow(op: string, reply: Record<string, unknown>): Record<string, u
   return reply;
 }
 
-function ptyIdOf(reply: Record<string, unknown>): string {
-  const id = okOrThrow("pty.create", reply)["ptyId"];
+/** A pty that runs args as its argv. A daemon older than args takes them for no field at all and opens a plain shell,
+ * which nothing would ever type into, so that pty is ended and the sign-in refused rather than left to wait, with the
+ * line that updates the joined computer's daemon where the link names that computer. */
+async function argvPty(link: PtyLink, create: Record<string, unknown> & { args: string[] }): Promise<string> {
+  const reply = okOrThrow("pty.create", await link.op("pty.create", create));
+  const id = reply["ptyId"];
   if (typeof id !== "string") throw new Error("pty.create answered without a pty id");
+  if (reply["argv"] !== true) {
+    await link.op("pty.kill", { ptyId: id }).catch(() => {});
+    throw refusal(ARGV_BEHIND_WHAT, argvBehindFix(link.computer));
+  }
   return id;
 }
 
-/** What the pty prints the moment the typed line has run and the tool starts: everything before it is the shell's
- * prompt and its echo of the line, which are not the tool's words. */
+/** What the pty prints the moment the tool starts: everything before it is what the rc file of the bash it runs under
+ * printed, which is not the tool's words. */
 export const TOOL_STARTS = "\x1e";
 
-/** Puts a command in a file only the daemon's login can read, in a folder of its own, and answers the folder. */
-const STAGE = `umask 077 && d=$(mktemp -d "\${TMPDIR:-/tmp}/wsp-line.XXXXXX") && cat > "$d/line" && printf '%s' "$d"`;
-
-/** A command put where a short typed line reads it: a canonical tty line holds 1024 bytes on macOS and bash takes the
- * typed line before its line editor has the tty, so a command typed whole is cut off past that. */
-export interface Staged {
-  dir: string;
-  /** The folder's file, quoted for the shell. */
-  file: string;
-  clear(): Promise<void>;
-}
-
-async function stage(link: PtyLink, command: string): Promise<Staged> {
-  const reply = await link.op("exec", { cmd: STAGE, stdin: Buffer.from(command, "utf8").toString("base64") });
-  const dir = typeof reply["stdout"] === "string" ? reply["stdout"] : "";
-  if (reply["exitCode"] !== 0 || !dir.startsWith("/") || hasControlChar(dir)) {
-    throw new Error(`could not put the command on that computer: ${lastLine(String(reply["stderr"] ?? reply["error"] ?? "")) ?? "no reason given"}`);
-  }
-  return { dir, file: shellQuote(`${dir}/line`), clear: async () => void (await link.op("exec", { cmd: `rm -rf -- ${shellQuote(dir)}` }).catch(() => {})) };
-}
-
-/** The line typed into the pty's bash: it reads the staged command, removes its folder, prints the byte that marks the
- * tool starting and exec's the command, so the pty ends with the tool whatever way it ends. */
-export function shellLine(staged: Pick<Staged, "dir" | "file">): string {
-  return `c=$(< ${staged.file}); rm -rf -- ${shellQuote(staged.dir)}; printf '\\036'; exec bash -c "$c"\r`;
-}
-
-/** Hands on only what the pty printed once the tool started: a login banner, the prompt and the echo of the typed line
- * are the shell's, so a page or a code read there is not the tool's. */
+/** Hands on only what the pty printed once the tool started: what an rc file printed is the shell's, so a page or a
+ * code read there is not the tool's. */
 function fromTool(): (chunk: string) => string {
   let started = false;
   return chunk => {
@@ -204,11 +192,9 @@ export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
   const now = o.now ?? Date.now;
   const cols = output.columns ?? 80;
   const rows = output.rows ?? 24;
-  // bash by name: the person's login shell may read interactive rc files that would sit under the typed line.
-  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols, rows, ...ptyShell(o.link.bare), ...(o.env !== undefined ? { env: o.env } : {}) }));
+  const ptyId = await argvPty(o.link, { cols, rows, args: signInArgs(o.command, o.link.bare), ...(o.env !== undefined ? { env: o.env } : {}), ...(o.asLogin === true ? { asLogin: true } : {}) });
   const scanner = new UrlScanner();
   const tool = o.command === undefined ? (chunk: string) => chunk : fromTool();
-  let staged: Staged | undefined;
   const outcome: RelayOutcome = { exitCode: -1, timedOut: false, dropped: false, urls: 0, opened: 0 };
   let offer: { url: string; at: number; typed: boolean } | undefined;
   let done: (() => void) | undefined;
@@ -280,10 +266,6 @@ export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
     input.on("data", onData);
     input.resume();
     output.on("resize", onResize);
-    if (o.command !== undefined) {
-      staged = await stage(o.link, o.command);
-      await o.link.op("pty.write", { ptyId, data: shellLine(staged) });
-    }
     await exited;
   } finally {
     clearTimeout(timer);
@@ -294,7 +276,6 @@ export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
     if (rawSet && input.setRawMode) input.setRawMode(wasRaw);
     detach();
     await o.link.op("pty.kill", { ptyId }).catch(() => {});
-    await staged?.clear();
   }
   return outcome;
 }
@@ -323,6 +304,8 @@ export interface WatchOptions {
   onScanned?(): void;
   /** Rides the pty's environment on the machine, where the daemon's own defaults would otherwise decide. */
   env?: Record<string, string>;
+  /** The command runs as the computer's login rather than as its daemon, so the terminal is handed to that login. */
+  asLogin?: boolean;
   /** The questions the row declares: an answer the row carries is typed on the tool's own pty as its line appears,
    * once, the way the person at that terminal would press it. */
   questions?: readonly Question[];
@@ -346,7 +329,7 @@ export interface WatchOptions {
  * computer instead. */
 export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
   // Wide, so a printed URL is never wrapped onto two lines before the scanner reads it.
-  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols: 200, rows: 50, ...ptyShell(o.link.bare), ...(o.env !== undefined ? { env: o.env } : {}) }));
+  const ptyId = await argvPty(o.link, { cols: 200, rows: 50, args: signInArgs(o.command, o.link.bare), ...(o.env !== undefined ? { env: o.env } : {}), ...(o.asLogin === true ? { asLogin: true } : {}) });
   const scanner = new UrlScanner();
   const outcome: WatchOutcome = { exitCode: -1, timedOut: false, dropped: false, stopped: false };
   let ended = false;
@@ -364,7 +347,6 @@ export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
   };
   const questions = new QuestionScanner(o.questions ?? []);
   const tool = fromTool();
-  let staged: Staged | undefined;
   const detach = o.link.onEvent(e => {
     if (e["ptyId"] !== ptyId) return;
     if (e["type"] === "pty.data") {
@@ -394,8 +376,6 @@ export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
   try {
     okOrThrow("pty.attach", await o.link.op("pty.attach", { ptyId }));
     o.onTyping?.(async data => void okOrThrow("pty.write", await o.link.op("pty.write", { ptyId, data })));
-    staged = await stage(o.link, o.command);
-    await o.link.op("pty.write", { ptyId, data: shellLine(staged) });
     await exited;
   } finally {
     clearTimeout(timer);
@@ -403,7 +383,6 @@ export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
     o.onTyping?.(undefined);
     detach();
     await o.link.op("pty.kill", { ptyId }).catch(() => {});
-    await staged?.clear();
   }
   return outcome;
 }
@@ -418,11 +397,11 @@ export interface QuietRun {
 
 const STATUS_MARK = "WSP_STATUS";
 
-/** Runs one command on the builder with nothing shown: the output between the
- * echoed line and the exit marker, for the secrets step. `env` rides the pty's
- * environment, where a value never reaches the echoed line. */
+/** Runs one command on the builder with nothing shown: the output before the exit marker, for the status reads and
+ * the secrets step. The command rides as an argument of sh and `env` the pty's environment, so neither is on a line
+ * anything echoes. */
 export async function runQuiet(link: PtyLink, command: string, timeoutMs: number, env: Record<string, string> = {}): Promise<QuietRun> {
-  const ptyId = ptyIdOf(await link.op("pty.create", { cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", ...env } }));
+  const ptyId = await argvPty(link, { cols: 200, rows: 50, args: ["/bin/sh", "-c", `eval "$1"; printf '\\n${STATUS_MARK} %s\\n' $?`, "sh", command], env });
   let text = "";
   /** Index of the exit marker line in what arrived so far, -1 before it. */
   const markAtEnd = (): number => {
@@ -448,23 +427,18 @@ export async function runQuiet(link: PtyLink, command: string, timeoutMs: number
     if (done !== undefined && markAtEnd() < 0) dropped = true;
     done?.();
   });
-  let staged: Staged | undefined;
   try {
     okOrThrow("pty.attach", await link.op("pty.attach", { ptyId }));
-    staged = await stage(link, command);
-    await link.op("pty.write", { ptyId, data: `c=$(cat ${staged.file}); rm -rf -- ${shellQuote(staged.dir)}; eval "$c"; printf '\\n${STATUS_MARK} %s\\n' $?; exit\r` });
     await exited;
   } finally {
     clearTimeout(timer);
     detach();
     await link.op("pty.kill", { ptyId }).catch(() => {});
-    await staged?.clear();
   }
   const lines = text.replace(/\r/g, "").split("\n");
   const markAt = markAtEnd();
   const exitCode = markAt >= 0 ? Number(/(\d+)$/.exec(lines[markAt]!)![1]) : -1;
-  // The first line is the shell echoing what was typed.
-  const body = lines.slice(1, markAt >= 0 ? markAt : undefined);
+  const body = lines.slice(0, markAt >= 0 ? markAt : undefined);
   // Tools colour into the pty (opencode 1.18.18 paints key names even piped); the readers want the words.
   return { output: stripVTControlCharacters(body.join("\n")).trim(), exitCode, timedOut, dropped };
 }

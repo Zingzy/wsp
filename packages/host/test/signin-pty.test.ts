@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A sign-in's line run for real: the daemon binary this checkout ships opens
-// the pty and an interactive bash takes the line, as on any computer. Every
+// the pty and runs bash with the line as its argument, as on any computer. Every
 // tool here is a stub script, the daemon starts with an emptied environment
 // whose PATH holds none of them, and every home is a scratch folder.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -80,36 +80,10 @@ async function signIn(plan: SignInPlan, over: PtyLink = link): Promise<Omit<Agen
   return steps;
 }
 
-interface Staged {
-  dir?: string;
-  /** The folder's mode and each file's in it, the moment the typed line went in. */
-  modes?: { dir: number; files: number[] };
-  /** Whether the folder was still there when the tool first spoke. */
-  whileRunning?: boolean;
-}
-
-/** The daemon link with the file a command was put in looked at: as its line is typed, and as the tool first speaks.
- * `swallow` drops the typed line, so the command never runs. */
-function staging(o: { swallow?: boolean } = {}): { over: PtyLink; staged: Staged } {
-  const staged: Staged = {};
-  const over: PtyLink = {
-    onEvent: fn =>
-      link.onEvent(e => {
-        if (e["type"] === "pty.data" && staged.dir !== undefined && staged.whileRunning === undefined && String(e["data"]).includes("Waiting for the page.")) staged.whileRunning = existsSync(staged.dir);
-        fn(e);
-      }),
-    op: async (op, extra) => {
-      if (op === "pty.write" && staged.dir !== undefined && staged.modes === undefined && String(extra?.["data"]).includes(staged.dir)) {
-        const dir = staged.dir;
-        staged.modes = { dir: statSync(dir).mode & 0o777, files: readdirSync(dir).map(f => statSync(join(dir, f)).mode & 0o777) };
-        if (o.swallow === true) return { ok: true };
-      }
-      const reply = await link.op(op, extra);
-      if (op === "exec" && extra?.["stdin"] !== undefined) staged.dir = String(reply["stdout"]).trim();
-      return reply;
-    },
-  };
-  return { over, staged };
+/** The daemon link with every op a caller sent kept, so a case can say what started the tool. */
+function spied(): { over: PtyLink; sent: { op: string; extra: Record<string, unknown> }[] } {
+  const sent: { op: string; extra: Record<string, unknown> }[] = [];
+  return { over: { onEvent: fn => link.onEvent(fn), op: async (op, extra) => (sent.push({ op, extra: extra ?? {} }), link.op(op, extra)) }, sent };
 }
 
 const freshHome = (name: string): string => {
@@ -161,31 +135,18 @@ describe("a name holding control characters", () => {
   }, 20_000);
 });
 
-describe("a command longer than the terminal takes as one typed line", () => {
-  it("on a joined Mac with a PATH over the 1024 bytes a canonical tty line holds, the tool still runs from a file only the login reads", async () => {
+describe("a command longer than a typed terminal line could hold, started from the pty's argv", () => {
+  it("on a joined Mac with a PATH over the 1024 bytes a canonical tty line holds, the tool runs from the pty's argv with nothing typed and nothing staged", async () => {
     const home = freshHome("long-path");
     const long = Array.from({ length: 260 }, (_, i) => `/opt/nowhere-${i}/bin`).join(":");
     const plan = await planSignIn(box(SHAPES["a joined Mac"], home, `${long}:${stubs}:/usr/bin:/bin`), { agent: "claude", server: "notion" });
     expect(plan.line.command.length).toBeGreaterThan(4096);
-    const { over, staged } = staging();
+    const { over, sent } = spied();
     const steps = await signIn(plan, over);
     expect(steps.at(-1)).toEqual({ state: "signed-in" });
     expect(readFileSync(join(home, "claude-argv"), "utf8")).toBe("mcp\nlogin\nnotion\n--no-browser\n");
-    expect(staged.modes).toEqual({ dir: 0o700, files: [0o600] });
-    expect(existsSync(staged.dir!)).toBe(false);
-  }, 30_000);
-
-  it("the file is gone before the tool runs, and gone when a sign-in is stopped before its line ever ran", async () => {
-    const home = freshHome("staged-gone");
-    const running = staging();
-    const hung = await watchPty({ link: running.over, command: `CLAUDE_HANG=1 HOME=${shellQuote(home)} PATH=${shellQuote(`${stubs}:/usr/bin:/bin`)} claude mcp login notion`, timeoutMs: 15_000, flushMs: 10, stop: new Promise(r => setTimeout(r, 1_500)) });
-    expect(hung.stopped).toBe(true);
-    expect(running.staged.whileRunning).toBe(false);
-    const never = staging({ swallow: true });
-    const stopped = await watchPty({ link: never.over, command: "echo never", timeoutMs: 15_000, flushMs: 10, stop: new Promise(r => setTimeout(r, 300)) });
-    expect(stopped.stopped).toBe(true);
-    expect(never.staged.modes).toEqual({ dir: 0o700, files: [0o600] });
-    expect(existsSync(never.staged.dir!)).toBe(false);
+    expect(sent.filter(o => o.op === "pty.write" || o.op === "exec")).toEqual([]);
+    expect(sent.find(o => o.op === "pty.create")?.extra["args"]).toContain(plan.line.command);
   }, 30_000);
 });
 

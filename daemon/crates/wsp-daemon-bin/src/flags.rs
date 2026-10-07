@@ -12,7 +12,7 @@ use wsp_frames::numbers;
 
 use crate::verbs::Verb;
 
-pub(crate) const USAGE: &str = "usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>] [--root <dir>] [--roots-path <file>] [--kind cloud|local|place] [--work-folder <dir>] [--inbox <dir>] [--inbox-quiet-ms <n>] [--inbox-poll-ms <n>] [--manifest <file>] [--run-dir <dir>] [--log-dir <dir>] [--open-socket <path>] [--port-file <file>] [--proc-root <dir>] [--passwd <file>] [--ports-interval-ms <n>] [--sys-interval-ms <n>] [--proc-interval-ms <n>] [--mode-interval-ms <n>] [--auth-deadline-ms <n>] [--place-file <file>] [--home <dir>] [--wsp-argv <word>]... [--agents id=bin,...] [--link-connect-ms <n>] [--link-quiet-ms <n>] [--link-refused-retry-ms <n>] [--link-backoff-ms <n>] [--runtime-root <dir>] [--apparmor-profile <file>] [--readings-dir <dir>]";
+pub(crate) const USAGE: &str = "usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>] [--root <dir>] [--roots-path <file>] [--kind cloud|local|place] [--work-folder <dir>] [--inbox <dir>] [--inbox-quiet-ms <n>] [--inbox-poll-ms <n>] [--manifest <file>] [--run-dir <dir>] [--log-dir <dir>] [--open-socket <path>] [--login-uid <uid>] [--port-file <file>] [--proc-root <dir>] [--passwd <file>] [--ports-interval-ms <n>] [--sys-interval-ms <n>] [--proc-interval-ms <n>] [--mode-interval-ms <n>] [--auth-deadline-ms <n>] [--guest-unwatched-ms <n>] [--place-file <file>] [--home <dir>] [--wsp-argv <word>]... [--agents id=bin,...] [--link-connect-ms <n>] [--link-quiet-ms <n>] [--link-refused-retry-ms <n>] [--link-backoff-ms <n>] [--runtime-root <dir>] [--apparmor-profile <file>] [--readings-dir <dir>]";
 
 #[derive(Debug, Parser)]
 #[command(name = "wsp-daemon", disable_version_flag = true, override_usage = USAGE)]
@@ -51,6 +51,10 @@ pub(crate) struct Flags {
     pub(crate) log_dir: Option<PathBuf>,
     #[arg(long, value_name = "path")]
     pub(crate) open_socket: Option<PathBuf>,
+    /// The uid of the login this computer's lines run as, where that is not root: its open socket and the terminal
+    /// of a line run as that login are handed to it.
+    #[arg(long, value_name = "uid")]
+    pub(crate) login_uid: Option<u32>,
     #[arg(long, value_name = "file")]
     pub(crate) port_file: Option<PathBuf>,
     #[arg(long, value_name = "dir")]
@@ -139,6 +143,7 @@ impl Flags {
             run_dir: self.run_dir,
             log_dir: self.log_dir,
             open_socket_path: self.open_socket,
+            login_uid: self.login_uid,
             proc_root: self.proc_root,
             passwd_path: self.passwd,
             ports_interval_ms: self.ports_interval_ms,
@@ -180,6 +185,19 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<Flags, clap::Error> {
         Flags::try_parse_from(std::iter::once("wsp-daemon").chain(args.iter().copied()))
+    }
+
+    /// The usage line is kept by hand, so a flag the unit is written with and the line leaves out is caught here.
+    #[test]
+    fn the_usage_line_names_every_flag_the_daemon_takes() {
+        use clap::CommandFactory;
+        let missing: Vec<String> = Flags::command()
+            .get_arguments()
+            .filter_map(|arg| arg.get_long())
+            .filter(|long| *long != "help" && !USAGE.contains(&format!("[--{long} ")) && !USAGE.contains(&format!("[--{long}]")))
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(missing, Vec::<String>::new());
     }
 
     #[test]
@@ -226,6 +244,8 @@ mod tests {
             "/l",
             "--open-socket",
             "/o.sock",
+            "--login-uid",
+            "1001",
             "--port-file",
             "/p",
             "--proc-root",
@@ -276,6 +296,7 @@ mod tests {
         assert_eq!((o.inbox_quiet_ms, o.inbox_poll_ms, o.auth_deadline_ms), (Some(10), Some(20), Some(5)));
         assert_eq!((o.link_connect_ms, o.link_quiet_ms, o.link_refused_retry_ms, o.link_backoff_ms), (Some(6), Some(7), Some(8), Some(9)));
         assert_eq!(o.open_socket_path, Some(PathBuf::from("/o.sock")));
+        assert_eq!(o.login_uid, Some(1001));
         assert_eq!(o.runtime_root, Some(PathBuf::from("/wsp-test")));
         assert_eq!(o.apparmor_profile, Some(PathBuf::from("/aa")));
         assert_eq!(o.readings_dir, Some(PathBuf::from("/rd")));

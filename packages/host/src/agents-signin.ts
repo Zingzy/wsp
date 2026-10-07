@@ -62,12 +62,12 @@ function agentOf(id: string): CatalogEntry {
 }
 
 /** How each line reaches the target: as the owner of the home where a box's daemon runs as root, as it is elsewhere. */
-async function wrapFor(on: AgentsOn): Promise<(line: string) => string> {
-  const login = await loginOf(on);
-  return login === undefined ? line => line : line => asLogin(login, line);
-}
-
 const loginOf = async (on: AgentsOn): Promise<TargetLogin | undefined> => (on.kind === "box" ? targetLogin(on.machine, on.login) : undefined);
+
+const wrapAs = (login: TargetLogin | undefined): ((line: string) => string) => (login === undefined ? line => line : line => asLogin(login, line));
+
+/** A line handed to another login is run as that login, so the terminal it runs on is handed to it as well. */
+const handed = (login: TargetLogin | undefined): { asLogin?: true } => (login?.runAs !== undefined ? { asLogin: true } : {});
 
 /** The opener a harness is handed for a sign-in: it writes the page onto the sign-in's own terminal, then hands it to
  * the browser the terminal had. A tool may open its page with no terminal of its own, so the write goes to the device. */
@@ -96,14 +96,14 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
     const road = serverSignInRoad(entry.id, ask.server, reach);
     if (road === undefined) throw new Error(`${entry.name} has no sign-in for an MCP server that wsp knows`);
     if (road.kind === "copy") throw new Error(serverSignInCopyRefusal(entry.name, road.line, road.why));
-    const wrap = login === undefined ? (line: string) => line : (line: string) => asLogin(login, line);
+    const wrap = wrapAs(login);
     // The daemon's pty names wsp's own shim as BROWSER, which this computer has none of; a workspace keeps it behind
     // the sign-in's own opener, and its browser.open is what the relay carries here. A joined computer keeps its
     // shim under the login's home.
     const shim: Record<string, string> = login === undefined ? {} : { BROWSER: placeDaemonPaths(login.home).openShim };
     const env: Record<string, string> | undefined = reach === "here" ? { BROWSER: process.env["BROWSER"] || openerCommand() } : road.finish === "callback" ? { ...signInEnv("callback"), ...shim } : undefined;
     const command = reach === "relay" ? pagesOnPty(road.command) : road.command;
-    return { line: { command: wrap(command), ...(env !== undefined ? { env } : {}) }, questions: [], paste: () => road.finish === "code" };
+    return { line: { command: wrap(command), ...(env !== undefined ? { env } : {}), ...handed(login) }, questions: [], paste: () => road.finish === "code" };
   }
   const row = entry.signIn;
   if (!hasLogin(row)) throw new Error(signInVaultRefusal(entry.name));
@@ -118,8 +118,9 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
     const home = loginHomeIn(on.logins, shared);
     return { ...plan, line: { command, env: { [shared.homeEnv]: home }, prepare: `mkdir -p ${shellQuote(home)}`, ...(status !== undefined ? { status } : {}) } };
   }
-  const wrap = await wrapFor(on);
-  return { ...plan, line: { command: wrap(command), ...(status !== undefined ? { status: wrap(status) } : {}) } };
+  const login = await loginOf(on);
+  const wrap = wrapAs(login);
+  return { ...plan, line: { command: wrap(command), ...(status !== undefined ? { status: wrap(status) } : {}), ...handed(login) } };
 }
 
 /** The last thing the tool said, with the terminal's escapes taken out and the tool's echo of a code a page handed
@@ -176,6 +177,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   const watching = watchPty({
     link,
     command: line.command,
+    ...(line.asLogin === true ? { asLogin: true } : {}),
     timeoutMs: capMs,
     stop,
     questions: plan.questions,

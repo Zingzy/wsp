@@ -2397,6 +2397,7 @@ dependencies = [
  "wsp-frames",
  "wsp-runtime",
  "wsp-seal",
+ "xattr",
 ]
 
 [[package]]

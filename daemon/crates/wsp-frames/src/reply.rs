@@ -112,6 +112,10 @@ pub struct PtyCreateReply {
     /// which is the pane's broker and which the daemon signals a resize to. A workspace numbers its own
     /// processes, so this is not the number one inside reads for itself.
     pub pid: u32,
+    /// The pty runs the frame's args as its argv. A daemon from before args takes them for no field at all and
+    /// opens a plain shell, so the host ends a pty that does not say this and refuses rather than wait on it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub argv: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

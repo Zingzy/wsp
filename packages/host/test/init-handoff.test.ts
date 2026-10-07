@@ -138,7 +138,7 @@ describe("the sign-in hand-off", () => {
     expect(text).toContain(`${GH_LOGIN} is running on the machine; this run waits up to 2.0s for you`);
     expect(text).toContain("GitHub CLI login: signed in");
     // Two checks: the first said no, the second said yes, and the login's own pty was killed once it had.
-    expect(link.ptys.filter(p => p.writes[0]?.includes("WSP_STATUS"))).toHaveLength(2);
+    expect(link.ptys.filter(p => p.line?.includes("WSP_STATUS"))).toHaveLength(2);
     expect(link.ptys[0]!.ran).toBe(GH_LOGIN);
     expect(link.ptys.every(p => p.killed)).toBe(true);
   });
@@ -222,7 +222,7 @@ describe("the sign-in hand-off", () => {
     await st.run;
     // The command line, then the Enter gh waits on before it opens anything; nothing else is ever typed at it.
     expect(login!.ran).toBe(GH_LOGIN);
-    expect(login!.writes.slice(1)).toEqual(["\r"]);
+    expect(login!.writes).toEqual(["\r"]);
     // The code and the page gh printed beside that question still reach the person.
     expect(st.json[1]).toMatchObject({ browserUrl: DEVICE, code: "72F3-072B" });
   });
@@ -249,7 +249,7 @@ describe("the sign-in hand-off", () => {
     expect(link.ptys[0]!.killed).toBe(true);
     // Nothing was typed at it: the answer is the person's and no guess belongs on their terminal.
     expect(link.ptys[0]!.ran).toBe(loginOf("aws"));
-    expect(link.ptys[0]!.writes).toHaveLength(1);
+    expect(link.ptys[0]!.writes).toEqual([]);
   });
 
   it("says the page again when the code lands after it, so a row whose tool prints them in that order still shows both", async () => {
