@@ -65,7 +65,7 @@ describe("the public text", () => {
     expect(readme).toContain(`npm i -g ${npm}\n`);
     // wsp and wsp-cli are someone else's on npm; nothing may send a reader to them.
     for (const taken of ["wsp", "wsp-cli"]) expect(readme).not.toMatch(new RegExp(`(npm i -g|npx) ${taken}(\\s|$)`, "m"));
-    expect(readme).toContain("https://github.com/Zingzy/wsp/releases");
-    expect(readme).toContain("https://github.com/Zingzy/wsp/issues");
+    expect(readme).toContain("https://github.com/wsp-labs/wsp/releases");
+    expect(readme).toContain("https://github.com/wsp-labs/wsp/issues");
   });
 });

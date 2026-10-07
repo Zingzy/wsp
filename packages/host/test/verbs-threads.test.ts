@@ -593,7 +593,7 @@ describe("wsp verbs over the host: threads, projects and agent defaults", () => 
 
   it("threads shows a multi-paragraph brief as one row, titled by the protocol's rule: its first sentence cut at a word to 48 characters, the same title the sidebar shows", async () => {
     await h.run("new", "alpha");
-    const brief = "You are a builder for the wsp repo, which is at /Users/zingzy/wsp on this machine.\n\nTicket: Zingzy/wsp-map#292.\nBuild: the fix.";
+    const brief = "You are a builder for the wsp repo, which is at /Users/zingzy/wsp on this machine.\n\nTicket: wsp-labs/wsp-map#292.\nBuild: the fix.";
     await h.run("run", "alpha", brief);
     const { io } = await h.run("threads");
     const rows = io.lines[0]!.split("\n");

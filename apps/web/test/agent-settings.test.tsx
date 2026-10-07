@@ -24,7 +24,7 @@ const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", labe
 const REPORT = AGENTS_SETUP_REPORT;
 const CLAUDE = REPORT.agents[0]!;
 
-const WSP: ProjectView = { id: "pr_wsp", name: "wsp", computer: "here", source: { kind: "folder", path: "~/wsp" }, path: "/Users/dev/wsp", remote: "https://github.com/Zingzy/wsp.git", defaultBranch: "main", memoryKey: "-Users-dev-wsp", memoryDir: "/Users/dev/.claude/projects/-Users-dev-wsp/memory", createdAt: "2026-09-12T11:00:00.000Z" };
+const WSP: ProjectView = { id: "pr_wsp", name: "wsp", computer: "here", source: { kind: "folder", path: "~/wsp" }, path: "/Users/dev/wsp", remote: "https://github.com/wsp-labs/wsp.git", defaultBranch: "main", memoryKey: "-Users-dev-wsp", memoryDir: "/Users/dev/.claude/projects/-Users-dev-wsp/memory", createdAt: "2026-09-12T11:00:00.000Z" };
 
 /** An api that answers the agents report, the lists and the setup writes, recording each setup it was asked. */
 const RECORD: Preferences = { ...DEFAULT_PREFERENCES, labs: false, agentDefaults: HARNESS_DEFAULTS };

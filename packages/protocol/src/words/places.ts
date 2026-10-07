@@ -369,7 +369,7 @@ export const PLACES_WORDS = {
   addComputer: "Add a computer",
   connectProvider: "Connect a provider",
   sheet: {
-    install: "npm i -g @zingzy/wsp",
+    install: "npm i -g @wsp-labs/wsp",
     /** The line typed in a terminal on the computer being joined. The token is the code and the fingerprint of the
      * key this host will prove, as joinToken writes them, so the line names which host it is joining. */
     joinLine: (url: string, token: string): string => `wsp join ${url} --code ${token}`,

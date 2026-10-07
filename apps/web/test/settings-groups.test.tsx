@@ -748,7 +748,7 @@ describe("General's Version card", () => {
   const DAY = 24 * 60 * 60_000;
   const read = (version: string, over: Partial<ReleaseView> = {}): ReleaseView => ({
     state: "read",
-    latest: { version, tag: `v${version}`, url: `https://github.com/Zingzy/wsp/releases/tag/v${version}`, publishedAt: AT },
+    latest: { version, tag: `v${version}`, url: `https://github.com/wsp-labs/wsp/releases/tag/v${version}`, publishedAt: AT },
     // An hour past the day, so the page's minute clock reads the same whole days as this one.
     checkedAt: new Date(Date.now() - 3 * DAY - 60 * 60_000).toISOString(),
     triedAt: new Date(Date.now() - 3 * DAY - 60 * 60_000).toISOString(),
@@ -870,11 +870,11 @@ describe("General's Version card", () => {
     expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.whatsNew]);
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
     fireEvent.click(whatsNew());
-    expect(opened).toEqual(["https://github.com/Zingzy/wsp/releases/tag/v0.3.0", "https://github.com/Zingzy/wsp/releases/tag/v0.3.0"]);
+    expect(opened).toEqual(["https://github.com/wsp-labs/wsp/releases/tag/v0.3.0", "https://github.com/wsp-labs/wsp/releases/tag/v0.3.0"]);
     await show(read("0.2.0"));
     expect(buttons()).toEqual([ABOUT_WORDS.whatsNew]);
     fireEvent.click(whatsNew());
-    expect(opened.at(-1)).toBe("https://github.com/Zingzy/wsp/releases/tag/v0.2.0");
+    expect(opened.at(-1)).toBe("https://github.com/wsp-labs/wsp/releases/tag/v0.2.0");
     // Under the switch no number stands, so nothing is offered off a stale one and the notes are the whole list.
     await show({ state: "off" });
     expect(buttons()).toEqual([ABOUT_WORDS.whatsNew]);
@@ -959,7 +959,7 @@ describe("General's Version card", () => {
     const get = screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") });
     expect(get.title).toBe("");
     fireEvent.click(get);
-    expect(opened).toEqual(["https://github.com/Zingzy/wsp/releases/tag/v0.3.0"]);
+    expect(opened).toEqual(["https://github.com/wsp-labs/wsp/releases/tag/v0.3.0"]);
     expect(getBundle).not.toHaveBeenCalled();
   });
 
@@ -976,7 +976,7 @@ describe("General's Version card", () => {
     const get = screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") });
     expect(get.title).toBe("");
     fireEvent.click(get);
-    expect(opened).toEqual(["https://github.com/Zingzy/wsp/releases/tag/v0.3.0"]);
+    expect(opened).toEqual(["https://github.com/wsp-labs/wsp/releases/tag/v0.3.0"]);
     expect(getBundle).not.toHaveBeenCalled();
   });
 
@@ -986,7 +986,7 @@ describe("General's Version card", () => {
   it("offers Restart host in place of Get once the installed files are newer and a restart brings the host back, and the click asks the host", async () => {
     shell("0.3.0", "0.2.0");
     const hostRestart = vi.fn(async () => undefined);
-    useStore.setState({ release: read("0.3.0", { installed: "0.3.0", update: "npm i -g @zingzy/wsp@0.3.0" }) });
+    useStore.setState({ release: read("0.3.0", { installed: "0.3.0", update: "npm i -g @wsp-labs/wsp@0.3.0" }) });
     await mount({ hostRestart } as Partial<Api>, "general");
     expect(buttons()).toEqual([ABOUT_WORDS.restartHost, ABOUT_WORDS.whatsNew]);
     const restart = screen.getByRole("button", { name: ABOUT_WORDS.restartHost });
@@ -1036,9 +1036,9 @@ describe("General's Version card", () => {
 
   it("the Host hover names the line that moves the host onto the release while it is behind, and the plain words otherwise", async () => {
     shell("0.3.0", "0.2.0");
-    useStore.setState({ release: read("0.3.0", { update: "npm i -g @zingzy/wsp@0.3.0" }) });
+    useStore.setState({ release: read("0.3.0", { update: "npm i -g @wsp-labs/wsp@0.3.0" }) });
     await mount({}, "general");
-    expect(hostHover()).toBe(ABOUT_WORDS.hostUpdateHover("npm i -g @zingzy/wsp@0.3.0", "0.3.0"));
+    expect(hostHover()).toBe(ABOUT_WORDS.hostUpdateHover("npm i -g @wsp-labs/wsp@0.3.0", "0.3.0"));
     await show(read("0.2.0"));
     expect(hostHover()).toBe(ABOUT_WORDS.hostHover);
   });

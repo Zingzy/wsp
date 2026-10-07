@@ -27,7 +27,7 @@ wsp reads your computer once, builds a machine that has what it has (your agents
 ## Install
 
 ```sh
-npm i -g @zingzy/wsp
+npm i -g @wsp-labs/wsp
 ```
 
 ### Let your agent set it up
@@ -60,7 +60,7 @@ wsp import api ~/code/api    # put a folder in it
 wsp run api "fix the flaky terminal test"
 ```
 
-The first line that needs a host starts one and says so; `wsp down` stops it. `wsp up` is for a host you want to watch in a terminal, and `wsp up --service` keeps one up across logins. The desktop app installs the host as your computer's own service on its first launch; bundles for macOS and Linux are on the [releases page](https://github.com/Zingzy/wsp/releases).
+The first line that needs a host starts one and says so; `wsp down` stops it. `wsp up` is for a host you want to watch in a terminal, and `wsp up --service` keeps one up across logins. The desktop app installs the host as your computer's own service on its first launch; bundles for macOS and Linux are on the [releases page](https://github.com/wsp-labs/wsp/releases).
 
 `wsp --help` is sixteen words on five nouns: image, place, workspace, thread, project. Every command is `wsp <verb> <workspace> ...`, the workspace first. `wsp --help agent` has the verbs your agents use and `wsp host --help` the roads to a host on another computer. The command line and the MCP tools are the same verbs; the app's palette runs them too.
 
@@ -111,7 +111,7 @@ Spaces: one workspace at a time in the sidebar, with its own tint. Images in thr
 ## Building from source
 
 ```sh
-git clone https://github.com/Zingzy/wsp.git && cd wsp
+git clone https://github.com/wsp-labs/wsp.git && cd wsp
 pnpm install && pnpm build
 pnpm wsp init
 ```
@@ -120,7 +120,7 @@ pnpm wsp init
 
 ## Issues
 
-[github.com/Zingzy/wsp/issues](https://github.com/Zingzy/wsp/issues). Say what you ran, what you saw, and the output of `wsp --version`. Never paste a key.
+[github.com/wsp-labs/wsp/issues](https://github.com/wsp-labs/wsp/issues). Say what you ran, what you saw, and the output of `wsp --version`. Never paste a key.
 
 ## License
 

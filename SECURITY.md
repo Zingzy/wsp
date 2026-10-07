@@ -8,7 +8,7 @@ learns of it.
 ## Reporting
 
 Use GitHub's private vulnerability reporting on this repository:
-[github.com/Zingzy/wsp/security/advisories/new](https://github.com/Zingzy/wsp/security/advisories/new).
+[github.com/wsp-labs/wsp/security/advisories/new](https://github.com/wsp-labs/wsp/security/advisories/new).
 The report is visible to you and the maintainer only.
 
 Do not open a public issue for a security problem, and do not paste a key,

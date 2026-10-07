@@ -239,10 +239,10 @@ describe("a thread on another branch", () => {
   });
 
   it("is refused in one sentence when the daemon binary beside this host is behind, and the binary is never run", async () => {
-    const { rt, copier } = here({ hereDaemon: { version: async () => DAEMON_VERSION - 1, fix: "npm i -g @zingzy/wsp" } });
+    const { rt, copier } = here({ hereDaemon: { version: async () => DAEMON_VERSION - 1, fix: "npm i -g @wsp-labs/wsp" } });
     const project = await rt.projects.add({ source: repo() });
     await expect(rt.workspaces.folderFor({ project: project.id, branch: "feat/x" })).rejects.toThrow(
-      `this computer's wsp daemon is version ${DAEMON_VERSION - 1} and this wsp needs ${DAEMON_VERSION}; npm i -g @zingzy/wsp stages the right one`,
+      `this computer's wsp daemon is version ${DAEMON_VERSION - 1} and this wsp needs ${DAEMON_VERSION}; npm i -g @wsp-labs/wsp stages the right one`,
     );
     expect(copier.worktrees).toEqual([]);
   });

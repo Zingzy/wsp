@@ -1720,12 +1720,12 @@ describe("thread provenance", () => {
   });
 
   it("foldThreads titles a thread by its opening prompt's first line, so the CLI's table and the sidebar show one line for a multi-paragraph brief", () => {
-    const [t] = foldThreads([{ ...row, prompt: "You are a builder.\n\nTicket: Zingzy/wsp-map#292.\nBuild: the fix." }]);
+    const [t] = foldThreads([{ ...row, prompt: "You are a builder.\n\nTicket: wsp-labs/wsp-map#292.\nBuild: the fix." }]);
     expect(t!.title).toBe("You are a builder.");
   });
 
   it("foldThreads titles a thread with no harness title by its opening turn's first sentence, cut to 48 characters, so a brief-shaped turn never shows whole in the row, the breadcrumb, the switcher card or the CLI's table", () => {
-    const brief = "You are a builder for the wsp repo, which is at /Users/dev/wsp on this Mac: read the ticket, then run `pnpm test` and report.\n\nTicket: Zingzy/wsp-map#408.";
+    const brief = "You are a builder for the wsp repo, which is at /Users/dev/wsp on this Mac: read the ticket, then run `pnpm test` and report.\n\nTicket: wsp-labs/wsp-map#408.";
     const [t] = foldThreads([{ ...row, prompt: brief }]);
     expect(t!.title).toBe("You are a builder for the wsp repo, which is at\u2026");
     const [two] = foldThreads([{ ...row, prompt: "Bump the lockfile. Then run the gate." }]);
@@ -1937,7 +1937,7 @@ describe("the newest release as the host read it", () => {
     for (const op of ["release.get", "release.check"]) expect(wire.THREAD_OPS).not.toContain(op);
     const release = {
       state: "read",
-      latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: "2026-09-24T10:00:00Z" },
+      latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/wsp-labs/wsp/releases/tag/v0.3.0", publishedAt: "2026-09-24T10:00:00Z" },
       checkedAt: "2026-09-24T11:00:00.000Z",
       triedAt: "2026-09-24T11:00:00.000Z",
       shape: "service",
@@ -1948,7 +1948,7 @@ describe("the newest release as the host read it", () => {
     expect(wire.ReleaseView.parse({ state: "off" })).toEqual({ state: "off" });
     expect(wire.ReleaseView.safeParse({ ...release, state: "stale" }).success).toBe(false);
     // The line that moves this host onto the release rides beside it, read on the road the host was installed by.
-    const behind = { ...release, update: "npm i -g @zingzy/wsp@0.3.0" };
+    const behind = { ...release, update: "npm i -g @wsp-labs/wsp@0.3.0" };
     expect(wire.ReleaseView.parse(behind)).toEqual(behind);
     // The restart road's own refusal rides as the words the page shows; absent, a restart brings the host back.
     const refused = { ...release, restartRefusal: wire.UP_RESTART_LINE };

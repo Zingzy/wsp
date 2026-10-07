@@ -4,7 +4,7 @@ wsp is AGPL-3.0-only. By sending a change you agree it is licensed the same
 way. New source files start with `// SPDX-License-Identifier: AGPL-3.0-only`.
 
 File bugs and requests at
-[github.com/Zingzy/wsp/issues](https://github.com/Zingzy/wsp/issues). Say
+[github.com/wsp-labs/wsp/issues](https://github.com/wsp-labs/wsp/issues). Say
 what you ran, what you saw, and the output of `wsp --version`. Never paste
 a key.
 
@@ -37,7 +37,7 @@ On a small computer run vitest by file:
 tests, which create real machines, are described in
 [docs/canary.md](docs/canary.md).
 
-`@zingzy/wsp` and `@wsp/desktop` bundle their dependencies into one file, so their
+`@wsp-labs/wsp` and `@wsp/desktop` bundle their dependencies into one file, so their
 `build` uses whatever those last built. Building either on its own starts
 with `pnpm --filter <name> build:deps`. `pnpm build` and `pnpm release`
 already build everything in dependency order, so they need no such step.
