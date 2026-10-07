@@ -1028,6 +1028,7 @@ function runtimeOf(ctx: RuntimeContext): Runtime {
       // touching a computer it no longer holds. Each sync is a read and a write, so the wait is milliseconds.
       await Promise.allSettled([...ctx.daemonSyncs.values()]);
       await Promise.allSettled([...ctx.keptWrites.values()]);
+      await Promise.allSettled([...ctx.agentAsks]);
       // The turns running on machines are not ended: each leads a process group on its own machine and its log is
       // there to be read again, so what this host lets go of is the reading of them, which is what holds this
       // process open after its last line.

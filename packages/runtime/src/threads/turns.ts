@@ -288,9 +288,11 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           // under the one start row a turn writes, so a re-opened run, whose row the host that launched it wrote,
           // returns above and asks nothing.
           if (ctx.sourceOf(view) === "seed") {
-            void ctx.refreshTitle(view, false)
-              .then(() => ctx.makeTitle(view))
-              .catch((e: unknown) => console.warn(noMadeTitleLogLine(threadId, workspaceId, e instanceof Error ? e.message : String(e))));
+            void ctx.holdAsk(
+              ctx.refreshTitle(view, false)
+                .then(() => ctx.makeTitle(view))
+                .catch((e: unknown) => console.warn(noMadeTitleLogLine(threadId, workspaceId, e instanceof Error ? e.message : String(e)))),
+            );
           }
           return;
         }

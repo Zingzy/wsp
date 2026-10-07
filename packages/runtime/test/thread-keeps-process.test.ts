@@ -33,7 +33,11 @@ beforeEach(() => {
   claudeKeeper(join(root, "bin", "claude"));
   codexKeeper(join(root, "bin", "codex"));
 });
+/** Every runtime a case made, closed before its folder goes even when the case failed before its own close: the asks
+ * a runtime makes on its own run the stub in that folder, and with it gone, the next claude on the PATH. */
+const runtimes: Runtime[] = [];
 afterEach(async () => {
+  for (const rt of runtimes.splice(0)) await rt.close();
   await localExecStream({ root, runDir }).sweep!([]);
   rmSync(root, { recursive: true, force: true });
   sweepStrays();
@@ -50,8 +54,8 @@ const wiring = (reading?: Set<() => void>, env: Record<string, string> = {}): Lo
   copier: copyingFake(),
 });
 
-const host = (o: { reading?: Set<() => void>; clock?: ReturnType<typeof fakeClock>["clock"]; env?: Record<string, string>; dials?: true } = {}): Runtime =>
-  createRuntime({
+const host = (o: { reading?: Set<() => void>; clock?: ReturnType<typeof fakeClock>["clock"]; env?: Record<string, string>; dials?: true } = {}): Runtime => {
+  const rt = createRuntime({
     backend: stubBackend(),
     store,
     adapters: { claude: HARNESS_ADAPTERS.claude, codex: HARNESS_ADAPTERS.codex },
@@ -60,6 +64,9 @@ const host = (o: { reading?: Set<() => void>; clock?: ReturnType<typeof fakeCloc
     // A host its turns can dial mints each a device of its own, the token a kept process goes on holding.
     ...(o.dials === true ? { agents: { here: { url: "http://127.0.0.1:9" } } } : {}),
   });
+  runtimes.push(rt);
+  return rt;
+};
 
 /** Whether any process of a run's group is still there, by the leader pid its launch recorded. */
 const groupAlive = (leader: number): boolean => {
