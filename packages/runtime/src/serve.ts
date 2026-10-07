@@ -13,7 +13,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import {
   ACCOUNT_TICKET_REFUSAL,
   usageRefusal,
-  absentComputer,
+  absentComputer, workspaceProcFrame,
   ACCOUNT_UNSERVED,
   AUTH_DEADLINE_MS,
   DAEMON_AUTH_DEADLINE_PASSED,
@@ -1536,7 +1536,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 }
                 if (msg.placeId === HERE_PLACE_ID) ch = await rt.hereChannel(onEvent);
                 else {
-                  const onLink = places().channel(msg.placeId, onEvent);
+                  const onLink = places().channel(msg.placeId, event => (workspaceProcFrame(event) ? undefined : onEvent(event)));
                   if (onLink === undefined) throw new Error(absentComputer(places().nameOf(msg.placeId), null).sentence);
                   ch = onLink;
                 }

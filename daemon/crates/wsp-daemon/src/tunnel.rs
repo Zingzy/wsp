@@ -10,21 +10,24 @@ use base64::Engine;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use wsp_frames::{numbers, DaemonErrorCode, DaemonEvent};
+use wsp_frames::{numbers, words, DaemonErrorCode, DaemonEvent};
 
 use crate::ops::Conn;
 use crate::paths::OpError;
 
 type Writes = mpsc::UnboundedSender<Vec<u8>>;
 
+/// One open tunnel: the pump it belongs to, where its bytes go, and the workspace it was opened for.
+type Open = HashMap<String, (u64, Writes, Option<String>)>;
+
 /// The tunnels one socket holds open; they die with it.
 #[derive(Default)]
 pub(crate) struct Tunnels {
-    open: Mutex<HashMap<String, (u64, Writes)>>,
+    open: Mutex<Open>,
     generation: std::sync::atomic::AtomicU64,
 }
 
-fn lock(map: &Mutex<HashMap<String, (u64, Writes)>>) -> std::sync::MutexGuard<'_, HashMap<String, (u64, Writes)>> {
+fn lock(map: &Mutex<Open>) -> std::sync::MutexGuard<'_, Open> {
     map.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -47,7 +50,7 @@ fn dial_error(host: &str, port: u16, e: &io::Error) -> String {
 
 /// The id is taken, or the socket holds the cap: checked before the dial, so nothing is dialled for nothing, and
 /// again where the entry is made, so the rule holds whatever ran while the dial was out.
-fn room_for(map: &HashMap<String, (u64, Writes)>, tunnel_id: &str) -> Result<(), OpError> {
+fn room_for(map: &Open, tunnel_id: &str) -> Result<(), OpError> {
     if map.contains_key(tunnel_id) {
         return Err(OpError::coded(DaemonErrorCode::BadRequest, format!("tunnel {tunnel_id} is already open")));
     }
@@ -78,17 +81,22 @@ impl Tunnels {
         {
             let mut map = lock(&conn.tunnels.open);
             room_for(&map, &tunnel_id)?;
-            map.insert(tunnel_id.clone(), (generation, tx));
+            map.insert(tunnel_id.clone(), (generation, tx, machine_id.clone()));
         }
         tokio::spawn(pump(Arc::clone(conn), tunnel_id, generation, stream, rx, machine_id, session));
         Ok(())
     }
 
-    pub(crate) fn write(&self, tunnel_id: &str, bytes: Vec<u8>) -> Result<(), OpError> {
+    /// Every road on a computer that runs workspaces rides one socket, so a write names the road it is on and reaches
+    /// only a tunnel that road opened: the computer's own under none, a workspace's under its machine id.
+    pub(crate) fn write(&self, tunnel_id: &str, bytes: Vec<u8>, machine: Option<&str>) -> Result<(), OpError> {
         let map = lock(&self.open);
-        let Some((_, writes)) = map.get(tunnel_id) else {
+        let Some((_, writes, of)) = map.get(tunnel_id) else {
             return Err(OpError::coded(DaemonErrorCode::NotFound, format!("no such tunnel: {tunnel_id}")));
         };
+        if of.as_deref() != machine {
+            return Err(OpError::coded(DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD));
+        }
         // Two writes on one socket keep their order because each frame's task reaches this send with no await before
         // it and the runtime runs on one thread; an await on that road, or a multi-thread runtime, would reorder bytes.
         // A pump that already ended drops the bytes, as a write to a closed socket did under node.
@@ -96,9 +104,15 @@ impl Tunnels {
         Ok(())
     }
 
-    /// Ends the tunnel; the pump says tunnel.end once the stream is down, as node's close event did.
-    pub(crate) fn close(&self, tunnel_id: &str) {
-        lock(&self.open).remove(tunnel_id);
+    /// Ends the tunnel; the pump says tunnel.end once the stream is down, as node's close event did. One another
+    /// road opened is refused, as a write is; one that is not open is already what the close asks for.
+    pub(crate) fn close(&self, tunnel_id: &str, machine: Option<&str>) -> Result<(), OpError> {
+        let mut map = lock(&self.open);
+        if map.get(tunnel_id).is_some_and(|(_, _, of)| of.as_deref() != machine) {
+            return Err(OpError::coded(DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD));
+        }
+        map.remove(tunnel_id);
+        Ok(())
     }
 
     pub(crate) fn close_all(&self) {
@@ -142,7 +156,7 @@ async fn pump(
     }
     {
         let mut map = lock(&conn.tunnels.open);
-        if map.get(&tunnel_id).is_some_and(|(g, _)| *g == generation) {
+        if map.get(&tunnel_id).is_some_and(|(g, _, _)| *g == generation) {
             map.remove(&tunnel_id);
         }
     }

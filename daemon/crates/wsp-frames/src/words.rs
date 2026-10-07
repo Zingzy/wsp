@@ -122,6 +122,20 @@ pub fn folders_outside(dir: impl std::fmt::Display, roots: impl std::fmt::Displa
     format!("{dir} is outside the folders wsp browses on that computer: {roots}")
 }
 
+/// What a link frame on a computer that runs workspaces is refused with when it names neither the computer's own road
+/// nor a workspace's: a frame that lost the workspace it was for would otherwise run on the computer itself.
+pub const ROAD_UNNAMED: &str = "this frame names no road: neither the computer's own nor a workspace on it";
+
+/// What a kill from a workspace's pane is refused with where the kernel holds no process by descriptor: a signal by
+/// number could reach a process outside the workspace that took a number one inside it left.
+pub const PIDFD_MISSING: &str =
+    "this computer's kernel cannot hold a process by descriptor, so a workspace's process is not signalled from here";
+
+/// What a proc.inspect or proc.kill naming a workspace is refused with for a pid outside that workspace's cgroup.
+pub fn proc_outside_workspace(pid: impl std::fmt::Display) -> String {
+    format!("pid {pid} is not one of this workspace's processes")
+}
+
 pub fn port_scope_refusal(port: impl std::fmt::Display) -> String {
     format!("this socket is scoped to port {port}: only tunnel ops on it and ping are allowed")
 }

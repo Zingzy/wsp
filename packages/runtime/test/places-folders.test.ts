@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { PLACES_TICKET_REFUSAL, DAEMON_VERSION, FS_FOLDERS_DAEMON_VERSION, PLACE_WORKSPACE_PATH, placeBehindLine, placeDaemonBehind, absentComputer, HERE_PLACE_ID, noSuchPlaceRefusal, providerFoldersRefusal, type HostFolderListing } from "@wsp/protocol";
+import { COMPUTER_ROAD, PLACES_TICKET_REFUSAL, DAEMON_VERSION, FS_FOLDERS_DAEMON_VERSION, PLACE_WORKSPACE_PATH, placeBehindLine, placeDaemonBehind, absentComputer, HERE_PLACE_ID, noSuchPlaceRefusal, providerFoldersRefusal, type HostFolderListing } from "@wsp/protocol";
 import { TOOL_PREFIX, installEnv, installHomes } from "@wsp/catalog";
 import { removeScript } from "../src/project-landing.js";
 import { until } from "./until.js";
@@ -104,8 +104,8 @@ describe("the folders of a computer you own", () => {
     // The repos listing is that computer's too, over the same frame.
     expect((await c.request("host.folders", { on: placeId, repos: true })).ok).toBe(true);
     expect(asked).toEqual([
-      { id: expect.anything(), op: "fs.folders", dir: "/home/maya", hidden: true, projects: [project.checkout] },
-      { id: expect.anything(), op: "fs.folders", repos: true, projects: [project.checkout] },
+      { id: expect.anything(), op: "fs.folders", dir: "/home/maya", hidden: true, projects: [project.checkout], road: COMPUTER_ROAD },
+      { id: expect.anything(), op: "fs.folders", repos: true, projects: [project.checkout], road: COMPUTER_ROAD },
     ]);
   });
 

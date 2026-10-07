@@ -2,7 +2,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
+import { COMPUTER_ROAD, type DaemonEvent, type DaemonLinkStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import { fakeProcTree, setListeners } from "../../daemon/test/fake-proc.js";
@@ -260,6 +260,53 @@ describe("connectDaemon", () => {
     expect(reach.stats().reconnects).toBe(0);
     ws.close();
     await until(() => reach!.status() === "dead");
+  });
+
+  it("names the computer's road on its own frames of a link a computer opened, leaves a caller's frame as the caller named it, and names none on a dialled link", async () => {
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    const frames: Record<string, unknown>[] = [];
+    server.on("connection", ws => {
+      ws.on("message", raw => {
+        const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+        frames.push(frame);
+        ws.send(JSON.stringify({ id: frame["id"], ok: true }));
+      });
+    });
+    await new Promise<void>(r => server.once("listening", () => r()));
+    const WebSocketClient = (await import("ws")).default;
+    try {
+      const port = (server.address() as { port: number }).port;
+      const ws = new WebSocketClient(`ws://127.0.0.1:${port}/`);
+      await new Promise<void>((done, fail) => {
+        ws.once("open", () => done());
+        ws.once("error", fail);
+      });
+      reach = connectDaemon({ socket: ws, onEvent: () => {}, heartbeatMs: 60_000 });
+      await reach.ready;
+      // A frame a caller sends names its own road or none: one that lost the workspace it was for goes up unnamed,
+      // and the daemon refuses it rather than running it on the computer.
+      await reach.request("exec", { cmd: "uptime" });
+      await reach.request("exec", { cmd: "uptime", road: COMPUTER_ROAD });
+      await reach.request("machine.pause", { machineId: "wsp-a" });
+      expect(frames.map(f => [f["op"], "road" in f, f["machineId"]])).toEqual([
+        ["ports.watch", true, undefined],
+        ["inbox.watch", true, undefined],
+        ["inbox.rescan", true, undefined],
+        ["exec", false, undefined],
+        ["exec", true, undefined],
+        ["machine.pause", false, "wsp-a"],
+      ]);
+      expect(new Set(frames.map(f => f["road"]).filter(road => road !== undefined))).toEqual(new Set([COMPUTER_ROAD]));
+      reach.close();
+      frames.length = 0;
+      reach = connectDaemon({ previewUrl: `ws://127.0.0.1:${port}`, token: TOKEN, onEvent: () => {}, heartbeatMs: 60_000 });
+      await reach.ready;
+      await reach.request("exec", { cmd: "uptime" });
+      expect(frames.some(f => "road" in f)).toBe(false);
+    } finally {
+      reach?.close();
+      server.close();
+    }
   });
 
   it("stamps its own id and op over any the caller's params carry, so a frame cannot take another's reply", async () => {

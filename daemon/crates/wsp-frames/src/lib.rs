@@ -63,7 +63,7 @@ pub use reply::{
     PullRequestFork, PullRequestLabel, PullRequestPageCut, PullRequestReaction, PullRequestReview, PullRequestReviewComment,
     PullRequestReviewRequest, PullRequestVerdict, Reply, SshStartReply, SysHistoryReply, SysPoint, True,
 };
-pub use request::{DaemonOp, DaemonRequest, ReviewComment, DAEMON_OPS, GUEST_OPS};
+pub use request::{DaemonOp, DaemonRequest, ReviewComment, DAEMON_OPS, FORK_OPS, GUEST_OPS};
 pub use shell::shell_quote;
 pub use shim::guest_wsp_shim;
 pub use validate::{is_http_url, is_plain_path, is_under_path, RelayPort};

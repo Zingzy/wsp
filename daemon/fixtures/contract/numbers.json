@@ -38,6 +38,7 @@
   "sshIdleMs": 300000,
   "openBodyMax": 8192,
   "daemonDefaultHost": "0.0.0.0",
+  "computerRoad": "computer",
   "daemonDefaultPort": 7070,
   "daemonSamplerIntervalMs": 2000,
   "guestWspHome": "/root/.wsp",

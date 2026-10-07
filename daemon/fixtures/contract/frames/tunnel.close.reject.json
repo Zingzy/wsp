@@ -2,5 +2,11 @@
   {
     "id": 1,
     "op": "tunnel.close"
+  },
+  {
+    "id": 1,
+    "op": "tunnel.close",
+    "tunnelId": "t1",
+    "machineId": 7
   }
 ]

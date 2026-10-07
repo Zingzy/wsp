@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { createServer, type Socket } from "node:net";
 import {
   LOOPBACK,
+  COMPUTER_ROAD,
   HERE_PLACE_ID,
   NO_RECIPE,
   PLACE_KEY_REFUSAL,
@@ -216,7 +217,7 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
           const { op, ...params } = frame;
           const on = live.get(placeId);
           if (on?.reach !== held.reach) return Promise.reject(new PlaceAbsentError(absentComputer(kept.get(placeId)?.name ?? placeId, null).sentence));
-          return on.reach.request(op, params) as Promise<DaemonResponse>;
+          return on.reach.request(op, { ...params, road: COMPUTER_ROAD }) as Promise<DaemonResponse>;
         },
         closed,
         close: () => {
@@ -340,11 +341,11 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
         conn.pause();
         conn.on("close", () => {
           conns.delete(tunnelId);
-          void reach.request("tunnel.close", { tunnelId }).catch(() => undefined);
+          void reach.request("tunnel.close", { tunnelId, road: COMPUTER_ROAD }).catch(() => undefined);
         });
-        reach.request("tunnel.open", { tunnelId, port: placePort }).then(
+        reach.request("tunnel.open", { tunnelId, port: placePort, road: COMPUTER_ROAD }).then(
           () => {
-            conn.on("data", (d: Buffer) => void reach.request("tunnel.write", { tunnelId, data: d.toString("base64") }).catch(() => conn.destroy()));
+            conn.on("data", (d: Buffer) => void reach.request("tunnel.write", { tunnelId, data: d.toString("base64"), road: COMPUTER_ROAD }).catch(() => conn.destroy()));
             conn.resume();
           },
           () => {

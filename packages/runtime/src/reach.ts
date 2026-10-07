@@ -4,7 +4,7 @@
 // liveness is an app-level ping op; every (re)connect re-subscribes and
 // rescans the inbox because events pushed during a gap are gone for good.
 
-import { DaemonEvent, linkBackoffMs, MachineErrorKind, type DaemonLinkStatus } from "@wsp/protocol";
+import { COMPUTER_ROAD, DaemonEvent, linkBackoffMs, MachineErrorKind, type DaemonLinkStatus } from "@wsp/protocol";
 import WebSocket from "ws";
 import { openFrame, SEAL_REFUSAL, type Seal } from "@wsp/keys";
 
@@ -104,6 +104,10 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
     });
   }
 
+  /** The frames this reach sends of its own accord, its opening watches and its beat: on a place's link they are the
+   * computer's, and that daemon refuses a frame naming no road. A frame a caller sends names its own. */
+  const ownFrame = (op: string): Promise<Record<string, unknown>> => send(op, opts.socket === undefined ? {} : { road: COMPUTER_ROAD });
+
   function flushPending(reason: string): void {
     for (const p of pending.values()) p.reject(new Error(reason));
     pending.clear();
@@ -124,7 +128,7 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
       }
       awaitingPong = true;
       stats.pingsSent++;
-      send("ping").then(
+      ownFrame("ping").then(
         () => {
           stats.pongsReceived++;
           awaitingPong = false;
@@ -188,9 +192,9 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
     try {
       // The auth frame is the dial's; a socket the far side opened proved itself by the handshake that opened it.
       if (opts.previewUrl !== undefined) await send("auth", { token: opts.token });
-      await send("ports.watch");
-      await send("inbox.watch");
-      await send("inbox.rescan");
+      await ownFrame("ports.watch");
+      await ownFrame("inbox.watch");
+      await ownFrame("inbox.rescan");
     } catch {
       return; // connection died mid-ritual; the close handler redials
     }

@@ -177,6 +177,17 @@ export const boxFullLine = (needMb: number | string, freeMb: number | string, qu
 export const workspaceMemMb = (totalMb: number): number => Math.max(1024, Math.min(Math.floor(totalMb / 3), totalMb - 1024));
 /** The refusal every op but tunnel ops on the scoped port and ping gets on a socket whose auth frame named a port. */
 export const portScopeRefusal = (port: number | string): string => `this socket is scoped to port ${port}: only tunnel ops on it and ping are allowed`;
+/** What a link frame on a computer that runs workspaces is refused with when it names neither the computer's own road
+ * nor a workspace's: a frame that lost the workspace it was for would otherwise run on the computer itself. */
+export const ROAD_UNNAMED = "this frame names no road: neither the computer's own nor a workspace on it";
+/** The road a link frame names in its `road` field when it is for the computer itself; a frame for one workspace
+ * names that workspace's machineId instead. */
+export const COMPUTER_ROAD = "computer";
+/** What a proc.inspect or proc.kill naming a workspace is refused with for a pid outside that workspace's cgroup. */
+export const procOutsideWorkspaceLine = (pid: number | string): string => `pid ${pid} is not one of this workspace's processes`;
+/** What a kill from a workspace's pane is refused with where the kernel holds no process by descriptor: a signal by
+ * number could reach a process outside the workspace that took a number one inside it left. */
+export const PIDFD_MISSING = "this computer's kernel cannot hold a process by descriptor, so a workspace's process is not signalled from here";
 /** Directories a machine recreates, by exact name: installs, build output and tool caches. A directory is a cache only
  * when its whole name is on this list; a file never is, whatever its name, since a source file called lruCache.ts is
  * source. The list is spelled once here and read by the local walk, the guest's find and a box's repos listing. */

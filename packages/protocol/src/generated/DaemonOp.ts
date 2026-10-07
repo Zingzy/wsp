@@ -66,7 +66,7 @@ roots?: Array<number>,
  * With roots, the workspace's folder: a process running in it is the workspace's too, a server started
  * with setsid among them.
  */
-folder?: string, } | { "op": "manifest.get" } | { "op": "manifest.record", cmd: string, cwd: string, port?: number, } | { "op": "manifest.restartScript" } | { "op": "inbox.watch" } | { "op": "inbox.rescan" } | { "op": "sys.watch" } | { "op": "sys.history", from: number, to: number, stepMs: number, } | { "op": "proc.watch" } | { "op": "proc.unwatch" } | { "op": "proc.inspect", pid: number, } | { "op": "proc.kill", pid: number, signal: ProcSignal, } | { "op": "ping" } | { "op": "fs.list", path: string, gitignore?: boolean, 
+folder?: string, } | { "op": "manifest.get" } | { "op": "manifest.record", cmd: string, cwd: string, port?: number, } | { "op": "manifest.restartScript" } | { "op": "inbox.watch" } | { "op": "inbox.rescan" } | { "op": "sys.watch" } | { "op": "sys.history", from: number, to: number, stepMs: number, } | { "op": "proc.watch", machineId?: string, } | { "op": "proc.unwatch", machineId?: string, } | { "op": "proc.inspect", pid: number, machineId?: string, } | { "op": "proc.kill", pid: number, signal: ProcSignal, machineId?: string, } | { "op": "ping" } | { "op": "fs.list", path: string, gitignore?: boolean, 
 /**
  * The workspace this frame is for, on a daemon that runs workspaces: the path then names the folder as
  * that workspace sees it, and the operation is answered inside it. Without one the path is resolved under
@@ -295,4 +295,20 @@ authorizedKey: string,
 /**
  * The workspace this frame is for, as on fs.list above.
  */
-machineId?: string, } | { "op": "tunnel.write", tunnelId: string, data: string, } | { "op": "tunnel.close", tunnelId: string, } | { "op": "exec", cmd: string, timeoutMs?: number, stdin?: string, } | { "op": "place.leave" } | { "op": "guest.open", kind: GuestKind, token: string, turnToken?: string, argv: Array<string>, cwd: string, } | { "op": "guest.send", message: unknown, } | { "op": "guest.watch" } | { "op": "guest.reply", session: string, message: unknown, } | { "op": "guest.close", session: string, error?: string, } | { "op": "place.update", uploadId: string, seq: number, last: boolean, data: string, sha256: string, };
+machineId?: string, } | { "op": "tunnel.write", tunnelId: string, data: string, 
+/**
+ * The workspace whose road this frame is on; it must be the one the tunnel was opened for.
+ */
+machineId?: string, } | { "op": "tunnel.close", tunnelId: string, 
+/**
+ * The workspace whose road this frame is on; it must be the one the tunnel was opened for.
+ */
+machineId?: string, } | { "op": "exec", cmd: string, timeoutMs?: number, stdin?: string, } | { "op": "place.leave" } | { "op": "guest.open", kind: GuestKind, token: string, turnToken?: string, argv: Array<string>, cwd: string, } | { "op": "guest.send", message: unknown, } | { "op": "guest.watch" } | { "op": "guest.reply", session: string, message: unknown, 
+/**
+ * The workspace whose road this frame is on; it must be the one the session was opened inside.
+ */
+machineId?: string, } | { "op": "guest.close", session: string, error?: string, 
+/**
+ * The workspace whose road this frame is on, as on guest.reply.
+ */
+machineId?: string, } | { "op": "place.update", uploadId: string, seq: number, last: boolean, data: string, sha256: string, };

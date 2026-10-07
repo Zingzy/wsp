@@ -2,6 +2,7 @@
 //! The op switch behind the door: one request text in, one reply text out, with the events an op raises going out
 //! through the socket's own channel.
 
+use std::collections::HashMap;
 use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -22,14 +23,23 @@ use crate::git::Asked::{Read as Reads, Work as Works};
 use crate::guest::SESSION_TAKEN;
 use crate::manifest::RecordInput;
 use crate::paths::OpError;
-use crate::proc::{kill_process, ProcSampler, ProtectedPids};
+use crate::proc::ProcSampler;
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::tunnel::Tunnels;
+mod procs;
+mod road;
 mod runner;
 use crate::{bring_back, frame_text as text, fs, git, hosts, paths, readings, ssh, tunnel, Ctx, Listener, Outbound, Outgoing};
+use road::off_its_road;
 use runner::Runner;
 
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use procs::cgroup_pids;
+pub(crate) use procs::pid_scope;
+
 type Detach = Box<dyn FnOnce() + Send>;
+/// One socket's process watches, by the workspace each names and its own under None.
+type ProcWatches = HashMap<Option<String>, (u64, Arc<ProcSampler>)>;
 
 /// Which road a socket came in on: dialled by a client of this machine, opened outward by this place to its host,
 /// or opened inside one workspace this computer runs, on that workspace's own socket. The leave op and every
@@ -71,9 +81,10 @@ pub(crate) struct Conn {
     /// What the socket's close undoes: every pty, mode and watcher listener an op on it made. None once closed, so an
     /// op still being answered when the socket went undoes itself at once instead of outliving it.
     detaches: Mutex<Option<Vec<Detach>>>,
-    /// This socket's proc.watch, so proc.unwatch can end it before the socket does and a second watch on the same
-    /// socket asks for a whole snapshot rather than a second subscription.
-    proc_watch: Mutex<Option<(u64, Arc<ProcSampler>)>>,
+    /// This socket's proc.watch per workspace it named and its own under None, so proc.unwatch can end one before
+    /// the socket does and a second watch on the same socket asks for a whole snapshot rather than a second
+    /// subscription. Every road on a computer that runs workspaces rides its one link socket.
+    proc_watch: Mutex<ProcWatches>,
     /// The one guest session this socket opened, which ends with it.
     guest: Mutex<Option<String>>,
 }
@@ -88,7 +99,7 @@ impl Conn {
             token,
             tunnels: Tunnels::default(),
             detaches: Mutex::new(Some(Vec::new())),
-            proc_watch: Mutex::new(None),
+            proc_watch: Mutex::new(HashMap::new()),
             guest: Mutex::new(None),
         }
     }
@@ -228,6 +239,9 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
         }
     }
     if conn.road == Road::Link {
+        if let Some(refused) = off_its_road(&frame, op) {
+            return Outgoing::Text(refuse(id, DaemonErrorCode::Forbidden, refused));
+        }
         // The road that opened this socket answers its own ops before the daemon's switch sees them.
         match op {
             Some("place.leave") => {
@@ -1141,8 +1155,12 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             ctx.guests.watch(conn);
             ok(id)
         }
-        DaemonOp::GuestReply { session, message } => answer(id, ctx.guests.reply(conn, &session, message).map(|()| Empty {})),
-        DaemonOp::GuestClose { session, error } => answer(id, ctx.guests.close(conn, &session, error).map(|()| Empty {})),
+        DaemonOp::GuestReply { session, message, machine_id } => {
+            answer(id, ctx.guests.reply(conn, &session, message, machine_id.as_deref()).map(|()| Empty {}))
+        }
+        DaemonOp::GuestClose { session, error, machine_id } => {
+            answer(id, ctx.guests.close(conn, &session, error, machine_id.as_deref()).map(|()| Empty {}))
+        }
         DaemonOp::TunnelOpen { tunnel_id, port, machine_id } => {
             let port = port.get();
             // A tunnel to a machine's ssh server is a session into it, held for as long as the tunnel stands.
@@ -1151,10 +1169,11 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             answer(id, Tunnels::open(conn, tunnel_id, dial, machine_id, session).await.map(|()| Empty {}))
         }
         DaemonOp::SshStart { authorized_key, machine_id } => answer(id, ssh_start(ctx, machine_id.as_deref(), &authorized_key).await),
-        DaemonOp::TunnelWrite { tunnel_id, data } => answer(id, conn.tunnels.write(&tunnel_id, lenient_base64(&data)).map(|()| Empty {})),
-        DaemonOp::TunnelClose { tunnel_id } => {
-            conn.tunnels.close(&tunnel_id);
-            ok(id)
+        DaemonOp::TunnelWrite { tunnel_id, data, machine_id } => {
+            answer(id, conn.tunnels.write(&tunnel_id, lenient_base64(&data), machine_id.as_deref()).map(|()| Empty {}))
+        }
+        DaemonOp::TunnelClose { tunnel_id, machine_id } => {
+            answer(id, conn.tunnels.close(&tunnel_id, machine_id.as_deref()).map(|()| Empty {}))
         }
         DaemonOp::SysWatch => {
             // One read before the watch is taken: a machine whose module cannot read it refuses here, where the pane
@@ -1188,40 +1207,8 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, read.await)
         }
-        DaemonOp::ProcWatch => {
-            let watched = async {
-                let sampler = ctx.proc_sampler()?;
-                sampler.probe().await?;
-                let key = ctx.next_key();
-                conn.while_open(|| {
-                    let mut watch = conn.proc_watch.lock().unwrap_or_else(|e| e.into_inner());
-                    // A socket already watching that watches again missed a frame: its next one is whole.
-                    if let Some((held, sampler)) = watch.as_ref() {
-                        sampler.resend(*held);
-                        return None;
-                    }
-                    sampler.subscribe(key, conn.out.clone());
-                    *watch = Some((key, Arc::clone(&sampler)));
-                    Some(Box::new(move || sampler.unsubscribe(key)) as Detach)
-                });
-                Ok(Empty {})
-            };
-            answer(id, watched.await)
-        }
-        DaemonOp::ProcUnwatch => {
-            let watch = conn.proc_watch.lock().unwrap_or_else(|e| e.into_inner()).take();
-            if let Some((key, sampler)) = watch {
-                sampler.unsubscribe(key);
-            }
-            ok(id)
-        }
-        DaemonOp::ProcInspect { pid } => {
-            let inspected = async { ctx.proc_sampler()?.inspect(pid_in_range(pid)?).await };
-            answer(id, inspected.await)
-        }
-        DaemonOp::ProcKill { pid, signal } => {
-            let protected = ProtectedPids { this: std::process::id(), parent: std::os::unix::process::parent_id() };
-            answer(id, pid_in_range(pid).and_then(|pid| kill_process(pid, signal, protected)).map(|()| Empty {}))
+        op @ (DaemonOp::ProcWatch { .. } | DaemonOp::ProcUnwatch { .. } | DaemonOp::ProcInspect { .. } | DaemonOp::ProcKill { .. }) => {
+            procs::serve(conn, ctx, id, op).await
         }
         _ => refuse(id, DaemonErrorCode::Unsupported, not_built(name)),
     }
@@ -1229,6 +1216,7 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
 
 #[cfg(test)]
 mod tests {
+    mod roads;
     use super::*;
     use crate::Options;
     use serde_json::json;
@@ -1256,8 +1244,9 @@ mod tests {
         conn_on(scope, Road::Inbound)
     }
 
-    /// A daemon of a computer somebody owns: the place file is what the roads table reads, and on this platform
-    /// it turns no runtime on, so the bench is the switch alone.
+    /// A daemon of a computer somebody owns: the place file is what the roads table reads, and the runtime root is
+    /// one the open refuses before it makes anything, so the bench is the switch alone on every platform and a run
+    /// as root on Linux opens no runtime at the default root.
     fn place_bench() -> Bench {
         let mut token = tempfile::NamedTempFile::new().unwrap();
         writeln!(token, "t").unwrap();
@@ -1267,6 +1256,7 @@ mod tests {
         options.roots_path = Some(root.path().join("roots"));
         options.manifest_path = Some(root.path().join("manifest.json"));
         options.place_file = Some(root.path().join("place.json"));
+        options.runtime_root = Some(std::path::PathBuf::from("/var/wsp-under-a-lower"));
         Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap()), _token: token, root }
     }
 
@@ -1632,7 +1622,7 @@ mod tests {
         options.apparmor_profile = Some(profile.clone());
         options.install_root = Some(home.path().to_path_buf());
         let ctx = Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap());
-        let out = handle(&link, &ctx, &json!({"id": 21, "op": "place.leave"}).to_string()).await;
+        let out = handle(&link, &ctx, &json!({"id": 21, "op": "place.leave", "road": "computer"}).to_string()).await;
         let Outgoing::Leave(text) = &out else { panic!("a leave stops the daemon after its reply") };
         // Each part of wsp's own folder is named for the line it puts in front of a person, and the folder itself
         // goes last, so nothing under it is left on a computer the person joined; a root leave then takes the profile,
@@ -1666,7 +1656,7 @@ mod tests {
         // Never the sha of what this sends: the exe a landing moves over is this test binary's own, so a part that
         // matched would replace the runner under itself. The landing is proved in place.rs against a temp file.
         let sha = "0".repeat(64);
-        let part = |seq: u64, last: bool, data: &str| json!({"id": 9, "op": "place.update", "uploadId": "u1", "seq": seq, "last": last, "data": data, "sha256": sha});
+        let part = |seq: u64, last: bool, data: &str| json!({"id": 9, "op": "place.update", "uploadId": "u1", "seq": seq, "last": last, "data": data, "sha256": sha, "road": "computer"});
         let said = |out: &Outgoing| serde_json::from_str::<Value>(out.text()).unwrap();
 
         // A part that is not the first with nothing landed drops the upload and says which part.
@@ -1691,7 +1681,7 @@ mod tests {
         let bad = handle(
             &link,
             &ctx,
-            &json!({"id": 9, "op": "place.update", "uploadId": "../x", "seq": 0, "last": true, "data": "", "sha256": sha}).to_string(),
+            &json!({"id": 9, "op": "place.update", "uploadId": "../x", "seq": 0, "last": true, "data": "", "sha256": sha, "road": "computer"}).to_string(),
         )
         .await;
         assert_eq!(said(&bad)["code"], json!("bad-request"));
@@ -1848,13 +1838,13 @@ mod tests {
         let (link, _rx) = conn_on(None, Road::Link);
         for op in GUEST_OPS {
             assert_eq!(
-                reply(&b, &link, json!({"id": 1, "op": op, "session": "g0", "message": {}})).await,
+                reply(&b, &link, json!({"id": 1, "op": op, "session": "g0", "message": {}, "road": "computer"})).await,
                 json!({"id": 1, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD}),
                 "{op}"
             );
         }
         // The same socket still answers the ops that are not the guest road's.
-        assert_eq!(reply(&b, &link, json!({"id": 2, "op": "ping"})).await, json!({"id": 2, "ok": true}));
+        assert_eq!(reply(&b, &link, json!({"id": 2, "op": "ping", "road": "computer"})).await, json!({"id": 2, "ok": true}));
         // And an inbound socket opens a session, which is what the link was refused.
         let (inbound, _rx2) = conn(None);
         let opened =
@@ -1899,12 +1889,17 @@ mod tests {
         let b = place_bench();
         let (link, _rx) = conn_on(None, Road::Link);
         for op in ["guest.watch", "guest.reply", "guest.close"] {
-            let said = reply(&b, &link, json!({"id": 1, "op": op, "session": "g0", "message": {}})).await;
+            let said = reply(&b, &link, json!({"id": 1, "op": op, "session": "g0", "message": {}, "road": "computer"})).await;
             assert_ne!(said["code"], json!("forbidden"), "{op}: {said}");
         }
         for op in ["guest.open", "guest.send"] {
             assert_eq!(
-                reply(&b, &link, json!({"id": 2, "op": op, "kind": "cli", "token": "", "argv": [], "cwd": "/root", "message": {}})).await,
+                reply(
+                    &b,
+                    &link,
+                    json!({"id": 2, "op": op, "kind": "cli", "token": "", "argv": [], "cwd": "/root", "message": {}, "road": "computer"})
+                )
+                .await,
                 json!({"id": 2, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD}),
                 "{op}"
             );
@@ -1931,7 +1926,7 @@ mod tests {
     async fn a_session_carries_the_workspace_its_socket_was_inside_and_reaches_that_socket_alone() {
         let b = place_bench();
         let (host, mut watching) = conn_on(None, Road::Link);
-        assert_eq!(reply(&b, &host, json!({"id": 1, "op": "guest.watch"})).await["ok"], json!(true));
+        assert_eq!(reply(&b, &host, json!({"id": 1, "op": "guest.watch", "road": "computer"})).await["ok"], json!(true));
         let open = json!({"id": 2, "op": "guest.open", "kind": "cli", "token": "dev-1.tok", "argv": ["threads"], "cwd": "/root"});
         let (a_side, mut a_events) = conn_on(None, Road::Workspace("wsp-a".to_owned()));
         let (b_side, mut b_events) = conn_on(None, Road::Workspace("wsp-b".to_owned()));
@@ -1949,7 +1944,7 @@ mod tests {
         let said: Value = serde_json::from_str(watching.recv().await.unwrap().text()).unwrap();
         assert_eq!(said, json!({"type": "guest.message", "session": a, "message": {"hello": 1}, "machineId": "wsp-a"}));
         // And the host's answer goes to the socket that opened that session: the other workspace hears nothing.
-        let answered = json!({"id": 4, "op": "guest.reply", "session": a, "message": {"exit": 3}});
+        let answered = json!({"id": 4, "op": "guest.reply", "session": a, "message": {"exit": 3}, "machineId": "wsp-a"});
         assert_eq!(reply(&b, &host, answered).await["ok"], json!(true));
         let down: Value = serde_json::from_str(a_events.recv().await.unwrap().text()).unwrap();
         assert_eq!(down, json!({"type": "guest.message", "session": a, "message": {"exit": 3}, "machineId": "wsp-a"}));

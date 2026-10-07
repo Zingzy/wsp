@@ -11,7 +11,11 @@
       "quietForMs": 143000,
       "address": "10.65.0.6",
       "cgroup": "/sys/fs/cgroup/wsp/wsp-8fef733ad77786dc",
-      "upper": "/wsp/run/wsp-8fef733ad77786dc/upper"
+      "upper": "/wsp/run/wsp-8fef733ad77786dc/upper",
+      "disk": {
+        "used": 21474836480,
+        "total": 107374182400
+      }
     }
   },
   {

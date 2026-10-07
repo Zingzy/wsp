@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { EXEC_TIMEOUT_MAX_MS, placeProvisionPaths } from "@wsp/protocol";
+import { COMPUTER_ROAD, EXEC_TIMEOUT_MAX_MS, placeProvisionPaths } from "@wsp/protocol";
 import { INLINE_EXEC_MS, execFits } from "../src/exec-detached.js";
 import { LINK_MARGIN_MS } from "../src/link-backend.js";
 import { NOT_A_WORKSPACE, PLACE_PART_BYTES, PlaceMachine, placePartBoundMs } from "../src/place-machine.js";
@@ -38,7 +38,7 @@ describe("a command on the computer itself", () => {
     const l = link(cmd => (cmd === "echo hi" ? { exitCode: 3, stdout: "hi\n", stderr: "oops\n" } : undefined));
     const res = await machineOn(l).exec("echo hi");
     expect(res).toEqual({ exitCode: 3, stdout: "hi\n", stderr: "oops\n" });
-    expect(l.frames).toEqual([{ op: "exec", params: { cmd: "echo hi", timeoutMs: INLINE_EXEC_MS }, opts: { timeoutMs: INLINE_EXEC_MS + LINK_MARGIN_MS } }]);
+    expect(l.frames).toEqual([{ op: "exec", params: { road: COMPUTER_ROAD, cmd: "echo hi", timeoutMs: INLINE_EXEC_MS }, opts: { timeoutMs: INLINE_EXEC_MS + LINK_MARGIN_MS } }]);
   });
 
   it("holds the wait under the cap the daemon holds its own timer to, and carries a key the caller said may be asked twice", async () => {
@@ -52,7 +52,7 @@ describe("a command on the computer itself", () => {
     const l = link();
     const stdin = Buffer.from([0, 1, 2, 250, 251]);
     await machineOn(l).exec("cat > /root/x", { stdin });
-    expect(l.frames).toEqual([{ op: "exec", params: { cmd: "cat > /root/x", timeoutMs: INLINE_EXEC_MS, stdin: stdin.toString("base64") }, opts: { timeoutMs: INLINE_EXEC_MS + LINK_MARGIN_MS } }]);
+    expect(l.frames).toEqual([{ op: "exec", params: { road: COMPUTER_ROAD, cmd: "cat > /root/x", timeoutMs: INLINE_EXEC_MS, stdin: stdin.toString("base64") }, opts: { timeoutMs: INLINE_EXEC_MS + LINK_MARGIN_MS } }]);
   });
 });
 

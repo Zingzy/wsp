@@ -15,5 +15,14 @@
     "message": {
       "exit": 0
     }
+  },
+  {
+    "id": 9,
+    "op": "guest.reply",
+    "session": "g1",
+    "message": {
+      "exit": 0
+    },
+    "machineId": "wsp-a"
   }
 ]

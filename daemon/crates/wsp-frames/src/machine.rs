@@ -561,6 +561,11 @@ pub struct MachineReading {
     pub cgroup: String,
     /// The overlay directory holding everything it has written since it was made, which is what a snapshot saves.
     pub upper: String,
+    /// The filesystem that directory sits on, which is the disk the workspace writes to and shares with the
+    /// computer under it. Absent where it cannot be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub disk: Option<crate::Usage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

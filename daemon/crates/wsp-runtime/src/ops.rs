@@ -39,6 +39,8 @@ use crate::engine::{self, Fence, Ports};
 use crate::net::{self, Net};
 use crate::profile;
 use crate::runtime::{self, Runtime, Status};
+
+mod processes;
 use crate::size::{size_on_box, BoxFacts, SizeOnBox};
 use crate::{answer_machine_op, no_backend_refusal};
 
@@ -1216,6 +1218,7 @@ impl Ops {
             address: self.net.record(&record.id).ok().flatten().map(|network| network.address.to_string()),
             cgroup: cgroup.display().to_string(),
             upper: self.layout.upper(&record.id).display().to_string(),
+            disk: crate::disk::disk_under(&self.layout.upper(&record.id)).ok(),
         }
     }
 
@@ -1294,12 +1297,6 @@ impl Ops {
     pub fn ssh_host_key_in(&self, id: &str) -> Result<Option<String>, OpError> {
         let record = self.running(id)?;
         bundle::ssh_host_key_inside(&self.layout.inside_of(&record.id)).map_err(|e| OpError::plain(e.to_string()))
-    }
-
-    /// The cgroup a running workspace's processes live in, under which a server of its own is given one.
-    pub fn cgroup_of_running(&self, id: &str) -> Result<PathBuf, OpError> {
-        let record = self.running(id)?;
-        Ok(self.layout.cgroup_dir(&record.id))
     }
 
     /// A port on a running workspace's own loopback, dialled inside its network namespace.

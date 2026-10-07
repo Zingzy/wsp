@@ -15,5 +15,12 @@
     "op": "proc.kill",
     "pid": -1,
     "signal": "TERM"
+  },
+  {
+    "id": 1,
+    "op": "proc.kill",
+    "pid": 50,
+    "signal": "KILL",
+    "machineId": 7
   }
 ]

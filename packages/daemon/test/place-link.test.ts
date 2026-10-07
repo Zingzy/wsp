@@ -8,8 +8,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
-import { NO_PLACE_FILE_LINE, NOT_ON_THIS_ROAD, PLACE_UNKNOWN_REFUSAL, PlaceProveRequest, PlaceReport, hostKeyRefusal, hostQuietLine, linkedLine, placeDaemonPaths, placeLinkTranscript, unknownOpLine, type PlaceFile } from "@wsp/protocol";
-import { freshEphemeral, makeSeal, sealKeys, sharedSecret, type Seal } from "@wsp/runtime";
+import { COMPUTER_ROAD, NO_PLACE_FILE_LINE, NOT_ON_THIS_ROAD, ROAD_UNNAMED, PLACE_UNKNOWN_REFUSAL, PlaceProveRequest, PlaceReport, hostKeyRefusal, hostQuietLine, linkedLine, placeDaemonPaths, placeLinkTranscript, unknownOpLine, type PlaceFile } from "@wsp/protocol";
+import { connectDaemon, freshEphemeral, makeSeal, sealKeys, sharedSecret, type DaemonReach, type Seal } from "@wsp/runtime";
 import { closeFakePlaceHosts, fakePlaceHost, listening, placePair, settled, writePlaceFile } from "./fake-place-host.js";
 import { daemonUnderTest, type DaemonUnderTest, type DaemonUnderTestArgs } from "./harness.js";
 import { rejectedEvents } from "./wire-events.js";
@@ -226,7 +226,7 @@ describe("the socket a place proved, served as an inbound one", () => {
       else answers.push(f);
     });
     const ask = (id: number, op: string): Promise<Record<string, unknown>> => {
-      ws.send(seal.seal(JSON.stringify({ id, op })));
+      ws.send(seal.seal(JSON.stringify({ id, op, road: COMPUTER_ROAD })));
       return new Promise(done => {
         const at = setInterval(() => {
           const found = answers.find(a => a["id"] === id);
@@ -242,6 +242,28 @@ describe("the socket a place proved, served as an inbound one", () => {
     await settled(50);
     expect(events.some(e => e["type"] === "daemon.hello")).toBe(true);
     expect(rejectedEvents(events)).toEqual([]);
+  });
+
+  it("takes the host's own reach over the link, which names the computer's road on its own frames alone, so a frame naming no road is refused", async () => {
+    const key = placePair();
+    const host = await fakePlaceHost({ key });
+    const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
+    await placeDaemon(place);
+    const { ws, seal } = await host.socket;
+    // The host holds a place's link exactly so: the socket the place dialled in on, and the seal its handshake agreed.
+    const reach: DaemonReach = connectDaemon({ socket: ws as unknown as WebSocket, seal, onEvent: () => {}, heartbeatMs: 60_000 });
+    try {
+      // The opening watches are the reach's own and the computer's, so the link comes up.
+      await reach.ready;
+      // A workspace's op that lost its machineId on the way, and a frame naming nothing at all, never run on the computer.
+      await expect(reach.request("git.status", { cwd: "/root" })).rejects.toThrow(ROAD_UNNAMED);
+      await expect(reach.request("ping")).rejects.toThrow(ROAD_UNNAMED);
+      expect(await reach.request("ping", { road: COMPUTER_ROAD })).toMatchObject({ ok: true });
+      // A frame for one workspace carries only what is answered inside it, whatever road word rides beside it.
+      await expect(reach.request("exec", { cmd: "true", machineId: "wsp-x", road: COMPUTER_ROAD })).rejects.toThrow(NOT_ON_THIS_ROAD);
+    } finally {
+      reach.close();
+    }
   });
 
   it("the link has no backend behind it, the door answers the listing, and an op that drives a workspace is still the link's", async () => {
@@ -313,7 +335,7 @@ describe("the socket a place proved, served as an inbound one", () => {
       const f = JSON.parse(seal.unseal(raw as Uint8Array)) as Record<string, unknown>;
       if (f["type"] === undefined) answers.push(f);
     });
-    ws.send(seal.seal(JSON.stringify({ id: 21, op: "place.leave" })));
+    ws.send(seal.seal(JSON.stringify({ id: 21, op: "place.leave", road: COMPUTER_ROAD })));
     const answer = await vi.waitFor(
       () => {
         const found = answers.find(a => a["id"] === 21);

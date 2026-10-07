@@ -18,6 +18,7 @@ pub mod copy_reflink;
 pub mod copy_road;
 #[cfg(target_os = "linux")]
 pub mod copy_snapshot;
+pub mod disk;
 pub mod doctor;
 #[cfg(target_os = "linux")]
 pub mod engine;
@@ -32,6 +33,8 @@ pub mod net;
 pub mod nft;
 #[cfg(target_os = "linux")]
 pub mod ops;
+#[cfg(target_os = "linux")]
+pub mod pidfd;
 pub mod profile;
 pub mod pty;
 #[cfg(target_os = "linux")]

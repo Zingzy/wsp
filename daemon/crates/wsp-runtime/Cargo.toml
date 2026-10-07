@@ -24,7 +24,7 @@ tempfile = "3"
 libc = "0.2"
 # The pty the pane's broker opens is POSIX and so is every call it makes, so the module builds here too and its
 # cases run on the computer the work is done on rather than on a box alone.
-nix = { version = "0.31", default-features = false, features = ["poll", "process", "signal", "term"] }
+nix = { version = "0.31", default-features = false, features = ["fs", "poll", "process", "signal", "term"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # pidfd_open, which nix 0.31 wraps no module for: the descriptor the runtime watches a workspace's init on.

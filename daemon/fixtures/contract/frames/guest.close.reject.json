@@ -8,5 +8,11 @@
     "op": "guest.close",
     "session": "g1",
     "error": 5
+  },
+  {
+    "id": 10,
+    "op": "guest.close",
+    "session": "g1",
+    "machineId": 7
   }
 ]

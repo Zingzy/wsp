@@ -7,7 +7,7 @@
 // sentence rather than sending a frame nothing on the far side would take.
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
-import { DaemonExecReply, EXEC_TIMEOUT_MAX_MS, base64Length, placeProvisionPaths, shellQuote } from "@wsp/protocol";
+import { COMPUTER_ROAD, DaemonExecReply, EXEC_TIMEOUT_MAX_MS, base64Length, placeProvisionPaths, shellQuote } from "@wsp/protocol";
 import { INLINE_EXEC_MS, execDetached, machineAnswer } from "./exec-detached.js";
 import { LINK_MARGIN_MS, type MachineLink } from "./link-backend.js";
 import type { BytesLanded, ExecResult, Machine, MachineKind, MachineState, RunOptions } from "./machine.js";
@@ -57,7 +57,7 @@ export class PlaceMachine implements Machine {
     const timeoutMs = Math.min(opts?.timeoutMs ?? INLINE_EXEC_MS, EXEC_TIMEOUT_MAX_MS);
     const answer = await this.link.request(
       "exec",
-      { cmd, timeoutMs, ...(opts?.stdin !== undefined ? { stdin: Buffer.from(opts.stdin).toString("base64") } : {}) },
+      { road: COMPUTER_ROAD, cmd, timeoutMs, ...(opts?.stdin !== undefined ? { stdin: Buffer.from(opts.stdin).toString("base64") } : {}) },
       { timeoutMs: timeoutMs + LINK_MARGIN_MS, ...(opts?.idempotencyKey !== undefined ? { idempotencyKey: opts.idempotencyKey } : {}) },
     );
     const reply = DaemonExecReply.parse(answer);

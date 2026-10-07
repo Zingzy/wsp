@@ -17,7 +17,16 @@ left?: boolean,
 /**
  * When the close was seen, as the node daemon stamps it: an ISO date, never a number.
  */
-at?: string, } | { "type": "inbox.file", path: string, bytes: number, } | { "type": "pty.mode", ptyId: string, mode: PtyMode, echo: boolean, foreground: string, } | { "type": "browser.open", url: string, port?: RelayPort, } | { "type": "callback.port", port: RelayPort, } | { "type": "tunnel.data", tunnelId: string, data: string, machineId?: string, } | { "type": "tunnel.end", tunnelId: string, machineId?: string, } | { "type": "localhost.url", port: RelayPort, } | { "type": "sys.sample", cpu: number, load1: number, mem: Usage, disk: Usage, at: number, } | { "type": "proc.snapshot", at: number, daemon: number, total: number, procs: Array<ProcEntry>, seq?: number, } | { "type": "proc.changes", at: number, daemon: number, total: number, procs: Array<ProcEntry>, gone: Array<number>, seq: number, base: number, } | { "type": "guest.opened", session: string, 
+at?: string, } | { "type": "inbox.file", path: string, bytes: number, } | { "type": "pty.mode", ptyId: string, mode: PtyMode, echo: boolean, foreground: string, } | { "type": "browser.open", url: string, port?: RelayPort, } | { "type": "callback.port", port: RelayPort, } | { "type": "tunnel.data", tunnelId: string, data: string, machineId?: string, } | { "type": "tunnel.end", tunnelId: string, machineId?: string, } | { "type": "localhost.url", port: RelayPort, } | { "type": "sys.sample", cpu: number, load1: number, mem: Usage, disk: Usage, at: number, } | { "type": "proc.snapshot", at: number, daemon: number, total: number, procs: Array<ProcEntry>, seq?: number, 
+/**
+ * The workspace the watch named, whose processes alone these are; absent on a watch of the machine itself.
+ * Every watch on a link rides one socket, so this is what the host routes a workspace's stream by.
+ */
+machineId?: string, } | { "type": "proc.changes", at: number, daemon: number, total: number, procs: Array<ProcEntry>, gone: Array<number>, seq: number, base: number, 
+/**
+ * The workspace the watch named, as on proc.snapshot.
+ */
+machineId?: string, } | { "type": "guest.opened", session: string, 
 /**
  * The workspace the session was opened inside, on a daemon that runs workspaces: the listener the frame
  * arrived on is what names it, never anything the guest said. Absent on a daemon inside a machine, where

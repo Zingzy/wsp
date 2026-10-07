@@ -10,5 +10,12 @@
     "op": "proc.kill",
     "pid": 50,
     "signal": "KILL"
+  },
+  {
+    "id": 1,
+    "op": "proc.kill",
+    "pid": 50,
+    "signal": "KILL",
+    "machineId": "wsp-a"
   }
 ]

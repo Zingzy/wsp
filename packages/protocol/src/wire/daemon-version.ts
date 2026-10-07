@@ -566,6 +566,11 @@ export function placeDaemonBehind(place: { daemonVersion?: number }): string | u
 /** The first daemon that answers fs.folders. */
 export const FS_FOLDERS_DAEMON_VERSION = 73;
 
+/** The first daemon that reads, inspects and signals only a workspace's own pids on the proc ops naming it, and keeps
+ * the disk on a workspace's reading. One before it reads no workspace on them and would act on the whole computer.
+ * The landing's cut writes this version's note, which the daemon content test holds this number to. */
+export const PROC_SCOPED_DAEMON_VERSION = 133;
+
 /** The line that moves a place onto this wsp's daemon, which is the fix half of every sentence about a place that
  * is behind. */
 export const placeUpdateLine = (name: string): string => `wsp add ${name} --update`;

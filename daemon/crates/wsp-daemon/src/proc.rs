@@ -173,6 +173,18 @@ pub(crate) fn no_process(pid: u32) -> OpError {
     OpError::coded(DaemonErrorCode::NotFound, format!("no process {pid}"))
 }
 
+/// The pids one workspace holds, read again at every ask: a process started or gone since the last one is counted
+/// as it stands, and a pid the kernel handed to a process outside the workspace is not.
+pub(crate) type PidScope = Arc<dyn Fn() -> Result<HashSet<u32>, OpError> + Send + Sync>;
+
+/// The pid as one workspace may ask about it or signal it: one of its own, or refused as forbidden.
+pub(crate) fn within(scope: Option<&PidScope>, pid: u32) -> Result<u32, OpError> {
+    match scope {
+        Some(scope) if !scope()?.contains(&pid) => Err(OpError::coded(DaemonErrorCode::Forbidden, words::proc_outside_workspace(pid))),
+        _ => Ok(pid),
+    }
+}
+
 pub(crate) fn children_of(pid: u32, procs: &[ProcEntry]) -> Vec<u32> {
     procs.iter().filter(|p| p.ppid == pid).map(|p| p.pid).collect()
 }
@@ -199,12 +211,20 @@ pub(crate) struct ProcFsSource {
     proc_root: PathBuf,
     passwd_path: PathBuf,
     cap: usize,
+    /// One workspace's pids, where the source reads for that workspace alone: every other pid in /proc is left out
+    /// of the scan and refused to an inspect.
+    scope: Option<PidScope>,
     state: Mutex<FsState>,
 }
 
 impl ProcFsSource {
     pub(crate) fn new(proc_root: PathBuf, passwd_path: PathBuf, cap: usize) -> ProcFsSource {
-        ProcFsSource { proc_root, passwd_path, cap, state: Mutex::new(FsState::default()) }
+        ProcFsSource { proc_root, passwd_path, cap, scope: None, state: Mutex::new(FsState::default()) }
+    }
+
+    /// The same source held to one workspace's pids.
+    pub(crate) fn scoped(self, scope: PidScope) -> ProcFsSource {
+        ProcFsSource { scope: Some(scope), ..self }
     }
 
     fn prime(&self, state: &mut FsState) -> Result<(), String> {
@@ -280,6 +300,10 @@ impl ProcSource for ProcFsSource {
         let elapsed_ticks = input.elapsed_ms as f64 / 1000.0 * USER_HZ;
         let listed = std::fs::read_dir(&self.proc_root).map_err(|e| format!("{}: {e}", self.proc_root.display()))?;
         let mut pids: Vec<u32> = listed.flatten().filter_map(|d| d.file_name().to_str().and_then(|n| n.parse().ok())).collect();
+        if let Some(scope) = &self.scope {
+            let held = scope().map_err(|e| e.message)?;
+            pids.retain(|pid| held.contains(pid));
+        }
         pids.sort_unstable();
         let mut procs = Vec::new();
         let mut seen = HashSet::new();
@@ -294,6 +318,7 @@ impl ProcSource for ProcFsSource {
     }
 
     fn inspect(&self, pid: u32, procs: &[ProcEntry]) -> Result<ProcInspectReply, OpError> {
+        let pid = within(self.scope.as_ref(), pid)?;
         let dir = self.proc_root.join(pid.to_string());
         let st =
             std::fs::read_to_string(dir.join("stat")).ok().and_then(|t| parse_proc_pid_stat(&t).ok()).ok_or_else(|| no_process(pid))?;
@@ -315,6 +340,8 @@ pub(crate) type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 pub(crate) struct ProcSamplerOptions {
     /// The daemon's own pid, named in every snapshot.
     pub(crate) self_pid: u32,
+    /// The workspace a sampler reads for alone, named on every frame it sends; none for the machine itself.
+    pub(crate) machine: Option<String>,
     pub(crate) ptys: PtyPids,
     /// From the cpu baseline to the first snapshot.
     pub(crate) first: Duration,
@@ -389,6 +416,7 @@ impl ProcSampler {
                 total: sent.total,
                 procs: sent.procs.clone(),
                 seq: Some(sent.seq),
+                machine_id: self.opts.machine.clone(),
             };
             out.send_text(&frame_text(&snapshot));
         }
@@ -404,6 +432,13 @@ impl ProcSampler {
         if inner.subscribers.contains_key(&key) {
             inner.owed.insert(key);
         }
+    }
+
+    /// Every watcher off and the clock stopped: the workspace this sampler read for is gone.
+    pub(crate) fn stop_all(&self) {
+        let mut inner = self.lock();
+        inner.subscribers.clear();
+        self.stop(&mut inner);
     }
 
     pub(crate) fn unsubscribe(&self, key: u64) {
@@ -464,10 +499,18 @@ impl ProcSampler {
         let daemon = self.opts.self_pid;
         let seq = inner.seq + 1;
         inner.seq = seq;
-        let whole = frame_text(&DaemonEvent::ProcSnapshot { at, daemon, total: scan.total, procs: scan.procs.clone(), seq: Some(seq) });
+        let machine_id = self.opts.machine.clone();
+        let whole = frame_text(&DaemonEvent::ProcSnapshot {
+            at,
+            daemon,
+            total: scan.total,
+            procs: scan.procs.clone(),
+            seq: Some(seq),
+            machine_id: machine_id.clone(),
+        });
         let moved = inner.sent.as_ref().map(|sent| {
             let (procs, gone) = changes(&sent.procs, &scan.procs);
-            frame_text(&DaemonEvent::ProcChanges { at, daemon, total: scan.total, procs, gone, seq, base: sent.seq })
+            frame_text(&DaemonEvent::ProcChanges { at, daemon, total: scan.total, procs, gone, seq, base: sent.seq, machine_id })
         });
         let owed = std::mem::take(&mut inner.owed);
         for (key, out) in &inner.subscribers {
@@ -525,31 +568,64 @@ impl ProcSampler {
     }
 }
 
-/// init, the daemon and whatever started the daemon: never signalled, the workspace would go with them.
+/// init, the daemon and whatever started the daemon: never signalled, the workspace would go with them. A kill
+/// from a workspace's own pane adds that workspace's init, which is its pid 1 and sits inside its cgroup.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ProtectedPids {
     pub(crate) this: u32,
     pub(crate) parent: u32,
+    pub(crate) init: Option<u32>,
 }
 
-/// Signals one process.
-pub(crate) fn kill_process(pid: u32, signal: ProcSignal, protected: ProtectedPids) -> Result<(), OpError> {
-    if pid == 1 || pid == protected.this || pid == protected.parent {
+fn refuse_protected(pid: u32, protected: ProtectedPids) -> Result<(), OpError> {
+    if pid == 1 || pid == protected.this || pid == protected.parent || Some(pid) == protected.init {
         return Err(OpError::coded(
             DaemonErrorCode::Forbidden,
             format!("refusing to signal pid {pid}: it is init, the daemon or the daemon's parent"),
         ));
     }
-    let signal = match signal {
+    Ok(())
+}
+
+fn signal_of(signal: ProcSignal) -> Signal {
+    match signal {
         ProcSignal::Kill => Signal::SIGKILL,
         ProcSignal::Term => Signal::SIGTERM,
-    };
-    match kill(Pid::from_raw(pid as i32), signal) {
-        Ok(()) => Ok(()),
-        Err(nix::errno::Errno::ESRCH) => Err(no_process(pid)),
-        Err(nix::errno::Errno::EPERM) => Err(OpError::coded(DaemonErrorCode::Forbidden, format!("no permission to signal pid {pid}"))),
-        Err(e) => Err(OpError::plain(e.to_string())),
     }
+}
+
+fn signal_refused(pid: u32, errno: nix::errno::Errno) -> OpError {
+    match errno {
+        nix::errno::Errno::ESRCH => no_process(pid),
+        nix::errno::Errno::EPERM => OpError::coded(DaemonErrorCode::Forbidden, format!("no permission to signal pid {pid}")),
+        e => OpError::plain(e.to_string()),
+    }
+}
+
+/// Signals one process.
+pub(crate) fn kill_process(pid: u32, signal: ProcSignal, protected: ProtectedPids) -> Result<(), OpError> {
+    refuse_protected(pid, protected)?;
+    kill(Pid::from_raw(pid as i32), signal_of(signal)).map_err(|e| signal_refused(pid, e))
+}
+
+/// Signals one process of a workspace. The process is held by a descriptor before its membership is read, and the
+/// signal goes through that descriptor: a process that left and whose number a process outside the workspace took
+/// meanwhile is not the one signalled, and the signal fails as gone instead.
+#[cfg(target_os = "linux")]
+pub(crate) fn kill_within(pid: u32, signal: ProcSignal, protected: ProtectedPids, scope: &PidScope) -> Result<(), OpError> {
+    refuse_protected(pid, protected)?;
+    let errno = |e: std::io::Error| nix::errno::Errno::from_raw(e.raw_os_error().unwrap_or(0));
+    let pinned = wsp_runtime::pidfd::open(pid as i32).map_err(|e| match errno(e) {
+        nix::errno::Errno::ENOSYS => OpError::coded(DaemonErrorCode::Unsupported, words::PIDFD_MISSING),
+        e => signal_refused(pid, e),
+    })?;
+    within(Some(scope), pid)?;
+    wsp_runtime::pidfd::send_signal(&pinned, signal_of(signal) as i32).map_err(|e| signal_refused(pid, errno(e)))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn kill_within(_pid: u32, _signal: ProcSignal, _protected: ProtectedPids, _scope: &PidScope) -> Result<(), OpError> {
+    Err(OpError::coded(DaemonErrorCode::Unsupported, words::PIDFD_MISSING))
 }
 
 #[cfg(test)]
@@ -654,6 +730,7 @@ mod tests {
             source,
             ProcSamplerOptions {
                 self_pid: 4242,
+                machine: None,
                 ptys: Arc::new(move || ptys.clone()),
                 first: Duration::from_secs(60),
                 interval: Duration::from_secs(60),
@@ -690,6 +767,7 @@ mod tests {
         let scans = || source.scans.load(Ordering::SeqCst);
         let opts = ProcSamplerOptions {
             self_pid: 1,
+            machine: None,
             ptys: Arc::new(Vec::new),
             first: Duration::from_secs(60),
             interval: Duration::from_secs(60),
@@ -721,6 +799,7 @@ mod tests {
         let source = Arc::new(Fake { scans: AtomicUsize::new(0), broken: AtomicBool::new(false) });
         let opts = ProcSamplerOptions {
             self_pid: 1,
+            machine: None,
             ptys: Arc::new(Vec::new),
             first: Duration::ZERO,
             interval: Duration::ZERO,
@@ -735,6 +814,118 @@ mod tests {
         assert!(source.scans.load(Ordering::SeqCst) >= 2);
         assert!(rx.try_recv().is_ok());
         s.unsubscribe(1);
+    }
+
+    /// A workspace's cgroup as the kernel lays one out: its own processes, and a container's in a cgroup under it.
+    #[cfg(target_os = "linux")]
+    fn fake_cgroup(own: &[u32], container: &[u32]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let listed = |pids: &[u32]| pids.iter().map(|p| format!("{p}\n")).collect::<String>();
+        std::fs::write(dir.path().join("cgroup.procs"), listed(own)).unwrap();
+        std::fs::create_dir(dir.path().join("docker")).unwrap();
+        std::fs::write(dir.path().join("docker/cgroup.procs"), listed(container)).unwrap();
+        dir
+    }
+
+    /// A child of this test held in a fake cgroup of its own, as a workspace's process is under its cgroup.
+    #[cfg(target_os = "linux")]
+    fn scoped_child() -> (std::process::Child, PidScope, tempfile::TempDir) {
+        let child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let cgroup = fake_cgroup(&[child.id()], &[]);
+        let at = cgroup.path().to_path_buf();
+        (child, Arc::new(move || crate::ops::cgroup_pids(&at)), cgroup)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_kill_from_a_workspace_reaches_its_own_process_through_a_descriptor_and_nothing_outside_it_nor_its_init() {
+        let (mut inside, scope, _cgroup) = scoped_child();
+        let mut outside = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let refused = kill_within(outside.id(), ProcSignal::Kill, PROTECTED, &scope).unwrap_err();
+        assert_eq!(refused.code, Some(DaemonErrorCode::Forbidden));
+        assert!(outside.try_wait().unwrap().is_none(), "a kill from a workspace reached a process outside it");
+        let init = ProtectedPids { init: Some(inside.id()), ..PROTECTED };
+        let refused = kill_within(inside.id(), ProcSignal::Kill, init, &scope).unwrap_err();
+        assert!(refused.message.starts_with("refusing to signal pid"), "{}", refused.message);
+        assert!(inside.try_wait().unwrap().is_none(), "a kill from a workspace's pane reached its init");
+        kill_within(inside.id(), ProcSignal::Kill, PROTECTED, &scope).unwrap();
+        assert_eq!(std::os::unix::process::ExitStatusExt::signal(&inside.wait().unwrap()), Some(9));
+        outside.kill().unwrap();
+        outside.wait().unwrap();
+    }
+
+    /// The race a kill by number has: the process checked leaves and its number goes to another. A signal through the
+    /// descriptor taken before the check reaches the one that left or nothing, never the number's new holder.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_signal_through_a_descriptor_whose_process_left_fails_as_gone_and_reaches_nobody() {
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let pinned = wsp_runtime::pidfd::open(child.id() as i32).unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let gone = wsp_runtime::pidfd::send_signal(&pinned, Signal::SIGKILL as i32).unwrap_err();
+        assert_eq!(gone.raw_os_error(), Some(nix::errno::Errno::ESRCH as i32));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_workspace_watch_lists_the_pids_under_its_cgroup_alone_names_it_on_every_frame_and_refuses_an_inspect_outside() {
+        let proc = |pid: u32, comm: &str| FakeProc {
+            pid,
+            ppid: Some(1),
+            comm: Some(comm.into()),
+            cmdline: Some(vec![comm.into()]),
+            ..FakeProc::default()
+        };
+        let root = fake_proc_tree(&[proc(1, "init"), proc(300, "sshd"), proc(500, "bash"), proc(501, "postgres"), proc(502, "node")], 4096);
+        let (_passwd_dir, passwd) = fake_passwd();
+        let cgroup = fake_cgroup(&[500], &[501]);
+        let at = cgroup.path().to_path_buf();
+        let scope: PidScope = Arc::new(move || crate::ops::cgroup_pids(&at));
+        let source = Arc::new(ProcFsSource::new(root.path().to_path_buf(), passwd, numbers::PROC_CAP).scoped(Arc::clone(&scope)));
+        let clock = Arc::new(Clock(Mutex::new(1_000_000)));
+        let now = Arc::clone(&clock);
+        let sampler = ProcSampler::new(
+            source,
+            ProcSamplerOptions {
+                self_pid: 4242,
+                machine: Some("wsp-a".into()),
+                ptys: Arc::new(Vec::new),
+                first: Duration::from_secs(60),
+                interval: Duration::from_secs(60),
+                now: Arc::new(move || *now.0.lock().unwrap()),
+                log: quiet(),
+            },
+        );
+        let (tx, rx) = mpsc::unbounded_channel();
+        sampler.lock().subscribers.insert(1, Outbound(tx));
+        let mut b = Bench { sampler, rx, root, _passwd: _passwd_dir, clock };
+        b.sampler.poll().await;
+        b.advance(2_000);
+        b.sampler.poll().await;
+        let got = b.got();
+        assert_eq!(got.len(), 1);
+        let pids = |frame: &Value| frame["procs"].as_array().unwrap().iter().map(|p| p["pid"].as_u64().unwrap()).collect::<Vec<_>>();
+        assert_eq!((&got[0]["type"], &got[0]["machineId"], &got[0]["total"]), (&json!("proc.snapshot"), &json!("wsp-a"), &json!(2)));
+        assert_eq!(pids(&got[0]), vec![500, 501]);
+
+        // A process that joins the workspace is listed on the next frame, which names the workspace too.
+        std::fs::write(cgroup.path().join("cgroup.procs"), "500\n502\n").unwrap();
+        b.advance(2_000);
+        b.sampler.poll().await;
+        let got = b.got();
+        assert_eq!((&got[0]["type"], &got[0]["machineId"]), (&json!("proc.changes"), &json!("wsp-a")));
+        assert_eq!(pids(&got[0]), vec![502]);
+
+        let outside = b.sampler.inspect(300).await.unwrap_err();
+        assert_eq!(
+            (outside.code, outside.message.as_str()),
+            (Some(DaemonErrorCode::Forbidden), "pid 300 is not one of this workspace's processes")
+        );
+        assert_eq!(b.sampler.inspect(501).await.unwrap().pid, 501);
+        assert_eq!(within(Some(&scope), 300).unwrap_err().code, Some(DaemonErrorCode::Forbidden));
+        assert_eq!(within(Some(&scope), 502).unwrap(), 502);
+        assert_eq!(within(None, 300).unwrap(), 300);
     }
 
     #[tokio::test]
@@ -1039,7 +1230,7 @@ mod tests {
         assert_eq!(b.sampler.inspect(1).await.unwrap().children, vec![2]);
     }
 
-    const PROTECTED: ProtectedPids = ProtectedPids { this: 5000, parent: 4000 };
+    const PROTECTED: ProtectedPids = ProtectedPids { this: 5000, parent: 4000, init: None };
 
     #[test]
     fn refuses_init_the_daemon_and_the_daemons_parent_with_code_forbidden() {
