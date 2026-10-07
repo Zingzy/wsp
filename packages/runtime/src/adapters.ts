@@ -7,11 +7,11 @@
 // folder the golden's sign-in wrote into, and the command that signs in on a
 // machine; the adapter packages carry no catalog rows of their own.
 import { createClaudeAdapter } from "@wsp/adapter-claude";
-import { codexPlanResets, createCodexAdapter } from "@wsp/adapter-codex";
+import { codexPlanResets, createCodexAdapter, limitOf as codexLimitOf } from "@wsp/adapter-codex";
 import { createCursorAdapter } from "@wsp/adapter-cursor";
 import { createOpenCodeAdapter } from "@wsp/adapter-opencode";
 import { CATALOG_AGENTS, keyEnvOf, mintsToken, type ThreadAgent } from "@wsp/catalog";
-import type { PlanResets } from "@wsp/protocol";
+import type { HarnessLimit, PlanResets } from "@wsp/protocol";
 import type { HarnessAdapterFactory } from "./runtime.js";
 
 /** The sign-in command a person runs on a machine: the row's headless fallback when it has one, else its login. */
@@ -66,3 +66,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<ThreadAgent, HarnessAdapterFactor
 
 /** The agents whose plans bank resets a person can spend, each with the scripts that read and spend one. */
 export const PLAN_RESETS: Readonly<Partial<Record<ThreadAgent, PlanResets>>> = { codex: codexPlanResets };
+
+/** The agents whose own store keeps the plan's windows, each with its reader of a reading off that store, which is in
+ * the shape the agent's server answers a rate-limits read with. */
+export const LOG_LIMITS: Readonly<Partial<Record<ThreadAgent, (snapshot: Record<string, unknown>) => HarnessLimit | undefined>>> = { codex: snapshot => codexLimitOf(snapshot, {}) };

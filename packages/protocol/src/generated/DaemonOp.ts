@@ -8,6 +8,7 @@ import type { ProcSignal } from "./ProcSignal.js";
 import type { ReactionContent } from "./ReactionContent.js";
 import type { ReviewComment } from "./ReviewComment.js";
 import type { ReviewEvent } from "./ReviewEvent.js";
+import type { UsageStore } from "./UsageStore.js";
 
 /**
  * Every op the protocol's DaemonRequest names, keyed on `op` as the zod discriminated union is.
@@ -66,7 +67,7 @@ roots?: Array<number>,
  * With roots, the workspace's folder: a process running in it is the workspace's too, a server started
  * with setsid among them.
  */
-folder?: string, } | { "op": "manifest.get" } | { "op": "manifest.record", cmd: string, cwd: string, port?: number, } | { "op": "manifest.restartScript" } | { "op": "inbox.watch" } | { "op": "inbox.rescan" } | { "op": "sys.watch" } | { "op": "sys.history", from: number, to: number, stepMs: number, } | { "op": "proc.watch" } | { "op": "proc.unwatch" } | { "op": "proc.inspect", pid: number, } | { "op": "proc.kill", pid: number, signal: ProcSignal, } | { "op": "ping" } | { "op": "fs.list", path: string, gitignore?: boolean, 
+folder?: string, } | { "op": "manifest.get" } | { "op": "manifest.record", cmd: string, cwd: string, port?: number, } | { "op": "manifest.restartScript" } | { "op": "inbox.watch" } | { "op": "inbox.rescan" } | { "op": "sys.watch" } | { "op": "sys.history", from: number, to: number, stepMs: number, } | { "op": "usage.logs", stores: Array<UsageStore>, } | { "op": "proc.watch" } | { "op": "proc.unwatch" } | { "op": "proc.inspect", pid: number, } | { "op": "proc.kill", pid: number, signal: ProcSignal, } | { "op": "ping" } | { "op": "fs.list", path: string, gitignore?: boolean, 
 /**
  * The workspace this frame is for, on a daemon that runs workspaces: the path then names the folder as
  * that workspace sees it, and the operation is answered inside it. Without one the path is resolved under

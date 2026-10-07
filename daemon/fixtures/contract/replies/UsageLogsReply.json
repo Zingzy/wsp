@@ -1,0 +1,58 @@
+[
+  {
+    "rows": [
+      {
+        "agent": "claude",
+        "session": "s1",
+        "at": 1790676000000,
+        "model": "claude-opus-5",
+        "folder": "/home/dev/proj",
+        "tokens": {
+          "input": 1112,
+          "output": 55,
+          "cached": 1000,
+          "cacheWrite": 100,
+          "reasoning": 0
+        }
+      },
+      {
+        "agent": "opencode",
+        "session": "ses_1",
+        "at": 1790679600000,
+        "model": "anthropic/claude-sonnet-4-5",
+        "tokens": {
+          "input": 1210,
+          "output": 40,
+          "cached": 300,
+          "cacheWrite": 10,
+          "reasoning": 0
+        },
+        "cost": 0.12
+      }
+    ],
+    "limits": [
+      {
+        "agent": "codex",
+        "at": 1790679600000,
+        "primary": {
+          "usedPercent": 55.5,
+          "windowDurationMins": 300,
+          "resetsAt": 1790690000
+        },
+        "secondary": {
+          "usedPercent": 12
+        },
+        "planType": "pro",
+        "rateLimitReachedType": "primary"
+      },
+      {
+        "agent": "codex",
+        "at": 1790679600000
+      }
+    ]
+  },
+  {
+    "rows": [],
+    "limits": []
+  }
+]

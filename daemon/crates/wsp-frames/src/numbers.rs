@@ -199,6 +199,8 @@ pub const GUEST_TOKEN_MAX: usize = 512;
 /// Words in one guest command line, and the length of the folder it runs in.
 pub const GUEST_ARGV_MAX: usize = 256;
 pub const GUEST_CWD_MAX: usize = 4096;
+/// The most stores one usage.logs names: the catalog's agents, so a handful.
+pub const USAGE_STORES_MAX: usize = 32;
 
 pub const PLACE_LINK_NONCE_BYTES: usize = 32;
 

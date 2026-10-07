@@ -1,0 +1,220 @@
+[
+  {
+    "id": 1,
+    "op": "usage.logs"
+  },
+  {
+    "id": 1,
+    "op": "usage.logs",
+    "stores": [
+      {
+        "agent": "hermes",
+        "format": "hermes-sqlite",
+        "root": "~/.hermes/state.db"
+      }
+    ]
+  },
+  {
+    "id": 1,
+    "op": "usage.logs",
+    "stores": [
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": ""
+      }
+    ]
+  },
+  {
+    "id": 1,
+    "op": "usage.logs",
+    "stores": [
+      {
+        "agent": "",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      }
+    ]
+  },
+  {
+    "id": 1,
+    "op": "usage.logs",
+    "stores": [
+      {
+        "agent": "claude",
+        "format": "claude-jsonl"
+      }
+    ]
+  },
+  {
+    "id": 1,
+    "op": "usage.logs",
+    "stores": [
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      },
+      {
+        "agent": "claude",
+        "format": "claude-jsonl",
+        "root": "~/.claude/projects"
+      }
+    ]
+  }
+]

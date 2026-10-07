@@ -258,7 +258,7 @@ export const PRIVACY_WORDS = {
   agentVersionsDescription: "wsp asks npm, GitHub and each agent's maker for every agent's newest version, once a day.",
   agentVersionsHeld: "Off on the host: WSP_UPDATE_CHECK is 0.",
   usageLogs: "Agent logs",
-  usageLogsDescription: (here: string): string => onceNamed(here, h => `Usage counts what Claude Code, Codex and OpenCode logged on ${h}, wsp's own threads there included. wsp reads the logs there and shows what they count on the Usage page alone, never to an agent.`),
+  usageLogsDescription: (here: string): string => onceNamed(here, h => `Usage counts what Claude Code, Codex and OpenCode logged on ${h} and on every computer you added, wsp's own threads there included. Each computer reads its own logs, and wsp shows what they count on the Usage page alone, never to an agent.`),
   productUsage: "Anonymous usage counts",
   productUsageDescription: "wsp sends PostHog counts of threads, turns, setups and failures; never a path, a prompt, a name or a key.",
   productUsageOff: { env: "Off on the host: WSP_ANALYTICS is 0.", build: "Off in this build: it carries no PostHog key, so nothing is sent." } satisfies Record<ProductUsageOff, string>,

@@ -409,6 +409,81 @@ pub struct SysHistoryReply {
     pub truncated: bool,
 }
 
+/// What usage.logs read: each session's use per half hour under one model and folder, and the newest plan reading
+/// each agent's store kept.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UsageLogsReply {
+    pub rows: Vec<UsageLogRow>,
+    pub limits: Vec<UsageLimitReading>,
+}
+
+/// One session's use in one half hour under one model, as its agent's own store counted it. `at` is the newest
+/// moment of that half hour the store counted any of it, ms epoch; input counts the cached and written tokens too.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UsageLogRow {
+    pub agent: String,
+    pub session: String,
+    pub at: i64,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub folder: Option<String>,
+    pub tokens: UsageTokens,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cost: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageTokens {
+    pub input: u64,
+    pub output: u64,
+    pub cached: u64,
+    pub cache_write: u64,
+    pub reasoning: u64,
+}
+
+/// The plan's windows as the newest line of an agent's store that carried them left them, at that line's moment, in
+/// the shape the agent's own server answers a rate-limits read with, so one reader reads both.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageLimitReading {
+    pub agent: String,
+    pub at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub primary: Option<UsageLimitWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub secondary: Option<UsageLimitWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plan_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rate_limit_reached_type: Option<String>,
+}
+
+/// One window of a plan reading: how much of it is used, its length in minutes where the store named one, and when
+/// it starts again, epoch seconds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageLimitWindow {
+    pub used_percent: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub window_duration_mins: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub resets_at: Option<i64>,
+}
+
 /// The commit a git.snapshot recorded, by its full sha.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]

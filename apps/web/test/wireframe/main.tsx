@@ -580,7 +580,7 @@ const USAGE_ANSWERS = {
     series: Array.from({ length: 7 }, (_, i) => ({ t: Date.parse(AT) - (6 - i) * DAY_MS, tokens: [1.4, 0.6, 1.1, 0.3, 1.8, 0.9, 1.2][i]! * 1_000_000_000 })),
     since: Date.parse(AT) - 6 * DAY_MS,
     until: Date.parse(AT) + DAY_MS,
-    logs: { agents: ["Claude Code"], computer: "zingzy's MacBook Pro" },
+    logs: { agents: ["Claude Code"], computers: ["zingzy's MacBook Pro"] },
   }),
 };
 

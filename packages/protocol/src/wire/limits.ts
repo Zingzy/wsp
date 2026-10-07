@@ -19,6 +19,8 @@ export const GUEST_TOKEN_MAX = 512;
 /** Words in one guest command line, and the length of the folder it runs in. */
 export const GUEST_ARGV_MAX = 256;
 export const GUEST_CWD_MAX = 4096;
+/** The most stores one usage.logs names: the catalog's agents, so a handful. */
+export const USAGE_STORES_MAX = 32;
 /** How much of a detached command's output one poll exec reads; a full read is followed by another at once. */
 export const EXEC_CHUNK_BYTES = 262_144;
 /** How long a turn may do nothing at all before the runtime cuts it: no byte on its stream, no message from the

@@ -61,6 +61,7 @@ import {
   FS_SEARCH_CAP_HITS,
   GIT_DIFF_CAP_BYTES,
   GUEST_ARGV_MAX,
+  USAGE_STORES_MAX,
   GUEST_CWD_MAX,
   GUEST_DAEMON_DIR,
   GUEST_DAEMON_SOCKET_PATH,
@@ -111,6 +112,7 @@ import {
   FsFilesReply,
   GitSnapshotReply,
   SysHistoryReply,
+  UsageLogsReply,
   GitPushReply,
   GuestCliMessage,
   GuestOpenReply,
@@ -347,6 +349,7 @@ const numbers = (): Record<string, number | string | readonly string[]> => ({
   guestTokenMax: GUEST_TOKEN_MAX,
   guestArgvMax: GUEST_ARGV_MAX,
   guestCwdMax: GUEST_CWD_MAX,
+  usageStoresMax: USAGE_STORES_MAX,
   execOutputMax: EXEC_OUTPUT_MAX,
   execTimeoutDefaultMs: EXEC_TIMEOUT_DEFAULT_MS,
   execDeadlineExit: EXEC_DEADLINE_EXIT,
@@ -800,6 +803,22 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
     samples: [
       { points: [{ at: 1_790_640_000_000, cpu: 20.5, load1: 0.42, mem: { used: 2_048_000, total: 8_192_000 }, disk: { used: 40_960_000, total: 81_920_000 } }], stepMs: 300_000, truncated: false },
       { points: [], stepMs: 7_200_000, truncated: true },
+    ],
+  },
+  UsageLogsReply: {
+    schema: UsageLogsReply,
+    samples: [
+      {
+        rows: [
+          { agent: "claude", session: "s1", at: 1_790_676_000_000, model: "claude-opus-5", folder: "/home/dev/proj", tokens: { input: 1_112, output: 55, cached: 1_000, cacheWrite: 100, reasoning: 0 } },
+          { agent: "opencode", session: "ses_1", at: 1_790_679_600_000, model: "anthropic/claude-sonnet-4-5", tokens: { input: 1_210, output: 40, cached: 300, cacheWrite: 10, reasoning: 0 }, cost: 0.12 },
+        ],
+        limits: [
+          { agent: "codex", at: 1_790_679_600_000, primary: { usedPercent: 55.5, windowDurationMins: 300, resetsAt: 1_790_690_000 }, secondary: { usedPercent: 12 }, planType: "pro", rateLimitReachedType: "primary" },
+          { agent: "codex", at: 1_790_679_600_000 },
+        ],
+      },
+      { rows: [], limits: [] },
     ],
   },
   FsFilesReply: { schema: FsFilesReply, samples: [{ files: ["README.md", "src/ChatView.tsx"], truncated: false }, { files: [], truncated: true }] },

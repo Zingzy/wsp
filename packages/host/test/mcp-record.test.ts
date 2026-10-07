@@ -676,7 +676,7 @@ const ANSWERED: Answered = {
             range: "day",
             split: "source",
             rows: [
-              { key: "log", label: "Outside wsp on spoo", tokens: { input: 11, output: 1, cached: 0 }, costList: 0.0001, priced: true, turns: 0 },
+              { key: "log", label: "Outside wsp", tokens: { input: 11, output: 1, cached: 0 }, costList: 0.0001, priced: true, turns: 0 },
               { key: "wsp", label: "wsp threads", tokens: { input: 10, output: 1, cached: 0 }, costReported: 0.5, priced: true, turns: 1 },
             ],
             series: [],

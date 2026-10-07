@@ -406,8 +406,7 @@ export interface PullRequestsArea {
 export interface DaemonArea {
   readonly sendDetached: (workspaceId: string, o: { prompt: string; thread?: string }, origin: Caller | undefined) => Promise<{ outcome: "steered" | "queued" | "started"; threadId: string; harness: string }>;
   readonly toFirstThread: (workspaceId: string, prompt: string, origin: Caller | undefined) => ReturnType<(workspaceId: string, o: { prompt: string; thread?: string; }, origin: Caller | undefined) => Promise<{ outcome: "steered" | "queued" | "started"; threadId: string; harness: string; }>>;
-  readonly rootsWrite: <T>(machineId: string, work: () => Promise<T>) => Promise<T>;
-  readonly writeDaemonRoots: (entry: LiveWorkspace) => Promise<void>;
+  readonly writeDaemonRoots: (entry: LiveWorkspace, strict?: boolean) => Promise<void>;
   readonly turnRuns: (workspaceId: string) => boolean;
   readonly deployDaemonOn: (entry: LiveWorkspace, deploy: (e: LiveWorkspace) => Promise<void | string>) => Promise<void | string>;
   readonly daemonSyncs: Map<string, Promise<void>>;

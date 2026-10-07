@@ -353,6 +353,9 @@ export interface WorkspaceRecord extends Omit<WorkspaceView, "project"> {
   review?: ReviewDraft;
   /** The items of its pull request's page sent to its agent, with when. */
   prSent?: PullRequestSent[];
+  /** Folders an import landed on the machine beside the project, which its daemon may browse: kept here so every
+   * whole write of the roots file lists them, and gone with the record. No project is made of them. */
+  landed?: string[];
 }
 
 export interface LiveWorkspace {
@@ -605,9 +608,6 @@ export interface RuntimeOptions {
   /** Reads LiteLLM's price file, the one outbound read the usage ledger makes, once a day; absent, nothing is read and
    * no row is priced off a table. The host wires GitHub's copy of it. */
   pricesFetch?: () => Promise<unknown>;
-  /** Reads this computer's agent logs for what was used outside wsp, the collector's own reader; absent, no row of
-   * the ledger is read from a log. Read on this computer only, and never while the person has turned it off. */
-  logUsage?: () => Promise<readonly LogUsageRow[]>;
   /** How a folder on this computer is read and packed to seed a project on another computer. The runtime reads no
    * folder of the person's itself: the host wires the collector's menu and its own pack, and without them a folder
    * can only be a project on this computer. */
@@ -929,25 +929,18 @@ export interface OriginStatusApi extends Omit<StatusApi, "list" | "history"> {
   history(workspaceId: string, origin?: Caller): Promise<WorkspaceCostEvent[]>;
 }
 
-/** One session's use as an agent's own log on this computer counted it, which the ledger files as outside wsp. */
-export interface LogUsageRow {
-  agent: string;
-  session: string;
-  at: number;
-  model: string;
-  folder?: string;
-  tokens: { input: number; output: number; cached: number; cacheWrite: number; reasoning: number };
-  cost?: number;
-}
-
 /** How often a read of the Usage page may read the logs again: once a minute, so a turn run outside wsp shows soon. */
 export const LOG_READ_EVERY_MS = 60_000;
+
+/** How long one computer's daemon may take over its logs before that computer reads as not read this time: the first
+ * read after the daemon starts opens every file, and the files it read are kept, so the next one is quick. */
+export const LOG_READ_MS = 30_000;
 
 /** How long one reset script may run on a computer: each of its reads waits ten seconds at most for a line. */
 export const RESET_EXEC_MS = 30_000;
 
 export interface UsageDoor {
-  /** outside: count the rows read from this computer's agent logs, where the person has not turned that off. */
+  /** outside: count the rows read from the computers' agent logs, where the person has not turned that off. */
   used(q: { range: UsageRange; split: UsageSplit; outside?: boolean }): Promise<UsedAnswer>;
   accounts(): Promise<AccountsAnswer>;
   /** A computer's readings over a range, off the daemon that kept them: this computer, a joined one, or a workspace's

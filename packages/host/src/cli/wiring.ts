@@ -2,7 +2,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { collect, expand, fileUsageCache, nodeHost, readLogUsage, seedMenu, type Manifest, type Rung } from "@wsp/collect";
+import { collect, expand, nodeHost, seedMenu, type Manifest, type Rung } from "@wsp/collect";
 import { HARNESS_ADAPTERS, createRuntime, hostIdentity, localExecStream, type GoldenRecipe, type GoldenVersion, type HarnessAdapterFactory, type LocalWiring, type Machine, type PlaceWiring, type Runtime, type SeedWiring, type Store } from "@wsp/runtime";
 import { CATALOG_AGENTS, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import { PRICES_URL, PERSON_HOME_ENV, type SealedImage } from "@wsp/protocol";
@@ -312,9 +312,6 @@ export function makeRuntime(
       if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
       return (await res.json()) as unknown;
     },
-    // What this computer's agents used outside wsp, off their own logs here, counts and a model name alone, read at
-    // most once a minute; the cache beside the state file keeps each read to the files that changed.
-    logUsage: () => readLogUsage(nodeHost(), CATALOG_AGENTS, { cache: fileUsageCache(join(dirname(statePath), "usage-cache.json")) }),
     // The same vault stands behind the sign-in word of an agent whose own login is not on the computer read.
     // Each agent's newest version is asked of its vendor from this host, never from a machine, and kept a day.
     agentsReader: agentsReader({ vault: () => vaultNow(statePath), loginEnv, latest: agentLatest({ statePath, running: VERSION }).read }),
