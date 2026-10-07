@@ -99,6 +99,12 @@ describe("the tests a change runs", () => {
     expect(err).toContain("apps/ui/  declares @t/run");
   });
 
+  it("prints with --files every test file the imports reach inside the folders it picks too", () => {
+    const { out } = affected(workspace(), { "packages/proto/src/index.ts": "export const proto = 2;\n" }, "--files");
+    const reached = ["apps/ui/test/ui.test.ts", "packages/lone/test/borrow.test.ts", "packages/lone/test/uses-built.test.ts", "packages/proto/test/proto.test.ts", "packages/run/test/run.test.ts"];
+    expect(out).toEqual(["apps/ui/", "packages/proto/", "packages/run/", ...reached, ...ALWAYS].sort());
+  });
+
   it("leaves out what the changed package depends on and what imports nothing of it", () => {
     const { out } = affected(workspace(), { "apps/ui/src/index.ts": 'import { run } from "@t/run";\nexport {};\n' });
     expect(out).toEqual(["apps/ui/", ...ALWAYS].sort());

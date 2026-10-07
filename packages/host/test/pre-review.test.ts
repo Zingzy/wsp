@@ -2,6 +2,7 @@
 // The laws judge the tree that lands, the branch merged with origin/main, so a branch that passes alone and fails
 // once it meets main is caught before its report. Driven in a throwaway origin and clone whose one law, a stand-in
 // for test-files.sh, holds the notes folder to three files: main adding one and the branch adding one each pass alone.
+// The full run then runs the test files the change reaches through imports, as the real affected-tests.mjs names them.
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 const SCRIPT = fileURLToPath(new URL("../../../scripts/pre-review.sh", import.meta.url));
+const AFFECTED = fileURLToPath(new URL("../../../scripts/affected-tests.mjs", import.meta.url));
 
 /** Each run says where it ran, whether it saw this clone's installs and how pnpm was told to treat them. */
 const LAW = `#!/bin/sh
@@ -42,8 +44,14 @@ function commit(dir: string, files: Record<string, string>, message: string): vo
   git(dir, "commit", "-q", "-m", message);
 }
 
+/** Each run writes the files it was handed on one line and passes. */
+const RECORD = `#!/bin/sh
+printf '%s\\n' "$*" >>"$LAW_RUNS"
+echo " Test Files  $# passed ($#)"
+`;
+
 /** An origin holding the script and the law, and a clone on a branch off its main with installs git ignores. */
-function clone(): { origin: string; work: string; runs: string } {
+function clone(law = LAW, files: Record<string, string> = {}): { origin: string; work: string; runs: string } {
   const top = mkdtempSync(join(tmpdir(), "wsp-pre-review-"));
   dirs.push(top);
   const origin = join(top, "origin");
@@ -54,8 +62,8 @@ function clone(): { origin: string; work: string; runs: string } {
   git(origin, "config", "user.name", "pre-review");
   mkdirSync(join(origin, "scripts"));
   copyFileSync(SCRIPT, join(origin, "scripts/pre-review.sh"));
-  writeStub(join(origin, "scripts/test-files.sh"), LAW);
-  write(origin, { ".gitignore": "node_modules/\n", "notes/one.md": "one\n", "notes/shared.md": "as it was\n" });
+  writeStub(join(origin, "scripts/test-files.sh"), law);
+  write(origin, { ".gitignore": "node_modules/\n", "notes/one.md": "one\n", "notes/shared.md": "as it was\n", ...files });
   commit(origin, {}, "base");
   execFileSync("git", ["clone", "-q", origin, work]);
   git(work, "config", "user.email", "pre-review@example.invalid");
@@ -68,8 +76,8 @@ function clone(): { origin: string; work: string; runs: string } {
 /** This run's environment less the pnpm settings the pnpm that started it hands down, which the script decides. */
 const pnplessEnv = (): NodeJS.ProcessEnv => Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("pnpm_config_")));
 
-function laws(work: string, runs: string): { status: number | null; out: string; ran: string[] } {
-  const run = spawnSync("bash", [join(work, "scripts/pre-review.sh"), "--laws"], { cwd: work, encoding: "utf8", env: { ...pnplessEnv(), LAW_RUNS: runs } });
+function laws(work: string, runs: string, args = ["--laws"]): { status: number | null; out: string; ran: string[] } {
+  const run = spawnSync("bash", [join(work, "scripts/pre-review.sh"), ...args], { cwd: work, encoding: "utf8", env: { ...pnplessEnv(), LAW_RUNS: runs } });
   const ran = existsSync(runs) ? readFileSync(runs, "utf8").split("\n").filter(Boolean) : [];
   rmSync(runs, { force: true });
   const logs = /^logs: (.+)$/m.exec(run.stdout);
@@ -138,5 +146,51 @@ describe("the laws on the branch merged with origin/main", () => {
     expect(run.out).toContain(`the laws run on this folder, which holds origin/main ${git(work, "rev-parse", "--short", "origin/main")}`);
     expect(run.out).toContain("PASS  the laws: 1 passed (1)");
     expect(run.ran).toEqual([`${git(work, "rev-parse", "--show-toplevel")} installed check`]);
+  });
+});
+
+/** One package whose test imports its source, another test beside it that imports nothing, and the hook pre-review
+ * runs, passing. */
+const PACKAGE = {
+  "scripts/affected-tests.mjs": readFileSync(AFFECTED, "utf8"),
+  ".githooks/pre-commit": "exit 0\n",
+  "pnpm-workspace.yaml": 'packages:\n  - "packages/*"\n',
+  "packages/a/package.json": JSON.stringify({ name: "@t/a" }),
+  "packages/a/src/thing.ts": "export const thing = 1;\n",
+  "packages/a/test/thing.test.ts": 'import { thing } from "../src/thing.js";\n',
+  "packages/a/test/other.test.ts": "\n",
+};
+
+describe("the test files the change reaches", () => {
+  it("runs the test that imports a source file the branch changes, on a branch that touches no test", () => {
+    const { work, runs } = clone(RECORD, PACKAGE);
+    commit(work, { "packages/a/src/thing.ts": "export const thing = 2;\n" }, "feature");
+
+    const run = laws(work, runs, []);
+    expect(run.status, run.out).toBe(0);
+    expect(run.out).toContain("SKIP  the touched tests: the branch changes no test file outside the laws");
+    expect(run.out).toContain("PASS  the affected tests, files affected-tests.mjs names: 1; 1 passed (1)");
+    expect(run.out).toContain("WARN  the affected tests: CI runs every test of packages/a/; of those, only the files the change reaches through imports ran here");
+    expect(run.ran.filter(files => !files.startsWith("--tools "))).toEqual(["packages/a/test/thing.test.ts"]);
+  });
+
+  it("runs the touched files alone when the change reaches the whole suite, and says so", () => {
+    const { work, runs } = clone(RECORD, PACKAGE);
+    commit(work, { "packages/a/src/thing.ts": "export const thing = 2;\n", "packages/a/test/other.test.ts": "//\n", "tsconfig.json": "{}\n" }, "feature");
+
+    const run = laws(work, runs, []);
+    expect(run.out).toContain("PASS  the touched tests: 1 passed (1)");
+    expect(run.out).toContain("WARN  the affected tests: the change reaches the whole suite (tsconfig.json is outside the packages and the folders mapped above, so any test may read it), so only the touched files ran; the rest waits on CI");
+    expect(run.ran.filter(files => !files.startsWith("--tools "))).toEqual(["packages/a/test/other.test.ts"]);
+  });
+
+  it("fails, running no affected file, when affected-tests.mjs fails", () => {
+    const { work, runs } = clone(RECORD, { ...PACKAGE, "scripts/affected-tests.mjs": 'console.error("no workspace file"); process.exit(1);\n' });
+    commit(work, { "packages/a/src/thing.ts": "export const thing = 2;\n" }, "feature");
+
+    const run = laws(work, runs, []);
+    expect(run.status, run.out).toBe(1);
+    expect(run.out).toContain("FAIL  the affected tests: scripts/affected-tests.mjs failed, so no affected file ran: no workspace file");
+    expect(run.ran.filter(files => !files.startsWith("--tools "))).toEqual([]);
   });
 });

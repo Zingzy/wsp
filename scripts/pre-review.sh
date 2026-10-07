@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # What a review keeps finding on a branch, checked before anyone says it is
 # ready. Each check prints PASS, FAIL, WARN or SKIP with its reason, every
-# check runs even after one fails, and any FAIL exits 1. --laws runs only the
-# tests that read the whole tree, on the branch merged with origin/main, and
-# --build builds the packages they load first. A ticket number prints the
-# lines a report on it has to answer.
+# check runs even after one fails, and any FAIL exits 1. The test files the
+# branch changes run, then the ones its change reaches through imports. --laws
+# runs only the tests that read the whole tree, on the branch merged with
+# origin/main, and --build builds the packages they load first. A ticket
+# number prints the lines a report on it has to answer.
 set -u
 
 usage='usage: scripts/pre-review.sh [--laws] [--build] [<ticket number>]'
@@ -290,6 +291,49 @@ else
   failing=$(build_cause "$work/tests.log")
   [ -n "$failing" ] || failing=$(grep -E '^ *FAIL ' "$work/tests.log" | sed 's/^ *FAIL *//' | sort -u | head -n 5 | joined)
   fail "the touched tests" "${failing:-see $work/tests.log}"
+fi
+
+# The test files the change reaches through imports, as affected-tests.mjs picks them for CI, less what ran above.
+# The package folders CI runs whole are named and not run: for a change to a shared package they are most of the suite.
+reached=()
+folders=()
+whole=""
+broken=""
+if [ ! -f scripts/affected-tests.mjs ]; then
+  whole="scripts/affected-tests.mjs is not on this branch"
+elif ! node scripts/affected-tests.mjs "$base" --files >"$work/affected.txt" 2>"$work/affected.why"; then
+  broken=$(tail -n 1 "$work/affected.why")
+elif [ ! -s "$work/affected.txt" ]; then
+  whole="the change reaches the whole suite ($(grep '^everything ' "$work/affected.why" | head -n 1 | sed 's/^everything *//'))"
+fi
+if [ -z "$whole$broken" ]; then
+  while IFS= read -r f; do
+    case "$f" in
+      */) folders+=("$f") ;;
+      *)
+        case " ${LAWS[*]} ${touched[*]-} packages/host/test/mcp-record.test.ts packages/host/test/memory.test.ts packages/protocol/test/stub-script.test.ts " in
+          *" $f "*) ;;
+          *) [ -f "$f" ] && reached+=("$f") ;;
+        esac
+        ;;
+    esac
+  done <"$work/affected.txt"
+fi
+if [ -n "$broken" ]; then
+  fail "the affected tests" "scripts/affected-tests.mjs failed, so no affected file ran: $broken"
+elif [ -n "$whole" ]; then
+  warn "the affected tests" "$whole, so only the touched files ran; the rest waits on CI"
+elif [ ${#reached[@]} -eq 0 ]; then
+  skip "the affected tests" "every test file affected-tests.mjs names ran above"
+elif scripts/test-files.sh "${reached[@]}" >"$work/affected.log" 2>&1; then
+  pass "the affected tests, files affected-tests.mjs names: ${#reached[@]}; $(grep -E '^ *Test Files' "$work/affected.log" | sed 's/^ *Test Files *//')"
+else
+  failing=$(build_cause "$work/affected.log")
+  [ -n "$failing" ] || failing=$(grep -E '^ *FAIL ' "$work/affected.log" | sed 's/^ *FAIL *//' | sort -u | head -n 5 | joined)
+  fail "the affected tests, files affected-tests.mjs names: ${#reached[@]}" "${failing:-see $work/affected.log}"
+fi
+if [ ${#folders[@]} -gt 0 ]; then
+  warn "the affected tests" "CI runs every test of ${folders[*]}; of those, only the files the change reaches through imports ran here"
 fi
 
 # The red proof: the branch's test files, with every test helper and fixture it changed, run on the merge-base's
