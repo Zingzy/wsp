@@ -1122,7 +1122,8 @@ export const SessionInterruptResult = z.object({
    * agents spawned stop as one, since a lead left standing while its builders are cut is neither state. Absent
    * where the thread spawned none that were running. */
   under: z.array(z.string()).optional(),
-  /** The words for a refused or unsupported stop of a subagent. */
+  /** The words for a refused or unsupported stop of a subagent, and for an accepted stop of a turn whose computer is
+   * not answering, which ends there once that computer connects again. */
   error: z.string().optional(),
 });
 export type SessionInterruptResult = z.infer<typeof SessionInterruptResult>;

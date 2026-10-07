@@ -17,10 +17,12 @@ import {
   attachmentRecord, attachmentKey, filesBlocked, isImage, sendFilesDir, attachedFilesPrompt, threadMessages,
   threadSeed, taskStopRefusedLine, taskStopUnsupportedLine, agentOffLine, HEAD_BYTES, HISTORY_PAGE_BYTES,
   HISTORY_PAGE_EVENTS, AGENT_STARTING_MS, ASIDE_EMPTY_LINE, type AsideQuestion, type McpServerSpec, type SessionAsker,
+  stopAwayLine, workspacePlace,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { headShape } from "../transcript-reader.js";
 import type { HarnessAdapter } from "../types/harness.js";
+import type { LiveWorkspace } from "../types/wiring.js";
 import { SESSION_TITLE_TIMEOUT_MS } from "../types/events.js";
 import type { Runtime } from "../types/api.js";
 import {
@@ -42,6 +44,20 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
   const {
     opts, store, bus, clock, deviceDoor, threadLaunch, live, setups, threadRecords, sessions, transcriptIndex,
   } = ctx;
+  /** The run of a turn stopped while its computer was away, ended by name once that computer connects again. */
+  const endRunOnReturn = (entry: LiveWorkspace, place: string, run: string, startedAt: number): void => {
+    const door = ctx.placeDoorOf();
+    const off = door.on(e => {
+      if (e.type !== "place.present" || e.placeId !== place) return;
+      off();
+      void (async () => {
+        const stream = await ctx.execFactoryFor(entry).attach?.(run, { input: false, startedAt });
+        if (stream === undefined || stream === "gone") return;
+        stream.kill();
+        for await (const line of stream.lines) void line;
+      })().catch((err: unknown) => console.warn(`a turn stopped while ${door.nameOf(place)} was away is still running there: ${err instanceof Error ? err.message : String(err)}`));
+    });
+  };
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, opened, origin) {
       await ctx.ready();
@@ -548,7 +564,8 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       if (!s) return { outcome: "not-found" };
       // One absence for every row a thread cannot reach, wherever it stands: a sentence about the workspace would
       // tell a thread which of the two rules hid the row.
-      if ((await ctx.entryOfRow(s.view, origin)) === undefined) return { outcome: "not-found" };
+      const entry = await ctx.entryOfRow(s.view, origin);
+      if (entry === undefined) return { outcome: "not-found" };
       // One subagent of the turn, and nothing else: the threads under this one and the turn itself run on.
       if (task !== undefined) {
         if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
@@ -565,6 +582,15 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const under = s.view.threadId === undefined ? [] : await ctx.stopUnder(s.view.threadId, origin);
       const answered = (outcome: SessionInterruptOutcome): SessionInterruptResult => ({ outcome, ...(under.length > 0 ? { under } : {}) });
       if (s.view.status !== "running" || s.handle === undefined) return answered("not-running");
+      // Nothing reaches the turn's process while its computer is away, and the agent's own stop would wait out the
+      // gap: the row ends now, and the run is ended by name once that computer connects again.
+      const place = workspacePlace(entry.record);
+      if (place !== undefined && ctx.placeAway(place) && s.end !== undefined) {
+        const line = stopAwayLine(ctx.placeDoorOf().nameOf(place));
+        if (s.run !== undefined) endRunOnReturn(entry, place, s.run, s.view.startedAt ?? Date.now());
+        s.end(line, true);
+        return { ...answered("accepted"), error: line };
+      }
       await s.handle.interrupt();
       // The harness resolves finished only after session.end, so accepted means the turn is over on the transcript too.
       await s.handle.finished.catch(() => {});

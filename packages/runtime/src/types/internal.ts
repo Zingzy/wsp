@@ -902,4 +902,4 @@ export type LiveSession = { view: SessionView; turnId: string; handle: SessionHa
  * run this host has no road to at all, and the row reads as a turn the restart cut. */
 export type Reopened = "attached" | "gone" | "unreached" | "cannot";
 
-export type SessionEntry = { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> };
+export type SessionEntry = { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string, stopped?: boolean) => void; turnLive?: TurnLive; run?: string; from?: number; asked?: TurnAsked; snapshot?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> };

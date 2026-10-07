@@ -553,8 +553,10 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
       ...(started.setAccess !== undefined ? { setAccess } : {}),
       ...(started.stopTask !== undefined ? { stopTask: (task: string) => started.stopTask!(task) } : {}),
     };
-    const end = (reason: string): void => {
+    const end = (reason: string, stopped = false): void => {
       if (ended || view.status !== "running") return;
+      // A stop that cannot reach the harness yet is still the turn's reply, so the thread reads stopped, not failed.
+      if (stopped && turnLive.reply === undefined) forward({ type: "turn.done", sessionId: view.claudeSessionId ?? view.id, result: { status: "interrupted", error: reason } });
       // Before `ended` shuts the forward road: the interrupt below reaches the harness, whose own close would then
       // be dropped, so the rows and the waits are ended here.
       closeOpenAsks();
