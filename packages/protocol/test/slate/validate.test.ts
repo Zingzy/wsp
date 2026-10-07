@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSlate, parseSlatePatch, printSlate, slateCatalog, validateSlate, SLATE_CODES, SLATE_ICONS, SLATE_RUN_FIELDS } from "../../src/slate/index.js";
+import { parseSlate, parseSlatePatch, printSlate, slateCatalog, validateSlate, SLATE_CODES, SLATE_RUN_FIELDS } from "../../src/slate/index.js";
 import { SPEC_EXAMPLES } from "./examples.js";
 
 const wrap = (pieces: string, decls = ""): string => `<slate title="T">\n${decls}\n  <column>\n    ${pieces}\n  </column>\n</slate>`;
@@ -225,14 +225,6 @@ describe("writes the sessions were refused", () => {
     clean(wrap(`<section title="More" collapsible open={$open}><text>x</text></section>`, `  <value name="open" start={true} />`));
     expect(all(wrap(`<section title="More" open="no"><text>x</text></section>`))).toContain("X410");
     expect(all(wrap(`<toggle label="On" value={true} />`))).toContain("X410");
-  });
-
-  it("knows about 200 icons, the sessions' among them, and takes a formula over them", () => {
-    expect(SLATE_ICONS.length).toBeGreaterThanOrEqual(190);
-    for (const n of ["mail", "gem", "inbox", "trending-up", "trending-down", "thermometer", "cloud-rain", "sun", "dollar-sign", "indian-rupee"]) expect(SLATE_ICONS, n).toContain(n);
-    clean(wrap(`<heading icon="gem">Gold</heading><number label="Change" value={$d} icon={$d >= 0 ? 'trending-up' : 'trending-down'} />`, `  <value name="d" start={1} />`));
-    clean(wrap(`<facts><fact label="Mail" value="3" icon={'inbox'} /></facts>`));
-    expect(all(wrap(`<heading icon="gold-bar">Gold</heading>`))).toContain("W016");
   });
 
   it("takes camelCase piece ids, and a piece id may be a run's name", () => {

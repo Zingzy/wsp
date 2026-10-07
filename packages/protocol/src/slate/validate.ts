@@ -5,7 +5,6 @@
 import { fmtBytes } from "../format.js";
 import { escapeRegExp } from "../regexp.js";
 import { checkSlateExpression, parseSlateExpression, parseSlateFormat, slateDependencies, type SlateCheckScope, type SlateType } from "./expr.js";
-import { isSlateIcon, nearestSlateIcon } from "./icons.js";
 import { SLATE_PIECES, SLATE_RESERVED_PROPS, type SlateItemSpec, type SlatePieceModule, type SlatePropSpec } from "./kit.js";
 import { SLATE_LIMITS, slateBytes } from "./limits.js";
 import { slateTable, parseSlateOwnPath, slateOwnName } from "./paths.js";
@@ -648,19 +647,12 @@ class Validator {
       case "list":
         if (!Array.isArray(v)) this.add("T303", `${name} takes a list: ${name}={path} or ${name}={[...]}`, w);
         return;
-      case "icon": {
-        if (isSlateIcon(v)) return;
-        const fix = typeof v === "string" ? nearestSlateIcon(v) : undefined;
-        // An icon is decoration: a name the kit lacks draws none and never stops the write.
-        this.add("W016", `${JSON.stringify(v)} is not an icon in the kit, so it draws none${fix !== undefined ? `; did you mean ${fix}?` : ""} slate_catalog icons lists them`, w, fix !== undefined ? `icon="${fix}"` : undefined);
-        return;
-      }
       case "string": case "text":
         if (typeof v === "string") {
           if (looksLikePath(v)) this.add("W001", `${name} is the literal text "${v}", which reads like a path`, w, `${name}={${v}}`);
           else if (parseSlateOwnPath(v) !== undefined || /\{\$[^}]*\}/.test(v)) this.add("W001", `${name} is the literal text "${v}", which reads like a formula; quotes show it as written`, w, `${name}={${v.replace(/^\{(.*)\}$/, "$1")}}`);
           if (v.includes("\u2014")) this.add("W004", "an em dash in the slate's words; use a comma, a colon or a full stop", w);
-          if (/\p{Extended_Pictographic}/u.test(v)) this.add("W017", `${name} has an emoji; the slate's words carry none, so say it in words or give the piece an icon`, w);
+          if (/\p{Extended_Pictographic}/u.test(v)) this.add("W017", `${name} has an emoji; the slate's words carry none, so say it in words`, w);
           if ((name === "title" || ps.head === true) && titleCased(v)) this.add("W018", `${name} "${v}" is in Title Case; heads take sentence case`, w, `${name}="${sentenceCase(v)}"`);
           return;
         }

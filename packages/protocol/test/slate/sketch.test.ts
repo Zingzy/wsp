@@ -135,7 +135,7 @@ describe("the catalog", () => {
     // the pieces every named entry ends with, after agents that read runs alone guessed <h1> and <p>, to 740; a timed
     // run on the tab's return and a tool's text in out, to 750.
     expect(slateTokens(slateCatalog("runs"))).toBeLessThan(750);
-    for (const n of ["runs", "chart", "thread", "functions", "steps", "handlers", "patch", "icons", "examples"]) expect(slateCatalog(n).endsWith("\nThe pieces and rules: slate_catalog with no name."), n).toBe(true);
+    for (const n of ["runs", "chart", "thread", "functions", "steps", "handlers", "patch", "examples"]) expect(slateCatalog(n).endsWith("\nThe pieces and rules: slate_catalog with no name."), n).toBe(true);
     expect(slateCatalog()).not.toContain("slate_catalog with no name");
     expect(slateCatalog("nope")).not.toContain("slate_catalog with no name");
     // A guessed name answers the index too, which small models never asked for by name.
@@ -195,7 +195,6 @@ describe("the sketch says what the person sees", () => {
       case "text": return [12345, 23456];
       case "integer": return [spec.min ?? 1, (spec.min ?? 1) + 1];
       case "list": return name === "items" ? [ROWS, [...ROWS, { ...ROWS[1]!, name: "c", v: 3, at: 1_759_000_120_000 }]] : [[1, 2, 3], [4, 5, 6, 7]];
-      case "icon": return ["zap", "clock"];
       case "path": return ["$r", "$s"];
       case "id": return ["a", "b"];
       default: return ["Alpha", "Beta"];
@@ -276,14 +275,6 @@ describe("the sketch of the sessions' writes", () => {
 
   it("draws a section a literal open={false} starts shut as collapsed", () => {
     expect(sketch(wrap(`<section title="More" collapsible open={false}><text>inside</text></section>`))).toContain("More (collapsed)");
-  });
-
-  it("names an icon a formula gives that the kit lacks as a problem, and stays quiet on one it has", () => {
-    const text = wrap(`<number label="Change" value={$d} icon={$d >= 0 ? 'trending-up' : 'rocket-ship'} />`, `  <value name="d" start={1} />`);
-    expect(sketch(text)).toContain("0 problems");
-    const s = sketch(text, { d: -1 });
-    expect(s).toContain("1 problem");
-    expect(s).toContain('R905 number-1.icon: icon "rocket-ship" is not in the kit, so it draws none');
   });
 
   it("names a plotted value that is not a number as a problem, with the binding, what it read and a fix", () => {

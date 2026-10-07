@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The richer kit in the renderer: every new piece and prop draws, the example slate with a history draws its chart,
-// the quiz's choices write the pick, and every icon a slate may name has its component.
+// and the quiz's choices write the pick.
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { parseSlate, sketchSlate, slateChartAxis, slateStartValues, SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
+import { parseSlate, sketchSlate, slateChartAxis, slateStartValues, SLATE_EXAMPLES, SLATE_PIECES, type SlateDoc, type SlateJson } from "@wsp/protocol/slate";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { SLATE_VIEWS } from "./pieces";
-import { SLATE_ICON_VIEWS } from "./pieces/icon";
 import { SlateView } from "./SlateView";
 import { fakeLink, manualScheduler } from "./testing";
 
@@ -33,10 +32,6 @@ const piece = (container: HTMLElement, id: string): HTMLElement => container.que
 const HIST = [{ at: 1_759_000_000_000, v: 2400.5 }, { at: 1_759_000_060_000, v: 2401.25 }, { at: 1_759_000_120_000, v: 2399 }];
 
 describe("the richer kit in the renderer", () => {
-  it("has a component for every icon a slate may name", () => {
-    expect(Object.keys(SLATE_ICON_VIEWS).sort()).toEqual([...SLATE_ICONS].sort());
-  });
-
   it("draws the example: heading, a stat strip of three numbers, a section card, a status, a chip, a ring and a chart from a history", () => {
     const doc = example("a live figure with an hour of history");
     const { view } = draw(doc, { hist: HIST, spot: { state: "done", exit: 0, json: { price: 2399 }, runs: 3 } });
@@ -52,8 +47,6 @@ describe("the richer kit in the renderer", () => {
     expect(grid.textContent).toContain("$2,399.00");
     // A number's trend is a sparkline's job; the stat cell draws its figure alone.
     expect(grid.querySelector("[data-slate-sparkline]")).toBeNull();
-    // A head, a figure's label and a tag draw no icon: wsp draws icons in buttons and glyph frames only.
-    for (const name of ["gauge", "zap", "arrow-down", "arrow-up", "activity", "clock"]) expect(c.querySelector(`[data-slate-icon="${name}"]`), name).toBeNull();
     expect(c.querySelector("[data-slate-strip]")).not.toBeNull();
     const section = c.querySelector<HTMLElement>("[data-slate-section]")!;
     expect(section.querySelector("[data-slate-card]")!.className).toContain("bg-card/40");
@@ -321,26 +314,18 @@ describe("the richer kit in the renderer", () => {
     expect([...piece(c, "release").querySelectorAll("li")].map(li => li.textContent)).toEqual(["Run all tests", "Run linter", "Tag the release"]);
   });
 
-  it("draws bars, a status word with no dot, a chip as plain words, and no icon on a button, a text, a fact or a section head", () => {
+  it("draws bars, a status word with no dot and a chip as plain words", () => {
     const doc = compiled(`<slate><value name="n" start={0} /><column>
       <bars label="Busiest" items={[{ n: 'web', v: 4 }, { n: 'host', v: 2 }]} name={item.n} value={item.v} />
       <status tone="bad">Down</status>
-      <chip icon="git-branch">main</chip>
-      <button label="Go" icon="play" onPress={set($n, 1)} />
-      <text icon="clock">Every minute</text>
-      <facts><fact label="Branch" value="main" icon="git-branch" /></facts>
-      <section title="Feed" icon="activity"><text>x</text></section>
+      <chip>main</chip>
     </column></slate>`);
     const c = draw(doc).view.container;
     expect([...c.querySelectorAll("[data-slate-bar]")].map(b => b.textContent)).toEqual(["web4", "host2"]);
     expect(c.querySelector("[data-slate-status=bad]")!.textContent).toBe("Down");
     expect(c.querySelector("[data-slate-status=bad]")!.querySelector(".rounded-full")).toBeNull();
     expect(c.querySelector("[data-slate-chip]")!.textContent).toBe("main");
-    expect(c.querySelector("[data-slate-chip] [data-slate-icon]")).toBeNull();
-    expect(screen.getByRole("button", { name: "Go" }).querySelector("[data-slate-icon]")).toBeNull();
-    expect(c.querySelector("[data-slate-type=text] [data-slate-icon]")).toBeNull();
-    expect(c.querySelector("[data-slate-type=facts] [data-slate-icon]")).toBeNull();
-    expect(c.querySelector("[data-slate-section] [data-slate-icon=activity]")).toBeNull();
+    expect(c.querySelector("[data-slate-chip] svg")).toBeNull();
   });
 });
 

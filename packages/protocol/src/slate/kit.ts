@@ -22,9 +22,8 @@ const SURFACE = ["plain", "inset"] as const;
 const PLACE = ["start", "center", "end"] as const;
 const FIGURE = ["plain", "tokens", "bytes", "percent", "usd", "inr", "duration", "integer"] as const;
 
-/** A prop's type. text is a string or a number; path names a run or value as $name; icon is a name from
- * SLATE_ICONS; an array is an enum. */
-export type SlatePropType = "string" | "number" | "integer" | "boolean" | "text" | "list" | "any" | "id" | "path" | "icon" | readonly string[];
+/** A prop's type. text is a string or a number; path names a run or value as $name; an array is an enum. */
+export type SlatePropType = "string" | "number" | "integer" | "boolean" | "text" | "list" | "any" | "id" | "path" | readonly string[];
 
 export interface SlatePropSpec {
   type: SlatePropType;
@@ -125,7 +124,6 @@ const enm = (values: readonly string[], fallback?: string): SlatePropSpec => ({ 
 const tone = (values: readonly string[] = SLATE_TONES): SlatePropSpec => ({ type: values, binds: "yes" });
 const req = { required: true as const };
 const rowKey = (): SlatePropSpec => ({ type: "any", binds: "item", unseen: "names a row so it keeps its place as rows move" });
-const icon = (): SlatePropSpec => ({ type: "icon", binds: "yes" });
 /** How a group sits: inner space, the app's inset ground, and where its children line up across. */
 const box = { pad: enm(PAD, "none"), surface: enm(SURFACE, "plain") };
 
@@ -150,7 +148,7 @@ const join2 = (...parts: string[]): string => parts.filter(p => p !== "").join("
 const asList = (v: SlatePropValue | undefined): SlatePropValue[] => (Array.isArray(v) ? v : []);
 const rec = (v: SlateJson | undefined): Record<string, SlateJson> => (v !== null && typeof v === "object" && !Array.isArray(v) ? v : {});
 
-/** A row's or an item's look as a mark after it: [bad strong mono icon=zap], nothing when it has none. */
+/** A row's or an item's look as a mark after it: [bad strong mono], nothing when it has none. */
 function marks(r: Record<string, SlateJson | undefined>): string {
   const words = [
     typeof r.tone === "string" && r.tone !== "default" ? r.tone : "",
@@ -158,7 +156,6 @@ function marks(r: Record<string, SlateJson | undefined>): string {
     r.mono === true ? "mono" : "",
     typeof r.align === "string" && r.align !== "start" ? r.align : "",
     typeof r.width === "string" ? r.width : "",
-    typeof r.icon === "string" ? `icon=${r.icon}` : "",
   ].filter(Boolean);
   return words.length === 0 ? "" : ` [${words.join(" ")}]`;
 }
@@ -234,23 +231,23 @@ const PIECES: Record<string, SlatePieceModule> = {
   },
   section: {
     type: "section", level: "core", purpose: "A titled group, optionally collapsible.", holdsChildren: true,
-    props: { title: str(req), note: str(), icon: icon(), collapsible: flag(), open: { type: "boolean", binds: "state", literal: true, about: "open={false} starts it shut; open={$open} also keeps it" }, align: enm(PLACE), ...box }, items: {}, events: ["change"],
+    props: { title: str(req), note: str(), collapsible: flag(), open: { type: "boolean", binds: "state", literal: true, about: "open={false} starts it shut; open={$open} also keeps it" }, align: enm(PLACE), ...box }, items: {}, events: ["change"],
     sketch: v => (v.prop("open") === false ? `${shown(v.prop("title"))} (collapsed)` : shown(v.prop("title"))),
     collapsed: v => v.prop("open") === false,
     fallback: "children under a text with the title", example: `<section title="Files changed" collapsible><text>None yet</text></section>`,
   },
   text: {
     type: "text", level: "core", purpose: "A line or a paragraph; a text child with {holes} fills a sentence.", holdsChildren: false, textProp: "value",
-    props: { value: { type: "text", binds: "yes", required: true }, tone: tone(), emphasis: { type: EMPHASIS, binds: "yes" }, mono: flag(), size: enm(SIZE), lines: { type: "integer", binds: "no", min: 1, max: 20 }, placeholder: str(), icon: icon() },
+    props: { value: { type: "text", binds: "yes", required: true }, tone: tone(), emphasis: { type: EMPHASIS, binds: "yes" }, mono: flag(), size: enm(SIZE), lines: { type: "integer", binds: "no", min: 1, max: 20 }, placeholder: str() },
     items: {}, events: [],
     sketch: v => { const s = shown(v.prop("value")); return s === "" ? shown(v.prop("placeholder")) : s; },
     fallback: "none needed", example: `<text tone="muted">{tokens(thread.context.free)} free</text>`,
   },
   heading: {
     type: "heading", level: "core", purpose: "A heading on the app's type ladder: title, section, or label in small caps.", holdsChildren: false, textProp: "value",
-    props: { value: { type: "text", binds: "yes", required: true, head: true }, level: enm(["title", "section", "label"]), icon: icon() }, items: {}, events: [],
+    props: { value: { type: "text", binds: "yes", required: true, head: true }, level: enm(["title", "section", "label"]) }, items: {}, events: [],
     sketch: v => { const s = shown(v.prop("value")); return v.prop("level") === "title" ? `# ${s}` : v.prop("level") === "label" ? s.toUpperCase() : `## ${s}`; },
-    fallback: "text", example: `<heading level="title" icon="gauge">Gold price</heading>`,
+    fallback: "text", example: `<heading level="title">Gold price</heading>`,
   },
   markdown: {
     type: "markdown", level: "core", purpose: "Rich text, sanitised; images are not fetched.", holdsChildren: false, textProp: "value",
@@ -260,7 +257,7 @@ const PIECES: Record<string, SlatePieceModule> = {
   },
   number: {
     type: "number", level: "core", purpose: "A figure with a label.", holdsChildren: false,
-    props: { label: str(req), value: { type: "text", binds: "yes", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), note: str(), size: enm(["normal", "large"]), icon: icon(), trend: { type: "list", binds: "yes", of: "number", about: "read in the sketch alone; the panel's stat cell draws its figure alone, so a trend the person sees is a sparkline beside it" } },
+    props: { label: str(req), value: { type: "text", binds: "yes", required: true }, format: enm(FIGURE, "plain"), unit: str(), tone: tone(), note: str(), size: enm(["normal", "large"]), trend: { type: "list", binds: "yes", of: "number", about: "read in the sketch alone; the panel's stat cell draws its figure alone, so a trend the person sees is a sparkline beside it" } },
     items: {}, events: [],
     sketch: v => {
       const value = v.prop("value");
@@ -268,7 +265,7 @@ const PIECES: Record<string, SlatePieceModule> = {
       const line = numbers(v.prop("trend"));
       return join2(shown(v.prop("label")), [fig, shown(v.prop("unit"))].filter(Boolean).join(" "), shown(v.prop("note")), line.length > 1 ? `trend ${line.at(0)} to ${line.at(-1)}` : "");
     },
-    fallback: "text", example: `<number label="Spent" value={thread.cost.usd} format="usd" icon="zap" />`,
+    fallback: "text", example: `<number label="Spent" value={thread.cost.usd} format="usd" />`,
   },
   meter: {
     type: "meter", level: "core", purpose: "One value against a maximum.", holdsChildren: false,
@@ -369,7 +366,7 @@ const PIECES: Record<string, SlatePieceModule> = {
   facts: {
     type: "facts", level: "core", purpose: "Label and value pairs: <fact> per pair.", holdsChildren: false,
     props: { layout: enm(["line", "grid"], "line") },
-    items: { fact: { prop: "facts", min: 1, max: SLATE_LIMITS.facts, fields: { label: str(req), value: { type: "text", binds: "yes", required: true }, tone: tone(), emphasis: { type: EMPHASIS, binds: "yes" }, mono: flag(), icon: icon() } } },
+    items: { fact: { prop: "facts", min: 1, max: SLATE_LIMITS.facts, fields: { label: str(req), value: { type: "text", binds: "yes", required: true }, tone: tone(), emphasis: { type: EMPHASIS, binds: "yes" }, mono: flag() } } },
     events: [],
     sketch: v => {
       const all = present(v, asList(v.raw("facts"))).map((f, i) => v.row(f, null, i));
@@ -386,9 +383,9 @@ const PIECES: Record<string, SlatePieceModule> = {
     sketch: v => `(${shown(v.prop("tone")) || "default"}) ${shown(v.prop("value"))}`, fallback: "text", example: `<status tone={$up ? 'good' : 'bad'}>{$up ? 'Live' : 'Down'}</status>`,
   },
   chip: {
-    type: "chip", level: "core", purpose: "A short fact in a small framed chip, with an icon.", holdsChildren: false, textProp: "value",
-    props: { value: { type: "text", binds: "yes", required: true }, icon: icon() }, items: {}, events: [],
-    sketch: v => `[${shown(v.prop("value"))}]`, fallback: "text", example: `<chip icon="git-branch">{git.branch}</chip>`,
+    type: "chip", level: "core", purpose: "A short fact in a small framed chip.", holdsChildren: false, textProp: "value",
+    props: { value: { type: "text", binds: "yes", required: true } }, items: {}, events: [],
+    sketch: v => `[${shown(v.prop("value"))}]`, fallback: "text", example: `<chip>{git.branch}</chip>`,
   },
   ring: {
     type: "ring", level: "core", purpose: "Progress as a ring with its figure inside.", holdsChildren: false,
@@ -421,7 +418,7 @@ const PIECES: Record<string, SlatePieceModule> = {
   },
   button: {
     type: "button", level: "core", purpose: "An action the person presses. held is a sentence that disables it: bind it to a condition.", holdsChildren: false, interactive: true, textProp: "label", needsHandler: "press",
-    props: { label: str(req), variant: enm(VARIANT), held: str(), note: str(), size: enm(["normal", "small"]), icon: icon() },
+    props: { label: str(req), variant: enm(VARIANT), held: str(), note: str(), size: enm(["normal", "small"]) },
     items: {}, events: ["press"],
     sketch: v => { const held = slateHeldText(v.prop("held")); return `[ ${shown(v.prop("label"))} ]${held !== undefined ? ` (held: ${held})` : ""}`; },
     fallback: "none needed", example: `<button label="Next" variant="primary" held={$ok ? null : 'Check the id first'} onPress={set($step, 2)} />`,
@@ -502,5 +499,5 @@ export const SLATE_RESERVED_PROPS: Readonly<Record<string, string>> = slateTable
   font: "emphasis, size or mono", fontSize: "size", fontWeight: "emphasis", bold: "emphasis=\"strong\"", italic: "emphasis",
   padding: "pad", margin: "gap or pad", spacing: "gap", background: "surface=\"inset\" on a section, column or grid", bg: "surface=\"inset\"", border: "nothing; wsp draws edges", radius: "nothing; wsp draws edges", shadow: "nothing; wsp draws edges", outline: "nothing; wsp draws edges",
   width: "nothing; the panel decides", height: "nothing; the panel decides", style: "nothing", className: "nothing", class: "nothing", css: "nothing", html: "nothing",
-  glyph: "icon=\"<lucide name>\"", emoji: "icon=\"<lucide name>\"", animation: "nothing", transition: "nothing", pulse: "nothing", blink: "nothing",
+  glyph: "nothing; say it in words", emoji: "nothing; say it in words", animation: "nothing", transition: "nothing", pulse: "nothing", blink: "nothing",
 });

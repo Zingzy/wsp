@@ -4,7 +4,6 @@
 // what is hidden, tags each line with its id and type, lists the values, runs and problems, and caps the whole.
 import { fmtBytes, plural } from "../format.js";
 import { evaluateSlateExpression, parseSlateFormat, resolveSlateProp, slateDependencies, slatePropDependencies, slateTruthy, type SlateEvalContext } from "./expr.js";
-import { isSlateIcon } from "./icons.js";
 import { SLATE_PIECES, slateHeldText, type SlatePieceModule, type SlatePropSpec, type SlateSketchView } from "./kit.js";
 import { SLATE_LIMITS } from "./limits.js";
 import { parseSlateOwnPath, slateEqual, slateStep } from "./paths.js";
@@ -57,27 +56,6 @@ function shownValue(v: SlateJson | undefined): string {
   if (isSlateSecretHandle(v)) return v.set ? `${SECRET_DOTS} (${v.len} characters)` : "(empty)";
   const s = JSON.stringify(v ?? null);
   return cut(s, SLATE_LIMITS.sketchValueChars);
-}
-
-/** An icon a formula named that the kit does not have: the piece draws none, and the agent hears why. */
-function iconProblems(doc: SlateDoc, read: SlateEvalContext): SlateProblem[] {
-  const out: SlateProblem[] = [];
-  const check = (raw: SlatePropValue | undefined, piece: string, prop: string): void => {
-    if (!isSlateBinding(raw) && !isSlateFormat(raw)) return;
-    const name = resolveSlateProp(raw, read);
-    if (typeof name === "string" && name !== "" && !isSlateIcon(name)) out.push(slateProblem("R905", `icon "${name}" is not in the kit, so it draws none; slate_catalog icons lists them`, { piece, prop }));
-  };
-  const icons = (fields: Readonly<Record<string, SlatePropSpec>>): string[] => Object.entries(fields).filter(([, f]) => f.type === "icon").map(([k]) => k);
-  for (const [id, piece] of Object.entries(doc.pieces)) {
-    const module: SlatePieceModule | undefined = SLATE_PIECES[piece.type];
-    if (module === undefined) continue;
-    for (const k of icons(module.props)) check(piece.props?.[k], id, k);
-    for (const item of Object.values(module.items)) {
-      const list = piece.props?.[item.prop];
-      if (Array.isArray(list)) list.forEach((it, i) => { for (const k of icons(item.fields)) check((it as Record<string, SlatePropValue> | null)?.[k], id, `${item.prop}[${i}].${k}`); });
-    }
-  }
-  return out;
 }
 
 const kindOf = (v: SlateJson): string => (Array.isArray(v) ? "a list" : typeof v === "object" ? "an object" : typeof v === "string" ? "a string" : "a boolean");
@@ -165,7 +143,7 @@ export function sketchSlate(doc: SlateDoc | null, values: SlateValues, ctx: Slat
   };
   const pieces = Object.keys(doc.pieces).length;
   const bound = Object.values(doc.pieces).reduce((n, p) => n + Object.values(p.props ?? {}).reduce<number>((m, v) => m + boundCount(v), 0), 0);
-  const problems = [...(ctx.problems ?? []), ...(unbound ? [] : [...iconProblems(doc, read), ...plotProblems(doc, read)])];
+  const problems = [...(ctx.problems ?? []), ...(unbound ? [] : plotProblems(doc, read))];
   const warned = ctx.warnings ?? [];
   const head = `slate${version}${doc.title !== undefined ? ` ${JSON.stringify(doc.title)}` : ""}, ${plural(pieces, "piece")}, ${bound} bound, ${plural(problems.length, "problem")}${warned.length > 0 ? `, ${plural(warned.length, "warning")}` : ""}`;
 
