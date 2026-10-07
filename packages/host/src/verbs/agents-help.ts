@@ -230,12 +230,13 @@ export async function addTools(client: HostClient, agent: string): Promise<{ fil
 }
 
 /** Runs a sign-in the host plans for a target on that target's own terminal, shown in this one. */
-export async function signInHere(ctx: VerbContext, target: AgentsTarget, ask: { agent: string; name?: string }): Promise<BoxSignedIn> {
+export async function signInHere(ctx: VerbContext, target: AgentsTarget, ask: { agent: string; name?: string }, where: string): Promise<BoxSignedIn> {
   const client = await ctx.client();
   const { line } = await client.request<{ line: unknown }>("agents.signInLine", { target, agent: ask.agent, ...(ask.name !== undefined ? { name: ask.name } : {}) });
   const road = await targetLink(client, target);
   try {
     return await relaySignIn({
+      where,
       link: road.link,
       ...(ask.name === undefined ? { agent: ask.agent } : {}),
       line: SignInLine.parse(line),

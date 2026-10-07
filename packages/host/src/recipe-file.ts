@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, join } from "node:path";
 import { catalogEntry, loginIdOf } from "@wsp/catalog";
 import { type HistoryCache, fileHistoryCache } from "@wsp/collect";
-import { issuesLine, Recipe, toolRowId, type RecipeRow, type ToolPin } from "@wsp/protocol";
+import { issuesLine, Recipe, toolRowId, usageRefusal, type RecipeRow, type ToolPin } from "@wsp/protocol";
 
 /** Where the small recipe lives, beside the saved manifest: what wsp recipe writes and wsp init --recipe reads. */
 export function smallRecipePath(statePath: string): string {
@@ -32,8 +32,14 @@ export function loadRecipe(path: string): Recipe {
   }
   const r = Recipe.safeParse(data);
   if (r.success) return r.data;
+  if (savedManifest(data)) throw usageRefusal(`${path} is the manifest wsp init saves beside the state, not a recipe.`, `Run wsp init --recipe ${smallRecipePath(path)} instead.`);
   throw new Error(`${path}: invalid recipe: ${issuesLine(r.error.issues)}`);
 }
+
+/** Whether a file that is no recipe is the manifest init saves beside the state: its rows under entries, and none of
+ * a recipe's own keys. The two sit side by side, so the one handed in place of the other is the likely mistake. */
+const savedManifest = (data: unknown): boolean =>
+  typeof data === "object" && data !== null && Array.isArray((data as { entries?: unknown }).entries) && !("rows" in data) && !("version" in data);
 
 /** What the file at `path` is right now, for telling a recipe that arrived from one that was already there: its size
  * and the nanosecond of its last write, or nothing when no file is there. A recipe beside the state is not proof

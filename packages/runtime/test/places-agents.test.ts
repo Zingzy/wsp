@@ -77,7 +77,7 @@ describe("the agents on a computer you own", () => {
     expect(answered.ok, String(answered["error"])).toBe(true);
     expect(answered["report"]).toMatchObject({ ...READ, target: { placeId } });
     expect(typeof (answered["report"] as { readAt: unknown }).readAt).toBe("string");
-    expect(asked).toEqual([{ kind: "box", machine: expect.anything(), login: { HOME: "/home/maya", PATH: "/usr/bin" }, signIns: { claude: "none" }, versions: { claude: "2.1.281 (Claude Code)" }, projects: [] }]);
+    expect(asked).toEqual([{ kind: "box", name: "srv", machine: expect.anything(), login: { HOME: "/home/maya", PATH: "/usr/bin" }, signIns: { claude: "none" }, versions: { claude: "2.1.281 (Claude Code)" }, projects: [] }]);
     expect(lines).toEqual(["id -un"]);
     expect(said).toEqual(["maya"]);
     expect((await c.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).ok).toBe(true);

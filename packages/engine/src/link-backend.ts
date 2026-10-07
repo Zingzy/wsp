@@ -81,6 +81,11 @@ export interface MachineLink {
 /** How much longer than the frame's own timeout the client waits for the answer to come back over the link. */
 export const LINK_MARGIN_MS = 5_000;
 
+/** How long a daemon ask over a joined computer's link may take before the reach reads slow: one frame out to that
+ * computer and back plus its own look at the guest, where a probe of a box over ssh crossed the 2.5 s an HTTP GET is
+ * given while the guest was healthy. Under the probe's 10 s bound, so a link that does not answer still reads silent. */
+export const LINK_PROMPT_MS = 6_000;
+
 /** What every call on a place that is not connected rejects with. Nothing is wrong with the machine: the computer
  * holding it dials this host on its own whenever it is on, and the record waits rather than being called gone. */
 export class PlaceAbsentError extends Error {
@@ -109,6 +114,7 @@ export class LinkMachine implements Machine {
   readonly daemonSupervisor?: "systemd" | "entrypoint";
   readonly previewUrl?: (port: number) => Promise<PreviewReach>;
   readonly daemonAnswers?: (opts?: { timeoutMs?: number }) => Promise<boolean>;
+  readonly daemonAnswersPromptMs?: number;
   readonly putBytes?: (path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }) => Promise<void>;
   readonly describe?: () => Promise<MachineShape>;
   readonly facts?: () => Promise<MachineFacts>;
@@ -127,7 +133,10 @@ export class LinkMachine implements Machine {
     if (handle.notice !== undefined) this.notice = handle.notice;
     if (handle.daemonSupervisor !== undefined) this.daemonSupervisor = handle.daemonSupervisor;
     if (handle.roads.previewUrl) this.previewUrl = port => this.routeTo(port);
-    if (handle.roads.daemonAnswers) this.daemonAnswers = opts => this.askDaemon(opts);
+    if (handle.roads.daemonAnswers) {
+      this.daemonAnswers = opts => this.askDaemon(opts);
+      this.daemonAnswersPromptMs = LINK_PROMPT_MS;
+    }
     if (handle.roads.putBytes) this.putBytes = (path, bytes, opts) => this.landBytes(path, bytes, opts);
     if (handle.roads.describe) this.describe = () => this.ask(MachineShapeReply, "machine.describe").then(r => r.shape);
     if (handle.roads.facts) this.facts = () => this.ask(MachineFactsReply, "machine.facts").then(r => r.facts);

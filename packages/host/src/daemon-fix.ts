@@ -11,11 +11,11 @@ import type { RunningWsp } from "./mcp-install.js";
 /** The published package, as an install line names it. */
 const NPM_PACKAGE = "@wsp-labs/wsp";
 
-type Road = "npm" | "app" | "checkout";
+export type Road = "npm" | "app" | "checkout";
 
 /** The road this wsp was installed by: a bin under a global node_modules is an npm install, a bin inside the
  * desktop app's bundle moves with the app, and anything else is a checkout. */
-function roadOf(run: Pick<RunningWsp, "argv" | "shim">): Road {
+export function roadOf(run: Pick<RunningWsp, "argv" | "shim">): Road {
   const parts = (run.shim ?? run.argv[1] ?? "").split(sep);
   if (parts.includes("node_modules")) return "npm";
   if (parts.some(part => part.endsWith(".app"))) return "app";
@@ -34,3 +34,7 @@ const ROAD_LINES: Readonly<Record<Road, { daemon: string; release: (version: str
 export const daemonFixLine = (run: Pick<RunningWsp, "argv" | "shim">): string => ROAD_LINES[roadOf(run)].daemon;
 
 export const releaseUpdateLine = (run: Pick<RunningWsp, "argv" | "shim">, version: string): string => ROAD_LINES[roadOf(run)].release(version);
+
+/** The line that moves an install of that road onto a release, by the road's name: what the record hands the daemon
+ * binary, which reads its road off its own path. */
+export const releaseLineOf = (road: Road, version: string): string => ROAD_LINES[road].release(version);

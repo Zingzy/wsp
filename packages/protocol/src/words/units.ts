@@ -119,11 +119,16 @@ export function fmtMemGb(memMb: number): string {
 /** What one of a machine's cpus is called: a provider's are virtual, this computer's are the cores it has. */
 export type CpuWord = "vCPU" | "cores";
 
+/** A count of cpus in the kind's word: "1 core" and "2 cores", while a provider's vCPU reads the same at any count. */
+export function fmtCpus(n: number, cpu: CpuWord = "vCPU"): string {
+  return `${n} ${cpu === "cores" && n === 1 ? "core" : cpu}`;
+}
+
 /** A size as the sidebar row and the Machine tab show it: "2 vCPU, 4 GB", or "10 cores, 16 GB"
  * in the word the machine's kind has for a cpu. A size offer is always a provider's, so the provider's word is the default. */
 /** The size joins its words with no-break spaces, so a sentence carrying it never breaks between a number and its unit. */
 export function fmtSize(size: WorkspaceSize, cpu: CpuWord = "vCPU"): string {
-  return `${size.cpu}\u00a0${cpu},\u00a0${fmtMemGb(size.memMb).replace(" ", "\u00a0")}`;
+  return `${fmtCpus(size.cpu, cpu)},\u00a0${fmtMemGb(size.memMb)}`.replace(/ /g, "\u00a0");
 }
 
 /** What the create says where the machine it got is not the size it was forked at, the one asked for or else the
@@ -147,9 +152,8 @@ export function placeFactsLine(shape: WorkspaceSize, diskFreeBytes?: number): st
 export function boxRoomLines(capacity: Pick<PlaceCapacity, "cores" | "memMb" | "cpuTaken" | "memTakenMb">): string[] {
   const { cpuTaken, memTakenMb } = capacity;
   if (cpuTaken === undefined || memTakenMb === undefined) return [];
-  const cores = (n: number): string => `${n} ${n === 1 ? "core" : "cores"}`;
   return [
-    `${cores(capacity.cores)}, ${cpuTaken} in use by forks, ${Math.max(0, capacity.cores - cpuTaken)} free`,
+    `${fmtCpus(capacity.cores, "cores")}, ${cpuTaken} in use by forks, ${Math.max(0, capacity.cores - cpuTaken)} free`,
     `${fmtMemGb(capacity.memMb)}, ${fmtMemGb(memTakenMb)} in use by forks, ${fmtMemGb(Math.max(0, capacity.memMb - memTakenMb))} free`,
   ];
 }

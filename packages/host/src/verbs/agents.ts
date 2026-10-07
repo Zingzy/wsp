@@ -227,8 +227,9 @@ export const AGENT_VERBS: readonly Verb[] = [
       const [agent, workspace, ...rest] = ctx.args;
       if (agent === undefined || rest.length > 0) throw usageRefusal("wsp agents signin takes one agent and one workspace at most.", usageIs(ctx));
       const target = await agentsTarget(await ctx.client(), workspace, undefined, usageIs(ctx));
-      const answer = await signInHere(ctx, target, { agent });
-      ctx.io.log(signedInLine(agentName(agent), workspace ?? THIS_COMPUTER, answer));
+      const where = workspace ?? THIS_COMPUTER;
+      const answer = await signInHere(ctx, target, { agent }, where);
+      ctx.io.log(signedInLine(agentName(agent), where, answer));
       return answer.signedIn ? 0 : 1;
     },
   },
@@ -426,8 +427,9 @@ export const AGENT_VERBS: readonly Verb[] = [
       if (agent === undefined) throw usageRefusal("wsp servers signin needs --agent, the agent whose config names the server, as wsp servers shows it.", usageIs(ctx));
       const on = flag(ctx.flags, "on");
       const target = await agentsTarget(await ctx.client(), workspace, on, usageIs(ctx));
-      const answer = await signInHere(ctx, target, { agent, name });
-      ctx.io.log(signedInLine(name, workspace ?? on ?? THIS_COMPUTER, answer));
+      const where = workspace ?? on ?? THIS_COMPUTER;
+      const answer = await signInHere(ctx, target, { agent, name }, where);
+      ctx.io.log(signedInLine(name, where, answer));
       return answer.signedIn ? 0 : 1;
     },
   },

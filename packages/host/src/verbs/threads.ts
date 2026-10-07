@@ -329,6 +329,7 @@ export const THREAD_VERBS: readonly Verb[] = [
   {
     name: "restart",
     usage: "wsp restart",
+    anyRelease: "the restart is the fix the release refusal names for an older host here, which comes back on the release installed",
     about: "stops the host and brings it back on the road it came up on, its service, the verb that started it or the app; running turns go on and the host that comes back re-opens them. A host wsp up holds in a terminal refuses",
     page: "agent",
     options: {},

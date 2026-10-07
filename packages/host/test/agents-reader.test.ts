@@ -259,6 +259,20 @@ describe("the agents report off this computer and off a workspace", () => {
     nothingLeaked(at, read, lines);
   });
 
+  it("a project skills folder that links out of the repo is left out and said in one refusal line, which the agents panel lists under its rows", async () => {
+    const at = fixture();
+    const away = join(at.root, "away");
+    mkdirSync(join(away, "grab"), { recursive: true });
+    writeFileSync(join(away, "grab/SKILL.md"), "---\nname: grab\n---\n");
+    rmSync(join(at.project, ".agents/skills"), { recursive: true, force: true });
+    symlinkSync(away, join(at.project, ".agents/skills"));
+    const { machine, lines } = road(at);
+    const read = await agentsReader({ vault: () => ({}) }).read({ kind: "box", machine, login: { HOME: at.home, PATH: `${at.bin}:/usr/bin:/bin` }, projects: [{ id: "pr_app", name: "app", path: at.project }] });
+    expect(read.skills.filter(s => s.scope === "project").map(s => s.name)).toEqual(["deploy"]);
+    expect(read.refused).toEqual([`skills: ~/code/app/.agents/skills links out of the repo, to ${away}, so its skills are not read`]);
+    nothingLeaked(at, read, lines);
+  });
+
   it("a read that covers no project says so with an empty list, and one handed none says nothing of projects", async () => {
     const at = fixture();
     const reader = agentsReader({ vault: () => ({}), here: () => here(at) });

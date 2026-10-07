@@ -437,7 +437,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         // launch that never opened leaves none; a thread from before the record existed gets one here too, off what
         // its rows said this turn runs at, so it is read the one way from now on. Persisted with the row as the turn
         // announces itself and at its end.
-        if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}) });
+        if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}), worked: threadRan(ctx.rowsOn(threadId).filter(r => r.status !== "running")) });
         const thread = threadRecords.get(threadId)!;
         // A newer turn leaves Resume at reset nothing to resume.
         if (thread.limitResume !== undefined) {
@@ -597,19 +597,28 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       return { outcome: await s.handle.answer(o.askId, { optionId: o.optionId, ...(o.reason === undefined ? {} : { reason: o.reason }) }) };
     },
 
-    async access(sessionId, permissionMode, origin) {
+    async access(id, permissionMode, origin) {
       await ctx.ready();
-      const s = sessions.get(sessionId);
-      if (!s) return { outcome: "not-found" };
-      const entry = await ctx.entryOfRow(s.view, origin);
+      // A row's id or a thread's: a thread whose rows all fell off the index cap is still the thread its record
+      // says, and its access is moved on that record, which is what its next turn reads.
+      const s = sessions.get(id) ?? [...sessions.values()].filter(r => r.view.threadId === id).at(-1);
+      const record = s === undefined ? threadRecords.get(id) : undefined;
+      if (s === undefined && record === undefined) return { outcome: "not-found" };
+      const entry = await ctx.entryOfRow(s?.view ?? { threadId: id, workspaceId: record!.workspaceId }, origin);
       if (entry === undefined) return { outcome: "not-found" };
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
-      const { harness, adapter } = await ctx.launchAdapterFor(entry, s.view.harness);
+      const { harness, adapter } = await ctx.launchAdapterFor(entry, s?.view.harness ?? record!.harness);
       const table = harnessCatalog(harness);
       // Checked against the list the picker showed, so a mode this CLI does not take is refused in the same words a
       // start refuses it with rather than travelling to the machine as a request it will not answer.
       if (table !== undefined) startPicks(await ctx.catalogOn(table, entry, adapter), { permissionMode }, false);
+      if (s === undefined) {
+        threadRecords.set(id, { ...record!, permissionMode });
+        void ctx.persistSessions(record!.workspaceId);
+        ctx.pushHead(id);
+        return { outcome: "set" };
+      }
       // The pick lands on the thread's record whatever the turn running now does with it: this is the one road that
       // changes a thread's access, and the thread's next turn runs at it. The thread's latest row says the same, as
       // every client folds the access off that row; a running turn's row moves where the harness took the pick,
@@ -931,9 +940,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // the thread it named is there, and the refusal past this gate says its turn ran.
       const entry = await ctx.entryOfRow({ threadId, workspaceId }, origin);
       if (entry === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
-      // A record is written once a turn was handed over, so a thread with a record and no row left is one whose
-      // turns ran and fell off the index cap; the rows alone would read it as a thread that never ran.
-      if (threadRan(held.map(([, s]) => s.view)) || (held.length === 0 && record !== undefined)) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
+      // The rows that say a turn did work fall off the index cap, so the record's word stands beside them: a thread
+      // whose worked turns fell off is refused however few rows it has left, and one whose turns never worked goes.
+      if (threadRan(held.map(([, s]) => s.view)) || (record !== undefined && record.worked !== false)) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
       // A transcript that does not read refuses here, before anything is changed.
       await ctx.openTranscript(workspaceId);
       // A launch that never got going can still have landed the files its send carried.

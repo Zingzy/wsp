@@ -62,7 +62,23 @@ export async function targetLink(client: HostClient, target: AgentsTarget): Prom
   };
 }
 
+/** What the step a sign-in runs before its command came to: nothing where it ran clean, else what stopped it, which
+ * is the computer's refusal or the last line the step said. A reply with no word either way is a step that ran. */
+export async function prepareFailed(link: PtyLink, cmd: string): Promise<string | undefined> {
+  const reply = await link.op("exec", { cmd }).catch((e: unknown): Record<string, unknown> => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  if (reply["ok"] === false) return typeof reply["error"] === "string" && reply["error"] !== "" ? reply["error"] : "the computer refused it";
+  const exit = reply["exitCode"];
+  if (typeof exit !== "number" || exit === 0) return undefined;
+  const said = (key: string): string => (typeof reply[key] === "string" ? (reply[key] as string) : "");
+  return lastLine(said("stderr")) ?? lastLine(said("stdout")) ?? `it exited ${exit}`;
+}
+
+/** The one sentence a sign-in whose first step failed ends on: where, and that step's own last words. */
+export const signInPrepareLine = (where: string, said: string): string => `the sign-in on ${where} did not start, since the step before it failed: ${said}`;
+
 export interface BoxSignIn {
+  /** The computer or workspace it runs on, as the person reads it. */
+  where: string;
   link: PtyLink;
   /** The agent whose own status says it landed; absent for one server's sign-in, which its exit says. */
   agent?: string;
@@ -87,7 +103,8 @@ export interface BoxSignedIn {
  * here but what the person types. */
 export async function relaySignIn(o: BoxSignIn): Promise<BoxSignedIn> {
   const { line } = o;
-  if (line.prepare !== undefined) await o.link.op("exec", { cmd: line.prepare });
+  const failed = line.prepare === undefined ? undefined : await prepareFailed(o.link, line.prepare);
+  if (failed !== undefined) throw new Error(signInPrepareLine(o.where, failed));
   const outcome = await relayPty({
     link: o.link,
     command: line.command,
