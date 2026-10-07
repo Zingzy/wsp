@@ -12,7 +12,8 @@ import { MissingKnownHostsError, missingKnownHostsLine, SshBackend, SSH_READ_SCR
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine, noPlaceSystemLine } from "../src/daemon-binary.js";
 import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, joinedAddWrites, joinedLine, joinedPlace, PLACE_JOINED_LINE, WSP_READY_LINE } from "../src/doctor.js";
 import { placeInstaller, addLineWords, backRefusedLine, dialsBackOverSshNote, placeHeldRefusal, reachScript, unreachedLine, UNSAID_CHIP_REFUSAL, ADD_LOOPBACK_REFUSAL, advertisedLoopbackRefusal, placeUnit, joinUnansweredLine, addUndoneLine, addTakenLine, placeRootHomeRefusal, PLACE_CHECK_SCRIPT, placeNoRootLine } from "../src/places.js";
-import { BackCutError, backBindLine, heldPlaceScript } from "../src/place-back.js";
+import { BackCutError, backBindLine } from "../src/place-back.js";
+import { heldPlaceScript } from "@wsp/protocol";
 import { placeReport } from "../src/place-report.js";
 import { opts, spooConfig, tmp } from "./places-fixture.js";
 

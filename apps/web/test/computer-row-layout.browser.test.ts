@@ -3,7 +3,9 @@
 // both themes, since jsdom lays nothing out: every cell that stands at that
 // width stands wholly inside the row, the cores and memory having given way
 // and the state cell kept, on the Computers list; and a computer's Levels deep
-// row standing whole in its card, its words read at AA. Runs only when asked for
+// row standing whole in its card, its words read at AA; and the Image card's
+// Not here yet row keeping its bottom padding under the slot that drops below
+// its words, so On your image never starts flush under it. Runs only when asked for
 // (WSP_RENDER=1) and skips without Playwright's Chromium.
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,6 +98,34 @@ describe.skipIf(renderSkipped !== undefined)("a computer's row at 390", () => {
     }, row);
     expect(got).toEqual({ title: "Levels deep", value: "2", inCard: true, stepperInRow: true, under: true });
     for (const ratio of await textContrast(page!, `${row} [data-settings-title], ${row} [data-settings-description], ${row} [data-k='levels-deep-value']`)) expect(ratio).toBeGreaterThanOrEqual(4.5);
+  }, 60_000);
+
+  it.each(["dark", "light"] as const)("in the %s theme at 390 the Image card's Not here yet row keeps its bottom padding under the slot that drops below its words, so On your image starts a padding under it", async theme => {
+    await page!.emulateMedia({ colorScheme: theme });
+    await page!.goto(`${base}?screen=settings-add-cloud&copies=none&theme=${theme}`);
+    await page!.fill("[data-k=cloud-key]", "sk-fake-key-not-real");
+    await page!.click("[data-k=cloud-save]");
+    const row = "[data-settings-row='image-state'][data-state='none']";
+    await page!.waitForSelector(`${row} [data-k='image-press']`);
+    const got = await page!.evaluate(row => {
+      const el = document.querySelector<HTMLElement>(row)!;
+      const box = el.getBoundingClientRect();
+      const words = el.querySelector<HTMLElement>("[data-settings-title]")!.getBoundingClientRect();
+      const slot = el.querySelector<HTMLElement>("[data-settings-slot]")!.getBoundingClientRect();
+      const next = el.parentElement!.querySelector<HTMLElement>("[data-settings-row='image-holds']")!;
+      return {
+        title: el.querySelector("[data-settings-title]")?.textContent,
+        next: next.querySelector("[data-settings-title]")?.textContent,
+        dropped: slot.top >= words.bottom,
+        padding: box.bottom - slot.bottom,
+        slotToNext: next.getBoundingClientRect().top - slot.bottom,
+        floor: parseFloat(getComputedStyle(el).paddingTop),
+      };
+    }, row);
+    expect(got).toMatchObject({ title: "Not here yet", next: "On your image", dropped: true });
+    expect(got.floor).toBeGreaterThan(0);
+    expect(got.padding).toBeGreaterThanOrEqual(got.floor - 0.5);
+    expect(got.slotToNext).toBeGreaterThanOrEqual(got.floor - 0.5);
   }, 60_000);
 
   it.each(["dark", "light"] as const)("in the %s theme at 1440 every list's heads stand over their own values in one style, a cloud's Machines over its count, and no head is blank", async theme => {

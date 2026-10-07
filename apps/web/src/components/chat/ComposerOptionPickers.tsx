@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import { ACCESS_REFUSED_LINE, HERE_PLACE_ID, accessReachLine, githubLinkOf, projectForRepo, contextWindowsFor, effortsFor, markedFor, movesRunningAccess, resolveThreadDefaults, type DefaultsAsk, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView } from "@wsp/protocol";
 import { isProjectHomeKey, projectHomeKey, projectOfKey, useAbsentComputer, useHarnessCatalog, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
+import { failureOf } from "../../protocol/failure";
 import { useComputerName } from "../../sidebar/workspaceRows";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -38,6 +39,7 @@ import { useComposerDraftStore } from "./composerDraftStore";
 import { togglePick, useMultiPicks, useMultiPickStore } from "./composerMultiPick";
 import { useComposerOptions, useComposerOptionsStore, type ComposerOptionKey, type PickThreads } from "./composerOptionsStore";
 import { effectivePicks, pickedFor, resolveModel, startOptionsFrom, threadPicks, type ComposerStart, type ResolvedPicks } from "./composerPicks";
+import { COMPOSER_WORDS } from "./composerWords";
 import { ACCESS_WORD, accessLabel, REASONING_WORD, reasoningLabel } from "./format";
 import type { ChatThreadHandle } from "./useChatThread";
 import { ROW_ITEM_CLASS } from "./ComposerCheckoutRow";
@@ -339,13 +341,13 @@ export interface AccessTarget {
  * row says it takes a mode change mid-turn (`movesAccess`, which is what the menu says over its list before the
  * pick). `line` is the refusal that stands on the picker when a row saying so came back refused all the same:
  * nothing is said for a harness whose row already said the pick waits, since the person read that before they
- * picked, and nothing for a turn that simply ended. It stands only while the turn it is about is still the running
- * one. */
+ * picked, and nothing for a turn that simply ended; or the host's own words where it would not take the pick for the
+ * thread at all. It stands only while the turn it is about is still the running one. */
 export function useAccessPick(workspaceId: string, target: AccessTarget | null, threadKey: string, movesRunningTurn: boolean): { pick: (mode: string) => void; line: string | null } {
   const api = useStore(s => s.api);
   const setPreferences = useStore(s => s.setPreferences);
   const stamp = useComposerOptionsStore(s => s.pick);
-  const [note, setNote] = useState<{ turnId: string } | null>(null);
+  const [note, setNote] = useState<{ turnId: string | null; line: string } | null>(null);
   const pick = useCallback(
     (mode: string) => {
       setNote(null);
@@ -355,13 +357,19 @@ export function useAccessPick(workspaceId: string, target: AccessTarget | null, 
       stamp(workspaceId, "permissionMode", mode, threadKey);
       if (target === null || api?.setSessionAccess === undefined) return;
       const turnId = target.turnId;
-      void api.setSessionAccess(target.sessionId, mode).then(outcome => {
-        if (outcome === "unsupported" && movesRunningTurn && turnId !== null) setNote({ turnId });
-      }, () => {});
+      void api.setSessionAccess(target.sessionId, mode).then(
+        outcome => {
+          if (outcome === "unsupported" && movesRunningTurn && turnId !== null) setNote({ turnId, line: ACCESS_REFUSED_LINE });
+        },
+        (e: unknown) => {
+          const failure = failureOf(e);
+          if (!failure.disconnected) setNote({ turnId, line: COMPOSER_WORDS.accessNotChanged(failure.said) });
+        },
+      );
     },
     [api, movesRunningTurn, setPreferences, stamp, target, threadKey, workspaceId],
   );
-  return { pick, line: note !== null && note.turnId === target?.turnId ? ACCESS_REFUSED_LINE : null };
+  return { pick, line: note !== null && note.turnId === target?.turnId ? note.line : null };
 }
 
 export function ComposerOptionPickers({

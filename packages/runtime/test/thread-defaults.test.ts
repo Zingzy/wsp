@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, PLACES_TICKET_REFUSAL, markedDefault, type AgentLaunch, type TurnResult } from "@wsp/protocol";
+import { HERE_PLACE_ID, PLACES_TICKET_REFUSAL, effortsFor, everyModel, markedDefault, modelOf, unmarked, type AgentLaunch, type HarnessCatalog, type TurnResult } from "@wsp/protocol";
 import { createRuntime, serveRuntime, type AgentsReader, type HarnessAdapterFactory, type LocalWiring, type Runtime, type RuntimeServer } from "../src/index.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -151,6 +151,18 @@ describe("what a new thread starts on", () => {
     const claude = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
     expect(claude.unshaped?.models.map(m => m.value)).toEqual(ids);
     expect(claude.unshaped?.legacyModels?.map(m => m.value)).toEqual(own.legacyModels?.map(m => m.value));
+  });
+
+  it("hands the agent's own marks beside the ones the person's defaults moved, so a client reads what a reset falls back to", async () => {
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const own = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
+    const marks = (c: HarnessCatalog) => ({ model: markedDefault(everyModel(c))?.value, effort: markedDefault(effortsFor(c, modelOf(c, markedDefault(everyModel(c))?.value)))?.value, mode: markedDefault(c.permissionModes)?.value });
+    const fresh = marks(own);
+    await rt.preferences.set({ agentDefaults: { claude: { model: "claude-fable-5-1", effort: "max", access: "ask" } } });
+    const claude = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
+    expect(marks(claude)).toEqual({ model: "claude-fable-5-1", effort: "max", mode: "default" });
+    expect(marks(unmarked(claude))).toEqual(fresh);
+    expect(fresh.model).not.toBe("claude-fable-5-1");
   });
 
   it("refuses a model id no agent runs where it is kept, and stores nothing of that change", async () => {

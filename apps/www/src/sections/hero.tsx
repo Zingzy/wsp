@@ -56,7 +56,6 @@ export function Hero() {
         >
           <span className="inline-flex flex-wrap justify-center gap-x-5 gap-y-1">
             <span>macOS and Linux</span>
-            <span>Node 22</span>
             <span>AGPL-3.0</span>
             <span>no hosted service in between</span>
           </span>

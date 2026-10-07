@@ -919,9 +919,9 @@ function runtimeOf(ctx: RuntimeContext): Runtime {
         const project = entry === undefined ? undefined : prefs.projectDefaults[entry.record.project];
         const agent = ctx.defaultAgentOf(prefs, entry);
         return lists.map(c => {
-          const picker = prefs.agentDefaults[c.harness]?.models;
-          const unshaped = picker === undefined ? {} : { unshaped: { models: c.models, ...(c.legacyModels !== undefined ? { legacyModels: c.legacyModels } : {}) } };
-          return { ...shapeModels(ctx.defaultsOn(c, prefs, project).catalog, picker), ...unshaped, ...(c.harness === agent ? { isDefault: true } : {}) };
+          const own = prefs.agentDefaults[c.harness];
+          const unshaped = own === undefined && project === undefined ? {} : { unshaped: { models: c.models, ...(c.legacyModels !== undefined ? { legacyModels: c.legacyModels } : {}), efforts: c.efforts, permissionModes: c.permissionModes } };
+          return { ...shapeModels(ctx.defaultsOn(c, prefs, project).catalog, own?.models), ...unshaped, ...(c.harness === agent ? { isDefault: true } : {}) };
         });
       },
     },

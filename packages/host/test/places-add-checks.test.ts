@@ -14,7 +14,7 @@ import { SSH_LINE_CAP, keyFingerprint } from "@wsp/engine";
 import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, joinedAddWrites, joinedPlace, profileSourceLine } from "../src/doctor.js";
 import { refusedPort } from "../../runtime/test/held-port.js";
 import { addCommand, placeHeldRefusal, reachScript, reachedUrls, unreachedLine, hostKeyHere, placeUnit } from "../src/places.js";
-import { heldPlaceScript } from "../src/place-back.js";
+import { heldPlaceScript } from "@wsp/protocol";
 import { captured } from "./verbs-fixture.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 import { fakeRunner, noBoxSignIn, opts, sweepPlace, tmp } from "./places-fixture.js";

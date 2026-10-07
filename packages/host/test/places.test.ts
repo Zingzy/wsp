@@ -97,7 +97,8 @@ import {
   placeUndoNeedsSudoLine,
   sudoPasswordAsk,
 } from "../src/places.js";
-import { BackCutError, backBindLine, heldPlaceScript } from "../src/place-back.js";
+import { BackCutError, backBindLine } from "../src/place-back.js";
+import { heldPlaceScript } from "@wsp/protocol";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace as sweepPlaceHere, sweptLine, sweptSaid, writePlaceFile, type PlaceSweepOptions } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type RunResult, type ServiceAddress, type ServiceManager, type ServiceRunner, type ServiceUnit } from "../src/service.js";

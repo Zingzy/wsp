@@ -9,6 +9,8 @@
 // mounts once.
 import { useCallback, useEffect } from "react";
 import { desktopBridge } from "../lib/desktopShell.js";
+import { notRead } from "../notices/store.js";
+import { failureOf } from "../protocol/failure.js";
 import { heldFresh, hold } from "../protocol/held.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { appScheme } from "../terminal/ghosttyConfig.js";
@@ -44,48 +46,57 @@ export function useSettingsReads(): void {
   useEffect(() => {
     void held("setup", api?.initGet)?.then(
       setup => setReads({ setup }),
-      () => setReads({ setup: null }),
+      e => {
+        setReads({ setup: null });
+        notRead("Setup")(e);
+      },
     );
     const scheme = appScheme();
     const terminalConfig = api?.hostTerminalConfig;
     void held(`file:${scheme}`, terminalConfig === undefined ? undefined : () => terminalConfig(scheme))?.then(
       file => setReads({ file }),
-      () => {},
+      notRead("Terminal config"),
     );
-    // A refusal (a page on a ticket socket) leaves the row without a picker rather than saying none is installed.
+    // A refusal leaves the row without a picker rather than saying none is installed.
     void held("editors", api?.editorList)?.then(
       editors => setReads({ editors }),
-      () => {},
+      notRead("Editors"),
     );
     // The desktop shell answers for its own computer's service alone; a tab, or a window on a host elsewhere, has none.
     void desktopBridge()
       ?.loginStart?.()
       .then(
         loginStart => setReads({ loginStart }),
-        () => {},
+        notRead("Start at login"),
       );
     const readSsh = api?.sshInclude;
     void held("sshInclude", readSsh === undefined ? undefined : () => readSsh())?.then(
       sshInclude => setReads({ sshInclude }),
-      () => {},
+      notRead("ssh config"),
     );
     void held("account", api?.account)?.then(
       account => setReads({ account }),
-      () => setReads({ account: null }),
+      e => {
+        setReads({ account: null });
+        notRead("Account")(e);
+      },
     );
   }, [api, setReads]);
 
   useEffect(() => {
     void held(`devices:${devicesAsked}`, api?.devicesList)?.then(
       devices => setReads({ devices, devicesRefused: false }),
-      // The one refusal a page served on a ticket socket gets; anything else reads as no answer yet.
-      () => setReads({ devices: null, devicesRefused: true }),
+      // A page served on a ticket socket is refused the list and says so in its place; anything else is a notice.
+      e => {
+        setReads({ devices: null, devicesRefused: failureOf(e).kind === "ticket" });
+        notRead("Devices")(e);
+      },
     );
   }, [api, devicesAsked, setReads]);
 
   // Each opening of About asks the host to read the newest release again; the host's floor keeps that to one ask.
   useEffect(() => {
-    if (onAbout) void api?.releaseCheck?.().then(release => useStore.setState({ release }), () => {});
+    if (onAbout) void api?.releaseCheck?.().then(release => useStore.setState({ release }), notRead("Newest release"));
   }, [api, onAbout]);
 
   const readImage = useCallback(
@@ -93,7 +104,7 @@ export function useSettingsReads(): void {
       const image = api?.image;
       void held("image", image === undefined ? undefined : () => image(), force)?.then(
         view => setReads({ image: view }),
-        () => {},
+        notRead("Image"),
       );
     },
     [api, setReads],

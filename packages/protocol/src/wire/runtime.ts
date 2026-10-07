@@ -99,9 +99,13 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Sets what a person may set on one place: threads at once on a computer, machines at once and spend per day on
    * a cloud, the nap after on any place that forks, and the agents switch its workspaces inherit. A key left out
    * keeps what stands, a word under `reset` takes that setting back to its default, and a key the place's kind does
-   * not take is refused. Answers `{ place: PlaceView }`, the row as it now reads. The person's own road only, as
-   * every other place op is. */
-  z.object({ id: reqId, op: z.literal("places.set"), placeId: z.string(), reset: z.array(PlaceSettingWord).optional() }).merge(PlaceSettingsAsk),
+   * not take is refused. `name` renames a computer the person added, `ssh` gives it a new login once that login is
+   * read as the same computer, and `recipe` is what places.follow takes; this computer and a cloud take none of the
+   * three. Everything is checked before anything is written. Answers `{ place: PlaceView }`, the row as it now
+   * reads. The person's own road only, as every other place op is. */
+  z
+    .object({ id: reqId, op: z.literal("places.set"), placeId: z.string(), reset: z.array(PlaceSettingWord).optional(), name: z.string().max(200).optional(), ssh: z.string().max(300).optional(), recipe: z.string().min(1).max(200).optional() })
+    .merge(PlaceSettingsAsk),
   /** The saved recipe one computer follows from now, by its name or slug, or `none`: one it follows syncs to it, and
    * one that follows none keeps what it has. Answers `{ place: PlaceView }`. The person's own road only. */
   z.object({ id: reqId, op: z.literal("places.follow"), placeId: z.string(), recipe: z.string().min(1).max(200) }),

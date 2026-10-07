@@ -1,0 +1,416 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+# Installs wsp:
+#
+#   curl --proto '=https' --tlsv1.2 -fsSL https://usewsp.com/install | sh
+#
+# On a Mac it puts wsp.app in /Applications, or ~/Applications where that is not writable, and opens it once. On
+# Linux (x64) it puts the AppImage in ~/Applications and the files the command runs under ~/.wsp/app. On both it
+# writes the wsp command at ~/.wsp/bin/wsp and puts that folder on PATH for new shells.
+#
+# Every download is an asset of a release of github.com/wsp-labs/wsp, checked against the sha256 GitHub publishes
+# for it before anything is unpacked. The release is read off api.github.com and nothing else is asked of anything,
+# except apt-get on a Linux computer that lacks the libraries the app links, which is said before it runs and is the
+# one step that may ask for sudo. WSP_VERSION=1.2.3 installs that release instead of the latest. Running this again
+# over an installed wsp replaces it in place.
+#
+# Everything runs from main at the bottom, so a download cut short runs nothing.
+
+set -eu
+
+REPO="wsp-labs/wsp"
+BUNDLE_ID="wsp.desktop"
+SHIM_HEAD="# The wsp app writes this on each launch; it runs the wsp the app bundles."
+
+step=""
+tmp=""
+stage=""
+# Folders this run made, newest first, one per line, and files it writes beside their final names: a failed run
+# takes both away again, and a folder that holds something by then stays.
+made=""
+parts=""
+
+say() { printf 'wsp install: %s\n' "$*"; }
+
+die() {
+  printf 'wsp install: %s failed: %s\n' "$step" "$*" >&2
+  exit 1
+}
+
+cleanup() {
+  if [ -n "$stage" ]; then rm -rf "$stage"; fi
+  if [ -n "$tmp" ]; then rm -rf "$tmp"; fi
+  printf '%s\n' "$parts" | while IFS= read -r part; do if [ -n "$part" ]; then rm -f "$part"; fi; done
+  printf '%s\n' "$made" | while IFS= read -r dir; do if [ -n "$dir" ]; then rmdir "$dir" 2>/dev/null || true; fi; done
+}
+
+# Makes a folder and each missing one above it, noting every one it made.
+make_dir() {
+  if [ -d "$1" ]; then return 0; fi
+  make_dir "$(dirname "$1")" || return 1
+  mkdir "$1" 2>/dev/null || return 1
+  made="$1
+$made"
+}
+
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is not installed"; }
+
+last_line() { tail -n 1 "$1" 2>/dev/null || true; }
+
+# One word for a shell, in single quotes, as the app quotes the paths in the command it writes.
+quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+# The release workflow's own rule for a version: v1.2.3 carries 1.2.3, with an optional prerelease part.
+valid_version() {
+  case "$1" in '' | *[!0-9A-Za-z.-]*) return 1 ;; esac
+  printf '%s\n' "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+}
+
+# -q first, so no ~/.curlrc can turn the checks below off.
+fetch() {
+  if [ -n "${WSP_RELEASE_API:-}" ]; then
+    curl -q -fsSL -o "$2" "$1" 2>"$tmp/curl.err" </dev/null || die "$(last_line "$tmp/curl.err")"
+  else
+    curl -q -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$2" "$1" 2>"$tmp/curl.err" </dev/null || die "$(last_line "$tmp/curl.err")"
+  fi
+}
+
+# GitHub's answer one "key":value per line, whether it came pretty or compact. A string value's own quotes are
+# escaped in JSON, so no line cut out of one starts with a quote and none is read as a key.
+flatten() { tr -d '\r\n' <"$1" | sed 's/" *: */":/g' | tr ',{}[]' '\n\n\n\n\n' | sed 's/^[[:space:]]*//'; }
+
+# The hex sha256 GitHub publishes for one asset: the digest between its name and the next asset's.
+published_sum() {
+  name=$(printf '%s' "$1" | sed 's/\./\\./g')
+  sed -n "/^\"name\":\"$name\"\$/,/^\"name\":/s/^\"digest\":\"sha256:\\([0-9a-f]*\\)\"\$/\\1/p" "$2" | head -n 1
+}
+
+# A Mac always has shasum and not always sha256sum; a Linux box has sha256sum from coreutils.
+sha256_of() {
+  if [ "$os" = Darwin ] || ! command -v sha256sum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi | cut -d ' ' -f 1
+}
+
+# Writes the command at ~/.wsp/bin/wsp the way the app does, so it works before the app has ever opened, and asks it
+# for its version before it takes the place of the one there. The app rewrites it on each launch. Fails with why set,
+# for the caller to put things back first.
+write_command() {
+  step="writing the wsp command"
+  parts="$shim.part
+$parts"
+  if ! { make_dir "$HOME/.wsp/bin" && printf '#!/bin/sh\n%s\nELECTRON_RUN_AS_NODE=1 exec %s %s "$@"\n' "$SHIM_HEAD" "$(quote "$1")" "$(quote "$2")" >"$shim.part" && chmod 755 "$shim.part"; } 2>/dev/null; then
+    why="could not be written at $shim"
+    return 1
+  fi
+  answers "$shim.part" || {
+    why="--version $why"
+    return 1
+  }
+  mv -f "$shim.part" "$shim" 2>/dev/null || {
+    why="could not be moved into $shim"
+    return 1
+  }
+}
+
+# Whether a command answers --version with this release's version; why says what it did instead.
+answers() {
+  why=""
+  got=$("$@" --version 2>"$tmp/version.err" </dev/null) || {
+    why="did not answer: $(last_line "$tmp/version.err")"
+    return 1
+  }
+  [ "$got" = "wsp $version" ] || {
+    why="says ${got:-nothing}, not wsp $version"
+    return 1
+  }
+}
+
+# The host service the app installed runs the command above, so a restart puts it on the files just installed. Only
+# a service already loaded is restarted; none is started.
+restart_service() {
+  step="restarting the wsp service"
+  if [ "$os" = Darwin ]; then
+    for unit in "$HOME"/Library/LaunchAgents/com.wsp.host.*.plist; do
+      [ -f "$unit" ] && grep -qF "<string>$shim</string>" "$unit" || continue
+      label="gui/$(id -u)/$(basename "$unit" .plist)"
+      launchctl print "$label" >/dev/null 2>&1 </dev/null || continue
+      if launchctl kickstart -k "$label" >/dev/null 2>&1 </dev/null; then say "restarted the wsp service on $version"; else say "the wsp service did not restart; quit wsp and open it again"; fi
+    done
+  else
+    for unit in "$HOME"/.config/systemd/user/wsp-host-*.service; do
+      [ -f "$unit" ] && grep -qF "ExecStart=$(quote "$shim")" "$unit" || continue
+      if systemctl --user try-restart "$(basename "$unit")" >/dev/null 2>&1 </dev/null; then say "restarted the wsp service on $version"; else say "the wsp service did not restart; run wsp restart"; fi
+    done
+  fi
+}
+
+# The app is in place by now, so a file that cannot be written leaves the person the line to add, and the install goes
+# on to restart the service and open the app.
+add_line() {
+  if [ -f "$1" ] && grep -qF "$2" "$1" 2>/dev/null; then return 0; fi
+  if { mkdir -p "$(dirname "$1")" && printf '\n# wsp\n%s\n' "$2" >>"$1"; } 2>/dev/null; then
+    say "added ~/.wsp/bin to PATH in $1"
+  else
+    say "$1 could not be written; add this line to it yourself: $2"
+  fi
+}
+
+# One line, once, in the files the person's shell reads. Bash on Linux takes it in .profile as well as .bashrc, since
+# the .bashrc a distribution ships returns early for a shell that is not interactive, which is what ssh runs a
+# command in.
+put_on_path() {
+  step="putting wsp on PATH"
+  line='case ":$PATH:" in *":$HOME/.wsp/bin:"*) ;; *) export PATH="$HOME/.wsp/bin:$PATH" ;; esac'
+  # A shell started with no SHELL, as cron and containers start one, reads the login shell off the passwd entry.
+  login=${SHELL:-$(getent passwd "$(id -un)" 2>/dev/null | cut -d : -f 7)}
+  case "$(basename "${login:-sh}")" in
+    zsh) add_line "${ZDOTDIR:-$HOME}/.zshrc" "$line" ;;
+    bash)
+      if [ "$os" = Darwin ]; then add_line "$HOME/.bash_profile" "$line"; else
+        add_line "$HOME/.bashrc" "$line"
+        add_line "$HOME/.profile" "$line"
+      fi
+      ;;
+    fish) add_line "$HOME/.config/fish/conf.d/wsp.fish" 'contains $HOME/.wsp/bin $PATH; or set -gx PATH $HOME/.wsp/bin $PATH' ;;
+    *) add_line "$HOME/.profile" "$line" ;;
+  esac
+}
+
+app_running() { [ "$(osascript -e "application id \"$BUNDLE_ID\" is running" 2>/dev/null </dev/null)" = true ]; }
+
+# Between moving the installed copy aside and knowing the new one stands, a signal would leave neither: the exit trap
+# deletes the stage the old copy waits in. The swap in apps/desktop/src/self-update.ts holds signals off the same way.
+hold_signals() { trap '' HUP INT TERM; }
+release_signals() { trap 'exit 1' HUP INT TERM; }
+
+# Takes the new copy at $1 away again and puts the one moved aside to $2 back, or keeps the stage and says where it is.
+put_back() {
+  rm -rf "$1" 2>/dev/null || true
+  if [ ! -e "$2" ]; then
+    release_signals
+    die "$3; nothing was installed"
+  fi
+  if ! mv "$2" "$1"; then
+    kept=$2
+    stage=""
+    die "$3, and the copy that was installed could not be put back; it is at $kept"
+  fi
+  release_signals
+  die "$3; the copy that was installed is back in place"
+}
+
+install_mac() {
+  step="choosing where the app goes"
+  if [ -d /Applications ] && [ -w /Applications ]; then apps=/Applications; else
+    apps="$HOME/Applications"
+    say "/Applications is not writable by $(id -un), so wsp goes in $apps"
+  fi
+  make_dir "$apps" || die "$apps could not be made"
+  app="$apps/wsp.app"
+  if [ -e "$app" ] && [ ! -w "$app" ]; then die "$app is not writable by $(id -un)"; fi
+
+  step="unpacking $asset"
+  stage=$(mktemp -d "$apps/.wsp-install.XXXXXX") || die "no folder could be made in $apps"
+  ditto -x -k "$tmp/$asset" "$stage/new" 2>"$tmp/ditto.err" </dev/null || die "$(last_line "$tmp/ditto.err")"
+  [ "$(ls -A "$stage/new")" = wsp.app ] && [ -d "$stage/new/wsp.app" ] && [ ! -L "$stage/new/wsp.app" ] || die "$asset does not hold exactly one wsp.app"
+
+  step="checking the app"
+  new="$stage/new/wsp.app"
+  got=$(plutil -extract CFBundleShortVersionString raw -o - "$new/Contents/Info.plist" 2>/dev/null </dev/null || true)
+  [ "$got" = "$version" ] || die "it is version ${got:-unknown}, not $version"
+  [ -f "$new/Contents/MacOS/wsp" ] && [ -f "$new/Contents/Resources/app/main/cli.mjs" ] || die "it holds no wsp command"
+  codesign --verify --deep --strict "$new" 2>/dev/null </dev/null || die "its signature does not verify"
+  # The new copy runs once where it was unpacked, before anything installed moves.
+  answers env ELECTRON_RUN_AS_NODE=1 "$new/Contents/MacOS/wsp" "$new/Contents/Resources/app/main/cli.mjs" || die "its wsp command $why; nothing was changed"
+
+  if app_running; then
+    step="quitting wsp"
+    say "quitting wsp to replace it"
+    osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 </dev/null || die "wsp did not take the quit; nothing was changed"
+    n=0
+    while app_running; do
+      n=$((n + 1))
+      [ "$n" -le 300 ] || die "wsp did not quit within 30 s; nothing was changed"
+      sleep 0.1
+    done
+  fi
+
+  step="putting the app in place"
+  hold_signals
+  if [ -e "$app" ]; then
+    old=$(plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist" 2>/dev/null </dev/null || true)
+    if ! mv "$app" "$stage/old.app"; then
+      release_signals
+      die "the installed app could not be moved aside; nothing was changed"
+    fi
+    say "replacing wsp ${old:-of unknown version} with $version"
+  fi
+  mv "$new" "$app" || put_back "$app" "$stage/old.app" "the new app could not be moved in"
+  # The installed copy goes only once the command the new one carries answers from where it now stands.
+  step="writing the wsp command"
+  write_command "$app/Contents/MacOS/wsp" "$app/Contents/Resources/app/main/cli.mjs" ||
+    put_back "$app" "$stage/old.app" "the wsp command $why"
+  rm -rf "$stage"
+  stage=""
+  release_signals
+  say "installed $app"
+
+  put_on_path
+  restart_service
+
+  # A file curl wrote carries no quarantine flag, so this opens with no Open Anyway step.
+  step="opening wsp"
+  open "$app" 2>"$tmp/open.err" </dev/null || say "wsp did not open here ($(last_line "$tmp/open.err")); open $app yourself"
+}
+
+# The packages that carry the libraries the app links, by the names this computer's apt knows them by: Ubuntu 24.04
+# renamed two of them with a t64 suffix and keeps no package under the old name.
+apt_packages() {
+  for want in "libgtk-3-0t64 libgtk-3-0" libnss3 "libasound2t64 libasound2" libgbm1; do
+    pick=""
+    for name in $want; do
+      if apt-cache show "$name" >/dev/null 2>&1 </dev/null; then
+        pick=$name
+        break
+      fi
+    done
+    printf '%s ' "${pick:-$name}"
+  done
+}
+
+missing_libraries() { ldd "$1" 2>/dev/null </dev/null | sed -n 's/^[[:space:]]*\([^[:space:]]*\) => not found.*/\1/p' | tr '\n' ' '; }
+
+# Electron links GTK and the libraries beside it, which a desktop has and a server usually lacks.
+ensure_libraries() {
+  missing=$(missing_libraries "$1")
+  [ -n "$missing" ] || return 0
+  step="installing the libraries wsp needs"
+  command -v apt-get >/dev/null 2>&1 || die "this computer lacks $missing; install them with its package manager and run this again"
+  if [ "$(id -u)" = 0 ]; then sudo=""; else
+    need sudo
+    sudo=sudo
+  fi
+  say "this computer lacks $(printf '%s\n' "$missing" | wc -w | tr -d ' ') libraries the app links, GTK among them; installing them with apt-get${sudo:+, which asks for sudo}"
+  $sudo apt-get update -qq >"$tmp/apt.log" 2>&1 </dev/null || die "apt-get update: $(last_line "$tmp/apt.log")"
+  packages=$(apt_packages)
+  # shellcheck disable=SC2086
+  $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $packages >"$tmp/apt.log" 2>&1 </dev/null ||
+    die "apt-get install $packages: $(last_line "$tmp/apt.log")"
+  missing=$(missing_libraries "$1")
+  [ -z "$missing" ] || die "this computer still lacks $missing after apt-get installed $packages"
+}
+
+install_linux() {
+  step="unpacking $asset"
+  make_dir "$HOME/.wsp/app" || die "$HOME/.wsp/app could not be made"
+  stage=$(mktemp -d "$HOME/.wsp/app/.install.XXXXXX") || die "no folder could be made in $HOME/.wsp/app"
+  # Run from beside the files it unpacks, since a temporary folder may be mounted with no execution.
+  { cp "$tmp/$asset" "$stage/$asset" && chmod 755 "$stage/$asset"; } || die "$asset could not be copied into $stage"
+  (cd "$stage" && "./$asset" --appimage-extract >/dev/null 2>"$tmp/extract.err" </dev/null) || die "$(last_line "$tmp/extract.err")"
+  tree="$stage/squashfs-root"
+  [ -f "$tree/wsp" ] && [ -f "$tree/resources/app/main/cli.mjs" ] || die "$asset holds no wsp command"
+
+  ensure_libraries "$tree/wsp"
+
+  step="checking the app"
+  answers env ELECTRON_RUN_AS_NODE=1 "$tree/wsp" "$tree/resources/app/main/cli.mjs" || die "its wsp command $why; nothing was changed"
+
+  step="putting the app in place"
+  files="$HOME/.wsp/app/$version-install"
+  hold_signals
+  if [ -e "$files" ] && ! mv "$files" "$stage/old"; then
+    release_signals
+    die "$files could not be moved aside; nothing was changed"
+  fi
+  mv "$tree" "$files" || put_back "$files" "$stage/old" "the new files could not be moved into $files"
+  write_command "$files/wsp" "$files/resources/app/main/cli.mjs" || put_back "$files" "$stage/old" "the wsp command $why"
+  release_signals
+  make_dir "$HOME/Applications" || die "$HOME/Applications could not be made"
+  image="$HOME/Applications/wsp.AppImage"
+  parts="$image.part
+$parts"
+  { cp "$stage/$asset" "$image.part" && chmod 755 "$image.part" && mv -f "$image.part" "$image"; } || die "$image could not be written"
+  rm -rf "$stage"
+  stage=""
+  say "installed $image"
+
+  put_on_path
+  restart_service
+
+  # What earlier runs of this left; the service now runs the files above.
+  for earlier in "$HOME"/.wsp/app/*-install; do
+    if [ -d "$earlier" ] && [ "$earlier" != "$files" ]; then rm -rf "$earlier"; fi
+  done
+}
+
+main() {
+  trap cleanup EXIT
+  trap 'exit 1' HUP INT TERM
+
+  step="checking this computer"
+  [ -n "${HOME:-}" ] || die "HOME is not set"
+  # Under sudo HOME is still the person's, and every file written there would be root's, the folder the app keeps
+  # its state in among them. Nothing here needs root but apt-get, which asks for sudo itself.
+  if [ "$(id -u)" = 0 ] && [ "$(ls -nd "$HOME" | awk '{ print $3 }')" != 0 ]; then
+    die "this runs as root with HOME at $HOME, which is not root's; run the line without sudo (where /Applications is not writable, wsp goes in ~/Applications)"
+  fi
+  need curl
+  os=$(uname -s)
+  case "$os" in
+    Darwin)
+      for tool in ditto plutil codesign osascript open shasum; do need "$tool"; done
+      ;;
+    Linux)
+      arch=$(uname -m)
+      case "$arch" in x86_64 | amd64) ;; *) die "wsp builds no Linux app for $arch" ;; esac
+      ;;
+    *) die "wsp builds no app for $os" ;;
+  esac
+  tmp=$(mktemp -d) || die "no temporary folder could be made"
+  shim="$HOME/.wsp/bin/wsp"
+
+  # A smoke serves its own release from WSP_RELEASE_API, the base the app's own update check reads; unset, it is
+  # GitHub's API and github.com.
+  api=${WSP_RELEASE_API:-https://api.github.com}
+  api=${api%/}
+  if [ -n "${WSP_RELEASE_API:-}" ]; then
+    site="$api/$REPO"
+    say "WSP_RELEASE_API is set: the release and its download come from $api, with no https check"
+  else site="https://github.com/$REPO"; fi
+
+  if [ -n "${WSP_VERSION:-}" ]; then
+    asked=${WSP_VERSION#v}
+    valid_version "$asked" || die "WSP_VERSION=$WSP_VERSION is not a version like 1.2.3"
+    step="reading release v$asked"
+    fetch "$api/repos/$REPO/releases/tags/v$asked" "$tmp/release.json"
+  else
+    step="reading the latest release"
+    fetch "$api/repos/$REPO/releases/latest" "$tmp/release.json"
+  fi
+  flatten "$tmp/release.json" >"$tmp/release.txt"
+  tag=$(sed -n 's/^"tag_name":"\(.*\)"$/\1/p' "$tmp/release.txt" | head -n 1)
+  version=${tag#v}
+  { [ "v$version" = "$tag" ] && valid_version "$version"; } || die "GitHub's answer names no release version"
+  if [ -n "${asked:-}" ] && [ "$version" != "$asked" ]; then die "GitHub answered with $tag, not v$asked"; fi
+  if [ "$os" = Darwin ]; then asset="wsp-$version-mac.zip"; else asset="wsp-$version.AppImage"; fi
+  grep -qxF "\"name\":\"$asset\"" "$tmp/release.txt" || die "release $tag has no $asset"
+  sum=$(published_sum "$asset" "$tmp/release.txt")
+  [ "${#sum}" -eq 64 ] || die "release $tag publishes no sha256 for $asset"
+
+  step="downloading $asset"
+  say "downloading wsp $version"
+  fetch "$site/releases/download/$tag/$asset" "$tmp/$asset"
+
+  step="checking $asset"
+  got=$(sha256_of "$tmp/$asset")
+  [ "$got" = "$sum" ] || die "its sha256 is $got and the release publishes $sum; nothing was unpacked"
+  say "sha256 matches the release"
+
+  if [ "$os" = Darwin ]; then install_mac; else install_linux; fi
+
+  case ":${PATH:-}:" in
+    *":$HOME/.wsp/bin:"*) say "wsp $version is installed; run wsp --version" ;;
+    *) say "wsp $version is installed; open a new terminal and run wsp --version" ;;
+  esac
+}
+
+main "$@"

@@ -4,7 +4,6 @@ import { CopyIcon, CheckIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
-import { noticeFailure } from "../../notices/store";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 const COPIED_MS = 1500;
@@ -20,7 +19,7 @@ export const MessageCopyButton = memo(function MessageCopyButton({
   variant?: "outline" | "ghost";
   className?: string;
 }) {
-  const { copyToClipboard, isCopied } = useCopyToClipboard<void>({ timeout: COPIED_MS, onError: error => noticeFailure(error, said => `Not copied: ${said}`) });
+  const { copyToClipboard, isCopied } = useCopyToClipboard<void>({ timeout: COPIED_MS });
 
   return (
     <Tooltip>
