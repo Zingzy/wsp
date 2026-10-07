@@ -324,6 +324,7 @@ const OTHER = "thread-b0b0b0b0c1c1";
 const STARTED = "thread-9d8c7b6a5f4e";
 const WORKSPACE = { id: "ws-1", name: "attic-work", machineId: "m-1", phase: "running", kind: "cloud", golden: "default", createdAt: "2026-09-27T00:00:00.000Z", project: { id: "p-1", name: "wsp", path: "/root/wsp", computer: "here" }, home: "/root" };
 const NAPPING = { ...WORKSPACE, phase: "napping" };
+const SITE_FORK = { ...WORKSPACE, id: "ws-5", name: "fix the login page now 2", project: { id: "p-2", name: "site", path: "/root/site", computer: "pl-attic" } };
 const GONE = { ...WORKSPACE, phase: "gone", gone: "deleted at the provider \u0085" };
 const sessionRow = (fields: Record<string, unknown>) => ({ workspaceId: "ws-1", harness: "claude", status: "completed", ...fields });
 const SESSIONS = [
@@ -498,6 +499,27 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
     { case: "in a folder of the project", arguments: { project: "wsp", cwd: "/Users/me/wsp/src", message: "t", detach: true }, replies: { ...PROJECTS, "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES, "sessions.start": startIn("/Users/me/wsp/src") } },
     { case: "a relative folder of the project", arguments: { project: "wsp", cwd: "src", message: "t" }, replies: { ...PROJECTS, "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES } },
     { case: "a branch for a box", arguments: { project: "attic-work", branch: "x", message: "t" }, replies: PROJECTS },
+    {
+      case: "a project on another computer forks a machine named off the task",
+      arguments: { project: "site", message: "fix the login page now please", detach: true },
+      replies: {
+        ...PROJECTS,
+        "workspaces.list": ok({ workspaces: [WORKSPACE, { ...WORKSPACE, id: "ws-2", name: "fix the login page now" }] }),
+        "projects.defaults": ok({ defaults: { "p-2": { agent: { value: "claude", from: "default" } } } }),
+        "harnesses.list": HARNESSES,
+        "workspaces.landing": ok({ capabilities: { sizes: [] } }),
+        "workspaces.create": ok({ workspace: SITE_FORK }),
+        "workspaces.wake": resolved(SITE_FORK),
+        "sessions.start": START,
+      },
+    },
+    {
+      case: "a fork's model read against the project's own agent",
+      arguments: { project: "site", message: "t", model: "claude-opus-5-5" },
+      replies: { ...PROJECTS, "workspaces.list": ok({ workspaces: [WORKSPACE] }), "projects.defaults": ok({ defaults: { "p-2": { agent: { value: "codex", from: "project" } } } }), "harnesses.list": HARNESSES },
+    },
+    { case: "a fork's file that is not there", arguments: { project: "site", message: "t", files: ["no-such-shot.png"] }, replies: { ...PROJECTS, "workspaces.list": ok({ workspaces: [WORKSPACE] }), "projects.defaults": ok({ defaults: {} }), "harnesses.list": HARNESSES } },
+    { case: "a project elsewhere with a machine of its name", arguments: { project: "site", message: "t", detach: true }, replies: { ...PROJECTS, "workspaces.list": ok({ workspaces: [{ ...WORKSPACE, name: "site" }] }), "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.start": START } },
     { case: "the projects not read", arguments: { project: "attic-work", message: "t", detach: true }, replies: { "workspaces.list": ok({ workspaces: [WORKSPACE] }), "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.start": START } },
     { case: "a project held by the thread's own tree", arguments: { project: "wsp", message: "t", detach: true }, replies: { "workspaces.list": ok({ workspaces: [{ ...WORKSPACE, kind: "local", project: { id: "p-1", name: "wsp", path: "/Users/me/wsp", computer: "here" } }] }), "projects.resolve": ok({ project: HERE_PROJECT }), "harnesses.list": HARNESSES, "sessions.start": startIn("/Users/me/wsp") } },
     { case: "beside the thread asking", arguments: { message: "look", detach: true }, env: { [TURN_TOKEN_ENV]: "turn-token-1" }, replies: { "harnesses.list": HARNESSES, "sessions.start": startIn("/Users/me/wsp") } },

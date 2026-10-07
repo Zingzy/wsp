@@ -258,6 +258,48 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect(io.errors).toEqual([]);
   });
 
+  it("run on a project that lives elsewhere and has no machine forks one from the image, named off the task as the app names it, and --detach prints the thread id", async () => {
+    expect(await h.rt.workspaces.list()).toEqual([]);
+    const { code, io } = await h.run("run", h.cloud.name, "--detach", "fix the login page before friday");
+    expect(code, io.errors.join("\n")).toBe(0);
+    const [made] = await h.rt.workspaces.list();
+    expect(made).toMatchObject({ name: "fix the login page before", project: { id: h.cloud.id } });
+    const [row] = await h.rt.sessions.list(made!.id);
+    expect(row).toMatchObject({ startedBy: "cli", prompt: "fix the login page before friday" });
+    // The fork's stages go to stderr, so stdout carries the thread id alone.
+    expect(io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`]);
+    expect(io.errors.at(-1)).toMatch(new RegExp(`^created fix the login page before ${made!.id}`));
+
+    // The same task again is a second machine beside the first, numbered as wsp start numbers one.
+    expect((await h.run("run", h.cloud.name, "--detach", "fix the login page before friday")).code).toBe(0);
+    expect((await h.rt.workspaces.list()).map(w => w.name).sort()).toEqual(["fix the login page before", "fix the login page before 2"]);
+  });
+
+  it("run on a project elsewhere numbers a taken name even where the cut of the task lands on a space", async () => {
+    const task = `${"a".repeat(39)} and the rest of it`;
+    for (const _ of [1, 2]) {
+      const { code, io } = await h.run("run", h.cloud.name, "--detach", task);
+      expect(code, io.errors.join("\n")).toBe(0);
+    }
+    expect((await h.rt.workspaces.list()).map(w => w.name).sort()).toEqual(["a".repeat(39), `${"a".repeat(39)} 2`]);
+  });
+
+  it("run on a project elsewhere reads the whole line before it forks: a bad --notify, --file, --model, --effort or --access makes no machine", async () => {
+    const lines = [
+      ["--notify", "nosuchthread"],
+      ["--file", "/nonexistent/file.txt"],
+      ["--model", "no-such-model"],
+      ["--effort", "no-such-effort"],
+      ["--access", "no-such-access"],
+    ];
+    const refused = [];
+    for (const words of lines) {
+      const { code } = await h.run("run", h.cloud.name, ...words, "--detach", "fix it");
+      refused.push([words[0], code, (await h.rt.workspaces.list()).map(w => w.name)]);
+    }
+    expect(refused).toEqual(lines.map(([word]) => [word, EXIT_CODES.usage, []]));
+  });
+
   it("a turn watched at a terminal shows its reply once: the prose as it streamed, ended on a line of its own, and the finished line under it carries no copy of it", async () => {
     const held = heldAgent(false);
     await h.restartHost({ claude: held.adapter });
@@ -499,6 +541,16 @@ describe("wsp verbs over the host: prompts, answers and what a turn prints", () 
     expect([modelled.code, modelled.io.errors]).toEqual([0, []]);
     expect((await h.rt.sessions.list()).map(r => r.harness)).toEqual(["codex", "codex"]);
     expect(h.claude.starts).toEqual([]);
+  });
+
+  it("run on a project elsewhere whose default agent is Codex reads a model named alone against Codex's list before it forks", async () => {
+    expect((await h.run("projects", "set", h.cloud.name, "--agent", "codex")).code).toBe(0);
+    const modelled = await h.run("run", h.cloud.name, "--model", "gpt-5.6-sol", "--detach", "on codex");
+    expect(modelled.code, modelled.io.errors.join("\n")).toBe(0);
+    expect((await h.rt.sessions.list()).map(r => r.harness)).toEqual(["codex"]);
+    const claudes = await h.run("run", h.cloud.name, "--model", "claude-sonnet-5", "--detach", "on claude's model");
+    expect(claudes.code).toBe(EXIT_CODES.usage);
+    expect((await h.rt.workspaces.list()).map(w => w.name)).toEqual(["on codex"]);
   });
 
   it.runIf(CLOUD_ON)("fork --send under an agent the host has no adapter for is refused naming the agents it has, and no machine is minted", async () => {
