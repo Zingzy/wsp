@@ -10,7 +10,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:f
 import { tmpdir } from "node:os";
 import { extname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 /** What a provider leaves in a build: its backend classes, its API's address, its key's variable and prefix, ASCII's
  * shim marks and the providers' names, matched inside a longer word (BOAT_API_KEY, getsolari.com). Solarized is a

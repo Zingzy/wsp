@@ -8,7 +8,6 @@
     "moduleResolution": "Bundler",
     "module": "ESNext",
     "noEmit": true,
-    "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src", "test", "vite.config.ts"]

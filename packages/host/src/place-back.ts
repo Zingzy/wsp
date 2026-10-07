@@ -310,7 +310,7 @@ export function placeBackHolder(deps: PlaceBackDeps): PlaceBackHolder {
           }
           sayOnce(h, `the forward back from ${h.login.ssh} ended: ${boxWord(said, SSH_LINE_CAP)}; wsp makes it again`);
         } catch (e) {
-          const error = e instanceof BackCutError || e instanceof MissingKnownHostsError ? e : new Error(boxWord(e instanceof Error ? e.message : String(e), SSH_LINE_CAP));
+          const error: Error = e instanceof BackCutError || e instanceof MissingKnownHostsError ? e : new Error(boxWord(e instanceof Error ? e.message : String(e), SSH_LINE_CAP));
           h.now.reject(error);
           if (h.released) return;
           h.now = freshTry();

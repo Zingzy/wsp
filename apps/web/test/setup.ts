@@ -67,7 +67,7 @@ if (typeof Element !== "undefined") {
   const matches = Element.prototype.matches;
   Element.prototype.matches = function (this: Element, selectors: string): boolean {
     return selectors === ":modal" || selectors === ":popover-open" ? false : matches.call(this, selectors);
-  };
+  } as typeof matches;
 }
 
 if (typeof ResizeObserver === "undefined") {

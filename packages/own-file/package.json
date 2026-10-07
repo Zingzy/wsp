@@ -3,7 +3,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts"
+    "build": "tsup src/index.ts --format esm"
   },
   "devDependencies": {
     "@types/node": "^22.20.1"
