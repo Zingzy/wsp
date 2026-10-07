@@ -75,7 +75,7 @@ const OPTIONS: RecipeOptions = {
     { id: "github", label: "the GitHub sign-in", signins: ["vault", "machine", "skip"], account: "Zingzy", scopes: ["repo", "read:org", "workflow"] },
   ],
   folders: [
-    { name: "wsp", path: "~/wsp", remote: "github.com/Zingzy/wsp", private: true, unpushed: 2, bytes: 1.1 * 1024 * MB },
+    { name: "wsp", path: "~/wsp", remote: "github.com/wsp-labs/wsp", private: true, unpushed: 2, bytes: 1.1 * 1024 * MB },
     { name: "spoo", path: "~/spoo", remote: "github.com/spoo-me/url-shortener", private: false, unpushed: 0, bytes: 180 * MB },
     { name: "laya", path: "~/laya", bytes: 340 * MB },
     { name: "kartsmash", path: "~/kartsmash", bytes: 2.3 * 1024 * MB },
@@ -95,7 +95,7 @@ const HERE_AGENTS: AgentsReport = {
 };
 
 const project = (id: string, name: string, path: string, remote: string, computer = "here"): ProjectView => ({ id, name, computer, source: { kind: "folder", path }, path, remote, defaultBranch: "main", memoryKey: id, memoryDir: "/m" }) as ProjectView;
-const PROJECTS: ProjectView[] = [project("pr_wsp", "wsp", "~/wsp", "github.com/Zingzy/wsp"), project("pr_spoo", "spoo", "~/spoo", "github.com/spoo-me/url-shortener"), project("pr_laya", "laya", "~/laya", ""), project("pr_kart", "kartsmash", "~/kartsmash", "")];
+const PROJECTS: ProjectView[] = [project("pr_wsp", "wsp", "~/wsp", "github.com/wsp-labs/wsp"), project("pr_spoo", "spoo", "~/spoo", "github.com/spoo-me/url-shortener"), project("pr_laya", "laya", "~/laya", ""), project("pr_kart", "kartsmash", "~/kartsmash", "")];
 const LOOKS = { pr_wsp: { icon: "terminal" as const, hue: "amber" as const }, pr_spoo: { icon: "globe" as const, hue: "blue" as const }, pr_kart: { icon: "gamepad" as const, hue: "pink" as const } };
 
 /** The picks the frozen screens hold: everything but OpenCode, two servers, yq, two plugins, and one project. */
@@ -162,7 +162,7 @@ const SETUPS: Record<string, { setup: PlaceSetup; applied: PlaceApplied }> = {
   },
   "running-failed": {
     setup: setupOf("done", DONE_STEPS.map(l => (l.step === "skills" || l.step === "folders" ? { ...l, state: "failed" as const, note: "1 of 2 failed" } : l))),
-    applied: { hash: "h", at: AT, rows: [...ALL_LANDED, { ...row("skills", "skills/zingzy-design-taste", "zingzy-design-taste", "failed", "A link inside the folder points at a folder, which never travels."), fix: setupRowFix({ step: "skills" }, "studio") }, { ...row("folders", "folders/wsp", "wsp", "failed", "studio could not clone github.com/Zingzy/wsp: permission denied."), fix: setupRowFix({ step: "folders" }, "studio") }] },
+    applied: { hash: "h", at: AT, rows: [...ALL_LANDED, { ...row("skills", "skills/zingzy-design-taste", "zingzy-design-taste", "failed", "A link inside the folder points at a folder, which never travels."), fix: setupRowFix({ step: "skills" }, "studio") }, { ...row("folders", "folders/wsp", "wsp", "failed", "studio could not clone github.com/wsp-labs/wsp: permission denied."), fix: setupRowFix({ step: "folders" }, "studio") }] },
   },
   "running-blocked": {
     setup: setupOf("failed", [{ step: "floor", state: "failed" }], [], "apt-get install exited 100 on studio: E: Unable to locate package nodejs."),
@@ -253,7 +253,7 @@ const { api } = settingsApi({
     "2026-10-03T10:02:06Z [clis] apt-get install -y golang-go",
     "2026-10-03T10:02:07Z [skills] copying 78 skills",
     "2026-10-03T10:02:08Z [plugins] claude plugin install frontend-design@claude-plugins-official",
-    "2026-10-03T10:02:09Z [folders] git clone github.com/Zingzy/wsp",
+    "2026-10-03T10:02:09Z [folders] git clone github.com/wsp-labs/wsp",
   ],
   // A 75 GB box with 9 GB free keeps a tenth of its disk free, so 2 GB of picks do not fit there.
   placesEstimate: async () => (screen === "summary-disk" ? { neededBytes: 2 * 1024 * MB, keptBytes: 7.5 * 1024 * MB, freeBytes: 9 * 1024 * MB, unmeasured: 0 } : { neededBytes: 3.9 * 1024 * MB, keptBytes: 2 * 1024 * MB, freeBytes: 61 * 1024 * MB, unmeasured: 0 }),

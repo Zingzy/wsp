@@ -4,7 +4,7 @@
 // a rename touches this file alone. Nothing here imports node, because the
 // site bundles it for a browser.
 
-export const REPO = "https://github.com/Zingzy/wsp";
+export const REPO = "https://github.com/wsp-labs/wsp";
 
 /** What a release tag looks like, v1.2.3 carrying 1.2.3: the one rule for what the release workflow answers to
  * and for what the host takes as the newest release. */

@@ -8,7 +8,7 @@ import { RELEASE_BODY_MAX_BYTES, RELEASE_EVERY_MS, RELEASE_FIRST_MS, RELEASE_FLO
 
 const ANSWER = JSON.parse(readFileSync(new URL("./release-latest.json", import.meta.url), "utf8")) as Record<string, unknown>;
 const ETAG = 'W/"405c3ada"';
-const LATEST = "https://api.github.com/repos/Zingzy/wsp/releases/latest";
+const LATEST = "https://api.github.com/repos/wsp-labs/wsp/releases/latest";
 
 interface Asked {
   url: string;
@@ -51,15 +51,15 @@ function watchOn(statePath: string, over: Partial<ReleaseWatchOptions> & Pick<Re
 
 describe("the release GitHub names latest", () => {
   it("reads today's real answer as the version, its tag, its page and when it was published", () => {
-    expect(parseRelease(ANSWER)).toEqual({ version: "0.2.0", tag: "v0.2.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.2.0", publishedAt: "2026-09-10T16:06:44Z" });
+    expect(parseRelease(ANSWER)).toEqual({ version: "0.2.0", tag: "v0.2.0", url: "https://github.com/wsp-labs/wsp/releases/tag/v0.2.0", publishedAt: "2026-09-10T16:06:44Z" });
   });
 
   it("names the release page off the repo and the tag, whatever page the answer names", () => {
     for (const html_url of ["javascript:alert(1)", "https://evil.example/x"]) {
-      expect(parseRelease({ ...ANSWER, html_url }).url).toBe("https://github.com/Zingzy/wsp/releases/tag/v0.2.0");
+      expect(parseRelease({ ...ANSWER, html_url }).url).toBe("https://github.com/wsp-labs/wsp/releases/tag/v0.2.0");
     }
     const { html_url: _dropped, ...bare } = ANSWER;
-    expect(parseRelease(bare).url).toBe("https://github.com/Zingzy/wsp/releases/tag/v0.2.0");
+    expect(parseRelease(bare).url).toBe("https://github.com/wsp-labs/wsp/releases/tag/v0.2.0");
   });
 
   it("takes nothing that is not a published release tag", () => {
@@ -71,15 +71,15 @@ describe("the release GitHub names latest", () => {
 
   it("is asked of GitHub's API unless the smoke's variable moves the base", () => {
     expect(releaseUrl({})).toBe(LATEST);
-    expect(releaseUrl({ [RELEASE_API_ENV]: "http://127.0.0.1:9911/" })).toBe("http://127.0.0.1:9911/repos/Zingzy/wsp/releases/latest");
+    expect(releaseUrl({ [RELEASE_API_ENV]: "http://127.0.0.1:9911/" })).toBe("http://127.0.0.1:9911/repos/wsp-labs/wsp/releases/latest");
   });
 
   it("names one release's answer on the API and its download on the repo, and the smoke's variable moves both", () => {
-    expect(releaseTagUrl({}, "v0.3.0")).toBe("https://api.github.com/repos/Zingzy/wsp/releases/tags/v0.3.0");
-    expect(releaseAssetUrl({}, "v0.3.0", "wsp-0.3.0-mac.dmg")).toBe("https://github.com/Zingzy/wsp/releases/download/v0.3.0/wsp-0.3.0-mac.dmg");
+    expect(releaseTagUrl({}, "v0.3.0")).toBe("https://api.github.com/repos/wsp-labs/wsp/releases/tags/v0.3.0");
+    expect(releaseAssetUrl({}, "v0.3.0", "wsp-0.3.0-mac.dmg")).toBe("https://github.com/wsp-labs/wsp/releases/download/v0.3.0/wsp-0.3.0-mac.dmg");
     const smoke = { [RELEASE_API_ENV]: "http://127.0.0.1:9911/" };
-    expect(releaseTagUrl(smoke, "v9.9.9")).toBe("http://127.0.0.1:9911/repos/Zingzy/wsp/releases/tags/v9.9.9");
-    expect(releaseAssetUrl(smoke, "v9.9.9", "wsp-9.9.9.AppImage")).toBe("http://127.0.0.1:9911/Zingzy/wsp/releases/download/v9.9.9/wsp-9.9.9.AppImage");
+    expect(releaseTagUrl(smoke, "v9.9.9")).toBe("http://127.0.0.1:9911/repos/wsp-labs/wsp/releases/tags/v9.9.9");
+    expect(releaseAssetUrl(smoke, "v9.9.9", "wsp-9.9.9.AppImage")).toBe("http://127.0.0.1:9911/wsp-labs/wsp/releases/download/v9.9.9/wsp-9.9.9.AppImage");
   });
 });
 
@@ -213,12 +213,12 @@ describe("the host's reading of the newest release", () => {
     const lines: string[] = [];
     const update = (version: string): string => {
       lines.push(version);
-      return `npm i -g @zingzy/wsp@${version}`;
+      return `npm i -g @wsp-labs/wsp@${version}`;
     };
     const statePath = stateIn();
     const behind = watchOn(statePath, { fetch: fakeGithub([ok()]).fetch, running: "0.1.9", update });
     expect(behind.watch.get().update).toBeUndefined();
-    expect((await behind.watch.check()).update).toBe("npm i -g @zingzy/wsp@0.2.0");
+    expect((await behind.watch.check()).update).toBe("npm i -g @wsp-labs/wsp@0.2.0");
     expect(lines).toEqual(["0.2.0"]);
     expect((await watchOn(stateIn(), { fetch: fakeGithub([ok()]).fetch, update }).watch.check()).update).toBeUndefined();
     writeFileSync(join(statePath, "..", ".env"), `${UPDATE_CHECK_ENV}=0\n`);
@@ -230,7 +230,7 @@ describe("the host's reading of the newest release", () => {
     const { watch, tick } = watchOn(stateIn(), { fetch: fakeGithub([ok()]).fetch, installed: () => installed() });
     await watch.check();
     installed = () => {
-      throw new Error("ENOENT: no such file or directory, open '/usr/local/lib/node_modules/@zingzy/wsp/package.json'");
+      throw new Error("ENOENT: no such file or directory, open '/usr/local/lib/node_modules/@wsp-labs/wsp/package.json'");
     };
     tick(1);
     expect((await watch.check()).installed).toBe("0.3.0");
@@ -337,10 +337,10 @@ describe("what the command line reads off release.json, with no host asked", () 
 
   it("words the row: the number alone when this wsp is level or ahead, the road to it when behind, else the state", () => {
     const latest = parseRelease(ANSWER);
-    const fix = (version: string): string => `npm i -g @zingzy/wsp@${version}`;
+    const fix = (version: string): string => `npm i -g @wsp-labs/wsp@${version}`;
     expect(latestWords({ state: "read", latest }, "0.2.0", fix)).toBe("0.2.0");
     expect(latestWords({ state: "read", latest }, "0.3.0-rc.1", fix)).toBe("0.2.0");
-    expect(latestWords({ state: "read", latest }, "0.1.9", fix)).toBe("0.2.0; this is 0.1.9, npm i -g @zingzy/wsp@0.2.0 gets it");
+    expect(latestWords({ state: "read", latest }, "0.1.9", fix)).toBe("0.2.0; this is 0.1.9, npm i -g @wsp-labs/wsp@0.2.0 gets it");
     expect(latestWords({ state: "unreached", latest }, "0.2.0", fix)).toBe("0.2.0");
     expect(latestWords({ state: "unreached" }, "0.2.0", fix)).toBe("unreached");
     expect(latestWords({ state: "off" }, "0.2.0", fix)).toBe("off");

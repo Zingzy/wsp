@@ -1,6 +1,6 @@
 ---
 name: wsp-pr-review
-description: Review a wsp ticket's pull request from just the ticket number. Finds the PR on Zingzy/wsp from the ticket/<n>- branch prefix, reads the ticket and its plan on Zingzy/wsp-map, reviews the diff for ticket fidelity, product behaviour, blast radius, silent bugs and library misuse, runs the gates, then posts a full internal review on the ticket and a short code-only review on the PR. Use when asked to "review 87", "review #87", "review ticket 87", or given a wsp-map issue URL; a PR number or URL also works.
+description: Review a wsp ticket's pull request from just the ticket number. Finds the PR on wsp-labs/wsp from the ticket/<n>- branch prefix, reads the ticket and its plan on wsp-labs/wsp-map, reviews the diff for ticket fidelity, product behaviour, blast radius, silent bugs and library misuse, runs the gates, then posts a full internal review on the ticket and a short code-only review on the PR. Use when asked to "review 87", "review #87", "review ticket 87", or given a wsp-map issue URL; a PR number or URL also works.
 ---
 
 # wsp PR review
@@ -9,18 +9,18 @@ You get a ticket number. You leave two comments: the whole truth on the ticket, 
 
 ## 1. Resolve the ticket to its PR and plan
 
-The ticket is the unit. Everything hangs off its number `t` on Zingzy/wsp-map.
+The ticket is the unit. Everything hangs off its number `t` on wsp-labs/wsp-map.
 
 - Find the PR by branch prefix:
   ```
-  gh pr list --repo Zingzy/wsp --state all --json number,headRefName,state,isDraft,url -q '.[] | select(.headRefName | startswith("ticket/<t>-"))'
+  gh pr list --repo wsp-labs/wsp --state all --json number,headRefName,state,isDraft,url -q '.[] | select(.headRefName | startswith("ticket/<t>-"))'
   ```
   Exactly one open PR is the normal case. None: the builder has not pushed yet; say so on the ticket and stop. More than one: review the open one and say the others exist.
-- Given a PR number or URL instead, go the other way: `gh pr view <n> --repo Zingzy/wsp --json headRefName` and read `t` off the `ticket/<t>-` prefix, or the `Ticket:` link in the body. If neither exists, stop and say so; do not review blind.
-- Then `gh pr view <n> --repo Zingzy/wsp --json number,title,headRefName,body,isDraft,url,commits,files`.
-- Read the ticket and every comment on it: `gh issue view <t> --repo Zingzy/wsp-map --json title,body,comments`. Comments carry three things you need: coordinator rulings (they refine or override the body), the build report (gates, deviations, what was run live), and earlier review rounds.
+- Given a PR number or URL instead, go the other way: `gh pr view <n> --repo wsp-labs/wsp --json headRefName` and read `t` off the `ticket/<t>-` prefix, or the `Ticket:` link in the body. If neither exists, stop and say so; do not review blind.
+- Then `gh pr view <n> --repo wsp-labs/wsp --json number,title,headRefName,body,isDraft,url,commits,files`.
+- Read the ticket and every comment on it: `gh issue view <t> --repo wsp-labs/wsp-map --json title,body,comments`. Comments carry three things you need: coordinator rulings (they refine or override the body), the build report (gates, deviations, what was run live), and earlier review rounds.
 - The ticket body names its plan ("Plan 5 task 3", a `plans/0N-*.md` link). Fetch that plan at HEAD of the `plans` branch, never from memory or a local copy:
-  `gh api "repos/Zingzy/wsp-map/contents/plans/0N-name.md?ref=plans" -q .content | base64 -d`
+  `gh api "repos/wsp-labs/wsp-map/contents/plans/0N-name.md?ref=plans" -q .content | base64 -d`
   Read the task the ticket cites and the section around it. Map #1 on wsp-map holds the decisions batches and the later list; skim it when the ticket touches a decided question.
 - If `gh` cannot reach api.github.com, rerun the same command once with the sandbox disabled. It is an environment quirk, not a permissions problem.
 
@@ -29,7 +29,7 @@ The ticket is the unit. Everything hangs off its number `t` on Zingzy/wsp-map.
 - Worktree under `~/wsp/.claude/worktrees/review-<t>` from the PR branch. Never `/tmp`.
 - Merge `main` into it in a throwaway commit first. Conflicts are a finding (say which files). A branch on a stale main hides integration bugs, so the review runs on the merged tree.
 - `pnpm install --frozen-lockfile && pnpm build && pnpm test && pnpm -r exec tsc --noEmit`. Tests need the build first (bin-signals). Record the numbers.
-- Read the whole diff, not the PR description of it. `gh pr diff <n> --repo Zingzy/wsp`. Then read every changed file in full, not just the hunks; the bug is usually in the line above the hunk.
+- Read the whole diff, not the PR description of it. `gh pr diff <n> --repo wsp-labs/wsp`. Then read every changed file in full, not just the hunks; the bug is usually in the line above the hunk.
 
 ## 3. How to think
 
@@ -79,7 +79,7 @@ Before posting, read what is already on both sides.
 - Ticket: earlier review rounds and the builder's replies. Do not re-raise what was fixed; say "fixed since last round" for each earlier finding you re-checked.
 - PR review threads:
   ```
-  gh api graphql -f query='query{repository(owner:"Zingzy",name:"wsp"){pullRequest(number:<n>){reviewThreads(first:100){nodes{id isResolved isOutdated path line comments(first:5){nodes{body author{login}}}}}}}}'
+  gh api graphql -f query='query{repository(owner:"wsp-labs",name:"wsp"){pullRequest(number:<n>){reviewThreads(first:100){nodes{id isResolved isOutdated path line comments(first:5){nodes{body author{login}}}}}}}}'
   ```
   For each unresolved thread: if the code it points at was fixed or the concern no longer applies on the merged tree, reply with one line saying why and resolve it:
   ```
@@ -94,9 +94,9 @@ Post both comments every time, even when the gate failed, even when you are unsu
 **On the ticket (wsp-map), one comment, the full review:**
 verdict; ticket fidelity per acceptance item; plan alignment and any ruling you need from the coordinator; every finding with file:line and the law; gate numbers from your worktree; what you ran live and what it showed (machine ids you created and killed, never anything you did not create); threads resolved on the PR and why; a line on what the diff did well. Link the PR.
 
-**On the PR (Zingzy/wsp), the code review only:**
+**On the PR (wsp-labs/wsp), the code review only:**
 ```
-gh pr review <n> --repo Zingzy/wsp --comment --body "..."         # or --request-changes when there are findings
+gh pr review <n> --repo wsp-labs/wsp --comment --body "..."         # or --request-changes when there are findings
 ```
 Inline comments for findings that point at a line, via the review API with `path`, `line`, `side: RIGHT`. Rules for everything on the PR:
 - One-line summary first, then the findings, each two sentences at most: what breaks, how to fix.

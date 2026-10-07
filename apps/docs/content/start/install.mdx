@@ -11,7 +11,7 @@ import { Callout, Tabs, Tab } from 'scalar-mdx-components'
 ## The command line
 
 ```bash
-npm i -g @zingzy/wsp
+npm i -g @wsp-labs/wsp
 ```
 
 `wsp --version` prints the version. The same package holds the command line, the host and the app, so this is the whole install.
@@ -51,12 +51,12 @@ wsp up
 
 serves the app at `http://127.0.0.1:4400` and the runtime behind it, until you stop it. You do not have to type it: the first command that needs a host starts one and says so. `wsp up --service` hands the same line to your computer's service manager, a launchd agent on a Mac and a systemd user unit on Linux, so it serves now and again at every login; `wsp down` stops that, and it stops a host a command started.
 
-The browser `wsp init` opens is yours: init lets it in with a code it minted. Another browser on this computer pairs as a device, with a code from `wsp host pair`. The desktop app installs the host as your computer's own service on its first launch and opens the app on it. Bundles for macOS and Linux are on the [releases page](https://github.com/Zingzy/wsp/releases).
+The browser `wsp init` opens is yours: init lets it in with a code it minted. Another browser on this computer pairs as a device, with a code from `wsp host pair`. The desktop app installs the host as your computer's own service on its first launch and opens the app on it. Bundles for macOS and Linux are on the [releases page](https://github.com/wsp-labs/wsp/releases).
 
 ## Building from source
 
 ```bash
-git clone https://github.com/Zingzy/wsp.git && cd wsp
+git clone https://github.com/wsp-labs/wsp.git && cd wsp
 pnpm install && pnpm build
 pnpm wsp init
 ```

@@ -22,7 +22,7 @@ import { VERSION } from "./version.js";
 export { MCP_SERVER_NAME };
 
 /** The package `npx` fetches wsp from. */
-const NPM_PACKAGE = "@zingzy/wsp";
+const NPM_PACKAGE = "@wsp-labs/wsp";
 
 /** The folder under npm's cache where npx keeps what it ran; a path through it dies with a cache sweep. */
 const NPX_CACHE_DIR = "_npx";

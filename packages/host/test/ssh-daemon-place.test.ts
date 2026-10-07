@@ -54,7 +54,7 @@ function emptyCli(): string {
   const dir = mkdtempSync(join(tmpdir(), "wsp-cli-"));
   mkdirSync(join(dir, "dist"), { recursive: true });
   writeFileSync(join(dir, "dist", "bin.js"), "");
-  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@zingzy/wsp", version: "0.0.0" }));
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@wsp-labs/wsp", version: "0.0.0" }));
   return dir;
 }
 /** One chip a guest can be, for every line that names the binary by its own path. */

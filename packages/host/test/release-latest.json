@@ -1,8 +1,8 @@
 {
-  "url": "https://api.github.com/repos/Zingzy/wsp/releases/386430748",
-  "assets_url": "https://api.github.com/repos/Zingzy/wsp/releases/386430748/assets",
-  "upload_url": "https://uploads.github.com/repos/Zingzy/wsp/releases/386430748/assets{?name,label}",
-  "html_url": "https://github.com/Zingzy/wsp/releases/tag/v0.2.0",
+  "url": "https://api.github.com/repos/wsp-labs/wsp/releases/386430748",
+  "assets_url": "https://api.github.com/repos/wsp-labs/wsp/releases/386430748/assets",
+  "upload_url": "https://uploads.github.com/repos/wsp-labs/wsp/releases/386430748/assets{?name,label}",
+  "html_url": "https://github.com/wsp-labs/wsp/releases/tag/v0.2.0",
   "id": 386430748,
   "author": {
     "login": "github-actions[bot]",
@@ -21,7 +21,7 @@
   "published_at": "2026-09-10T16:06:44Z",
   "assets": [
     {
-      "url": "https://api.github.com/repos/Zingzy/wsp/releases/assets/555339894",
+      "url": "https://api.github.com/repos/wsp-labs/wsp/releases/assets/555339894",
       "id": 555339894,
       "node_id": "RA_kwDOULIAx84hGdB2",
       "name": "wsp-0.2.0-mac.dmg",
@@ -38,10 +38,10 @@
       "download_count": 1,
       "created_at": "2026-09-10T16:06:02Z",
       "updated_at": "2026-09-10T16:06:17Z",
-      "browser_download_url": "https://github.com/Zingzy/wsp/releases/download/v0.2.0/wsp-0.2.0-mac.dmg"
+      "browser_download_url": "https://github.com/wsp-labs/wsp/releases/download/v0.2.0/wsp-0.2.0-mac.dmg"
     },
     {
-      "url": "https://api.github.com/repos/Zingzy/wsp/releases/assets/555336689",
+      "url": "https://api.github.com/repos/wsp-labs/wsp/releases/assets/555336689",
       "id": 555336689,
       "node_id": "RA_kwDOULIAx84hGcPx",
       "name": "wsp-0.2.0.AppImage",
@@ -58,10 +58,10 @@
       "download_count": 0,
       "created_at": "2026-09-10T16:03:57Z",
       "updated_at": "2026-09-10T16:04:01Z",
-      "browser_download_url": "https://github.com/Zingzy/wsp/releases/download/v0.2.0/wsp-0.2.0.AppImage"
+      "browser_download_url": "https://github.com/wsp-labs/wsp/releases/download/v0.2.0/wsp-0.2.0.AppImage"
     },
     {
-      "url": "https://api.github.com/repos/Zingzy/wsp/releases/assets/555336690",
+      "url": "https://api.github.com/repos/wsp-labs/wsp/releases/assets/555336690",
       "id": 555336690,
       "node_id": "RA_kwDOULIAx84hGcPy",
       "name": "wsp-linux.AppImage",
@@ -78,10 +78,10 @@
       "download_count": 1,
       "created_at": "2026-09-10T16:03:57Z",
       "updated_at": "2026-09-10T16:04:01Z",
-      "browser_download_url": "https://github.com/Zingzy/wsp/releases/download/v0.2.0/wsp-linux.AppImage"
+      "browser_download_url": "https://github.com/wsp-labs/wsp/releases/download/v0.2.0/wsp-linux.AppImage"
     },
     {
-      "url": "https://api.github.com/repos/Zingzy/wsp/releases/assets/555339892",
+      "url": "https://api.github.com/repos/wsp-labs/wsp/releases/assets/555339892",
       "id": 555339892,
       "node_id": "RA_kwDOULIAx84hGdB0",
       "name": "wsp-mac.dmg",
@@ -98,10 +98,10 @@
       "download_count": 3,
       "created_at": "2026-09-10T16:06:02Z",
       "updated_at": "2026-09-10T16:06:16Z",
-      "browser_download_url": "https://github.com/Zingzy/wsp/releases/download/v0.2.0/wsp-mac.dmg"
+      "browser_download_url": "https://github.com/wsp-labs/wsp/releases/download/v0.2.0/wsp-mac.dmg"
     }
   ],
-  "tarball_url": "https://api.github.com/repos/Zingzy/wsp/tarball/v0.2.0",
-  "zipball_url": "https://api.github.com/repos/Zingzy/wsp/zipball/v0.2.0",
+  "tarball_url": "https://api.github.com/repos/wsp-labs/wsp/tarball/v0.2.0",
+  "zipball_url": "https://api.github.com/repos/wsp-labs/wsp/zipball/v0.2.0",
   "body": "## What changed since v0.1.4\n"
 }

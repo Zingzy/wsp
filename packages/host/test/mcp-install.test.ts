@@ -66,11 +66,11 @@ describe("installing the MCP server for a local agent", () => {
     writeFileSync(join(home, "node", "bin", "npx"), "#!/usr/bin/env node\n");
     const cached = join(home, ".npm", "_npx", "ee7519ab73f4721e", "node_modules", ".bin", "wsp");
     const npx: RunningWsp = { ...PROC, execPath: join(home, "node", "bin", "node"), argv: [join(home, "node", "bin", "node"), cached, "mcp", "install"], PATH: `${join(home, "bin")}:/usr/bin` };
-    expect(mcpServerSpec(statePath, npx)).toEqual({ command: join(home, "node", "bin", "npx"), args: ["-y", "@zingzy/wsp@0.1.2", "mcp", "--state", statePath] });
-    const resolved = { ...npx, argv: [npx.execPath, join(home, ".npm", "_npx", "ee7519ab73f4721e", "node_modules", "@zingzy", "wsp", "dist", "bin.js")] };
+    expect(mcpServerSpec(statePath, npx)).toEqual({ command: join(home, "node", "bin", "npx"), args: ["-y", "@wsp-labs/wsp@0.1.2", "mcp", "--state", statePath] });
+    const resolved = { ...npx, argv: [npx.execPath, join(home, ".npm", "_npx", "ee7519ab73f4721e", "node_modules", "@wsp-labs", "wsp", "dist", "bin.js")] };
     expect(mcpServerSpec(statePath, resolved).command).toBe(join(home, "node", "bin", "npx"));
     const bareNode: RunningWsp = { ...npx, execPath: "/opt/node/bin/node", argv: ["/opt/node/bin/node", cached] };
-    expect(mcpServerSpec(statePath, bareNode)).toEqual({ command: "npx", args: ["-y", "@zingzy/wsp@0.1.2", "mcp", "--state", statePath] });
+    expect(mcpServerSpec(statePath, bareNode)).toEqual({ command: "npx", args: ["-y", "@wsp-labs/wsp@0.1.2", "mcp", "--state", statePath] });
   });
 
   it("the default reading of the process is this node, its flags and argv, its PATH and the running package's version, the one an npx pin names", () => {
@@ -80,10 +80,10 @@ describe("installing the MCP server for a local agent", () => {
   });
 
   it("run as the wsp on PATH, the server's command is that binary and the word mcp, through a symlinked PATH folder too", () => {
-    mkdirSync(join(home, ".local", "lib", "node_modules", "@zingzy", "wsp", "dist"), { recursive: true });
+    mkdirSync(join(home, ".local", "lib", "node_modules", "@wsp-labs", "wsp", "dist"), { recursive: true });
     mkdirSync(join(home, ".local", "bin"), { recursive: true });
-    writeFileSync(join(home, ".local", "lib", "node_modules", "@zingzy", "wsp", "dist", "bin.js"), "#!/usr/bin/env node\n");
-    symlinkSync("../lib/node_modules/@zingzy/wsp/dist/bin.js", join(home, ".local", "bin", "wsp"));
+    writeFileSync(join(home, ".local", "lib", "node_modules", "@wsp-labs", "wsp", "dist", "bin.js"), "#!/usr/bin/env node\n");
+    symlinkSync("../lib/node_modules/@wsp-labs/wsp/dist/bin.js", join(home, ".local", "bin", "wsp"));
     const bin = join(home, ".local", "bin", "wsp");
     const global: RunningWsp = { ...PROC, argv: ["/opt/node/bin/node", bin, "mcp", "install"], PATH: `/usr/bin:${join(home, ".local", "bin")}` };
     expect(mcpServerSpec(statePath, global)).toEqual({ command: bin, args: ["mcp", "--state", statePath] });

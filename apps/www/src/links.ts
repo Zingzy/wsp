@@ -2,11 +2,11 @@
 import { RELEASES, REPO } from "../../../packages/protocol/src/bundles.mjs";
 
 export { RELEASES, REPO };
-export const INSTALL = "npm i -g @zingzy/wsp";
+export const INSTALL = "npm i -g @wsp-labs/wsp";
 export const DOCS = "https://wsp.apidocumentation.com";
 export const ISSUES = `${REPO}/issues`;
 export const README = `${REPO}#readme`;
-export const NPM = "https://www.npmjs.com/package/@zingzy/wsp";
+export const NPM = "https://www.npmjs.com/package/@wsp-labs/wsp";
 export const SOLARI = "https://console.getsolari.com";
 export const AUTHOR = "https://github.com/Zingzy";
 export const X = "https://x.com/AdityaSinghi5";

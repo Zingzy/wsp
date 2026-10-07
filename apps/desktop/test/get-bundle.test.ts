@@ -12,9 +12,9 @@ import { BUNDLE_WORDS, IN_PLACE_HOVER, askedVersion, bundleHover, bundleShell, g
 
 const BYTES = Buffer.from("a disk image, as far as this test is concerned");
 const SUM = createHash("sha256").update(BYTES).digest("hex");
-const TAG_URL = "https://api.github.com/repos/Zingzy/wsp/releases/tags/v0.3.0";
-const DMG_URL = "https://github.com/Zingzy/wsp/releases/download/v0.3.0/wsp-0.3.0-mac.dmg";
-const ZIP_URL = "https://github.com/Zingzy/wsp/releases/download/v0.3.0/wsp-0.3.0-mac.zip";
+const TAG_URL = "https://api.github.com/repos/wsp-labs/wsp/releases/tags/v0.3.0";
+const DMG_URL = "https://github.com/wsp-labs/wsp/releases/download/v0.3.0/wsp-0.3.0-mac.dmg";
+const ZIP_URL = "https://github.com/wsp-labs/wsp/releases/download/v0.3.0/wsp-0.3.0-mac.zip";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -73,7 +73,7 @@ describe("the download", () => {
     const hub = github();
     const d = deps({ platform: "linux", fetch: hub.fetch });
     expect(await getBundle("0.3.0", d)).toEqual({ ok: true, file: join(d.dir, "wsp-0.3.0.AppImage"), sum: SUM });
-    expect(hub.asked.at(-1)).toBe("https://github.com/Zingzy/wsp/releases/download/v0.3.0/wsp-0.3.0.AppImage");
+    expect(hub.asked.at(-1)).toBe("https://github.com/wsp-labs/wsp/releases/download/v0.3.0/wsp-0.3.0.AppImage");
     const none = github();
     expect(await getBundle("0.3.0", deps({ platform: "win32", fetch: none.fetch }))).toEqual({ ok: false, error: BUNDLE_WORDS.noBundle("win32") });
     expect(none.asked).toEqual([]);
@@ -82,7 +82,7 @@ describe("the download", () => {
   it("follows the smoke's variable for the answer and the download both", async () => {
     const hub = github();
     await getBundle("0.3.0", deps({ fetch: hub.fetch, env: { [RELEASE_API_ENV]: "http://127.0.0.1:9911" } }));
-    expect(hub.asked).toEqual(["http://127.0.0.1:9911/repos/Zingzy/wsp/releases/tags/v0.3.0", "http://127.0.0.1:9911/Zingzy/wsp/releases/download/v0.3.0/wsp-0.3.0-mac.dmg"]);
+    expect(hub.asked).toEqual(["http://127.0.0.1:9911/repos/wsp-labs/wsp/releases/tags/v0.3.0", "http://127.0.0.1:9911/wsp-labs/wsp/releases/download/v0.3.0/wsp-0.3.0-mac.dmg"]);
   });
 
   it("keeps nothing whose sha256 is not the published one, and says so", async () => {

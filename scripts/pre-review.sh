@@ -10,7 +10,7 @@
 set -u
 
 usage='usage: scripts/pre-review.sh [--laws] [--build] [<ticket number>]'
-tickets=Zingzy/wsp-map
+tickets=wsp-labs/wsp-map
 root=$(git rev-parse --show-toplevel) || exit 2
 cd "$root" || exit 2
 
@@ -43,6 +43,7 @@ LAWS=(
   packages/protocol/test/daemon-contract.test.ts
   packages/protocol/test/area-notes.test.ts
   packages/protocol/test/test-hygiene.test.ts
+  packages/protocol/test/repo-names.test.ts
 )
 
 failed=0

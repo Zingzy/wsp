@@ -499,7 +499,7 @@ describe("settling on merge", () => {
   });
 });
 
-/** A page as git.prView answers it, its items off PR 772 of Zingzy/wsp: a bot's comment, a review, and a comment on a
+/** A page as git.prView answers it, its items off PR 772 of wsp-labs/wsp: a bot's comment, a review, and a comment on a
  * line with its hunk. */
 const PAGE = {
   title: "t",

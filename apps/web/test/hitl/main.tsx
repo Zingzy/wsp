@@ -31,7 +31,7 @@ applyTheme({ theme, ...picks }, theme === "dark");
 const screen = params.get("screen") ?? "single";
 
 const HERE: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", mac: "macbook", default: true, present: true, shape: { cpu: 10, memMb: 16384 }, takesForks: false, agentVersions: { claude: "2.1.286", codex: "0.47.0" } };
-const PROJECT: ProjectView = { id: "pr_wsp", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/zingzy/wsp" }, path: "/Users/zingzy/wsp", remote: "github.com/Zingzy/wsp", defaultBranch: "main", memoryKey: "pr_wsp", memoryDir: "/m" } as ProjectView;
+const PROJECT: ProjectView = { id: "pr_wsp", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/zingzy/wsp" }, path: "/Users/zingzy/wsp", remote: "github.com/wsp-labs/wsp", defaultBranch: "main", memoryKey: "pr_wsp", memoryDir: "/m" } as ProjectView;
 const MAC: WorkspaceView = { id: "ws_m", name: "wsp", kind: "local", machineId: "local", project: { id: PROJECT.id, name: PROJECT.name, path: PROJECT.path, computer: "here" }, phase: "running", golden: "", createdAt: "2026-10-03T09:00:00Z", place: "here" } as WorkspaceView;
 const workspaces = [MAC];
 
@@ -110,7 +110,7 @@ const PROMPTS: Record<string, { toolName: string; input: string; detail?: string
   },
   edit: { toolName: "Edit", toolUseId: "toolu_e", input: JSON.stringify({ file_path: "/Users/zingzy/wsp/apps/web/src/sidebar/ThreadTile.tsx", old_string: EDIT_OLD, new_string: EDIT_NEW }), detail: "ThreadTile.tsx", options: consentOptions },
   write: { toolName: "Write", toolUseId: "toolu_w", input: JSON.stringify({ file_path: "/Users/zingzy/wsp/apps/web/test/needs-you.test.tsx", content: 'import { describe, expect, it } from "vitest";\n\ndescribe("a waiting tile", () => {\n  it("keeps the foreground ink", () => {\n    expect(true).toBe(true);\n  });\n});\n' }), detail: "needs-you.test.tsx", options: consentOptions },
-  mcp: { toolName: "mcp__github__create_issue", toolUseId: "toolu_m", input: JSON.stringify({ owner: "Zingzy", repo: "wsp-map", title: "Prompts where the composer stands", labels: ["design"] }), options: consentOptions },
+  mcp: { toolName: "mcp__github__create_issue", toolUseId: "toolu_m", input: JSON.stringify({ owner: "wsp-labs", repo: "wsp-map", title: "Prompts where the composer stands", labels: ["design"] }), options: consentOptions },
   fetch: { toolName: "WebFetch", toolUseId: "toolu_f", input: JSON.stringify({ url: "https://code.claude.com/docs/en/agent-sdk/permissions", prompt: "List the PermissionUpdate destinations" }), options: consentOptions },
   codex: { toolName: "command_execution", toolUseId: "exec-267f4a9f", input: JSON.stringify({ command: "/bin/zsh -lc 'touch hi.txt'", cwd: "/Users/zingzy/wsp" }), detail: "Allow me to create hi.txt in the current folder?", options: codexOptions },
 };

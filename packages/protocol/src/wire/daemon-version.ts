@@ -140,6 +140,7 @@ const DAEMON_CONTENTS = [
   "31a6bcca711ff0e60f8953d4b8e5544bab64c3143c956122fc2a781a3a653a64",
   "2540fa408c276c18c468074087ba6a23d1c0607d2324b74db6ef7ff07ad89bd7",
   "7ce975e245d718211ba30c356b6fbc500fc2c9170924b46b974ae3f93e8f0508",
+  "1597d4f2ea2cdebc749b7771600c6e7e0bd8138057410b65077314a06ed83ac6",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -501,7 +502,9 @@ const DAEMON_CONTENTS = [
  * Version 129: hold the ports a test counts on being refused.
  * Version 130: git lines put a separator before every name a checkout or a frame chose, a push and a fetch no longer
  * read a branch named as a flag, and a pane's save, a terminal's size file and a door's mode go through a folder's
- * descriptor. */
+ * descriptor.
+ * Version 131: the contract fixtures and the daemon's tests name the repo wsp-labs/wsp; nothing the daemon does
+ * changed. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

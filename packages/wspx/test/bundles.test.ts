@@ -30,11 +30,11 @@ describe("where a download is reached", () => {
   it("is the newest release's copy, which is the only link that survives a release", () => {
     expect(downloadUrl(STABLE_NAMES.mac)).toBe(`${REPO}/releases/latest/download/wsp-mac.dmg`);
     expect(downloadUrl(STABLE_NAMES.appImage)).toBe(`${REPO}/releases/latest/download/wsp-linux.AppImage`);
-    expect(REPO).toBe("https://github.com/Zingzy/wsp");
+    expect(REPO).toBe("https://github.com/wsp-labs/wsp");
   });
 
   it("has one page for anything with no single asset to point at, which the site's footer and the app's version line both read", () => {
-    expect(RELEASES).toBe("https://github.com/Zingzy/wsp/releases");
+    expect(RELEASES).toBe("https://github.com/wsp-labs/wsp/releases");
   });
 });
 

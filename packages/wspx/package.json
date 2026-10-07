@@ -1,5 +1,5 @@
 {
-  "name": "@zingzy/wsp",
+  "name": "@wsp-labs/wsp",
   "version": "0.2.0",
   "description": "Your setup, on cloud machines, for coding agents. Installs the wsp command.",
   "type": "module",
@@ -22,15 +22,15 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Zingzy/wsp.git",
+    "url": "git+https://github.com/wsp-labs/wsp.git",
     "directory": "packages/wspx"
   },
-  "homepage": "https://github.com/Zingzy/wsp#readme",
+  "homepage": "https://github.com/wsp-labs/wsp#readme",
   "bugs": {
-    "url": "https://github.com/Zingzy/wsp/issues"
+    "url": "https://github.com/wsp-labs/wsp/issues"
   },
   "scripts": {
-    "build:deps": "pnpm --filter \"@zingzy/wsp^...\" build",
+    "build:deps": "pnpm --filter \"@wsp-labs/wsp^...\" build",
     "build": "tsup && node scripts/stage.mjs",
     "release": "node scripts/release.mjs",
     "smoke": "cd ../.. && WSP_PACK_SMOKE=1 vitest run --project node packages/wspx/test/smoke.pack.test.ts"

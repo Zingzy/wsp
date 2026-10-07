@@ -182,7 +182,7 @@ describe("the message that asks the agent to fix a conflict, and the verbs' line
 });
 
 describe("the message that sends a pull request's comments to the agent", () => {
-  // Off PR 772 of Zingzy/wsp: the first comment on a line with its hunk, and a bot's comment in the conversation, each
+  // Off PR 772 of wsp-labs/wsp: the first comment on a line with its hunk, and a bot's comment in the conversation, each
   // with the association GitHub answered; a member's review and a stranger's comment on a line beside them.
   const page: Pick<GitPrViewReply, "comments" | "reviews" | "reviewComments"> = {
     comments: [

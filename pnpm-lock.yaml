@@ -33,6 +33,9 @@ importers:
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
+      '@wsp-labs/wsp':
+        specifier: workspace:*
+        version: link:../../packages/wspx
       '@wsp/catalog':
         specifier: workspace:*
         version: link:../../packages/catalog
@@ -48,9 +51,6 @@ importers:
       '@wsp/web':
         specifier: workspace:*
         version: link:../web
-      '@zingzy/wsp':
-        specifier: workspace:*
-        version: link:../../packages/wspx
       electron:
         specifier: 43.5.1
         version: 43.5.1

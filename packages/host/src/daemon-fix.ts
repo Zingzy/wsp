@@ -9,7 +9,7 @@ import { sep } from "node:path";
 import type { RunningWsp } from "./mcp-install.js";
 
 /** The published package, as an install line names it. */
-const NPM_PACKAGE = "@zingzy/wsp";
+const NPM_PACKAGE = "@wsp-labs/wsp";
 
 type Road = "npm" | "app" | "checkout";
 
