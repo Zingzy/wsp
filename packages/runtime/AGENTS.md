@@ -10,9 +10,9 @@ An agent writes everything in its copy, the gh on its PATH included, and the dae
 
 ## Invariants
 
-1. A restarted host re-opens each running turn by its handle and reads its log from the first byte, keeping a reply that landed while it was down (`test/local-exec.test.ts`).
+1. A restarted host re-opens each running turn by its handle and reads its log from byte 0, keeping a reply that landed meanwhile (`test/local-exec.test.ts`).
 2. A re-opened turn writes no row twice: `turnWritten()` counts what it wrote and the replay skips that much (`test/subagents.test.ts`).
-3. Where a request came from is stamped off its token, never the client's word: a thread's token reads as relayed (`test/spawn-guard.test.ts`).
+3. A request's origin is stamped off its token, never the client's word (`test/spawn-guard.test.ts`).
 4. Nothing posts as the person through a copy's gh (`postAsPerson()`), and a merge sends the head the person was shown (`test/pull-request.test.ts`).
 5. A transcript that does not parse is set aside and every later turn is still written (`test/transcript-index.test.ts`).
 6. A computer's record is read and written in its turn with `change()`, so no writer drops another's fields (`test/places-setup.test.ts`).
@@ -25,11 +25,11 @@ An agent writes everything in its copy, the gh on its PATH included, and the dae
 - Three roads make a worktree record: all go through `worktreeRecordAt()`, which keeps `madeFor`, or the thread's own tree refuses it (#1607).
 - `ls-remote --exit-code` exits 2 for a branch never pushed and for one deleted: ask `branchGoneAtRemote()` (#1607).
 - A daemon op on a folder outside the home needs it in the roots file: `writeDaemonRoots()` writes it whole from every live checkout, the import via `kind.roots` with its two paths alone (#1607, #1645, #1774).
-- A folder record no thread names stands on nothing: count with `bareFolder()` (`packages/protocol/src/projects.ts`); the recipe's `removeFolder` still counts every record (#1634).
-- A new kind of turn row is counted in `turnWritten()` and skipped on replay, or a restart writes it twice (#1577, #1613, #1644).
+- A folder record no thread names stands on nothing: count with `bareFolder()` (`packages/protocol/src/projects.ts`); `removeFolder` counts every record (#1634).
 - A prompt held back at launch goes in the seed file on disk, not memory alone (#1620, #1665).
+- A turn's rows carry the agent's session id (`claudeSessionId`), while `sessions` is keyed by the launch's id, which a Codex thread's first process does not share: look up both, as `answer()` does (#1776).
 - `end()` hands `settleCut()` a fresh literal: change the row through its entry in `sessions` (#1646).
-- `sharedFolder()` compares the cwd exactly, so two threads in subfolders of one repo read as not sharing it (#1664).
+- `sharedFolder()` compares checkout tops, not cwds: threads in two subfolders of one repo share it (#1664).
 - Trim a transcript with `dropOldest()`, and set aside any blob that does not parse or the table refuses (#1520, #1666, #1722).
 - An undo is wsp's only when its owner row reads installed, never when any id of its group does (#1481).
 - A vault value reaches an owned computer on stdin with `withEnvFromInput()` (`packages/engine/src/run-env.ts`); a clone there runs no setup-git (#1482).

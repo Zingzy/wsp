@@ -62,8 +62,10 @@ export const AgentRow = z.object({
   pinned: z.string().optional(),
   road: AgentRoad,
   /** The command on PATH is a script that installs the agent on its first run, which is still to come (Omarchy's mise
-   * wrappers): nothing ran it, so no version stands and its own sign-in was not asked. */
+   * wrappers, ASCII's lazy-run shims): nothing ran it, so no version stands and its own sign-in was not asked. */
   installsOnFirstRun: z.literal(true).optional(),
+  /** Its `--version` exited non-zero there, so no version stands and what it printed is shown nowhere. */
+  versionUnread: z.literal(true).optional(),
   /** Where the command answers from, `~`-relative under the home: past any wrapper another app put first on PATH. */
   path: z.string().optional(),
   /** The app whose wrapper answers first on the login PATH, in front of the binary at path. */
