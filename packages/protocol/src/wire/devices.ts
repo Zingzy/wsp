@@ -105,7 +105,7 @@ export const ACCOUNT_TICKET_REFUSAL = "a socket let in on a ticket cannot see th
 
 /** The relay wsp signs in to when a person names none: the one this project runs, opt in as every account road is,
  * and the only address the lines carry by default. Another relay is named on the line that signs in. */
-export const DEFAULT_RELAY = "https://relay.singhi.me";
+export const DEFAULT_RELAY = "https://relay.usewsp.com";
 
 /** What one computer already on the account signs for another: the key it admits, its own key, and the moment.
  * The relay stores these bytes and can make none of them, since it holds no device's private key; every host

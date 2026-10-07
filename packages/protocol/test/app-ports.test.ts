@@ -99,7 +99,7 @@ describe("the address a person types to join a wsp", () => {
     expect(joinAddressOf("old-macbook.local:4400")).toBe("http://old-macbook.local:4400");
     expect(joinAddressOf("[::1]:4400")).toBe("http://[::1]:4400");
     expect(joinAddressOf("http://192.168.1.20:7788")).toBe("http://192.168.1.20:7788");
-    expect(joinAddressOf("https://p-x.singhi.me")).toBe("https://p-x.singhi.me");
+    expect(joinAddressOf("https://p-x.usewsp.com")).toBe("https://p-x.usewsp.com");
   });
 
   it("is nothing for a word that names no wsp: a name with no port, a socket address, an empty field", () => {
