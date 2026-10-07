@@ -5,6 +5,7 @@ import { type MessageId, type MessagesTimelineRow, type ProviderSkill, type Time
 import { createContext } from "react";
 import { type SessionRunEvent } from "@wsp/protocol";
 import type { ExpandedImagePreview } from "../ExpandedImagePreview";
+import type { AnswerPrompt } from "../answerPrompt";
 import { type WorkGroupScrollAnchor } from "../MessagesTimeline.logic";
 
 // ---------------------------------------------------------------------------
@@ -33,7 +34,7 @@ export interface TimelineRowSharedState {
   onToggleTurnFold: (turnId: TurnId) => void;
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   onToggleWorkEntry: (anchorKey: string) => void;
-  onAnswerPermission: (sessionId: string, askId: string, optionId: string) => void;
+  onAnswerPermission: AnswerPrompt;
   dockedAskId: string | null;
   workGroupViewState: WorkGroupViewState;
   replyRuns: ReplyRuns | null;

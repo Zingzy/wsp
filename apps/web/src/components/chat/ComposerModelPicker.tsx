@@ -39,6 +39,9 @@ export interface ModelPickerProps {
   pinned: boolean;
   /** Where this workspace's turns run, as the rest of the app names it, for the footer's sentences. */
   where: string;
+  /** That computer's state while it is not answering, as the app reads it everywhere: the foot says it ahead of any
+   * agent's own words, since the lists shown are then wsp's table and no agent there was asked. */
+  away?: string | null;
   /** Put the rail in front of the person: a project nobody has run an agent on has no agent to default to, so the
    * list is opened for them the one time. It takes no focus, since the box under it is where the ask is typed. */
   onPickHarness: (harness: string) => void;
@@ -108,7 +111,7 @@ export function newThreadNotice(entry: HarnessCatalog): string {
 const RAIL_TAB =
   "relative flex aspect-square w-full items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 before:absolute before:top-2 before:bottom-2 before:-left-1.5 before:w-0.5 before:rounded-full hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, onPickHarness, onPickModel, multi }: ModelPickerProps) {
+export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, away = null, onPickHarness, onPickModel, multi }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [onlyStarred, setOnlyStarred] = useState(false);
@@ -121,8 +124,9 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
   const shown = (viewing === null ? undefined : catalogs.find(entry => entry.harness === viewing)) ?? catalog;
   const current = shown.harness === catalog.harness ? model : null;
   const browsing = multi !== undefined && multi.picks.length > 0;
-  // An agent that described nothing says why here, such as a CLI that is not signed in; a notice outranks it while it stands.
-  const foot = notice ?? shown.refusal ?? (multi !== undefined ? ADD_MODEL_LINE : null);
+  // An agent that described nothing says why here, such as a CLI that is not signed in; a notice outranks it while it
+  // stands, and so does a computer that is not answering, where no agent was asked at all.
+  const foot = notice ?? away ?? shown.refusal ?? (multi !== undefined ? ADD_MODEL_LINE : null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const favourites = useComposerFavouritesStore(s => s.keys);
   const toggle = useComposerFavouritesStore(s => s.toggle);

@@ -61,13 +61,29 @@ const dying: HarnessAdapterFactory = () => ({
   },
 });
 
+/** The id a launch hands the runtime and the id its events carry, which are one id unless the harness names its own
+ * session. */
+type SessionIds = (resume: string | undefined) => { localId: string; session: string };
+const oneId: SessionIds = resume => {
+  const id = resume ?? randomUUID();
+  return { localId: id, session: id };
+};
+/** Codex's: the launch is keyed by an id of its own, and the app-server names the thread it opened, which a resume
+ * then names. */
+const codexIds: SessionIds = resume => (resume === undefined ? { localId: randomUUID(), session: randomUUID() } : { localId: resume, session: resume });
+/** Claude's, where the CLI re-keys a resumed session: the launch resumes the thread's id and system/init names a new one. */
+const claudeRekeyIds: SessionIds = resume => {
+  const localId = resume ?? randomUUID();
+  return { localId, session: resume === undefined ? localId : randomUUID() };
+};
+
 /** An adapter whose turn raises whatever prompt the test tells it to and answers by handing the answer back, the way
  * the claude adapter's control channel does; the close event is the adapter's, as it is there. */
-function askingAdapter(turns: Turn[]): HarnessAdapterFactory {
+function askingAdapter(turns: Turn[], ids: SessionIds = oneId): HarnessAdapterFactory {
   return () => ({
     steers: false,
     start: ({ onEvent, resume }) => {
-      const session = resume ?? randomUUID();
+      const { localId, session } = ids(resume);
       const open = new Map<string, PermissionAsk>();
       const answers: Turn["answers"] = [];
       let interrupted = false;
@@ -96,7 +112,7 @@ function askingAdapter(turns: Turn[]): HarnessAdapterFactory {
         interrupted: () => interrupted,
       });
       return {
-        localId: session,
+        localId,
         finished,
         interrupt: async () => {
           interrupted = true;
@@ -202,6 +218,41 @@ describe("a permission prompt relayed into the chat", () => {
     expect(closes(await history(workspaceId))).toHaveLength(1);
     turn.reply();
     await handle.finished;
+  });
+
+  /** Answers the open prompt the way the app and `wsp thread allow` do, by the session id its row carries. */
+  const allowByRow = async (workspaceId: string, turn: Turn, handleId: string): Promise<void> => {
+    turn.raise();
+    await vi.waitFor(async () => expect(prompts(await history(workspaceId))).toHaveLength(1));
+    const row = prompts(await history(workspaceId))[0]!;
+    expect(row.sessionId).not.toBe(handleId);
+    expect(await rt.sessions.answer(row.sessionId, { askId: "ask_1", optionId: PERMISSION_ALLOW })).toEqual({ outcome: "answered" });
+    expect(turn.answers).toMatchObject([{ askId: "ask_1", optionId: PERMISSION_ALLOW, outcome: "allowed" }]);
+    expect(closes(await history(workspaceId))).toMatchObject([{ askId: "ask_1", outcome: "allowed" }]);
+  };
+
+  it("is answered by its row's session id on a Codex thread, whose app-server names a thread id of its own", async () => {
+    rt = runtime({ codex: askingAdapter(turns, codexIds) });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "write it", harness: "codex", permissionMode: "read-only" });
+    await vi.waitFor(() => expect(turns).toHaveLength(1));
+    await allowByRow(ws.id, turns[0]!, handle.id);
+    turns[0]!.reply();
+    await handle.finished;
+  });
+
+  it("is answered by its row's session id on a Claude thread asking in a mode that asks, after the CLI re-keyed its resume", async () => {
+    rt = runtime({ claude: askingAdapter(turns, claudeRekeyIds) });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const first = await rt.sessions.start(ws.id, { prompt: "one", permissionMode: "default" });
+    await vi.waitFor(() => expect(turns).toHaveLength(1));
+    turns[0]!.reply();
+    await first.finished;
+    const next = await rt.sessions.start(ws.id, { prompt: "write it", thread: first.view().threadId, permissionMode: "default" });
+    await vi.waitFor(() => expect(turns).toHaveLength(2));
+    await allowByRow(ws.id, turns[1]!, next.id);
+    turns[1]!.reply();
+    await next.finished;
   });
 
   it("carries a subagent's prompt and a subagent's lines to the chat with the call that launched them", async () => {

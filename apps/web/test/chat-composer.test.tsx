@@ -4,7 +4,7 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_PREFERENCES, HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, type EventUnion, type HarnessCatalog, type HostItem, type ProjectView, type SessionEvent, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HERE_PLACE_ID, HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, type EventUnion, type HarnessCatalog, type HostItem, type ProjectView, type SessionEvent, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { clickIntoEditor, composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -29,6 +29,7 @@ import { CHAT_HARNESS, CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtur
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { clearNotices, lastNotice } from "./notice-text.js";
+import { forgetAgentsReports } from "../src/components/agents/useAgentsReport.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
@@ -1607,5 +1608,76 @@ describe("a file dragged over the chat", () => {
     fireEvent.dragEnter(transcript, { dataTransfer: { files: [], items: [], types: ["text/plain"], getData: () => "words" } });
     await new Promise(r => setTimeout(r, 20));
     expect(zone()).toBeNull();
+  });
+});
+
+describe("a first send on this computer", () => {
+  beforeEach(() => {
+    forgetAgentsReports();
+    useStore.setState({ places: [{ id: HERE_PLACE_ID, kind: "computer", name: "ada-mac", default: true, present: true }] });
+  });
+  const { claudeSessionId: _resumed, ...unstarted } = workspace;
+  const fresh: WorkspaceView = { ...unstarted, kind: "local" };
+  const report = (signIn: "signed-in" | "none") => ({
+    target: { workspaceId: WS },
+    home: "/Users/ada",
+    user: "ada",
+    readAt: "2026-10-05T22:44:00Z",
+    agents: [{ id: "claude", name: "Claude Code", installed: true, road: "own" as const, signIn, signInRoad: "token" as const, wspTools: false }],
+    skills: [],
+    servers: [],
+    refused: [],
+  });
+
+  it("names an agent the agents report reads as signed out under the box, before anything is sent", async () => {
+    const { api, started } = fixtureApi([fresh], {}, [], { agentsRead: async () => report("none") });
+    await setup(api);
+    await waitFor(() => expect(document.querySelector("[data-k='signed-out']")?.textContent).toBe("Claude Code is not signed in on ada-mac; sign in from a terminal there before you send"));
+    expect(started).toEqual([]);
+  });
+
+  it("reads the report again when the window comes back while the line stands, so a sign-in made in a terminal clears it", async () => {
+    let answer: "signed-in" | "none" = "none";
+    let asked = 0;
+    const { api } = fixtureApi([fresh], {}, [], { agentsRead: async () => { asked += 1; return report(answer); } });
+    await setup(api);
+    await waitFor(() => expect(document.querySelector("[data-k='signed-out']")).not.toBeNull());
+    const before = asked;
+    answer = "signed-in";
+    // A return to the tab fires both, and costs one read.
+    act(() => void document.dispatchEvent(new Event("visibilitychange")));
+    await new Promise(r => setTimeout(r, 0));
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(document.querySelector("[data-k='signed-out']")).toBeNull());
+    expect(asked).toBe(before + 1);
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await new Promise(r => setTimeout(r, 50));
+    expect(asked).toBe(before + 1);
+  });
+
+  it("says nothing under the box where the agent is signed in", async () => {
+    let asked = 0;
+    const { api } = fixtureApi([fresh], {}, [], { agentsRead: async () => { asked += 1; return report("signed-in"); } });
+    await setup(api);
+    await waitFor(() => expect(asked).toBeGreaterThan(0));
+    expect(document.querySelector("[data-k='signed-out']")).toBeNull();
+  });
+
+  it("says under the message that the agent is starting while the runtime waits on it, drops the sign-in line once the send is out, and drops its own once the turn starts", async () => {
+    const { api, started, emit } = fixtureApi([fresh], {}, [], { agentsRead: async () => report("none") });
+    await setup(api);
+    await waitFor(() => expect(document.querySelector("[data-k='signed-out']")).not.toBeNull());
+    const editor = composerEditor();
+    await typeInto(editor, "hello");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    const requestId = started[0]!.requestId!;
+    emit({ type: "session.starting", workspaceId: WS, threadId: "thr_1", harness: "claude", installs: true, requestId, seq: 1 });
+    await waitFor(() => expect(screen.getByText("Claude Code installs on first run")).toBeTruthy());
+    emit({ type: "session.starting", workspaceId: WS, threadId: "thr_2", harness: "claude", requestId: "someone_else", seq: 2 });
+    expect(screen.queryByText("Starting Claude Code")).toBeNull();
+    expect(document.querySelector("[data-k='signed-out']")).toBeNull();
+    emit({ type: "session.start", workspaceId: WS, sessionId: "sess_1", turnId: "turn_1", threadId: "thr_1", prompt: "hello", requestId, seq: 3 });
+    await waitFor(() => expect(screen.queryByText("Claude Code installs on first run")).toBeNull());
   });
 });

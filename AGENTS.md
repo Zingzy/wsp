@@ -59,6 +59,12 @@ and the skill row in one change. The check is
 pnpm exec vitest run --minWorkers=1 --maxWorkers=2 packages/host/test/parity.test.ts packages/host/test/skill.test.ts packages/host/test/contract.test.ts
 ```
 
+## Before a branch is called ready
+
+`scripts/pre-review.sh [<ticket>]` is the last command before ready.
+`scripts/test-files.sh <file>...` runs named tests, `pnpm check:laws` the
+tree-wide laws, `scripts/heavy.sh <cmd>` heavy runs two at a time on a Mac.
+
 ## Glossary
 
 The words to use in code and to people. This list is the target; `packages/protocol/test/person-words.test.ts`

@@ -18,6 +18,7 @@ import { fmtDuration, subagentAskerLine } from "@wsp/protocol";
 import type { PermissionPrompt, SubagentRun, SubagentState } from "../../adapt";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { PermissionPromptRow } from "./PermissionPromptRow";
+import type { AnswerPrompt } from "./answerPrompt";
 import { Spaced } from "../ui/spaced";
 
 /** Running holds nothing: the row's own presence says it, which is the rule every state slot here follows. */
@@ -34,7 +35,7 @@ export function SubagentFoldRow({
   onAnswer,
 }: {
   subagent: SubagentRun;
-  onAnswer: (sessionId: string, askId: string, optionId: string) => void;
+  onAnswer: AnswerPrompt;
 }) {
   const asking = subagent.prompts.some((p: PermissionPrompt) => p.outcome === null);
   const [open, setOpen] = useState(asking);

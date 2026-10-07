@@ -133,6 +133,10 @@
                   "none"
                 ]
               },
+              "installsOnFirstRun": {
+                "type": "boolean",
+                "const": true
+              },
               "path": {
                 "type": "string"
               },
@@ -395,6 +399,10 @@
                   "shim",
                   "none"
                 ]
+              },
+              "installsOnFirstRun": {
+                "type": "boolean",
+                "const": true
               },
               "path": {
                 "type": "string"

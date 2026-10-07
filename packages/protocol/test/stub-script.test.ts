@@ -129,6 +129,7 @@ const HOME = ["packages/protocol/test/stub-script.ts", "packages/protocol/test/s
 const NEVER_RUN: Record<string, Record<string, string>> = {
   "packages/engine/test/ssh-backend.test.ts": { dir: "the ssh control folder, loosened for the code under test to tighten" },
   "packages/engine/test/provision-outside.test.ts": { 'join(root, "usr/local/bin/claude")': "a mode change the outside sweep must read as touching a file the person wrote over" },
+  "packages/host/test/first-run.test.ts": { wrapperAt: "Omarchy's wrapper, which the reads name without running it" },
   "packages/runtime/test/store.test.ts": { wide: "the state folders an older build left wider, for the store to repair" },
   "packages/host/test/connector.test.ts": { 'join(made, "cloudflared")': "packed into a release archive the unpack is tested on, and read back for its bytes and mode" },
   "packages/host/test/doctor.test.ts": { "daemonBinaryIn(daemon, triple)": "a stand-in daemon staged into a bundle as bytes" },

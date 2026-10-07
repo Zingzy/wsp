@@ -48,6 +48,7 @@ import {
   type TurnResult,
   BUILT_IN_LIST_CLAUSE,
   BUILT_IN_TABLE_CLAUSE,
+  ANSWER_WORDS,
 } from "@wsp/protocol";
 import { BASE_GROUP, FLOOR_LINE, GROUP_LABEL, tableLines, totalsLine, type TableRow } from "../src/init-table.js";
 import { GUTTER } from "../src/init-layout.js";
@@ -57,7 +58,6 @@ import {
   absoluteFolder,
   accessWordOf,
   ANSWER_ROADS,
-  ANSWER_WORDS,
   answeredLine,
   checkedStart,
   hostDidNotStopLine,

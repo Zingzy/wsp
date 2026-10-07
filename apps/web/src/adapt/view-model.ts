@@ -55,7 +55,7 @@ export type ProviderRequestKind = "command" | "file-read" | "file-change" | "mcp
 export type WorkLogTone = "thinking" | "tool" | "notice" | "error";
 
 /** Which wire event produced a work row; the copied rows key chrome on it. */
-export type WorkLogSourceKind = "tool.started" | "tool.completed" | "reasoning" | "runtime.error" | "runtime.notify" | "runtime.resume" | "harness.note";
+export type WorkLogSourceKind = "tool.started" | "tool.completed" | "reasoning" | "runtime.error" | "runtime.notify" | "runtime.resume" | "runtime.starting" | "harness.note";
 
 export interface WorkLogEntry {
   readonly id: string;
@@ -107,7 +107,7 @@ export interface ProposedPlan {
 export interface PermissionPrompt {
   readonly askId: string;
   readonly turnId: string | null;
-  /** The runtime's session id, what sessions.answer takes. */
+  /** The agent's own session id, as the prompt's row carries it, which sessions.answer takes. */
   readonly sessionId: string;
   readonly toolName: string;
   /** The tool's input as the harness sent it, JSON. */

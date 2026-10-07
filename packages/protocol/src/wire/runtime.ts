@@ -441,7 +441,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
     cwd: z.string().optional(),
     /** Values from the harness's catalog for the workspace (harnesses.list), refused with that list on a miss. A
      * start that opens a thread without a model runs the one the catalog marks default, so the app, the command line
-     * and the MCP server run the same model; an absent effort or mode leaves the CLI's own. */
+     * and the MCP server run the same model; an absent effort or mode leaves the CLI's own. A start into a thread
+     * that has run takes the model, effort and window it leaves out from the thread's own latest turns. */
     model: z.string().optional(),
     effort: z.string().optional(),
     permissionMode: z.string().optional(),
@@ -504,8 +505,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.steer"), sessionId: z.string(), prompt: z.string(), requestId: z.string().optional() }),
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
-   * options; replies with a SessionAnswerResult. Takes the runtime's session id, as sessions.interrupt does. A deny
-   * may carry the person's reason, what the agent should do instead. */
+   * options; replies with a SessionAnswerResult. Takes the session id the prompt's row carries, the agent's own, or
+   * the runtime's. A deny may carry the person's reason, what the agent should do instead. */
   z.object({ id: reqId, op: z.literal("sessions.answer"), sessionId: z.string(), askId: z.string(), optionId: z.string(), reason: z.string().optional() }),
   /** Puts the session's running turn into another access mode from its next tool call on; replies with a
    * SessionAccessResult. Takes the runtime's session id, as sessions.interrupt does. */

@@ -137,10 +137,8 @@ fn hex(oid: &[u8]) -> String {
 }
 
 fn parse_oid(text: &str, len: usize) -> Option<Oid> {
-    let text = text.trim();
-    if text.len() != len * 2 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
+    let id = super::GitOid::parse(text).filter(|id| id.as_str().len() == len * 2)?;
+    let text = id.as_str();
     (0..len).map(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).ok()).collect()
 }
 

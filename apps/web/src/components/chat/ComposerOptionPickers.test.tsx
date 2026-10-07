@@ -5,7 +5,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type HarnessCatalog, type ProjectOverrides, type ProjectView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, absentComputer, type HarnessCatalog, type PlaceView, type ProjectOverrides, type ProjectView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../ui/menu", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -171,7 +171,7 @@ afterEach(() => {
   cleanup();
   useComposerDraftStore.setState({ drafts: {} });
   useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {} });
-  useStore.setState({ workspaces: [], projects: [], harnesses: [], harnessesByWorkspace: {}, preferences: DEFAULT_PREFERENCES });
+  useStore.setState({ workspaces: [], places: [], projects: [], harnesses: [], harnessesByWorkspace: {}, preferences: DEFAULT_PREFERENCES });
 });
 
 describe("the composer's reasoning and access buttons", () => {
@@ -254,6 +254,11 @@ describe("the agent a fresh thread opens on", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("is the rule's off the record, not the host's mark on lists read under a default since reset", () => {
+    draw({ catalogs: [CLAUDE, { ...CODEX, isDefault: true }] });
+    expect(model().dataset["harness"]).toBe("claude");
+  });
+
   it("is the linked project's own once a GitHub link in New thread names it, since the send starts there", () => {
     const home = projectHomeKey(PROJECT.id);
     // Two computers hold the linked repository; the send starts on this computer's, as the host's start does.
@@ -290,5 +295,32 @@ describe("the agent a fresh thread opens on", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
     await waitFor(() => expect(model().dataset["harness"]).toBe("codex"));
     expect(within(screen.getByRole("dialog")).getByRole("option", { name: /GPT-6 Astra/ })).toBeTruthy();
+  });
+});
+
+describe("the model menu on a computer that stopped answering", () => {
+  const foot = () => document.querySelector("[data-composer-model-foot]")?.textContent ?? null;
+  const onBox = (present: boolean) =>
+    act(() =>
+      useStore.setState({
+        workspaces: [{ ...WORKSPACE, kind: "cloud", place: "p_srv" }],
+        places: [{ id: "p_srv", kind: "computer", name: "srv", default: true, present } as PlaceView],
+      }),
+    );
+
+  it("says that computer's state from the app's reading of it, not as the agent's refusal", () => {
+    draw({ catalogs: [CLAUDE, { ...CODEX, refusal: "Codex is not signed in" }] });
+    onBox(false);
+    fireEvent.click(model());
+    expect(foot()).toBe(absentComputer("srv", null).said);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("tab", { name: "Codex" }));
+    expect(foot()).toBe(absentComputer("srv", null).said);
+  });
+
+  it("goes back to the agent's own words once the computer answers", () => {
+    draw({ catalogs: [{ ...CLAUDE, refusal: "Claude Code is not signed in" }] });
+    onBox(true);
+    fireEvent.click(model());
+    expect(foot()).toBe("Claude Code is not signed in");
   });
 });

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { contextWindowsFor, type HarnessCatalog, type SessionView } from "@wsp/protocol";
-import { effectivePicks, pickedFor, recordedPicks, resolveModel, runningPicks, startOptionsFrom, threadPicks } from "./composerPicks";
+import { contextWindowsFor, recordedPicks, type HarnessCatalog, type SessionView } from "@wsp/protocol";
+import { effectivePicks, pickedFor, resolveModel, runningPicks, startOptionsFrom, threadPicks } from "./composerPicks";
 
 const CLAUDE: HarnessCatalog = {
   harness: "claude",

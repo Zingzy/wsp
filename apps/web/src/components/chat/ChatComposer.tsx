@@ -76,7 +76,7 @@
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { PaperclipIcon } from "lucide-react";
-import { ASIDE_NO_SESSION_LINE, composerHeldLine, HOST_ASLEEP_SEND, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, composerHeldLine, HERE_PLACE_ID, hereName, HOST_ASLEEP_SEND, isLocalWorkspace, signedOutLine, type AgentsTarget, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
@@ -86,6 +86,7 @@ import { useThreadFolder, useThreadStart } from "../../files/root";
 import { useDaemonWire } from "../../files/wire";
 import { DaemonOpError, fsFiles, gitPrList } from "../../terminal/daemon-fs";
 import { useAgentsReport } from "../agents/useAgentsReport";
+import { RefusalSlot } from "../../settings/sheetParts";
 import { addNotice } from "../../notices/store";
 import { collapseExpandedComposerCursor, detectComposerTrigger, enterSends, expandCollapsedComposerCursor, insertComposerBlock, isCollapsedCursorAdjacentToInlineToken, replaceTextRange } from "../../composer-logic";
 import { hostItemText, serializeComposerMention, splitPromptIntoComposerSegments } from "../../composer-editor-mentions";
@@ -873,6 +874,21 @@ export function ChatComposer({
   const access = <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} refused={accessPick.line} />;
   const accessInBar = <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} refused={accessPick.line} inBar />;
   const home = useStore(s => s.projects.find(p => projectHomeKey(p.id) === workspaceId));
+  // Before a thread's first send on this computer, and until it goes, an agent the agents report reads as signed out is named under the
+  // box, so the person learns it here rather than from the turn that fails on it.
+  const signInTarget: AgentsTarget | null = !opening || thread.busy ? null : home !== undefined ? (home.computer === HERE_PLACE_ID ? { placeId: HERE_PLACE_ID } : null) : workspace !== null && isLocalWorkspace(workspace) ? { workspaceId } : null;
+  const signIn = useAgentsReport(signInTarget);
+  const signInRow = signIn.report?.agents.find(a => a.id === harnessId);
+  const here = useStore(s => hereName(s.places));
+  const signedOut = signInRow?.installed === true && signInRow.signIn === "none" && here !== "" ? signedOutLine(harnessCatalog?.label ?? signInRow.name, here) : null;
+  // The sign-in it asks for happens in a terminal, which the host hears nothing of: coming back to the window reads
+  // the report again, only while the line stands, since a read runs every agent's own status command.
+  const readSignIn = signIn.refresh;
+  useEffect(() => {
+    if (signedOut === null) return;
+    window.addEventListener("focus", readSignIn);
+    return () => window.removeEventListener("focus", readSignIn);
+  }, [readSignIn, signedOut]);
   // The agent's own compaction goes as the message its adapter declares, a turn like any other that carries none of
   // the box's files and leaves the draft where it is.
   const compacts = harnessCatalog?.compacts;
@@ -1096,9 +1112,9 @@ export function ChatComposer({
           />
         )}
       </ComposerSurface.Shell>
-      {under !== undefined ? (
+      {under !== undefined || signedOut !== null ? (
         <div data-composer-under className="mx-auto mt-2 w-full max-w-3xl px-[1.625rem]">
-          {under}
+          {under ?? <RefusalSlot k="signed-out" note={signedOut} />}
         </div>
       ) : null}
     </div>

@@ -13,6 +13,7 @@ use wsp_frames::{checkpoint_prefix, Carried, CopyRoadName};
 
 use super::rules::{config_files, git, Walked, READ_MS, WRITE_MS};
 use super::{Availability, CopyRoad, Settling};
+use crate::git_line::GitLine;
 
 pub struct Worktree;
 
@@ -24,7 +25,7 @@ impl CopyRoad for Worktree {
     /// Whether git here keeps worktrees and the copy's parent can be written in. The size line says nothing about
     /// this road: it writes the files git tracks, which is the checkout without its dependencies.
     fn available(&self, from: &Path, to: &Path, _walked: &Walked, _size_line_bytes: u64) -> Availability {
-        let Ok(listed) = git(from, &["worktree", "list", "--porcelain"], READ_MS) else {
+        let Ok(listed) = git(from, &GitLine::new(&["worktree", "list", "--porcelain"]), READ_MS) else {
             return Availability::No(format!("{}: git here does not keep worktrees", from.display()));
         };
         if !listed.ok() {
@@ -43,7 +44,7 @@ impl CopyRoad for Worktree {
     /// own: a branch would be the folder's too, since the two share one git directory, and a copy must not move
     /// what the person has checked out.
     fn make(&self, from: &Path, to: &Path, base: &str) -> io::Result<()> {
-        let added = git(from, &["worktree", "add", "--detach", &to.to_string_lossy(), base], WRITE_MS)?;
+        let added = git(from, &GitLine::new(&["worktree", "add", "--detach"]).operands(&[&to.to_string_lossy(), base]), WRITE_MS)?;
         if !added.ok() {
             return Err(io::Error::other(added.why()));
         }
@@ -63,18 +64,18 @@ impl CopyRoad for Worktree {
     /// copy's folder names.
     fn remove(&self, from: &Path, to: &Path) -> io::Result<()> {
         let prefix = checkpoint_prefix(&to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-        let listed = git(from, &["for-each-ref", "--format=%(refname)", &prefix], READ_MS)?;
+        let listed = git(from, &GitLine::new(&["for-each-ref", "--format=%(refname)"]).revs(&[&prefix]), READ_MS)?;
         for name in listed.out().lines().filter(|n| n.starts_with(&prefix)) {
-            let deleted = git(from, &["update-ref", "-d", name], WRITE_MS)?;
+            let deleted = git(from, &GitLine::new(&["update-ref", "-d"]).revs(&[name]), WRITE_MS)?;
             if !deleted.ok() {
                 return Err(io::Error::other(deleted.why()));
             }
         }
-        let removed = git(from, &["worktree", "remove", "--force", &to.to_string_lossy()], WRITE_MS)?;
+        let removed = git(from, &GitLine::new(&["worktree", "remove", "--force"]).operands(&[&to.to_string_lossy()]), WRITE_MS)?;
         if !removed.ok() && to.exists() {
             return Err(io::Error::other(removed.why()));
         }
-        let _ = git(from, &["worktree", "prune"], READ_MS);
+        let _ = git(from, &GitLine::new(&["worktree", "prune"]), READ_MS);
         Ok(())
     }
 
@@ -101,8 +102,8 @@ mod tests {
         let from = dir.path().join("work");
         repo(&from);
         fs::write(from.join(".gitignore"), b"node_modules/\n*.local\n").unwrap();
-        assert!(git(&from, &["add", ".gitignore"], READ_MS).unwrap().ok());
-        assert!(git(&from, &["commit", "--quiet", "-m", "ignore"], WRITE_MS).unwrap().ok());
+        assert!(git(&from, &GitLine::new(&["add", ".gitignore"]), READ_MS).unwrap().ok());
+        assert!(git(&from, &GitLine::new(&["commit", "--quiet", "-m", "ignore"]), WRITE_MS).unwrap().ok());
         fs::create_dir_all(from.join("node_modules/pkg")).unwrap();
         fs::write(from.join("node_modules/pkg/index.js"), b"x\n").unwrap();
         fs::write(from.join(".env.local"), b"KEY=1\n").unwrap();
@@ -114,13 +115,13 @@ mod tests {
         assert_eq!(fs::read_to_string(to.join(".env.local")).unwrap(), "KEY=1\n");
         assert!(!to.join("node_modules").exists(), "a worktree carries no ignored directory");
         assert_eq!(sha_of(&to, "HEAD").unwrap(), base);
-        assert_eq!(git(&to, &["rev-parse", "--abbrev-ref", "HEAD"], READ_MS).unwrap().out(), "HEAD", "detached");
+        assert_eq!(git(&to, &GitLine::new(&["rev-parse", "--abbrev-ref", "HEAD"]), READ_MS).unwrap().out(), "HEAD", "detached");
         // The registration is there and goes with the remove, and nothing of the copy is left behind.
-        let listed = git(&from, &["worktree", "list", "--porcelain"], READ_MS).unwrap();
+        let listed = git(&from, &GitLine::new(&["worktree", "list", "--porcelain"]), READ_MS).unwrap();
         assert!(listed.stdout.contains(&to.canonicalize().unwrap().display().to_string()), "{}", listed.stdout);
         road.remove(&from, &to).unwrap();
         assert!(!to.exists());
-        let after = git(&from, &["worktree", "list", "--porcelain"], READ_MS).unwrap();
+        let after = git(&from, &GitLine::new(&["worktree", "list", "--porcelain"]), READ_MS).unwrap();
         assert!(!after.stdout.contains("work-other"), "{}", after.stdout);
     }
 
@@ -136,10 +137,10 @@ mod tests {
         // A worktree shares the folder's git directory, so a checkpoint taken in the copy is a ref of the folder's.
         for (copy, name) in [(&to, "work-fix"), (&other, "work-fix-2")] {
             let at = format!("{}thr_1/turn_1", wsp_frames::checkpoint_prefix(name));
-            assert!(git(copy, &["update-ref", &at, &base], WRITE_MS).unwrap().ok());
+            assert!(git(copy, &GitLine::new(&["update-ref"]).revs(&[&at, &base]), WRITE_MS).unwrap().ok());
         }
         Worktree.remove(&from, &to).unwrap();
-        let listed = git(&from, &["for-each-ref", "--format=%(refname)", "refs/wsp"], READ_MS).unwrap();
+        let listed = git(&from, &GitLine::new(&["for-each-ref", "--format=%(refname)", "refs/wsp"]), READ_MS).unwrap();
         assert_eq!(listed.out(), "refs/wsp/checkpoints/work-fix-2/thr_1/turn_1", "the removed copy's refs go and the other copy's stay");
     }
 

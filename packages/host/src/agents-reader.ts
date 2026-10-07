@@ -7,7 +7,7 @@
 // state is what its tools connect answers, asked apart from the read.
 import { userInfo } from "node:os";
 import { posix } from "node:path";
-import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, serverValuesOf, signInRoadOf, versionOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, installsOnFirstRun, serverValuesOf, signInRoadOf, versionOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
 import { detectSkills, expand, nodeHost, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
 import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLogin } from "@wsp/engine";
 import { MCP_SERVER_NAME, agentVersionWord, compareVersions, controlNameRefusal, hasControlChar, shellQuote, strictVersion, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow } from "@wsp/protocol";
@@ -41,13 +41,13 @@ function installedAt(matches: readonly string[]): { found: boolean; path?: strin
   return { found: matches.length > 0, ...(real !== undefined ? { path: real } : {}), ...(via !== undefined ? { via } : {}) };
 }
 /** Each command run side by side under its own bound, then each one's exit code and output in the order asked. */
-const EACH = [
+export const eachScript = (seconds: number): string => [
   'd=$(mktemp -d) || exit 1',
   // macOS has no timeout command, and a probe that hung there outlived every batch until hundreds piled up
   // (2026-10-06). perl stands in: it runs the probe in a process group of its own and kills that group at the bound,
   // so the kill can only reach the probe and its children, and a probe that ends leaves nothing waiting.
-  `if command -v timeout >/dev/null 2>&1; then bound() { timeout ${COMMAND_S} "$@"; }`,
-  `elif command -v perl >/dev/null 2>&1; then bound() { perl -e '$t = shift; $p = fork; defined $p or exit 126; if (!$p) { setpgrp(0, 0); exec @ARGV or exit 127 } setpgrp($p, $p); $SIG{ALRM} = sub { kill 9, -$p; exit 137 }; alarm $t; waitpid($p, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' ${COMMAND_S} "$@"; }`,
+  `if command -v timeout >/dev/null 2>&1; then bound() { timeout ${seconds} "$@"; }`,
+  `elif command -v perl >/dev/null 2>&1; then bound() { perl -e '$t = shift; $p = fork; defined $p or exit 126; if (!$p) { setpgrp(0, 0); exec @ARGV or exit 127 } setpgrp($p, $p); $SIG{ALRM} = sub { kill 9, -$p; exit 137 }; alarm $t; waitpid($p, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' ${seconds} "$@"; }`,
   'else bound() { "$@"; }; fi',
   "i=0",
   'for c; do ( bound sh -c "$c" > "$d/$i" 2>&1 < /dev/null; echo $? > "$d/$i.x" ) & i=$((i+1)); done',
@@ -66,7 +66,7 @@ interface Said {
 /** Each command's exit code and output, run on the target side by side; nothing for any where the run failed. */
 async function each(host: Host, commands: readonly string[]): Promise<(Said | undefined)[]> {
   if (commands.length === 0) return [];
-  const out = await host.exec.run("sh", ["-c", EACH, "sh", ...commands], { timeoutMs: READ_MS + 5_000 });
+  const out = await host.exec.run("sh", ["-c", eachScript(COMMAND_S), "sh", ...commands], { timeoutMs: READ_MS + 5_000 });
   if (out === undefined) return commands.map(() => undefined);
   const records = out.split("\x1e").slice(1, commands.length + 1);
   return commands.map((_, i) => {
@@ -184,7 +184,12 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
   if (o.box !== undefined && recipe === undefined) refused.push("servers: the list of what wsp's recipe put there could not be read");
   const lines = (where ?? "").split("\n");
   const at = new Map(agents.map((a, i) => [a.id, installedAt((lines[i] ?? "").split("\t").filter(m => m !== ""))]));
-  const installed = agents.filter(a => at.get(a.id)!.found);
+  const onPath = agents.filter(a => at.get(a.id)!.found);
+  // A command that installs its agent when run is never run here: a read bound at COMMAND_S would end the download it
+  // started, and every read after it would start it again.
+  const firstRun = await installsOnFirstRun(script => host.exec.run("sh", ["-c", script], { timeoutMs: READ_MS }), onPath.map(a => a.bin));
+  const installs = new Set(onPath.filter((_, i) => firstRun[i]).map(a => a.id));
+  const installed = onPath.filter(a => !installs.has(a.id));
   const box = o.box;
   const [versions, statuses] = await Promise.all([
     box?.versions !== undefined ? Promise.resolve(installed.map(a => box.versions?.[a.id])) : each(host, installed.map(a => `${shellQuote(a.bin)} --version`)).then(r => r.map(s => s?.output.split("\n")[0])),
@@ -198,7 +203,8 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
     const status = i < 0 ? undefined : statuses[i];
     const pinned = a.latest === undefined ? undefined : strictVersion(versionOf(a.installRoad) ?? "");
     const ownLogin = box === undefined && status !== undefined && a.signIn.status !== undefined && a.signIn.status.signedIn(status.output, status.code);
-    const signIn: AgentRow["signIn"] = box !== undefined ? (box.signIns?.[a.id] ?? "unknown") : status === undefined ? "unknown" : ownLogin ? "signed-in" : vaultSignIn(a.id, o.vault);
+    // An agent its first run has yet to install has no login of its own there, so the vault's key is all it has.
+    const signIn: AgentRow["signIn"] = box !== undefined ? (box.signIns?.[a.id] ?? "unknown") : installs.has(a.id) ? vaultSignIn(a.id, o.vault) : status === undefined ? "unknown" : ownLogin ? "signed-in" : vaultSignIn(a.id, o.vault);
     // The status module's own words for how the login stands, which name a variable and never hold its value.
     const signInDetail = ownLogin ? a.signIn.status?.detail?.(status!.output, new Map()) : undefined;
     const signInKind = ownLogin ? a.signIn.status?.kind?.(status!.output) : undefined;
@@ -210,6 +216,7 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
       ...(version !== undefined ? { version } : {}),
       ...(pinned !== undefined ? { pinned } : {}),
       road: !found ? "none" : path === undefined ? "shim" : path.startsWith(`${TOOL_PREFIX}/`) ? "wsp" : "own",
+      ...(installs.has(a.id) ? { installsOnFirstRun: true as const } : {}),
       ...(path !== undefined ? { path: tilde(host.home, path) } : {}),
       ...(via !== undefined ? { via } : {}),
       signIn: !found ? "none" : signIn,

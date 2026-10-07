@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dialHost, startHost } from "@wsp/host";
-import { DEFAULT_PREFERENCES, type SessionView } from "@wsp/protocol";
+import { ANSWER_WORDS, DEFAULT_PREFERENCES, refusal, type SessionView } from "@wsp/protocol";
 import { createRuntime, memoryStore } from "@wsp/runtime";
 import { describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
@@ -13,7 +13,7 @@ type Client = Awaited<ReturnType<typeof dialHost>>;
 
 /** A socket to a host that answers the lists from what the case holds, records what it is asked, and pushes the
  * frames the case sends it; replayed frames go out before the subscribe answers, as the host sends them. */
-function fakeHost(sessions: SessionView[] = []) {
+function fakeHost(sessions: SessionView[] = [], answer: () => Promise<Record<string, unknown>> = async () => ({ outcome: "answered" })) {
   const asked: { op: string; params?: Record<string, unknown> }[] = [];
   let push: ((frame: Record<string, unknown>) => void) | undefined;
   let end: (() => void) | undefined;
@@ -29,6 +29,7 @@ function fakeHost(sessions: SessionView[] = []) {
         if (op === "sessions.list") return { sessions } as unknown as T;
         if (op === "workspaces.list") return { workspaces: [{ id: "ws_mac", kind: "local" }] } as unknown as T;
         if (op === "places.list") return { places: [] } as unknown as T;
+        if (op === "sessions.answer") return (await answer()) as T;
         if (op === "preferences.get") return { preferences: { ...DEFAULT_PREFERENCES, keepAwake: false } } as unknown as T;
         return {} as T;
       },
@@ -67,6 +68,25 @@ describe("the menu bar's feed from the host the window is on", () => {
     expect(host.asked.at(-1)).toEqual({ op: "sessions.interrupt", params: { sessionId: "s1" } });
     host.push({ type: "preferences.changed", preferences: { ...DEFAULT_PREFERENCES, keepAwake: true, notifyNeeds: "sound", notifyDone: "notify", planAlerts: false, onQuit: "keep" } });
     await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ keepAwake: true, notifyNeeds: "sound", notifyDone: "notify", planAlerts: false, onQuit: "keep" }));
+    feed.close();
+  });
+
+  it("keeps a pick the host refused by its prompt, in the host's words, and lets it go on a pick the host takes", async () => {
+    let answer = async (): Promise<Record<string, unknown>> => ({ outcome: "not-found" });
+    const host = fakeHost([{ id: "s1", workspaceId: "ws_mac", harness: "codex", status: "running", threadId: "t1" }], () => answer());
+    const states: FeedState[] = [];
+    const feed = hostFeed({ dial: async () => host.client(), changed: s => states.push(s), settleMs: 0, retryMs: 10 });
+    await vi.waitFor(() => expect(states.at(-1)?.sessions).toHaveLength(1));
+    host.push(ask);
+    await vi.waitFor(() => expect(states.at(-1)?.asks.get("s1")?.askId).toBe("a1"));
+    await feed.answer("s1", "a1", "o_yes");
+    expect(states.at(-1)?.refused.get("a1")).toBe(ANSWER_WORDS["not-found"]);
+    answer = async () => Promise.reject(refusal("workspace api is paused.", "Wake it first."));
+    await feed.answer("s1", "a1", "o_yes");
+    expect(states.at(-1)?.refused.get("a1")).toBe("workspace api is paused. Wake it first.");
+    answer = async () => ({ outcome: "answered" });
+    await feed.answer("s1", "a1", "o_yes");
+    expect(states.at(-1)?.refused.has("a1")).toBe(false);
     feed.close();
   });
 

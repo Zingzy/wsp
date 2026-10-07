@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { PermissionEffect, PermissionOption, PermissionOutcome, SessionEvent, SessionPermissionEvent } from "../index.js";
+import type { PermissionEffect, PermissionOption, PermissionOutcome, SessionAnswerOutcome, SessionEvent, SessionPermissionEvent } from "../index.js";
 import { folderName, parentFolderName } from "../project-path.js";
 import { lastLine, plural } from "./base.js";
 import { fmtBytes } from "./units.js";
@@ -668,6 +668,15 @@ export function permissionOutcomeLine(outcome: PermissionOutcome, picked?: { lab
     }
   }
 }
+
+/** What a pick the host would not take came to, one line per outcome it can answer with, said by the app under the
+ * prompt and by a terminal that answered it; `answered` is the only one that is not a failure and has no line here. */
+export const ANSWER_WORDS: Readonly<Record<Exclude<SessionAnswerOutcome, "answered">, string>> = {
+  gone: "the prompt closed before the answer reached it",
+  unsupported: "this thread's agent raises no prompt this host can answer",
+  "not-found": "this host holds no turn of that thread",
+  "no-option": "the prompt carries no option by that id",
+};
 
 /** What the harness is told when a person picked deny in the chat: the agent reads it as the call's result, so it
  * says who refused rather than reading as a tool that failed. */

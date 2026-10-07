@@ -30,7 +30,7 @@
         },
         "effort": {
           "type": "string",
-          "description": "the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"
+          "description": "the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent on a new thread means the agent's default, high for claude; on send, the thread's own"
         },
         "access": {
           "type": "string",
@@ -146,7 +146,7 @@
         },
         "effort": {
           "type": "string",
-          "description": "the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"
+          "description": "the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent on a new thread means the agent's default, high for claude; on send, the thread's own"
         },
         "access": {
           "type": "string",

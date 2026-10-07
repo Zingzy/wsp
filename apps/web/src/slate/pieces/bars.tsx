@@ -34,7 +34,7 @@ export const bars: PieceView = {
             const share = row.value === undefined || max <= 0 ? 0 : Math.max(0, Math.min(1, row.value / max));
             return (
               <div key={at} data-slate-bar className={cn("flex min-h-11 min-w-0 items-center gap-3 py-3", inset)}>
-                <span className="min-w-0 flex-1 truncate text-sm leading-5 text-foreground">{row.name}</span>
+                <span className="min-w-0 flex-1 break-words text-sm leading-5 text-foreground">{row.name}</span>
                 <span className="flex shrink-0 items-center gap-2">
                   <span aria-hidden className="block h-1 w-14 overflow-hidden rounded-full bg-foreground/10">
                     <span className={cn("block h-full rounded-full", row.tone === undefined ? "bg-foreground/55" : TONE_FILL[toneOf(row.tone, slate, id)])} style={{ width: `${Math.round(share * 1000) / 10}%` }} />

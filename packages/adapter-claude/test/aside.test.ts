@@ -172,7 +172,9 @@ describe("the adapter's aside", () => {
     const fork = forkOf(call.command);
     expect(fork).toMatch(/^[0-9a-f-]{36}$/);
     expect(fork).not.toBe(SESSION);
-    expect(call.command).toBe(asideCommand({ session: SESSION, fork, configDir: CONFIG, cwd: "/root/spoo", model: "claude-opus-5", mcpServers: servers }));
+    expect(call.command).toBe(asideCommand({ session: SESSION, fork, configDir: CONFIG, cwd: "/root/spoo", model: "claude-opus-5", mcpServers: servers, memoryDir: `${CONFIG}/projects/-root-spoo/memory` }));
+    // The fork reads the memory the thread's turns read, in the one settings flag that turns its hooks off.
+    expect(call.command).toContain(`--settings '{"disableAllHooks":true,"autoMemoryDirectory":"${CONFIG}/projects/-root-spoo/memory"}'`);
     // The turn's own environment: the login it signs in with and the folder key the thread's session is stored under.
     expect(call.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat-x", CLAUDE_CODE_PROJECT_DIR_NAME: "-root-spoo", PATH: "/bin" });
     expect(call.env["CLAUDE_CODE_ENTRYPOINT"]).toBeUndefined();

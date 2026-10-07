@@ -28,6 +28,9 @@ use crate::doctor::OVERLAID;
 use crate::hardening;
 use crate::profile;
 
+mod ssh;
+pub use ssh::{ssh_host_key_inside, write_ssh_files_inside, SSH_DIR_INSIDE};
+
 /// Every path the runtime writes under its root.
 pub struct Layout {
     root: PathBuf,
@@ -1027,71 +1030,38 @@ pub fn write_wsp_shim_inside(place: &Inside) -> Result<(), Error> {
 pub fn write_file_inside(place: &Inside, path: &str, bytes: &[u8], mode: u32) -> Result<(), Error> {
     let (folder, name) = path.rsplit_once('/').expect("a file written inside names the folder it sits in");
     let dir = open_inside(place, folder, Want::Dir, BoxLink::FollowedOnce)?;
-    let landed = dir.named(place).join(name);
+    write_named(dir.fd(), name, &dir.named(place).join(name), bytes, mode)
+}
+
+/// A file straight in a folder of this runtime's own that a workspace writes in, its wsp home, by the same rule:
+/// the folder is the runtime's and no workspace can swap it, and the name is opened through its descriptor.
+pub fn write_file_in(folder: &Path, name: &str, bytes: &[u8], mode: u32) -> Result<(), Error> {
+    let dir = open_dir(folder)?;
+    write_named(dir.as_fd(), name, &folder.join(name), bytes, mode)
+}
+
+fn write_named(dir: BorrowedFd<'_>, name: &str, landed: &Path, bytes: &[u8], mode: u32) -> Result<(), Error> {
     let made = |flags: OFlag| {
         openat(
-            dir.fd(),
+            dir,
             name,
             flags | OFlag::O_WRONLY | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC,
             Mode::from_bits_truncate(mode),
         )
     };
     let file = match made(OFlag::O_CREAT | OFlag::O_TRUNC) {
-        Ok(fd) if regular(&fd).map_err(nix_at(&landed))? => fd,
+        Ok(fd) if regular(&fd).map_err(nix_at(landed))? => fd,
         // A link, a fifo, a socket or a device at the name: taken off through the same descriptor and a file
         // written in its place. ENXIO is a fifo nobody reads, or a socket.
         Ok(_) | Err(Errno::ELOOP | Errno::ENXIO) => {
-            nix::unistd::unlinkat(dir.fd(), name, nix::unistd::UnlinkatFlags::NoRemoveDir).map_err(nix_at(&dir.named(place)))?;
-            made(OFlag::O_CREAT | OFlag::O_EXCL).map_err(nix_at(&landed))?
+            nix::unistd::unlinkat(dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir).map_err(nix_at(landed))?;
+            made(OFlag::O_CREAT | OFlag::O_EXCL).map_err(nix_at(landed))?
         }
-        Err(e) => return Err(nix_at(&landed)(e)),
+        Err(e) => return Err(nix_at(landed)(e)),
     };
     let mut file = std::fs::File::from(file);
-    file.write_all(bytes).map_err(at(&landed))?;
-    file.set_permissions(fs::Permissions::from_mode(mode)).map_err(at(&landed))
-}
-
-/// Where the files of the ssh server an editor reaches a workspace through live inside it: its own disk, under no
-/// home, since a fork's /root/.ssh is a cover and stays empty.
-pub const SSH_DIR_INSIDE: &str = "/var/lib/wsp-ssh";
-
-/// The ssh server's folder and its two files inside a workspace, by the rule `write_file_inside` holds: the folder
-/// opened beneath the rootfs with no link of the workspace's followed and made the owner's alone through that
-/// descriptor, and each file written through it. An absolute link the workspace planted at the folder or at a name
-/// resolves against this computer's own root, where these writes would replace a key or change a folder's mode.
-pub fn write_ssh_files_inside(place: &Inside, authorized_keys: &[u8], config: &[u8]) -> Result<(), Error> {
-    let dir = open_inside(place, SSH_DIR_INSIDE, Want::Dir, BoxLink::Refused)?;
-    let named = dir.named(place);
-    let readable = openat(dir.fd(), ".", OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC, Mode::empty()).map_err(nix_at(&named))?;
-    nix::sys::stat::fchmod(&readable, Mode::from_bits_truncate(0o700)).map_err(nix_at(&named))?;
-    write_file_inside(place, &format!("{SSH_DIR_INSIDE}/authorized_keys"), authorized_keys, 0o600)?;
-    write_file_inside(place, &format!("{SSH_DIR_INSIDE}/sshd_config"), config, 0o600)
-}
-
-/// The public half of the ssh server's host key inside a workspace, read through the folder's descriptor with no
-/// link followed, so a link planted at the name reads as a refusal and never as a key of this computer's. Anything
-/// but a regular file there is refused without a byte read, and a file longer than any key is refused after
-/// `SSH_KEY_MAX` bytes, so the workspace can neither hold this read nor fill this process's memory. Nothing where
-/// no key has been made yet.
-pub fn ssh_host_key_inside(place: &Inside) -> Result<Option<String>, Error> {
-    let dir = open_inside(place, SSH_DIR_INSIDE, Want::Dir, BoxLink::Refused)?;
-    let name = "host_ed25519.pub";
-    let landed = dir.named(place).join(name);
-    let file = match openat(dir.fd(), name, OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC, Mode::empty()) {
-        Err(Errno::ENOENT) => return Ok(None),
-        other => other.map_err(nix_at(&landed))?,
-    };
-    let refused = |why: &str| Error { path: landed.clone(), source: io::Error::new(io::ErrorKind::InvalidData, why.to_owned()) };
-    if !regular(&file).map_err(nix_at(&landed))? {
-        return Err(refused("not a regular file"));
-    }
-    let max = wsp_frames::numbers::SSH_KEY_MAX;
-    let mut text = String::new();
-    io::Read::read_to_string(&mut io::Read::take(std::fs::File::from(file), max as u64 + 1), &mut text).map_err(at(&landed))?;
-    if text.len() > max {
-        return Err(refused("longer than any ssh key"));
-    }
-    Ok(Some(text.trim().to_owned()))
+    file.write_all(bytes).map_err(at(landed))?;
+    file.set_permissions(fs::Permissions::from_mode(mode)).map_err(at(landed))
 }
 
 /// Whether what a descriptor holds is a regular file, and not a fifo, a socket or a device a workspace put there.

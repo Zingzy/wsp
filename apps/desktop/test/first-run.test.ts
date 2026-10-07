@@ -143,6 +143,17 @@ describe("the first launch", () => {
     expect(doc.querySelectorAll("#agents button.primary")).toHaveLength(1);
   });
 
+  it("names an agent whose command is a wrapper that installs it on its first run as such, ticked like any found one", async () => {
+    const screen = await open([
+      { id: "claude", name: "Claude Code", found: true, configured: false, installs: true },
+      { id: "codex", name: "Codex", found: false, configured: false },
+    ]);
+    expect(rows(screen)).toEqual([
+      { id: "claude", checked: true, disabled: false, state: "installs on first run" },
+      { id: "codex", checked: false, disabled: true, state: "not installed" },
+    ]);
+  });
+
   it("tells the shell its theme moved once the computer's side is on, as it opens and as the side flips, and drags the window by its top band", async () => {
     const bar: { dark: boolean; colors: unknown[]; flip?: () => void } = { dark: true, colors: [] };
     await open(AGENTS, { titleBar: bar });

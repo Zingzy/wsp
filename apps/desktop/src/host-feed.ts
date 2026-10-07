@@ -5,7 +5,7 @@
 // turn starts, asks or ends, rather than folded here a second way. A host that
 // does not answer, or goes, reads as lost and is dialled again until it answers.
 import type { dialHost } from "@wsp/host";
-import { DEFAULT_PREFERENCES, type NotifyChoice, type OnQuit, type PlaceView, type Preferences, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { ANSWER_WORDS, DEFAULT_PREFERENCES, SessionAnswerResult, type NotifyChoice, type OnQuit, type PlaceView, type Preferences, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import type { OpenAsk } from "./tray.js";
 
 type HostClient = Awaited<ReturnType<typeof dialHost>>;
@@ -15,6 +15,8 @@ export interface FeedState {
   workspaces: readonly WorkspaceView[];
   places: readonly PlaceView[];
   asks: ReadonlyMap<string, OpenAsk>;
+  /** A pick the host would not take, in its words, by the prompt it was made on. */
+  refused: ReadonlyMap<string, string>;
   keepAwake: boolean;
   notifyNeeds: NotifyChoice;
   notifyDone: NotifyChoice;
@@ -67,7 +69,7 @@ const text = (e: unknown): string => (e instanceof Error ? e.message : String(e)
 export function hostFeed(deps: FeedDeps): HostFeed {
   const settleMs = deps.settleMs ?? 150;
   const retryMs = deps.retryMs ?? 3_000;
-  let state: FeedState = { sessions: [], workspaces: [], places: [], asks: new Map(), keepAwake: DEFAULT_PREFERENCES.keepAwake, notifyNeeds: DEFAULT_PREFERENCES.notifyNeeds, notifyDone: DEFAULT_PREFERENCES.notifyDone, planAlerts: DEFAULT_PREFERENCES.planAlerts, onQuit: DEFAULT_PREFERENCES.onQuit, lost: false };
+  let state: FeedState = { sessions: [], workspaces: [], places: [], asks: new Map(), refused: new Map(), keepAwake: DEFAULT_PREFERENCES.keepAwake, notifyNeeds: DEFAULT_PREFERENCES.notifyNeeds, notifyDone: DEFAULT_PREFERENCES.notifyDone, planAlerts: DEFAULT_PREFERENCES.planAlerts, onQuit: DEFAULT_PREFERENCES.onQuit, lost: false };
   let client: HostClient | undefined;
   let dialing = false;
   let closed = false;
@@ -167,7 +169,18 @@ export function hostFeed(deps: FeedDeps): HostFeed {
   void connect();
   return {
     answer: async (sessionId, askId, optionId) => {
-      await client?.request("sessions.answer", { sessionId, askId, optionId });
+      if (client === undefined) return;
+      let said: string | undefined;
+      try {
+        const { outcome } = SessionAnswerResult.parse(await client.request("sessions.answer", { sessionId, askId, optionId }));
+        said = outcome === "answered" ? undefined : ANSWER_WORDS[outcome];
+      } catch (e) {
+        said = text(e);
+      }
+      const refused = new Map(state.refused);
+      if (said === undefined) refused.delete(askId);
+      else refused.set(askId, said);
+      set({ refused });
     },
     interrupt: async sessionId => {
       await client?.request("sessions.interrupt", { sessionId });

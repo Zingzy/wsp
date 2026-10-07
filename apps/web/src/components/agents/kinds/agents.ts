@@ -5,7 +5,7 @@
 // terminal; the detail says who the agent is and the rest, next step first.
 import { CircleArrowUpIcon, DownloadIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
 import { catalogEntry, installShown, runsThreads, type AgentEntry } from "@wsp/catalog";
-import { compareVersions, MCP_SERVER_NAME, type AgentRow, type AgentsReport } from "@wsp/protocol";
+import { compareVersions, FIRST_RUN_WORD, MCP_SERVER_NAME, type AgentRow, type AgentsReport } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, agentSignInStart, editImageAct, heldReason, holdAll, notYet, onImage, signInAct, waitingFlow, type RowAct, type RowsContext } from "../agentsRows.js";
 import { kind, matchesAny, rowKey, type Fact, type KindModule, type Status } from "./kind.js";
 
@@ -133,7 +133,7 @@ export const AGENTS_KIND: KindModule<AgentItem> = {
       key: rowId(row),
       title: row.name,
       lead: { kind: "agent", agent: row.id },
-      ...(row.version === undefined ? {} : { subtext: `v${row.version}` }),
+      ...(row.version !== undefined ? { subtext: `v${row.version}` } : row.installsOnFirstRun === true ? { subtext: FIRST_RUN_WORD } : {}),
       status: waitingFlow(flow) ? { ...signInStatus(row), words: W.waitingOnYou } : signInStatus(row),
       ...(quick === undefined ? {} : { quick }),
     };

@@ -8,27 +8,28 @@ use wsp_frames::{GitBranchesReply, GitLocalBranch, GitWorktreesReply};
 use wsp_runtime::copy_road::branch::worktrees_of;
 
 use super::checkpoint::ran;
-use super::{run_git, stdout_text, Runs};
+use super::{run_git, stdout_text, GitLine, Runs};
 use crate::paths::OpError;
 
 /// The most branches one reply carries, newest commit first.
 pub(crate) const BRANCHES_MAX: usize = 500;
 
 pub(crate) async fn worktrees<R: Runs>(runner: &R, cwd: &Path) -> Result<GitWorktreesReply, OpError> {
-    let listed = run_git(runner, cwd, &["worktree", "list", "--porcelain", "-z"], None, None).await?;
+    let listed = run_git(runner, cwd, &GitLine::new(&["worktree", "list", "--porcelain", "-z"]), None, None).await?;
     ran(&listed, "worktree list")?;
     Ok(GitWorktreesReply { worktrees: worktrees_of(&stdout_text(&listed)) })
 }
 
 pub(crate) async fn branches<R: Runs>(runner: &R, cwd: &Path) -> Result<GitBranchesReply, OpError> {
-    let count = format!("--count={}", BRANCHES_MAX + 1);
     let format = "--format=%(refname)%00%(objectname)%00%(committerdate:unix)%00%(upstream:short)%00%(worktreepath)";
-    let listed = run_git(runner, cwd, &["for-each-ref", "--sort=-committerdate", &count, format, "refs/heads"], None, None).await?;
+    let line = GitLine::new(&["for-each-ref", "--sort=-committerdate"]).glued("--count=", &(BRANCHES_MAX + 1).to_string());
+    let line = line.words(&[format, "refs/heads"]);
+    let listed = run_git(runner, cwd, &line, None, None).await?;
     ran(&listed, "for-each-ref")?;
     let mut branches: Vec<GitLocalBranch> = stdout_text(&listed).lines().filter_map(branch_of).collect();
     let truncated = branches.len() > BRANCHES_MAX;
     branches.truncate(BRANCHES_MAX);
-    let head = run_git(runner, cwd, &["symbolic-ref", "--quiet", "--short", "HEAD"], None, None).await?;
+    let head = run_git(runner, cwd, &GitLine::new(&["symbolic-ref", "--quiet", "--short", "HEAD"]), None, None).await?;
     let current = (head.code == Some(0)).then(|| stdout_text(&head).trim().to_owned()).filter(|b| !b.is_empty());
     Ok(GitBranchesReply { current, branches, truncated })
 }

@@ -7,7 +7,6 @@
 
 use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Component, Path};
 
 use nix::fcntl::{open, OFlag};
 use nix::sys::stat::Mode;
@@ -36,7 +35,7 @@ pub(crate) enum Seen {
 /// no regular file stands there by the time it is opened.
 pub(crate) fn seen(at: &OnThisSide, rel: &str) -> Option<Seen> {
     let held = open(&at.open, OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC, Mode::empty()).ok()?;
-    let file = beneath::file(&held, &joined(&at.walk, rel)?).ok()??;
+    let file = beneath::file(&held, &beneath::joined(&at.walk, rel)?).ok()??;
     let meta = file.metadata().ok()?;
     if meta.len() > READ_MAX as u64 {
         return Some(Seen::TooLarge);
@@ -47,20 +46,6 @@ pub(crate) fn seen(at: &OnThisSide, rel: &str) -> Option<Seen> {
         return Some(Seen::TooLarge);
     }
     Some(Seen::File { bytes, exec: meta.permissions().mode() & 0o100 != 0 })
-}
-
-/// The walk's names, then rel's, as one name under the held folder; None where the walk takes a way up.
-fn joined(walk: &Path, rel: &str) -> Option<String> {
-    let mut names = Vec::new();
-    for part in walk.components() {
-        match part {
-            Component::Normal(name) => names.push(name.to_str()?),
-            Component::RootDir | Component::CurDir => {}
-            Component::ParentDir | Component::Prefix(_) => return None,
-        }
-    }
-    names.push(rel);
-    Some(names.join("/"))
 }
 
 /// The patch `git diff --no-index -- /dev/null <rel>` prints for a new file holding `bytes`: every line added in one
@@ -125,7 +110,7 @@ fn quoted(prefix: &str, rel: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn git(dir: &Path, args: &[&str]) -> Vec<u8> {
         std::process::Command::new("git").args(args).current_dir(dir).env("LC_ALL", "C").output().unwrap().stdout

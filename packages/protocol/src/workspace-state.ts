@@ -559,6 +559,10 @@ export function signInRoad(view: Pick<WorkspaceView, "kind">): string {
  * to send again once they have taken it. The agent's own sentence names its login command; this names where. */
 export const signInRefusalLine = (view: Pick<WorkspaceView, "kind">): string => `${signInRoad(view)}, then send again`;
 
+/** The composer's line before a thread's first send on the computer the app runs on, where the agents report says the
+ * agent there has no sign-in, so the person is told before the turn rather than by its failure. */
+export const signedOutLine = (agent: string, computer: string): string => `${agent} is not signed in on ${computer}; sign in from a terminal there before you send`;
+
 /** The composer's line for a slash command the CLI runs only in its own terminal, in place of a turn that would answer
  * the command is not available: what the command is, then the wsp control that serves the same intent. */
 export function screenCommandLine(command: ScreenCommand, catalog: Pick<HarnessCatalog, "label">, view: Pick<WorkspaceView, "kind">): string {

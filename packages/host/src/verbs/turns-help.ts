@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { z } from "zod";
+import { agentName } from "@wsp/catalog";
 import {
   AccessChoice,
   accessWordRefusal,
@@ -16,6 +17,8 @@ import {
   SessionStartOutcome,
   SessionStartResult,
   type SessionSteerEvent,
+  type SessionStartingEvent,
+  agentStartingLine,
   ThreadMessage,
   ThreadHead,
   ThreadView,
@@ -36,7 +39,7 @@ import {
   askingLine,
   type PermissionEffect,
   type PermissionOption,
-  type SessionAnswerOutcome,
+  ANSWER_WORDS,
   SessionAnswerResult,
   type SessionPermissionEvent,
   notAFileLine,
@@ -314,6 +317,8 @@ const OTHER_VERSION = otherVersion("sessions.start");
  * the same text in flight cannot hand this one another start's news. */
 interface StartNews {
   queued?(): void;
+  /** Fires when the start has waited on its agent long enough to say the agent is starting. */
+  starting?(event: SessionStartingEvent): void;
   /** Fires when the runtime records the steer, which is the moment the harness took the message; it carries what
    * that turn was doing then, which the start's own reply does not. */
   steered?(event: SessionSteerEvent): void;
@@ -330,15 +335,33 @@ async function begin(client: HostClient, start: Sent, startedBy: SessionOrigin, 
     if (f.type === "session.queued") news.queued?.();
     if (f.type === "session.steer") news.steered?.(f as unknown as SessionSteerEvent);
   });
+  // The start is answered once its launch is handed over, which is before the agent's session starts, and the wait
+  // the starting line is about can be that launch: it is heard until it comes, the session starts, the message steers
+  // a running turn instead, or the turn ends without a start.
+  let turnOf: string | undefined;
+  const offStarting = client.onFrame(f => {
+    if (f.type === "session.end" && turnOf !== undefined && f["turnId"] === turnOf) return offStarting();
+    if (f["requestId"] !== requestId) return;
+    if (f.type === "session.starting") news.starting?.(f as unknown as SessionStartingEvent);
+    if (f.type === "session.starting" || f.type === "session.start" || f.type === "session.steer") offStarting();
+  });
   let answer: Record<string, unknown>;
   try {
     answer = await client.request("sessions.start", { ...asked, startedBy, requestId });
+  } catch (e) {
+    offStarting();
+    throw e;
   } finally {
     offNews();
   }
   const reply = SessionStartResult.safeParse(answer);
-  if (!reply.success) throw new Error(OTHER_VERSION);
+  if (!reply.success) {
+    offStarting();
+    throw new Error(OTHER_VERSION);
+  }
   const { session, outcome, turnId } = reply.data;
+  turnOf = turnId;
+  if (outcome === "steered") offStarting();
   const threadId = session.threadId;
   if (threadId === undefined) throw new Error("the runtime stamped no thread on the session");
   return { turn: { session, threadId, outcome }, turnId };
@@ -395,7 +418,7 @@ export async function follow(
   client: HostClient,
   start: Record<string, unknown>,
   startedBy: SessionOrigin,
-  on: { queued?(): void; steered?(event: SessionSteerEvent): void; started?(turn: Turn): void; redialed?(): void; event(e: SessionEvent, turn: Turn): void },
+  on: { queued?(): void; starting?(event: SessionStartingEvent): void; steered?(event: SessionSteerEvent): void; started?(turn: Turn): void; redialed?(): void; event(e: SessionEvent, turn: Turn): void },
   redial?: () => Promise<HostClient>,
 ): Promise<Turn> {
   const going = sent(start);
@@ -415,7 +438,7 @@ export async function follow(
     const pushed = pushedFrames(socket);
     try {
       if (named === undefined) {
-        named = await begin(socket, going, startedBy, { ...(on.queued !== undefined ? { queued: on.queued } : {}), ...(on.steered !== undefined ? { steered: on.steered } : {}) });
+        named = await begin(socket, going, startedBy, { ...(on.queued !== undefined ? { queued: on.queued } : {}), ...(on.starting !== undefined ? { starting: on.starting } : {}), ...(on.steered !== undefined ? { steered: on.steered } : {}) });
         on.started?.(named.turn);
       } else await socket.events();
       const { turn, turnId } = named;
@@ -732,15 +755,6 @@ export function noSuchAnswerLine(threadId: string, verb: string): string {
   return `the prompt thread ${threadWord(threadId)} is stopped on takes no ${verb}; wsp thread read shows what it asks`;
 }
 
-/** What a pick the host would not take came to, one line per outcome it can answer with; `answered` is the only one
- * that is not a failure and has no line here. */
-export const ANSWER_WORDS: Readonly<Record<Exclude<SessionAnswerOutcome, "answered">, string>> = {
-  gone: "the prompt closed before the answer reached it",
-  unsupported: "this thread's agent raises no prompt this host can answer",
-  "not-found": "this host holds no turn of that thread",
-  "no-option": "the prompt carries no option by that id",
-};
-
 /** Picks one option on a prompt the runtime holds open, the op the app's own buttons send; anything but a pick the
  * harness took is the caller's failure, in the words of the outcome. */
 async function answerAsk(client: HostClient, sessionId: string, askId: string, optionId: string, reason?: string): Promise<void> {
@@ -831,6 +845,7 @@ export async function followVerb(ctx: VerbContext, client: HostClient, start: Re
   try {
     turn = await follow(client, start, "cli", {
       queued: () => ctx.io.error(WAITING),
+      starting: event => ctx.io.error(agentStartingLine(agentName(event.harness), event.installs === true)),
       steered: event => {
         joinedWaiting = event.waiting === true;
       },
