@@ -128,10 +128,40 @@ pub fn to_fixed(x: f64, digits: usize) -> String {
     if !x.is_finite() || x.abs() >= 1e21 {
         return number(x);
     }
-    let exact = format!("{:.1100}", x.abs());
-    let (whole, fraction) = exact.split_once('.').unwrap_or((&exact, ""));
-    let kept = &fraction[..digits];
-    let dropped = &fraction[digits..];
+    let (whole, fraction) = rounded(&format!("{:.1100}", x.abs()), digits);
+    let sign = if x < 0.0 { "-" } else { "" };
+    if digits == 0 {
+        format!("{sign}{whole}")
+    } else {
+        format!("{sign}{whole}.{fraction}")
+    }
+}
+
+/// `x.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })` for a finite `x`:
+/// the shortest digits that read back as `x` rounded with a tie away from zero, so 1.005 reads 1.01 where toFixed
+/// reads 1.00, and the whole part grouped by threes.
+pub fn to_locale_fixed(x: f64, digits: usize) -> String {
+    let (whole, fraction) = rounded(&format!("{}", x.abs()), digits);
+    let mut grouped = String::with_capacity(whole.len() + whole.len() / 3);
+    for (i, d) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(d);
+    }
+    let sign = if x.is_sign_negative() { "-" } else { "" };
+    if digits == 0 {
+        format!("{sign}{grouped}")
+    } else {
+        format!("{sign}{grouped}.{fraction}")
+    }
+}
+
+/// A plain decimal's digits cut to `digits` places, the dropped part rounded with a tie away from zero.
+fn rounded(decimal: &str, digits: usize) -> (String, String) {
+    let (whole, fraction) = decimal.split_once('.').unwrap_or((decimal, ""));
+    let fraction = format!("{fraction:0<digits$}");
+    let (kept, dropped) = fraction.split_at(digits);
     let mut number: Vec<u8> = format!("{whole}{kept}").into_bytes();
     if dropped.as_bytes().first().is_some_and(|d| *d >= b'5') {
         let mut at = number.len();
@@ -150,14 +180,8 @@ pub fn to_fixed(x: f64, digits: usize) -> String {
         }
     }
     let number = String::from_utf8(number).unwrap_or_default();
-    let split = number.len() - digits;
-    let (whole, fraction) = number.split_at(split);
-    let sign = if x < 0.0 { "-" } else { "" };
-    if digits == 0 {
-        format!("{sign}{whole}")
-    } else {
-        format!("{sign}{whole}.{fraction}")
-    }
+    let (whole, fraction) = number.split_at(number.len() - digits);
+    (whole.to_owned(), fraction.to_owned())
 }
 
 #[cfg(test)]
