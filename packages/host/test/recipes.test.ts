@@ -311,6 +311,14 @@ describe("the configs a recipe carries", () => {
     expect(cut).toBe(["[core]", "\tautocrlf = input", "[alias]", "\tlg = log --oneline", "[diff]", "\tcolorMoved = zebra", '[diff "pdf"]', '[merge "ours"]', "[sequence]", "[interactive]", ""].join("\n"));
   });
 
+  it("lands no rerere key: a resolution recorded on one copy would replay silently into a later merge on the box", () => {
+    const cut = gitCut(["[rerere]", "\tenabled = true", "\tautoUpdate = true", "[merge]", "\tconflictStyle = zdiff3"].join("\n"), false);
+    expect(cut).toBe(["[rerere]", "[merge]", "\tconflictStyle = zdiff3", ""].join("\n"));
+    // git reads a key on its section's header line as that section's key, so the same rules cut it there: a secret, a command, rerere.
+    const inline = gitCut(["[rerere] enabled = true", "[github] token = ghp_16C7e42F292c6912E7710c838347Ae178B4a", "[alias] nuke = !rm -rf .", '[diff "pdf"] textconv = pdftotext', "[core] autocrlf = input"].join("\n"), false);
+    expect(inline).toBe(["[rerere]", "[github]", "[alias]", '[diff "pdf"]', "[core]", " autocrlf = input", ""].join("\n"));
+  });
+
   it("carries no bash file and no exported secret of the shell's", () => {
     writeFileSync(join(home, ".zshrc"), "alias g=git\nexport OPENAI_API_KEY=sk-x\nexport EDITOR=vim\n");
     writeFileSync(join(home, ".bashrc"), "alias g=git\n");

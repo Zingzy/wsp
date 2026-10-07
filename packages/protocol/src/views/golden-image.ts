@@ -118,11 +118,12 @@ export function goldenImage(v: Pick<GoldenVersion, "snapshotId" | "templateId">)
 }
 
 /** What a build recorded a row installed: the version, read back off the builder once the row ran (a release's tag,
- * a package's version), and the archive's sha256 where the road hashed one. `latest` marks a row whose road installs
+ * a package's version), and the archive's sha256 where the road hashed one, with the arch whose file that was, since
+ * a release serves each arch its own file and a sum holds for one of them. `latest` marks a row whose road installs
  * the current version wherever it runs, so the version is what that seal got and not what a copy is fixed to. The
  * one shape for the recipe row that carries it, the collector's row, the catalog road that installs at it, the tick
  * the seal writes and the record's pins. */
-export const ToolPin = z.object({ tag: z.string().min(1), sha256: z.string().min(1).optional(), latest: z.literal(true).optional() });
+export const ToolPin = z.object({ tag: z.string().min(1), sha256: z.string().min(1).optional(), arch: z.enum(["x86_64", "aarch64"]).optional(), latest: z.literal(true).optional() });
 export type ToolPin = z.infer<typeof ToolPin>;
 
 /** What a golden is built from, as its builder records it: every ticked row

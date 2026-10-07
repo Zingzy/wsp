@@ -222,6 +222,13 @@
                                 "type": "string",
                                 "minLength": 1
                               },
+                              "arch": {
+                                "type": "string",
+                                "enum": [
+                                  "x86_64",
+                                  "aarch64"
+                                ]
+                              },
                               "latest": {
                                 "type": "boolean",
                                 "const": true
@@ -317,6 +324,9 @@
                       },
                       "sha256": {
                         "$ref": "#/properties/image/anyOf/0/properties/recipe/properties/rows/items/properties/pin/properties/sha256"
+                      },
+                      "arch": {
+                        "$ref": "#/properties/image/anyOf/0/properties/recipe/properties/rows/items/properties/pin/properties/arch"
                       },
                       "latest": {
                         "$ref": "#/properties/image/anyOf/0/properties/recipe/properties/rows/items/properties/pin/properties/latest"
@@ -774,6 +784,13 @@
                                 "type": "string",
                                 "minLength": 1
                               },
+                              "arch": {
+                                "type": "string",
+                                "enum": [
+                                  "x86_64",
+                                  "aarch64"
+                                ]
+                              },
                               "latest": {
                                 "type": "boolean",
                                 "const": true
@@ -869,6 +886,9 @@
                       },
                       "sha256": {
                         "$ref": "#/properties/image/anyOf/0/properties/recipe/properties/rows/items/properties/pin/properties/sha256"
+                      },
+                      "arch": {
+                        "$ref": "#/properties/image/anyOf/0/properties/recipe/properties/rows/items/properties/pin/properties/arch"
                       },
                       "latest": {
                         "$ref": "#/properties/image/anyOf/0/properties/recipe/properties/rows/items/properties/pin/properties/latest"

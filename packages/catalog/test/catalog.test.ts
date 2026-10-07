@@ -154,9 +154,12 @@ describe("catalog", () => {
     expect(unpinned({ road: "npm", package: "bun" })).toEqual({ road: "npm", package: "bun" });
     // The failure names what came down, at which tag, then the recorded sum and the served one, each cut to 12 characters so the reason line keeps both.
     expect(pinCheckLine("$asset", "$tag", pin.sha256)).toBe(`[ "$sum" = '${"d".repeat(64)}' ] || { echo "Error: $asset at $tag does not match the checksum recorded on its first install: recorded dddddddddddd, served \${sum:0:12}" >&2; exit 1; }`);
-    const release = roadModule({ road: "release", repo: "cli/cli", pin }).install({ road: "release", repo: "cli/cli", pin }, "gh") as string;
+    const armed = { ...pin, arch: "x86_64" as const };
+    const release = roadModule({ road: "release", repo: "cli/cli", pin: armed }).install({ road: "release", repo: "cli/cli", pin: armed }, "gh") as string;
     expect(release).toContain("tag='v2.86.0'");
-    expect(release).toContain(pinCheckLine("$asset", "$tag", pin.sha256));
+    expect(release).toContain(`if [ "$arch" = 'x86_64' ]; then ${pinCheckLine("$asset", "$tag", pin.sha256)}; fi`);
+    // A sum recorded before pins named their arch is checked on every arch, as it always was: every seal before then was built on x86_64.
+    expect(roadModule({ road: "release", repo: "cli/cli", pin }).install({ road: "release", repo: "cli/cli", pin }, "gh")).toContain(`  ${pinCheckLine("$asset", "$tag", pin.sha256)}\n`);
     // A cask checks the sum it pins for the arch, whatever a recipe recorded, so its first install is checked too.
     for (const cask of LINUX_CASKS) {
       const line = cask.install;
@@ -432,6 +435,40 @@ describe("catalog", () => {
     expect(existsSync(join(bin, "agent"))).toBe(false);
   });
 
+  it("a release pin's sum is checked only against the file of the arch it was recorded on: it runs here against a served file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-release-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(dir, "served"), "the arm build\n");
+    const sum = createHash("sha256").update("the arm build\n").digest("hex");
+    const listing = ["amd64", "arm64"].map(a => `"browser_download_url": "https://example.com/spoo_0.4.1_linux_${a}"`).join(",");
+    writeStub(join(bin, "curl"), `#!/bin/sh\nif [ "$1" = -o ]; then cp ${JSON.stringify(join(dir, "served"))} "$2"; else printf '%s\\n' '${listing}'; fi\n`);
+    const run = (arch: string, pin: { tag: string; sha256: string; arch?: "x86_64" | "aarch64" }) => {
+      const script = String(ROAD_MODULES.release.install({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin }, "spoo"))
+        .replace('arch="$(uname -m)"', `arch=${arch}`)
+        .replaceAll("/usr/local/bin", bin);
+      return spawnSync("bash", ["-c", script], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin` } });
+    };
+    // An x86_64 builder's sum on an arm machine: the arm file is never held to it, and its own sum and arch are printed for the record.
+    const other = run("aarch64", { tag: "v0.4.1", sha256: "c".repeat(64), arch: "x86_64" });
+    expect(other.stderr).toBe("");
+    expect(other.status).toBe(0);
+    expect(other.stdout).toContain(`WSP_ROAD release spoo_0.4.1_linux_arm64 ${sum} v0.4.1 aarch64`);
+    // The same arch is held to its sum, and a file that does not match it is refused by name.
+    const same = run("aarch64", { tag: "v0.4.1", sha256: "c".repeat(64), arch: "aarch64" });
+    expect(same.status).toBe(1);
+    expect(same.stderr).toContain(pinMismatchLine("spoo_0.4.1_linux_arm64", "v0.4.1", "c".repeat(12), sum.slice(0, 12)));
+    expect(run("aarch64", { tag: "v0.4.1", sha256: sum, arch: "aarch64" }).status).toBe(0);
+    // A pin that names no arch holds the file to its sum on either arch, so no seal made before pins named one loses its check.
+    for (const arch of ["x86_64", "aarch64"]) {
+      const old = run(arch, { tag: "v0.4.1", sha256: "c".repeat(64) });
+      const served = arch === "x86_64" ? "spoo_0.4.1_linux_amd64" : "spoo_0.4.1_linux_arm64";
+      expect(old.status, arch).toBe(1);
+      expect(old.stderr, arch).toContain(pinMismatchLine(served, "v0.4.1", "c".repeat(12), sum.slice(0, 12)));
+    }
+  });
+
   it("says which agents wsp opens threads on", () => {
     expect(CATALOG_AGENTS.filter(a => runsThreads(a.id)).map(a => a.id)).toEqual([...THREAD_AGENTS]);
     expect(runsThreads("nope")).toBe(false);
@@ -612,7 +649,7 @@ describe("catalog", () => {
     expect(tagged).toContain(`release="$(curl 'https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1' || true)"`);
     expect(tagged).not.toContain("tag=\"$(");
     expect(tagged).toContain("tag='v0.4.1'");
-    expect(tagged).toContain('echo "WSP_ROAD release $asset $sum $tag"');
+    expect(tagged).toContain('echo "WSP_ROAD release $asset $sum $tag $arch"');
     // A bare module goes in at the tag; one that carries its own version keeps it; a road with none has no go branch.
     expect(tagged).toContain("go install 'github.com/spoo-me/spoo-cli@v0.4.1'");
     expect(tagged).toContain(`echo "Error: release "'v0.4.1'" of "'spoo-me/spoo-cli'" has no Linux build, and go is not on the machine" >&2`);
@@ -629,7 +666,7 @@ describe("catalog", () => {
     expect(line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin: { tag: "v0.4.0", sha256: "c".repeat(64) } }, "spoo")).not.toContain('[ "$sum" =');
     // No version: a pin fixes the tag and is checked, as a vendor install does; with neither there is no release to read and the row is noted.
     expect(line({ road: "release", repo: "cli/cli", pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }, "gh")).toContain("releases/tags/v2.86.0");
-    expect(line({ road: "release", repo: "cli/cli", pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }, "gh")).toContain(`[ "$sum" = '${"d".repeat(64)}' ]`);
+    expect(line({ road: "release", repo: "cli/cli", pin: { tag: "v2.86.0", sha256: "d".repeat(64), arch: "aarch64" } }, "gh")).toContain(`[ "$sum" = '${"d".repeat(64)}' ]`);
     expect(line({ road: "release" }, "spoo")).toEqual({ note: "no GitHub release to install from" });
     expect(off({ road: "release" }, "spoo")).toEqual({ cmd: "rm -f /usr/local/bin/'spoo'" });
     // A vendor's download is the cask's own script, whatever version the row carries.
