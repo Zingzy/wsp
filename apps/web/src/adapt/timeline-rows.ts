@@ -32,7 +32,7 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
   const latest = input.turns[input.turns.length - 1] ?? null;
   const unsettledTurnId = latest !== null && latest.state === "running" ? latest.turnId : null;
   const turnById = new Map(input.turns.map(t => [t.turnId, t]));
-  const folds = deriveTurnFolds(entries, terminalAssistantIds, turnById, unsettledTurnId);
+  const { folds, stops } = deriveTurnFolds(entries, terminalAssistantIds, turnById, unsettledTurnId);
   const collapsed = new Set<string>();
   for (const fold of folds.values()) {
     if (!input.expandedTurnIds?.has(fold.turnId)) for (const id of fold.hiddenEntryIds) collapsed.add(id);
@@ -99,8 +99,23 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
     if (activeRow.expanded) rows.push(expandedGroupRow(activeRow.groupId, activeRow.createdAt, activeRow.groupedEntries));
   };
 
+  // A stopped turn's line goes after its last row, wherever a message with no turn (a steer) sits among its rows.
+  const lastOf = new Map<string, number>();
+  entries.forEach((e, i) => {
+    const turnId = entryTurnId(e);
+    if (turnId !== null && stops.has(turnId)) lastOf.set(turnId, i);
+  });
+  const unsaid = [...lastOf].sort((a, b) => a[1] - b[1]);
+  const sayStopsBefore = (index: number): void => {
+    while (unsaid.length > 0 && unsaid[0]![1] < index) {
+      const stop = stops.get(unsaid.shift()![0])!;
+      rows.push({ kind: "turn-fold", id: `turn-stopped:${stop.turnId}`, createdAt: stop.createdAt, turnId: stop.turnId, label: stop.label, expanded: null });
+    }
+  };
+
   for (let index = 0; index < entries.length; index++) {
     const entry = entries[index]!;
+    sayStopsBefore(index);
     if (input.isWorking && index === activeTurnHeaderIndex) pushWorking();
     if (entry.id === activePlacementId) pushActive();
 
@@ -119,7 +134,7 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
       let cursor = index + 1;
       while (cursor < entries.length) {
         const next = entries[cursor]!;
-        if (next.kind !== "work" || standsAlone(next.entry) || activeIds.has(next.id) || collapsed.has(next.id) || folds.has(next.id)) break;
+        if (next.kind !== "work" || standsAlone(next.entry) || activeIds.has(next.id) || collapsed.has(next.id) || folds.has(next.id) || next.entry.turnId !== entry.entry.turnId) break;
         grouped.push(next.entry);
         cursor++;
       }
@@ -180,6 +195,7 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
     });
   }
 
+  sayStopsBefore(entries.length);
   if (input.isWorking && activeTurnHeaderIndex === entries.length) pushWorking();
   if (behind !== null) rows.push({ kind: "permission", id: `waiting-on:${behind.threadId}:${behind.prompt.askId}`, createdAt: input.activeTurnStartedAt ?? "", permission: borrowedPrompt(behind), asker: waitingAskerLine(behind.title) });
   // A turn stopped on a prompt is waiting, not thinking: the live row would say the agent is at work while it is not.
@@ -216,13 +232,15 @@ interface TurnFold {
   readonly label: string;
 }
 
-/** Settled turns keep only their terminal assistant message; everything before it folds behind "Worked for ...". */
+/** Settled turns keep only their terminal assistant message; everything before it folds behind "Worked for ...". A
+ * stopped turn never folds, since its last message is wherever the stop caught it and not a reply that stands for the
+ * rest: it keeps every row, and its "You stopped after ..." line comes under them, by its turn in `stops`. */
 function deriveTurnFolds(
   entries: ReadonlyArray<TimelineEntry>,
   terminalAssistantIds: ReadonlySet<string>,
   turnById: ReadonlyMap<string, TurnSummary>,
   unsettledTurnId: string | null,
-): ReadonlyMap<string, TurnFold> {
+): { folds: ReadonlyMap<string, TurnFold>; stops: ReadonlyMap<string, TurnFold> } {
   const groups = new Map<string, { entries: TimelineEntry[]; terminalId: string | null; streaming: boolean }>();
   for (const entry of entries) {
     if (entry.kind === "message" && entry.message.role === "user") continue;
@@ -240,8 +258,19 @@ function deriveTurnFolds(
     }
   }
   const folds = new Map<string, TurnFold>();
+  const stops = new Map<string, TurnFold>();
+  const durationOf = (turnId: string, group: { entries: TimelineEntry[] }): string | null => {
+    const turn = turnById.get(turnId);
+    const durationMs = turn?.durationMs ?? elapsedMs(turn?.startedAt ?? group.entries[0]!.createdAt, turn?.completedAt ?? group.entries[group.entries.length - 1]!.createdAt);
+    return durationMs !== null ? fmtDuration(durationMs) : null;
+  };
   for (const [turnId, group] of groups) {
     if (turnId === unsettledTurnId || group.streaming) continue;
+    if (turnById.get(turnId)?.state === "interrupted") {
+      const duration = durationOf(turnId, group);
+      stops.set(turnId, { turnId, createdAt: group.entries[group.entries.length - 1]!.createdAt, hiddenEntryIds: new Set(), label: duration ? `You stopped after ${duration}` : "You stopped this response" });
+      continue;
+    }
     // Rows that stand alone stay visible on a settled turn: a failed turn often has no terminal message to stand in
     // for its error, and a compaction is all a /compact turn did. So does the turn's proposed plan, which is what the
     // turn was for as much as its last words.
@@ -249,15 +278,10 @@ function deriveTurnFolds(
     const hidden = new Set(group.entries.filter(e => !kept(e)).map(e => e.id));
     if (hidden.size === 0) continue;
     const firstHidden = group.entries.find(e => hidden.has(e.id))!;
-    const turn = turnById.get(turnId);
-    const durationMs = turn?.durationMs ?? elapsedMs(turn?.startedAt ?? group.entries[0]!.createdAt, turn?.completedAt ?? group.entries[group.entries.length - 1]!.createdAt);
-    const duration = durationMs !== null ? fmtDuration(durationMs) : null;
-    const label = turn?.state === "interrupted"
-      ? (duration ? `You stopped after ${duration}` : "You stopped this response")
-      : (duration ? `Worked for ${duration}` : "Worked");
-    folds.set(firstHidden.id, { turnId, createdAt: firstHidden.createdAt, hiddenEntryIds: hidden, label });
+    const duration = durationOf(turnId, group);
+    folds.set(firstHidden.id, { turnId, createdAt: firstHidden.createdAt, hiddenEntryIds: hidden, label: duration ? `Worked for ${duration}` : "Worked" });
   }
-  return folds;
+  return { folds, stops };
 }
 
 function elapsedMs(startIso: string, endIso: string): number | null {

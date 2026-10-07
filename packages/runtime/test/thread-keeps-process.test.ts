@@ -128,6 +128,22 @@ describe("a thread on this computer keeps its agent process between turns", () =
     await gone(pidOf(one.result.text));
   }, 30_000);
 
+  it("keeps every line a stopped turn wrote, its call and that call's result included, and the next turn's lines come after them", async () => {
+    const rt = host();
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "hang talk" });
+    const threadId = handle.view().threadId!;
+    await until(async () => (await rt.sessions.history(ws.id)).some(e => e.threadId === threadId && e.type === "session.delta" && e.text === "beta"), 10_000);
+    expect((await rt.sessions.interrupt(handle.id)).outcome).toBe("accepted");
+    await send(rt, ws.id, "two", { thread: threadId });
+    const rows = (await rt.sessions.history(ws.id)).filter(e => e.threadId === threadId && e.type !== "session.checkpoint").map(e => (e.type === "session.delta" ? `${e.kind}:${e.text.split(" from ")[0]}` : e.type));
+    expect(rows).toEqual([
+      "session.start", "text:alpha", 'tool_use:{"command":"echo one"}', "tool_result:one", "text:beta", "session.done", "session.end",
+      "session.start", "text:two", "session.done", "session.end",
+    ]);
+    await rt.close();
+  }, 30_000);
+
   it("ends the kept process when the model changes between turns, and the next turn boots cold", async () => {
     const rt = host();
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });

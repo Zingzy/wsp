@@ -211,6 +211,21 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Worked for 8.0s");
   });
 
+  it("draws a stopped turn's line under its rows as words, with nothing to open", () => {
+    const turnId = "turn-stopped";
+    const assistantEntry = buildAssistantTimelineEntry("Halfway there.");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        turns={[buildTurn(turnId, "interrupted", "2026-03-17T19:12:20.000Z", "2026-03-17T19:12:28.000Z")]}
+        timelineEntries={[{ ...assistantEntry, message: { ...assistantEntry.message, turnId } }]}
+      />,
+    );
+
+    expect(markup.indexOf("You stopped after 8.0s")).toBeGreaterThan(markup.indexOf("Halfway there."));
+    expect(markup).not.toMatch(/<button[^>]*>(?:(?!<\/button>).)*You stopped/);
+  });
+
   it("keeps a settled reply's row to its copy and its time, whatever the turn ran on and read", () => {
     const turnId = "turn-with-meta";
     const assistantEntry = buildAssistantTimelineEntry("Done.");
