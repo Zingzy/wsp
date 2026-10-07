@@ -20,7 +20,7 @@ import {
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { headShape } from "../transcript-reader.js";
-import type { HarnessAdapter } from "../types/harness.js";
+import type { HarnessAdapter, HarnessStartOptions } from "../types/harness.js";
 import { SESSION_TITLE_TIMEOUT_MS } from "../types/events.js";
 import type { Runtime } from "../types/api.js";
 import {
@@ -165,7 +165,8 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           o.harness,
           { [TURN_TOKEN_ENV]: turnToken, ...launchEnv },
           () => waiting.on,
-          // A name no catalog row declares is one an MCP server's definition reads, which only the environment carries.
+          // A name no catalog row declares is one an MCP server's definition reads; the kind decides whether the
+          // environment is what carries it.
           serverValuesOf(opts.vault?.() ?? {}),
         );
       } catch (e) {
@@ -251,6 +252,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       let images: TurnImage[] = [];
       let imagesDir: string | undefined;
       let filePaths: string[] = [];
+      let serverValues: HarnessStartOptions["serverValues"];
       let filesFolder: string | undefined;
       // Every send takes one trip before its launch: its files land and its folder's snapshot is taken, or only started
       // where the agent takes its prompt late.
@@ -333,6 +335,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
             ({ images, dir: imagesDir } = await ctx.landImages(entry, adapter.attachments, landing, turnImagesDir(landing, threadId, o.requestId, minted), (o.attachments ?? []).filter(a => isImage(a.mediaType))));
             filePaths = await ctx.landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, minted), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
             if (filePaths.length > 0) filesFolder = landing;
+            if (adapter.mcpServers === true) serverValues = await ctx.serverValuesFor(entry, harness, landing);
             const taken = promptsLate ? ctx.snapshotOf(entry, landing) : await ctx.snapshotOf(entry, landing);
             snapshot = taken === undefined ? undefined : { from: taken, cwd: landing };
             refuse();
@@ -427,6 +430,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
               ...(title !== undefined ? { title } : {}),
               ...(images.length > 0 ? { images } : {}),
               ...(mcpServers !== undefined ? { mcpServers } : {}),
+              ...(serverValues !== undefined ? { serverValues } : {}),
               ...(limitDetails ? { limitDetails: true as const } : {}),
               ...(promptAfter !== undefined ? { promptAfter } : {}),
               ...(launchKey !== undefined ? { keep: true as const } : {}),
@@ -758,7 +762,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         const { adapter } = ctx.adapterFor(entry, harness, launchEnv, undefined, servers);
         if (adapter.aside === undefined) throw new Error(asideUnsupportedLine(harness));
         const served = servedTo(wsp, ctx.rootOf(threadId), threadId);
-        return await answered(adapter.aside, { ...ask, ...(served !== undefined ? { mcpServers: { [MCP_SERVER_NAME]: served } } : {}) });
+        const asideIn = latest.cwd ?? ctx.folderOf(latest.workspaceId, ask.session);
+        const serverValues = asideIn === undefined ? undefined : await ctx.serverValuesFor(entry, harness, asideIn);
+        return await answered(adapter.aside, { ...ask, ...(served !== undefined ? { mcpServers: { [MCP_SERVER_NAME]: served } } : {}), ...(serverValues !== undefined ? { serverValues } : {}) });
       } finally {
         if (scoped !== undefined) await deviceDoor.revoke(scoped.deviceId).catch((e: unknown) => console.warn(`the token of a side question on thread ${threadWord(threadId)} was not taken away: ${e instanceof Error ? e.message : String(e)}`));
       }

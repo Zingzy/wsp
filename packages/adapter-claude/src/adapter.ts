@@ -11,7 +11,7 @@ import { rec, str, num, strArr } from "./fields.js";
 import { limitOf, noteRejected, withLimit } from "./limits.js";
 import { ASIDE_HOOKS_ID, asideAnswer, asideCommand, asideCut, asideHooksLine, asidePrompt, asideTailCommand, asideTextOf, forkCleanupCommand, hookDenyLine, noConversationLine, promptDenyLine } from "./aside.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
-import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, userMessageLine } from "./landmines.js";
+import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, serverValuesFile, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
 export interface StartOptions {
@@ -35,6 +35,9 @@ export interface StartOptions {
   images?: readonly TurnImage[];
   /** MCP servers this turn gets besides the config dir's own, by the name each takes in a config. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** The config's own servers that read a value the host holds, each whole with its values in place, for this launch
+   * alone: they reach the CLI in a file of the run's, never on its command line or in its environment. */
+  serverValues?: { entries?: Readonly<Record<string, Readonly<Record<string, unknown>>>> };
   /** The thread so far as text, asked for only where the CLI holds no session under `resume`: the turn then runs in a
    * new session handed it ahead of the prompt. Absent, that turn fails with the CLI's own sentence. */
   seed?: () => Promise<string>;
@@ -1235,6 +1238,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
 
   const launch = (options: StartOptions): ClaudeSession => {
     const localId = options.resume ?? newSessionId();
+    const valued = serverValuesFile(options.serverValues);
     const command = buildCommand({
       ...(options.resume === undefined ? { sessionId: localId } : { resume: options.resume }),
       ...(options.resumeAt !== undefined ? { resumeAt: options.resumeAt } : {}),
@@ -1247,12 +1251,13 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       ...memory,
       ...(options.title !== undefined ? { name: options.title } : {}),
       ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}),
+      ...(valued !== undefined ? { serverValues: true as const } : {}),
       ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
       ...(forwardsSubagentText(options.version) ? { subagentText: true } : {}),
     });
     const launch = options.resume === undefined ? command : `${savedSpendCommand({ configDir: deps.configDir, sessionId: options.resume })}${command}`;
     const line = userMessageLine(options.prompt, localId, options.images);
-    const run = deps.exec(launch, { env: { ...env }, input: [line], ...(options.promptAfter !== undefined ? { inputAfter: options.promptAfter } : {}) });
+    const run = deps.exec(launch, { env: { ...env }, input: [line], ...(options.promptAfter !== undefined ? { inputAfter: options.promptAfter } : {}), ...(valued !== undefined ? { secret: valued } : {}) });
     const keeper = options.keep === true ? keepRun(run) : undefined;
     const stream = keeper === undefined ? run : keeper.turn().stream;
     return follow({ stream, localId, announced: false, fresh: options.resume === undefined, command: launch, ...(keeper !== undefined ? { keeper } : {}), onEvent: options.onEvent });
@@ -1348,8 +1353,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     }
     const { keep, running } = asideCut(total, read.slice(1));
     const picks = { ...(q.cwd !== undefined ? { cwd: q.cwd } : {}), ...(q.model !== undefined ? { model: q.model } : {}), ...(q.effort !== undefined ? { effort: q.effort } : {}), ...(q.contextWindow !== undefined ? { contextWindow: q.contextWindow } : {}), ...(q.fast === true ? { fast: true } : {}) };
-    const command = asideCommand({ session: q.session, fork, keep, configDir: deps.configDir, ...picks, ...(q.mcpServers !== undefined ? { mcpServers: q.mcpServers } : {}), ...memory, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
-    const stream = deps.exec(command, { env: { ...env }, input: [asideHooksLine(), userMessageLine(asidePrompt(q.question, running), fork)] });
+    const valued = serverValuesFile(q.serverValues);
+    const command = asideCommand({ session: q.session, fork, keep, configDir: deps.configDir, ...picks, ...(q.mcpServers !== undefined ? { mcpServers: q.mcpServers } : {}), ...(valued !== undefined ? { serverValues: true as const } : {}), ...memory, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
+    const stream = deps.exec(command, { env: { ...env }, input: [asideHooksLine(), userMessageLine(asidePrompt(q.question, running), fork)], ...(valued !== undefined ? { secret: valued } : {}) });
     current = stream;
     let answer: AsideAnswer | { error: string } | undefined;
     let said: string | undefined;

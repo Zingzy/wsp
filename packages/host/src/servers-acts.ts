@@ -10,7 +10,7 @@
 // computer's file names a variable for each, and the value goes to the vault.
 import { posix } from "node:path";
 import { CONFIG_LINK_EXIT, MCP_AGENTS, agentName, rowVariableLine, catalogEntry, configRefusal, configWriteLine, insideBase, stillStands, type McpAgent, type McpTransport } from "@wsp/catalog";
-import { expand, nodeHost, tilde, type Host } from "@wsp/collect";
+import { nodeHost, tilde, type Host } from "@wsp/collect";
 import { configLanded } from "@wsp/engine";
 import {
   hasControlChar,
@@ -27,7 +27,7 @@ import {
 } from "@wsp/protocol";
 import { projectOf, type AgentsOn, type ServersActs } from "@wsp/runtime";
 import type { ServerVault } from "./env-keys.js";
-import { serverListedHere } from "./agents-here.js";
+import { ownServerFiles, serverListedHere } from "./agents-here.js";
 import { keyOwner } from "./providers.js";
 import { firstLine, roadOf, type Road } from "./target-road.js";
 
@@ -108,7 +108,7 @@ function checkNameKept(agent: McpAgent, name: string, transport: McpTransport): 
 function configOf(road: Road, on: AgentsOn, agentId: string, scope: McpScope): Config {
   const agent = mcpAgent(agentId);
   const home = road.host.home;
-  if (scope !== "project") return { agent, files: agent.mcp.files.map(f => expand(road.host, f)), base: home, ...(scope === "home" ? { folder: home } : {}) };
+  if (scope !== "project") return { agent, files: ownServerFiles(road.host, agent), base: home, ...(scope === "home" ? { folder: home } : {}) };
   const project = projectOf(on);
   if (project === undefined) throw usage("A project's server is changed from a workspace of that project, or from its computer's page.");
   const files = (agent.mcp.projectFiles ?? []).map(f => posix.join(project, f));

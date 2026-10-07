@@ -31,7 +31,7 @@ import type {
   WorkspaceSize,
 } from "@wsp/protocol";
 import { type ThreadPlacement, ThreadScope, WorkspaceOrigin } from "@wsp/protocol";
-import { fmtDuration, type WorktreeFolder } from "@wsp/protocol";
+import { EXEC_OUTPUT_MAX, fmtBytes, fmtDuration, type WorktreeFolder } from "@wsp/protocol";
 import type { MachineExecOptions, TurnWaiting } from "../machine-exec.js";
 import type { SubagentView } from "@wsp/protocol";
 import type { ScopedRoad } from "../devices.js";
@@ -121,6 +121,14 @@ export const sweptRunsLogLine = (workspaceId: string, runs: readonly string[]): 
   `ended ${runs.length === 1 ? "1 harness run" : `${runs.length} harness runs`} on ${workspaceId} that no thread here holds: ${runs.join(", ")}`;
 /** The host log's one line for a harness store that would not give a title, said once per session until a read
  * answers. */
+/** What a turn on a computer the person owns fails with when its agent's servers there could not be read for the
+ * values its launch hands them. */
+export const serverValuesUnreadLine = (agent: string, reason: string): string =>
+  `${agent}'s MCP servers on that computer could not be read for the values its launch hands them (${reason}), so the turn did not start; try again once it answers`;
+/** What that turn fails with when the read came back cut: the agent's config files there passed what one command on
+ * that computer may answer with, and a config cut short would read as one holding no servers. */
+export const serverValuesCutLine = (agent: string, files: readonly string[]): string =>
+  `${agent}'s MCP servers on that computer could not be read whole for the values its launch hands them: ${files.join(" and ")} together, once encoded, pass the ${fmtBytes(EXEC_OUTPUT_MAX)} one read there carries, so the turn did not start; make them smaller and send again`;
 export const noTitleLogLine = (sessionId: string, workspaceId: string, words: string): string =>
   `no title for session ${sessionId.slice(0, 8)} on ${workspaceId}: ${words}`;
 /** The host log's one line for a thread its harness would not name; the thread keeps its opening turn's words and
@@ -794,8 +802,10 @@ export interface KindModule {
   /** The machine's own home, published on the view so a client shortens a folder under it to ~; undefined where
    * the kind has not read one. */
   homeDir: (record: WorkspaceRecord) => string | undefined;
-  /** The login environment a turn of one harness runs under there, read the same way. */
-  env: (entry: LiveWorkspace, agentId: string) => Readonly<Record<string, string>>;
+  /** The login environment a turn of one harness runs under there, read the same way; no harness named is a process
+   * of the thread that is no agent's, a terminal's shell. `homeOf` is where each agent keeps its store there, the
+   * folder the person set for it before the kind's own. */
+  env: (entry: LiveWorkspace, agentId: string | undefined, homeOf: (agentId: string) => string) => Readonly<Record<string, string>>;
   /** Whether a login of this agent's own stands where this workspace runs, which decides whether the vault's key
    * is handed to a turn at all: a harness reads a key in its environment ahead of the login on its disk, so
    * handing one where a person signed in would bill the key and leave that login unused. Where a login lives is
@@ -837,6 +847,11 @@ export interface KindModule {
   /** Whether a thread's agent process is kept up between its turns here, for the next send to skip its boot: on the
    * computer the host runs on, and on no machine, where a 4 GB box holds two threads' agents already. */
   keepsAgents: boolean;
+  /** Where a turn here gets the values the vault holds for MCP servers: "environment", the turn's own, which a
+   * fork's image names each by and nothing else hands them; "launch", each server's entry in the turn's launch, read
+   * off the agent's own config there, since a value in the environment signs the agent in to whatever reads that
+   * name; "file", nowhere, the agent's own file here holding the value as the person typed it. */
+  serverValues: "environment" | "launch" | "file";
   /** Whether this machine's daemon can be dialled at all, asked before a road is opened so nothing mints a preview
    * route to find out: a cloud fork needs one, this computer's daemon is on it. Read as truthy, the way the reach
    * word and the status poller read it before this seam existed. */

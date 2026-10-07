@@ -23,9 +23,10 @@
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { MCP_AGENTS, MCP_AGENT_IDS, valueForms, type McpAgent, type McpServer, type McpTransport } from "@wsp/catalog";
-import { expand, secretNamed, type Host } from "@wsp/collect";
+import { secretNamed, type Host } from "@wsp/collect";
 import type { ServerToolsAsk } from "@wsp/runtime";
 import { lastLine, serverToolsLateRefusal, shellQuote, withoutControlChars, type McpAuth, type McpTool, type McpToolParam, type ServerToolsAnswer } from "@wsp/protocol";
+import { ownServerFiles } from "./agents-here.js";
 
 export const TOOLS_DEADLINE_MS = 20_000;
 /** How long one server's answer stands before it is asked again. */
@@ -283,7 +284,7 @@ interface Found {
 
 async function findServer(host: Host, agent: McpAgent, name: string, project: string | undefined): Promise<Found | undefined> {
   const files: { path: string; project: boolean }[] = [
-    ...agent.mcp.files.map(f => ({ path: expand(host, f), project: false })),
+    ...ownServerFiles(host, agent).map(path => ({ path, project: false })),
     ...(project === undefined ? [] : (agent.mcp.projectFiles ?? []).map(f => ({ path: posix.join(project, f), project: true }))),
   ];
   const texts = await Promise.all(files.map(f => host.fs.readText(f.path)));
@@ -335,7 +336,7 @@ export async function resolveServer(host: Host, agentId: string, name: string, o
 /** Whether the harness asked from `cwd` finds the name in two scopes, where it picks one itself and may start a
  * command server of that name. */
 async function twiceAt(host: Host, agent: McpAgent, name: string, cwd: string): Promise<boolean> {
-  const own = agent.mcp.files.map(f => expand(host, f));
+  const own = ownServerFiles(host, agent);
   const first = async (files: readonly string[]): Promise<string | undefined> => (await Promise.all(files.map(f => host.fs.readText(f)))).find(t => t !== undefined);
   const [mine, theirs] = await Promise.all([first(own), first((agent.mcp.projectFiles ?? []).map(f => posix.join(cwd, f)).filter(f => !own.includes(f)))]);
   const scopes = new Set<string>([

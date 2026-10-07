@@ -8,10 +8,11 @@
 import { userInfo } from "node:os";
 import { posix } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, installsOnFirstRun, serverValuesOf, signInRoadOf, versionOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
-import { detectSkills, expand, nodeHost, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
+import { detectSkills, nodeHost, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
 import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLogin } from "@wsp/engine";
 import { MCP_SERVER_NAME, agentVersionWord, compareVersions, controlNameRefusal, hasControlChar, shellQuote, strictVersion, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow } from "@wsp/protocol";
 import { projectOf, vaultSignIn, type AgentsOn, type AgentsRead, type AgentsReader } from "@wsp/runtime";
+import { ownServerFiles } from "./agents-here.js";
 import { machineHost, type MachineHost } from "./machine-host.js";
 import { resolveServer, serverTools } from "./server-tools.js";
 
@@ -136,7 +137,7 @@ async function serversOf(host: Host, projects: readonly AgentsProject[], held: R
   };
   await Promise.all(
     MCP_AGENTS.map(async agent => {
-      const [mine, theirs] = await Promise.all([firstOf(agent.mcp.files.map(f => expand(host, f))), Promise.all(projects.map(p => firstOf((agent.mcp.projectFiles ?? []).map(f => posix.join(p.path, f)))))]);
+      const [mine, theirs] = await Promise.all([firstOf(ownServerFiles(host, agent)), Promise.all(projects.map(p => firstOf((agent.mcp.projectFiles ?? []).map(f => posix.join(p.path, f)))))]);
       const read = (f: { text: string } | undefined, userOnly: boolean): McpServer[] => (f === undefined ? [] : agent.mcp.format.read(f.text, host.home).filter(s => !userOnly || s.scope === "user"));
       if (mine !== undefined) push(agent, mine.file, read(mine, false));
       theirs.forEach((f, i) => f !== undefined && push(agent, f.file, read(f, true), projects[i]));
@@ -272,7 +273,8 @@ export function agentsReader(o: {
   };
   const hostOf = async (on: Exclude<AgentsOn, { kind: "here" }>): Promise<{ host: MachineHost; user: string; runAs?: string }> => {
     const login = await targetLogin(on.machine, on.kind === "box" ? on.login : {});
-    return { host: machineHost(on.machine, login, on.kind === "box" ? { stdin: true } : { land: on.machine }), user: login.user, ...(login.runAs !== undefined ? { runAs: login.runAs } : {}) };
+    const host = machineHost(on.machine, login, on.kind === "box" ? { stdin: true } : { land: on.machine });
+    return { host: on.stores === undefined ? host : { ...host, stores: on.stores }, user: login.user, ...(login.runAs !== undefined ? { runAs: login.runAs } : {}) };
   };
   const readOn = async (on: AgentsOn): Promise<AgentsRead> => {
     if (on.kind === "here") {
@@ -305,7 +307,7 @@ export function agentsReader(o: {
       const host = on.kind === "here" ? here() : (await hostOf(on)).host;
       const project = projectOf(on);
       const env = on.kind === "here" ? await o.loginEnv?.() : undefined;
-      // A turn gets the servers' values under its own environment, so a reference reads them the same way here.
+      // A turn's servers get the vault's values, in its launch or its environment, so a reference reads them here too.
       const values = { ...serverValuesOf(o.vault()), ...env };
       return kept.tools(host, ask, { values, ...(project !== undefined ? { project } : {}), ...(env !== undefined ? { env } : {}) });
     },

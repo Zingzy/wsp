@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 import type { Caller, ThreadScope, TurnResult } from "@wsp/protocol";
 import type { HarnessAdapterFactory, HarnessStartOptions } from "../src/runtime.js";
 import type { Store } from "../src/store.js";
+import type { ServersActs } from "../src/agents-read.js";
+import { MCP_READ_END } from "@wsp/engine";
 import { ctx, sockets, serving, code, join, KEEPS_NO_IMAGE } from "./places-fixture.js";
 import { report } from "./place-join.js";
 import type { WsClient } from "./ws-client.js";
@@ -27,6 +29,10 @@ export interface Box {
   kills: string[];
   /** An event the computer's daemon pushes up the link. */
   push(event: Record<string, unknown>): void;
+  /** The files the agents' configs read finds there, by path. */
+  configs: Map<string, string>;
+  /** How the configs read answers, given what it printed: as printed and exiting 0 unless a test says otherwise. */
+  readAs?: (stdout: string) => { stdout: string; exitCode: number; stderr?: string };
 }
 
 export interface BoxLogin {
@@ -44,7 +50,7 @@ export const handedLine = (cmd: string): string => {
 
 export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean } = {}): Box {
   let ptys = 0;
-  const seen: Box = { ops: [], execs: [], frames: [], taken: new Set(), kills: [], push: event => client.say(event) };
+  const seen: Box = { ops: [], execs: [], frames: [], taken: new Set(), kills: [], push: event => client.say(event), configs: new Map() };
   let stopped = false;
   client.onFrame(raw => {
     const frame = raw as unknown as Record<string, unknown>;
@@ -74,6 +80,15 @@ export function box(client: WsClient, login: BoxLogin, o: { failClone?: boolean 
       return out(`${at}\n`);
     }
     if (o.failClone === true && line.includes("git clone")) return out("", 128);
+    if (line.includes("wsp_mcp_read()")) {
+      const said = [...line.matchAll(/^wsp_mcp_read (\d+) '([^']+)'$/gm)].map(([, i, path]) => {
+        const text = seen.configs.get(path!);
+        return text === undefined ? `wsp-mcp ${i} - -` : `wsp-mcp ${i} 0 ${Buffer.from(text).toString("base64")}`;
+      });
+      const printed = `${[...said, MCP_READ_END].join("\n")}\n`;
+      const read = seen.readAs?.(printed) ?? { stdout: printed, exitCode: 0 };
+      return say({ exitCode: read.exitCode, stdout: read.stdout, stderr: read.stderr ?? "", truncated: false });
+    }
     if (cmd.includes("WSP_LAUNCHED")) return out("WSP_LAUNCHED\n");
     const sentinel = /(__WSP_EOF_[0-9a-f]+__)/.exec(cmd)?.[1];
     if (sentinel !== undefined) return out(stopped ? `\n${sentinel} 143 down \n` : `\n${sentinel}  up \n`);
@@ -107,9 +122,9 @@ export function answering(starts: Started[]): HarnessAdapterFactory {
 export const HETZNER: BoxLogin = { home: "/root", owner: "root" };
 
 /** A host holding one joined computer, hetzner, its login root unless named, and a project added there by url. */
-export async function joined(o: { login?: BoxLogin; adapters?: Record<string, HarnessAdapterFactory>; taken?: string[]; store?: Store; vault?: Record<string, string>; failClone?: boolean } = {}) {
+export async function joined(o: { login?: BoxLogin; adapters?: Record<string, HarnessAdapterFactory>; taken?: string[]; store?: Store; vault?: Record<string, string>; failClone?: boolean; serversActs?: ServersActs } = {}) {
   const login = o.login ?? HETZNER;
-  const { hostKey } = await serving({ adapters: o.adapters ?? {}, ...(o.store !== undefined ? { store: o.store } : {}), ...(o.vault !== undefined ? { vault: o.vault } : {}) });
+  const { hostKey } = await serving({ adapters: o.adapters ?? {}, ...(o.store !== undefined ? { store: o.store } : {}), ...(o.vault !== undefined ? { vault: o.vault } : {}), ...(o.serversActs !== undefined ? { serversActs: o.serversActs } : {}) });
   let seen!: Box;
   const { client, placeId, pair } = await join(hostKey, {
     code: await code(),

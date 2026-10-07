@@ -24,14 +24,14 @@ import { LinkBackend, PlaceAbsentError, PlaceFolderMachine, keyFingerprint } fro
 import { connectDaemon } from "../reach.js";
 import { verifyPlaceBytes } from "@wsp/keys";
 import { CAPS, DEFAULT_COLLECTION, DEFAULT_ID, type PlaceRecord, type PlaceDoor, PlaceForksNowhereError, PlaceProvisioningError } from "./types.js";
-import { bounded, readsAsEd25519, JOIN_PROVE_MS, PLACE_BAD_KEY_REFUSAL, takenReport, sharedLoginFile, REPLACED, BACKEND_FACTS_MS } from "./helpers.js";
+import { bounded, readsAsEd25519, JOIN_PROVE_MS, PLACE_BAD_KEY_REFUSAL, takenReport, sharedLoginFile, REPLACED, BACKEND_FACTS_MS, GITHUB_ROW } from "./helpers.js";
 import type { PlaceDoorContext } from "./context.js";
 import type { PlaceRecordsArea } from "./records.js";
 import type { PlaceSetupArea } from "./setup.js";
 import type { PlaceViewsArea } from "./views.js";
 
 /** The door's half that joins, proves and holds each computer's link, and answers what a link and a place say. */
-export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "signInsAt" | "loginLanded" | "offerOf" | "backendOf" | "forkingBackend" | "joined" | "folderComputer" | "forward" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
+export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, setupArea: PlaceSetupArea, viewArea: PlaceViewsArea): Pick<PlaceDoor, "answerChallenge" | "join" | "auth" | "hostKey" | "prove" | "attach" | "link" | "channel" | "load" | "nameOf" | "settingsAt" | "turnLimitAt" | "signInsAt" | "githubFromVault" | "loginLanded" | "offerOf" | "backendOf" | "forkingBackend" | "joined" | "folderComputer" | "forward" | "placeFor" | "defaultPlace" | "markUsed" | "markDefaultIfNone"> {
   const { opts, store, wiring, clockNow, seenEveryMs, live, kept, signInsHere, backends, forwards, asking, emit } = ctx;
   const {
     records, wiredProvider, providerIds, providerBackend, recordOf, settingsOf, settingsHeld, awaiting, holdBack,
@@ -263,6 +263,12 @@ export function linkDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, se
     },
 
     signInsAt: signInsHere,
+
+    githubFromVault(placeId) {
+      const held = kept.get(placeId);
+      const github = held?.picks?.configs.github;
+      return github !== undefined && (github.signin ?? "vault") === "vault" && held?.applied?.rows.some(r => r.id === GITHUB_ROW && r.outcome === "present") === true;
+    },
 
     async loginLanded(placeId, agent) {
       const file = sharedLoginFile(agent);

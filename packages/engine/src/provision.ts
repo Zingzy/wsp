@@ -237,6 +237,9 @@ const MCP_LABEL = "MCP servers";
 export interface ProvisionOn {
   /** The home of the login the computer's agent runs as: where the agents' own folders are there. */
   home: string;
+  /** The names this host's vault holds a server's value under, names only, so a server's row can say where its
+   * agent's launch there hands it none. */
+  held?: ReadonlySet<string>;
 }
 
 /** The steps of a setup the engine runs on the computer itself; the sign-ins, the folders and the GitHub check are
@@ -415,6 +418,7 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
           landed: run.landed,
           tools: run.tools,
           path: plan.path,
+          ...(on.held !== undefined ? { held: on.held } : {}),
           stage: (_which, detail) => {
             if (detail !== undefined) stage(detail);
           },

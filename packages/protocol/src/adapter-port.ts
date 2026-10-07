@@ -257,6 +257,11 @@ export interface ExecStreamFactory {
        * a rejection kills the run. Where runs outlive the host, the held lines wait beside the run, and a host that
        * re-opens a run whose seed never reached it hands the seed over. */
       inputAfter?: Promise<void>;
+      /** Text the run reads that holds values: each of `files` lands as a file of the run's own, its login's alone,
+       * and the variable it is keyed by carries that file's path; with `input`, the seed lines land the same way. It
+       * goes by the launch's own input, never by a command, which every login on that computer can read, and a road
+       * whose launch takes no input refuses it. */
+      secret?: { files?: Readonly<Record<string, string>>; input?: true };
     },
   ): ExecStream;
   /** Asks the machine whether it still holds a run this factory launched in an earlier process, and reads it from
@@ -428,6 +433,8 @@ export interface AsideQuestion {
   contextWindow?: string;
   fast?: boolean;
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** The values the thread's turns hand its agent's own servers at launch, handed the copy the same way. */
+  serverValues?: { entries?: Readonly<Record<string, Readonly<Record<string, unknown>>>> };
   /** Handed each piece of the answer as the harness writes it, where it writes in pieces. */
   onText?: (text: string) => void;
 }

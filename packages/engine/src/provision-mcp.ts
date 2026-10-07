@@ -8,7 +8,7 @@
 // knows its own hand from the agent's and from the person's; a name it planned
 // and wrote nowhere is written down as one it no longer owns.
 import { placeProvisionPaths, type PlaceProvisionRow } from "@wsp/protocol";
-import type { McpEditLib, McpMergeResult } from "@wsp/catalog";
+import { launchMisses, type McpEditLib, type McpMergeResult } from "@wsp/catalog";
 import {
   READ_MS,
   absentCommands,
@@ -54,6 +54,10 @@ export function atHome(plan: McpPlan, home: string): McpPlan {
 /** Why one server is set aside: the agent, or the person at that computer, keeps its own definition under that
  * name, and what wsp owns in such a file is only what wsp itself put there. */
 export const theirServerLine = (agent: string, name: string, path: string): string => `${name} in ${path} is ${agent}'s own under that name; wsp does not write over it`;
+
+/** What a server's row on a computer somebody owns says where it reads a value this host's vault holds and its agent's
+ * launch there hands it none, so its threads there start that server without it. */
+export const keyUnreachedLine = (agent: string, names: readonly string[]): string => `its key in ${names.join(", ")} does not reach ${agent}'s threads on that computer yet`;
 
 /** Why one server is set aside on a round that never got this computer's copy of the agent's file to that
  * computer: the recipe's servers are read out of that copy, so a name that is not already in the file there is a
@@ -111,7 +115,7 @@ interface Merged {
 export async function provisionMcp(
   machine: Machine,
   planned: McpPlan,
-  o: { home: string; landed: OwnedPaths; tools: readonly ToolResult[]; stage: StageListener; path: string },
+  o: { home: string; landed: OwnedPaths; tools: readonly ToolResult[]; stage: StageListener; path: string; held?: ReadonlySet<string> },
 ): Promise<PlaceProvisionRow[]> {
   const plan = atHome(planned, o.home);
   o.stage("installing-mcp", mcpOpening(plan.agents));
@@ -260,11 +264,31 @@ export async function provisionMcp(
     ...(merged !== undefined ? { report: merged.outcomes } : {}),
     ...(failure !== undefined ? { failure } : {}),
   });
+  // Each kept server that reads a value the vault holds where its agent's launch there hands it none, read off its
+  // file as the round left it.
+  const unreached = new Map<string, string>();
+  if (failure === undefined && merged !== undefined && o.held !== undefined && o.held.size > 0) {
+    let at = 0;
+    for (const agent of agents) {
+      for (const scope of agent.scopes) {
+        const path = target[at++];
+        const text = path === undefined ? undefined : (merged.texts.get(path) ?? stood.get(path));
+        if (text === undefined) continue;
+        const servers = scope.format.read(text, scope.project?.to ?? o.home);
+        for (const name of scope.keep) {
+          const server = servers.find(s => s.name === name && (s.scope === "home") === (scope.project !== undefined));
+          const misses = server === undefined || server.disabled === true ? [] : launchMisses(agent.id, scope.format, server, o.held);
+          if (misses.length > 0) unreached.set(mcpRowId(agent.id, scope.project !== undefined, name), keyUnreachedLine(agent.label, misses));
+        }
+      }
+    }
+  }
   if (failure === undefined && merged !== undefined) {
     await appendLanding(machine, o.home, [...[...merged.records].map(([id, digest]) => serverLine(id, digest)), ...merged.tombstones.map(tombstoneLine)]);
   }
   return results.map(r => {
     const outcome = r.outcome === "skipped" ? "skipped" : present.has(r.id) ? "present" : "installed";
-    return { id: r.id, label: `${r.agent} ${r.name}`, outcome, kind: "server" as const, ...(r.note !== undefined && outcome !== "present" ? { note: r.note } : {}) };
+    const note = [outcome !== "present" ? r.note : undefined, outcome === "skipped" ? undefined : unreached.get(r.id)].filter((n): n is string => n !== undefined).join("; ");
+    return { id: r.id, label: `${r.agent} ${r.name}`, outcome, kind: "server" as const, ...(note !== "" ? { note } : {}) };
   });
 }

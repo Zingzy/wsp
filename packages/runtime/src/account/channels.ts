@@ -392,6 +392,10 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
       }
       if (op === "pty.detach" || op === "pty.kill") attached.delete(ptyId);
     };
+    /** A terminal in a thread's folder there starts under the environment the thread's turns do, so the logins it
+     * reads are theirs; a container's pty takes none. */
+    const terminalEnv = (frame: DaemonFrame): { env?: Record<string, string> } =>
+      runsInFolder(entry.record.kind) ? { env: { ...ctx.threadEnv(entry), ...(frame["env"] as Record<string, string> | undefined) } } : {};
     onEvent({ type: "daemon.hello", root: checkout, ...(version !== undefined ? { version } : {}) });
     return {
       async send(frame) {
@@ -401,7 +405,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
         if (!carries.includes(op)) return { id: null, ok: false, code: "unsupported", error: forkOpRefusedLine(op, entry.record.name, door.nameOf(placeId)) };
         // The pane's first tab names no folder, and the daemon answering for a workspace has no working directory
         // inside it: without one the shell would open in the home of the computer, which is bound in.
-        const asked = op === "pty.create" && frame["cwd"] === undefined ? { ...frame, cwd: checkout } : frame;
+        const asked = op === "pty.create" ? { ...frame, ...(frame["cwd"] === undefined ? { cwd: checkout } : {}), ...terminalEnv(frame) } : frame;
         const reply = await served(asked);
         if (reply["ok"] === true) held(op, asked, reply);
         return { id: null, ...reply } as DaemonResponse;

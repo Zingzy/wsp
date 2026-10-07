@@ -146,10 +146,13 @@ export const MCP_READ_MARK = "wsp-mcp";
  * error's words, so the stage names it on every server and the build goes on. */
 export const refused = (e: unknown): ExecResult => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) });
 
-/** Why the read did not answer, worded without a line of its output. That output is every config whole, and this
- * sentence is every skipped server's note, the stage line, the run log and the saved result: a read that stopped
- * says so by what it exited with. A machine that refused the call still says its own words, which are on stderr. */
-export const readFailed = (res: ExecResult): string => `the config edit did not run (${reasonOf({ ...res, stdout: "" }, READ_MS / 1000)})`;
+/** Why a read of every config did not answer, worded without a line of its output. That output is every config whole,
+ * and this reason lands in sentences a person, a log and a lead thread read: a read that stopped says so by what it
+ * exited with. A machine that refused the call still says its own words, which are on stderr. */
+export const readReason = (res: ExecResult, timeoutS: number = READ_MS / 1000): string => reasonOf({ ...res, stdout: "" }, timeoutS);
+
+/** Why the sync's read did not answer: every skipped server's note, the stage line, the run log and the saved result. */
+export const readFailed = (res: ExecResult): string => `the config edit did not run (${readReason(res)})`;
 
 /** One run reads every scope's config: the first of the scope's files that exists, base64 on one line, under the
  * scope's place in the plan and the file's place in the scope. */
@@ -164,8 +167,16 @@ export function readConfigsCmd(scopes: readonly { files: readonly string[] }[]):
     `  printf '${MCP_READ_MARK} %s - -\\n' "$i"`,
     "}",
     ...scopes.map((s, i) => `wsp_mcp_read ${i} ${s.files.map(shellQuote).join(" ")}`),
+    `printf '%s\\n' '${MCP_READ_END}'`,
   ].join("\n");
 }
+
+/** The read's last line. A computer cuts what one command may answer with, and a cut config line still parses into
+ * a config holding nothing, so a read missing this line came back cut. */
+export const MCP_READ_END = `${MCP_READ_MARK} end`;
+
+/** Whether the read answered whole, its last line there. */
+export const readWhole = (stdout: string): boolean => stdout.split("\n").some(line => line.trim() === MCP_READ_END);
 
 /** The config one scope points at, as it stands on the machine; nothing when none of the scope's files is there. */
 export interface ScopeFile {

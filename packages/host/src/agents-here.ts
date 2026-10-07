@@ -3,7 +3,7 @@
 // computer by the recipe scan's own detector, so the app and wsp recipe scan
 // agree on what is here; whether its MCP config already names wsp; and the
 // version its command answers with.
-import { CATALOG_AGENTS, MCP_AGENTS, installsOnFirstRun } from "@wsp/catalog";
+import { CATALOG_AGENTS, LAUNCH_SERVER_ROADS, MCP_AGENTS, installsOnFirstRun, type McpAgent } from "@wsp/catalog";
 import { agentRowId, detectAgents, expand, firstLine, nodeHost, type Host } from "@wsp/collect";
 import { MCP_SERVER_NAME } from "./mcp-install.js";
 
@@ -20,10 +20,20 @@ export interface AgentHere {
   installs?: true;
 }
 
+/** The files an agent's own servers are read from and written to there, the first that is there being its config: its
+ * file under the store folder a thread's agent there is pointed at, else the catalog's under the home. A store outside
+ * the home stays the catalog's, since no act writes outside the login's home. */
+export function ownServerFiles(host: Pick<Host, "home" | "stores">, agent: McpAgent): string[] {
+  const store = host.stores?.[agent.id];
+  const road = LAUNCH_SERVER_ROADS[agent.id];
+  if (store !== undefined && road !== undefined && (store === host.home || store.startsWith(`${host.home}/`))) return [road.user(store, host.home)];
+  return agent.mcp.files.map(f => expand(host, f));
+}
+
 /** Whether any of the agent's MCP config files names the server; a file that is not its format names nothing. */
-async function lists(host: Host, agent: (typeof MCP_AGENTS)[number], name: string): Promise<boolean> {
-  for (const file of agent.mcp.files) {
-    const text = await host.fs.readText(expand(host, file));
+async function lists(host: Host, agent: McpAgent, name: string): Promise<boolean> {
+  for (const file of ownServerFiles(host, agent)) {
+    const text = await host.fs.readText(file);
     if (text === undefined) continue;
     try {
       if (agent.mcp.format.read(text, host.home).some(s => s.name === name)) return true;

@@ -32,7 +32,7 @@ const machineLogin = (id: ThreadAgent): string => {
  * beside it, since the sentence for a key the provider turns down has to name it. */
 export function secretsOf(
   vault: Readonly<Record<string, string>>,
-  id: ThreadAgent,
+  id: string,
   loginStands = false,
 ): { oauthToken?: string; apiKey?: string; keyEnv?: string } {
   const signIn = CATALOG_AGENTS.find(a => a.id === id)?.signIn;
@@ -43,6 +43,15 @@ export function secretsOf(
   if (keyEnv === undefined || loginStands) return {};
   const key = vault[keyEnv];
   return key === undefined ? {} : { apiKey: key, keyEnv };
+}
+
+/** The same, under the variable the agent reads it from: what a process that is not that agent's turn carries, so
+ * the agent run from a shell there signs in as its turn does. */
+export function secretEnvOf(vault: Readonly<Record<string, string>>, id: string, loginStands = false): Record<string, string> {
+  const signIn = CATALOG_AGENTS.find(a => a.id === id)?.signIn;
+  const { oauthToken, apiKey, keyEnv } = secretsOf(vault, id, loginStands);
+  if (oauthToken !== undefined && signIn !== undefined && mintsToken(signIn)) return { [signIn.tokenEnv]: oauthToken };
+  return apiKey !== undefined && keyEnv !== undefined ? { [keyEnv]: apiKey } : {};
 }
 
 export const HARNESS_ADAPTERS: Readonly<Record<ThreadAgent, HarnessAdapterFactory>> = {

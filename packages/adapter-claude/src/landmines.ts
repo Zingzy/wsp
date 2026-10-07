@@ -110,6 +110,9 @@ export interface BuildCommandOptions {
   name?: string;
   /** MCP servers this turn gets on top of the config dir's own, by the name each takes in a config. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** The run's environment names a file under SERVER_VALUES_ENV holding servers with their values, which stand for
+   * the config's own servers of those names on this launch alone. */
+  serverValues?: true;
   /** The model's faster output. The CLI takes it as the fastMode setting, which --settings carries for this launch
    * alone; the result's fast_mode_state says whether the account served it (2.1.283, 2026-09-27). */
   fast?: boolean;
@@ -218,6 +221,17 @@ function briefFlag(servers: Readonly<Record<string, McpServerSpec>> | undefined)
   return launchHasSlate(servers) ? [`--append-system-prompt ${shellQuote(SLATE_BRIEF)}`] : [];
 }
 
+/** The variable a run's environment names its servers-with-values file under: a path, the values being in the file. A
+ * second --mcp-config stands for the config's own server of a name it holds (measured on 2.1.280). */
+export const SERVER_VALUES_ENV = "WSP_MCP_VALUES";
+
+/** What a run lands for its servers with their values, a turn's or a side question's alike: one file keyed by
+ * SERVER_VALUES_ENV; nothing where no server reads a value. */
+export function serverValuesFile(values: { entries?: Readonly<Record<string, Readonly<Record<string, unknown>>>> } | undefined): { files: Record<string, string> } | undefined {
+  const entries = values?.entries ?? {};
+  return Object.keys(entries).length === 0 ? undefined : { files: { [SERVER_VALUES_ENV]: JSON.stringify({ mcpServers: entries }) } };
+}
+
 /**
  * The servers a turn is handed, as this CLI takes them: one --mcp-config carrying the JSON a config file would hold.
  * Not --strict-mcp-config, which would drop the config dir's own servers and leave the turn with these alone.
@@ -273,6 +287,7 @@ export function buildCommand(options: BuildCommandOptions): string {
     ...slugFlag("--effort", "effort", effort),
     ...(name === undefined ? [] : [`--name ${shellQuote(name)}`]),
     ...mcpConfigFlag(mcpServers),
+    ...(options.serverValues === true ? [`--mcp-config "$${SERVER_VALUES_ENV}"`] : []),
     ...briefFlag(mcpServers),
     ...(person.file ? [] : settingsFlag({ ...(fast === true ? { fastMode: true } : {}), ...memorySettings(memoryDir), ...person.settings, ...(aside ? { disableAllHooks: true } : {}) })),
     idFlag,

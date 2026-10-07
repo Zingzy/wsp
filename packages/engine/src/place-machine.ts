@@ -75,7 +75,8 @@ export class PlaceMachine implements Machine {
    * frame's own stdin, and a last frame joining the parts in order and taking them away. A part is written over
    * rather than appended and the join is skipped once the parts are gone, so a frame whose answer the link lost is
    * sent again and the file still reads the same bytes once. The parts are what a trip over this road costs, and
-   * they ride back on the answer. */
+   * they ride back on the answer. Every part and the file are the login's alone, whatever mask the daemon runs under,
+   * since what lands this way is often a config or a secret; a caller that wants the file shared sets its mode. */
   async putBytes(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<BytesLanded> {
     const at = shellQuote(path);
     const parts = Math.max(1, Math.ceil(bytes.length / PLACE_PART_BYTES));
@@ -84,14 +85,14 @@ export class PlaceMachine implements Machine {
     try {
       for (let i = 0; i < parts; i++) {
         const part = bytes.subarray(i * PLACE_PART_BYTES, Math.min((i + 1) * PLACE_PART_BYTES, bytes.length));
-        const res = await this.exec([`mkdir -p ${shellQuote(posix.dirname(path))}`, `cat > ${at}.part${i}`].join("\n"), {
+        const res = await this.exec(["umask 077", `mkdir -p ${shellQuote(posix.dirname(path))}`, `cat > ${at}.part${i}`].join("\n"), {
           timeoutMs: placePartBoundMs(part.length, opts?.timeoutMs),
           idempotencyKey: `${put}/${i}`,
           stdin: part,
         });
         if (res.exitCode !== 0) throw new Error(`part ${i + 1} of ${parts} did not land at ${path} on ${this.id}: ${machineAnswer(res)}`);
       }
-      const joined = await this.exec(`if [ -e ${at}.part0 ]; then cat ${names} > ${at} && rm -f ${names}; fi`, {
+      const joined = await this.exec(`umask 077; if [ -e ${at}.part0 ]; then cat ${names} > ${at} && rm -f ${names}; fi`, {
         idempotencyKey: `${put}/join`,
         ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
       });

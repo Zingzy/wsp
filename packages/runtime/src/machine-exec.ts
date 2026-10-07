@@ -480,8 +480,15 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     return stream;
   };
 
-  const factory: ExecStreamFactory = (command, { env, input, inputAfter }) => {
+  const factory: ExecStreamFactory = (command, { env, input, inputAfter, secret }) => {
     const base = `${runDir}/${randomBytes(6).toString("hex")}`;
+    if (secret !== undefined && machine.takesStdin !== true) throw new Error(`${machine.id} takes no input on its launch, so text holding a value would ride its command; nothing was started`);
+    // Text that holds values rides the launch's input under names of its own, is written to the run's files under
+    // its mask and leaves the shell before the run starts, so the run's environment never carries it.
+    const held = [
+      ...Object.entries(secret?.files ?? {}).map(([variable, text], i) => ({ name: `WSP_LAND_${i}`, path: `${base}.f${i}`, text, variable })),
+      ...(secret?.input === true && input !== undefined ? [{ name: "WSP_LAND_IN", path: `${base}.in`, text: input.map(line => `${line}\n`).join(""), variable: undefined }] : []),
+    ];
 
     // The environment reaches the run as the one setsid starts it under and never sits in its script. A machine
     // that takes stdin reads it off the launch exec's input, since its command line is world-readable there; a
@@ -489,6 +496,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     // wsp builds keep sudo and the box login's systemd manager from logging (QUIET_LOGS).
     const named = Object.fromEntries(Object.entries(env).filter(([k]) => ENV_KEY.test(k)));
     const envLines = machine.takesStdin === true ? [ENV_FROM_INPUT] : Object.entries(named).map(([k, v]) => `export ${k}=${shellQuote(v)}`);
+    const heldLines = held.flatMap(h => [`printf %s "$${h.name}" > ${q(h.path)} || exit 1`, `unset ${h.name}`, ...(h.variable !== undefined ? [`export ${h.variable}=${q(h.path)}`] : [])]);
     // The tail starts in a subshell so bash's job notice for its kill never lands in the log; the command's exit code
     // is written before the tail is killed, so a poll that sees it reads a finished log.
     const run =
@@ -498,7 +506,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     // The turn's processes are what the kernel takes first when memory runs out: the work outgrew the machine, and
     // the daemon and the guest agent are how anyone hears of it.
     const files: GuestWrite[] = [{ path: `${base}.sh`, text: `${workScoreLine()}\n${run}` }];
-    if (input !== undefined) files.push({ path: `${base}.in`, text: input.map(line => `${line}\n`).join("") });
+    if (input !== undefined && !held.some(h => h.variable === undefined)) files.push({ path: `${base}.in`, text: input.map(line => `${line}\n`).join("") });
 
     // Spawn eagerly, like a local child process would, unless the seed is held: a write here is one more exec trip, so
     // the launch waits and carries the seed with it.
@@ -512,9 +520,9 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           // and the log carry the person's messages and the agent's output, and a machine somebody owns may carry
           // other logins that can read a folder wsp did not make.
           before: ["umask 077", `mkdir ${q(claim(base))} 2>/dev/null || { [ -d ${q(claim(base))} ] && { echo ${HANDSHAKE.launched}; exit 0; }; echo ${q(`no run folder on this machine: ${claim(base)}`)} >&2; exit 1; }`],
-          after: [...(input === undefined ? [] : [`mkfifo ${q(base)}.fifo`]), ...envLines, `${opts.launchUnder?.(base) ?? ""}setsid bash ${q(base)}.sh > ${q(base)}.log 2>&1 & echo $! > ${q(base)}.pid; echo ${HANDSHAKE.launched}`],
+          after: [...(input === undefined ? [] : [`mkfifo ${q(base)}.fifo`]), ...envLines, ...heldLines, `${opts.launchUnder?.(base) ?? ""}setsid bash ${q(base)}.sh > ${q(base)}.log 2>&1 & echo $! > ${q(base)}.pid; echo ${HANDSHAKE.launched}`],
           timeoutMs: execTimeoutMs,
-          ...(machine.takesStdin === true ? { stdin: envInput(named) } : {}),
+          ...(machine.takesStdin === true ? { stdin: envInput({ ...named, ...Object.fromEntries(held.map(h => [h.name, h.text])) }) } : {}),
         }),
       { now, sleep },
     ));

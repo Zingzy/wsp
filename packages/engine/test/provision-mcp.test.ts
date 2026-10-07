@@ -11,7 +11,7 @@ import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, parseJsonc } from "@wsp/ca
 import { MCP_ID_PREFIX, TOOLS_PATH, placeProvisionPaths } from "@wsp/protocol";
 import type { McpPlan } from "../src/golden-mcp.js";
 import { closeAgentFiles, oncePathsOf, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
-import { provisionMcp, theirServerLine } from "../src/provision-mcp.js";
+import { keyUnreachedLine, provisionMcp, theirServerLine } from "../src/provision-mcp.js";
 import { tarOf } from "../src/vault.js";
 import type { PackedFiles } from "../src/golden.js";
 import { boxGuest, cleanGuests, type BoxGuest } from "./box-guest.js";
@@ -111,7 +111,7 @@ const tarOfConfigs = (claude: string, codex: string): Buffer =>
 
 /** One run of the job's files and servers rounds on that computer, in the order the job runs them, with the close
  * that folds what it wrote into the list beside the job. */
-async function run(g: BoxGuest, o: { claude?: string; codex?: string; far?: boolean; untick?: readonly string[] } = {}): Promise<{ files: [string, string][]; servers: [string, string, string | undefined][]; closing: string }> {
+async function run(g: BoxGuest, o: { claude?: string; codex?: string; far?: boolean; untick?: readonly string[]; held?: ReadonlySet<string> } = {}): Promise<{ files: [string, string][]; servers: [string, string, string | undefined][]; closing: string }> {
   const said: string[] = [];
   const landed = await provisionFiles(g.machine, { home: g.root, lands: LANDS, pack: async () => packed(tarOfConfigs(o.claude ?? CLAUDE_TRAVELLED(["--stdio"], o.far === true), o.codex ?? CODEX_TRAVELLED)) });
   const servers = await provisionMcp(g.machine, planOn(g.root, o.far === true, o.untick ?? []), {
@@ -119,6 +119,7 @@ async function run(g: BoxGuest, o: { claude?: string; codex?: string; far?: bool
     landed: landed.owned,
     tools: [],
     path: TOOLS_PATH,
+    ...(o.held !== undefined ? { held: o.held } : {}),
     stage: (_which, detail) => {
       if (detail !== undefined) said.push(detail);
     },
@@ -136,6 +137,17 @@ const claudeOf = (root: string): { numStartups: number; oauthAccount: unknown; p
   JSON.parse(readFileSync(join(root, ".claude-cfg/.claude.json"), "utf8")) as never;
 
 describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }, () => {
+  it("lands each server as the copy carries it, every key the person set kept and every value still a name", async () => {
+    const g = box();
+    const gsc = { type: "http", url: "https://gsc.example/mcp", headers: { Authorization: "Bearer ${GSC_TOKEN}" }, oauth: { clientId: "abc", callbackPort: 8080 } };
+    const claude = `${JSON.stringify({ mcpServers: { gsc, mine: { command: "npx", args: [] } } }, null, 2)}\n`;
+    const codex = ["[mcp_servers.context7]", 'command = "npx"', 'args = ["-y", "context7"]', 'env_vars = ["GITHUB_PERSONAL_ACCESS_TOKEN", "HTTPS_PROXY"]', 'disabled_tools = ["delete_repository"]', "startup_timeout_sec = 40", ""].join("\n");
+    await run(g, { claude, codex });
+    expect(claudeOf(g.root).mcpServers.gsc).toEqual(gsc);
+    const own = readFileSync(join(g.root, ".codex/config.toml"), "utf8");
+    for (const line of ['env_vars = ["GITHUB_PERSONAL_ACCESS_TOKEN", "HTTPS_PROXY"]', 'disabled_tools = ["delete_repository"]', "startup_timeout_sec = 40"]) expect(own).toContain(line);
+  });
+
   it("merges them into the file its agent keeps, reads them present on the next run, and writes its own copy again only where this computer's changed", async () => {
     const g = box();
     const { root } = g;
@@ -264,6 +276,29 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
     // Every key the agent wrote for itself and the server the person put there are where they were.
     expect(claudeOf(root).numStartups).toBe(41);
     expect(claudeOf(root).mcpServers["mine"]).toEqual({ command: "/usr/local/bin/mine", args: [] });
+  });
+
+  it("says on a server's row where its key does not reach that computer's threads, since that agent's launch hands it no value", async () => {
+    const g = box();
+    const held = new Set(["LINEAR_TOKEN"]);
+    const claude = `${JSON.stringify({ mcpServers: { gsc: { type: "http", url: "https://gsc.example/mcp", headers: { Authorization: "Bearer ${LINEAR_TOKEN}" } }, mine: { command: "npx", args: [] } } }, null, 2)}\n`;
+    const codex = ["[mcp_servers.context7]", 'url = "https://c7.example/mcp"', 'bearer_token_env_var = "LINEAR_TOKEN"', ""].join("\n");
+    const { servers } = await run(g, { claude, codex, held });
+    expect(servers.find(([id]) => id === `${MCP_ID_PREFIX}codex/context7`)).toEqual([`${MCP_ID_PREFIX}codex/context7`, "installed", keyUnreachedLine("Codex", ["LINEAR_TOKEN"])]);
+    expect(servers.find(([id]) => id === `${MCP_ID_PREFIX}claude/gsc`)?.[2]).toBeUndefined();
+
+    const o = box();
+    const config = join(o.root, ".config/opencode/opencode.json");
+    mkdirSync(join(o.root, ".config/opencode"), { recursive: true });
+    writeFileSync(config, OPENCODE_ON_BOX);
+    const travelled = `${JSON.stringify({ mcp: { docs: { type: "local", command: ["npx", "docs-mcp"], enabled: true, environment: { DOCS_KEY: "{env:LINEAR_TOKEN}" } } } }, null, 2)}\n`;
+    const lands: ProvisionLanding[] = [{ id: "agents/opencode", label: "OpenCode", dest: ".config/opencode/opencode.json", once: true }];
+    const landed = await provisionFiles(o.machine, { home: o.root, lands, pack: async () => packed(tarOf([{ path: ".config/opencode/opencode.json", mode: 0o600, content: travelled }])) });
+    const rows = await provisionMcp(o.machine, opencodePlanOn(o.root), { home: o.root, landed: landed.owned, tools: [], path: TOOLS_PATH, stage: () => {}, held });
+    expect(rows.map(r => r.note)).toEqual([`npx fetches the package on first use; ${keyUnreachedLine("OpenCode", ["LINEAR_TOKEN"])}`]);
+    // Read again with the server already as it travelled, the row reads present and still says so.
+    const again = await provisionMcp(o.machine, opencodePlanOn(o.root), { home: o.root, landed: new Map(), tools: [], path: TOOLS_PATH, stage: () => {}, held });
+    expect(again.map(r => [r.outcome, r.note])).toEqual([["present", keyUnreachedLine("OpenCode", ["LINEAR_TOKEN"])]]);
   });
 
   it("merges into a jsonc config in place, so the person's comments stand and no row says anything of them", async () => {

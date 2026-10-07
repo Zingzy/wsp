@@ -634,6 +634,39 @@ describe("local workspace", () => {
     await rt.close();
   });
 
+  it("a turn on this computer carries none of the values the vault holds for MCP servers, a server's GH_TOKEN among them", async () => {
+    const said: string[] = [];
+    const printsEnv: HarnessAdapterFactory = ctx => {
+      const claude = HARNESS_ADAPTERS.claude(ctx);
+      return {
+        steers: false,
+        start: ({ onEvent }) => {
+          const sessionId = randomUUID();
+          const result: TurnResult = { status: "completed", text: "read" };
+          const finished = (async (): Promise<TurnResult> => {
+            const stream = ctx.execStream("env", { env: { ...claude.env } });
+            for await (const line of stream.lines) said.push(line);
+            await stream.exited;
+            onEvent({ type: "session.start", sessionId });
+            onEvent({ type: "turn.done", sessionId, result });
+            onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+            return result;
+          })();
+          return { localId: sessionId, finished, interrupt: async () => {} };
+        },
+      };
+    };
+    const token = "sk-ant-oat01-TESTONLY";
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: printsEnv }, local: localWiring, vault: () => ({ CLAUDE_CODE_OAUTH_TOKEN: token, GH_TOKEN: "ghp_server_TESTONLY", WSP_MCP_LINEAR_AUTHORIZATION: "lin_api_TESTONLY" }) });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "servers"))).id });
+    await (await rt.sessions.start(ws.id, { prompt: "read your environment" })).finished;
+    const env = said.join("\n");
+    expect(env).toContain(`CLAUDE_CODE_OAUTH_TOKEN=${token}`);
+    expect(env).not.toContain("ghp_server_TESTONLY");
+    expect(env).not.toContain("lin_api_TESTONLY");
+    await rt.close();
+  });
+
   it("the registry hands the local factory the same limits a cloud turn gets: the turn's own by default, none for the exec verb", async () => {
     const rt = runtime();
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });

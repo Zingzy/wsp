@@ -43,7 +43,7 @@ import {
   type WorkspaceSize,
   type PlaceProveRequest,
 } from "@wsp/protocol";
-import type { EngineStep, ExecResult, Machine, MachineBackend, PlaceFolderMachine, ProvisionPlan, ProvisionStage, SetupRun } from "@wsp/engine";
+import type { EngineStep, ExecResult, Machine, MachineBackend, PlaceFolderMachine, ProvisionOn, ProvisionPlan, ProvisionStage, SetupRun } from "@wsp/engine";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "../devices.js";
 import type { HereDaemon, PlaceBackends } from "../runtime.js";
@@ -220,7 +220,7 @@ export interface PlaceProvisioner {
   /** `only` holds a sync to the steps it runs, so a plan for those alone reads no more of this computer than they need. */
   setup(picks: RecipeFile, on: { home: string }, only?: ReadonlySet<PlaceSetupStep>): Promise<ProvisionPlan>;
   floor(machine: Machine, on: { home: string }, stage: ProvisionStage): Promise<PlaceProvisionRow[]>;
-  step(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: { home: string }): Promise<PlaceProvisionRow[]>;
+  step(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: ProvisionOn): Promise<PlaceProvisionRow[]>;
   /** What taking rows out of a computer's picks runs there, planned off the picks as they were. Absent, a row taken
    * out of a recipe stays where it is. */
   undo?(before: RecipeFile, removed: readonly { kind: RecipeKind; name: string }[], on: { home: string }): Promise<PlaceUndo[]>;
@@ -518,6 +518,9 @@ export interface PlaceDoor {
    * without a read of the store, since every launch on that computer asks it. Nothing for a place this host holds
    * no record of and for a computer whose daemon lists no logins. */
   signInsAt(placeId: string): Record<string, AgentSignInState> | undefined;
+  /** Whether GitHub on that computer signs in from this host's vault: the person picked the vault for it there and
+   * its row says gh took the token. Answered without a read, since every launch on that computer asks it. */
+  githubFromVault(placeId: string): boolean;
   /** An agent's own sign-in on that computer landed, as the tool's status there said: the file its shared login
    * writes is taken as listed, so every word read before that computer's next report says signed in. */
   loginLanded(placeId: string, agent: string): Promise<void>;

@@ -41,14 +41,18 @@ export interface ThreadOptions {
   /** The model's faster output, on a model the catalog marks as offering it. */
   serviceTier?: "fast";
   access: AccessParams;
+  /** Config keys laid over the server's own config for this thread alone, each a dotted path to a string. */
+  config?: Readonly<Record<string, string>>;
 }
 
+const configOf = (o: ThreadOptions): { config?: Readonly<Record<string, string>> } => (o.config !== undefined && Object.keys(o.config).length > 0 ? { config: o.config } : {});
+
 export function threadStartLine(o: ThreadOptions): string {
-  return line({ id: REQUEST.thread, method: "thread/start", params: { ...named({ cwd: o.cwd, model: o.model, serviceTier: o.serviceTier }), ...o.access } });
+  return line({ id: REQUEST.thread, method: "thread/start", params: { ...named({ cwd: o.cwd, model: o.model, serviceTier: o.serviceTier }), ...o.access, ...configOf(o) } });
 }
 
 export function threadResumeLine(o: ThreadOptions & { threadId: string }): string {
-  return line({ id: REQUEST.thread, method: "thread/resume", params: { threadId: o.threadId, ...named({ cwd: o.cwd, model: o.model, serviceTier: o.serviceTier }), ...o.access } });
+  return line({ id: REQUEST.thread, method: "thread/resume", params: { threadId: o.threadId, ...named({ cwd: o.cwd, model: o.model, serviceTier: o.serviceTier }), ...o.access, ...configOf(o) } });
 }
 
 /** A copy of the thread that is never written to disk, in a read-only sandbox that asks nobody: what a side question
