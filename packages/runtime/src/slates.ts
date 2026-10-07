@@ -145,6 +145,8 @@ export interface SlatesDeps {
   machineOf?(threadId: string): Machine | undefined;
   /** That machine naps: a timer never wakes it, a press does, through wake. */
   asleep?(threadId: string): boolean;
+  /** Readies that machine for a run a press starts: waits out the sweep a starting host has out there, which would end
+   * the run, then wakes it where it naps. */
   wake?(threadId: string): Promise<void>;
   /** Whether the thread is settled, by the sidebar's own rule: its slate's timers, always ones too, wait until a window
    * shows the slate again. */
@@ -411,9 +413,7 @@ export function createSlates(deps: SlatesDeps): Slates {
             machine,
             threadId,
             () => records.get(threadId)?.document?.files ?? {},
-            async () => {
-              if (deps.asleep?.(threadId) === true) await deps.wake?.(threadId);
-            },
+            async () => deps.wake?.(threadId),
             ledger,
           );
     },

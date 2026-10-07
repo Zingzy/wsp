@@ -490,8 +490,9 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // A refresh is where a rename made inside the harness reaches us: nothing on this side changed. A row that
       // already carries a title is answered from the index and its read goes out unawaited, so a wedged guest
       // costs the listing nothing and the rename lands on the next refresh, which is the window the TTL promises.
-      // A row with none blocks, so a thread is titled on the first listing that sees it.
-      const asked = ctx.titleRows(rows).map(view => ({ first: view.harnessTitle === undefined, done: ctx.refreshTitle(view, false) }));
+      // A row with none blocks, so a thread is titled on the first listing that sees it. A machine still being settled
+      // after a restart may answer nothing for minutes, so its rows wait for a later listing.
+      const asked = ctx.titleRows(rows.filter(view => !ctx.bootWork.has(view.workspaceId))).map(view => ({ first: view.harnessTitle === undefined, done: ctx.refreshTitle(view, false) }));
       await Promise.all(asked.filter(a => a.first).map(a => a.done));
       return ctx.listedRows(held);
     },
@@ -698,7 +699,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       const found: { hit: SessionSearchResult["hits"][number]; last: number }[] = [];
       for (const [workspaceId, index] of transcriptIndex) {
         // The workspaces a caller reads the transcript of, by the rule history reads them by.
-        if (!ctx.treeStandsOn(workspaceId, origin) && !(await ctx.entryOf(workspaceId, origin).then(() => true, () => false))) continue;
+        if (!ctx.treeStandsOn(workspaceId, origin) && !(await ctx.entryOf(workspaceId, origin, { now: true }).then(() => true, () => false))) continue;
         for (const [threadId, { lines, last }] of index.words) {
           if (lines.length === 0 || !ctx.drivesThread(threadId, origin)) continue;
           // The snippet stays inside the one message that holds the words, so it never runs one message into the next.

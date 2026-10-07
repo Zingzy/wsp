@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { execFile } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { DAEMON_VERSION, PERMISSION_ALLOW, RUN_GONE_LINE, TURN_TOKEN_ENV, foldThreads, threadWordOf, type AdapterEvent, type ExecStream, type SessionView, type TurnResult } from "@wsp/protocol";
-import { TRANSCRIPTS_HELD, createRuntime, type HarnessAdapterFactory, type HarnessSession } from "../src/runtime.js";
+import { execDetached, type ExecResult } from "@wsp/engine";
+import { DAEMON_VERSION, PERMISSION_ALLOW, RUN_GONE_LINE, TURN_TOKEN_ENV, foldThreads, threadWordOf, type AdapterEvent, type Caller, type ExecStream, type SessionView, type TurnResult } from "@wsp/protocol";
+import { TRANSCRIPTS_HELD, createRuntime, type HarnessAdapterFactory, type HarnessSession, type ProjectLander } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { until } from "./until.js";
 import { stubBackend, tokenGuest, type StubBackend, createOn } from "./stub-backend.js";
@@ -387,11 +394,327 @@ describe("a turn the host comes back to", () => {
     const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
     expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
 
+    await until(async () => guest.reaps.length > 0);
     expect(guest.reaps).toHaveLength(1);
     expect(guest.reaps[0]).toContain(`rm -rf '${orphan}'.*`);
     expect(guest.reaps[0]).not.toContain(run);
     await rt2.close();
   });
+
+  /** Two workspaces left by a host that went down; `slow` stands for a machine still restoring, whose answer to the
+   * question of which runs it holds the test lets out by hand, naming one run nobody here keeps. */
+  const slowListing = async (backend: StubBackend, store: Store, h: ReturnType<typeof machineRuns>, o: { thread?: true } = {}) => {
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const slow = await createOn(rt1, { golden: "snap_g", name: "slow" });
+    const other = await createOn(rt1, { golden: "snap_g", name: "other" });
+    const thread = o.thread === true ? await threadOn(rt1, slow.id, h) : undefined;
+    await rt1.close();
+    const orphan = "/tmp/wsp-run/aabbccddeeff";
+    let answer!: () => void;
+    const answered = new Promise<void>(resolve => (answer = resolve));
+    backend.execImpl = async (m, cmd) => {
+      if (m.id === slow.machineId && cmd.includes("printf '%s\\n' \"$d\"")) {
+        await answered;
+        return { exitCode: 0, stdout: `${orphan}.d\n`, stderr: "" };
+      }
+      return { exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : cmd.includes("mkdir") ? "WSP_LAUNCHED\n" : cmd.includes("echo yes || echo no") ? "yes\n" : "", stderr: "" };
+    };
+    const log = (): readonly string[] => backend.machines.find(m => m.id === slow.machineId)!.execLog;
+    const reapAt = (): number => log().findIndex(cmd => cmd.includes("kill -TERM") && cmd.includes(orphan));
+    return { slow, other, answer, log, reapAt, thread };
+  };
+
+  it("a machine that has not answered which runs it holds holds its own verbs, and no verb on another workspace waits on it", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { slow, other, answer, reapAt } = await slowListing(backend, store, h);
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    let slowAnswered = false;
+    void rt2.workspaces.get(slow.id).then(() => (slowAnswered = true));
+    expect((await rt2.workspaces.get(other.id)).name).toBe("other");
+    expect(await rt2.sessions.list(other.id)).toEqual([]);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(slowAnswered).toBe(false);
+
+    answer();
+    await until(async () => slowAnswered);
+    expect(reapAt()).toBeGreaterThan(-1);
+    await rt2.close();
+  });
+
+  it("a machine whose running turn has not answered the re-open holds no verb on another workspace", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId } = await hostWentDown(h, store, backend);
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const other = await createOn(rt1, { golden: "snap_g", name: "other" });
+    await rt1.close();
+    let answer!: () => void;
+    const answered = new Promise<void>(resolve => (answer = resolve));
+    const held: HarnessAdapterFactory = ctx => {
+      const inner = h.adapter(ctx);
+      return { ...inner, attach: async o => (await answered, inner.attach!(o)) };
+    };
+
+    const before = h.reopened().length;
+    const rt2 = createRuntime({ backend, store, adapters: { claude: held } });
+    expect((await rt2.workspaces.get(other.id)).name).toBe("other");
+    expect(await rt2.sessions.list(other.id)).toEqual([]);
+    expect(h.reopened()).toHaveLength(before);
+
+    answer();
+    await until(async () => h.reopened().length === before + 1);
+    expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+    await rt2.close();
+  });
+
+  it("a listing of every thread does not wait to title a row on a machine whose turns the host is still re-opening", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId } = await hostWentDown(h, store, backend);
+    let answer!: () => void;
+    const answered = new Promise<void>(resolve => (answer = resolve));
+    // A machine still restoring answers neither the re-open nor a read of the agent's own store until it is back.
+    const held: HarnessAdapterFactory = ctx => {
+      const inner = h.adapter(ctx);
+      return {
+        ...inner,
+        attach: async o => (await answered, inner.attach!(o)),
+        sessionTitle: async (_id, exec) => (await answered, await exec("true"), null),
+      };
+    };
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: held } });
+    expect((await rt2.sessions.list()).map(s => [s.workspaceId, s.status])).toEqual([[workspaceId, "running"]]);
+    answer();
+    await rt2.close();
+  });
+
+  /** A finished thread on a workspace, and that thread as a caller. */
+  const threadOn = async (rt: ReturnType<typeof createRuntime>, workspaceId: string, h: ReturnType<typeof machineRuns>) => {
+    const started = await rt.sessions.start(workspaceId, { prompt: "build it" });
+    const threadId = started.view().threadId!;
+    const run = h.handles().at(-1)!;
+    await until(async () => (await rt.sessions.history(workspaceId)).some(e => e.type === "session.start"));
+    h.emit(run, { type: "turn.done", sessionId: `sess-${h.handles().length}`, result: { status: "completed", text: "done" } });
+    h.emit(run, { type: "session.end", sessionId: `sess-${h.handles().length}`, exitCode: 0, sawResult: true });
+    await started.finished;
+    const caller: Caller = { origin: "here", by: { kind: "thread", threadId, workspaceId, rootThreadId: threadId } };
+    return { threadId, caller };
+  };
+
+  it("a thread's send into a thread on a machine whose runs are being swept starts nothing there until the sweep is done", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { slow, answer, thread } = await slowListing(backend, store, h, { thread: true });
+    const { threadId, caller } = thread!;
+    const before = h.envs.length;
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const sent = rt2.sessions.start(slow.id, { prompt: "and the tests", thread: threadId }, caller);
+    await rt2.workspaces.list();
+    await new Promise(resolve => setImmediate(resolve));
+    expect(h.envs).toHaveLength(before);
+
+    answer();
+    await sent;
+    expect(h.envs).toHaveLength(before + 1);
+    await rt2.close();
+  });
+
+  it("a press on a box slate whose machine's runs are being swept runs nothing there until the sweep is done", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { slow, answer, log, reapAt, thread } = await slowListing(backend, store, h, { thread: true });
+    const { threadId, caller } = thread!;
+    const runs = backend.machines.find(m => m.id === slow.machineId)!.runLog;
+    const before = runs.length;
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    await rt2.slates.write({ text: `<slate title="Held"><value name="go" start={0} />
+  <run name="box" cmd="echo ran" timeout={20} />
+  <when change={$go} do={start($box)} />
+  <column><output run={$box} /></column>
+</slate>` }, caller);
+    await rt2.slates.state({ threadId, values: { $go: 1 } }, caller);
+    for (const ask of (await rt2.slates.get(threadId))!.asks) await rt2.slates.approve({ threadId, key: ask.key, scope: "thread" });
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(runs.slice(before)).toEqual([]);
+
+    answer();
+    await until(() => runs.length > before, 3000);
+    expect(log().lastIndexOf(runs[before]!)).toBeGreaterThan(reapAt());
+    await rt2.close();
+  });
+
+  it("an export on a machine whose runs are being swept starts no run there until the sweep is done", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { slow, answer, log, reapAt } = await slowListing(backend, store, h);
+    const lander: ProjectLander = {
+      caches: { dirs: [], files: [], markers: [] },
+      probe: async () => undefined,
+      land: async () => ({ files: 0, bytes: 0, agents: [] }),
+    };
+
+    const runs = backend.machines.find(m => m.id === slow.machineId)!.runLog;
+    const before = runs.length;
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const exported = rt2.projects.export({ workspaceId: slow.id, source: "/root/work/proj", dest: "/Users/dev/code/proj", lander }).catch(() => undefined);
+    await rt2.workspaces.list();
+    await new Promise(resolve => setImmediate(resolve));
+    expect(runs.slice(before)).toEqual([]);
+
+    answer();
+    await exported;
+    expect(runs.length).toBeGreaterThan(before);
+    expect(log().lastIndexOf(runs[before]!)).toBeGreaterThan(reapAt());
+    await rt2.close();
+  });
+
+  it("a command run detached on a machine whose runs are being swept finishes, and the sweep does not end it", async () => {
+    // Real bash in a private folder: the sweep lists and reaps that folder alone, never the machine's own run folder.
+    const dir = mkdtempSync(join(tmpdir(), "wsp-sweep-"));
+    const runDir = join(dir, "wsp-run");
+    mkdirSync(runDir);
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const slow = await createOn(rt1, { golden: "snap_g", name: "slow" });
+    await rt1.close();
+    const machine = backend.machines.find(m => m.id === slow.machineId)!;
+    const stubbed = machine.exec.bind(machine);
+    let answer!: () => void;
+    const answered = new Promise<void>(resolve => (answer = resolve));
+    const bash = (cmd: string): Promise<ExecResult> =>
+      new Promise(resolve => execFile("bash", ["-c", cmd], { cwd: dir }, (e, stdout, stderr) => resolve({ exitCode: e === null ? 0 : typeof e.code === "number" ? e.code : 1, stdout, stderr })));
+    machine.exec = async (cmd, o) => {
+      // As a box runs an exec given longer than its inline span.
+      if (cmd.includes("echo finished")) return execDetached(machine, cmd, { deadlineMs: o?.timeoutMs ?? 60_000, pollMs: 50 }, runDir);
+      if (!cmd.includes(runDir)) return stubbed(cmd, o);
+      if (cmd.includes("printf '%s\\n' \"$d\"")) await answered;
+      return bash(cmd);
+    };
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter }, machineExec: { runDir } });
+    try {
+      const ran = rt2.workspaces.exec(slow.id, "sleep 1; echo finished", { timeoutMs: 600_000 });
+      // The listing goes out once the command is up where nothing holds it back, and after a wait where something does.
+      await until(() => readdirSync(runDir).some(name => name.endsWith(".d")), 1000).catch(() => undefined);
+      answer();
+      expect(await ran).toMatchObject({ exitCode: 0, stdout: "finished\n" });
+    } finally {
+      await rt2.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /** A machine whose daemon port answers 502, so the reach poll puts the daemon back, and whose run listing the test
+   * lets out by hand. `runDir` makes the machine's runs real: `run` goes through execDetached into that folder on
+   * this computer's bash, and the listing and the reap run there too. */
+  const daemonDown = async (o: { runDir?: string } = {}) => {
+    const server = createServer((_req, res) => res.writeHead(502).end());
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const deploys: { listingAnswered: boolean; result?: ExecResult }[] = [];
+    let listingAnswered = false;
+    const recipe = {
+      setup: "true",
+      smoke: "true",
+      deployDaemon: async (machine: { run: (script: string, o: { deadlineMs: number }) => Promise<ExecResult> }) => {
+        const deploy: (typeof deploys)[number] = { listingAnswered };
+        deploys.push(deploy);
+        deploy.result = await machine.run("sleep 1; echo deployed", { deadlineMs: 180_000 });
+      },
+    };
+    const store = memoryStore();
+    const rt1 = createRuntime({ backend, store, adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe });
+    const slow = await createOn(rt1, { golden: "snap_g", name: "slow" });
+    await rt1.close();
+    deploys.length = 0;
+    let answer!: () => void;
+    const answered = new Promise<void>(resolve => (answer = resolve));
+    const listing = (cmd: string): boolean => cmd.includes("printf '%s\\n' \"$d\"");
+    const machine = backend.machines.find(m => m.id === slow.machineId)!;
+    machine.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+    if (o.runDir === undefined) {
+      backend.execImpl = async (m, cmd) => {
+        if (m.id === slow.machineId && listing(cmd)) {
+          await answered;
+          listingAnswered = true;
+          return { exitCode: 0, stdout: "", stderr: "" };
+        }
+        return tokenGuest(m, cmd);
+      };
+    } else {
+      const runDir = o.runDir;
+      const stubbed = machine.exec.bind(machine);
+      const bash = (cmd: string): Promise<ExecResult> =>
+        new Promise(resolve => execFile("bash", ["-c", cmd], (e, stdout, stderr) => resolve({ exitCode: e === null ? 0 : typeof e.code === "number" ? e.code : 1, stdout, stderr })));
+      machine.run = (script, ro) => execDetached(machine, script, { deadlineMs: ro.deadlineMs, pollMs: 50 }, runDir);
+      machine.exec = async (cmd, eo) => {
+        if (!cmd.includes(runDir)) return stubbed(cmd, eo);
+        if (listing(cmd)) {
+          await answered;
+          listingAnswered = true;
+        }
+        return bash(cmd);
+      };
+    }
+    const rt2 = createRuntime({
+      backend, store, adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe,
+      status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 },
+      ...(o.runDir !== undefined ? { machineExec: { runDir: o.runDir } } : {}),
+    });
+    const stop = rt2.status.watch();
+    const end = async (): Promise<void> => {
+      stop();
+      await rt2.close();
+      server.close();
+    };
+    return { deploys, answer, end };
+  };
+
+  it("the reach poll puts no daemon back on a machine whose run listing is still out", async () => {
+    const { deploys, answer, end } = await daemonDown();
+    try {
+      // Long enough for the poll at 5 ms to see the port answer nothing twice and deploy, where nothing holds it back.
+      await until(() => deploys.length > 0, 1000).catch(() => undefined);
+      expect(deploys).toEqual([]);
+      answer();
+      await until(() => deploys.length > 0, 3000);
+      expect(deploys[0]!.listingAnswered).toBe(true);
+    } finally {
+      await end();
+    }
+  }, 20_000);
+
+  it("a daemon the reach poll puts back on a machine whose runs are being swept is deployed, not ended by the sweep", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-sweep-"));
+    const runDir = join(dir, "wsp-run");
+    mkdirSync(runDir);
+    const { deploys, answer, end } = await daemonDown({ runDir });
+    try {
+      // The listing goes out once the deploy's claim is up where nothing holds it back, and after a wait where something does.
+      await until(() => readdirSync(runDir).some(name => name.endsWith(".d")), 1000).catch(() => undefined);
+      answer();
+      await until(() => deploys[0]?.result !== undefined, 5000);
+      expect(deploys[0]!.result).toMatchObject({ exitCode: 0, stdout: "deployed\n" });
+    } finally {
+      await end();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
 
   it("a run whose row this host could not re-open is ended on the machine, not left holding it", async () => {
     const backend = stubBackend();
@@ -613,7 +936,8 @@ describe("a host that comes back to a turn still running on a machine", () => {
 
   it("lets go of the poll that reads it when it closes, so nothing it opened holds this process open", async () => {
     // Counted, not named: the runner holds timers of its own, and what this case is about is the one this runtime
-    // adds. The list goes into the failure so a run that drifts says what it was holding.
+    // adds; one the first host left may run out meanwhile. The list goes into the failure so a run that drifts says
+    // what it was holding.
     const held = (): string[] => process.getActiveResourcesInfo().filter(kind => kind === "Timeout");
     const backend = stubBackend();
     const store = memoryStore();
@@ -625,10 +949,13 @@ describe("a host that comes back to a turn still running on a machine", () => {
     await first.close();
 
     const before = held().length;
+    const log = backend.machines[0]!.execLog;
+    const polled = log.length;
     const again = createRuntime({ backend, store, adapters: { claude: pollingAdapter() } });
     expect((await again.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
-    await vi.waitFor(() => expect(held().length).toBeGreaterThan(before));
+    // The re-opened run is being read: its poll has reached the machine.
+    await vi.waitFor(() => expect(log.slice(polled).some(cmd => cmd.includes("__WSP_EOF_"))).toBe(true));
     await again.close();
-    expect(held().length, `left open: ${process.getActiveResourcesInfo().join(", ")}`).toBe(before);
+    expect(held().length, `left open: ${process.getActiveResourcesInfo().join(", ")}`).toBeLessThanOrEqual(before);
   }, 20_000);
 });

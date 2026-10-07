@@ -47,7 +47,9 @@ export function slatesArea(ctx: RuntimeContext): SlatesArea {
     },
     wake: async threadId => {
       const entry = ctx.boxOf(threadId);
-      if (entry !== undefined) await ctx.workspaces.wake(entry.record.id);
+      if (entry === undefined) return;
+      await ctx.bootWork.get(entry.record.id);
+      if (entry.record.phase !== "running") await ctx.workspaces.wake(entry.record.id);
     },
     loaded: () => ctx.ready(),
     settled: async threadId => {
