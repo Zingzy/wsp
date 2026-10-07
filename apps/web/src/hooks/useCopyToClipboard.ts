@@ -1,5 +1,6 @@
 // Adapted from pingdotgg/t3code apps/web/src/hooks/useCopyToClipboard.ts at 57a66608 (MIT).
 import * as React from "react";
+import { noticeFailure, notCopied } from "../notices/store.js";
 
 export class ClipboardApiUnavailableError extends Error {
   constructor(readonly target: string) {
@@ -112,8 +113,9 @@ export function useCopyToClipboard<TContext = void>({
         }
       },
       (error) => {
-        console.error(error);
-        onErrorRef.current?.(error, ctx);
+        // A caller that says nothing of its own failure has it said for it, so a copy never fails unseen.
+        if (onErrorRef.current === undefined) noticeFailure(error, notCopied);
+        else onErrorRef.current(error, ctx);
       },
     );
   }, []);

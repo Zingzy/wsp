@@ -63,7 +63,8 @@
 //   settings-computers-refused  Computers with the host refusing the places read
 //                         and the ssh config read
 //   settings-add-cloud    the cloud road, where a key saved for Boat lists it and
-//                         draws its Image card (&image=none as above)
+//                         draws its Image card (&image=none as above; &copies=none
+//                         keeps the image with no copy anywhere, so the card reads Not here yet)
 //   settings-remove-computer  the Remove dialog over the box's page
 //   settings-agents       the Agents page on this Mac: the default agent, then Claude Code
 //                         with an update out, Codex, and OpenCode not installed
@@ -641,7 +642,7 @@ const api = {
           ? { image: IMAGE_RECORD, copies: IMAGE_COPIES.map(copy => (copy.place === imageAt.word ? { ...copy, version: 2, hash: "b".repeat(63) + "2" } : copy)), projects: [] }
           : screen === "settings-image-ready"
             ? { image: IMAGE_RECORD, copies: IMAGE_COPIES.map(copy => (copy.place === imageAt.word ? { ...copy, version: 3, hash: IMAGE.hash } : copy)), projects: [] }
-            : { image: IMAGE, copies: IMAGE_COPIES, projects: [] },
+            : { image: IMAGE, copies: params.get("copies") === "none" ? [] : IMAGE_COPIES, projects: [] },
   imageBuild: async () => new Promise<never>(() => {}),
   initStart: async () => new Promise<never>(() => {}),
   initDraft: async () => new Promise<never>(() => {}),

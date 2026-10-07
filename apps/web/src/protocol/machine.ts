@@ -3,6 +3,7 @@
 // history with the live ticks folded onto it.
 import { useCallback, useEffect, useState } from "react";
 import { appendCostPoint, type WorkspaceCostEvent } from "@wsp/protocol";
+import { noticeFailureOnce } from "../notices/store.js";
 import { useProtocolEvents, useStore } from "./store.js";
 
 /** The runtime's history with the ticks that landed while it was in flight folded on after it. */
@@ -27,7 +28,8 @@ export function useCostSeries(id: string | null): WorkspaceCostEvent[] {
       .then(history => {
         if (current) setSeries(live => seeded(history, live));
       })
-      .catch((e: unknown) => console.warn("cost history unavailable; the chart begins at the first live tick", e));
+      // The chart begins at the first live tick.
+      .catch((e: unknown) => noticeFailureOnce(`cost-history:${id}`, e, said => `Cost history not read: ${said}`));
     return () => {
       current = false;
     };

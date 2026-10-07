@@ -11,6 +11,7 @@ import { Button } from "../components/ui/button.js";
 import { Spinner } from "../components/ui/spinner.js";
 import { GROUP_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
+import { noticeFailure, notCopied } from "../notices/store.js";
 import { STATE_WORD } from "./recipe/rows.js";
 
 /** How long the copy glyph stands as a check before it is a copy glyph again. */
@@ -50,7 +51,7 @@ function useCopy(value: string): { copied: boolean; copy: () => void } {
         setCopied(true);
         setTimeout(() => setCopied(false), COPIED_MS);
       },
-      () => {},
+      (e: unknown) => noticeFailure(e, notCopied),
     );
   };
   return { copied, copy };

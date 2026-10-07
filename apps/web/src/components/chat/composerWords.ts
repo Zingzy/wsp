@@ -36,6 +36,8 @@ export const COMPOSER_WORDS = {
   fileRefused: "Refused",
   /** The access picker's hover when the running turn refused the pick its harness said it takes. */
   accessRefused: ACCESS_REFUSED_LINE,
+  /** The access picker's hover when the host would not take the pick for the thread at all, in its own words. */
+  accessNotChanged: (said: string): string => `Access not changed on this thread: ${said}`,
   /** The @ and # menus' empty and foot lines. */
   menuListUnserved: (computer: string): string => `${computer}'s wsp is older than this app, so the list is not there yet; it arrives with its next update`,
   noHostList: (host: string, computer: string): string => `No signed-in command line for ${host} is on ${computer}, so its pull requests and issues are not listed`,

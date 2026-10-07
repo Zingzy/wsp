@@ -23,6 +23,7 @@ import { classifyMarkdownImageSource } from "../lib/markdownImages";
 import { mediaKindFromPath } from "../lib/filePreview";
 import { isAbsolutePath } from "../terminal-links";
 import { cn } from "../lib/utils";
+import { noticeFailureOnce } from "../notices/store";
 import { hasMath, rehypePreserveImageSourceMeta, rehypeRestrict, remarkNormalizeLinksAndTagInlineCode, remarkPandocMath, remarkPreserveCodeMeta, RESTRICTED_FACT_CLASS, restrictedImageSrc } from "./markdown/plugins";
 import { findTaskListMarkerOffset, GITHUB_ALERT_PRESENTATIONS, MarkdownDetails, MarkdownTable, orderedListGutterStyle } from "./markdown/blocks";
 import { extractCodeBlock, extractFenceLanguage, extractFenceTitle, extractPreCodeMeta, MarkdownCodeBlock, nodeToPlainText, SuspenseShikiCodeBlock } from "./markdown/codeBlocks";
@@ -121,9 +122,16 @@ function useKatex(wanted: boolean): RehypePlugin | null {
     if (!wanted || plugin !== null) return;
     let live = true;
     katexLoad ??= import("./markdownMath").then(m => (katexLoaded = m.REHYPE_KATEX as unknown as RehypePlugin));
-    void katexLoad.then(loaded => {
-      if (live) setPlugin(() => loaded);
-    });
+    void katexLoad.then(
+      loaded => {
+        if (live) setPlugin(() => loaded);
+      },
+      (e: unknown) => {
+        // The import holds its rejection for good; dropped, the next message with math tries again.
+        katexLoad = null;
+        noticeFailureOnce("katex", e, said => `Math not drawn: ${said}`);
+      },
+    );
     return () => {
       live = false;
     };
