@@ -395,6 +395,12 @@ export function asideWallLine(ms: number): string {
   return `the side question had no answer after ${fmtDuration(ms)} and was stopped`;
 }
 
+/** Why a side question came back with no answer: the harness ended it with no words in it. */
+export const ASIDE_EMPTY_LINE = "the side question came back with no words in its answer; ask it again";
+
+/** Why a side question came back with no answer: the model reached for a tool, which a side question runs none of. */
+export const ASIDE_TOOL_LINE = "the answer reached for a tool, and a side question runs none; ask it again, or send it as a message for the thread to work on";
+
 /** A rewind refused on a thread whose turn is running: the person stops it, never the rewind. */
 export const REWIND_WORKING_LINE = "this thread is working; stop its turn first, since a rewind never stops it for you";
 
