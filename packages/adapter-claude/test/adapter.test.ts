@@ -1616,7 +1616,7 @@ describe("ClaudeAdapter reads the plan's limits Claude Code prints", () => {
 describe("a person's setup for Claude Code on a computer", () => {
   const launch = { program: "/opt/my claude/bin/claude", args: ["--debug", "a b"] };
 
-  it("runs the program everywhere the CLI's own word runs, and adds the launch words to a turn alone", async () => {
+  it("runs the program everywhere the CLI's own word runs, and adds the launch words to a turn and its side question alone", async () => {
     const exec = scriptedExec(fixtureLines());
     const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg", launch });
     await adapter.start({ prompt: "go", onEvent: () => {} }).finished;
@@ -1629,12 +1629,13 @@ describe("a person's setup for Claude Code on a computer", () => {
     await adapter.probeCatalog(answer);
     await adapter.titleFor!({ opening: "fix the build", reply: "done" }, answer);
     await adapter.draftFor!({ promptFile: "/tmp/ask" }, answer);
-    asked.push(asideCommand({ session: FIXTURE_SESSION_ID, fork: "11111111-2222-4333-8444-555555555555", configDir: "/root/.claude-cfg", launch }));
     for (const command of asked) {
       expect(command).toContain(`'/opt/my claude/bin/claude' -p`);
       expect(command).not.toMatch(/(^|[;|&] *)claude /);
       expect(command).not.toContain("--debug");
     }
+    // The side question sends the request a turn sends, and the person's words can shape it, so it carries them too.
+    expect(asideCommand({ session: FIXTURE_SESSION_ID, fork: "11111111-2222-4333-8444-555555555555", keep: 0, configDir: "/root/.claude-cfg", launch })).toContain(`'/opt/my claude/bin/claude' -p '--debug' 'a b' --input-format stream-json`);
   });
 
   it("with no setup the line is the CLI's own", async () => {

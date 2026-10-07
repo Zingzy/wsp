@@ -4,7 +4,7 @@
 # ready. Each check prints PASS, FAIL, WARN or SKIP with its reason, every
 # check runs even after one fails, and any FAIL exits 1. The test files the
 # branch changes run, then the ones its change reaches through imports. --laws
-# runs only the tests that read the whole tree, on the branch merged with
+# runs only the laws and the size check, on the branch merged with
 # origin/main, and --build builds the packages they load first. A ticket
 # number prints the lines a report on it has to answer.
 set -u
@@ -27,8 +27,9 @@ for arg in "$@"; do
   esac
 done
 
-# The tests that read the whole tree rather than the code beside them, so a change anywhere can turn them red.
-# test-files.sh adds the memory, stub-script and, under --tools, mcp-record tests to these.
+# The tests that read the whole tree rather than the code beside them, so a change anywhere can turn them red. The
+# landing runs this list on the squash, so it is the one list: packages/protocol/test/law-list.test.ts holds it to
+# every law. test-files.sh adds the memory, stub-script and, under --tools, mcp-record tests to these.
 LAWS=(
   packages/host/test/words.test.ts
   packages/host/test/boat-words.test.ts
@@ -44,6 +45,11 @@ LAWS=(
   packages/protocol/test/area-notes.test.ts
   packages/protocol/test/test-hygiene.test.ts
   packages/protocol/test/repo-names.test.ts
+  packages/protocol/test/fixture-privacy.test.ts
+  packages/host/test/file-size-check.test.ts
+  apps/web/test/design-literals.test.ts
+  apps/web/test/design-pieces.test.ts
+  packages/protocol/test/law-list.test.ts
 )
 
 failed=0
@@ -249,6 +255,18 @@ else
   fail "the laws" "${reason:-${failing:-see $law_log}}"
 fi
 
+if [ -z "$laws_at" ]; then
+  :
+elif [ -f "$laws_at/scripts/file-size-check.mjs" ]; then
+  if said=$(cd "$laws_at" && node scripts/file-size-check.mjs 2>&1); then
+    pass "the size check"
+  else
+    fail "the size check" "$(printf '%s' "$said" | tail -n 5)"
+  fi
+else
+  skip "the size check" "scripts/file-size-check.mjs is not on this branch"
+fi
+
 if [ -z "$base" ] || [ -n "$(git diff --name-only "$base" -- daemon)" ]; then
   if ! command -v cargo >/dev/null 2>&1; then
     fail "cargo fmt --check" "daemon/ changed and cargo is not on PATH"
@@ -262,16 +280,6 @@ else
 fi
 
 [ $laws_only -eq 1 ] && exit $failed
-
-if [ -f scripts/file-size-check.mjs ]; then
-  if said=$(node scripts/file-size-check.mjs 2>&1); then
-    pass "the size check"
-  else
-    fail "the size check" "$(printf '%s' "$said" | tail -n 5)"
-  fi
-else
-  skip "the size check" "scripts/file-size-check.mjs is not on this branch"
-fi
 
 changed=()
 while IFS= read -r f; do

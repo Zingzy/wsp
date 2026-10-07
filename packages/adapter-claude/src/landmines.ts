@@ -119,6 +119,10 @@ export interface BuildCommandOptions {
   launch?: AgentLaunch;
   /** Forward a subagent's own text and thinking, not only its tool calls; see forwardsSubagentText. */
   subagentText?: boolean;
+  /** A side question: `resume` names the copy of the thread's session it is asked on, at the default mode with its
+   * prompts routed here, hooks off, two calls at most and the answer's words streamed. Every flag that shapes the
+   * request stays the turn's, since a copy whose tools or system prompt differ reads none of the thread's cache. */
+  aside?: boolean;
 }
 
 /** The settings that put a run's auto memory in `dir`. The only road to it that holds on a computer with no
@@ -154,6 +158,16 @@ export function personSettings(args: readonly string[]): { words: string[]; sett
     settings = parsed as Record<string, unknown>;
   }
   return { words, settings, file: false };
+}
+
+/** The person's launch words less every --settings and the value it names. */
+function withoutSettings(args: readonly string[]): string[] {
+  const words: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--settings") i++;
+    else if (!args[i]!.startsWith("--settings=")) words.push(args[i]!);
+  }
+  return words;
 }
 
 /** The first CLI that takes --forward-subagent-text: the SDK of 0.3.270 passes it, and a CLI before it exits on a flag
@@ -225,7 +239,10 @@ export function mcpConfigFlag(servers: Readonly<Record<string, McpServerSpec>> |
  */
 export function buildCommand(options: BuildCommandOptions): string {
   const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow, name, mcpServers, fast, memoryDir, subagentText } = options;
-  const person = personSettings(options.launch?.args ?? []);
+  const named = personSettings(options.launch?.args ?? []);
+  // A settings file in the person's words would replace the copy's own flag and its disableAllHooks with it, so the
+  // copy leaves that file out and keeps its hooks off.
+  const person = options.aside === true && named.file ? { words: withoutSettings(options.launch?.args ?? []), settings: {}, file: false } : named;
   if ((sessionId === undefined) === (resume === undefined)) {
     throw new Error("buildCommand needs exactly one of sessionId or resume");
   }
@@ -234,8 +251,15 @@ export function buildCommand(options: BuildCommandOptions): string {
     throw new Error(`session identifier must be a UUID, got "${id}"`);
   }
   if (options.resumeAt !== undefined && resume === undefined) throw new Error("a cut at a message rides a resume alone");
+  const aside = options.aside === true;
+  if (aside && resume === undefined) throw new Error("a side question resumes the copy it is asked on");
   if (options.resumeAt !== undefined && !UUID_RE.test(options.resumeAt)) throw new Error(`a cut must name a message by its UUID, got "${options.resumeAt}"`);
-  const idFlag = sessionId === undefined ? `--resume ${id}${options.resumeAt === undefined ? "" : ` --resume-session-at ${options.resumeAt}`}` : `--session-id ${id}`;
+  const idFlag =
+    aside
+      ? `--max-turns 2 --resume ${id}`
+      : sessionId === undefined
+        ? `--resume ${id}${options.resumeAt === undefined ? "" : ` --resume-session-at ${options.resumeAt}`}`
+        : `--session-id ${id}`;
   const claude = [
     `${programWord("claude", options.launch)} -p`,
     ...person.words.map(shellQuote),
@@ -243,13 +267,14 @@ export function buildCommand(options: BuildCommandOptions): string {
     "--output-format stream-json",
     "--verbose",
     ...(subagentText === true ? ["--forward-subagent-text"] : []),
-    ...permissionFlags(permissionMode),
+    ...(aside ? ["--include-partial-messages"] : []),
+    ...permissionFlags(aside ? "default" : permissionMode),
     ...slugFlag("--model", "model", modelWithContext(model, contextWindow)),
     ...slugFlag("--effort", "effort", effort),
     ...(name === undefined ? [] : [`--name ${shellQuote(name)}`]),
     ...mcpConfigFlag(mcpServers),
     ...briefFlag(mcpServers),
-    ...(person.file ? [] : settingsFlag({ ...(fast === true ? { fastMode: true } : {}), ...memorySettings(memoryDir), ...person.settings })),
+    ...(person.file ? [] : settingsFlag({ ...(fast === true ? { fastMode: true } : {}), ...memorySettings(memoryDir), ...person.settings, ...(aside ? { disableAllHooks: true } : {}) })),
     idFlag,
   ].join(" ");
   return inFolder(cwd, claude);

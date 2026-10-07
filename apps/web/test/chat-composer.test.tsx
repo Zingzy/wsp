@@ -979,6 +979,48 @@ describe("a side question from the composer", () => {
     expect(draft()).toBe("/btw x");
   });
 
+  it("a side question asked on one thread never stands on another thread of the workspace, nor does its late answer", async () => {
+    const rowB: SessionView = { ...row, id: "sess_local_2", claudeSessionId: "sess_0002", threadId: "thr_0002", startedAt: 1 };
+    const streamA = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_0001" }));
+    const streamB = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_0002", sessionId: "sess_0002", turnId: "turn_0002" }));
+    const asked: string[] = [];
+    const answers = new Map<string, (text: string) => void>();
+    const { api } = fixtureApi([workspace], { [WS]: [...streamA, ...streamB] }, [], {
+      listSessions: async () => [row, rowB],
+      listHarnesses: async () => [{ ...CLAUDE_CATALOG, asides: true }],
+      askAside: (sessionId, question) => {
+        asked.push(`${sessionId}: ${question}`);
+        return new Promise(resolve => answers.set(sessionId, text => resolve({ text })));
+      },
+    });
+    useStore.setState({ conn: "connecting", workspaces: [], statuses: {}, harnesses: [], harnessesByWorkspace: {}, launches: {} });
+    useStore.getState().bind(api);
+    useStore.getState().setConn("live");
+    await waitFor(() => expect(useStore.getState().harnesses.length).toBeGreaterThan(0));
+    const view = render(<WorkspaceThread workspaceId={WS} threadId="thr_0001" />);
+    render(<PanelHost />);
+    await screen.findByText(/Server is live at :3000\./);
+    const ask = async (question: string) => {
+      await typeInto(composerEditor(), `/btw ${question}`);
+      await press(composerEditor(), "Escape");
+      await press(composerEditor(), "Enter");
+    };
+    const standing = () => document.querySelector<HTMLElement>('[data-panel-host] [data-k="aside-surface"]');
+    await ask("what is A about?");
+    await waitFor(() => expect(standing()?.querySelector('[data-k="aside-question"]')?.textContent).toBe("what is A about?"));
+    view.rerender(<WorkspaceThread workspaceId={WS} threadId="thr_0002" />);
+    await screen.findByText(/Server is live at :3000\./);
+    await waitFor(() => expect(standing()).toBeNull());
+    act(() => answers.get("sess_local_1")!("A is the hello world server."));
+    await ask("what is B about?");
+    await waitFor(() => expect(standing()?.querySelector('[data-k="aside-question"]')?.textContent).toBe("what is B about?"));
+    act(() => answers.get("sess_local_1")!("A is the hello world server."));
+    act(() => answers.get("sess_local_2")!("B is its twin."));
+    await waitFor(() => expect(standing()?.querySelector('[data-k="aside-answer"]')?.textContent).toContain("B is its twin."));
+    expect(standing()?.textContent).not.toContain("A is the hello world server.");
+    expect(asked).toEqual(["sess_local_1: what is A about?", "sess_local_2: what is B about?"]);
+  });
+
   it("a side question goes when the composer leaves the thread it was asked from", async () => {
     const { api } = asking(true);
     await setup(api);

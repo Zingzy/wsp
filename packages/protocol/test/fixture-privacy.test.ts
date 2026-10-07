@@ -53,11 +53,12 @@ const CODEX_TURN = "a recorded Codex app server turn whose thread and turn ids t
 const NO_SIGN_IN = "a recorded Codex app server run with no sign-in";
 const SAMPLE_HOME =
   "a sample path copied from a real computer before this scan and read only as text: the MCP record's folder listings and the reads that write them, where a new home means regenerating the record, the dev harness pages, the daemon contract's frames, a report link the renderer must leave unlinked, and test text";
+const ASIDE = "a synthetic id in a recorded mid-turn Claude Code session, linking each line to the one before and each call to its result";
 const CURSOR = "a recorded Cursor turn; the call id is cut short";
 /** Every recorded id or real home the fixtures and test sources still carry, in whichever file, as many times as count
  * says, each with why it stays. */
 const ALLOWED: readonly Allowed[] = [
-  { text: "e16ed170-8257-4668-879e-fe836341633c", count: 39, why: "the session id of a recorded Claude Code stream, shared by its subagent and WebFetch turns, which the adapter tests match on" },
+  { text: "e16ed170-8257-4668-879e-fe836341633c", count: 54, why: "the session id of a recorded Claude Code stream, shared by its subagent and WebFetch turns and the mid-turn thread a side question copies, which the adapter tests match on" },
   { text: "0f0d5872-9c1a-4e56-8a3b-7d2c4f6e9b01", count: 1, why: CLAUDE_STREAM },
   { text: "1a2b3c4d-0001-4aaa-8bbb-000000000001", count: 1, why: CLAUDE_STREAM },
   { text: "1a2b3c4d-0002-4aaa-8bbb-000000000002", count: 1, why: CLAUDE_STREAM },
@@ -74,6 +75,27 @@ const ALLOWED: readonly Allowed[] = [
   { text: "toolu_01WspFixBashB", count: 2, why: SUBAGENTS },
   { text: "toolu_01WspFixSearch1", count: 3, why: "a synthetic tool id in a recorded WebFetch turn, pairing the call with its result" },
   { text: "toolu_01WspFixFetch1", count: 3, why: "a synthetic tool id in a recorded WebFetch turn, pairing the call with its result" },
+  { text: "18090a51-0000-4aaa-8bbb-000000000000", count: 5, why: ASIDE },
+  { text: "18090a51-0001-4aaa-8bbb-000000000001", count: 2, why: ASIDE },
+  { text: "18090a51-0002-4aaa-8bbb-000000000002", count: 2, why: ASIDE },
+  { text: "18090a51-0003-4aaa-8bbb-000000000003", count: 3, why: ASIDE },
+  { text: "18090a51-0004-4aaa-8bbb-000000000004", count: 2, why: ASIDE },
+  { text: "18090a51-0005-4aaa-8bbb-000000000005", count: 2, why: ASIDE },
+  { text: "18090a51-0006-4aaa-8bbb-000000000006", count: 3, why: ASIDE },
+  { text: "18090a51-0007-4aaa-8bbb-000000000007", count: 2, why: ASIDE },
+  { text: "18090a51-0008-4aaa-8bbb-000000000008", count: 3, why: ASIDE },
+  { text: "18090a51-0009-4aaa-8bbb-000000000009", count: 2, why: ASIDE },
+  { text: "18090a51-0010-4aaa-8bbb-000000000010", count: 2, why: ASIDE },
+  { text: "18090a51-0011-4aaa-8bbb-000000000011", count: 3, why: ASIDE },
+  { text: "18090a51-0012-4aaa-8bbb-000000000012", count: 2, why: ASIDE },
+  { text: "18090a51-0013-4aaa-8bbb-000000000013", count: 2, why: ASIDE },
+  { text: "18090a51-0014-4aaa-8bbb-000000000014", count: 2, why: ASIDE },
+  { text: "18090a51-0015-4aaa-8bbb-000000000015", count: 1, why: ASIDE },
+  { text: "toolu_01WspFixAsideBash1", count: 3, why: ASIDE },
+  { text: "toolu_01WspFixAsideRead1", count: 3, why: ASIDE },
+  { text: "toolu_01WspFixAsideRead2", count: 3, why: ASIDE },
+  { text: "toolu_01WspFixAsideEdit1", count: 3, why: ASIDE },
+  { text: "toolu_01WspFixAsideBash2", count: 2, why: ASIDE },
   { text: "5b3d3ddb-86d6-47ba-b216-0a510284d8b6", count: 5, why: TITLES },
   { text: "11111111-1111-4111-8111-111111111111", count: 2, why: TITLES },
   { text: "7c6f56dc-c585-42a0-b6e8-783665c45546", count: 1, why: CLAUDE_PROBE },

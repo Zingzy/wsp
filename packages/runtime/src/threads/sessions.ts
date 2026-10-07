@@ -16,7 +16,7 @@ import {
   REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine,
   attachmentRecord, attachmentKey, filesBlocked, isImage, sendFilesDir, attachedFilesPrompt, threadMessages,
   threadSeed, taskStopRefusedLine, taskStopUnsupportedLine, agentOffLine, HEAD_BYTES, HISTORY_PAGE_BYTES,
-  HISTORY_PAGE_EVENTS, AGENT_STARTING_MS,
+  HISTORY_PAGE_EVENTS, AGENT_STARTING_MS, ASIDE_EMPTY_LINE, type AsideQuestion, type McpServerSpec, type SessionAsker,
 } from "@wsp/protocol";
 import { harnessCatalog } from "../harness-catalog.js";
 import { headShape } from "../transcript-reader.js";
@@ -28,6 +28,15 @@ import {
   type LiveSession,
 } from "../types/internal.js";
 import type { RuntimeContext, SessionsArea } from "../context.js";
+
+/** The wsp server a thread's launch is handed. A thread another thread started has no slate: its launch says nothing of
+ * one, and on this computer, where the server is the host's own wsp and knows the word, its server is told too. A box's
+ * server is served by this host as a guest, which reads the same off the thread's token; the box's own wsp may be
+ * older and never sees a word. */
+function servedTo(wsp: McpServerSpec | undefined, rootThreadId: string, threadId: string): McpServerSpec | undefined {
+  if (wsp === undefined || rootThreadId === threadId) return wsp;
+  return { ...wsp, noSlate: true as const, ...(wsp.args.includes(SCOPED_MCP_ARG) ? { args: [...wsp.args, NO_SLATE_MCP_ARG] } : {}) };
+}
 
 export function sessionsArea(ctx: RuntimeContext): SessionsArea {
   const {
@@ -171,11 +180,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // person's other servers stay (measured on 2.1.284 and 0.155.1 against the user-scope config; a project's own
       // .mcp.json naming wsp was not measured). A harness that takes none is refused where a caller named servers and
       // left alone here, since the person asked for a thread, not for tools.
-      // A thread another thread started has no slate: its launch says nothing of one, and on this computer, where the
-      // server is the host's own wsp and knows the word, its server is told too. A box's server is served by this host
-      // as a guest, which reads the same off the thread's token; the box's own wsp may be older and never sees a word.
-      const sub = tree.rootThreadId !== undefined && tree.rootThreadId !== threadId;
-      const served = wsp === undefined || !sub ? wsp : { ...wsp, noSlate: true as const, ...(wsp.args.includes(SCOPED_MCP_ARG) ? { args: [...wsp.args, NO_SLATE_MCP_ARG] } : {}) };
+      const served = servedTo(wsp, tree.rootThreadId ?? threadId, threadId);
       const mcpServers = served !== undefined && adapter.mcpServers === true ? { [MCP_SERVER_NAME]: served, ...o.mcpServers } : o.mcpServers;
       const records = (o.attachments ?? []).map(attachmentRecord);
       const blocked = filesBlocked(records, adapter.attachments, harness) ?? mcpServersBlocked(o.mcpServers, adapter.mcpServers, harness);
@@ -727,16 +732,24 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       if (latest.claudeSessionId === undefined) throw new Error(ASIDE_NO_SESSION_LINE);
       const threadId = threadKeyOf(latest);
       const onText = askId === undefined ? undefined : (text: string): void => bus.pass({ type: "aside.text", workspaceId: latest.workspaceId, threadId, askId, text });
-      const ask = { session: latest.claudeSessionId, question, ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}), ...(latest.model !== undefined ? { model: latest.model } : {}), ...(onText !== undefined ? { onText } : {}) };
-      if (bare.asideServers !== true || bare.mcpServers !== true) return { text: (await bare.aside(ask)).text };
-      // A copy that loads the thread's servers is launched with the thread's own wsp server and the pair it dials
-      // with, since a harness resuming a session that announced a server it no longer has tells the model so, and the
-      // answer opens on it. The harness keeps every tool off; the token goes back the moment the answer is in.
+      // What the thread's latest turn ran at, so a harness that copies the session sends the request its turns sent.
+      const ran = { ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}), ...(latest.model !== undefined ? { model: latest.model } : {}), ...(latest.effort !== undefined ? { effort: latest.effort } : {}), ...(latest.contextWindow !== undefined ? { contextWindow: latest.contextWindow } : {}), ...(latest.fast === true ? { fast: true } : {}) };
+      const ask = { session: latest.claudeSessionId, question, ...ran, ...(onText !== undefined ? { onText } : {}) };
+      const answered = async (asker: SessionAsker, q: AsideQuestion): Promise<{ text: string }> => {
+        const { text } = await asker(q);
+        if (text.trim() === "") throw new Error(ASIDE_EMPTY_LINE);
+        return { text };
+      };
+      if (bare.asideServers !== true || bare.mcpServers !== true) return answered(bare.aside, ask);
+      // A copy that loads the thread's servers is launched with the server the thread's turns get and the pair it
+      // dials with, since a harness resuming a session that announced a server it no longer has tells the model so,
+      // and the answer opens on it. The harness keeps every tool off; the token goes back the moment the answer is in.
       const { scoped, env: launchEnv, wsp } = await threadLaunch(entry, threadId, ctx.rootOf(threadId), { aside: true });
       try {
         const { adapter } = ctx.adapterFor(entry, harness, launchEnv, undefined, servers);
         if (adapter.aside === undefined) throw new Error(asideUnsupportedLine(harness));
-        return { text: (await adapter.aside({ ...ask, ...(wsp !== undefined ? { mcpServers: { [MCP_SERVER_NAME]: wsp } } : {}) })).text };
+        const served = servedTo(wsp, ctx.rootOf(threadId), threadId);
+        return await answered(adapter.aside, { ...ask, ...(served !== undefined ? { mcpServers: { [MCP_SERVER_NAME]: served } } : {}) });
       } finally {
         if (scoped !== undefined) await deviceDoor.revoke(scoped.deviceId).catch((e: unknown) => console.warn(`the token of a side question on thread ${threadWord(threadId)} was not taken away: ${e instanceof Error ? e.message : String(e)}`));
       }

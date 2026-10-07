@@ -4,10 +4,12 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { ASIDE_WALL_MS, baseModel, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, claudeMemoryDir, endAfterResult, endRun, fmtDuration, keepRun, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, HarnessExec, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, HarnessExec, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, interruptLine, modeOptionOn, setModeLine, stopTaskLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
-import { asideAnswer, asideCommand, asideTextOf, forkCleanupCommand } from "./aside.js";
+import { rec, str, num, strArr } from "./fields.js";
+import { limitOf, noteRejected, withLimit } from "./limits.js";
+import { ASIDE_HOOKS_ID, asideAnswer, asideCommand, asideCut, asideHooksLine, asidePrompt, asideTailCommand, asideTextOf, forkCleanupCommand, hookDenyLine, noConversationLine, promptDenyLine } from "./aside.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
@@ -170,24 +172,6 @@ export interface ClaudeAdapter {
   readonly asideServers: true;
   /** What every session's command is exported with; the one environment a turn on the machine gets. */
   readonly env: Readonly<Record<string, string>>;
-}
-
-function rec(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function str(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function num(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function strArr(value: unknown): string[] | undefined {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined;
 }
 
 function harnessOf(init: Record<string, unknown>): SessionHarness | undefined {
@@ -679,61 +663,6 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
     default:
       return [];
   }
-}
-
-/** Claude Code's name for each window as wsp's kind. The overage buckets are one kind: both are use past the plan. */
-const LIMIT_KIND: Record<string, LimitKind> = {
-  five_hour: "session",
-  seven_day: "week",
-  seven_day_opus: "week_opus",
-  seven_day_sonnet: "week_sonnet",
-  seven_day_overage_included: "overage",
-  overage: "overage",
-};
-const LIMIT_STATUS: Record<string, LimitStatus> = { allowed: "ok", allowed_warning: "warning", rejected: "reached" };
-
-/** A rate_limit_event's reading: every window it tracks under unifiedWindows, else the one window it names at the top
- * level, utilization (a fraction, above 1 when a window ran past its cap) as a percent and resetsAt (epoch seconds) in
- * ms. A reading with no utilization for any window says nothing about the plan and is dropped. Claude Code names no
- * account in it. */
-function limitOf(info: Record<string, unknown> | undefined): HarnessLimit | undefined {
-  if (info === undefined) return undefined;
-  const windows: LimitWindow[] = [];
-  const add = (type: string, reading: Record<string, unknown> | undefined): void => {
-    const kind = LIMIT_KIND[type];
-    const used = num(reading?.utilization);
-    if (kind === undefined || used === undefined || windows.some(w => w.kind === kind)) return;
-    const resetsAt = num(reading?.resetsAt);
-    windows.push({ kind, usedPercent: Math.round(used * 1000) / 10, ...(resetsAt !== undefined ? { resetsAt: resetsAt * 1000 } : {}) });
-  };
-  for (const [type, reading] of Object.entries(rec(info.unifiedWindows) ?? {})) add(type, rec(reading));
-  const top = str(info.rateLimitType);
-  if (top !== undefined) add(top, info);
-  if (windows.length === 0) return undefined;
-  const status = LIMIT_STATUS[str(info.status) ?? ""];
-  return { windows, ...(status !== undefined ? { status } : {}) };
-}
-
-/** Moves the windows a turn's readings say stop the agent: a rejected window with no overage to run on stops it until
- * its reset (epoch seconds, kept in ms), and any other reading of that window takes the stop back. */
-function noteRejected(info: Record<string, unknown> | undefined, rejected: Map<string, number | undefined>): void {
-  if (info === undefined) return;
-  const type = str(info.rateLimitType) ?? "";
-  const overage = info.isUsingOverage === true || str(info.overageStatus) === "allowed" || str(info.overageStatus) === "allowed_warning";
-  if (str(info.status) !== "rejected" || overage) {
-    rejected.delete(type);
-    return;
-  }
-  const resetsAt = num(info.resetsAt);
-  rejected.set(type, resetsAt === undefined ? undefined : resetsAt * 1000);
-}
-
-/** A failed turn the plan's rejected windows stopped, with the limit on it: the reset is the last of theirs, and
- * unknown where any of them named none. */
-function withLimit(result: TurnResult, rejected: ReadonlyMap<string, number | undefined>): TurnResult {
-  if (result.status !== "failed" || rejected.size === 0) return result;
-  const resets = [...rejected.values()];
-  return { ...result, limit: resets.every((r): r is number => r !== undefined) ? { resetsAt: Math.max(...resets) } : {} };
 }
 
 /** Whether the turn settled inside `ms`. */
@@ -1393,27 +1322,51 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     await cleanup.exited;
   };
 
-  /** One run on the turn's road and environment, read to its end so the answer lands after the fork's file is gone. */
+  /** The tail of the thread's session file read on the turn's road, then one run there on a copy cut before any call
+   * still running, read to its end so the answer lands after the copy's file is gone. The hook goes in ahead of the
+   * question, and every call the copy tries is refused on the control channel. */
   const aside = async (q: AsideQuestion): Promise<AsideAnswer> => {
     const fork = newSessionId();
-    const command = asideCommand({ session: q.session, fork, configDir: deps.configDir, ...(q.cwd !== undefined ? { cwd: q.cwd } : {}), ...(q.model !== undefined ? { model: q.model } : {}), ...(q.mcpServers !== undefined ? { mcpServers: q.mcpServers } : {}), ...memory, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
-    const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(q.question, fork)] });
     const wallMs = deps.asideWallMs ?? ASIDE_WALL_MS;
     let walled = false;
+    let current = deps.exec(asideTailCommand({ session: q.session, configDir: deps.configDir }), { env: { ...env } });
     const wall = setTimeout(() => {
       walled = true;
-      void endRun(stream, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
+      void endRun(current, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
     }, wallMs);
+    const read: string[] = [];
+    try {
+      for await (const line of current.lines) read.push(line);
+    } finally {
+      await current.exited.catch(() => null);
+    }
+    const total = Number(read[0]);
+    if (walled || read.length === 0 || !Number.isSafeInteger(total)) {
+      clearTimeout(wall);
+      throw new Error(walled ? asideWallLine(wallMs) : (read.at(-1) ?? noConversationLine(q.session)));
+    }
+    const { keep, running } = asideCut(total, read.slice(1));
+    const picks = { ...(q.cwd !== undefined ? { cwd: q.cwd } : {}), ...(q.model !== undefined ? { model: q.model } : {}), ...(q.effort !== undefined ? { effort: q.effort } : {}), ...(q.contextWindow !== undefined ? { contextWindow: q.contextWindow } : {}), ...(q.fast === true ? { fast: true } : {}) };
+    const command = asideCommand({ session: q.session, fork, keep, configDir: deps.configDir, ...picks, ...(q.mcpServers !== undefined ? { mcpServers: q.mcpServers } : {}), ...memory, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
+    const stream = deps.exec(command, { env: { ...env }, input: [asideHooksLine(), userMessageLine(asidePrompt(q.question, running), fork)] });
+    current = stream;
     let answer: AsideAnswer | { error: string } | undefined;
-    const said: string[] = [];
+    let said: string | undefined;
     let code: number | null;
     try {
       for await (const raw of stream.lines) {
         const event = parseLine(raw);
         if (event === undefined) {
-          const text = raw.trim();
-          if (text.length > 0 && said.push(text) > STDERR_TAIL_LINES) said.shift();
+          if (raw.trim().length > 0) said = raw.trim();
           continue;
+        }
+        const control = controlLine(event);
+        if (control?.kind === "unknown") void stream.write(control.subtype === "hook_callback" ? hookDenyLine(control.requestId) : controlErrorLine(control.requestId, control.subtype));
+        if (control?.kind === "ask") void stream.write(promptDenyLine(control.ask.askId));
+        // A CLI that refuses the hook would run a call the copy tries, so the question goes no further.
+        if (control?.kind === "answer" && control.requestId === ASIDE_HOOKS_ID && control.error !== undefined && answer === undefined) {
+          answer = { error: control.error };
+          void endRun(stream, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
         }
         const piece = answer === undefined ? asideTextOf(event) : undefined;
         if (piece !== undefined) q.onText?.(piece);
@@ -1434,7 +1387,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       return answer;
     }
     if (walled) throw new Error(asideWallLine(wallMs));
-    throw new Error(said.length > 0 ? said.join("\n") : harnessExitLine("claude", code, env["PATH"], { reached: false }));
+    // A side question's refusal is one line, and the last one the CLI printed is the one that says why.
+    throw new Error(said ?? harnessExitLine("claude", code, env["PATH"], { reached: false }));
   };
 
   const attach = deps.exec.attach?.bind(deps.exec);
