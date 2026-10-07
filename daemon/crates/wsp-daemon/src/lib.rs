@@ -35,6 +35,7 @@ mod ssh;
 mod sys;
 mod sys_local;
 mod tunnel;
+mod under_home;
 mod urls;
 
 pub use link::place_backoff_ms;
