@@ -2,7 +2,7 @@
 import { createServer, type Server } from "node:http";
 import { CLOUD_CAP_DEFAULT, EventUnion, PLACES_TICKET_REFUSAL, dayStart, THREAD_OPS, machineUnreachableLine, sendRefusal, workspaceState, workspaceWord, type PlaceView, type WorkspaceStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { roadFailed, type ExecResult } from "@wsp/engine";
+import { LINK_PROMPT_MS, LinkMachine, roadFailed, type ExecResult } from "@wsp/engine";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { POLL_INTERVAL_MS, createStatusTracker, probeReach, type StatusListOptions, type StatusRecord, type StatusWatchOptions } from "../src/status.js";
@@ -319,6 +319,51 @@ describe("a machine that answers for its own daemon", () => {
     // Three Docker API round trips ride this road where the edge road rode one, so the slow word is reachable here.
     expect((await rt.status.list(opts))[0]!.reach.state).toBe("slow");
     expect((await rt.status.list(opts))[0]!.machineState).toBe("running");
+  });
+
+  it("the slow prompt is the road's own: the loopback socket keeps 2.5 s and a joined computer's link gets its own", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock });
+    await createOn(rt, { golden: "snap_g", name: "socket" });
+    await createOn(rt, { golden: "snap_g", name: "box" });
+    const [socket, box] = backend.machines;
+    // Each road moves the shared clock only while it is the one measured, since the two probes run side by side.
+    const took = { socket: 0, box: 0 };
+    // The loopback socket: one HTTP GET, the clock moving inside the daemon's answer.
+    const server = createServer((_req, res) => {
+      fc.advance(took.socket);
+      res.writeHead(426).end();
+    });
+    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+    openServers.push(server);
+    const port = (server.address() as { port: number }).port;
+    socket!.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
+    // The joined computer's road is the link machine's own, with the prompt the link declares.
+    const linked = new LinkMachine(
+      {
+        request: async () => {
+          fc.advance(took.box);
+          return { answers: true };
+        },
+        forward: async () => ({ localPort: 0 }),
+      },
+      { id: "c1", kind: "sandbox", roads: { previewUrl: false, daemonAnswers: true, putBytes: false, describe: false, facts: false, metrics: false } },
+    );
+    Object.assign(box!, { previewUrl: undefined, daemonAnswers: linked.daemonAnswers, daemonAnswersPromptMs: linked.daemonAnswersPromptMs });
+    const reach = async (): Promise<Record<string, string>> => Object.fromEntries((await rt.status.list({ probeTimeoutMs: 5_000 })).map(s => [s.name, s.reach.state]));
+    const reachAfter = async (road: "socket" | "box", ms: number): Promise<string> => {
+      took.socket = 0;
+      took.box = 0;
+      took[road] = ms;
+      return (await reach())[road]!;
+    };
+    expect(await reachAfter("socket", 2_400)).toBe("reachable");
+    expect(await reachAfter("socket", 2_600)).toBe("slow");
+    // Past the socket's prompt and well inside the link's: a healthy guest over a joined computer's road.
+    expect(await reachAfter("box", 2_600)).toBe("reachable");
+    expect(await reachAfter("box", LINK_PROMPT_MS - 100)).toBe("reachable");
+    expect(await reachAfter("box", LINK_PROMPT_MS + 100)).toBe("slow");
   });
 
   it("the caller's bound is the whole ask: a machine that never answers reads unreachable rather than holding the read open", async () => {

@@ -368,6 +368,20 @@ describe("the small recipe", () => {
     expect(loadRecipe(path)).toEqual(RECIPE);
   });
 
+  it("loadRecipe handed the manifest init saves beside the state refuses in one sentence naming recipe.json, with no field list", () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
+    const path = recipePath(join(dir, "state.json"));
+    saveRecipe(path, FIXTURE, new Set(["shell/zshrc"]));
+    let said = "";
+    try {
+      loadRecipe(path);
+    } catch (e) {
+      said = e instanceof Error ? e.message : String(e);
+    }
+    expect(said).toBe(`${path} is the manifest wsp init saves beside the state, not a recipe. Run wsp init --recipe ${join(dir, "recipe.json")} instead.`);
+    expect(said).not.toMatch(/Required|invalid recipe|version/);
+  });
+
   it("applyRecipe ticks the agents and tools rows from the catalog ids and leaves the other rungs to their defaults", () => {
     const applied = applyRecipe({ ...FIXTURE, entries: [...FIXTURE.entries, { rung: "agents", id: "agents/mcp/claude/spoo-ops", label: "spoo-ops", paths: [], bytes: 0, default: "bring" }, { rung: "agents", id: "agents/mcp/codex/axiom", label: "axiom", paths: [], bytes: 0, default: "bring" }, { rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote", paths: [], bytes: 0, default: "bring" }, { rung: "tools", id: "tools/brew/openjdk@21", label: "openjdk@21", paths: [], bytes: 0, default: "skip", reason: "no Linux bottle" }] }, RECIPE);
     const bring = new Map(applied.entries.map(e => [e.id, e.bring]));

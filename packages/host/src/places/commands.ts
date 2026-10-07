@@ -599,7 +599,7 @@ async function runBoxSignIn(io: CliIO, client: HostClient, place: PlaceView, age
   const { line } = await client.request<{ line: unknown }>("agents.signInLine", { target: { placeId: place.id }, agent });
   const road = await deps.placeLink(client, place.id);
   try {
-    const answer = await deps.signIn({ link: road.link, agent, line: SignInLine.parse(line), terminal: deps.terminal, open: deps.open });
+    const answer = await deps.signIn({ where: place.name, link: road.link, agent, line: SignInLine.parse(line), terminal: deps.terminal, open: deps.open });
     io.log(answer.signedIn ? boxSignedInLine(place.name, agent, answer.detail) : boxNotSignedInLine(place.name, agent, answer.said));
     // That computer lists its logins only when it dials, so the host notes this one as the app's own sign-in does.
     if (answer.signedIn) await client.request("places.loginLanded", { placeId: place.id, agent });

@@ -4248,6 +4248,17 @@ describe("wsp init --recipe", () => {
     expect(Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8"))).rows.some(r => r.id === "tools/brew/zingzy/tap/diskbloom")).toBe(false);
   });
 
+  it("the manifest saved beside the state, handed to --recipe, ends the run in one sentence naming recipe.json and no field list", async () => {
+    const f = fake({ collect: async () => { throw new Error("collect must not run on a manifest"); } });
+    f.opts.recipeFile = join(dirname(f.opts.statePath), "golden-recipe.json");
+    writeFileSync(f.opts.recipeFile, JSON.stringify({ entries: [] }));
+    expect((await runInit(f.opts, f.io)).code).toBe(1);
+    const text = f.text().replace(/\n[│▲■]\s+/g, " ");
+    expect(text).toContain(`${f.opts.recipeFile} is the manifest wsp init saves beside the state, not a recipe. Run wsp init --recipe ${join(dirname(f.opts.statePath), "recipe.json")} instead.`);
+    expect(text).not.toMatch(/invalid recipe|Required/);
+    expect(f.backends).toHaveLength(0);
+  });
+
   it("a recipe that does not parse ends the run before anything is read or booted", async () => {
     const f = fake({ collect: async () => { throw new Error("collect must not run on a bad recipe"); } });
     f.opts.recipeFile = join(dirname(f.opts.statePath), "recipe.json");

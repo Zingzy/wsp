@@ -33,6 +33,9 @@ import {
   fmtBytes,
   sayOnce,
   usageRefusal,
+  compareVersions,
+  isLoopback,
+  UP_RESTART_LINE,
   validatorRefusal,
   verbFailure,
   problemListsOf,
@@ -83,8 +86,10 @@ import type { RelayTerminal } from "../signin-relay.js";
 import { CLOUD_ON } from "../cloud.js";
 import { dialAddress, heldOrStarted, hostTokenFor, hostTokenPath, POLL_MS, SERVICE_WAIT_MS, servingHost } from "../host-lock.js";
 import type { HostStarter } from "../host-start.js";
-import { addressNotPairedLine, aimAddress, aimHolds, aimedHost, deviceRefusedLine, dialWindowMs, noAnswerRefusal, noAnswerWithin, READ_THE_HOSTS, wsUrlOf, wspHome, writeHost, type HostAim, type HostPick } from "../hosts.js";
+import { addressNotPairedLine, aimAddress, aimHolds, aimName, aimedHost, deviceRefusedLine, dialWindowMs, noAnswerRefusal, noAnswerWithin, READ_THE_HOSTS, wsUrlOf, wspHome, writeHost, type HostAim, type HostPick } from "../hosts.js";
 import { readDeviceKeyPair } from "../account.js";
+import { releaseUpdateLine } from "../daemon-fix.js";
+import { VERSION } from "../version.js";
 import type { WatchSignals } from "../watch.js";
 import type { ScanInput } from "../recipe-command.js";
 
@@ -127,6 +132,9 @@ export interface DialOpts extends HostPick {
    * admitted it: no code is spent, and the host answers a device token of its own.
    * The name is what the host's listing calls this computer. */
   admit?: { name: string; hostKey: string; key: PlaceKeyPair };
+  /** Dials a host of another release all the same: the one line that asks it to restart, which is how an older host
+   * on this computer comes back on the release installed here. */
+  anyRelease?: boolean;
   /** What brings a host up when none serves this state file here. A line that hands none in starts nothing and
    * reads the refusal, which is what a line about to serve a host itself wants. */
   start?: HostStarter;
@@ -317,6 +325,15 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
     if (aim.kind !== "alias") throw authRefusal(e instanceof Error ? e.message : String(e));
     throw authRefusal(deviceRefusedLine(aim.alias));
   };
+  /** One release on both ends or nothing past the first frame: the wire's shapes drop the keys they do not know, so
+   * a line and a host of two releases would misread each other rather than fail. A host that names no release is
+   * one from before the answer carried it, and is not judged. */
+  const sameRelease = (answer: Record<string, unknown>): void => {
+    const theirs = answer["version"];
+    if (opts.anyRelease === true || typeof theirs !== "string" || theirs === VERSION) return;
+    const road = typeof answer["road"] === "string" ? answer["road"] : undefined;
+    throw releaseRefusal(VERSION, theirs, aim.kind === "here" ? { state: statePath } : { where: aimName(aim), here: isLoopback(new URL(aimAddress(aim)).hostname) }, road);
+  };
   const authed = opened
     .catch((e: unknown) => {
       throw noAnswerRefusal(where, e instanceof Error ? e.message : String(e));
@@ -337,9 +354,10 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
           signature: signPlaceBytes(opts.admit.key.privateKeyPem, expect),
         }).catch(tokenRefused);
         paired = { deviceId: admitted.deviceId, deviceToken: admitted.deviceToken };
+        sameRelease(admitted);
         return;
       }
-      await request("auth", { token }).catch(tokenRefused);
+      sameRelease(await request("auth", { token }).catch(tokenRefused));
     });
   try {
     await Promise.race([authed, deadline]);
@@ -834,6 +852,8 @@ export interface CliVerb {
   readsHere?: string;
   /** Why this line dials only a host already up and never starts one: with none serving its state it refuses. */
   startsNoHost?: string;
+  /** Why this line dials a host of another release rather than refusing it, as every other line does. */
+  anyRelease?: string;
   /** Only means something on a cloud: with none registered the line prints on no page, its tool is not served, and
    * typing it is refused by the flag. */
   cloud?: true;
@@ -981,8 +1001,43 @@ export function accessWordOf(given: string): AccessChoice {
 /** Whether a path is the folder or inside it. */
 export const under = (path: string, folder: string): boolean => path === folder || path.startsWith(folder.endsWith("/") ? folder : `${folder}/`);
 
+/** The words of the refusal a line and a host of two releases meet: the node line's and, through the record, the
+ * daemon binary's, so both say the one sentence. */
+export const RELEASE_WORDS = {
+  said: (mine: string, host: string, theirs: string): string => `this line runs wsp ${mine} and ${host} runs wsp ${theirs}:`,
+  hostHere: (state: string): string => `the host serving ${state}`,
+  hostAt: (where: string): string => `the host at ${where}`,
+  restart: "restart that host with wsp restart.",
+  reopenApp: (mine: string): string => `quit and reopen the app that holds it once the app is on wsp ${mine}.`,
+  restartUp: UP_RESTART_LINE,
+  initFinish: "let the wsp init that serves it finish, then run this line again.",
+  updateThere: (mine: string): string => `update wsp to ${mine} on that computer and restart its host there.`,
+  updateHere: (line: string, theirs: string): string => `${line} on this computer brings this line to ${theirs}.`,
+};
+
+/** Which host a release refusal names: the one serving this computer's state file, or one by its alias or its
+ * address, which `here` says is on this computer all the same, as a turn's launch pair is. */
+export type ReleaseHost = { state: string } | { where: string; here: boolean };
+
+/** What brings an older host on this computer level, off the road it names beside its release (`hostRoadOf`): the
+ * app's host comes back on the app's own release, a terminal's wsp up and init's host refuse a restart, and every
+ * other host takes one. */
+export function releaseHereFix(mine: string, road: string | undefined): string {
+  const W = RELEASE_WORDS;
+  return road === "app" ? W.reopenApp(mine) : road === "up" ? W.restartUp : road === "init" ? W.initFinish : W.restart;
+}
+
+/** What a line and a host of two releases read, in one sentence: both releases, and what to run on the older end. */
+export function releaseRefusal(mine: string, theirs: string, host: ReleaseHost, road?: string): Error {
+  const W = RELEASE_WORDS;
+  const said = W.said(mine, "state" in host ? W.hostHere(host.state) : W.hostAt(host.where), theirs);
+  if (compareVersions(mine, theirs) < 0) return usageRefusal(said, W.updateHere(releaseUpdateLine({ argv: process.argv }, theirs), theirs));
+  const fix = "state" in host || host.here ? releaseHereFix(mine, road) : W.updateThere(mine);
+  return usageRefusal(said, fix);
+}
+
 /** A reply the protocol schema refuses: the host process predates or postdates this command's build. */
-export const otherVersion = (op: string): string => `the host answered ${op} in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up`;
+export const otherVersion = (op: string): string => `the host answered ${op} in a shape this wsp does not read; it runs another version of wsp, restart it with wsp restart`;
 
 /** The runtime's thread id of a row, the one its events carry; a row from before threads had ids is its own. */
 export const threadIdOf = (t: ThreadView): string => t.threadId ?? t.id;

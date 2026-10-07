@@ -14,6 +14,7 @@ use crate::aim::{self, Aim, HostRecord, Pick};
 use crate::client::{self, Admit, Client, Dial, Presents};
 use crate::failure::Failure;
 use crate::record::{self, fill};
+use crate::release::ReleaseHost;
 use crate::start;
 use crate::{Args, Env};
 
@@ -34,6 +35,9 @@ pub struct Host {
     /// The folder the server runs in, where a thread named with no workspace finds its repo; none finds none.
     cwd: Option<PathBuf>,
     held: Mutex<Option<Arc<Client>>>,
+    /// The socket a line that dials past the release check holds, kept apart so no other tool rides it to a host of
+    /// another release.
+    held_any_release: Mutex<Option<Arc<Client>>>,
 }
 
 impl Host {
@@ -48,7 +52,15 @@ impl Host {
         } else {
             env.clone()
         };
-        Host { args: args.clone(), process_env: env.clone(), env: readable, home: aim::wsp_home(env), cwd, held: Mutex::new(None) }
+        Host {
+            args: args.clone(),
+            process_env: env.clone(),
+            env: readable,
+            home: aim::wsp_home(env),
+            cwd,
+            held: Mutex::new(None),
+            held_any_release: Mutex::new(None),
+        }
     }
 
     /// The environment a tool reads a value it sends by name from.
@@ -59,17 +71,32 @@ impl Host {
     /// The socket the last call opened while it is still open; a fresh dial otherwise. Two calls at once share one
     /// dial, since the second waits on the first's.
     pub async fn client(&self) -> Result<Arc<Client>, Failure> {
-        self.held(None).await
+        self.held(None, true).await
+    }
+
+    /// The same past the release check, for the restart that is the fix the release refusal names, as `wsp restart`
+    /// dials with anyRelease.
+    pub async fn client_any_release(&self) -> Result<Arc<Client>, Failure> {
+        self.held(None, false).await
     }
 
     /// The host that came back after it stopped under a wait, within `window`: dialled until one answers, each dial
     /// handed what is left as its own deadline and none of them starting a host, as `hostAgain` in
     /// packages/host/src/verbs.ts dials. Past the window the last dial's refusal says what stands now.
     pub async fn back_within(&self, window: Duration) -> Result<Arc<Client>, Failure> {
+        self.back(window, true).await
+    }
+
+    /// The same past the release check, for the restart's own wait on the host it restarted.
+    pub async fn back_within_any_release(&self, window: Duration) -> Result<Arc<Client>, Failure> {
+        self.back(window, false).await
+    }
+
+    async fn back(&self, window: Duration, judged: bool) -> Result<Arc<Client>, Failure> {
         let until = Instant::now() + window;
         loop {
             let left = until.saturating_duration_since(Instant::now()).max(Duration::from_millis(1));
-            match self.held(Some(left)).await {
+            match self.held(Some(left), judged).await {
                 Ok(client) => return Ok(client),
                 Err(refused) if Instant::now() >= until => return Err(refused),
                 Err(_) => {}
@@ -87,18 +114,18 @@ impl Host {
         self.cwd.as_deref()
     }
 
-    async fn held(&self, again: Option<Duration>) -> Result<Arc<Client>, Failure> {
-        let mut held = self.held.lock().await;
+    async fn held(&self, again: Option<Duration>, judged: bool) -> Result<Arc<Client>, Failure> {
+        let mut held = if judged { self.held.lock().await } else { self.held_any_release.lock().await };
         if let Some(open) = held.as_ref().filter(|c| !c.is_closed()) {
             return Ok(open.clone());
         }
-        let dialled = Arc::new(self.dial(again).await?);
+        let dialled = Arc::new(self.dial(again, judged).await?);
         *held = Some(dialled.clone());
         Ok(dialled)
     }
 
     /// `again` is a dial after the host stopped: it starts nothing and is bounded by what the wait has left.
-    async fn dial(&self, again: Option<Duration>) -> Result<Client, Failure> {
+    async fn dial(&self, again: Option<Duration>, judged: bool) -> Result<Client, Failure> {
         let pick = Pick { host: self.args.host.as_deref(), env: &self.process_env, home: self.home.clone() };
         let state = &self.args.state;
         let aim = aim::aimed(state, &pick)?;
@@ -109,24 +136,33 @@ impl Host {
                     start::started(state, &self.args.wsp, &self.process_env, &mut |line| eprintln!("{line}")).await?;
                 }
                 let (url, token, at) = aim::here_door(state)?;
-                let to = Dial { url: &url, at: &at, window, pinned: None, alias: None };
+                let release = ReleaseHost::Here { state: state.to_string_lossy().into_owned() };
+                let to = Dial { url: &url, at: &at, window, pinned: None, alias: None, release: judged.then_some(&release) };
                 Ok(client::dial(&to, Presents::Token(&token)).await.map_err(|r| r.failure)?.0)
             }
             Aim::Url { url, token, host_key } => {
                 let Some(token) = token else {
                     return Err(Failure::usage(fill(&record::words().address_not_paired, &[("url", url)])));
                 };
-                let to = Dial { url: &ws_url(url)?, at: url, window, pinned: host_key.as_deref(), alias: None };
+                let release = ReleaseHost::At { at: url.clone(), here: on_this_computer(url) };
+                let to = Dial {
+                    url: &ws_url(url)?,
+                    at: url,
+                    window,
+                    pinned: host_key.as_deref(),
+                    alias: None,
+                    release: judged.then_some(&release),
+                };
                 Ok(client::dial(&to, Presents::Token(token)).await.map_err(|r| r.failure)?.0)
             }
-            Aim::Alias { alias, record } => self.dial_account(alias, record, window).await,
+            Aim::Alias { alias, record } => self.dial_account(alias, record, window, judged).await,
         }
     }
 
     /// A host on the account. A record written off the listing holds no token until its first dial, which is
     /// admitted on the key this computer signs with; a token that host took away while the account still names this
     /// computer is one more dial, proving the key. Either way the token it answers is written into the record.
-    async fn dial_account(&self, alias: &str, record: &HostRecord, window: Duration) -> Result<Client, Failure> {
+    async fn dial_account(&self, alias: &str, record: &HostRecord, window: Duration, judged: bool) -> Result<Client, Failure> {
         let admitting = || -> Option<Admit> {
             record.host_key.as_ref()?;
             let key = aim::device_key(&self.home)?;
@@ -134,7 +170,15 @@ impl Host {
         };
         let admit = if record.device_token.is_empty() { admitting() } else { None };
         let url = ws_url(&record.url)?;
-        let to = Dial { url: &url, at: &record.url, window, pinned: record.host_key.as_deref(), alias: Some(alias) };
+        let release = ReleaseHost::At { at: alias.to_owned(), here: on_this_computer(&record.url) };
+        let to = Dial {
+            url: &url,
+            at: &record.url,
+            window,
+            pinned: record.host_key.as_deref(),
+            alias: Some(alias),
+            release: judged.then_some(&release),
+        };
         let first = match &admit {
             Some(key) => Presents::Admit(key),
             None => Presents::Token(&record.device_token),
@@ -154,6 +198,12 @@ impl Host {
         }
         Ok(client)
     }
+}
+
+/// Whether an address names a host on this computer, as a turn's launch pair does, whose fix is the one the host here
+/// takes rather than an update over there.
+fn on_this_computer(url: &str) -> bool {
+    aim::served_hostname(url).is_some_and(|host| aim::is_loopback(&host))
 }
 
 /// What this computer calls itself, as node's os.hostname reads it: the name an admission gives the host's listing.

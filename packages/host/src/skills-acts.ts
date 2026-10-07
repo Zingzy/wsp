@@ -9,7 +9,7 @@
 // is not turned off here.
 import { posix } from "node:path";
 import { CATALOG_AGENTS, PROJECT_SHARED_SKILLS, SHARED_SKILLS, isSystemSkill, ownSkillFolder } from "@wsp/catalog";
-import { detectSkills, expand, nodeHost, skillRoots, tilde, type Host } from "@wsp/collect";
+import { SKILL_LINK_ABOVE, detectSkills, expand, nodeHost, skillRoots, tilde, type Host } from "@wsp/collect";
 import type { ExecResult } from "@wsp/engine";
 import { noSuchSkillRefusal, pluginSkillRefusal, projectSkillOffRefusal, shellQuote, systemSkillRefusal, type SkillAdded, type SkillPreview, type SkillRow } from "@wsp/protocol";
 import { projectOf, type AgentsOn, type SkillAsk, type SkillsActs } from "@wsp/runtime";
@@ -25,23 +25,6 @@ const OUT_EXIT = 5;
 /** What a preview reads of a SKILL.md at most; the preview itself carries the first SKILL_PREVIEW_BYTES. */
 const PREVIEW_READ_CAP = 2 * 1024 * 1024;
 
-/** A shell function: the first folder above $1, below $2, that is a link, printed with where it points, else false.
- * With $3, a real path, a link that resolves inside it is passed over. */
-const LINK_ABOVE = [
-  "linked() {",
-  "  p=${1%/*}",
-  '  while [ -n "$p" ] && [ "$p" != "$2" ] && [ "$p" != / ]; do',
-  '    if [ -L "$p" ]; then',
-  '      if [ -n "$3" ] && r=$(realpath "$p" 2>/dev/null); then case $r/ in "$3"/*) p=${p%/*}; continue;; esac; fi',
-  "      printf '%s\\t%s\\n' \"$p\" \"$(readlink \"$p\")\"",
-  "      return 0",
-  "    fi",
-  "    p=${p%/*}",
-  "  done",
-  "  return 1",
-  "}",
-].join("\n");
-
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
 
 /** The project a target holds, which a project's skill needs. */
@@ -55,7 +38,8 @@ function theProject(on: AgentsOn): string {
  * is not a project's, a person's own before a plugin's of the same name. */
 async function findSkill(road: Road, on: AgentsOn, ask: SkillAsk): Promise<{ row: SkillRow; roots: string[] }> {
   // Only the one project an act names: two projects' skills of one name would leave the act guessing.
-  const roots = await skillRoots(road.host, projectOf(on) !== undefined ? { projects: on.projects! } : {});
+  // A folder the list skips for linking out of the repo holds nothing an act may name, so it is no reason given here.
+  const roots = (await skillRoots(road.host, projectOf(on) !== undefined ? { projects: on.projects! } : {})).filter(r => r.skipped === undefined);
   const read = await detectSkills(road.host, roots);
   const rows = read.skills.filter(s => s.name === ask.name && (ask.project === true ? s.scope === "project" : s.scope !== "project"));
   const row = rows.find(s => s.scope !== "plugin") ?? rows[0];
@@ -69,7 +53,7 @@ const rootOf = (dir: string, roots: readonly string[]): string =>
 
 /** A line that exits HELD_EXIT naming the link when any of the folders sits under one below its skills folder. */
 const heldLine = (dirs: readonly string[], roots: readonly string[]): string =>
-  [LINK_ABOVE, ...dirs.map(d => `linked ${shellQuote(d)} ${shellQuote(rootOf(d, roots))} && exit ${HELD_EXIT}`)].join("\n");
+  [SKILL_LINK_ABOVE, ...dirs.map(d => `linked ${shellQuote(d)} ${shellQuote(rootOf(d, roots))} && exit ${HELD_EXIT}`)].join("\n");
 
 /** The link and where it points, off a line that exited HELD_EXIT. */
 function linkSaid(res: ExecResult, home: string): { link: string; to: string } {
@@ -152,7 +136,7 @@ export function skillsActs(o: SkillsActsOptions = {}): SkillsActs {
       });
       const q = shellQuote;
       // A project's folder that links out of it would put the skill somewhere the project does not hold.
-      const held = project === undefined ? [] : [LINK_ABOVE, `b=$(realpath ${q(project)}) || exit 1`, ...[dest, ...agents.map(a => posix.join(a.dir, got.name))].map(d => `linked ${q(d)} ${q(project)} "$b" && exit ${HELD_EXIT}`)];
+      const held = project === undefined ? [] : [SKILL_LINK_ABOVE, `b=$(realpath ${q(project)}) || exit 1`, ...[dest, ...agents.map(a => posix.join(a.dir, got.name))].map(d => `linked ${q(d)} ${q(project)} "$b" && exit ${HELD_EXIT}`)];
       const lines = [
         ...held,
         "umask 022",

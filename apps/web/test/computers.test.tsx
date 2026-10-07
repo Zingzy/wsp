@@ -742,6 +742,15 @@ describe("the Agents page on a computer", () => {
     ]);
   });
 
+  it("a project skills folder the read skipped for linking out of the repo is one refusal line under the list", async () => {
+    useStore.setState({ places: [here, { ...laptop, present: true, name: "spoo" }] });
+    const line = "skills: ~/code/app/.agents/skills links out of the repo, to /srv/away, so its skills are not read";
+    await mountAgents(computersApi({ agentsRead: async () => ({ ...EMPTY_REPORT, refused: [line] }) }).api, "p_1");
+    expect([...document.querySelectorAll("[data-settings-page] [data-settings-card=not-read] [data-refused-line]")].map(l => [l.querySelector("[data-settings-title]")?.textContent, l.querySelector("[data-settings-description]")?.textContent])).toEqual([
+      ["Skills", "~/code/app/.agents/skills links out of the repo, to /srv/away, so its skills are not read"],
+    ]);
+  });
+
   it("opens from a computer's own page with that computer picked, and the top bar's tabs switch the one kind the page lists", async () => {
     const asked: AgentsTarget[] = [];
     useStore.setState({ places: [here, box] });

@@ -90,7 +90,7 @@ export function validatorRefusal(error: string): string | undefined {
   // A discriminator the host does not know is this wsp asking for an op the host does not serve, which no argument
   // of the line can fix: the two builds differ.
   if (rows.some(row => row.code === "invalid_union_discriminator") && fields.every(field => field === "op")) {
-    return "the host does not serve this line; it runs another version of wsp, restart it with wsp up";
+    return "the host does not serve this line; it runs another version of wsp, restart it with wsp restart";
   }
   const named = [...new Set(fields.map(field => REQUEST_WORDS[field]).filter((word): word is string => word !== undefined))];
   return named.length === 0 ? "the host would not read this line" : `the host would not read ${named.join(" and ")} on this line`;

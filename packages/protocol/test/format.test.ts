@@ -91,6 +91,7 @@ import {
   fmtElapsed,
   fmtMemGb,
   fmtRate,
+  fmtCpus,
   fmtSize,
   boxRoomLines,
   placeFactsLine,
@@ -943,7 +944,7 @@ describe("a refusal the host's own validator wrote", () => {
   it("reads an op the host does not know as the two builds differing, and never prints the ops it listed", () => {
     const refusal = issues([{ code: "invalid_union_discriminator", options: ["auth", "status.list", "workspaces.exec"], path: ["op"], message: "Invalid discriminator value. Expected 'auth' | 'status.list' | 'workspaces.exec'" }]);
     const line = validatorRefusal(refusal);
-    expect(line).toBe("the host does not serve this line; it runs another version of wsp, restart it with wsp up");
+    expect(line).toBe("the host does not serve this line; it runs another version of wsp, restart it with wsp restart");
     expect(line).not.toContain("workspaces.exec");
     expect(line).not.toContain("discriminator");
   });
@@ -1042,6 +1043,17 @@ describe("machine size words", () => {
     // A provider's cpus are virtual and this computer's are not: the same line, the kind's own word for them.
     expect(fmtSize({ cpu: 10, memMb: 16384 }, kindWords("local").cpu)).toBe("10 cores, 16 GB");
     expect(fmtSize({ cpu: 2, memMb: 4096 }, kindWords("cloud").cpu)).toBe("2 vCPU, 4 GB");
+  });
+
+  it("a one-core size reads 1 core, never 1 cores, in fmtSize and in every line built on it", () => {
+    const nb = (line: string): string => line.replace(/ /g, "\u00a0");
+    expect(fmtSize({ cpu: 1, memMb: 3891 }, kindWords("local").cpu)).toBe(nb("1 core, 3.8 GB"));
+    expect(fmtSize({ cpu: 1, memMb: 4096 })).toBe(nb("1 vCPU, 4 GB"));
+    expect(placeFactsLine({ cpu: 1, memMb: 4096 })).toBe(nb("1 core, 4 GB"));
+    expect(boxRoomLines({ cores: 1, memMb: 4096, cpuTaken: 0, memTakenMb: 0 })[0]).toBe("1 core, 0 in use by forks, 1 free");
+    expect(fmtCpus(1, "cores")).toBe("1 core");
+    expect(fmtCpus(2, "cores")).toBe("2 cores");
+    expect(fmtCpus(1)).toBe("1 vCPU");
   });
 
   it("sizeWord spells vCPUs, an x and the GB the size table names, and sizeFromWord reads the same word back", () => {

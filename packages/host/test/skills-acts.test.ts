@@ -149,6 +149,32 @@ describe("installing a skill off skills.sh", () => {
     expect(lstatSync(join(at.project, ".claude/skills/memo"), { throwIfNoEntry: false })).toBeUndefined();
   });
 
+  it("the read and the install judge a project's skills folder by one rule: a link inside the repo is the repo's, one out of it is neither read nor written", async () => {
+    const at = fixture();
+    const app = [{ id: "pr_app", name: "app", path: at.project }];
+    const acts = skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) });
+    // Inside: .agents/skills is the repo's own link to another of its folders, so both read it and the install lands there.
+    mkdirSync(join(at.project, "shared-skills/lint"), { recursive: true });
+    writeFileSync(join(at.project, "shared-skills/lint/SKILL.md"), "---\nname: lint\n---\n");
+    rmSync(join(at.project, ".agents/skills"), { recursive: true, force: true });
+    symlinkSync("../shared-skills", join(at.project, ".agents/skills"));
+    const inside = await detectSkills(here(at), await skillRoots(here(at), { projects: app }));
+    expect(inside.skills.filter(s => s.scope === "project").map(s => s.name)).toEqual(["deploy", "lint"]);
+    expect(inside.refused).toEqual([]);
+    expect((await acts.add({ kind: "here", projects: app }, { skill: "acme/skills/memo", agents: [], project: true })).path).toBe("~/code/app/.agents/skills/memo");
+    expect(existsSync(join(at.project, "shared-skills/memo/SKILL.md"))).toBe(true);
+    // Out: the same folder pointed out of the repo is skipped by the read, said in one line, and refused by the install.
+    const away = join(at.root, "away");
+    mkdirSync(away, { recursive: true });
+    rmSync(join(at.project, ".agents/skills"));
+    symlinkSync(away, join(at.project, ".agents/skills"));
+    const outside = await detectSkills(here(at), await skillRoots(here(at), { projects: app }));
+    expect(outside.skills.filter(s => s.scope === "project").map(s => s.name)).toEqual(["deploy"]);
+    expect(outside.refused).toEqual([`skills: ~/code/app/.agents/skills links out of the repo, to ${away}, so its skills are not read`]);
+    rmSync(join(at.project, "shared-skills/memo"), { recursive: true, force: true });
+    await expect(acts.add({ kind: "here", projects: app }, { skill: "acme/skills/memo", agents: [], project: true })).rejects.toThrow(`memo was not installed: ~/code/app/.agents/skills is a link to ${away}, out of the project.`);
+  });
+
   it("on a box whose daemon is root, every write runs as the owner of the home through runuser", async () => {
     const at = fixture();
     const { machine, lines } = road(at, { root: true });

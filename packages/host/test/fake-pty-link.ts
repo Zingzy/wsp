@@ -38,6 +38,8 @@ export interface FakePtyLink extends PtyLink {
   drop(): void;
   /** What each pty's shell prints as it is attached, before any line is typed. */
   banner?: string;
+  /** What a plain exec answers in place of a clean run: a refusal or a nonzero exit, by the command it was sent. */
+  answerExec?: (cmd: string) => Record<string, unknown> | undefined;
   /** Called with each complete typed line, after its echo; a line that ran a staged command comes with that command
    * standing where the line reads it. */
   script?: (pty: FakePty, line: string) => void;
@@ -122,6 +124,8 @@ export function fakePtyLink(): FakePtyLink {
           }
           const cleared = /^rm -rf -- '(\/staged\/\d+)'$/.exec(String(extra["cmd"]))?.[1];
           if (cleared !== undefined) link.staged.get(cleared)!.cleared = true;
+          const answered = cleared === undefined ? link.answerExec?.(String(extra["cmd"])) : undefined;
+          if (answered !== undefined) return answered;
           return { ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false };
         }
         case "pty.kill":

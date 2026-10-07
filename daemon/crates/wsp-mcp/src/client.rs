@@ -30,6 +30,7 @@ use wsp_seal::Seal;
 
 use crate::failure::Failure;
 use crate::record::{self, fill};
+use crate::release::{self, ReleaseHost};
 
 type Waiting = HashMap<u64, oneshot::Sender<Result<String, Failure>>>;
 
@@ -125,6 +126,19 @@ pub struct Paired {
     pub device_token: String,
 }
 
+/// What a host names of itself on the answer that lets a socket in: its release, and the road it comes back by.
+struct Released {
+    version: Option<String>,
+    road: Option<String>,
+}
+
+impl Released {
+    fn of(answer: &Value) -> Released {
+        let word = |key: &str| answer.get(key).and_then(Value::as_str).map(str::to_owned);
+        Released { version: word("version"), road: word("road") }
+    }
+}
+
 /// Why a dial ended, and whether it was the answer to the frame that carried the token or the admission: the one
 /// refusal a second dial can do anything about, since a host that never proved the pinned key refuses the same way
 /// however often it is asked.
@@ -142,6 +156,8 @@ pub struct Dial<'a> {
     pub window: Duration,
     pub pinned: Option<&'a str>,
     pub alias: Option<&'a str>,
+    /// The host a release refusal names, where this line holds the host to its own release.
+    pub release: Option<&'a ReleaseHost>,
 }
 
 /// The host's answer to seal.open: the key it proves, its nonce, its half of the agreement and its signature.
@@ -175,7 +191,7 @@ pub async fn dial(to: &Dial<'_>, presents: Presents<'_>) -> Result<(Client, Opti
             Presents::Token(token) => {
                 let mut params = Map::new();
                 params.insert("token".to_owned(), Value::from(token));
-                client.request::<Value>("auth", params).await.map(|_| None)
+                client.request::<Value>("auth", params).await.map(|answer| (None, Released::of(&answer)))
             }
             Presents::Admit(key) => {
                 // The key is proved over this socket's own handshake, so the signature stands for this dial alone.
@@ -186,11 +202,22 @@ pub async fn dial(to: &Dial<'_>, presents: Presents<'_>) -> Result<(Client, Opti
                 params.insert("publicKey".to_owned(), Value::from(key.public_key.as_str()));
                 params.insert("name".to_owned(), Value::from(key.name.as_str()));
                 params.insert("signature".to_owned(), Value::from(Base64Bytes::<64>::from_bytes(&signature).as_str()));
-                client.request::<Paired>("device.auth", params).await.map(Some)
+                client.request::<Value>("device.auth", params).await.and_then(|answer| {
+                    let released = Released::of(&answer);
+                    serde_json::from_value::<Paired>(answer).map(|paired| (Some(paired), released)).map_err(|e| Failure::new(e.to_string()))
+                })
             }
         };
         match answered {
-            Ok(paired) => Ok((client, paired)),
+            Ok((paired, released)) => {
+                // A host that names no release is one from before the answer carried it, and is not judged.
+                if let (Some(host), Some(theirs)) = (to.release, released.version.as_deref()) {
+                    if let Some(failure) = release::refusal(theirs, released.road.as_deref(), host) {
+                        return Err(Refused { failure, token: false });
+                    }
+                }
+                Ok((client, paired))
+            }
             Err(refused) => Err(Refused { failure: client.token_refused(refused, to.alias, admit, at).await, token: true }),
         }
     };

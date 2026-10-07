@@ -51,6 +51,19 @@ describe("serveRuntime auth", () => {
     expect(await closed).toBe(HOST_STOPPING_CLOSE);
   });
 
+  it("the answer that lets a socket in names the release the host was served with and the road it comes back by, and names none where it was given none", async () => {
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret", released: { version: "0.4.2", road: "service" } });
+    const c = await WsClient.connect(srv.port);
+    expect(await c.request("auth", { token: "secret" })).toMatchObject({ ok: true, version: "0.4.2", road: "service" });
+    expect(await c.request("auth", { token: "secret" })).toMatchObject({ ok: true, version: "0.4.2", road: "service" });
+    c.close();
+    await srv.close();
+    srv = await serveRuntime(rt(), { port: 0, authToken: "secret" });
+    const bare = await WsClient.connect(srv.port);
+    expect(await bare.request("auth", { token: "secret" })).not.toHaveProperty("version");
+    bare.close();
+  });
+
   it("closes 4401 when the first op is not auth", async () => {
     srv = await serveRuntime(rt(), { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port);

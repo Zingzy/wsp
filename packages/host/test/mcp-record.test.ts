@@ -19,7 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, agentName } from "@wsp/catalog";
 import { SEAL_REFUSAL } from "@wsp/keys";
-import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, placeRenameRefusal, placeSshOtherRefusal, usageRefusal, type RefusalHalves, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, problemListsOf, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, PROVIDER_KEY_WORDS, RecipeFile, type PendingComputer, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
+import { CLOUD_ENV, cloudFromEnv, compareVersions, placeSetRefusal, placeRenameRefusal, placeSshOtherRefusal, usageRefusal, type RefusalHalves, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, problemListsOf, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, PROVIDER_KEY_WORDS, RecipeFile, type PendingComputer, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { hostExitedLine, noHostAnsweredLine, startingHostLine, upArgs } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
@@ -30,8 +30,22 @@ import { addressNotPairedLine, aliasOk, deviceRefusedLine, dialWindowMs, hostsDi
 import { GUEST_SERVED } from "../src/guest-mcp.js";
 import { mcpServer, type Dialer } from "../src/mcp.js";
 import { recipeCases, TURN_ANSWERED, turnWords, type TurnCase } from "./mcp-record-turns.js";
-import { absolutePath, DEFAULTS_LABELS, defaultsValueLine, noDefaultsAnsweredLine, agentSetNothingLine, agentSetupNothingLine, defaultAgentLine, ENV_NAME_FIX, envNameLine, FROM_WORDS, newThreadsHeadLine, NOTHING_TO_SET_FIX, PICKER_WORDS, projectSetNothingLine, SETUP_WORDS, setupOnLine, startsOnLine, startsOnOwnLine, agentCopyWords, aimedBothLine, aimedUsage, c1Escaped, CLOSE_GRACE_MS, goneFromLine, hasTool, hostTokenMissingLine, isInAlsoLine, isInLine, noHostServingLine, noSkillHitsLine, notHeaderLine, otherVersion, PLACES_FIX, previewCutLine, projectOffComputerLine, projectScopeLine, projectUnnamedLine, SERVER_TOOL_COLUMNS, SKILL_HIT_COLUMNS, skillsShPlacelessLine, threadOf, toolLines, toolName, toolsAddedLine, toolsProjectBareLine, turnedInLine, turnedLine, UNAUTHORIZED_CLOSE, unsetVariableLine, VERBS, workspaceOf, type HostClient } from "../src/verbs.js";
+import { absolutePath, DEFAULTS_LABELS, defaultsValueLine, noDefaultsAnsweredLine, RELEASE_WORDS, releaseRefusal, agentSetNothingLine, agentSetupNothingLine, defaultAgentLine, ENV_NAME_FIX, envNameLine, FROM_WORDS, newThreadsHeadLine, NOTHING_TO_SET_FIX, PICKER_WORDS, projectSetNothingLine, SETUP_WORDS, setupOnLine, startsOnLine, startsOnOwnLine, agentCopyWords, aimedBothLine, aimedUsage, c1Escaped, CLOSE_GRACE_MS, goneFromLine, hasTool, hostTokenMissingLine, isInAlsoLine, isInLine, noHostServingLine, noSkillHitsLine, notHeaderLine, otherVersion, PLACES_FIX, previewCutLine, projectOffComputerLine, projectScopeLine, projectUnnamedLine, SERVER_TOOL_COLUMNS, SKILL_HIT_COLUMNS, skillsShPlacelessLine, threadOf, toolLines, toolName, toolsAddedLine, toolsProjectBareLine, turnedInLine, turnedLine, UNAUTHORIZED_CLOSE, unsetVariableLine, VERBS, workspaceOf, type HostClient } from "../src/verbs.js";
 import { VERSION } from "../src/version.js";
+import { releaseLineOf, roadOf } from "../src/daemon-fix.js";
+
+/** Pairs of releases whose order the binary's own reading is held to. */
+const RELEASE_ORDER_SAMPLES: readonly (readonly [string, string])[] = [
+  ["0.2.0", "0.1.9"], ["0.1.10", "0.1.9"], ["0.2", "0.2.0"], ["1.0.0-rc.2", "1.0.0-rc.10"], ["1.0.0", "1.0.0-rc.1"],
+  ["1.0.0-alpha", "1.0.0-beta"], ["1.0.0+build.5", "1.0.0"], ["1.0.0-rc", "1.0.0-rc.1"], ["0.0.1", "0.2.0"],
+];
+
+/** Where the binary sits on each road, which it reads its road off: an npm install, the app's bundle, a checkout. */
+const RELEASE_ROAD_SAMPLES = [
+  "/usr/local/lib/node_modules/@wsp-labs/wsp/daemon/aarch64-apple-darwin/wsp-daemon",
+  "/Applications/wsp.app/Contents/Resources/daemon/wsp-daemon",
+  "/Users/dev/wsp/packages/wspx/daemon/aarch64-apple-darwin/wsp-daemon",
+];
 import { ADD_TOOL_FIX, ADD_TOOL_MS, addToolRefusal } from "../src/setup-follow.js";
 import { WORKSPACE_ANSWERED, workspaceWords } from "./mcp-record-workspaces.js";
 import { SLATE_ANSWERED } from "./mcp-record-slates.js";
@@ -41,7 +55,7 @@ const CRATE = fileURLToPath(new URL("../../../daemon/crates/wsp-mcp/", import.me
 const RECORD = join(CRATE, "record");
 const ANSWERS = join(CRATE, "tests", "answers");
 /** The record's files beside the answers. */
-const RECORDED_FILES = ["refusals.json", "sealed.json"];
+const RECORDED_FILES = ["refusals.json", "sealed.json", "release.json"];
 
 /** Every file the record holds, by its path under the crate, with the text it must hold. */
 type Files = Map<string, string>;
@@ -205,6 +219,21 @@ async function words(): Promise<Record<string, unknown>> {
     herePlaceId: HERE_PLACE_ID,
     agentNames: Object.fromEntries(CATALOG.map(e => [e.id, agentName(e.id)])),
     otherVersion: otherVersion("{op}"),
+    // The binary fills these and picks its road's line off its own path, held to the node line's reading by roadSamples.
+    release: {
+      said: RELEASE_WORDS.said("{mine}", "{host}", "{theirs}"),
+      hostHere: RELEASE_WORDS.hostHere("{state}"),
+      hostAt: RELEASE_WORDS.hostAt("{where}"),
+      restart: RELEASE_WORDS.restart,
+      reopenApp: RELEASE_WORDS.reopenApp("{mine}"),
+      restartUp: RELEASE_WORDS.restartUp,
+      initFinish: RELEASE_WORDS.initFinish,
+      updateThere: RELEASE_WORDS.updateThere("{mine}"),
+      updateHere: RELEASE_WORDS.updateHere("{line}", "{theirs}"),
+      roads: Object.fromEntries((["npm", "app", "checkout"] as const).map(road => [road, releaseLineOf(road, "{version}")])),
+      roadSamples: Object.fromEntries(RELEASE_ROAD_SAMPLES.map(path => [path, roadOf({ argv: [process.execPath, path] })])),
+      orderSamples: RELEASE_ORDER_SAMPLES.map(([a, b]) => [a, b, Math.sign(compareVersions(a, b))]),
+    },
     noSuchPlace: noSuchPlaceRefusal("{word}", ["{held}"]),
     placesFix: PLACES_FIX,
     aimedUsage: aimedUsage("{tool}"),
@@ -725,6 +754,9 @@ async function regeneratedHere(): Promise<Files> {
   // A host that did not prove the pinned key, refused where the dial refuses it: the whole line the tool answers.
   const sealedUrl = "http://127.0.0.1:{port}";
   files.set("tests/sealed.json", fileText({ tool: "computers", url: sealedUrl, line: (await answeredLine("computers", {}, {}, { refused: authRefusal(pairKeyRefusal(sealedUrl)) })).line }));
+  // A host of another release on this computer, refused at its auth answer on the address a turn's launch left: the
+  // whole line, its fix the one the road it names takes.
+  files.set("tests/release.json", fileText({ tool: "computers", url: sealedUrl, theirs: "0.0.1", road: "service", line: (await answeredLine("computers", {}, {}, { refused: releaseRefusal(VERSION, "0.0.1", { where: sealedUrl, here: true }, "service") })).line }));
   // Each tool as it is listed with the cloud off and on, and null in the state that lists no such tool.
   const entry = (tools: Record<string, unknown>[], name: string): Record<string, unknown> | null => tools.find(t => t["name"] === name) ?? null;
   for (const name of new Set([...off.tools, ...on.tools].map(t => String(t["name"])))) files.set(`record/tools/${name}.json`, fileText({ cloudOff: entry(off.tools, name), cloudOn: entry(on.tools, name) }));

@@ -751,7 +751,7 @@ export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<s
       }
       if (client !== undefined && again === undefined) return client;
       const start = verb.startsNoHost === undefined ? deps.start : undefined;
-      client = await (deps.dial ?? dialHost)(statePath, { aim, say: line => io.error(line), ...(again !== undefined ? { deadlineMs: again.withinMs } : start !== undefined ? { start } : {}) });
+      client = await (deps.dial ?? dialHost)(statePath, { aim, say: line => io.error(line), ...(verb.anyRelease !== undefined ? { anyRelease: true } : {}), ...(again !== undefined ? { deadlineMs: again.withinMs } : start !== undefined ? { start } : {}) });
       return client;
     },
   };

@@ -1,7 +1,7 @@
 {
   "severalThreads": "{count} threads start with {ref}; give more of the id",
   "noThread": "no thread {ref}",
-  "otherVersion": "the host answered {op} in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up",
+  "otherVersion": "the host answered {op} in a shape this wsp does not read; it runs another version of wsp, restart it with wsp restart",
   "gone": "{name}'s machine is gone with its disk, so work that was not pushed is lost; rebuild it to {action}, which brings back its home folder from the last saved nap",
   "goneWith": "{name}'s machine is gone with its disk, so work that was not pushed is lost; rebuild it to {action}, which brings back its home folder from the last saved nap ({words})",
   "stopped": {

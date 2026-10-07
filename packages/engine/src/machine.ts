@@ -126,6 +126,9 @@ export interface Machine {
    * previewUrl, which on a backend with a public edge is the same road a client takes. The caller's bound is the
    * whole call's, as it is on exec and putBytes. */
   daemonAnswers?(opts?: { timeoutMs?: number }): Promise<boolean>;
+  /** How long one daemonAnswers ask may take before the reach reads slow rather than prompt: that road's own round
+   * trip, which the prompt for one HTTP GET does not fit. Absent, the HTTP prompt stands for it too. */
+  readonly daemonAnswersPromptMs?: number;
   /** Optional: answers once the machine takes commands, on a backend whose running reading does not promise that: it
    * asks again inside the backend's own restore budget and past it throws RestoreUnfinishedError; any other refusal is
    * thrown as itself at once, and `signal` ends the asking. */

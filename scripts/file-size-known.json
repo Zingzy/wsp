@@ -10,8 +10,8 @@
   "daemon/crates/wsp-runtime/src/ops.rs": 2980,
   "packages/catalog/src/mcp.ts": 1797,
   "packages/engine/src/golden-import.ts": 1582,
-  "packages/host/src/doctor.ts": 2023,
+  "packages/host/src/doctor.ts": 2008,
   "packages/host/src/init.ts": 1748,
-  "packages/runtime/src/serve.ts": 2289,
+  "packages/runtime/src/serve.ts": 2245,
   "packages/runtime/src/slates.ts": 1602
 }
