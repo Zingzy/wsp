@@ -8,7 +8,7 @@
 // the workspace has spoken.
 import { act, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { HarnessCatalog, WorkspaceView } from "@wsp/protocol";
+import { unmarked, type HarnessCatalog, type WorkspaceView } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
 import { catalogIn, catalogsIn, useStore } from "../src/protocol/store.js";
 import { effectivePicks } from "../src/components/chat/composerPicks.js";
@@ -41,6 +41,14 @@ describe("the access pick reads the workspace's own catalog and no other", () =>
     // Everything the table does answer without a machine still reads, so the rest of the row is unchanged.
     expect(catalogIn(store(), WS, "claude")?.models).toEqual(TABLE.models);
     expect(catalogIn(store(), WS, "claude")?.efforts).toEqual(TABLE.efforts);
+  });
+
+  it("keeps no access for a waiting workspace when the lists are read back as the agent listed them", () => {
+    const set: HarnessCatalog = { ...TABLE, unshaped: { models: TABLE.models, efforts: TABLE.efforts, permissionModes: TABLE.permissionModes } };
+    const lists = catalogIn({ harnesses: [set], harnessesByWorkspace: {} }, WS, "claude")!;
+    expect(lists.permissionModes).toEqual([]);
+    expect(unmarked(lists).permissionModes).toEqual([]);
+    expect(unmarked(lists).models).toEqual(TABLE.models);
   });
 
   it("reads what the workspace's own catalog marks", () => {

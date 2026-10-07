@@ -6,7 +6,7 @@
 // variable's value is typed once and never drawn again.
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, ENV_VALUE_REFUSAL, accessRefusal, applyPreferencesPatch, agentEnvRefusal, configDirSignInLine, modelIdRefusal, type AgentSetupSet, type AgentsTarget, type Preferences, type PlaceView, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, ENV_VALUE_REFUSAL, accessRefusal, applyPreferencesPatch, agentEnvRefusal, configDirSignInLine, markedFor, modelIdRefusal, resolveThreadDefaults, type AgentSetupSet, type HarnessCatalog, type AgentsTarget, type Preferences, type PlaceView, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { catalogEntry } from "@wsp/catalog";
 import { useNotices } from "../src/notices/store.js";
@@ -46,6 +46,18 @@ function agentsApi(over: Partial<Api> = {}, record: Preferences = RECORD) {
     record,
   );
   return { ...made, setups, reads, lists: () => lists };
+}
+
+/** Claude Code's model, effort and access set for every new thread, and the lists as the host hands them under that
+ * record: its marks moved onto those picks, its own lists beside them. */
+const SET: Preferences = { ...RECORD, agentDefaults: { claude: { ...HARNESS_DEFAULTS["claude"], model: "claude-fable-5-1", effort: "max", access: "ask" } } };
+const MARKED: HarnessCatalog[] = [markedFor(CLAUDE_CATALOG, resolveThreadDefaults({ firstAgent: "claude", named: "claude", catalogOf: () => CLAUDE_CATALOG, prefs: SET })), CODEX_CATALOG, HARNESSES[2]!];
+
+/** An api over SET whose record writes stand unanswered until `answer` runs, so a page can only draw what it holds. */
+function heldApi(over: Partial<Api> = {}) {
+  const held: Array<() => void> = [];
+  const made = agentsApi({ listHarnesses: async () => MARKED, setPreferences: async patch => new Promise(answer => held.push(() => answer(applyPreferencesPatch(SET, patch)))), ...over } as Partial<Api>, SET);
+  return { ...made, answer: async () => act(async () => held.forEach(go => go())) };
 }
 
 const mount = async (api: Api, at: SettingsAt): Promise<void> => {
@@ -255,6 +267,24 @@ describe("an agent's page", () => {
     expect(sets.at(-1)).toEqual({ agentDefaults: { claude: { model: null, effort: null } } });
   });
 
+  it("shows a reset of the model, its effort and the access at once, off the record and the agent's own lists, while the host's lists still carry the old marks", async () => {
+    useStore.setState({ harnesses: MARKED, preferences: SET });
+    const { api, answer } = heldApi();
+    await mount(api, atClaude);
+    const checked = (): string | undefined => control("agent-access").querySelector<HTMLElement>("[data-segment][data-checked]")?.dataset["segment"];
+    expect(control("agent-model").textContent).toBe("Fable 5.1");
+    expect(control("agent-effort").textContent).toBe("Max");
+    expect(checked()).toBe("ask");
+    fireEvent.click(rowOf("agent-model")!.querySelector("[data-k=row-reset]")!);
+    fireEvent.click(rowOf("agent-access")!.querySelector("[data-k=row-reset]")!);
+    await settle();
+    expect(useStore.getState().harnesses).toBe(MARKED);
+    expect(control("agent-model").textContent).toBe("Opus 5.5");
+    expect(control("agent-effort").textContent).toBe("High");
+    expect(checked()).toBe("full");
+    await answer();
+  });
+
   it("offers access as four words, holds the ones the agent takes none of with its own sentence, and writes a pick", async () => {
     const { api, sets } = agentsApi();
     await mount(api, atClaude);
@@ -359,7 +389,7 @@ describe("an agent's page", () => {
   it("draws a model shown or hidden where the agent's own order puts it, before the host answers", async () => {
     const [opus, sonnet, haiku] = CLAUDE_CATALOG.models.filter(m => ["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"].includes(m.value));
     const { legacyModels: _legacy, ...claude } = CLAUDE_CATALOG;
-    const shaped = { ...claude, models: [opus!, haiku!], hiddenModels: [sonnet!], unshaped: { models: [opus!, sonnet!, haiku!] } };
+    const shaped = { ...claude, models: [opus!, haiku!], hiddenModels: [sonnet!], unshaped: { models: [opus!, sonnet!, haiku!], efforts: claude.efforts, permissionModes: claude.permissionModes } };
     const record: Preferences = { ...RECORD, agentDefaults: { claude: { models: { hide: [sonnet!.value] } } } };
     const drawn = (): Array<[string, boolean]> => [...page().querySelectorAll<HTMLElement>("[data-settings-card='agent-models'] [data-model]")].map(r => [r.dataset["model"] ?? "", r.querySelector("[data-k=model-shown]")?.getAttribute("aria-checked") === "true"]);
     const press = async (id: string): Promise<void> => act(async () => void fireEvent.click(page().querySelector(`[data-settings-card='agent-models'] [data-model='${id}'] [data-k=model-shown]`)!));
@@ -569,6 +599,25 @@ describe("a project's new threads", () => {
     await settle();
     expect(sets).toEqual([{ projectDefaults: { pr_wsp: { agent: "codex" } } }]);
     expect(reads).toBe(2);
+  });
+
+  it("names what each unset row takes off the record the window holds, so a reset on the agent's page shows here before the host answers", async () => {
+    useStore.setState({ harnesses: MARKED, preferences: SET });
+    const { api, answer } = heldApi({ projectsDefaults: async () => resolved({ model: { value: "claude-fable-5-1", from: "default" }, effort: { value: "max", from: "default" }, access: { value: "ask", mode: "default", from: "default" } }) });
+    await mount(api, atWsp);
+    expect(control("project-model").textContent).toBe("Default (Fable 5.1)");
+    expect(control("project-access").textContent).toBe("Default (Ask, from Claude Code)");
+    act(() => useSettingsStore.getState().go({ kind: "agent", id: "claude" }));
+    await settle();
+    fireEvent.click(rowOf("agent-model")!.querySelector("[data-k=row-reset]")!);
+    fireEvent.click(rowOf("agent-access")!.querySelector("[data-k=row-reset]")!);
+    await settle();
+    act(() => useSettingsStore.getState().go(atWsp));
+    await settle();
+    expect(useStore.getState().harnesses).toBe(MARKED);
+    expect(control("project-model").textContent).toBe("Default (Opus 5.5)");
+    expect(control("project-access").textContent).toBe("Default (Full, from Claude Code)");
+    await answer();
   });
 
   it("draws a set row with its value, the set line and the arrow, which writes the field away", async () => {

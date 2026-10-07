@@ -19,7 +19,7 @@ import { placeNames, projectComputerWord } from "../sidebar/workspaceRows.js";
 import { PROJECT_WORDS } from "../sidebar/words.js";
 import { RefusalSlot } from "./sheetParts.js";
 import { AGENTS_PAGE_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "./format.js";
-import { AgentChoice, defaultAgentOf, modelLabel, newThreadPicks } from "./agents.js";
+import { AgentChoice, defaultAgentOf, modelLabel, newThreadDefaults } from "./agents.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { SELECT_WIDTH } from "./layout.js";
 import { hereName, isProviderPlace, placeName } from "./places.js";
@@ -181,12 +181,12 @@ function ProjectNewThreads({ project, ctx }: { project: ProjectView; ctx: Settin
   const agentId = resolved?.agent.value ?? own.agent ?? globalAgent?.harness;
   const catalog = ctx.harnesses.find(c => c.harness === agentId);
   if (globalAgent === undefined || catalog === undefined) return null;
-  const agentPicks = newThreadPicks(catalog);
+  const agentPicks = newThreadDefaults(catalog, ctx.preferences);
   // A word no agent, model or access is spelled as: the select's empty value reads as a placeholder.
   const UNSET = "@unset";
   const unsetAgent = PROJECTS_WORDS.inherits(globalAgent.label);
-  const unsetModel = agentPicks.model === undefined ? undefined : PROJECTS_WORDS.inherits(modelLabel(catalog, agentPicks.model));
-  const unsetAccess = agentPicks.access === undefined ? undefined : PROJECTS_WORDS.inherits(AGENTS_PAGE_WORDS.accessWords[agentPicks.access], catalog.label);
+  const unsetModel = agentPicks.model === undefined ? undefined : PROJECTS_WORDS.inherits(modelLabel(catalog, agentPicks.model.value));
+  const unsetAccess = agentPicks.access === undefined ? undefined : PROJECTS_WORDS.inherits(AGENTS_PAGE_WORDS.accessWords[agentPicks.access.value], catalog.label);
   const models = [...catalog.models, ...(catalog.legacyModels ?? [])];
   const accesses = ACCESS_CHOICES.filter(word => accessRefusal(catalog, word) === null);
   const modelSet = own.model !== undefined && resolved?.model?.from === "project";
