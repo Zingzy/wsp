@@ -357,7 +357,7 @@ Only a press reaches you: a `send("text", $path)` step on a button puts one mess
 - A turn is cut after 10 minutes with no output from the agent, and at 6 hours in all. A long silent step (a full install, a build) needs output flowing or it ends the turn.
 - The root disk is 20 GB; wsp keeps 2 GB free and skips tool installs that would go under it. <!-- cloud -->
 - One thread runs one agent process; a 4 GB machine runs one build or one agent at a time. Put a second builder on a second machine, not a second thread on the same one.
-- A turn runs on the model, effort and access named with `--model`, `--effort` and `--access` (the tool inputs of the same names), else the project's (`wsp projects set`), else the ones set for that agent (`wsp agents set`), else the agent's catalog defaults. `--access` takes wsp's four words, ask, auto-edit, full and plan, and refuses an agent's own spelling. Choose the role by the brief and the picks, and keep review threads short and cheap.
+- A new thread runs on the model, effort and access named with `--model`, `--effort` and `--access` (the tool inputs of the same names), else the project's (`wsp projects set`), else the ones set for that agent (`wsp agents set`), else the agent's catalog defaults. A send into a thread runs on the model and effort it names, else the ones the thread's latest turns ran on. `--access` takes wsp's four words, ask, auto-edit, full and plan, and refuses an agent's own spelling. Choose the role by the brief and the picks, and keep review threads short and cheap.
 
 ## Tools the catalog does not carry
 

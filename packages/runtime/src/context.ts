@@ -80,7 +80,7 @@ import type { CopyBuild, GoneSeenBy, WorktreeSettled } from "@wsp/protocol";
 import type { agentsReads } from "./agents-read.js";
 import type { DaemonChannel, DaemonChannelOptions } from "./daemon-channel.js";
 import type { MachineExecOptions, TurnWaiting } from "./machine-exec.js";
-import type { AccessChoice, ProjectOverrides, ResolvedFolder } from "@wsp/protocol";
+import type { AccessChoice, ProjectOverrides, RanPicks, ResolvedFolder } from "@wsp/protocol";
 import type { Clock } from "./clock.js";
 import type { StatusApi } from "./status.js";
 import type { DeviceDoor, ScopedRoad } from "./devices.js";
@@ -135,6 +135,7 @@ import type {
   LiveSession,
   Reopened,
   SessionEntry,
+  SESSION_FACTS,
 } from "./types/internal.js";
 import type { EventBus } from "./types/events.js";
 import type { HarnessAdapterFactory } from "./types/harness.js";
@@ -290,7 +291,7 @@ export interface TranscriptsArea {
   readonly persistSessions: (workspaceId: string) => Promise<void>;
   readonly record: (unstamped: SessionEvent) => void;
   readonly accrued: Map<string, number>;
-  readonly ownPicks: (workspaceId: string, threadId: string) => { model?: string; effort?: string; contextWindow?: string };
+  readonly ranOn: (workspaceId: string, threadId: string, session: string | undefined) => RanPicks;
   readonly boxOf: (threadId: string) => LiveWorkspace | undefined;
 }
 
@@ -301,7 +302,7 @@ export interface SlatesArea {
 export interface ChannelsArea {
   readonly startedAs: (workspaceId: string, threadId: string) => string | undefined;
   readonly cutBefore: (workspaceId: string, threadId: string) => boolean;
-  readonly resumedFact: (workspaceId: string, resume: string, fact: "cwd" | "permissionMode" | "model") => string | undefined;
+  readonly resumedFact: (workspaceId: string, resume: string, fact: (typeof SESSION_FACTS)[number]) => string | undefined;
   readonly folderOf: (workspaceId: string, resume: string) => string | undefined;
   readonly accessOf: (workspaceId: string, threadId: string, resume: string | undefined) => string | undefined;
   readonly daemonNotes: Map<string, string>;

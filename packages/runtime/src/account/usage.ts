@@ -122,7 +122,10 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
       return (await placeDoor.exec(place.id, script, { timeoutMs: RESET_EXEC_MS })).stdout;
     }
     if (local === undefined) throw new Error(absentComputer(place.name, null).sentence);
-    const stream = local.execStream({ idleMs: RESET_EXEC_MS, deadlineMs: RESET_EXEC_MS })(script, { env: { ...local.env() } });
+    // The PATH and the home alone, as the road below reads them: the script exports what else it needs, and the
+    // variables that keep a thread's shells on its own wsp belong to threads.
+    const { PATH, HOME } = local.env();
+    const stream = local.execStream({ idleMs: RESET_EXEC_MS, deadlineMs: RESET_EXEC_MS })(script, { env: { ...(PATH !== undefined ? { PATH } : {}), ...(HOME !== undefined ? { HOME } : {}) } });
     const lines: string[] = [];
     for await (const line of stream.lines) lines.push(line);
     await stream.exited;

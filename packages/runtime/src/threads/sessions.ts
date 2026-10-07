@@ -9,7 +9,7 @@ import {
   MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, SCOPED_MCP_ARG, roadOf, scopeOf,
   RUN_PERSONS_LINE, runOutputTail, type SessionRunEvent, NO_SLATE_MCP_ARG, ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE,
   asideUnsupportedLine, isLocalWorkspace, mcpServersBlocked, actionRefusal, homeShortened, EMPTY_TITLE_LINE,
-  threadRunsOnLine, listedPick, everyModel, effortsFor, modelOf, notFoundRefusal, NOTIFY_ME, noCwdLine,
+  threadRunsOnLine, keptPicks, listedPick, notFoundRefusal, NOTIFY_ME, noCwdLine,
   THREAD_WORKING_LINE, threadOnMachineLine, WORKTREE_BUSY_LINE, copiesFolder, sendRefusal, startPicks, titleLine,
   TURN_TOKEN_ENV, turnImagesDir, workspaceState, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE,
   REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine,
@@ -80,10 +80,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
       // A start that names no agent runs the project's, else the person's default, else the catalog's first, so the
       // command line, the composer and a tool all open the next thread on the same agent.
       const overrides = prefs.projectDefaults[entry.record.project];
-      // A send, a notify or a press that names no model, effort or window runs on the thread's own last picks: a
-      // resume that names none runs on the CLI's default rather than the thread's.
-      const own = !opens && opened.model === undefined && opened.effort === undefined && opened.contextWindow === undefined ? ctx.ownPicks(workspaceId, threadId) : {};
-      const o = { ...opened, ...(own.contextWindow !== undefined ? { contextWindow: own.contextWindow } : {}), harness: carried?.harness ?? opened.harness ?? ctx.defaultAgentOf(prefs, entry) };
+      const o = { ...opened, harness: carried?.harness ?? opened.harness ?? ctx.defaultAgentOf(prefs, entry) };
       if (carried !== undefined) {
         delete o.permissionMode;
         delete o.access;
@@ -271,15 +268,18 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
         const catalog = resolved?.catalog;
         const named = o.permissionMode ?? (o.access === undefined ? undefined : ctx.namedMode(catalog, harness, o.access));
         // The thread's own access, read against the list in front of us: a mode this harness does not take is a pick
-        // that does not apply here, not a send to refuse. An access this send NAMED is still refused, by startPicks.
-        const picksFor = (session: string | undefined): StartPicks => {
+        // that does not apply here, not a send to refuse. An access this send NAMED is still refused, by startPicks. The
+        // model, effort and window it leaves out are the thread's own the same way; only a thread with none opens on
+        // the defaults.
+        const picksFor = (session: string | undefined): StartPicks & { contextWindow?: string } => {
           const access = named ?? (catalog === undefined ? undefined : listedPick(catalog.permissionModes, ctx.accessOf(workspaceId, threadId, session)));
-          const open = session === undefined ? (resolved?.open ?? {}) : {};
-          // The thread's own picks, like its access, only where the lists in front of us still carry them.
-          const model = o.model ?? (catalog === undefined || catalog.models.length === 0 ? own.model : listedPick(everyModel(catalog), own.model)) ?? open.model;
-          const ownEffort = catalog === undefined || catalog.efforts.length === 0 ? own.effort : listedPick(effortsFor(catalog, modelOf(catalog, model)), own.effort);
-          const effort = o.effort ?? ownEffort ?? open.effort;
-          return startPicks(catalog, { ...o, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: access }, session === undefined, session === undefined ? undefined : ctx.resumedFact(workspaceId, session, "model"));
+          const ran = ctx.ranOn(workspaceId, threadId, session);
+          const kept = keptPicks(catalog, ran, { ...(o.model !== undefined ? { model: o.model } : {}), ...(o.effort !== undefined ? { effort: o.effort } : {}), ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}) });
+          const open = session === undefined && ran.model === undefined && ran.effort === undefined ? (resolved?.open ?? {}) : {};
+          const model = kept.model ?? open.model;
+          const effort = kept.effort ?? open.effort;
+          const picks = startPicks(catalog, { ...o, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: access }, session === undefined, session === undefined ? undefined : ctx.resumedFact(workspaceId, session, "model"));
+          return { ...picks, ...(kept.contextWindow !== undefined ? { contextWindow: kept.contextWindow } : {}) };
         };
         // A pick the lists do not carry is refused here, before this send waits on anything; the picks themselves
         // are decided below the loop, against the session this send turns out to resume.
@@ -373,16 +373,13 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           ctx.moduleOf(entry.record.kind).keepsAgents && cutAt === undefined
             ? {
                 fixed: JSON.stringify({ harness, cwd, mcpServers: o.mcpServers, version: catalog?.version, setup: ctx.setupPlace(entry) === undefined ? undefined : setups.launchOf(ctx.setupPlace(entry)!, harness) }),
-                // A pick filled in from the thread's own last turn is the one its kept process already runs at, so only
-                // what this send named is held against the process; the fill stands for a cold launch.
-                picks: Object.fromEntries(
-                  Object.entries({ ...picks, ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}) }).filter(
-                    ([pick]) => !(resume !== undefined && ((pick === "model" && opened.model === undefined) || (pick === "effort" && opened.effort === undefined) || (pick === "contextWindow" && own.contextWindow !== undefined))),
-                  ),
-                ),
+                picks: { ...picks },
               }
             : undefined;
-        const kept = ctx.takeKept(threadId, launchKey, resume);
+        // Matched on what this send named and the thread's access alone: a pick it left out is the thread's own, which
+        // is the kept process's, even where the agent announced its model in other words than it was launched with.
+        const asked = { ...(o.model !== undefined ? { model: picks.model } : {}), ...(o.effort !== undefined ? { effort: picks.effort } : {}), ...(o.contextWindow !== undefined ? { contextWindow: picks.contextWindow } : {}), ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}), ...(picks.fast === true ? { fast: true } : {}) };
+        const kept = ctx.takeKept(threadId, launchKey === undefined ? undefined : { fixed: launchKey.fixed, picks: asked }, resume);
         // The kept process carries the token and the device its first turn was launched with; this send's go unused.
         if (kept !== undefined) dropScope();
         const promptAfter = promptsLate && snapshot?.from instanceof Promise ? snapshot.from.then(() => {}) : undefined;
@@ -418,7 +415,6 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
               ...(cutAt !== undefined ? { resumeAt: cutAt } : {}),
               ...(cwd !== undefined ? { cwd } : {}),
               ...picks,
-              ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
               ...(title !== undefined ? { title } : {}),
               ...(images.length > 0 ? { images } : {}),
               ...(mcpServers !== undefined ? { mcpServers } : {}),

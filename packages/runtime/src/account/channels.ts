@@ -6,7 +6,7 @@ import { groupExists } from "../local-exec.js";
 import type { DaemonChannel } from "../daemon-channel.js";
 import type { MachineExecOptions } from "../machine-exec.js";
 import type { WorkspaceRecord, LiveWorkspace } from "../types/wiring.js";
-import { DaemonRefusal, type ChildStart } from "../types/internal.js";
+import { DaemonRefusal, type ChildStart, type SESSION_FACTS } from "../types/internal.js";
 import type { RuntimeContext, ChannelsArea } from "../context.js";
 
 export function channelsArea(ctx: RuntimeContext): ChannelsArea {
@@ -24,7 +24,7 @@ export function channelsArea(ctx: RuntimeContext): ChannelsArea {
    * workspace and drops the oldest finished ones while the transcript keeps the thread, so the events are where a
    * long-lived thread's own facts survive. Nothing from before a fact was recorded, and the start then fills what
    * its catalog marks. */
-  const resumedFact = (workspaceId: string, resume: string, fact: "cwd" | "permissionMode" | "model"): string | undefined => {
+  const resumedFact = (workspaceId: string, resume: string, fact: (typeof SESSION_FACTS)[number]): string | undefined => {
     const rows = [...sessions.values()];
     for (let i = rows.length - 1; i >= 0; i--) {
       const view = rows[i]!.view;

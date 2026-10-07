@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Reading one harness's catalog: its marked defaults, the efforts a model takes,
-// every model a start may name. The start, the composer and the defaults a new
-// thread resolves to all read these, so they sit apart from the wire shapes.
-import type { HarnessCatalog, HarnessModel, HarnessOption } from "./index.js";
+// every model a start may name, and the picks a thread's own rows carry. The
+// start, the composer and the defaults a new thread resolves to all read these,
+// so they sit apart from the wire shapes.
+import type { HarnessCatalog, HarnessModel, HarnessOption, SessionView } from "./index.js";
 
 /** The option a list marks as its default, if one is: what an unpicked picker shows and an unnamed start runs. */
 export function markedDefault<T extends HarnessOption>(options: ReadonlyArray<T>): T | undefined {
@@ -51,4 +52,61 @@ export function contextWindowsFor(catalog: HarnessCatalog, model: HarnessModel |
  */
 export function listedPick(options: ReadonlyArray<HarnessOption>, value: string | undefined): string | undefined {
   return value !== undefined && options.some(o => o.value === value) ? value : undefined;
+}
+
+/** The picks a thread's turns ran with, as its rows carry them. */
+export type RanPicks = Partial<Record<"model" | "effort" | "contextWindow" | "permissionMode", string>>;
+
+const ONE_M = /\[1m\]$/;
+
+/** The model a start or a row names, with the window it runs at: the CLI announces the model with its own 1M suffix,
+ * and a row that names a window of its own says it outright. The two are read together wherever either is read,
+ * since on claude's wire the window rides inside the model string. */
+export function modelPicks(model: string, contextWindow?: string): RanPicks {
+  const window = contextWindow ?? (ONE_M.test(model) ? "1m" : undefined);
+  return { model: model.replace(ONE_M, ""), ...(window !== undefined ? { contextWindow: window } : {}) };
+}
+
+/** How each pick is read off one turn's row, one entry per pick, so a pick the thread keeps for itself is an entry
+ * here rather than a rule of its own; the model and the window it ran at come from the same row, never two. */
+const ROW_READERS: ReadonlyArray<(row: SessionView) => RanPicks | null> = [
+  row => (row.model === undefined ? null : modelPicks(row.model, row.contextWindow)),
+  row => (row.effort === undefined ? null : { effort: row.effort }),
+  row => (row.permissionMode === undefined ? null : { permissionMode: row.permissionMode }),
+];
+
+/** What a thread has already run with, from the rows of its turns oldest first: for each pick, the last turn that
+ * named one. */
+export function recordedPicks(rows: ReadonlyArray<SessionView>): RanPicks {
+  const picks: RanPicks = {};
+  for (const read of ROW_READERS) {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const named = read(rows[i]!);
+      if (named !== null) {
+        Object.assign(picks, named);
+        break;
+      }
+    }
+  }
+  return picks;
+}
+
+/** The model, effort and window a start into a thread that has run goes with: each one the start names, else the
+ * thread's own where the list in front of us carries it for the model the start resolves to. A resume that names
+ * none runs on the agent's own default and not the thread's (claude went to its settings' model and window,
+ * 2026-10-04), and a value the binary has since dropped is left out rather than refused. */
+export function keptPicks(catalog: HarnessCatalog | undefined, ran: RanPicks, named: Omit<RanPicks, "permissionMode">): Omit<RanPicks, "permissionMode"> {
+  const picked = (model: string | undefined, effort: string | undefined, contextWindow: string | undefined): Omit<RanPicks, "permissionMode"> => ({
+    ...(model !== undefined ? { model } : {}),
+    ...(effort !== undefined ? { effort } : {}),
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+  });
+  if (catalog === undefined) return picked(named.model ?? ran.model, named.effort ?? ran.effort, named.contextWindow ?? ran.contextWindow);
+  // The thread's model only where it takes the effort and the window the start names beside it, which win over it.
+  const takes = (model: HarnessModel | null): boolean =>
+    (named.effort === undefined || catalog.efforts.length === 0 || listedPick(effortsFor(catalog, model), named.effort) !== undefined) &&
+    (named.contextWindow === undefined || listedPick(contextWindowsFor(catalog, model), named.contextWindow) !== undefined);
+  const own = modelOf(catalog, listedPick(everyModel(catalog), ran.model));
+  const chosen = named.model !== undefined ? modelOf(catalog, named.model) : own !== null && takes(own) ? own : null;
+  return picked(chosen?.value, named.effort ?? listedPick(effortsFor(catalog, chosen), ran.effort), named.contextWindow ?? listedPick(contextWindowsFor(catalog, chosen), ran.contextWindow));
 }

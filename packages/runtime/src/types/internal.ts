@@ -169,7 +169,7 @@ export interface TranscriptIndex {
   starts: Map<string, string>;
   /** Whether each thread's newest end came with no exit code and no result. */
   cut: Map<string, boolean>;
-  /** The folder, access and model each session's newest start that named one named. */
+  /** The folder, access, model and effort each session's newest start that named one named. */
   facts: Map<string, SessionFacts>;
   /** The turn each start the transcript holds by its request id opened or joined: a start sent again under that id
    * after the host stopped under it is answered with this turn, never a second one. */
@@ -196,7 +196,7 @@ export interface Taken {
 export const transcriptUnreadLine = (workspaceId: string, why: string): string => `the transcript of ${workspaceId} does not read (${why})`;
 
 /** What a resumed session's turns carry, read off its newest start that named each. */
-export const SESSION_FACTS = ["cwd", "permissionMode", "model"] as const;
+export const SESSION_FACTS = ["cwd", "permissionMode", "model", "effort"] as const;
 export type SessionFacts = Partial<Record<(typeof SESSION_FACTS)[number], string>>;
 
 export const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map(), taken: new Map(), children: new Map(), pos: 0 });

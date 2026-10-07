@@ -652,7 +652,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     const fallback = markedDefault(options)!.value;
     const effort = VERBS.filter(hasTool).find(v => v.name === "run")!.tool.input.effort!.description!;
     expect(/\(([^)]*)\)/.exec(effort)![1]!.split(", ")).toEqual(words);
-    expect(effort).toContain(`absent means the agent's default, ${fallback} for ${claude.harness}`);
+    expect(effort).toContain(`absent on a new thread means the agent's default, ${fallback} for ${claude.harness}`);
     expect(wspSkill()).toContain(words.map(w => `\`${w}\``).join(", "));
     expect(wspSkill()).toContain(`(\`${fallback}\` for ${claude.harness})`);
   });
