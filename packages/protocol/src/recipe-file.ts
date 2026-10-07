@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { plural } from "./format.js";
 import { ProjectHue, ProjectIcon } from "./project-look.js";
+import { MCP_SERVER_NAME } from "./wsp-tools.js";
 
 /** How an agent or the GitHub row signs in on the computer: the token this computer's vault holds, set in the
  * environment of every run there, or the tool's own login run on that computer through the sign-in relay. */
@@ -71,6 +72,21 @@ export const RecipeFile = z
   .strict();
 export type RecipeFile = z.infer<typeof RecipeFile>;
 
+/** wsp's own pieces, which every add puts on a computer itself and so are never a row to pick: its MCP server, which
+ * every thread's launch there carries, and its command line, which the add installs. */
+export const wspOwnServer = (name: string): boolean => name === MCP_SERVER_NAME;
+
+/** The command wsp's own package installs, which is how a computer's global packages name wsp's whatever it is called. */
+export const WSP_COMMAND = "wsp";
+
+/** A recipe less wsp's own pieces, which a recipe saved before they were left out can still hold: its server, and
+ * the CLIs named in `wspPackages`, the packages that install the `wsp` command where the recipe is read. */
+export function withoutWspOwn(file: RecipeFile, wspPackages: ReadonlySet<string>): RecipeFile {
+  const mcp = Object.fromEntries(Object.entries(file.mcp).filter(([name]) => !wspOwnServer(name)));
+  const clis = Object.fromEntries(Object.entries(file.clis).filter(([name]) => !wspPackages.has(name)));
+  return Object.keys(mcp).length === Object.keys(file.mcp).length && Object.keys(clis).length === Object.keys(file.clis).length ? file : { ...file, mcp, clis };
+}
+
 /** The kinds of row a recipe holds, in the order a person reads them. */
 export const RECIPE_KINDS = ["agents", "mcp", "clis", "skills", "plugins", "folders", "configs"] as const;
 export type RecipeKind = (typeof RECIPE_KINDS)[number];
@@ -134,9 +150,9 @@ export function recipeCanon(resolved: ResolvedRecipe): string {
   return JSON.stringify(sorted(resolved));
 }
 
-/** One recipe as the list and the show answer it: its file, its slug, the line of what it holds and the computers
- * that follow it, by name. */
-export const RecipeView = z.object({ name: NAME, slug: NAME, summary: NAME, machines: NAMES, file: RecipeFile });
+/** One recipe as the list and the show answer it: its file, its slug, the line of what it holds, the computers that
+ * follow it, by name, and when its file was last written, ISO. */
+export const RecipeView = z.object({ name: NAME, slug: NAME, summary: NAME, machines: NAMES, savedAt: z.string().optional(), file: RecipeFile });
 export type RecipeView = z.infer<typeof RecipeView>;
 
 /** What a recipe can pick from on this computer: every row a computer of the person's can take, Mac-only things

@@ -538,10 +538,10 @@ export const followLine = (computer: Pick<PlaceView, "name" | "recipe" | "sync">
     ? `${computer.name} follows no recipe; it keeps what it has`
     : `${computer.name} follows ${computer.recipe}; a change to it reaches ${computer.name} on its own`;
 
-/** wsp recipes: one row per recipe, what it holds and the computers that follow it. */
+/** wsp recipes: one row per recipe, what it holds, the day it was saved and the computers that follow it. */
 export function recipeLines(recipes: readonly RecipeView[]): string[] {
   if (recipes.length === 0) return ["No recipe is saved yet. The app's Add a computer saves one, and wsp recipes save <name> --from <computer> saves what a computer was set up with."];
-  return table([["RECIPE", "HOLDS", "COMPUTERS"], ...recipes.map(r => [r.name, r.summary, r.machines.join(", ")])]);
+  return table([["RECIPE", "HOLDS", "SAVED", "COMPUTERS"], ...recipes.map(r => [r.name, r.summary, r.savedAt?.slice(0, 10) ?? "", r.machines.join(", ")])]);
 }
 
 /** One row of a recipe as wsp recipes show prints it: the row's name, then what it says beyond its name. */

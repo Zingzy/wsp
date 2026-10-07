@@ -8,9 +8,10 @@ import { execFile } from "node:child_process";
 import { posix } from "node:path";
 import { BASE_FLOOR, CATALOG_AGENTS, COMPILER_ROW, catalogEntry, catalogIdOfRow, catalogToolFor, hasLogin, keyEnvOf, mintsToken } from "@wsp/catalog";
 import { collect, detectSkills, expand, readHistories, skillRoots, type HistoryCache, type Host, type Manifest, type Usage } from "@wsp/collect";
-import { agentOfRow, ghStatusOf, githubAddress, MCP_ID_PREFIX, packageOf, type RecipeOptions, type RecipeSignIn, type ServerSignIn, type SkillRow } from "@wsp/protocol";
+import { agentOfRow, ghStatusOf, githubAddress, MCP_ID_PREFIX, packageOf, wspOwnServer, type RecipeOptions, type RecipeSignIn, type ServerSignIn, type SkillRow } from "@wsp/protocol";
 import { agentBytes, cliBytes, folderBytes } from "./pick-sizes.js";
 import { CONFIG_PATHS } from "./recipe-configs.js";
+import { wspPackages } from "./wsp-own.js";
 
 /** The rows the base packages put on every box, which a person never picks. */
 const FLOOR_IDS: ReadonlySet<string> = new Set(BASE_FLOOR.map(e => e.id));
@@ -70,9 +71,18 @@ export function commandCalls(histories: readonly { usage: Pick<Usage, "commands"
   return { byTool, byName };
 }
 
-/** The options off what was read: the manifest, the person's own skills, the plugins, which config rows this
- * computer has files for, and how often the agents ran each CLI. */
-export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow[]; plugins: readonly string[]; configs: readonly ("git" | "shell")[]; github: boolean; gh?: { account?: string; scopes?: string[] }; calls?: CommandCalls }): RecipeOptions {
+/** The skills an agent's install seeded, by the folder it seeded them in, `~/`-relative as a skill's path reads. */
+export interface Bundled {
+  dir: string;
+  names: ReadonlySet<string>;
+}
+
+const under = (path: string, dir: string): boolean => path.startsWith(`${dir}/`);
+
+/** The options off what was read: the manifest less wsp's own packages, the person's own skills less the ones an
+ * agent's install seeded, the plugins, which config rows this computer has files for, and how often the agents ran
+ * each CLI. */
+export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow[]; bundled?: readonly Bundled[]; wsp?: ReadonlySet<string>; plugins: readonly string[]; configs: readonly ("git" | "shell")[]; github: boolean; gh?: { account?: string; scopes?: string[] }; calls?: CommandCalls }): RecipeOptions {
   const agents = manifest.entries.flatMap(e => {
     const id = agentOfRow(e);
     const entry = id === undefined ? undefined : CATALOG_AGENTS.find(a => a.id === id);
@@ -82,7 +92,7 @@ export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow
   });
   const servers = new Map<string, { agents: Set<string>; kind?: ServerSignIn }>();
   for (const e of manifest.entries) {
-    if (!e.id.startsWith(MCP_ID_PREFIX) || e.reason !== undefined) continue;
+    if (!e.id.startsWith(MCP_ID_PREFIX) || e.reason !== undefined || wspOwnServer(e.label)) continue;
     const agent = e.id.slice(MCP_ID_PREFIX.length).split("/")[0];
     if (agent === undefined || !CATALOG_AGENTS.some(a => a.id === agent)) continue;
     const held = servers.get(e.label) ?? servers.set(e.label, { agents: new Set() }).get(e.label)!;
@@ -92,6 +102,7 @@ export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow
   const clis = manifest.entries.flatMap(e => {
     const manager = e.id.split("/")[1];
     if (e.rung !== "tools" || manager === undefined || manager === "brew-tap" || e.linux === "no" || e.id.split("/").length < 3) return [];
+    if (o.wsp?.has(packageOf(e)) === true) return [];
     const catalogId = catalogIdOfRow({ id: e.id });
     if (catalogId !== undefined && FLOOR_IDS.has(catalogId)) return [];
     const needs = needsOf(e.id, manager);
@@ -100,7 +111,7 @@ export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow
     return [{ name: packageOf(e), via: manager, ...(e.version !== undefined ? { version: e.version } : {}), ...(needs !== undefined ? { needs } : {}), ...(bytes !== undefined ? { bytes } : {}), ...(calls > 0 ? { calls } : {}) }];
   });
   const skills = o.skills.flatMap(s => {
-    const at = s.paths[0];
+    const at = s.paths.find(p => !(o.bundled ?? []).some(b => b.names.has(s.name) && under(p.path, b.dir)));
     if (s.scope !== "user" || at === undefined) return [];
     return [{ name: s.name, from: posix.dirname(at.path), linked: at.linkTo !== undefined }];
   });
@@ -161,16 +172,28 @@ export async function githubHere(exec: Pick<Host["exec"], "run">): Promise<{ acc
   return said === undefined ? {} : ghStatusOf(said);
 }
 
+/** The skills each agent's install seeded here, off the file it names them in; nothing for an agent whose file is not
+ * here. */
+export async function bundledSkills(host: Pick<Host, "home" | "fs">): Promise<Bundled[]> {
+  const seeding = CATALOG_AGENTS.flatMap(a => (a.bundledSkills === undefined ? [] : [a.bundledSkills]));
+  const texts = await Promise.all(seeding.map(b => host.fs.readText(expand(host, b.manifest))));
+  return seeding.flatMap((b, i) => {
+    const text = texts[i];
+    return text === undefined ? [] : [{ dir: posix.dirname(b.manifest), names: new Set(b.names(text)) }];
+  });
+}
+
 /** Reads this computer for the options: the collector's manifest, the person's own skills folders, Claude Code's
  * plugin index, whether any file of each config row is here, and the commands the agents' histories ran, read
  * through the cache the recipe scan keeps so only the session files that changed are opened. */
 export async function readRecipeOptions(host: Host, cache?: HistoryCache): Promise<RecipeOptions> {
   const [histories, manifest] = await Promise.all([readHistories(host, CATALOG_AGENTS, cache === undefined ? {} : { cache }), collect(host)]);
-  const read = await detectSkills(host, await skillRoots(host));
+  const [read, bundled] = await Promise.all([skillRoots(host).then(roots => detectSkills(host, roots)), bundledSkills(host)]);
   const indexes = await Promise.all(CATALOG_AGENTS.flatMap(a => (a.pluginSkills === undefined ? [] : [host.fs.readText(expand(host, a.pluginSkills.index))])));
   const plugins = [...new Set(indexes.flatMap(userPlugins))].sort();
   const has = async (paths: readonly string[]): Promise<boolean> => (await Promise.all(paths.map(p => host.fs.stat(expand(host, `~/${p}`))))).some(s => s !== undefined);
   const configs = [...((await has(CONFIG_PATHS.git)) ? (["git"] as const) : []), ...((await has(CONFIG_PATHS.shell)) ? (["shell"] as const) : [])];
   const github = manifest.entries.some(e => e.id === "logins/gh");
-  return recipeOptions(manifest, { skills: read.skills, plugins, configs, github, calls: commandCalls(histories), ...(github ? { gh: await githubHere(host.exec) } : {}) });
+  const wsp = await wspPackages(host, manifest.entries.flatMap(e => (e.rung === "tools" && e.id.split("/").length >= 3 ? [{ name: packageOf(e), via: e.id.split("/")[1] ?? "" }] : [])));
+  return recipeOptions(manifest, { skills: read.skills, bundled, wsp, plugins, configs, github, calls: commandCalls(histories), ...(github ? { gh: await githubHere(host.exec) } : {}) });
 }

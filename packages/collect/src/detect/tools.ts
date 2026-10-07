@@ -3,7 +3,7 @@ import { MAC_BREW, catalogToolFor, readsRowRoad } from "@wsp/catalog";
 import { toolRowId } from "@wsp/protocol";
 import { linuxSupport } from "../brew-bottles.js";
 import { aptPackages } from "./apt.js";
-import type { Host } from "../host.js";
+import { expand, type Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
 import { exists, firstLine, found, entry, item, present } from "./common.js";
 
@@ -28,6 +28,8 @@ export function parseBrewfile(text: string): BrewLine[] {
 export interface Pkg {
   name: string;
   version?: string;
+  /** The folder the package sits in, where the manager's listing names one. */
+  path?: string;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -93,7 +95,8 @@ export function parsePnpmGlobals(text: string): Pkg[] {
     if (!isRecord(dir) || !isRecord(dir["dependencies"])) continue;
     for (const [name, info] of Object.entries(dir["dependencies"])) {
       const version = isRecord(info) && typeof info["version"] === "string" ? info["version"] : undefined;
-      out.push(version === undefined ? { name } : { name, version });
+      const path = isRecord(info) && typeof info["path"] === "string" ? info["path"] : undefined;
+      out.push({ name, ...(version === undefined ? {} : { version }), ...(path === undefined ? {} : { path }) });
     }
   }
   return out;
@@ -141,6 +144,7 @@ type GlobalManager = {
   sep?: string;
 } & Listing;
 
+/** How npm and pnpm both list their globals. */
 const NPM_LS = ["ls", "-g", "--depth=0", "--json"];
 /** Where another node once kept its globals; a laptop that moved to a new node still runs them from PATH. */
 const NPM_PREFIXES = [MAC_BREW, "/usr/local"];
@@ -160,9 +164,38 @@ async function npmGlobals(host: Host): Promise<Pkg[]> {
   return [...out.values()];
 }
 
+/** Where bun keeps its global packages. */
+const BUN_GLOBALS = "~/.bun/install/global/node_modules";
+
+/** The folders a global package of npm, pnpm or bun may sit in on this computer, by its name: one level under npm's and
+ * bun's global folders, and wherever pnpm's own listing says, since pnpm 11 keeps each global in a hashed folder of its
+ * own under `pnpm root -g` and pnpm 10 names a linked folder where it really is. */
+export async function jsGlobalFolders(host: Host): Promise<(name: string) => string[]> {
+  const [npm, pnpm] = await Promise.all([host.exec.run("npm", ["root", "-g"]), host.exec.run("pnpm", NPM_LS)]);
+  const roots = [...new Set([firstLine(npm), ...NPM_PREFIXES.map(p => `${p}/lib/node_modules`), expand(host, BUN_GLOBALS)].filter((r): r is string => r !== undefined))];
+  const listed = new Map<string, string[]>();
+  for (const p of parsePnpmGlobals(pnpm ?? "")) if (p.path !== undefined) listed.set(p.name, [...(listed.get(p.name) ?? []), p.path]);
+  return name => [...roots.map(root => `${root}/${name}`), ...(listed.get(name) ?? [])];
+}
+
+/** The commands a global package puts on PATH, off its package.json in any of its folders: each key of an object
+ * `bin`, or for a single one the name past its scope, as npm links it. */
+export async function packageCommands(host: Host, name: string, folders: readonly string[]): Promise<string[]> {
+  const texts = await Promise.all(folders.map(folder => host.fs.readText(`${folder}/package.json`)));
+  return [
+    ...new Set(
+      texts.flatMap(text => {
+        const data = tryJson(text ?? "");
+        const bin = isRecord(data) ? data["bin"] : undefined;
+        return typeof bin === "string" ? [name.split("/").at(-1) ?? name] : isRecord(bin) ? Object.keys(bin) : [];
+      }),
+    ),
+  ];
+}
+
 const GLOBALS: readonly GlobalManager[] = [
   { id: "npm", bin: "npm", group: "npm globals", list: npmGlobals, sep: "@" },
-  { id: "pnpm", bin: "pnpm", group: "pnpm globals", args: ["ls", "-g", "--depth=0", "--json"], parse: parsePnpmGlobals, sep: "@" },
+  { id: "pnpm", bin: "pnpm", group: "pnpm globals", args: NPM_LS, parse: parsePnpmGlobals, sep: "@" },
   { id: "bun", bin: "bun", group: "bun globals", args: ["pm", "ls", "-g"], parse: parseBunGlobals, sep: "@" },
   { id: "pipx", bin: "pipx", group: "pipx", args: ["list", "--json"], parse: parsePipxList, sep: " " },
   { id: "uv", bin: "uv", group: "uv tools", args: ["tool", "list"], parse: parseUvToolList, sep: " " },

@@ -9,8 +9,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
-import type { Manifest, ManifestEntry, Platform } from "@wsp/collect";
-import { expand } from "@wsp/collect";
+import type { Host, Manifest, ManifestEntry, Platform } from "@wsp/collect";
+import { expand, nodeHost } from "@wsp/collect";
 import { CATALOG_AGENTS, COMPILER_ROW, SHARED_SKILLS, TOOL_PREFIX, catalogEntry, catalogIdOfRow, installHomes, ownSkillFolder, roadModule } from "@wsp/catalog";
 import {
   agentStateFile,
@@ -39,6 +39,7 @@ import { folderFiles, LINKED_FOLDER_NOTE } from "./folder-files.js";
 import { loadRecipe, smallRecipePath } from "./recipe-file.js";
 import { estimatePicks } from "./pick-sizes.js";
 import { agentOwnPaths } from "./recipes.js";
+import { withoutWspHere } from "./wsp-own.js";
 
 /** What the planner reads beside the picks: this computer's rungs and its Homebrew table, the same two readers wsp
  * init and a copy's build take. */
@@ -48,6 +49,8 @@ export interface ProvisionReaders {
   platform: Platform;
   collect(): Promise<Manifest>;
   brew(): Promise<BrewTable>;
+  /** This computer, read for the package that installs wsp; the live one at `home` without it. */
+  here?: Host;
 }
 
 /** The one PATH every script of the job exports on that computer, and the folder every manager installs under there:
@@ -290,6 +293,7 @@ export async function undoPlan(before: RecipeFile, removed: readonly { kind: Rec
  * before anything was picked, and each step the engine runs on the computer itself. `plan` is the recipe beside the
  * state, which the doctor's road reads for a computer set up before picks were kept. */
 export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
+  const here = (): Host => o.here ?? { ...nodeHost(), home: o.home };
   return {
     async plan(on) {
       const recipePath = smallRecipePath(o.statePath);
@@ -305,7 +309,8 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
       );
       return provisionPlanOf(imp, recipe.at, path, prefix);
     },
-    async setup(picks, on, only) {
+    async setup(given, on, only) {
+      const picks = await withoutWspHere(here(), given);
       const { path, prefix } = placePaths(on.home);
       // A sync of the skills, the plugins, GitHub or the folders alone reads nothing of this computer's managers,
       // agents or servers: those are seconds of reading for rows that are not moving.
@@ -355,7 +360,7 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
     },
     floor: (machine, on, stage) => provisionStep(machine, { ...placePaths(on.home), recipeAt: "floor", steps: [], agents: 0, compiler: false, skipped: [] }, "floor", newSetupRun(), stage, on),
     step: (machine, plan, step, run, stage, on) => provisionStep(machine, plan, step, run, stage, on),
-    estimate: async picks => estimatePicks(picks, o.home),
+    estimate: async picks => estimatePicks(await withoutWspHere(here(), picks), o.home),
     undo: async (before, removed, on) => undoPlan(before, removed, on, async () => brewTableFor(await o.collect(), o.brew)),
   };
 }

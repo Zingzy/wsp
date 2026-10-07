@@ -3,16 +3,17 @@
 // written whole, never holding a secret, resolved against this computer by
 // real paths, and the choices a recipe picks from read with every Mac-only
 // thing left out. A recipe taken away leaves its computers following none.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { collect, type Host } from "@wsp/collect";
-import { NO_RECIPE, RecipeFile, type PlaceReport, type RecipeOptions } from "@wsp/protocol";
+import { collect, detectSkills, nodeHost, skillRoots, type Host } from "@wsp/collect";
+import { NO_RECIPE, RecipeFile, type PlaceReport, type RecipeOptions, type RecipeView } from "@wsp/protocol";
 import { createRuntime, memoryStore, newPlaceKeyPair, serveRuntime, type Runtime, type RuntimeServer } from "@wsp/runtime";
 import { WsClient } from "../../runtime/test/ws-client.js";
+import { recipeLines } from "../src/verbs/client.js";
 import { gitCut, configTexts } from "../src/recipe-configs.js";
-import { commandCalls, folderOptions, githubHere, recipeOptions } from "../src/recipe-options.js";
+import { bundledSkills, commandCalls, folderOptions, githubHere, readRecipeOptions, recipeOptions } from "../src/recipe-options.js";
 import { catalogEntry, sizeBytes } from "@wsp/catalog";
 import { execFileSync } from "node:child_process";
 import { keptOptions, keptTools, readRecipe, readRecipes, recipeHash, recipeShelf, recipesDir, resolveRecipe, TOOLS_KEPT_MS, writeRecipe, type RecipeReading } from "../src/recipes.js";
@@ -386,6 +387,79 @@ describe("what a recipe picks from", () => {
     expect(options.configs.map(c => c.id)).toEqual(["git", "github"]);
   });
 
+  it("offers no skill an agent's own install seeded, read off a stubbed home, and keeps the person's own beside them", async () => {
+    const skill = (at: string): void => {
+      mkdirSync(join(home, at), { recursive: true });
+      writeFileSync(join(home, at, "SKILL.md"), `---\nname: ${at.split("/").at(-1)}\ndescription: d\n---\n`);
+    };
+    skill(".hermes/skills/mlops/axolotl");
+    skill(".hermes/skills/note-taking/obsidian");
+    skill(".hermes/skills/mine");
+    skill(".codex/skills/.system/imagegen");
+    skill(".claude/skills/unslop");
+    skill(".claude/skills/obsidian");
+    writeFileSync(join(home, ".hermes/skills/.bundled_manifest"), "axolotl:3f2a\nobsidian:9c1d\n");
+    const host = { ...nodeHost(), home };
+    const read = await detectSkills(host, await skillRoots(host));
+    // The reader lists Hermes's seeded skills beside the person's own; the options are where they part.
+    expect(read.skills.map(s => s.name)).toEqual(["axolotl", "mine", "obsidian", "unslop"]);
+    const options = recipeOptions({ entries: [] }, { skills: read.skills, bundled: await bundledSkills(host), plugins: [], configs: [], github: false });
+    expect(options.skills.map(s => [s.name, s.from])).toEqual([
+      ["mine", "~/.hermes/skills"],
+      // A seeded name the person also keeps in their own folder stays, from their folder.
+      ["obsidian", "~/.claude/skills"],
+      ["unslop", "~/.claude/skills"],
+    ]);
+    // With no manifest here, Hermes seeded nothing this computer can name.
+    rmSync(join(home, ".hermes/skills/.bundled_manifest"));
+    expect(await bundledSkills(host)).toEqual([]);
+  });
+
+  it("offers neither wsp's own MCP server nor whichever npm global installs the wsp command, by any name", async () => {
+    const root = join(home, "npm-root");
+    const pkg = (name: string, bin: unknown): void => {
+      mkdirSync(join(root, name), { recursive: true });
+      writeFileSync(join(root, name, "package.json"), JSON.stringify({ name, bin }));
+    };
+    pkg("@someone/wsp", { wsp: "dist/bin.js" });
+    pkg("turbo", { turbo: "bin/turbo" });
+    pkg("wsp", "bin.js");
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ mcpServers: { wsp: { command: "wsp", args: ["mcp"] }, linear: { command: "npx", args: ["linear-mcp"] } } }));
+    const listed: Record<string, string> = {
+      "npm ls": JSON.stringify({ dependencies: { "@someone/wsp": { version: "0.2.0" }, turbo: { version: "2.1.0" }, wsp: { version: "1.0.0" } } }),
+      "npm root": root,
+    };
+    const host: Host = { ...nodeHost(), home, platform: "linux", exec: { which: async bin => bin === "npm", run: async (cmd, args) => listed[`${cmd} ${args[0]}`] } };
+    const read = await readRecipeOptions(host);
+    expect(read.mcp.map(s => s.name)).toEqual(["linear"]);
+    expect(read.clis.map(c => [c.name, c.via])).toEqual([["turbo", "npm"]]);
+  });
+
+  it("offers no pnpm global that installs the wsp command, found at the folder pnpm's own listing names, in pnpm 11's hashed layout and pnpm 10's", async () => {
+    // pnpm 11 keeps each global in a hashed folder under `pnpm root -g`; pnpm 10 keeps them one level under it, or links a
+    // folder in from elsewhere. Its listing names the folder either way.
+    const layouts = {
+      "pnpm 11": { "@wsp/host": "global/v11/21d31-1a1176c18dc/node_modules/@wsp/host", "wspx-lookalike": "global/v11/9be02-1a1176c2a41/node_modules/wspx-lookalike" },
+      "pnpm 10": { "@wsp/host": "checkout/packages/host", "wspx-lookalike": "global/5/node_modules/wspx-lookalike" },
+    };
+    for (const [layout, at] of Object.entries(layouts)) {
+      const top = join(home, layout.replace(" ", "-"));
+      const bins: Record<string, unknown> = { "@wsp/host": { wsp: "dist/bin.js" }, "wspx-lookalike": { wspx: "bin.js" } };
+      for (const [name, folder] of Object.entries(at)) {
+        mkdirSync(join(top, folder), { recursive: true });
+        writeFileSync(join(top, folder, "package.json"), JSON.stringify({ name, bin: bins[name] }));
+      }
+      if (layout === "pnpm 10") {
+        mkdirSync(join(top, "global/5/node_modules/@wsp"), { recursive: true });
+        symlinkSync(join(top, at["@wsp/host"]), join(top, "global/5/node_modules/@wsp/host"));
+      }
+      const listing = JSON.stringify([{ path: join(top, "global"), dependencies: Object.fromEntries(Object.entries(at).map(([name, folder]) => [name, { from: name, version: "1.0.0", path: join(top, folder) }])) }]);
+      const host: Host = { ...nodeHost(), home, platform: "linux", exec: { which: async bin => bin === "pnpm", run: async (cmd, args) => (cmd === "pnpm" && args[0] === "ls" ? listing : cmd === "pnpm" && args[0] === "root" ? join(top, layout === "pnpm 11" ? "global/v11" : "global/5/node_modules") : undefined) } };
+      const read = await readRecipeOptions(host);
+      expect(read.clis.map(c => [c.name, c.via]), layout).toEqual([["wspx-lookalike", "pnpm"]]);
+    }
+  });
+
   it("says what each CLI and agent weighs where the catalog measured it, and how each agent signs in", async () => {
     const options = recipeOptions(await collect(laptop()), { skills: [], plugins: [], configs: [], github: false });
     expect(options.clis.find(c => c.name === "a2ps")?.bytes).toBeUndefined();
@@ -438,6 +512,38 @@ describe("what a recipe picks from", () => {
     const read = (github: boolean) => recipeOptions({ entries: [] }, { skills: [], plugins: [], configs: [], github }).configs.find(c => c.id === "github");
     expect(read(true)?.signins).toEqual(["vault", "machine", "skip"]);
     expect(read(false)?.signins).toEqual(["machine", "skip"]);
+  });
+});
+
+describe("a recipe as the host hands it out", () => {
+  let rt: Runtime | undefined;
+  let srv: RuntimeServer | undefined;
+  afterEach(async () => {
+    await srv?.close();
+    await rt?.close();
+  });
+
+  it("holds neither wsp's own server nor the package that installs the wsp command, counts what is left, and keeps the hash its computers are held against", async () => {
+    const root = join(home, "npm-root");
+    for (const [name, bin] of [["@someone/wsp", { wsp: "dist/bin.js" }], ["turbo", { turbo: "bin/turbo" }]] as const) {
+      mkdirSync(join(root, name), { recursive: true });
+      writeFileSync(join(root, name, "package.json"), JSON.stringify({ name, bin }));
+    }
+    const here: Host = { ...nodeHost(), home, exec: { which: async () => true, run: async (cmd, args) => (cmd === "npm" && args[0] === "root" ? root : undefined) } };
+    const shelf = recipeShelf({ statePath, home, here, tools: async () => [] });
+    await writeRecipe(statePath, { ...LAPTOP, name: "default", mcp: { wsp: { agents: ["claude"] }, linear: { agents: ["claude"] } }, clis: { "@someone/wsp": { via: "npm" }, turbo: { via: "npm" } } });
+    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: { hostKey: newPlaceKeyPair(), here: () => ({ name: "mac" }), hostName: () => "mac" } });
+    srv = await serveRuntime(rt, { port: 0, authToken: "host-token", devices: rt.devices, recipes: shelf });
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    const [listed] = (await c.request("recipes.list"))["recipes"] as RecipeView[];
+    c.close();
+    expect([Object.keys(listed!.file.mcp), Object.keys(listed!.file.clis)]).toEqual([["linear"], ["turbo"]]);
+    expect(listed!.summary).toContain("1 MCP server, 1 CLI");
+    expect(Object.keys((await shelf.read("default")).file.clis)).toEqual(["turbo"]);
+    expect((await shelf.get("default")).hash).toBe((await shelf.resolve("default")).hash);
+    // The list on the command line says the day each was saved.
+    expect(recipeLines([listed!])[0]).toMatch(/^RECIPE\s+HOLDS\s+SAVED\s+COMPUTERS$/);
+    expect(recipeLines([listed!])[1]).toContain(listed!.savedAt!.slice(0, 10));
   });
 });
 
@@ -501,6 +607,10 @@ describe("a recipe taken away", () => {
     const saved = await c.request("recipes.save", { name: "Box", from: "spoo" });
     expect(saved.ok, String(saved["error"])).toBe(true);
     expect(saved["recipe"]).toEqual(expect.objectContaining({ name: "Box", slug: "box", machines: ["spoo"], file: { ...LAPTOP, name: "Box" } }));
+    // When it was saved is its file's last write, on the save's answer and on every list after it.
+    const written = statSync(join(recipesDir(statePath), "box.toml")).mtime.toISOString();
+    expect(saved["recipe"]).toMatchObject({ savedAt: written });
+    expect((await c.request("recipes.list"))["recipes"]).toEqual([expect.objectContaining({ slug: "box", savedAt: written })]);
     c.close();
   });
 });

@@ -38,6 +38,9 @@
                 "$ref": "#/properties/recipe/properties/name"
               }
             },
+            "savedAt": {
+              "type": "string"
+            },
             "file": {
               "type": "object",
               "properties": {
@@ -306,6 +309,9 @@
               "items": {
                 "$ref": "#/properties/recipe/properties/name"
               }
+            },
+            "savedAt": {
+              "type": "string"
             },
             "file": {
               "type": "object",

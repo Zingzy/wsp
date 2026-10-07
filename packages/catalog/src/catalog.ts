@@ -12,7 +12,7 @@ import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import type { McpConfig } from "./mcp.js";
 import { loginRoad, type ServerSignInRoad } from "./mcp-login.js";
 import { pinnedRelease } from "./release-pins.js";
-import type { PluginRoad, PluginSkills, SkillRoots } from "./skills.js";
+import type { BundledSkills, PluginRoad, PluginSkills, SkillRoots } from "./skills.js";
 import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
 import { DOCKER_INSTALL, FD_INSTALL, LOCAL_BIN, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
@@ -150,6 +150,8 @@ export interface AgentEntry extends EntryBase {
   skillRoots: SkillRoots;
   /** Skills its plugins bring, read-only; absent where the agent has no plugins. */
   pluginSkills?: PluginSkills;
+  /** Skills its own install seeds into its skills folder; absent where it seeds none there. */
+  bundledSkills?: BundledSkills;
   /** How its plugins go on another computer, by its own commands there; absent where the agent has no plugins. */
   plugins?: PluginRoad;
   /** The files in a project this agent reads standing instructions from, project-relative; the MCP install keeps its

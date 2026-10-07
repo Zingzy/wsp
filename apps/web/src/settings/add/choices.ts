@@ -11,8 +11,8 @@ export type TickKind = "agents" | "mcp" | "clis" | "skills" | "plugins" | "folde
 /** The name a computer's picks are filed under: its own, which is never read before a recipe is named. */
 const fileName = (name: string): string => (name.trim() === "" ? "computer" : name);
 
-/** Nothing picked. */
-export const noPicks = (name: string): RecipeFile => RecipeFile.parse({ name: fileName(name) });
+/** Nothing ticked, and GitHub signing in on the computer, which is a choice and not a tick. */
+export const noPicks = (name: string): RecipeFile => RecipeFile.parse({ name: fileName(name), configs: { github: { signin: "machine" } } });
 
 /** The key a folder goes by in a recipe: the project's own name, lower case, every other run a dash. */
 export const folderKey = (name: string): string =>
@@ -30,8 +30,14 @@ export const folderOf = (project: Pick<ProjectView, "id" | "name" | "path">, loo
   keep: [],
 });
 
-/** Every row the options offer, each agent signing in the first way it can, and every project here. No CLI: each one
- * is a person's pick, made from how often their agents ran it. */
+/** GitHub's row where the host offers it: signing in on the computer where that is one of its ways, else its first. */
+const githubOf = (signins: readonly GitHubSignIn[] | undefined): { signin?: GitHubSignIn } => {
+  const signin = signins?.includes("machine") === true ? "machine" : signins?.[0];
+  return signin === undefined ? {} : { signin };
+};
+
+/** Every row the options offer, each agent signing in the first way it can, GitHub signing in on the computer, and every
+ * project here. No CLI: each one is a person's pick, made from how often their agents ran it. */
 export function everything(name: string, options: RecipeOptions, projects: readonly Pick<ProjectView, "id" | "name" | "path">[], looks: Record<string, { icon?: ProjectIcon; hue?: ProjectHue }>): RecipeFile {
   return RecipeFile.parse({
     name: fileName(name),
@@ -40,9 +46,13 @@ export function everything(name: string, options: RecipeOptions, projects: reado
     skills: Object.fromEntries(options.skills.map(s => [s.name, { from: s.from }])),
     plugins: Object.fromEntries(options.plugins.map(p => [p.name, {}])),
     folders: Object.fromEntries(projects.map(p => [folderKey(p.name), folderOf(p, looks[p.id])])),
-    configs: Object.fromEntries(options.configs.map(c => [c.id, c.id === "github" && c.signins?.[0] !== undefined ? { signin: c.signins[0] } : {}])),
+    configs: Object.fromEntries(options.configs.map(c => [c.id, c.id === "github" ? githubOf(c.signins) : {}])),
   });
 }
+
+/** A saved recipe as the picks for this computer: its rows as the host hands them out, wsp's own pieces left out
+ * there, and every choice it saved, GitHub's included. */
+export const fromRecipe = (file: RecipeFile, name: string): RecipeFile => ({ ...file, name });
 
 /** One row ticked or not: ticked takes the row the options give for it, unticked takes it out. */
 export function tick(picks: RecipeFile, kind: Exclude<TickKind, "folders">, name: string, on: boolean, options: RecipeOptions): RecipeFile {
@@ -60,9 +70,18 @@ export function tick(picks: RecipeFile, kind: Exclude<TickKind, "folders">, name
   return { ...picks, [kind]: table };
 }
 
+/** Several rows ticked or not at once, each as one tick would move it. */
+export const tickMany = (picks: RecipeFile, kind: Exclude<TickKind, "folders">, changes: readonly (readonly [string, boolean])[], options: RecipeOptions): RecipeFile =>
+  changes.reduce((next, [name, on]) => tick(next, kind, name, on, options), picks);
+
 /** Every CLI the agents ran at least once ticked, on top of what the picks hold. */
 export const tickUsedClis = (picks: RecipeFile, options: RecipeOptions): RecipeFile =>
-  options.clis.filter(cli => (cli.calls ?? 0) > 0).reduce((next, cli) => tick(next, "clis", cli.name, true, options), picks);
+  tickMany(
+    picks,
+    "clis",
+    options.clis.filter(cli => (cli.calls ?? 0) > 0).map(cli => [cli.name, true] as const),
+    options,
+  );
 
 /** A folder ticked with its row, or taken out. */
 export function tickFolder(picks: RecipeFile, key: string, row: RecipeFile["folders"][string] | undefined): RecipeFile {

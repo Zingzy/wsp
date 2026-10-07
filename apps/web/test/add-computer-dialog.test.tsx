@@ -12,7 +12,9 @@ import { RequestError, type Api, type SshLogin } from "../src/protocol/client.js
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { closeAdd, openAdd, openPending, openSetup, useAddFlow } from "../src/settings/add/addFlow.js";
+import { fromRecipe, githubPick } from "../src/settings/add/choices.js";
 import { useAdds } from "../src/settings/adds.js";
+import { useRecipes } from "../src/settings/recipesStore.js";
 import { stepLogs } from "../src/settings/add/setup.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
@@ -373,7 +375,7 @@ describe("Add a computer, from the address to Set up", () => {
   });
 
   it("offers Start from where a recipe is saved, and a pick there takes the recipe's rows", async () => {
-    const builders: RecipeView = { name: "Builders", slug: "builders", summary: "1 agent", machines: ["spoo"], file: RecipeFile.parse({ name: "Builders", agents: { codex: { signin: "machine" } } }) };
+    const builders: RecipeView = { name: "Builders", slug: "builders", summary: "1 agent", machines: ["spoo"], savedAt: "2026-10-05T09:00:00.000Z", file: RecipeFile.parse({ name: "Builders", agents: { codex: { signin: "machine" } } }) };
     const fake = host({}, [builders]);
     useStore.setState({ places: [here, studio] });
     mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
@@ -381,6 +383,8 @@ describe("Add a computer, from the address to Set up", () => {
     await settle();
     expect([title(), progress()]).toEqual(["Start from", "3 of 12"]);
     expect([...dialog()!.querySelectorAll("[data-choice]")].map(c => c.getAttribute("data-choice"))).toEqual(["here", "builders", "none"]);
+    // A saved recipe says it is one and the day it was saved, beside the computers that follow it.
+    expect(dialog()!.querySelector("[data-choice='builders']")?.textContent).toBe("BuildersA recipe you saved on Oct 5, 2026. 1 agent.on spoo");
     await press(dialog()!.querySelector("[data-choice='builders'] [role=radio]"));
     await rest(450);
     expect(fake.asked.chosen.at(-1)).toMatchObject({ recipe: "builders" });
@@ -418,8 +422,8 @@ describe("Add a computer's picks read the host's facts", () => {
       { name: "laya", path: "/Users/zingzy/laya", bytes: 340 * MB },
     ],
   };
-  const open = async (at: "agents" | "mcp" | "clis" | "github" | "projects", picks?: RecipeFile, over: Partial<Api> = {}): Promise<ReturnType<typeof host>> => {
-    const fake = host({ recipesOptions: async () => FACTS, ...over } as Partial<Api>);
+  const open = async (at: "startfrom" | "agents" | "mcp" | "clis" | "github" | "projects", picks?: RecipeFile, over: Partial<Api> = {}, recipes: RecipeView[] = []): Promise<ReturnType<typeof host>> => {
+    const fake = host({ recipesOptions: async () => FACTS, ...over } as Partial<Api>, recipes);
     useStore.setState({ places: [here, studio] });
     mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
     act(() => useAddFlow.setState({ open: true, step: at, placeId: studio.id, pendingId: "a_1", address: "studio", ...(picks === undefined ? {} : { picks }) }));
@@ -539,6 +543,139 @@ describe("Add a computer's picks read the host's facts", () => {
     expect(asks).toHaveLength(2);
     expect(dialog()!.querySelector("[data-k=options-loading]")).toBeNull();
     expect(dialog()!.querySelector("[data-pick-row='gh']")).not.toBeNull();
+  });
+
+  it("gives every pick list one filter, one order, and All, None and Invert over what the filter leaves; a shift-click ticks the range", async () => {
+    await open("clis");
+    const rows = (): string[] => [...dialog()!.querySelectorAll<HTMLElement>("[data-pick-row]")].map(r => r.dataset["pickRow"]!);
+    const clis = (): string[] => Object.keys(useAddFlow.getState().picks!.clis).sort();
+    await waitFor(() => expect(rows()).toEqual(["ripgrep", "gh", "go"]));
+    await waitFor(() => expect(useAddFlow.getState().picks?.agents.claude).toBeDefined());
+    // The same tools from the one component on every step that ticks rows.
+    for (const at of ["agents", "mcp", "skills", "plugins", "projects", "other", "clis"] as const) {
+      act(() => useAddFlow.setState({ step: at }));
+      await settle();
+      expect(dialog()!.querySelectorAll("[data-pick-list] [data-pick-tools]"), at).toHaveLength(1);
+      expect([...dialog()!.querySelectorAll("[data-pick-tools] [data-k]")].map(el => el.getAttribute("data-k")), at).toEqual(["pick-filter", "pick-order", "pick-all", "pick-none", "pick-invert"]);
+    }
+    const tool = (k: string): HTMLElement => dialog()!.querySelector<HTMLElement>(`[data-pick-tools] [data-k=${k}]`)!;
+    fireEvent.change(tool("pick-filter"), { target: { value: "G" } });
+    await settle();
+    expect(rows()).toEqual(["ripgrep", "gh", "go"]);
+    fireEvent.change(tool("pick-filter"), { target: { value: "go" } });
+    await settle();
+    expect(rows()).toEqual(["go"]);
+    await press(tool("pick-all"));
+    expect(clis()).toEqual(["go"]);
+    fireEvent.change(tool("pick-filter"), { target: { value: "zzz" } });
+    await settle();
+    expect(dialog()!.querySelector("[data-k=pick-none-match]")?.textContent).toBe("No row matches zzz.");
+    fireEvent.change(tool("pick-filter"), { target: { value: "" } });
+    await settle();
+    await press(tool("pick-invert"));
+    expect(clis()).toEqual(["gh", "ripgrep"]);
+    await press(tool("pick-all"));
+    expect(clis()).toEqual(["gh", "go", "ripgrep"]);
+    await press(tool("pick-none"));
+    expect(clis()).toEqual([]);
+    // Ordered by name, then by what is ticked; the list's own order is the CLIs' most used first.
+    await press(tool("pick-order"));
+    expect([...document.querySelectorAll("[role=option]")].map(o => o.textContent)).toEqual(["Most used", "Name", "Ticked first"]);
+    const byName = [...document.querySelectorAll("[role=option]")].find(o => o.textContent === "Name")!;
+    fireEvent.pointerDown(byName, { pointerType: "mouse" });
+    fireEvent.mouseUp(byName);
+    await press(byName);
+    expect(rows()).toEqual(["gh", "go", "ripgrep"]);
+    // A shift-click takes every row from the last one clicked, in the order shown, the way the clicked row went.
+    const box = (row: string): HTMLElement => dialog()!.querySelector<HTMLElement>(`[data-pick-row='${row}'] [role=checkbox]`)!;
+    const shiftClick = async (row: string): Promise<void> => {
+      fireEvent.mouseDown(box(row), { shiftKey: true });
+      await press(box(row));
+    };
+    await press(box("gh"));
+    expect(clis()).toEqual(["gh"]);
+    await shiftClick("ripgrep");
+    expect(clis()).toEqual(["gh", "go", "ripgrep"]);
+    await shiftClick("go");
+    expect(clis()).toEqual(["gh"]);
+    // A plain click after it is one row again.
+    fireEvent.mouseDown(box("go"));
+    await press(box("go"));
+    expect(clis()).toEqual(["gh", "go"]);
+    expect(dialog()!.querySelector("[data-pick-row='go'] label")?.getAttribute("title")).toBe("Shift-click to tick or clear every row from the last one you clicked.");
+  });
+
+  it("holds Ticked first in the order it stood when picked, so a tick moves no row and a shift-click ranges over the rows as shown", async () => {
+    await open("mcp");
+    const rows = (): string[] => [...dialog()!.querySelectorAll<HTMLElement>("[data-pick-row]")].map(r => r.dataset["pickRow"]!);
+    const ticked = (): string[] => Object.keys(useAddFlow.getState().picks!.mcp).sort();
+    await waitFor(() => expect(useAddFlow.getState().picks?.agents.claude).toBeDefined());
+    await waitFor(() => expect(rows()).toEqual(["context7", "github", "linear", "old", "playwright"]));
+    const tool = (k: string): HTMLElement => dialog()!.querySelector<HTMLElement>(`[data-pick-tools] [data-k=${k}]`)!;
+    await press(tool("pick-none"));
+    // The servers arrive by name, so the picker offers no order of the list's own beside Name.
+    await press(tool("pick-order"));
+    expect([...document.querySelectorAll("[role=option]")].map(o => o.textContent)).toEqual(["Name", "Ticked first"]);
+    const first = [...document.querySelectorAll("[role=option]")].find(o => o.textContent === "Ticked first")!;
+    fireEvent.pointerDown(first, { pointerType: "mouse" });
+    fireEvent.mouseUp(first);
+    await press(first);
+    const box = (row: string): HTMLElement => dialog()!.querySelector<HTMLElement>(`[data-pick-row='${row}'] [role=checkbox]`)!;
+    await press(box("linear"));
+    expect(rows()).toEqual(["context7", "github", "linear", "old", "playwright"]);
+    fireEvent.mouseDown(box("playwright"), { shiftKey: true });
+    await press(box("playwright"));
+    expect(ticked()).toEqual(["linear", "old", "playwright"]);
+    // Picked again, it sorts the ticks of now to the top.
+    await press(tool("pick-order"));
+    const again = [...document.querySelectorAll("[role=option]")].find(o => o.textContent === "Name")!;
+    fireEvent.pointerDown(again, { pointerType: "mouse" });
+    fireEvent.mouseUp(again);
+    await press(again);
+    await press(tool("pick-order"));
+    const back = [...document.querySelectorAll("[role=option]")].find(o => o.textContent === "Ticked first")!;
+    fireEvent.pointerDown(back, { pointerType: "mouse" });
+    fireEvent.mouseUp(back);
+    await press(back);
+    expect(rows()).toEqual(["linear", "old", "playwright", "context7", "github"]);
+  });
+
+  it("opens GitHub on signing in on the computer, from everything here, from nothing, and where a token here could be copied", async () => {
+    const withToken = { recipesOptions: async () => ({ ...FACTS, configs: [{ id: "github", label: "the GitHub sign-in", signins: ["vault", "machine", "skip"] }] }) } as Partial<Api>;
+    const builders: RecipeView = { name: "Builders", slug: "builders", summary: "1 agent", machines: [], file: RecipeFile.parse({ name: "Builders" }) };
+    await open("startfrom", undefined, withToken, [builders]);
+    await waitFor(() => expect(useAddFlow.getState().picks?.configs.github).toEqual({ signin: "machine" }));
+    const checked = (): string | null | undefined => [...dialog()!.querySelectorAll("[data-choice]")].find(c => c.querySelector("[role=radio]")?.getAttribute("aria-checked") === "true")?.getAttribute("data-choice");
+    await press(dialog()!.querySelector("[data-choice='none'] [role=radio]"));
+    expect(useAddFlow.getState().picks!.configs.github).toEqual({ signin: "machine" });
+    act(() => useAddFlow.setState({ step: "github" }));
+    await settle();
+    expect(checked()).toBe("machine");
+    act(() => useAddFlow.setState({ step: "startfrom" }));
+    await settle();
+    await press(dialog()!.querySelector("[data-choice='here'] [role=radio]"));
+    act(() => useAddFlow.setState({ step: "github" }));
+    await settle();
+    expect(checked()).toBe("machine");
+  });
+
+  it("takes a saved recipe as the host hands it out, says what the host counts in it, and keeps the GitHub choice it saved, a Skip included", async () => {
+    const withToken = { recipesOptions: async () => ({ ...FACTS, configs: [{ id: "github", label: "the GitHub sign-in", signins: ["vault", "machine", "skip"] }] }) } as Partial<Api>;
+    const file = RecipeFile.parse({ name: "default", agents: { claude: { signin: "vault" } }, mcp: { linear: { agents: ["claude"] } }, clis: { "litmus-cli": { via: "npm" } }, configs: { git: {}, github: { signin: "skip" } } });
+    const saved: RecipeView = { name: "default", slug: "default", summary: "1 agent, 1 MCP server, 1 CLI, 2 configs", machines: [], savedAt: "2026-10-01T09:00:00.000Z", file };
+    await open("startfrom", undefined, withToken, [saved]);
+    await waitFor(() => expect(dialog()!.querySelector("[data-choice='default']")?.textContent).toBe("defaultA recipe you saved on Oct 1, 2026. 1 agent, 1 MCP server, 1 CLI, 2 configs."));
+    await press(dialog()!.querySelector("[data-choice='default'] [role=radio]"));
+    const picks = useAddFlow.getState().picks!;
+    expect([Object.keys(picks.mcp), Object.keys(picks.clis), picks.configs.github]).toEqual([["linear"], ["litmus-cli"], { signin: "skip" }]);
+    act(() => useAddFlow.setState({ step: "github" }));
+    await settle();
+    expect([...dialog()!.querySelectorAll("[data-choice]")].find(c => c.querySelector("[role=radio]")?.getAttribute("aria-checked") === "true")?.getAttribute("data-choice")).toBe("skip");
+    // Start from reads every GitHub row as wsp add --recipe and the setup read it: a row naming no way is the token.
+    for (const github of [undefined, {}, { signin: "skip" as const }, { signin: "vault" as const }, { signin: "machine" as const }]) {
+      const rows = RecipeFile.parse({ name: "r", configs: github === undefined ? {} : { github } });
+      expect(githubPick(fromRecipe(rows, "studio")), JSON.stringify(github)).toBe(githubPick(rows));
+    }
   });
 
   it("names the account and scopes of the token it would copy, as gh reads them here", async () => {

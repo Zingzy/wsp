@@ -19,6 +19,7 @@ import { Input } from "../../components/ui/input.js";
 import { RadioGroup } from "../../components/ui/radio-group.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { desktopBridge } from "../../lib/desktopShell.js";
+import { APP_LOCALE } from "../../lib/timestampFormat.js";
 import { cn } from "../../lib/utils.js";
 import { addNotice } from "../../notices/store.js";
 import { useStore } from "../../protocol/store.js";
@@ -35,7 +36,7 @@ import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
 import { CopyRow, DeviceCode, RefusalSlot } from "../sheetParts.js";
 import { STEP_TITLES, askedHostKey, askedSudo, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
-import { everything, folderKey, githubPick, noPicks, tickUsedClis } from "./choices.js";
+import { everything, folderKey, fromRecipe, githubPick, noPicks, tickUsedClis } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
 import { checkRows, opensLog, runningMs, setupCount, setupRows, setupStanding, stepLogs, type StepLine } from "./setup.js";
@@ -102,6 +103,9 @@ function ChecksStep({ rows, asksSudo, onAgain }: { rows: readonly StepLine[]; as
   );
 }
 
+/** The day a saved recipe was written, as the app spells a day. */
+const SAVED_DAY = new Intl.DateTimeFormat(APP_LOCALE, { month: "short", day: "numeric", year: "numeric" });
+
 function StartFromStep({ here, picks, options, onPick, from }: { here: string; picks: RecipeFile; options: RecipeOptions; onPick: (from: string, next: RecipeFile) => void; from: string }) {
   const recipes = useRecipes(s => s.recipes) ?? [];
   const looks = useStore(s => s.preferences.recipeLook);
@@ -115,7 +119,7 @@ function StartFromStep({ here, picks, options, onPick, from }: { here: string; p
       onValueChange={next => {
         const id = String(next);
         const recipe = recipes.find(r => r.slug === id);
-        onPick(id, id === "here" ? all : id === "none" ? noPicks(picks.name) : recipe === undefined ? picks : { ...recipe.file, name: picks.name });
+        onPick(id, id === "here" ? all : id === "none" ? noPicks(picks.name) : recipe === undefined ? picks : fromRecipe(recipe.file, picks.name));
       }}
       className="gap-0"
     >
@@ -123,7 +127,7 @@ function StartFromStep({ here, picks, options, onPick, from }: { here: string; p
         <Choice id="here" picked={from === "here"} glyph={hereRow === undefined ? <ListChecksIcon aria-hidden className={GLYPH} /> : <ComputerGlyph place={hereRow} className={GLYPH} />} name={`Everything on ${here}`} note={`${recipeSummary(all)}.`} />
         {recipes.map(recipe => {
           const Glyph = PROJECT_GLYPHS[looks?.[recipe.slug]?.icon ?? "folder"];
-          return <Choice key={recipe.slug} id={recipe.slug} picked={from === recipe.slug} glyph={<Glyph aria-hidden className={GLYPH} />} name={recipe.name} note={recipe.summary} {...(recipe.machines.length === 0 ? {} : { fact: `on ${recipe.machines.join(", ")}` })} />;
+          return <Choice key={recipe.slug} id={recipe.slug} picked={from === recipe.slug} glyph={<Glyph aria-hidden className={GLYPH} />} name={recipe.name} note={ADD_COMPUTER_WORDS.savedRecipe(recipe.summary, recipe.savedAt === undefined ? undefined : SAVED_DAY.format(new Date(recipe.savedAt)))} {...(recipe.machines.length === 0 ? {} : { fact: `on ${recipe.machines.join(", ")}` })} />;
         })}
         <Choice id="none" picked={from === "none"} glyph={<ListChecksIcon aria-hidden className={GLYPH} />} name="Pick each step" note="Nothing ticked." />
       </Grid>
