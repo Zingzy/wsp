@@ -163,7 +163,6 @@ describe("chat tab rendering", () => {
     const open = await screen.findByRole("button", { name: "Open diff" });
     // Another thread's turn in the same checkout, from an agent that named none of its edits: the list is the folder's.
     expect(screen.getByText("2 changed files in this folder")).toBeDefined();
-    expect(screen.getByText("Other threads worked here too")).toBeDefined();
     const counts = document.querySelector<HTMLElement>('[aria-label="14 additions, 3 deletions"]')!;
     expect([...counts.children].map(c => c.className.includes("text-success") || c.className.includes("text-error-foreground"))).toEqual([true, true]);
     fireEvent.click(open);
@@ -173,6 +172,24 @@ describe("chat tab rendering", () => {
     // A reload keeps the pane on that turn's own range, never the branch's whole diff against its base.
     const kept = JSON.parse(window.localStorage.getItem(useDiffStore.persist.getOptions().name!) ?? "null") as { state: { turnByWorkspaceId?: Record<string, unknown> } } | null;
     expect(kept?.state.turnByWorkspaceId?.[WS]).toMatchObject({ turnId: CHAT_TURN, from, to });
+  });
+
+  it("draws the card as the turn's files alone, and none for a turn that only moved the branch", async () => {
+    const { api, emit } = fixtureApi([workspace]);
+    await setup(api);
+    for (const e of FIXTURE) emit(e);
+    await screen.findByText(/Server is live at :3000\./);
+    const from = "a".repeat(40);
+    const to = "b".repeat(40);
+    const moved = ["Checked out main", "Checked out pr-889"];
+    emit({ type: "session.changes", ...scope, from, to, files: [], moved });
+    await new Promise(r => setTimeout(r, 50));
+    expect(document.querySelector("[data-changed-files-state]")).toBeNull();
+    expect(screen.queryByText(/Checked out/)).toBeNull();
+    emit({ type: "session.changes", ...scope, from, to: "c".repeat(40), files: [{ path: "server.js", kind: "added", additions: 12, deletions: 0 }], moved, shared: true });
+    await waitFor(() => expect(document.querySelector("[data-changed-file='server.js']")).not.toBeNull());
+    const card = document.querySelector<HTMLElement>("[data-changed-files-state='tree']")!;
+    expect(card.textContent).not.toMatch(/Checked out|Other threads/);
   });
 
   it("carries the agent's step list on the composer's edge while its turn runs, never in the transcript", async () => {

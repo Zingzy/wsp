@@ -450,7 +450,7 @@ export function createSessionFold(): SessionFold {
       case "session.changes": {
         const index = turns.findIndex(t => t.turnId === event.turnId);
         if (index === -1) return;
-        const changes = { from: event.from, to: event.to, files: event.files, moved: event.moved, ...(event.others !== undefined ? { others: event.others } : {}), ...(event.shared === true ? { shared: true as const } : {}) };
+        const changes = { from: event.from, to: event.to, files: event.files, ...(event.others !== undefined ? { others: event.others } : {}), ...(event.shared === true ? { shared: true as const } : {}) };
         turns[index] = { ...turns[index]!, changes };
         if (turn !== null && turn.summary.turnId === event.turnId) turn.summary = turns[index]!;
         return;

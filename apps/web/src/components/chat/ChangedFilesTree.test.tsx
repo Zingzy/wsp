@@ -58,10 +58,10 @@ describe("ChangedFilesCard", () => {
     expect(markup).toContain('aria-label="Open diff"');
   });
 
-  it("says the list is the folder's where other threads worked there and the agent named none of its edits", () => {
+  it("says the list is the folder's in its count alone where other threads worked there and the agent named none of its edits", () => {
     const markup = shared({ files: [slate, wrangler], folder: true });
     expect(markup).toContain("2 changed files in this folder");
-    expect(markup).toContain("Other threads worked here too");
+    expect(markup).not.toContain("Other threads");
     expect(markup).not.toContain("data-changed-files-others");
     expect(card([slate])).not.toContain("in this folder");
   });
@@ -70,28 +70,6 @@ describe("ChangedFilesCard", () => {
     expect(card([{ path: "README.md", kind: "modified", additions: 2, deletions: 1 }])).not.toContain("all folders");
     expect(card([{ path: "src/a.ts", kind: "modified", additions: 2, deletions: 1 }])).toContain('aria-label="Expand all folders"');
     expect(card([{ path: "src/a.ts", kind: "modified", additions: 2, deletions: 1 }], true)).toContain('aria-label="Collapse all folders"');
-  });
-
-  it("shows a move-only turn as its quiet lines alone: no file tree, no count and no Open diff", () => {
-    const markup = renderToStaticMarkup(
-      <ChangedFilesCard
-        turnId={"turn-1"}
-        files={[]}
-        moved={["Checked out pr-889", "Pulled"]}
-        allDirectoriesExpanded={false}
-        resolvedTheme="light"
-        onToggleAllDirectories={() => {}}
-        onOpenTurnDiff={() => {}}
-      />,
-    );
-    expect(markup).toContain("data-changed-files-moved");
-    expect(markup).toContain("Checked out pr-889");
-    expect(markup).toContain("Pulled");
-    // No file tree: the move named itself, and no file is its own.
-    expect(markup).not.toContain("data-changed-file=");
-    expect(markup).not.toContain("data-changed-files-header");
-    expect(markup).not.toContain("changed file");
-    expect(markup).not.toContain("Open diff");
   });
 
   it("lists a large turn as its top-level rows, with no chips and no Show all", () => {

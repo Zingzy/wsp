@@ -119,7 +119,7 @@ const ALLOWED: readonly Allowed[] = [
   { text: "shadow-[inset_0_1px_0_var(--keycap-top)]", count: 2, why: BEFORE("shadow-keycap") },
   { text: "shadow-[inset_0_1px_var(--chat-composer-highlight)]", count: 1, why: BEFORE("a named shadow in index.css") },
   { text: "text-[10px]", count: 2, why: BEFORE("a size on the type scale") },
-  { text: "text-[11px]", count: 63, why: BEFORE("text-meta") },
+  { text: "text-[11px]", count: 62, why: BEFORE("text-meta") },
   { text: "text-[12.5px]", count: 8, why: BEFORE("a size on the type scale") },
   { text: "text-[12px]", count: 7, why: BEFORE("text-xs") },
   { text: "text-[13.5px]", count: 5, why: BEFORE("text-head") },
