@@ -137,6 +137,8 @@ export const ADD_COMPUTER_WORDS = {
   skip: "Skip",
   /** A private repository ticked while GitHub is skipped: the box cannot clone it. */
   needsGitHub: "Private; needs GitHub to clone. Go back to sign in, or skip it.",
+  /** A recipe the person saved, on Start from: that it is one, the day it was saved, and what it holds. */
+  savedRecipe: (summary: string, day: string | undefined): string => `A recipe you saved${day === undefined ? "" : ` on ${day}`}. ${summary.charAt(0).toUpperCase()}${summary.slice(1)}.`,
   /** A project with no remote travels as its folder. */
   noRemote: "No remote; copied whole.",
   /** What the GitHub row says once its step ended, by the way it signed in. */

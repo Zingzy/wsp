@@ -23,10 +23,14 @@ import { ADD_COMPUTER_WORDS, FACT } from "../format.js";
 import { GlyphFrame, Grid } from "../grid.js";
 import { CARD_INSET, LIST_TITLE, NOTE, ROW_FIELD, ROW_FLOOR, SELECT_WIDTH } from "../layout.js";
 import { SizeCell } from "../recipe/rows.js";
-import { githubPick, setGitHub, signIn, tick, tickConfig, tickFolder } from "./choices.js";
+import { githubPick, setGitHub, signIn, tickConfig, tickFolder, tickMany } from "./choices.js";
+import { PickList, RANGE_HOVER, type PickChanges } from "./PickList.js";
 import { PickLine, PickRow } from "./PickRow.js";
 
 const GLYPH = "size-4 text-foreground/80";
+
+/** The order a list's rows come in where it is neither by name nor by use: the catalog's for agents, the projects'. */
+const AS_FOUND = "As found";
 
 /** What every list takes: the picks, what they are made from, and where a changed pick goes. */
 export interface PickProps {
@@ -64,92 +68,110 @@ export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicke
   // Where the picks are made, each agent says how it is signed in on the computer running the host.
   const { report } = useAgentsReport(wayAsNote ? null : { placeId: HERE_PLACE_ID });
   const here = useStore(s => hereName(s.places));
+  const items = options.agents.filter(agent => !onlyTicked || picks.agents[agent.id] !== undefined).map(agent => ({ key: agent.id, name: agent.name, on: picks.agents[agent.id] !== undefined, agent }));
+  const tools = !onlyTicked && !wayAsNote;
   return (
-    <Grid id="agents">
-      {options.agents
-        .filter(agent => !onlyTicked || picks.agents[agent.id] !== undefined)
-        .map(agent => {
-          const on = picks.agents[agent.id] !== undefined;
-          const words = signInWords(box, agent.kind);
-          const way = picks.agents[agent.id]?.signin ?? agent.signins[0] ?? "vault";
-          const version = versions?.[agent.id];
-          const row = report?.agents.find(a => a.id === agent.id && a.installed);
-          const note = on && wayAsNote ? words[way] : row === undefined ? undefined : signInSentence(row, here);
-          const select =
-            on && !wayAsNote && agent.signins.length > 0 ? (
-              <Select value={way} onValueChange={next => onChange(signIn(picks, agent.id, next as RecipeSignIn))}>
-                <SelectTrigger size="sm" aria-label={`${agent.name} sign-in`} className={SELECT_WIDTH}>
-                  <SelectValue>{(value: RecipeSignIn) => words[value]}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  {agent.signins.map(w => (
-                    <SelectItem key={w} value={w}>
-                      {words[w]}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            ) : null;
-          return (
-            <PickRow
-              key={agent.id}
-              id={agent.id}
-              checked={on}
-              onCheckedChange={next => onChange(tick(picks, "agents", agent.id, next, options))}
-              glyph={<HarnessMark harness={agent.id} label={agent.name} className="size-5" />}
-              name={agent.name}
-              {...(version === undefined ? {} : { tag: version })}
-              {...(note === undefined ? {} : { note })}
-              {...(select === null && agent.bytes === undefined
-                ? {}
-                : {
-                    slot: (
-                      <>
-                        <Size bytes={agent.bytes} />
-                        {select}
-                      </>
-                    ),
-                  })}
-            />
-          );
-        })}
-    </Grid>
+    <PickList
+      id="agents"
+      items={items}
+      own={AS_FOUND}
+      tools={tools}
+      onSet={changes => onChange(tickMany(picks, "agents", changes, options))}
+      row={({ agent, on }, tick) => {
+        const words = signInWords(box, agent.kind);
+        const way = picks.agents[agent.id]?.signin ?? agent.signins[0] ?? "vault";
+        const version = versions?.[agent.id];
+        const row = report?.agents.find(a => a.id === agent.id && a.installed);
+        const note = on && wayAsNote ? words[way] : row === undefined ? undefined : signInSentence(row, here);
+        const select =
+          on && !wayAsNote && agent.signins.length > 0 ? (
+            <Select value={way} onValueChange={next => onChange(signIn(picks, agent.id, next as RecipeSignIn))}>
+              <SelectTrigger size="sm" aria-label={`${agent.name} sign-in`} className={SELECT_WIDTH}>
+                <SelectValue>{(value: RecipeSignIn) => words[value]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                {agent.signins.map(w => (
+                  <SelectItem key={w} value={w}>
+                    {words[w]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          ) : null;
+        return (
+          <PickRow
+            key={agent.id}
+            id={agent.id}
+            checked={on}
+            onCheckedChange={tick}
+            {...(tools ? { hover: RANGE_HOVER } : {})}
+            glyph={<HarnessMark harness={agent.id} label={agent.name} className="size-5" />}
+            name={agent.name}
+            {...(version === undefined ? {} : { tag: version })}
+            {...(note === undefined ? {} : { note })}
+            {...(select === null && agent.bytes === undefined
+              ? {}
+              : {
+                  slot: (
+                    <>
+                      <Size bytes={agent.bytes} />
+                      {select}
+                    </>
+                  ),
+                })}
+          />
+        );
+      }}
+    />
   );
 }
 
 /** The servers, each saying how it signs in on the computer, as an agent's row says it. */
 export function ServersPicks({ picks, options, onChange, box, onlyTicked = false }: PickProps) {
+  const items = options.mcp.filter(server => !onlyTicked || picks.mcp[server.name] !== undefined).map(server => ({ key: server.name, name: server.name, on: picks.mcp[server.name] !== undefined, server }));
   return (
-    <Grid id="servers">
-      {options.mcp
-        .filter(server => !onlyTicked || picks.mcp[server.name] !== undefined)
-        .map(server => (
-          <PickRow
-            key={server.name}
-            id={server.name}
-            checked={picks.mcp[server.name] !== undefined}
-            onCheckedChange={next => onChange(tick(picks, "mcp", server.name, next, options))}
-            glyph={<PlugIcon aria-hidden className={GLYPH} />}
-            name={server.name}
-            marks={<AgentMarks agents={server.agents} />}
-            {...(server.kind === undefined ? {} : { note: ADD_COMPUTER_WORDS.serverSignIn(server.kind, box) })}
-          />
-        ))}
-    </Grid>
+    <PickList
+      id="servers"
+      items={items}
+      tools={!onlyTicked}
+      onSet={changes => onChange(tickMany(picks, "mcp", changes, options))}
+      row={({ server, on }, tick) => (
+        <PickRow
+          key={server.name}
+          id={server.name}
+          checked={on}
+          onCheckedChange={tick}
+          {...(onlyTicked ? {} : { hover: RANGE_HOVER })}
+          glyph={<PlugIcon aria-hidden className={GLYPH} />}
+          name={server.name}
+          marks={<AgentMarks agents={server.agents} />}
+          {...(server.kind === undefined ? {} : { note: ADD_COMPUTER_WORDS.serverSignIn(server.kind, box) })}
+        />
+      )}
+    />
   );
 }
 
 /** The CLIs, the ones the agents ran most first, each with how many times they ran it; one never run says nothing. */
 export function ClisPicks({ picks, options, onChange, onlyTicked = false }: PickProps) {
-  const rows = options.clis.filter(cli => !onlyTicked || picks.clis[cli.name] !== undefined).sort((a, b) => (b.calls ?? 0) - (a.calls ?? 0));
+  const items = options.clis
+    .filter(cli => !onlyTicked || picks.clis[cli.name] !== undefined)
+    .sort((a, b) => (b.calls ?? 0) - (a.calls ?? 0))
+    .map(cli => ({ key: cli.name, name: cli.name, on: picks.clis[cli.name] !== undefined, cli }));
   return (
-    <Grid id="clis">
-      {rows.map(cli => (
+    <PickList
+      id="clis"
+      items={items}
+      own="Most used"
+      tools={!onlyTicked}
+      onSet={changes => onChange(tickMany(picks, "clis", changes, options))}
+      row={({ cli, on }, tick) => (
         <PickRow
           key={cli.name}
           id={cli.name}
-          checked={picks.clis[cli.name] !== undefined}
-          onCheckedChange={next => onChange(tick(picks, "clis", cli.name, next, options))}
+          checked={on}
+          onCheckedChange={tick}
+          {...(onlyTicked ? {} : { hover: RANGE_HOVER })}
           glyph={<TerminalIcon aria-hidden className={GLYPH} />}
           name={cli.name}
           {...(cli.version === undefined ? {} : { tag: cli.version })}
@@ -172,8 +194,8 @@ export function ClisPicks({ picks, options, onChange, onlyTicked = false }: Pick
                 ),
               })}
         />
-      ))}
-    </Grid>
+      )}
+    />
   );
 }
 
@@ -182,31 +204,35 @@ export function SkillsPicks({ picks, options, onChange, onlyTicked = false, firs
   const rows = options.skills.filter(item => !onlyTicked || picks.skills[item.name] !== undefined);
   const shown = first === undefined ? rows : rows.slice(0, first);
   return (
-    <Grid id="skills">
-      {shown.map(item => (
-        <PickRow key={item.name} id={item.name} checked={picks.skills[item.name] !== undefined} onCheckedChange={next => onChange(tick(picks, "skills", item.name, next, options))} glyph={<ScrollTextIcon aria-hidden className={GLYPH} />} name={item.name} slot={<span className={FACT}>{item.from}</span>} />
-      ))}
+    <PickList
+      id="skills"
+      items={shown.map(item => ({ key: item.name, name: item.name, on: picks.skills[item.name] !== undefined, item }))}
+      tools={!onlyTicked}
+      onSet={changes => onChange(tickMany(picks, "skills", changes, options))}
+      row={({ item, on }, tick) => <PickRow key={item.name} id={item.name} checked={on} onCheckedChange={tick} {...(onlyTicked ? {} : { hover: RANGE_HOVER })} glyph={<ScrollTextIcon aria-hidden className={GLYPH} />} name={item.name} slot={<span className={FACT}>{item.from}</span>} />}
+    >
       {rows.length > shown.length ? (
         <div data-k="more-skills" className={cn("flex items-center py-3", CARD_INSET, "min-h-12")}>
           <span className={NOTE}>{rows.length - shown.length} more skills on this recipe.</span>
         </div>
       ) : null}
-    </Grid>
+    </PickList>
   );
 }
 
 export function PluginsPicks({ picks, options, onChange, onlyTicked = false }: PickProps) {
+  const items = options.plugins.filter(plugin => !onlyTicked || picks.plugins[plugin.name] !== undefined).map(plugin => ({ key: plugin.name, name: plugin.name, on: picks.plugins[plugin.name] !== undefined }));
   return (
-    <Grid id="plugins">
-      {options.plugins
-        .filter(plugin => !onlyTicked || picks.plugins[plugin.name] !== undefined)
-        .map(plugin => {
-          const at = plugin.name.lastIndexOf("@");
-          return (
-            <PickRow key={plugin.name} id={plugin.name} checked={picks.plugins[plugin.name] !== undefined} onCheckedChange={next => onChange(tick(picks, "plugins", plugin.name, next, options))} glyph={<PuzzleIcon aria-hidden className={GLYPH} />} name={at > 0 ? plugin.name.slice(0, at) : plugin.name} {...(at > 0 ? { tag: plugin.name.slice(at + 1) } : {})} />
-          );
-        })}
-    </Grid>
+    <PickList
+      id="plugins"
+      items={items}
+      tools={!onlyTicked}
+      onSet={changes => onChange(tickMany(picks, "plugins", changes, options))}
+      row={({ key, on }, tick) => {
+        const at = key.lastIndexOf("@");
+        return <PickRow key={key} id={key} checked={on} onCheckedChange={tick} {...(onlyTicked ? {} : { hover: RANGE_HOVER })} glyph={<PuzzleIcon aria-hidden className={GLYPH} />} name={at > 0 ? key.slice(0, at) : key} {...(at > 0 ? { tag: key.slice(at + 1) } : {})} />;
+      }}
+    />
   );
 }
 
@@ -261,15 +287,23 @@ const CONFIG_ROWS = [
 ] as const;
 
 export function OtherPicks({ picks, options, onChange, onlyTicked = false }: PickProps) {
+  const items = CONFIG_ROWS.flatMap(row => {
+    const offered = options.configs.find(c => c.id === row.id);
+    if (offered === undefined || (onlyTicked && picks.configs[row.id] === undefined)) return [];
+    return [{ key: row.id, name: row.name, on: picks.configs[row.id] !== undefined, row, label: offered.label }];
+  });
+  const set = (changes: PickChanges): void => onChange(changes.reduce((next, [id, on]) => tickConfig(next, id as "git" | "shell", on), picks));
   return (
-    <Grid id="configs">
-      {CONFIG_ROWS.flatMap(row => {
-        const offered = options.configs.find(c => c.id === row.id);
-        if (offered === undefined || (onlyTicked && picks.configs[row.id] === undefined)) return [];
+    <PickList
+      id="configs"
+      items={items}
+      tools={!onlyTicked}
+      onSet={set}
+      row={({ row, label, on }, tick) => {
         const Glyph = row.glyph;
-        return [<PickRow key={row.id} id={row.id} checked={picks.configs[row.id] !== undefined} onCheckedChange={next => onChange(tickConfig(picks, row.id, next))} glyph={<Glyph aria-hidden className={GLYPH} />} name={row.name} note={offered.label} />];
-      })}
-    </Grid>
+        return <PickRow key={row.id} id={row.id} checked={on} onCheckedChange={tick} {...(onlyTicked ? {} : { hover: RANGE_HOVER })} glyph={<Glyph aria-hidden className={GLYPH} />} name={row.name} note={label} />;
+      }}
+    />
   );
 }
 
@@ -297,30 +331,44 @@ const folderNote = (folder: FolderOption): string | undefined =>
  * by is the one state that questions the field. */
 export function ProjectsPicks({ picks, onChange, box, folders, taken }: Omit<PickProps, "options"> & { folders: readonly FolderOption[]; taken: (name: string) => boolean }) {
   const noGitHub = githubPick(picks) === "skip";
+  const rowOf = (folder: FolderOption): RecipeFile["folders"][string] & { name: string; icon: ProjectIcon; hue: ProjectHue } => {
+    const row = picks.folders[folder.key];
+    return { from: folder.path, name: row?.name ?? folder.name, icon: row?.icon ?? folder.icon, hue: row?.hue ?? folder.hue, keep: row?.keep ?? [] };
+  };
+  const set = (changes: PickChanges): void =>
+    onChange(
+      changes.reduce((next, [key, on]) => {
+        const folder = folders.find(f => f.key === key);
+        return folder === undefined ? next : tickFolder(next, key, on ? rowOf(folder) : undefined);
+      }, picks),
+    );
+  const items = folders.map(folder => ({ key: folder.key, name: picks.folders[folder.key]?.name ?? folder.name, on: picks.folders[folder.key] !== undefined, folder }));
   return (
-    <Grid id="projects">
-      {folders.map(folder => {
-        const row = picks.folders[folder.key];
-        const name = row?.name ?? folder.name;
-        const icon = row?.icon ?? folder.icon;
-        const hue = row?.hue ?? folder.hue;
+    <PickList
+      id="projects"
+      items={items}
+      own={AS_FOUND}
+      onSet={set}
+      row={({ folder, on }, tick) => {
+        const { name, icon, hue } = rowOf(folder);
         const Glyph = PROJECT_GLYPHS[icon];
-        const clash = row !== undefined && taken(name);
-        const note = row !== undefined && noGitHub && folder.private === true ? ADD_COMPUTER_WORDS.needsGitHub : folderNote(folder);
-        const put = (next: Partial<RecipeFile["folders"][string]>): void => onChange(tickFolder(picks, folder.key, { from: folder.path, name, icon, hue, keep: row?.keep ?? [], ...next }));
+        const clash = on && taken(name);
+        const note = on && noGitHub && folder.private === true ? ADD_COMPUTER_WORDS.needsGitHub : folderNote(folder);
+        const put = (next: Partial<RecipeFile["folders"][string]>): void => onChange(tickFolder(picks, folder.key, { ...rowOf(folder), ...next }));
         return (
           <PickRow
             key={folder.key}
             id={folder.key}
-            checked={row !== undefined}
-            onCheckedChange={next => (next ? put({}) : onChange(tickFolder(picks, folder.key, undefined)))}
+            checked={on}
+            onCheckedChange={tick}
+            hover={RANGE_HOVER}
             glyph={<Glyph aria-hidden className={cn("size-4", hue === "neutral" ? "text-foreground/80" : PROJECT_HUES[hue].text)} />}
             name={name}
             tag={folder.path}
             {...(note === undefined ? {} : { note })}
             {...(folder.bytes === undefined ? {} : { slot: <Size bytes={folder.bytes} /> })}
           >
-            {row === undefined ? null : (
+            {!on ? null : (
               <>
                 <PickLine label="Name">
                   <span className="flex flex-col items-end gap-1">
@@ -342,7 +390,7 @@ export function ProjectsPicks({ picks, onChange, box, folders, taken }: Omit<Pic
             )}
           </PickRow>
         );
-      })}
-    </Grid>
+      }}
+    />
   );
 }

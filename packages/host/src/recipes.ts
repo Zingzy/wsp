@@ -8,15 +8,16 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, hookFiles } from "@wsp/catalog";
-import { DETECTORS, expand, isSecretName, nodeHost, type Manifest } from "@wsp/collect";
+import { DETECTORS, expand, isSecretName, nodeHost, type Host, type Manifest } from "@wsp/collect";
 import { writeOwn } from "@wsp/own-file";
-import { issuesLine, noSuchRecipeRefusal, RECIPE_NAME_REFUSAL, RecipeFile, recipeCanon, recipeSlug, toolRowId, type RecipeOptions, type ResolvedRecipe } from "@wsp/protocol";
+import { issuesLine, noSuchRecipeRefusal, RECIPE_NAME_REFUSAL, RecipeFile, recipeCanon, recipeSlug, toolRowId, withoutWspOwn, type RecipeOptions, type ResolvedRecipe } from "@wsp/protocol";
 import type { RecipeShelf } from "@wsp/runtime";
 import { CONFIG_PATHS, configDigest, configTexts, type ConfigFiles } from "./recipe-configs.js";
 import { historyCache } from "./recipe-file.js";
 import { folderOptions, readRecipeOptions } from "./recipe-options.js";
 import { folderFiles } from "./folder-files.js";
 import { tokenShaped } from "./token-shapes.js";
+import { withoutWspHere, wspPackages } from "./wsp-own.js";
 
 /** Where a host keeps its recipes: beside its state file, one file per recipe. */
 export const recipesDir = (statePath: string): string => join(dirname(statePath), "recipes");
@@ -63,11 +64,18 @@ export async function readRecipeText(text: string, path: string): Promise<Recipe
   return parsed.data;
 }
 
-/** One saved recipe: its slug and what is in it. */
+/** One saved recipe: its slug, what is in it, and when its file was last written, ISO. */
 export interface SavedRecipe {
   slug: string;
   file: RecipeFile;
+  savedAt?: string;
 }
+
+/** When a recipe's file was last written, which a hand edit moves as a save does. */
+const savedAt = (path: string): { savedAt?: string } => {
+  const at = statSync(path, { throwIfNoEntry: false })?.mtime;
+  return at === undefined ? {} : { savedAt: at.toISOString() };
+};
 
 /** Every recipe beside the state file, by slug; a file that will not read is passed over, since one bad hand edit
  * must not take the others with it, and is named when asked for by name. */
@@ -77,7 +85,7 @@ export async function readRecipes(statePath: string): Promise<SavedRecipe[]> {
   const out: SavedRecipe[] = [];
   for (const name of readdirSync(dir).filter(n => n.endsWith(".toml")).sort()) {
     const file = await readRecipeText(readFileSync(join(dir, name), "utf8"), join(dir, name)).catch(() => undefined);
-    if (file !== undefined) out.push({ slug: name.slice(0, -".toml".length), file });
+    if (file !== undefined) out.push({ slug: name.slice(0, -".toml".length), file, ...savedAt(join(dir, name)) });
   }
   return out;
 }
@@ -87,7 +95,7 @@ export async function readRecipes(statePath: string): Promise<SavedRecipe[]> {
 export async function readRecipe(statePath: string, word: string): Promise<SavedRecipe> {
   const slug = recipeSlug(word);
   const path = join(recipesDir(statePath), `${slug}.toml`);
-  if (slug !== "" && existsSync(path)) return { slug, file: await readRecipeText(readFileSync(path, "utf8"), path) };
+  if (slug !== "" && existsSync(path)) return { slug, file: await readRecipeText(readFileSync(path, "utf8"), path), ...savedAt(path) };
   const all = await readRecipes(statePath);
   const named = all.find(r => r.file.name === word);
   if (named !== undefined) return named;
@@ -106,7 +114,7 @@ export async function writeRecipe(statePath: string, given: unknown): Promise<Sa
   if (slug === "") throw usage(RECIPE_NAME_REFUSAL);
   const { stringify } = await toml();
   writeOwn(dirname(statePath), `recipes/${slug}.toml`, stringify(file));
-  return { slug, file };
+  return { slug, file, ...savedAt(join(recipesDir(statePath), `${slug}.toml`)) };
 }
 
 /** Takes a recipe's file away; refused for a word naming none. */
@@ -273,16 +281,26 @@ export function keptOptions(read: (folders: Folders) => Promise<RecipeOptions>):
   };
 }
 
-/** The host's shelf of recipes, as the runtime serves it: the files beside the state, and the options read off this
- * computer when the modal or a recipe opens. */
-export function recipeShelf(o: { statePath: string; home: string; options?: () => Promise<RecipeOptions>; tools?: () => Promise<Manifest["entries"]> }): RecipeShelf {
+/** The host's shelf of recipes, as the runtime serves it: the files beside the state, each handed out less wsp's own
+ * pieces, and the options read off this computer when the modal or a recipe opens. */
+export function recipeShelf(o: { statePath: string; home: string; options?: () => Promise<RecipeOptions>; tools?: () => Promise<Manifest["entries"]>; here?: Host }): RecipeShelf {
   const reading: RecipeReading = { home: o.home, tools: o.tools ?? toolsHere };
+  const here = (): Host => o.here ?? { ...nodeHost(), home: o.home };
+  const read = async (word: string): Promise<SavedRecipe> => {
+    const held = await readRecipe(o.statePath, word);
+    return { ...held, file: await withoutWspHere(here(), held.file) };
+  };
   return {
-    list: () => readRecipes(o.statePath),
-    read: word => readRecipe(o.statePath, word),
+    list: async () => {
+      const all = await readRecipes(o.statePath);
+      const wsp = await wspPackages(here(), all.flatMap(r => Object.entries(r.file.clis).map(([name, row]) => ({ name, via: row.via }))));
+      return all.map(r => ({ ...r, file: withoutWspOwn(r.file, wsp) }));
+    },
+    read,
+    // The hash stays over the file as saved, the one every computer that follows it is held against.
     get: async word => {
       const held = await readRecipe(o.statePath, word);
-      return { ...held, hash: recipeHash(await resolveRecipe(held.file, reading)) };
+      return { ...held, file: await withoutWspHere(here(), held.file), hash: recipeHash(await resolveRecipe(held.file, reading)) };
     },
     save: file => writeRecipe(o.statePath, file),
     remove: word => deleteRecipe(o.statePath, word),

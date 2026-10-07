@@ -245,14 +245,15 @@ export interface InitDoor {
 /** The recipes a host keeps, as the runtime serves them: the files beside the state are the host's, and which
  * computers follow each is the place records', which the runtime folds in. */
 export interface RecipeShelf {
-  list(): Promise<{ slug: string; file: RecipeFile }[]>;
+  /** Each recipe with when its file was last written, ISO, where the shelf reads one. */
+  list(): Promise<{ slug: string; file: RecipeFile; savedAt?: string }[]>;
   /** One recipe by its name or slug, as saved; refused naming the ones there are. */
-  read(word: string): Promise<{ slug: string; file: RecipeFile }>;
+  read(word: string): Promise<{ slug: string; file: RecipeFile; savedAt?: string }>;
   /** One recipe by its name or slug, with the hash it resolves to on this computer now. */
-  get(word: string): Promise<{ slug: string; file: RecipeFile; hash: string }>;
+  get(word: string): Promise<{ slug: string; file: RecipeFile; savedAt?: string; hash: string }>;
   /** Writes the recipe whole; refused for a name that makes no file name and for anything shaped like a secret. */
-  save(file: unknown): Promise<{ slug: string; file: RecipeFile }>;
-  remove(word: string): Promise<{ slug: string; file: RecipeFile }>;
+  save(file: unknown): Promise<{ slug: string; file: RecipeFile; savedAt?: string }>;
+  remove(word: string): Promise<{ slug: string; file: RecipeFile; savedAt?: string }>;
   /** What a recipe can pick from on this computer, `folders` this computer's own projects to offer with their facts. */
   options(folders?: readonly { name: string; path: string }[]): Promise<RecipeOptions>;
   /** One recipe by its slug as this computer has it now: what it holds for each row, and the hash a computer that

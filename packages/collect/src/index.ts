@@ -13,7 +13,7 @@ export { TERMINAL_FONT_ID, alacrittyFont, detectTerminalFont, ghosttyFont, iterm
 export { GHOSTTY_BUILT_IN_FONT, ghosttyConfigPaths, parseGhosttyDirectives, readGhosttyConfig, themeFor, type GhosttyDirective } from "./ghostty-config.js";
 export { detectToolchains } from "./detect/toolchains.js";
 export { aptPackages, aptSizes, parseAptManual, parseDpkgFields } from "./detect/apt.js";
-export { detectTools, parseBrewfile, parseBunGlobals, parseCargoInstalls, parseGoVersionM, parseNpmGlobals, parsePipxList, parsePnpmGlobals, parseUvToolList, type BrewLine, type GoModule, type Pkg } from "./detect/tools.js";
+export { detectTools, jsGlobalFolders, packageCommands, parseBrewfile, parseBunGlobals, parseCargoInstalls, parseGoVersionM, parseNpmGlobals, parsePipxList, parsePnpmGlobals, parseUvToolList, type BrewLine, type GoModule, type Pkg } from "./detect/tools.js";
 export { classifyFormulae, linuxSupport, renderSnapshot, type BottleSnapshot } from "./brew-bottles.js";
 export { LINUX_BOTTLES } from "./data/linux-bottles.js";
 export { AGENTS, agentRowId, detectAgents } from "./detect/agents.js";

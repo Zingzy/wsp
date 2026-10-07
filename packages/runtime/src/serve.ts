@@ -455,14 +455,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     if (shelf === undefined) throw new Error(NO_RECIPES);
     return shelf;
   };
-  /** One recipe as a client reads it: its file, the line of what it holds and the computers that follow it. */
-  const recipeView = (held: { slug: string; file: RecipeFile }, followers: ReadonlyMap<string, string[]>): RecipeView => ({
-    name: held.file.name,
-    slug: held.slug,
-    summary: recipeSummary(held.file),
-    machines: followers.get(held.slug) ?? [],
-    file: held.file,
-  });
+  /** One recipe as a client reads it: its file, the line of what it holds, the computers that follow it, when it was saved. */
+  const recipeView = ({ slug, file, savedAt }: { slug: string; file: RecipeFile; savedAt?: string }, followers: ReadonlyMap<string, string[]>): RecipeView =>
+    ({ name: file.name, slug, summary: recipeSummary(file), machines: followers.get(slug) ?? [], ...(savedAt === undefined ? {} : { savedAt }), file });
   /** The saved recipe a word names, its file and its slug, or the refusal naming the ones there are. */
   const recipeNamed = (word: string): Promise<{ slug: string; file: RecipeFile }> => recipes().read(word);
   /** The computers that follow each recipe, empty on a runtime that holds no places. */

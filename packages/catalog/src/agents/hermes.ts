@@ -3,6 +3,7 @@ import type { AgentEntry } from "../catalog.js";
 import { HERMES, HERMES_INSTALL } from "../roads.js";
 import { HERMES_CONTEXT } from "../context.js";
 import { SIGN_IN_ROWS } from "../signin.js";
+import { HERMES_BUNDLED_SKILLS } from "../skills.js";
 import { agent, dfSize } from "./entry.js";
 
 export const HERMES_AGENT: AgentEntry = {
@@ -14,6 +15,7 @@ export const HERMES_AGENT: AgentEntry = {
   context: HERMES_CONTEXT,
   // 0.20.0: one folder, skills under a category folder or straight in it, links into the shared folder among them.
   skillRoots: { user: [{ dir: "~/.hermes/skills", lands: "link" }], project: [] },
+  bundledSkills: HERMES_BUNDLED_SKILLS,
   installRoad: { road: "script", script: HERMES_INSTALL, version: HERMES.tag },
   signIn: SIGN_IN_ROWS.hermes,
   configPaths: ["~/.hermes/config.yaml", "~/.hermes/SOUL.md", "~/.hermes/memories", "~/.hermes/skills", "~/.hermes/cron", "~/.hermes/hooks"],

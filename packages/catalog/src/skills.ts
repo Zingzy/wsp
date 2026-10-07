@@ -60,6 +60,25 @@ export const CLAUDE_PLUGIN_SKILLS: PluginSkills = {
   },
 };
 
+/** Skills an agent's own install puts in its skills folder, which come with the agent wherever it is installed and
+ * so are never the person's to pick: the file the install writes naming each one it put there, and its names. */
+export interface BundledSkills {
+  manifest: string;
+  names(text: string): string[];
+}
+
+/** Hermes's .bundled_manifest (tools/skills_sync.py at v2026.8.31): a line per skill it seeded into ~/.hermes/skills,
+ * `name:hash`, or the bare name an older install wrote. Codex keeps its own under ~/.codex/skills/.system, a dot
+ * folder the skills reader never lists. */
+export const HERMES_BUNDLED_SKILLS: BundledSkills = {
+  manifest: "~/.hermes/skills/.bundled_manifest",
+  names: text =>
+    text
+      .split("\n")
+      .map(line => line.split(":")[0]!.trim())
+      .filter(name => name !== ""),
+};
+
 /** How an agent's plugins go on another computer: the file here naming each marketplace and where it is fetched
  * from, and the lines that put one plugin on by the agent's own commands there. The plugin's folder never travels. */
 export interface PluginRoad {
