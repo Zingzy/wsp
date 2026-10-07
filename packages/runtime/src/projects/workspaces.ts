@@ -2,10 +2,10 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { GUEST_HOME, remoteHost } from "@wsp/catalog";
-import { NotFirstLifeError, ResumeUnansweredError, goldenHead, isMissing, readGone, MachineAliveError, answerOf, diskUse, projectSnapshotName, syncDisk } from "@wsp/engine";
+import { NotFirstLifeError, RestoreUnfinishedError, ResumeUnansweredError, goldenHead, isMissing, readGone, MachineAliveError, answerOf, diskUse, projectSnapshotName, syncDisk } from "@wsp/engine";
 import type { ProjectGolden, ProjectView, WorkspaceProject } from "@wsp/protocol";
 import { noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitRunLogReply, GitPrMergeReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, type TreeRecord, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, type PullRequestItem, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, AUTO_MERGE_OFF_LINE, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, scopeOf, spawnActRefusal, spawnGoldenRefusal, workspaceIdOf } from "@wsp/protocol";
-import { isLocalWorkspace, kindWords, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, kindForComputer, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, workspaceState, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix } from "@wsp/protocol";
+import { isLocalWorkspace, kindWords, noCommandsYetLine, readingRoad, forgetUndrivenRefusal, goneRefusal, goneWords, imageMoveRefusal, inFolder, machineWord, deleteRefusedLine, snapshotRefusedLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, refusalLine, notOnThisComputerLine, noBranchesLine, notMadeWorktreeLine, WORKTREE_FORCE_LINE, copiesFolder, copyTakesNone, kindForComputer, shellQuote, WAKE_STOPPED, wakeAsksIn, wakeGaveUpLine, workspaceState, HERE_PLACE_ID, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix } from "@wsp/protocol";
 import { putFiles } from "@wsp/engine";
 import { ownerRepoOf } from "@wsp/protocol";
 import { providerSaid } from "../status.js";
@@ -221,8 +221,10 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
         }
         if (read === "paused") await ctx.adoptPause(entry);
       } else if (await ctx.runsUnderNapping(entry)) await ctx.adoptRunning(entry);
+      // A wake that began while this one read the machine is the one this caller waits on.
+      if (entry.waking) return entry.waking;
       // A running workspace has nothing to wake, whatever its kind; only a real resume asks the machine for one.
-      if (entry.record.phase === "running") return ctx.view(entry.record);
+      if (entry.record.phase === "running") return entry.unchecked === true ? ctx.proven(entry) : ctx.view(entry.record);
       ctx.refusePauseless(entry, "be woken");
       entry.waking = (async () => {
         // The stop the person pulls from the row. It aborts the provider call the ask is on rather than walking away
@@ -292,11 +294,12 @@ export function workspacesArea(ctx: RuntimeContext): WorkspacesArea {
               entry.record.phase = entry.ws.currentPhase;
               await ctx.persist(entry.record);
               delete entry.wakeAsk;
-              const words = stopped() ? WAKE_STOPPED : (gaveUp ?? (e instanceof Error ? e.message : String(e)));
+              const unfinished = !stopped() && e instanceof RestoreUnfinishedError ? noCommandsYetLine(entry.record.name, e.message) : undefined;
+              const words = stopped() ? WAKE_STOPPED : (gaveUp ?? unfinished ?? (e instanceof Error ? e.message : String(e)));
               if (!stopped()) console.warn(`wake of ${id} failed: ${words}`);
               await ctx.emitStatus(entry, "napping", words);
               ctx.armLateRead(entry);
-              throw stopped() ? new Error(WAKE_STOPPED) : gaveUp !== undefined ? new Error(gaveUp) : e;
+              throw stopped() ? new Error(WAKE_STOPPED) : gaveUp !== undefined ? new Error(gaveUp) : unfinished !== undefined ? new Error(unfinished) : e;
             }
           }
         } finally {

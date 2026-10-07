@@ -228,6 +228,7 @@ export function bootArea(ctx: RuntimeContext): BootArea {
       await ctx.persist(record);
     }
     if (phase !== "running" || absent) return undefined;
+    if (stored.phase === "napping" || stored.phase === "waking") live.get(stored.id)!.unchecked = true;
     ctx.idle.touch(stored.id);
     return live.get(stored.id)!;
   };

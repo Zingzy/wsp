@@ -10,7 +10,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { DAEMON_UNIT, moveTimedOutLine, providerKeyName, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
-import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, StopRefusedError, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { GuestUnusableError, MoveUnansweredError, RestoreUnfinishedError, ROAD_TRIES, StopRefusedError, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import { DROP_SUDO_MARKS } from "./run-env.js";
@@ -740,7 +740,9 @@ export class BoxMachine implements Machine {
   /** One command on the road every other command takes, so a guest the provider left running but unusable is found
    * where it can still be acted on rather than two minutes later, when the daemon has not answered. */
   async proveRoad(signal?: AbortSignal): Promise<void> {
-    await this.execInline("true", INLINE_EXEC_MS, signal);
+    await this.execInline("true", INLINE_EXEC_MS, signal).catch((e: unknown) => {
+      throw stillRestoring(e) && e instanceof Error ? new RestoreUnfinishedError(this.id, e) : e;
+    });
   }
 
   run(script: string, opts: RunOptions): Promise<ExecResult> {

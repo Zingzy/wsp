@@ -4,16 +4,17 @@
 // stored, and a wake puts nothing back. The kinds that keep an image nap
 // exactly as they did.
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { BOX_BUDGETS } from "@wsp/engine";
+import { BOX_BUDGETS, BoxBackend, BoxMachine, GuestUnusableError, sudoCommand } from "@wsp/engine";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
-import { DAEMON_TOKEN_PATH, DAEMON_UNIT, EXEC_DEADLINE_EXIT, WAKE_STOPPED } from "@wsp/protocol";
-import { createRuntime } from "../src/runtime.js";
+import { DAEMON_TOKEN_PATH, DAEMON_UNIT, EXEC_DEADLINE_EXIT, WAKE_STOPPED, WAKE_STOPPED_UP, noCommandsYetLine, sendRefusal, workspaceState, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { droppingPort } from "./held-port.js";
 import { createOn, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
+import { until } from "./until.js";
 
 // The daemon link redials on the process's own timers while a wake's budget runs on the test's clock, which the
 // pump moves half a second a few turns of the loop at a time: a redial here waits for no time at all, or the budget
@@ -543,5 +544,324 @@ describe("the nap and rebuild of a workspace whose pause keeps the disk", () => 
       await rt.close();
       vi.unstubAllGlobals();
     }
+  });
+});
+
+/** A Boat box as the provider's API shows it to a host that finds it running: its state is whatever `state()` says,
+ * and every command is refused with box_restoring until the box's own clock reaches `restoredAt`, as a box does while
+ * its disk streams in behind a ready reading. The backend's sleeps move that clock and cost nothing. A test can hold
+ * the answer to one command until it lets go (an abort of the call ends the wait the way a cut connection does),
+ * delete the box, or have the provider's agent fail every command. A stop archives the box, which then refuses every
+ * command as not running, and a resume calls `resumed` and takes the archive off. A test can also hold the answer to
+ * the next read of the box. */
+function restoringBox(id: string, o: { state: () => string; restoredAt: number; resumed?: () => void }) {
+  const clock = { at: 0, now: () => clock.at, sleep: async (ms: number) => void (clock.at += ms) };
+  const box = {
+    clock,
+    commands: [] as boolean[],
+    proofs: 0,
+    deleted: false,
+    agentFails: false,
+    restoredAt: o.restoredAt,
+    hold: undefined as Promise<void> | undefined,
+    archived: false,
+    readHold: undefined as Promise<void> | undefined,
+    readHeld: false,
+  };
+  const reply = (status: number, body: unknown): Response => new Response(JSON.stringify(body), { status });
+  const missing = (): Response => reply(404, { ok: false, status: 404, code: "not_found", message: "Box not found." });
+  const fetch = async (url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const path = new URL(String(url)).pathname.replace(/^\/api\/box\/v1/, "");
+    const method = init?.method ?? "GET";
+    if (path === "/limits") return reply(200, { ok: true, accessTier: "paid" });
+    if (method === "DELETE" && path === `/boxes/${id}`) {
+      box.deleted = true;
+      return reply(202, { ok: true, operation: { id: "bdop_x" } });
+    }
+    if (method === "POST" && path === `/boxes/${id}/stop`) {
+      box.archived = true;
+      return reply(202, { ok: true });
+    }
+    if (method === "POST" && path === `/boxes/${id}/resume`) {
+      box.archived = false;
+      o.resumed?.();
+      return reply(202, { ok: true });
+    }
+    if (method === "GET" && path === `/boxes/${id}` && box.readHold !== undefined) {
+      const held = box.readHold;
+      box.readHold = undefined;
+      box.readHeld = true;
+      await held;
+    }
+    if (method === "GET" && path === `/boxes/${id}`) return box.deleted ? missing() : reply(200, { ok: true, box: { id, state: box.archived ? "archived" : o.state() } });
+    if (method === "POST" && path === `/boxes/${id}/commands`) {
+      const held = box.hold;
+      if (held !== undefined && (JSON.parse(String(init?.body)) as { command: string }).command === sudoCommand("true")) {
+        box.hold = undefined;
+        await new Promise<void>((resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("This operation was aborted"), { name: "AbortError" })), { once: true });
+          void held.then(resolve);
+        });
+      }
+      if (box.deleted) return missing();
+      if (box.archived) return reply(409, { ok: false, status: 409, code: "box_not_running", message: "Box is not running." });
+      if (box.agentFails) return reply(500, { ok: false, status: 500, code: "internal_error", message: "Cannot read properties of undefined (reading 'on')" });
+      const restoring = clock.at < box.restoredAt;
+      box.commands.push(restoring);
+      return restoring
+        ? reply(409, { ok: false, status: 409, code: "box_restoring", message: "Box is restoring." })
+        : reply(200, { ok: true, exitCode: 0, stdout: "", stderr: "", timedOut: false });
+    }
+    return missing();
+  };
+  const backend = new BoxBackend({ apiKey: "box_x", fetch, clock, budgets: { pollMs: 10, restoreMs: 100 } });
+  const machine = new BoxMachine(backend, id, "sandbox");
+  const prove = machine.proveRoad.bind(machine);
+  machine.proveRoad = (signal?: AbortSignal) => {
+    box.proofs++;
+    return prove(signal);
+  };
+  /** Holds the answer to the proof's next ask, the one command it sends, until the returned call lets it go. */
+  const holdNext = (): (() => void) => {
+    let release!: () => void;
+    box.hold = new Promise<void>(resolve => (release = resolve));
+    return () => release();
+  };
+  return Object.assign(box, { machine, holdNext });
+}
+
+/** A harness whose turn runs until the test ends; each launch notes whether the box had taken a command by then. */
+function launches(box: () => { commands: boolean[] }) {
+  const proven: boolean[] = [];
+  const factory: HarnessAdapterFactory = () => ({
+    steers: true,
+    start: ({ onEvent }) => {
+      proven.push(box().commands.at(-1) === false);
+      onEvent({ type: "session.start", sessionId: "c1" } as AdapterEvent);
+      return { localId: "s1", finished: new Promise<TurnResult>(() => {}), interrupt: async () => {}, steer: async () => "accepted" as const };
+    },
+  });
+  return { factory, proven };
+}
+
+describe("a wake that finds a Boat box already running", () => {
+  /** A workspace whose host restarted with its record left `left`, and whose box the new host reaches through the
+   * provider's API: archived until `ready` is called, or ready from the start. */
+  async function restarted(left: "napping" | "waking", restoredAt: number) {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {} });
+    const ws = await createOn(first, { golden: "snap_g", name: "x" });
+    await first.close();
+    await store.put("workspaces", ws.id, { ...((await store.get("workspaces", ws.id)) as object), phase: left });
+    let state = left === "napping" ? "archived" : "ready";
+    const box = restoringBox(ws.machineId, { state: () => state, restoredAt, resumed: () => void (state = "ready") });
+    const get = backend.get.bind(backend);
+    backend.get = async id => (id === ws.machineId ? box.machine : get(id));
+    const launched = launches(() => box);
+    const host = () => createRuntime({ backend, store, adapters: { claude: launched.factory }, goneConfirmMs: 0, killConfirm: { graceMs: 0, pollMs: 0 } });
+    const rt = host();
+    const phases: string[] = [];
+    rt.events.on("workspace.status", e => e.type === "workspace.status" && e.status.id === ws.id && phases.push(e.status.phase));
+    onTestFinished(() => rt.close());
+    return { rt, ws, box, phases, store, host, launched, ready: () => void (state = "ready") };
+  }
+
+  const ROADS = [
+    { road: "a napping record whose box the wake finds running", left: "napping" },
+    { road: "a record a restart found running over a box that was waking", left: "waking" },
+  ] as const;
+
+  for (const { road, left } of ROADS) {
+    it(`${road}: the wake waits, reading waking, until the box takes commands`, async () => {
+      const t = await restarted(left, 30);
+      t.ready();
+      const woken = await t.rt.workspaces.wake(t.ws.id);
+      expect(woken.phase).toBe("running");
+      // The box answered box_restoring while the wake waited, and took a command before the wake answered.
+      expect(t.box.commands.at(-1)).toBe(false);
+      expect(t.box.commands).toContain(true);
+      expect(t.phases).toContain("waking");
+      expect(t.phases.at(-1)).toBe("running");
+    });
+
+    it(`${road}: a box still restoring at the deadline fails the wake with a line that says so, and the next wake waits again`, async () => {
+      const t = await restarted(left, 1_000);
+      t.ready();
+      await expect(t.rt.workspaces.wake(t.ws.id)).rejects.toThrow(noCommandsYetLine("x", "Box is restoring."));
+      expect((await t.rt.workspaces.get(t.ws.id)).phase).toBe("running");
+      t.box.clock.at = 1_000;
+      expect((await t.rt.workspaces.wake(t.ws.id)).phase).toBe("running");
+      expect(t.box.commands.at(-1)).toBe(false);
+    });
+  }
+
+  it("a delete between two of the proof's asks sticks: nothing is written back, and a host started on the state lists no such workspace", async () => {
+    const t = await restarted("napping", Number.POSITIVE_INFINITY);
+    t.ready();
+    const release = t.box.holdNext();
+    const waking = t.rt.workspaces.wake(t.ws.id);
+    waking.catch(() => {});
+    await until(() => t.box.hold === undefined);
+    await t.rt.workspaces.delete(t.ws.id);
+    expect(await t.store.get("workspaces", t.ws.id)).toBeUndefined();
+    release();
+    await expect(waking).rejects.toThrow();
+    expect(await t.store.get("workspaces", t.ws.id)).toBeUndefined();
+    const next = t.host();
+    onTestFinished(() => next.close());
+    expect((await next.workspaces.list()).map(w => w.id)).not.toContain(t.ws.id);
+  });
+
+  it("the row's stop ends the proof within a second, leaves the record running, and the next wake proves again", async () => {
+    const t = await restarted("napping", 0);
+    t.ready();
+    const release = t.box.holdNext();
+    const waking = t.rt.workspaces.wake(t.ws.id);
+    waking.catch(() => {});
+    await until(() => t.box.hold === undefined);
+    expect((await t.rt.workspaces.get(t.ws.id)).phase).toBe("waking");
+    const stop = t.rt.workspaces.stopWake(t.ws.id).then(() => "stopped");
+    const answer = await Promise.race([stop, new Promise(resolve => setTimeout(() => resolve("still waiting after a second"), 1_000))]);
+    release();
+    expect(answer).toBe("stopped");
+    await expect(waking).rejects.toThrow(WAKE_STOPPED_UP);
+    expect((await t.rt.workspaces.get(t.ws.id)).phase).toBe("running");
+    const proofs = t.box.proofs;
+    expect((await t.rt.workspaces.wake(t.ws.id)).phase).toBe("running");
+    expect(t.box.proofs).toBe(proofs + 1);
+  });
+
+  it("a box whose agent fails during the proof fails the wake with that failure, not a line to wait", async () => {
+    const t = await restarted("napping", 0);
+    t.ready();
+    t.box.agentFails = true;
+    const failed = await t.rt.workspaces.wake(t.ws.id).then(() => undefined, (e: unknown) => e);
+    expect(failed).toBeInstanceOf(GuestUnusableError);
+    expect((failed as Error).message).not.toContain("wake it again");
+    expect((await t.rt.workspaces.get(t.ws.id)).phase).toBe("running");
+  });
+
+  it("a box the provider no longer has during the proof takes the gone road", async () => {
+    const t = await restarted("napping", 0);
+    t.ready();
+    const release = t.box.holdNext();
+    const waking = t.rt.workspaces.wake(t.ws.id);
+    waking.catch(() => {});
+    await until(() => t.box.hold === undefined);
+    t.box.deleted = true;
+    release();
+    const failed = await waking.then(() => undefined, (e: unknown) => e as Error);
+    expect(failed?.message).not.toContain("wake it again");
+    expect((await t.rt.workspaces.get(t.ws.id)).phase).toBe("gone");
+  });
+
+  it("a start from the app on a machine not yet proven proves it first, reading waking, and then launches", async () => {
+    const t = await restarted("waking", 30);
+    await t.rt.sessions.start(t.ws.id, { prompt: "go" });
+    expect(t.launched.proven).toEqual([true]);
+    expect(t.phases).toContain("waking");
+    expect((await t.rt.workspaces.get(t.ws.id)).phase).toBe("running");
+  });
+
+  it("two wakes at once share one proof", async () => {
+    const t = await restarted("waking", 30);
+    await t.rt.workspaces.get(t.ws.id);
+    // Both wakes read the machine before either starts its proof, as two callers a moment apart do.
+    const read = t.box.machine.state.bind(t.box.machine);
+    let arrived = 0;
+    let both_read!: () => void;
+    const barrier = new Promise<void>(resolve => (both_read = resolve));
+    t.box.machine.state = async () => {
+      if (++arrived === 2) both_read();
+      if (arrived <= 2) await barrier;
+      return read();
+    };
+    const release = t.box.holdNext();
+    const answered: string[] = [];
+    const both = Promise.all([t.rt.workspaces.wake(t.ws.id), t.rt.workspaces.wake(t.ws.id)].map(w => w.then(v => (answered.push(v.phase), v))));
+    await until(() => t.box.hold === undefined);
+    await new Promise(r => setTimeout(r, 50));
+    // Neither wake answers while the proof's ask is held.
+    expect(answered).toEqual([]);
+    release();
+    expect((await both).map(w => w.phase)).toEqual(["running", "running"]);
+    expect(t.box.proofs).toBe(1);
+  });
+
+  it("a wake after a proven launch proves nothing, and a steer is not refused", async () => {
+    const t = await restarted("waking", 0);
+    const handle = await t.rt.sessions.start(t.ws.id, { prompt: "go" });
+    const proofs = t.box.proofs;
+    const release = t.box.holdNext();
+    const waking = t.rt.workspaces.wake(t.ws.id);
+    waking.catch(() => {});
+    await new Promise(r => setTimeout(r, 20));
+    expect((await t.rt.workspaces.get(t.ws.id)).phase).toBe("running");
+    await expect(t.rt.sessions.steer(handle.id, { prompt: "and this" })).resolves.toMatchObject({ outcome: expect.any(String) });
+    release();
+    await waking;
+    expect(t.box.proofs).toBe(proofs);
+  });
+
+  it("a nap drops the mark: a send on the napping record is refused as paused, runs no proof and leaves it napping", async () => {
+    const t = await restarted("waking", 0);
+    await t.rt.workspaces.nap(t.ws.id);
+    expect(t.box.archived).toBe(true);
+    const proofs = t.box.proofs;
+    await expect(t.rt.sessions.start(t.ws.id, { prompt: "go" })).rejects.toThrow(sendRefusal(workspaceState({ phase: "napping" }), undefined, "x")!);
+    expect(t.box.proofs).toBe(proofs);
+    expect((await t.rt.workspaces.get(t.ws.id)).phase).toBe("napping");
+    expect(((await t.store.get("workspaces", t.ws.id)) as { phase: string }).phase).toBe("napping");
+  });
+
+  it("a delete that ends while the proof's 404 is confirmed sticks: nothing is written back, and a host started on the state lists no such workspace", async () => {
+    const t = await restarted("napping", 0);
+    t.ready();
+    const release = t.box.holdNext();
+    const waking = t.rt.workspaces.wake(t.ws.id);
+    waking.catch(() => {});
+    await until(() => t.box.hold === undefined);
+    t.box.deleted = true;
+    let letRead!: () => void;
+    t.box.readHold = new Promise<void>(resolve => (letRead = resolve));
+    release();
+    await until(() => t.box.readHeld);
+    await t.rt.workspaces.delete(t.ws.id);
+    expect(await t.store.get("workspaces", t.ws.id)).toBeUndefined();
+    letRead();
+    await expect(waking).rejects.toThrow();
+    expect(await t.store.get("workspaces", t.ws.id)).toBeUndefined();
+    const next = t.host();
+    onTestFinished(() => next.close());
+    expect((await next.workspaces.list()).map(w => w.id)).not.toContain(t.ws.id);
+  });
+
+  it("a stop that lands before the proof's first ask ends the wake with the stop's own line", async () => {
+    const t = await restarted("napping", 0);
+    t.ready();
+    const put = t.store.put.bind(t.store);
+    let letPut!: () => void;
+    let held = false;
+    const gate = new Promise<void>(resolve => (letPut = resolve));
+    t.store.put = (async (table: string, key: string, value: unknown) => {
+      if (!held && table === "workspaces" && (value as { phase?: string }).phase === "waking") {
+        held = true;
+        await gate;
+      }
+      return put(table, key, value as never);
+    }) as typeof t.store.put;
+    const said = t.rt.workspaces.wake(t.ws.id).then(() => "woke", (e: Error) => e.message);
+    await until(() => held);
+    const stopping = t.rt.workspaces.stopWake(t.ws.id);
+    letPut();
+    await stopping;
+    expect(await said).toBe(WAKE_STOPPED_UP);
+    expect((await t.rt.workspaces.get(t.ws.id)).phase).toBe("running");
+  });
+
+  it("a resumed box still restoring at the deadline fails the wake with the same line as one found running", async () => {
+    const t = await restarted("napping", Number.POSITIVE_INFINITY);
+    await expect(t.rt.workspaces.wake(t.ws.id)).rejects.toThrow(noCommandsYetLine("x", "Box is restoring."));
   });
 });
