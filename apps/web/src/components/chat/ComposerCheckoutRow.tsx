@@ -47,12 +47,11 @@ export const ROW_ITEM_CLASS = "inline-flex h-7 shrink-0 items-center gap-1 round
 const BRANCH_NOTE = "The folder's branch as the task reports it. Nothing here switches it; check out another branch from the terminal.";
 
 /** The computer the thread runs on: its icon, as the Computers page draws it, and its name, the row's first item. */
-export function RowComputer({ name, place, children, className }: { name: string; place: PlaceView | undefined; children?: ReactNode; className?: string }) {
+export function RowComputer({ name, place, className }: { name: string; place: PlaceView | undefined; className?: string }) {
   return (
     <span data-composer-computer className={cn(ROW_ITEM_CLASS, className)}>
       {place === undefined ? null : <ComputerGlyph place={place} className="size-3" />}
       <span className="min-w-0 max-w-60 truncate">{name}</span>
-      {children}
     </span>
   );
 }
@@ -125,8 +124,7 @@ export function ComposerCheckoutRow({
 }
 
 /** The row under a project home's composer: no workspace exists yet, so it names where the send will run (the
- * computer, a picker where several hold the repo), the access and the branch the workspace starts from, off the
- * project's own record. */
+ * project's one computer), the access and the branch the workspace starts from, off the project's own record. */
 export function HomeCheckoutRow({ path, branch, where = null, access = null }: { path: string; branch: string; where?: ReactNode; access?: ReactNode }) {
   return (
     <ComposerSurface.Tray data-composer-checkout data-composer-home data-composer-folder={path}>

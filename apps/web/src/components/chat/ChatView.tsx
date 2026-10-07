@@ -423,8 +423,8 @@ const TURN_STATUS: Record<TurnSummary["state"], string> = {
   error: "failed",
 };
 
-/** A turn that ended any way but completed says how, in one word: the fold above it says how long it worked, and a
- * price is not the line's to say. */
+/** A turn that ended any way but completed says how, in one word: how long it worked and what it cost are not the
+ * line's to say. */
 function SettledFooter({ turn }: { turn: TurnSummary }) {
   const limited = (turn.limit ?? null) !== null;
   return (

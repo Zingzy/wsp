@@ -143,6 +143,13 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
   const ctx = use(TimelineRowCtx);
   const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
 
+  if (row.expanded === null) {
+    return (
+      <div className="pb-2 pt-1">
+        <span className="px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">{row.label}</span>
+      </div>
+    );
+  }
   return (
     <div className="pb-2 pt-1">
       <button

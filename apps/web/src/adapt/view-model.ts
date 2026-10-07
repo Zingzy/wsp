@@ -247,7 +247,8 @@ export type MessagesTimelineRow =
       readonly createdAt: string;
       readonly turnId: string;
       readonly label: string;
-      readonly expanded: boolean;
+      /** null on a stopped turn's line, which folds nothing and so opens nothing. */
+      readonly expanded: boolean | null;
     }
   | {
       readonly kind: "message";

@@ -229,7 +229,7 @@ export function ChatComposer({
   thread: ChatThreadHandle;
   onStart?: (prompt: string) => Promise<string | null>;
   waiting?: { line: string; folder: string };
-  /** New thread's where it runs: the row's first item, the computer, a picker where several hold the repo. */
+  /** New thread's where it runs: the row's first item, the project's one computer. */
   where?: ReactNode;
   /** The send button's word where the send is something other than a message: Start on #12. */
   sendLabel?: string;

@@ -2,7 +2,8 @@
 // Agents that serve one turn after another from one process, as Claude Code on stream-json and Codex's app server
 // do: each reply names the process that gave it, the turn count that process is at and the turn token in its
 // environment, so a case reads which process served a turn without finding any pid by name. A message starting
-// "hang" opens a turn that runs until it is interrupted ("hang deaf" ignores the interrupt), and one containing
+// "hang" opens a turn that runs until it is interrupted ("hang deaf" ignores the interrupt, "hang talk" first says
+// two messages with a call and its result between them), and one containing
 // "later" waits for the file STUB_GATE names before the agent says anything at all. The Claude stub takes
 // STUB_EXIT_MS to exit once its input closes, as a CLI running its exit hooks does. It appends each message to its
 // session file under STUB_SESSIONS where that is set, answers the title question with STUB_TITLE after STUB_TITLE_MS,
@@ -82,6 +83,13 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
       if (text === "hang background") {
         background = "bg" + turns;
         say({ type: "system", subtype: "background_tasks_changed", tasks: [{ task_id: background, description: "Wait 75 seconds" }], session_id: sid });
+      }
+      if (text === "hang talk") {
+        const own = (id, block) => say({ type: "assistant", session_id: sid, parent_tool_use_id: null, uuid: id + block.type, message: { id, role: "assistant", content: [block] } });
+        own("talk1", { type: "text", text: "alpha" });
+        own("talk1", { type: "tool_use", id: "call1", name: "Bash", input: { command: "echo one" } });
+        say({ type: "user", session_id: sid, parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "call1", content: "one", is_error: false }] } });
+        own("talk2", { type: "text", text: "beta" });
       }
       return;
     }
