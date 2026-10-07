@@ -21,6 +21,7 @@ import { useForwarded, useWorkspace } from "../../protocol/store.js";
 import { useComputerName } from "../../sidebar/workspaceRows.js";
 import { useRightPanelStore, type RightPanelSurface } from "../../rightPanelStore.js";
 import { clockLabel } from "../../lib/timestampFormat.js";
+import { noticeFailure, notCopied } from "../../notices/store.js";
 import { Button } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
@@ -93,7 +94,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   };
 
   const copyUrl = (): void => {
-    if (realUrl !== null) void navigator.clipboard?.writeText(realUrl).catch(() => {});
+    if (realUrl !== null) void navigator.clipboard?.writeText(realUrl).catch((e: unknown) => noticeFailure(e, notCopied));
   };
   const openOutside = (): void => {
     if (realUrl !== null) window.open(realUrl, "_blank", "noopener");
@@ -236,7 +237,7 @@ function CopyUrlButton({ url }: { url: string }) {
             type="button"
             aria-label="Copy URL"
             onClick={() => {
-              void navigator.clipboard?.writeText(url).then(() => setCopied(true), () => {});
+              void navigator.clipboard?.writeText(url).then(() => setCopied(true), (e: unknown) => noticeFailure(e, notCopied));
             }}
           />
         }

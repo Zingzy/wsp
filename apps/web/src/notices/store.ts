@@ -112,3 +112,24 @@ export function noticeFailure(e: unknown, words: (said: string) => string = said
   const said = words(failure.said);
   addNotice({ ...extra, kind: "error", text: failure.fix === undefined ? said : `${said} ${failure.fix}` });
 }
+
+const saidOnce = new Set<string>();
+
+/** noticeFailure said once in the page's life for one key: a read that fails here fails the same way each time it is
+ * asked, and a toast at every ask would bury the rest. */
+export function noticeFailureOnce(once: string, e: unknown, words?: (said: string) => string): void {
+  if (failureOf(e).disconnected || saidOnce.has(once)) return;
+  saidOnce.add(once);
+  noticeFailure(e, words);
+}
+
+/** A read the host refused, said as "<what> not read: <said>": nothing for a page served on a ticket socket, which may
+ * not see it, nor for a lost socket, which the banner says. */
+export const notRead =
+  (what: string) =>
+  (e: unknown): void => {
+    if (failureOf(e).kind !== "ticket") noticeFailure(e, said => `${what} not read: ${said}`);
+  };
+
+/** What a copy the clipboard refused says. */
+export const notCopied = (said: string): string => `Not copied: ${said}`;

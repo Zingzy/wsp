@@ -14,7 +14,7 @@ import { RUN_WORDS, runBlockKey, runnableCommand } from "@wsp/protocol";
 import { useStore } from "../../protocol/store";
 import { InlineRun, ReplyRunContext } from "../chat/InlineRun";
 import { startRun } from "../chat/replyRun";
-import { reportMarkdownActionFailure } from "./blocks";
+import { noticeFailure, noticeFailureOnce, notCopied } from "../../notices/store";
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
 
@@ -186,16 +186,9 @@ export function MarkdownCodeBlock({
         }, 1200);
       })
       .catch((cause) => {
-        reportMarkdownActionFailure(
-          {
-            operation: "copy-code-block",
-            language,
-            ...(fenceTitle ? { fenceTitle } : {}),
-          },
-          cause,
-        );
+        noticeFailure(cause, notCopied);
       });
-  }, [code, fenceTitle, language]);
+  }, [code]);
 
   useEffect(
     () => () => {
@@ -340,20 +333,19 @@ function UncachedShikiCodeBlock({
   isStreaming,
 }: UncachedShikiCodeBlockProps) {
   const highlighter = use(getSyntaxHighlighterPromise(language));
-  const highlightedHtml = useMemo(() => {
+  const { highlightedHtml, failed } = useMemo((): { highlightedHtml: string; failed: unknown } => {
     try {
       // shiki cuts a line at 500 ms with no signal, and a cold grammar compiling its regexes on a busy main thread takes longer than that.
-      return highlighter.codeToHtml(code, { lang: language, theme: themeName, tokenizeTimeLimit: 0 });
+      return { highlightedHtml: highlighter.codeToHtml(code, { lang: language, theme: themeName, tokenizeTimeLimit: 0 }), failed: null };
     } catch (error) {
-      // Log highlighting failures for debugging while falling back to plain text
-      console.warn(
-        `Code highlighting failed for language "${language}", falling back to plain text.`,
-        error instanceof Error ? error.message : error,
-      );
-      // If highlighting fails for this language, render as plain text
-      return highlighter.codeToHtml(code, { lang: "text", theme: themeName });
+      return { highlightedHtml: highlighter.codeToHtml(code, { lang: "text", theme: themeName }), failed: error };
     }
   }, [code, highlighter, language, themeName]);
+
+  // A streaming block draws again with every chunk, so a language that fails is said once.
+  useEffect(() => {
+    if (failed !== null) noticeFailureOnce(`highlight:${language}`, failed, said => `Code shown as plain text, ${language} not highlighted: ${said}`);
+  }, [failed, language]);
 
   useEffect(() => {
     if (!isStreaming) {

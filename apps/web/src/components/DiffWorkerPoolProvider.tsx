@@ -4,8 +4,9 @@ import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting";
+import { noticeFailureOnce } from "../notices/store";
 
-type DiffWorkerOperation = "create-worker" | "get-render-options" | "set-render-options";
+type DiffWorkerOperation = "create-worker";
 
 export class DiffWorkerError extends Error {
   readonly operation: DiffWorkerOperation;
@@ -25,7 +26,6 @@ function DiffWorkerThemeSync({ themeName }: { themeName: DiffThemeName }) {
       return;
     }
 
-    let operation: DiffWorkerOperation = "get-render-options";
     void (async () => {
       try {
         const current = workerPool.getDiffRenderOptions();
@@ -33,13 +33,12 @@ function DiffWorkerThemeSync({ themeName }: { themeName: DiffThemeName }) {
           return;
         }
 
-        operation = "set-render-options";
         await workerPool.setRenderOptions({
           ...current,
           theme: themeName,
         });
       } catch (cause) {
-        console.error(new DiffWorkerError({ operation, themeName, cause }));
+        noticeFailureOnce("diff-worker", cause, said => `Diffs are not highlighted: ${said}`);
       }
     })();
   }, [themeName, workerPool]);

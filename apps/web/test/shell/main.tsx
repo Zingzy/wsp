@@ -62,7 +62,8 @@
 // past its six cards. ?pick=1 holds three projects, two on this Mac and one
 // on a joined box, with New thread set to ask, and opens the palette on the
 // page of projects it picks from; ?settings=general opens Settings on its
-// General page, ?settings=appearance on Appearance; ?linux=1 holds the page as
+// General page, ?settings=appearance on Appearance, ?settings=computer&places=1 on
+// the hetzner box's own page, whose crumbs carry the back chevron; ?linux=1 holds the page as
 // the Linux app's window does, the bridge on it and no Mac glass; ?panel=pr&ws=ws_a opens the Pull request pane on PR 838 (&pr=merged once merged, &pr=closed as it
 // stands, closed with its checks kept).
 import { useEffect } from "react";
@@ -74,7 +75,7 @@ import type { Api, ProtocolEvent } from "../../src/protocol/client";
 import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
 import { openCommandPalette } from "../../src/commandPaletteBus";
-import { openSettingsGroup } from "../../src/settings/openAt";
+import { openComputerSettings, openSettingsGroup } from "../../src/settings/openAt";
 import { SettingsPage } from "../../src/settings/SettingsPage";
 import { useHostNotices } from "../../src/notices/hostNotices.js";
 import { addNotice, type NoticeKind } from "../../src/notices/store.js";
@@ -766,6 +767,8 @@ if (params.get("pick") === "1") {
 const settingsGroup = params.get("settings");
 const settingsShown = settingsGroup === "general" || settingsGroup === "appearance";
 if (settingsShown) openSettingsGroup(settingsGroup);
+if (settingsGroup === "computer") openComputerSettings("p_hetzner");
+const settingsPage = settingsShown || settingsGroup === "computer";
 // ?init=building puts the init job mid-build on the store, as its events would, so the collapsed cloud row's progress
 // line can be measured and photographed; the fixture's golden is none, so the row is there.
 if (params.get("init") === "building") {
@@ -906,7 +909,7 @@ createRoot(document.getElementById("root")!).render(
     {params.get("version") === "behind" ? <VersionRule /> : null}
     {params.get("host") === "1" ? <HostRule /> : null}
     <AppShell>
-      {settingsShown ? (
+      {settingsPage ? (
         <SettingsPage />
       ) : shown === null ? (
         <div />

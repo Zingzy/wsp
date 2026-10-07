@@ -11,6 +11,7 @@ import { DEFAULT_PREFERENCES, type TerminalConfig } from "@wsp/protocol";
 import { TerminalViewport } from "../src/components/ThreadTerminalDrawer.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { noticeTexts } from "./notice-text.js";
 import { appTerminalFontSize, GhosttyTerminalSurface } from "../src/terminal/ghostty/surface.js";
 import type { TerminalIo } from "../src/terminal/pty-io.js";
 
@@ -133,7 +134,6 @@ describe("the viewport with the person's Ghostty config", () => {
   });
 
   it("a pane mounted while the socket is down draws the defaults and says so once; when the socket comes up it takes the file's colours, padding and opacity without a remount, and keeps the app's own text size", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     let up = false;
     const read = async (): Promise<TerminalConfig> => {
       if (!up) throw new Error("lost");
@@ -145,8 +145,7 @@ describe("the viewport with the person's Ghostty config", () => {
     expect(options.theme.palette).toBeUndefined();
     expect(options.backgroundOpacity).toBe(1);
     expect(mount.hasAttribute("data-terminal-translucent")).toBe(false);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0]![0])).toContain("lost");
+    expect(noticeTexts().filter(text => text.includes("lost"))).toHaveLength(1);
     const setFont = vi.spyOn(surface, "setFont");
     const setTheme = vi.spyOn(surface, "setTheme");
     const setPadding = vi.spyOn(surface, "setPadding");
@@ -162,7 +161,7 @@ describe("the viewport with the person's Ghostty config", () => {
     await vi.waitFor(() => expect(mount.hasAttribute("data-terminal-translucent")).toBe(true));
     expect(mount.className).not.toContain("bg-[var(--terminal-background)]");
     expect(create).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(noticeTexts().filter(text => text.includes("lost"))).toHaveLength(1);
   });
 
   it("no host, or a host that fails to answer, opens the surface on the defaults", async () => {

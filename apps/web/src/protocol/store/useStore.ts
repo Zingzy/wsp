@@ -6,7 +6,7 @@ import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "..
 import { sidebarWorkspaceOrder } from "../../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../client.js";
 import { failureOf, type Failure } from "../failure.js";
-import { addNotice, noticeFailure } from "../../notices/store.js";
+import { addNotice, noticeFailure, notRead } from "../../notices/store.js";
 import { refetchSlates, slateEvent } from "../../slate/store.js";
 import { rememberOpen } from "../lastWorkspace.js";
 import { claimKept, claiming, claimsAnswered, keepCreations, letGo, own } from "../keptCreations.js";
@@ -240,7 +240,7 @@ export const useStore = create<State>((set, get) => {
     const failure = failureOf(e);
     if (failure.disconnected) return undefined;
     if (failure.kind === "ticket") return null;
-    if (home === undefined || !get().settingsOpen || !sameAt(useSettingsStore.getState().at, home)) noticeFailure(e, said => `${what} not read: ${said}`);
+    if (home === undefined || !get().settingsOpen || !sameAt(useSettingsStore.getState().at, home)) notRead(what)(e);
     return failure;
   };
 
@@ -343,9 +343,7 @@ export const useStore = create<State>((set, get) => {
         if (initJobViews !== initJobsAtAsk) return;
         set({ initJob: setup.job });
       })
-      .catch((e: unknown) => {
-        if (failureOf(e).kind !== "ticket") noticeFailure(e, said => `Setup not read: ${said}`);
-      });
+      .catch(notRead("Setup"));
     readPlaces(api);
     // An answer either way settles it, and a host whose wire carries no projects list settles it at once.
     const projectsAsked = api.projectsList?.();
@@ -714,7 +712,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
     async readThread(threadId) {
-      await get().api?.readThread?.(threadId).catch((e: unknown) => console.warn(`read stamp not taken: ${e instanceof Error ? e.message : String(e)}`));
+      await get().api?.readThread?.(threadId).catch((e: unknown) => noticeFailure(e, said => `Thread not marked read: ${said}`));
     },
     async settleThreads(threadIds) {
       const api = get().api;

@@ -6,7 +6,8 @@
 // row two and the status on row one, every tile 52 px, a working title
 // recedes behind the rows that call for the person, the Settled fold sits shut
 // at the foot of the bare list and opens to slim rows, a toast holds a
-// long token inside its box off the sidebar, the line for a provider out of
+// long token inside its box off the sidebar and at 390 stands under the
+// settings crumbs and their back chevron, the line for a provider out of
 // reach is one muted mono line under the search row at AA, collapsing the
 // sidebar leaves the page header's left padding alone, a send refusal above
 // the composer is one muted mono line in a slot the composer keeps at one
@@ -530,6 +531,35 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         await page!.screenshot({ path });
         console.info(`notice screenshot: ${path}`);
       }
+    }
+    await page!.setViewportSize({ width: 1200, height: 800 });
+  }, 60_000);
+
+  it("at 390 with Settings open on a computer's page, a toast stands under the header that holds the crumbs and the back chevron, and the chevron takes a press while it stands, in both themes", async () => {
+    await page!.setViewportSize({ width: 390, height: 800 });
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&places=1&settings=computer&toast=${encodeURIComponent("hetzner stopped answering.")}&where=hetzner`);
+      await page!.locator("[data-notice]").first().waitFor();
+      const back = page!.locator("[data-k=settings-up]");
+      await back.waitFor();
+      await page!.waitForTimeout(500);
+      const header = await box("[data-shell-center] header");
+      const toast = await box("[data-sonner-toast]");
+      const chevron = await box("[data-k=settings-up]");
+      expect(chevron.y + chevron.height).toBeLessThanOrEqual(header.y + header.height);
+      expect(toast.y).toBeGreaterThanOrEqual(header.y + header.height);
+      const hit = await back.evaluate(el => {
+        const r = el.getBoundingClientRect();
+        const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return top !== null && el.contains(top);
+      });
+      expect(hit).toBe(true);
+      await page!.screenshot({ path: join(SHOTS_DIR, `notice-settings-390-${theme}.png`) });
+      await back.click({ timeout: 2_000 });
+      // The chevron stands on a computer's page alone, so its going is the page moving back to Computers.
+      await back.waitFor({ state: "detached", timeout: 2_000 });
+      expect(await page!.locator("[data-breadcrumb-group]").textContent()).toBe("Computers");
+      expect(await page!.locator("[data-notice]").count()).toBeGreaterThan(0);
     }
     await page!.setViewportSize({ width: 1200, height: 800 });
   }, 60_000);
