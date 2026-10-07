@@ -537,4 +537,18 @@ describe("an account's plan running low", () => {
     expect(lastNotice()).toBeNull();
     expect(FakeNotification.built).toHaveLength(2);
   });
+
+  it("tells the shell once the person opens Usage, so the dock's badge drops its plan alerts", () => {
+    let seen = 0;
+    window.wsp = { sayOutside: () => {}, onNeedsYouOpen: () => () => {}, setBadge: () => {}, planAlertsSeen: () => void (seen += 1) };
+    const emit = bindEvents();
+    render(<Harness />);
+    act(() => emit(LOW));
+    act(() => useSettingsStore.getState().go({ kind: "group", group: "usage" }));
+    expect(seen).toBe(0);
+    act(() => useStore.getState().openSettings());
+    expect(seen).toBe(1);
+    act(() => useSettingsStore.getState().go({ kind: "group", group: "general" }));
+    expect(seen).toBe(1);
+  });
 });

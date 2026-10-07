@@ -396,6 +396,8 @@ export function useHostNotices(): void {
   const needed = useStore(s => s.initJob?.needsYou !== undefined || Object.values(s.sessions).some(rows => rows.some(row => row.asking !== undefined)));
   // Counted where the rows land, so a window showing a thread, which moves its read stamp, takes it off the dock.
   const waiting = useStore(s => needsYouCount(Object.values(s.sessions).flat()));
+  const settingsOpen = useStore(s => s.settingsOpen);
+  const onUsage = useSettingsStore(s => s.at.kind === "group" && s.at.group === "usage");
   const held = useRef<Held>({ road: null, need: undefined, shown: false, jobsEnded: new Set(), released: undefined, results: new Map(), waits: new Map() });
   useEffect(() => {
     const h = held.current;
@@ -412,6 +414,10 @@ export function useHostNotices(): void {
   useEffect(() => {
     desktopBridge()?.setBadge?.(waiting);
   }, [waiting]);
+  // The dock's badge carries each account's plan alert until the person has seen Usage.
+  useEffect(() => {
+    if (settingsOpen && onUsage) desktopBridge()?.planAlertsSeen?.();
+  }, [settingsOpen, onUsage]);
   useEffect(() => {
     const h = held.current;
     h.released = releaseSaid();

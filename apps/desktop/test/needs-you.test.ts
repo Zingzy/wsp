@@ -8,7 +8,7 @@ import { NEEDS_YOU } from "@wsp/protocol";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
-import { noticeWindowOf, sayOutside, showBadge, type Notifier, type ShellWindow, type SystemNotification } from "../src/needs-you.js";
+import { dockBadge, noticeWindowOf, sayOutside, showBadge, type Notifier, type ShellWindow, type SystemNotification } from "../src/needs-you.js";
 
 // Process-wide: every test in this worker runs with gc exposed.
 setFlagsFromString("--expose-gc");
@@ -193,5 +193,66 @@ describe("the dock's badge", () => {
     showBadge(0, dock);
     for (const bad of [-1, 1.5, "2", null, Number.NaN]) showBadge(bad, dock);
     expect(counts).toEqual([3, 0]);
+  });
+});
+
+describe("an account's plan alert on the dock's badge", () => {
+  const alert = (key: string, kind: "low" | "blocked" | "back") => ({ type: "usage.alert", key, agent: "claude", label: "Claude Max", alert: kind === "low" ? { kind, window: "week", step: 90 } : { kind } });
+  /** A Mac's dock, whose badge takes words, and Electron's count beside it. */
+  const macDock = () => {
+    const said: string[] = [];
+    return { said, dock: { setBadgeCount: (n: number) => said.push(`count ${n}`), dock: { setBadge: (text: string) => said.push(text) } } };
+  };
+
+  it("stands beside the count of threads waiting for 70% or 90% of a window and for a block, and goes once the account is back", () => {
+    const { said, dock } = macDock();
+    const badge = dockBadge(dock);
+    badge.count(2);
+    expect(said.at(-1)).toBe("2");
+    badge.heard(alert("claude:a", "low"));
+    expect(said.at(-1)).toBe("2 !");
+    badge.heard(alert("codex:b", "blocked"));
+    badge.heard(alert("claude:a", "back"));
+    expect(said.at(-1)).toBe("2 !");
+    badge.count(0);
+    expect(said.at(-1)).toBe("!");
+    badge.heard(alert("codex:b", "back"));
+    expect(said.at(-1)).toBe("");
+    badge.heard({ type: "session.done" });
+    expect(said).not.toContain("count 0");
+  });
+
+  it("goes once the person opens Usage", () => {
+    const { said, dock } = macDock();
+    const badge = dockBadge(dock);
+    badge.count(1);
+    badge.heard(alert("claude:a", "blocked"));
+    badge.heard(alert("codex:b", "low"));
+    expect(said.at(-1)).toBe("1 !");
+    badge.seen();
+    expect(said.at(-1)).toBe("1");
+  });
+
+  it("is carried nowhere while the plan alerts switch is off", () => {
+    const { said, dock } = macDock();
+    const badge = dockBadge(dock);
+    badge.count(3);
+    badge.heard(alert("claude:a", "low"));
+    expect(said.at(-1)).toBe("3 !");
+    badge.alerts(false);
+    expect(said.at(-1)).toBe("3");
+    badge.heard(alert("codex:b", "blocked"));
+    badge.count(0);
+    expect(said.at(-1)).toBe("");
+    expect(said.filter(s => s.includes("!"))).toEqual(["3 !"]);
+  });
+
+  it("counts one more where the badge is a count alone", () => {
+    const counts: number[] = [];
+    const badge = dockBadge({ setBadgeCount: n => counts.push(n) });
+    badge.count(2);
+    badge.heard(alert("claude:a", "low"));
+    badge.seen();
+    expect(counts).toEqual([2, 3, 2]);
   });
 });
