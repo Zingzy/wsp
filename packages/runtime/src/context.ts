@@ -214,6 +214,9 @@ export interface RuntimeCore {
   readonly execs: Set<{ workspaceId: string; end: (reason: string) => void }>;
   /** Each running turn's row of what its agent held, written as the host closes. */
   readonly heldAtClose: Set<() => void>;
+  /** What a starting host still has out on each machine, by workspace id: the re-open of its turns, then the sweep of
+   * its runs, which ends every run it lists that the host did not keep. Everything that starts a run there waits for it. */
+  readonly bootWork: Map<string, Promise<void>>;
   readonly indexFlushes: Map<string, Promise<void>>;
   readonly transcripts: Map<string, SessionEvent[]>;
   readonly rows: TranscriptRows | undefined;
@@ -450,7 +453,7 @@ export interface BootArea {
   readonly rereadHeld: (id: string, by: GoneSeenBy) => Promise<void>;
   readonly hydrateWorkspace: (raw: unknown, seen?: FoundMachine) => Promise<LiveWorkspace | undefined>;
   readonly ready: () => Promise<void>;
-  readonly entryOf: (id: string, origin?: Caller) => Promise<LiveWorkspace>;
+  readonly entryOf: (id: string, origin?: Caller, o?: { now?: true }) => Promise<LiveWorkspace>;
   readonly childOf: (lead: LiveWorkspace, ref: string, origin?: Caller) => Promise<LiveWorkspace>;
   readonly reachesRow: (row: { threadId?: string; workspaceId: string }, caller: Caller | undefined) => boolean;
   readonly entryOfRow: (row: { threadId?: string; workspaceId: string }, origin: Caller | undefined) => Promise<LiveWorkspace | undefined>;

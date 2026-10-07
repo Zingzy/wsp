@@ -372,17 +372,6 @@ export function bootArea(ctx: RuntimeContext): BootArea {
           sessions.set(view.id, row);
         }
       }
-      // A turn's run belongs to the machine it runs on, not to the host that asked for it, so a host that comes back
-      // re-opens every run the machines still hold and reads the rest of its output. Only the machine's own answer
-      // that a run is gone ends that turn, and a machine that answered nothing leaves its turn running. The ends are
-      // told once every workspace's rows are in: the parent a settled turn tells may sit in a workspace read after
-      // its own, and a re-opened turn's own end tells it later, when it ends.
-      const answers = await Promise.all(left.map(async s => ({ row: s, answer: await ctx.reattach(s) })));
-      for (const { row, answer } of answers) {
-        if (answer === "cannot") ctx.settleCut(row, RESTARTED_REASON, endedAt => restartCutLine(endedAt - (row.view.startedAt ?? endedAt)));
-        else if (answer === "gone") ctx.settleCut(row, RUN_GONE_LINE, () => RUN_GONE_LINE);
-      }
-      for (const workspaceId of new Set(left.map(s => s.view.workspaceId))) void ctx.persistSessions(workspaceId);
       for (const row of unread) {
         const { workspaceId, threadId, cwd, claudeSessionId, id, startedAt } = row.view;
         const entry = live.get(workspaceId)!;
@@ -397,12 +386,42 @@ export function bootArea(ctx: RuntimeContext): BootArea {
           if (read || !ctx.state.closing) await ctx.persistSessions(workspaceId);
         })().catch((e: unknown) => console.warn(`what ${row.turnId} changed was not read: ${e instanceof Error ? e.message : String(e)}`));
       }
-      // The re-attach above has settled the rows the machines no longer hold, so a sync waiting out a running turn reads rows that are in.
-      for (const entry of toSync) void ctx.syncDaemon(entry);
       void Promise.all([...live.keys()].map(id => rereadHeld(id, "record load").catch((e: unknown) => console.warn(`workspace ${id} was not read again: ${e instanceof Error ? e.message : String(e)}`))));
-      // Every run left over from a host that never came back to read it, now that this host knows which ones it does
-      // hold: a harness whose reader is gone answers nobody and holds the machine's memory for its life.
-      await Promise.all([...live.values()].map(entry => ctx.sweepRuns(entry)));
+      // A turn's run belongs to the machine it runs on, not to the host that asked for it, so a host that comes back
+      // re-opens every run the machines still hold and reads the rest of its output. Only the machine's own answer
+      // that a run is gone ends that turn, and a machine that answered nothing leaves its turn running. The ends are
+      // told once every workspace's rows are in: the parent a settled turn tells may sit in a workspace read after
+      // its own, and a re-opened turn's own end tells it later, when it ends.
+      const reopen = async (rows: readonly (typeof left)[number][]): Promise<void> => {
+        const answers = await Promise.all(rows.map(async s => ({ row: s, answer: await ctx.reattach(s) })));
+        const cut = new Set<string>();
+        for (const { row, answer } of answers) {
+          if (answer === "cannot") ctx.settleCut(row, RESTARTED_REASON, endedAt => restartCutLine(endedAt - (row.view.startedAt ?? endedAt)));
+          else if (answer === "gone") ctx.settleCut(row, RUN_GONE_LINE, () => RUN_GONE_LINE);
+          if ((answer === "cannot" || answer === "gone") && row.view.threadId !== undefined) cut.add(row.view.threadId);
+        }
+        for (const workspaceId of new Set(rows.map(s => s.view.workspaceId))) void ctx.persistSessions(workspaceId);
+        // The token of a turn cut here dies with it, as the boot's own pass below takes the tokens of turns not running.
+        if (cut.size === 0) return;
+        for (const device of await deviceDoor.list()) {
+          const thread = device.scope?.threadId;
+          if (thread !== undefined && cut.has(thread) && !ctx.threadRuns(thread)) await deviceDoor.revoke(device.id);
+        }
+      };
+      // Each machine's turns are re-opened and then its runs swept in the background, and only what starts a run on
+      // that machine waits for it, since a machine still restoring answers nothing for minutes. The sweep ends every
+      // run left over from a host that never came back to read it, whose harness holds the machine's memory for its
+      // life, and every run started there while its listing was out. The daemon sync waits out a running turn, so it
+      // starts once the rows the machine no longer holds are settled.
+      for (const entry of live.values()) {
+        const id = entry.record.id;
+        const work = (async () => {
+          await reopen(left.filter(s => s.view.workspaceId === id));
+          await ctx.sweepRuns(entry);
+          if (toSync.includes(entry)) void ctx.syncDaemon(entry);
+        })();
+        ctx.bootWork.set(id, work.catch((e: unknown) => console.warn(`the turns and runs on ${id} were not settled: ${e instanceof Error ? e.message : String(e)}`)).finally(() => ctx.bootWork.delete(id)));
+      }
       // A turn's token dies with the turn, and a host that went down under one never reached that exit: every scoped
       // device whose thread is not running now is taken away here, so a restart is not how a token outlives its turn.
       for (const device of await deviceDoor.list()) {
@@ -420,14 +439,17 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     return hydrated;
   };
 
-  /** Every verb that names a workspace comes through here, so the origin rule is read once for all of them. */
-  const entryOf = async (id: string, origin?: Caller): Promise<LiveWorkspace> => {
+  /** Every verb that names a workspace comes through here, so the origin rule is read once for all of them. A verb
+   * may start a run on the machine, so it waits for what the boot still has out there; `now` is for a read that
+   * walks every workspace, which no one machine may hold. */
+  const entryOf = async (id: string, origin?: Caller, o: { now?: true } = {}): Promise<LiveWorkspace> => {
     await ready();
     const entry = live.get(id);
     // A workspace this host does not hold and one outside the caller's tree read alike to a thread: telling the two
     // apart is how a thread walks what else stands here.
     if (!entry || entry.creating) throw notFoundRefusal(scopeOf(origin) !== undefined ? noWorkspaceRefusal() : `${noWorkspaceRefusal()}: ${id}`);
     ctx.refuseRelayed(entry.record, origin);
+    if (o.now !== true) await ctx.bootWork.get(id);
     return entry;
   };
   /** A lead's child named by id or by name, refused for a workspace that is not that lead's child. */
@@ -454,7 +476,9 @@ export function bootArea(ctx: RuntimeContext): BootArea {
     if (scopeOf(origin) === undefined) return entryOf(row.workspaceId, origin);
     await ready();
     const entry = live.get(row.workspaceId);
-    return entry === undefined || entry.creating || !reachesRow(row, origin) ? undefined : entry;
+    if (entry === undefined || entry.creating || !reachesRow(row, origin)) return undefined;
+    await ctx.bootWork.get(row.workspaceId);
+    return entry;
   };
   /** Rows as a listing answers them: each with the stamps and marks its thread's record keeps, and with what only a
    * live turn knows, which rides the answer and never the row. */
