@@ -228,6 +228,13 @@ export function markedFor(catalog: HarnessCatalog, defaults: Omit<ThreadDefaults
   return next;
 }
 
+/** The catalog as the agent lists it, before the person's picker shaped it and markedFor moved its marks: what the
+ * one rule reads under a record the lists were not marked for. */
+export function unmarked(catalog: HarnessCatalog): HarnessCatalog {
+  const { hiddenModels: _shaped, unshaped, ...lists } = catalog;
+  return unshaped === undefined ? catalog : { ...lists, ...unshaped };
+}
+
 /** The model and effort a new thread starts on where the agent's list is open (its CLI takes any value), which no mark
  * can carry on a list with nothing in it: the value the person set, for a start to run where it names none. */
 export function openDefaults(catalog: HarnessCatalog, defaults: Omit<ThreadDefaults, "agent">): { model?: string; effort?: string } {

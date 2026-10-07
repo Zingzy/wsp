@@ -8,7 +8,7 @@
 // the same grammar, each opening its item's own page. A task's panel draws
 // the same agent cards and tabs.
 import { BotIcon, CircleArrowUpIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
-import { HERE_PLACE_ID, accessWord, effortsFor, listWords, markedDefault, modelOf, resolveThreadDefaults, type AccessChoice, type AgentRow, type HarnessCatalog, type PlaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, listWords, modelOf, resolveThreadDefaults, unmarked, withCustomModels, type AgentRow, type HarnessCatalog, type PlaceView, type ThreadDefaults } from "@wsp/protocol";
 import { agentName, catalogEntry } from "@wsp/catalog";
 import { copyText } from "../actions/clipboard.js";
 import { ActButton } from "../components/agents/agentsParts.js";
@@ -67,25 +67,15 @@ export function defaultAgentOf(ctx: Pick<SettingsContext, "harnesses" | "prefere
   return catalogOf(resolveThreadDefaults({ firstAgent: first.harness, catalogOf, prefs: ctx.preferences }).agent.value) ?? first;
 }
 
-/** What a new thread on an agent starts with, off the marks the host put on its lists: the model, its effort and the
- * access word. */
-export function newThreadPicks(catalog: HarnessCatalog): { model?: string; effort?: string; access?: AccessChoice } {
-  const model = markedDefault([...catalog.models, ...(catalog.legacyModels ?? [])])?.value;
-  const effort = markedDefault(effortsFor(catalog, modelOf(catalog, model)))?.value;
-  const mode = markedDefault(catalog.permissionModes)?.value;
-  const access = mode === undefined ? undefined : accessWord(catalog, mode);
-  return { ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }), ...(access === undefined ? {} : { access }) };
+/** What a new thread on an agent starts with where its project names nothing, read by the one rule off the record
+ * this window holds and the agent's own lists, so a pick or a reset shows before the host's lists are read again. */
+export function newThreadDefaults(catalog: HarnessCatalog, prefs: SettingsContext["preferences"]): ThreadDefaults {
+  const lists = withCustomModels(unmarked(catalog), prefs.agentDefaults[catalog.harness]?.models);
+  return resolveThreadDefaults({ firstAgent: catalog.harness, named: catalog.harness, catalogOf: () => lists, prefs });
 }
 
 /** A model by the label its list gives it, else its id. */
 export const modelLabel = (catalog: HarnessCatalog, value: string): string => modelOf(catalog, value)?.label ?? value;
-
-/** What a new thread runs an agent with, two kinds of fact held apart: its model at its effort, and its access. */
-export function runsWith(catalog: HarnessCatalog): string[] {
-  const picks = newThreadPicks(catalog);
-  const effort = picks.effort === undefined ? undefined : (catalog.efforts.find(o => o.value === picks.effort)?.label ?? picks.effort);
-  return [...(picks.model === undefined ? [] : [W.atEffort(modelLabel(catalog, picks.model), effort)]), ...(picks.access === undefined ? [] : [W.accessFact(W.accessWords[picks.access])])];
-}
 
 /** How an agent's sign-in stands for the head of its page, off the kind the host answered: a subscription by its plan
  * where the host read one, `plan` the plan's word, and the host's whole sentence on the hover with the computer named
