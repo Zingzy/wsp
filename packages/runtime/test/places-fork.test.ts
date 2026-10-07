@@ -965,6 +965,97 @@ describe("a fork on a computer you joined", () => {
     }
   });
 
+  it("pushes a fork's status the moment its computer dials back in after a host restart, not at the next poll", async () => {
+    const store = memoryStore();
+    const hostKey = newPlaceKeyPair();
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const first = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
+    sockets.push(first.client.ws);
+    const made = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "srv" });
+    first.client.close();
+    await ctx.srv.close();
+    await ctx.runtime.close();
+    ctx.runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const pushed: string[] = [];
+    ctx.runtime.events.on("workspace.status", e => {
+      if (e.type === "workspace.status" && e.status.id === made.id) pushed.push(e.status.reach.state);
+    });
+    const stop = ctx.runtime.status.watch({ pollIntervalMs: 60_000 });
+    try {
+      await until(() => pushed.at(-1) === "unreachable");
+      const back = await relink(hostKey, first.placeId, first.pair, report("srv"), c => forks(c));
+      sockets.push(back.client.ws);
+      await until(() => pushed.at(-1) === "reachable", 1000);
+    } finally {
+      stop();
+    }
+  });
+
+  it("pushes a fork's status the moment its computer dials back in after its link dropped, not at the next poll", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
+    sockets.push(client.ws);
+    const made = await createOn(ctx.runtime!, { golden: "snap_g", name: "x", on: "srv" });
+    const pushed: string[] = [];
+    ctx.runtime!.events.on("workspace.status", e => {
+      if (e.type === "workspace.status" && e.status.id === made.id) pushed.push(e.status.reach.state);
+    });
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    const stop = ctx.runtime!.status.watch({ pollIntervalMs: 60_000 });
+    try {
+      await until(() => pushed.at(-1) === "unreachable");
+      const back = await relink(hostKey, placeId, key, report("srv"), c => forks(c));
+      sockets.push(back.client.ws);
+      await until(() => pushed.at(-1) === "reachable", 1000);
+    } finally {
+      stop();
+    }
+  });
+
+  it("keeps a fork's row reachable after its computer dials back while a full tick that began during the gap is out", async () => {
+    const backend = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    ctx.runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    ctx.srv = await serveRuntime(ctx.runtime, { port: 0, authToken: "host-token", devices: ctx.runtime.devices });
+    const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
+    sockets.push(client.ws);
+    const made = await createOn(ctx.runtime, { golden: "snap_g", name: "x", on: "srv" });
+    const cloud = await createOn(ctx.runtime, { golden: "snap_g", name: "c", on: "solari" });
+    // The tick's slowest machine answers only once the computer is back, so the tick's row for the fork was built while it was away.
+    let release!: () => void;
+    const gate = new Promise<void>(r => (release = r));
+    let asked = false;
+    backend.machines.find(m => m.id === cloud.machineId)!.daemonAnswers = async () => {
+      asked = true;
+      await gate;
+      return true;
+    };
+    const pushed: string[] = [];
+    let cloudPushed = 0;
+    ctx.runtime.events.on("workspace.status", e => {
+      if (e.type !== "workspace.status") return;
+      if (e.status.id === made.id) pushed.push(e.status.reach.state);
+      if (e.status.id === cloud.id) cloudPushed++;
+    });
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    const stop = ctx.runtime.status.watch({ pollIntervalMs: 60_000 });
+    try {
+      await until(() => asked);
+      const back = await relink(hostKey, placeId, key, report("srv"), c => forks(c));
+      sockets.push(back.client.ws);
+      await until(() => pushed.at(-1) === "reachable", 1000);
+      release();
+      await until(() => cloudPushed > 0);
+      expect(pushed.at(-1)).toBe("reachable");
+    } finally {
+      stop();
+    }
+  });
+
   it("carries one port on this computer to one port on that one, for as long as the host runs", async () => {
     const { hostKey } = await serving();
     let place!: ForkingPlace;

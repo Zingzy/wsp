@@ -923,8 +923,9 @@ export interface SweepResult extends ReapResult {
 }
 
 /** The status tracker as the runtime serves it: the tracker's own surface, with the caller's origin last on the two
- * reads that answer for workspaces, so the snapshot leaves out what that caller may not drive. */
-export interface OriginStatusApi extends Omit<StatusApi, "list" | "history"> {
+ * reads that answer for workspaces, so the snapshot leaves out what that caller may not drive. The poll between ticks
+ * is the runtime's own, run when a computer dials back in. */
+export interface OriginStatusApi extends Omit<StatusApi, "list" | "history" | "poll"> {
   list(opts?: StatusListOptions, origin?: Caller): Promise<WorkspaceStatus[]>;
   history(workspaceId: string, origin?: Caller): Promise<WorkspaceCostEvent[]>;
 }

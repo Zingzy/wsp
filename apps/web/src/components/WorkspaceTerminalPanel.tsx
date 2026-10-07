@@ -8,7 +8,7 @@ import { useRightPanelStore, type RightPanelSurface } from "../rightPanelStore.j
 import { openPanelTerminal, splitPanelTerminal, type SplitDirection } from "../shell/shellCommands.js";
 import { useTerminalViewportConfig } from "../terminal/fontSetting.js";
 import { getTerminals, NOT_OPENED_YET, onTerminals, type WorkspaceTerminals } from "../terminal/link.js";
-import { useTerminalPane } from "../terminal/paneWords.js";
+import { useOwnComputerName, useTerminalPane } from "../terminal/paneWords.js";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty.js";
 import { lostTerminals, terminalLabels } from "./WorkspaceTerminalDrawer.js";
@@ -42,12 +42,13 @@ export function WorkspaceTerminalPanel({
   surface: Extract<RightPanelSurface, { kind: "terminal" }>;
 }) {
   const terms = useSyncExternalStore(onTerminals, () => getTerminals(workspaceId));
+  const computer = useOwnComputerName(workspaceId);
   if (!terms) {
     return (
       <Empty className="flex-1">
         <EmptyHeader>
-          <EmptyTitle>No terminal link for this task.</EmptyTitle>
-          <EmptyDescription>Terminals connect while the task is running.</EmptyDescription>
+          <EmptyTitle>No terminal link for this thread yet.</EmptyTitle>
+          <EmptyDescription>Terminals connect once {computer ?? "the thread's computer"} answers.</EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
