@@ -118,7 +118,7 @@ export function manageDoor(ctx: PlaceDoorContext, recordArea: PlaceRecordsArea, 
     if (wiring.runOver === undefined) return unchecked("this host holds no ssh road to read it over");
     if (home === undefined) return unchecked(`${record.name} never said where its home is`);
     const login: PlaceLogin = { ssh, ...(record.road?.keyPath !== undefined ? { keyPath: record.road.keyPath } : {}) };
-    const read = await wiring.runOver(login, heldPlaceScript(home), dialWaitMs).catch((e: unknown) => unchecked(refusalParts(e).said));
+    const read = await bounded(wiring.runOver(login, heldPlaceScript(home), dialWaitMs), dialWaitMs, `ssh ${ssh}`).catch((e: unknown) => unchecked(refusalParts(e).said));
     // The read itself answers empty where no place file stands, so a failed run is the login or its sudo.
     if (read.exitCode !== 0) return unchecked(lastLine(read.stderr) ?? `the read exited ${read.exitCode}`);
     const file = parsePlaceFile(read.stdout);

@@ -34,7 +34,7 @@ import { STEP_TITLES, openAdd, openPending, reachedSteps } from "./add/addFlow.j
 import { ComputerSignIns } from "./ComputerSignIns.js";
 import { readRecipes, useRecipes } from "./recipesStore.js";
 import { ComputerGlyph, useComputerIcon } from "./ComputerGlyph.js";
-import { BehindRow, LimitsCard, SpawnCard } from "./computerSettings.js";
+import { BehindRow, LimitsCard, NameCard, SpawnCard } from "./computerSettings.js";
 import { ADD_COMPUTER_WORDS, AGENTS_PAGE_WORDS, PLACE_STATE_WORDS, WHERE_WORDS, capitalised } from "./format.js";
 import { Chevron, GlyphFrame, Grid, GridHead, GridName, GridRow, LIST_COLUMNS, Num, PAGE_COLUMNS, StateCell, VersionFact, wordOnly, type HeadCell } from "./grid.js";
 import { copyOn } from "./image.js";
@@ -569,6 +569,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
       {cloud ? null : <SpawnCard place={place} />}
       {cloud ? image === null ? null : <ReportLists report={imageAgentsReport(image, place.id)} ctx={{ where: "provider", on: name, editImage: () => openImageRecipe(place.id) }} /> : <AgentsLink place={place} ctx={ctx} />}
       {standing === undefined || !held ? null : <ImageCard place={place} name={standing.name} state={standing.state} view={standing.view} ctx={ctx} row />}
+      <NameCard place={place} />
       {here ? null : <RemoveLine place={place} ctx={ctx} onRemoved={onRemoved} />}
     </>
   );

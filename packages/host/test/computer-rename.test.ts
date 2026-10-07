@@ -63,7 +63,7 @@ async function wsp(...argv: string[]): Promise<{ code: number; lines: string[]; 
 }
 
 /** A host holding a computer added as spoo, with a project, a workspace and a thread on it, and a second computer. */
-async function hostWithSpoo(road: { runOver?: PlaceWiring["runOver"]; back?: PlaceWiring["back"] } = {}) {
+async function hostWithSpoo(road: { runOver?: PlaceWiring["runOver"]; back?: PlaceWiring["back"]; dialWaitMs?: number } = {}) {
   const { hostKey, store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 }, adapters: { claude: answers }, ...road });
   const spoo = await joinHost(hostKey, { code: await code(), name: "spoo", report: report("spoo", { daemonVersion: DAEMON_VERSION }), answers: c => void forks(c) });
   sockets.push(spoo.client.ws);
@@ -152,7 +152,7 @@ describe("wsp computers set --name", () => {
 
 describe("wsp computers set --ssh", () => {
   /** The box behind each login: hetzner is spoo itself, prod and blank are other machines, locked asks sudo for a
-   * password. Every script asked is kept, so a refusal before the dial shows as nothing asked. */
+   * password, silent never answers. Every script asked is kept, so a refusal before the dial shows as nothing asked. */
   function logins() {
     const asked: { ssh: string; script: string }[] = [];
     const at: { placeId: string; hostPublicKey: string } = { placeId: "", hostPublicKey: "" };
@@ -163,6 +163,7 @@ describe("wsp computers set --ssh", () => {
       if (login.ssh === "root@prod") return { exitCode: 0, stdout: file("p_0000000000000000", at.hostPublicKey), stderr: "" };
       if (login.ssh === "root@blank") return { exitCode: 0, stdout: "", stderr: "" };
       if (login.ssh === "maya@locked") return { exitCode: 1, stdout: "", stderr: "sudo: a password is required" };
+      if (login.ssh === "root@silent") return new Promise(() => {});
       throw new Error(`ssh: Could not resolve hostname ${login.ssh}`);
     };
     const held: string[] = [];
@@ -178,7 +179,7 @@ describe("wsp computers set --ssh", () => {
   /** spoo as an add over ssh leaves it: reached as root@spoo, dialling back through a forward on its own loopback. */
   async function addedOverSsh() {
     const road = logins();
-    const host = await hostWithSpoo({ runOver: road.runOver, back: road.back });
+    const host = await hostWithSpoo({ runOver: road.runOver, back: road.back, dialWaitMs: 1000 });
     road.at.placeId = host.spoo.placeId;
     road.at.hostPublicKey = host.hostKey.publicKey;
     const record = (await host.store.get("places", host.spoo.placeId)) as Record<string, unknown>;
@@ -218,5 +219,26 @@ describe("wsp computers set --ssh", () => {
     expect(await store.get("caps", spoo.placeId)).toBeUndefined();
     expect((await placesOf()).find(p => p.id === spoo.placeId)!.name).toBe("spoo");
     expect(road.held).toEqual([]);
+  });
+
+  it("refuses a blank login with what was blank and how to write one, and dials nothing", async () => {
+    const { store, spoo, road } = await addedOverSsh();
+    const said = placeSshRefusal(spoo.placeView, "")!;
+    expect(said.happened).toBe("an ssh login cannot be blank");
+    const run = await wsp("computers", "set", "spoo", "--ssh", "");
+    expect(run.code).toBe(EXIT_CODES.usage);
+    expect(run.errors.join("\n")).toContain(refusalLine(said.happened, said.fix));
+    expect(road.asked).toEqual([]);
+    expect(await roadOf(store, spoo.placeId)).toEqual({ ssh: "root@spoo", back: { boxPort: 13758 } });
+  });
+
+  it("refuses a login whose computer never answers once the dial's bound passes, and writes nothing", async () => {
+    const { store, spoo, road } = await addedOverSsh();
+    const run = await wsp("computers", "set", "spoo", "--ssh", "root@silent");
+    expect(run.code).toBe(EXIT_CODES.usage);
+    const said = placeSshUncheckedRefusal("root@silent", "spoo", "ssh root@silent was not answered in 1s");
+    expect(run.errors.join("\n")).toContain(refusalLine(said.happened, said.fix));
+    expect(road.asked.map(a => a.ssh)).toEqual(["root@silent"]);
+    expect(await roadOf(store, spoo.placeId)).toEqual({ ssh: "root@spoo", back: { boxPort: 13758 } });
   });
 });

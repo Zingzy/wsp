@@ -1,27 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What a person sets on one of their own computers, off the row the host keeps for it: the older wsp it runs and
 // the update that brings it level, threads at once, how long a quiet workspace waits before it naps, how long one
-// turn may run, and whether its threads may open threads. Every set goes through places.set and the row comes back
-// as the host now reads it; a row off its default carries the arrow that takes it back.
+// turn may run, whether its threads may open threads, and its name and ssh login. Every set goes through places.set
+// and the row comes back as the host now reads it; a row off its default carries the arrow that takes it back.
 import { useState } from "react";
 import { MinusIcon, PlusIcon } from "lucide-react";
 import { HERE_PLACE_ID, NAP_AFTER_MAX_MS, TURN_LIMIT_MAX_MS, fmtMemGb, placeSettingNamed, type PlaceSettingWord, type PlaceSettingsAsk, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
+import { noticeFailure } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
-import { COMPUTER_PAGE_WORDS as W } from "./format.js";
+import { COMPUTER_PAGE_WORDS as W, SETTINGS_WORDS } from "./format.js";
 import { SELECT_WIDTH } from "./layout.js";
 import { hereName, placeName } from "./places.js";
 import { Card, Row } from "./rows.js";
+import { ChangeButton, FieldSheet, sheetWrite, type Written } from "./sheetParts.js";
 import type { SettingsContext } from "./settingsContext.js";
 
 const NAP_CHOICES: ReadonlyArray<number | null> = [10, 20, 30, 60, 120, 180].map(m => m * 60_000).filter(ms => ms <= NAP_AFTER_MAX_MS).concat([null] as never);
 const TURN_LIMIT_CHOICES: ReadonlyArray<number | null> = [1, 2, 4, 6, 8, 12, 24].map(h => h * 3_600_000).filter(ms => ms <= TURN_LIMIT_MAX_MS).concat([null] as never);
 const NEVER = "never";
 
-const setOn = (place: PlaceView, ask: PlaceSettingsAsk): Promise<void> => useStore.getState().setPlace(place.id, ask);
-const resetOn = (place: PlaceView, word: PlaceSettingWord): (() => void) => () => void useStore.getState().setPlace(place.id, {}, [word]);
+const setOn = (place: PlaceView, ask: PlaceSettingsAsk): Promise<void> => useStore.getState().setPlace(place.id, ask).catch(noticeFailure);
+const resetOn = (place: PlaceView, word: PlaceSettingWord): (() => void) => () => void useStore.getState().setPlace(place.id, {}, [word]).catch(noticeFailure);
 
 /** The row under a computer's head when it runs an older daemon than this wsp deploys: a button where the host can
  * run the fix there itself, the line to run where only the person can. */
@@ -179,5 +181,29 @@ export function SpawnCard({ place }: { place: PlaceView }) {
         />
       )}
     </Card>
+  );
+}
+
+/** What a computer the person added is called and the ssh login the host reaches it by, each changed in a sheet
+ * through places.set. A new login is saved only once the host reads this same computer over it, so a refusal keeps
+ * the old one and stands under the field in the host's words. */
+export function NameCard({ place }: { place: PlaceView }) {
+  const placesSet = useStore(s => s.api?.placesSet);
+  const [sheet, setSheet] = useState<"name" | "ssh" | null>(null);
+  if (place.kind !== "computer" || place.id === HERE_PLACE_ID) return null;
+  const name = placeName(place);
+  const ssh = place.road?.ssh;
+  const close = (): void => setSheet(null);
+  const write = (field: "name" | "ssh", value: string): Promise<Written> =>
+    value === (field === "name" ? place.name : ssh) ? Promise.resolve(null) : sheetWrite(useStore.getState().setPlace(place.id, { [field]: value }));
+  return (
+    <>
+      <Card id="computer-name-login">
+        <Row id="computer-name" title={W.nameTitle} description={name} control={<ChangeButton k="computer-name-change" word={SETTINGS_WORDS.change} held={placesSet === undefined} onClick={() => setSheet("name")} />} />
+        <Row id="computer-ssh" title={W.sshTitle} description={ssh ?? W.sshNone} mono={ssh !== undefined} control={<ChangeButton k="computer-ssh-change" word={SETTINGS_WORDS.change} held={placesSet === undefined} onClick={() => setSheet("ssh")} />} />
+      </Card>
+      {sheet === "name" ? <FieldSheet k="computer-name" title={W.nameTitle} line={W.nameSheet(name)} initial={place.name} placeholder={place.name} mono={false} required save={value => write("name", value)} onClose={close} /> : null}
+      {sheet === "ssh" ? <FieldSheet k="computer-ssh" title={W.sshTitle} line={W.sshSheet(name)} initial={ssh ?? ""} placeholder="user@host" required checking={login => W.sshChecking(login, name)} save={value => write("ssh", value)} onClose={close} /> : null}
+    </>
   );
 }
