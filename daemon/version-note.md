@@ -1,0 +1,1 @@
+a copy road's refusal writes a size as the app does (512 B, 21 GB, 1.3 GB) and a thread's cost groups thousands and rounds 1.005 to $1.01 as the app does, both held to one case file the TypeScript twins read too.
