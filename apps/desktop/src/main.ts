@@ -9,12 +9,13 @@ import { BrowserWindow, Menu, Notification, Tray, app, dialog, ipcMain, nativeIm
 import { awakeWanted } from "./awake.js";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { deepLinks, linkInArgv } from "./deep-link.js";
+import { appImageIcon, applicationsDir, claimWspLinks } from "./desktop-entry.js";
 import { fontDirs, fontFamilies, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { bundleShell, type BundleShell } from "./get-bundle.js";
 import { homeOf, loginStart, openHost, openHostReady, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
-import { noticeWindowOf, sayOutside, showBadge, type Notifier } from "./needs-you.js";
+import { dockBadge, noticeWindowOf, sayOutside, type Notifier } from "./needs-you.js";
 import { allowed, fromAppPage, fromOnboardingPage, hostsViewFor, notForThisPage } from "./origin.js";
 import { hostFeed, type FeedEvent, type FeedState, type HostFeed } from "./host-feed.js";
 import { guardWorkers, loadHostPage } from "./page-session.js";
@@ -171,10 +172,6 @@ app.on("second-instance", (_event, argv) => {
 });
 const launchedWith = linkInArgv(process.argv);
 if (launchedWith !== undefined) links.open(launchedWith);
-// The bundle names the scheme for macOS; Linux and Windows learn it here. A build run from dist by the smoke, or
-// unpackaged, would name itself the computer's handler for every wsp:// link, so only an installed app asks.
-if (app.isPackaged && process.env["WSP_DESKTOP_SMOKE"] !== "1") app.setAsDefaultProtocolClient("wsp");
-
 /** How this shell shows a system notification; the module decides whether to, this says with what. */
 const NOTIFIER: Notifier = {
   supported: () => Notification.isSupported(),
@@ -205,7 +202,9 @@ listen("outside:say", (event, line) => {
   sayOutside(parsed.data, noticeWindowOf(win, raiseWindow, () => void reopen()), NOTIFIER);
 });
 
-listen("badge:set", (_event, count) => showBadge(count, app));
+const badge = dockBadge(app);
+listen("badge:set", (_event, count) => badge.count(count));
+listen("plan-alerts:seen", () => badge.seen());
 
 // Whether this computer's service starts at login is this computer's to say, so only the app's own host's page asks.
 answer("service:login", () => loginStart(where().statePath, systemService()));
@@ -524,15 +523,20 @@ function follow(on: HostSession): void {
   feed?.close();
   fedFrom = on;
   fed = undefined;
+  badge.seen();
   const { home, statePath } = where();
   feed = hostFeed({
     dial: () => dialHost(statePath, { aim: on.remote && on.alias !== undefined ? aimedHost(statePath, { host: on.alias, home }) : { kind: "here" }, home }),
     changed: state => {
       fed = state;
+      badge.alerts(state.planAlerts);
       drawTray();
       holdAwake();
     },
-    event: sayWhileClosed,
+    event: e => {
+      badge.heard(e);
+      sayWhileClosed(e);
+    },
     log: io.error,
   });
 }
@@ -556,7 +560,7 @@ function drawTray(): void {
   tray.setToolTip(drawn.title === "" ? "wsp" : `wsp ${drawn.title}`);
   tray.setContextMenu(Menu.buildFromTemplate(menuOf(drawn.rows)));
   // The page puts the count on the dock while it is up; with no window, the menu bar's feed does.
-  if (win === undefined) showBadge(drawn.badge, app);
+  if (win === undefined) badge.count(drawn.badge);
 }
 
 /** What a menu row does when it is picked. */
@@ -613,13 +617,25 @@ if (process.env["WSP_DESKTOP_SMOKE"] === "1") Object.assign(globalThis, { wspTra
 /** The wsp command on this computer, rewritten whenever this app is not the one it names: an update or a move
  * changes the path inside the bundle, and the shim is what every agent's config and the service run. A home that
  * cannot be written is the launch's refusal, since the service would start nothing. */
-function installCommand(): void {
+function installCommand(): ShimTarget {
   const shim = shimPath(wspHome());
   try {
-    io.log(`wsp command ${installShim(shim, shimText(commandTarget()))} at ${shim}`);
+    const target = commandTarget();
+    io.log(`wsp command ${installShim(shim, shimText(target))} at ${shim}`);
+    return target;
   } catch (e) {
     throw new Error(`the wsp command could not be written at ${shim}: ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+/** The bundle names the scheme for macOS; Linux and Windows learn it here, an AppImage with the desktop entry it writes
+ * beside the command, naming the icon its kept copy holds. A build run from dist by the smoke, or unpackaged, would
+ * name itself the computer's handler for every wsp:// link, so only an installed app asks. */
+function claimLinks(target: ShimTarget): void {
+  if (!app.isPackaged || process.env["WSP_DESKTOP_SMOKE"] === "1") return;
+  const image = process.env["APPIMAGE"];
+  const entry = image !== undefined && process.env["APPDIR"] !== undefined ? { image, icon: appImageIcon(dirname(target.execPath)) } : undefined;
+  claimWspLinks({ entry, dir: applicationsDir(), claim: () => app.setAsDefaultProtocolClient("wsp"), log: io.log });
 }
 
 /** What the command runs: this app's own files, or under an AppImage a copy of them that outlives this launch. */
@@ -671,7 +687,8 @@ app
     if (moved === "moving") return;
     // The command is written first and waits on nothing: it needs no PATH, and a launch is expected to have left it
     // in place by the time a window is up.
-    installCommand();
+    const command = installCommand();
+    claimLinks(command);
     // Then, before the service is written and before the first launch reads the agents on this computer: a window
     // opened from Finder or the Dock was handed launchd's PATH, and the service runs with the PATH this launch holds.
     await adoptLoginPath(line => io.log(line));
