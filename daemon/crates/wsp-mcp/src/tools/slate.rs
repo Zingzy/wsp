@@ -19,24 +19,27 @@ use crate::host::Host;
 
 pub const CATALOG: Tool = Tool {
     name: "slate_catalog",
-    listed: include_str!("../../record/tools/slate_catalog.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/slate_catalog.json")),
     call: |host, args| Box::pin(catalog(host, args)),
 };
 pub const WRITE: Tool = Tool {
     name: "slate_write",
-    listed: include_str!("../../record/tools/slate_write.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/slate_write.json")),
     call: |host, args| Box::pin(write(host, args)),
 };
 pub const STATE: Tool = Tool {
     name: "slate_state",
-    listed: include_str!("../../record/tools/slate_state.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/slate_state.json")),
     call: |host, args| Box::pin(state(host, args)),
 };
 /// The slate's tools by name, which a server for a thread with no slate leaves off.
 pub const NAMES: [&str; 4] = [CATALOG.name, WRITE.name, STATE.name, READ.name];
 
-pub const READ: Tool =
-    Tool { name: "slate_read", listed: include_str!("../../record/tools/slate_read.json"), call: |host, args| Box::pin(read(host, args)) };
+pub const READ: Tool = Tool {
+    name: "slate_read",
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/slate_read.json")),
+    call: |host, args| Box::pin(read(host, args)),
+};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]

@@ -53,7 +53,7 @@ const NO_SNAPSHOT_STORAGE: SnapshotStoragePricing = { freeGb: 0, usdPerGbMonth: 
 
 export const BOX_PRICING: BackendPricing = {
   rateUsdPerHour: size => boxClassFor(size).rateUsdPerHour,
-  defaultSize: { cpu: BOX_CLASSES[0]!.cpu, memMb: BOX_CLASSES[0]!.memMb },
+  defaultSize: { cpu: 2, memMb: 4096 },
   snapshotStorage: NO_SNAPSHOT_STORAGE,
 };
 
@@ -62,7 +62,8 @@ export const BOX_PRICING: BackendPricing = {
 export const BOX_BASE_TEMPLATE = "base";
 
 // Frozen: one shared object for every backend, so nothing shrinks a budget for everyone by accident.
-export const BOX_BUDGETS: LifecycleBudgets = Object.freeze({
+// No arithmetic, since esbuild keeps that, and marked pure, so a public build, which builds no BoxBackend, drops it whole.
+export const BOX_BUDGETS: LifecycleBudgets = /* @__PURE__ */ Object.freeze({
   // A second attempt would be a stop that snapshots the disk for minutes and a resume that counts as a billed start
   // against 5 a minute and 75 a day on the trial; a wake that fails its check fails on the machine it has.
   wakeAttempts: 1,
@@ -71,7 +72,7 @@ export const BOX_BUDGETS: LifecycleBudgets = Object.freeze({
   // image, and 8 min 10 s and 12 min 8 s after boot on the two wakes that failed a five minute wait (2026-09-29).
   // Nothing the API answers tells a box still restoring from one that is done: it reads running and takes commands
   // while its services have not started. So the wait is long enough for the slowest restore seen, in one attempt.
-  daemonAnswersMs: 15 * 60_000,
+  daemonAnswersMs: 900_000,
 });
 
 /** A stop reads archived 0.6 to 39 s after the call on a small golden and the vendor's own probe puts the p99 near
@@ -111,9 +112,6 @@ export const FILE_PUT_MAX = 5 * 1024 * 1024;
  * adds 30 s of room for the round trip on top, so a command that stays inline is bounded here and anything longer
  * runs detached on the guest instead. */
 export const BOX_INLINE_MAX_MS = 30_000;
-
-/** Whose machine a box is, in the words a person reads when the provider left one unusable. */
-const BOX_PROVIDER = providerKeyName("box");
 
 /** The dynamic loader's own wording for EMFILE, anchored to the two programs every command starts in, the shell and
  * the sudo that wraps it: a child of a command that hits the limit prints the same line under its own name, and that
@@ -162,7 +160,6 @@ const SHORT_KEYS: readonly (readonly [key: string, short: string])[] = [
   [GOLDEN_LABEL, "g"],
   [NAME_LABEL, "n"],
 ];
-const LONG_KEYS = new Map(SHORT_KEYS.map(([key, short]) => [short, key]));
 
 const encodeValue = (value: string): string => value.replace(/[%;=]/g, c => `%${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
 const decodeValue = (value: string): string => value.replace(/%([0-9a-f]{2})/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
@@ -196,7 +193,7 @@ export function boxLabels(name: string | undefined | null): Record<string, strin
     const eq = part.indexOf("=");
     if (eq <= 0) continue;
     const short = part.slice(0, eq);
-    labels[LONG_KEYS.get(short) ?? short] = decodeValue(part.slice(eq + 1));
+    labels[SHORT_KEYS.find(([, s]) => s === short)?.[0] ?? short] = decodeValue(part.slice(eq + 1));
   }
   return labels;
 }
@@ -727,13 +724,13 @@ export class BoxMachine implements Machine {
       // The agent that runs the endpoint failing to spawn the shell at all reads as the guest being dead, not as a
       // command refused: the message is the agent's own (`D.stdout.on` of nothing, seen 2026-09-11).
       if ((e as Partial<WspError>).kind === "unknown" && (e as Partial<WspError>).status === 500) {
-        throw new GuestUnusableError(this.id, BOX_PROVIDER, (e as WspError).message, (e as WspError).status);
+        throw new GuestUnusableError(this.id, providerKeyName("box"), (e as WspError).message, (e as WspError).status);
       }
       throw e;
     });
     const stderr = res.stderr ?? "";
     // The endpoint answered the command, so the status behind this reading is the one request() returns on.
-    if (LOADER_EMFILE.test(stderr)) throw new GuestUnusableError(this.id, BOX_PROVIDER, stderr.trim(), 200);
+    if (LOADER_EMFILE.test(stderr)) throw new GuestUnusableError(this.id, providerKeyName("box"), stderr.trim(), 200);
     return { exitCode: res.exitCode ?? (res.timedOut === true ? DEADLINE_EXIT : -1), stdout: res.stdout ?? "", stderr };
   }
 

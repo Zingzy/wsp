@@ -4,12 +4,15 @@ import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
+import { cloudDefine } from "../../packages/wspx/scripts/build-defines.mjs";
 import { TEST_ENV } from "../../vitest.env.js";
 
 const pkg = (path: string) => fileURLToPath(new URL(`../../packages/${path}`, import.meta.url));
 
 export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss()],
+  // A public build (PUBLIC_BUILD=1) folds the protocol's and the catalog's cloud tables to empty and drops their words.
+  define: cloudDefine(),
   // The browser cannot follow a package.json main into a dist a fresh worktree may not have.
   resolve: command === "serve" ? { alias: { "@wsp/protocol/slate": pkg("protocol/src/slate/index.ts"), "@wsp/protocol": pkg("protocol/src/index.ts"), "@wsp/catalog": pkg("catalog/src/index.ts") } } : {},
   // noVNC's H.264 decoder module uses top-level await, which vite's default

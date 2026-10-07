@@ -17,29 +17,32 @@ use crate::record::{self, fill, Words};
 
 pub const TOOLS: Tool = Tool {
     name: "servers_tools",
-    listed: include_str!("../../record/tools/servers_tools.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/servers_tools.json")),
     call: |host, args| Box::pin(tools(host, args)),
 };
-pub const ADD: Tool =
-    Tool { name: "servers_add", listed: include_str!("../../record/tools/servers_add.json"), call: |host, args| Box::pin(add(host, args)) };
+pub const ADD: Tool = Tool {
+    name: "servers_add",
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/servers_add.json")),
+    call: |host, args| Box::pin(add(host, args)),
+};
 pub const REMOVE: Tool = Tool {
     name: "servers_remove",
-    listed: include_str!("../../record/tools/servers_remove.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/servers_remove.json")),
     call: |host, args| Box::pin(changed(host, args, "servers_remove", None)),
 };
 pub const DISABLE: Tool = Tool {
     name: "servers_disable",
-    listed: include_str!("../../record/tools/servers_disable.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/servers_disable.json")),
     call: |host, args| Box::pin(changed(host, args, "servers_disable", Some(false))),
 };
 pub const ENABLE: Tool = Tool {
     name: "servers_enable",
-    listed: include_str!("../../record/tools/servers_enable.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/servers_enable.json")),
     call: |host, args| Box::pin(changed(host, args, "servers_enable", Some(true))),
 };
 pub const ADD_TOOLS: Tool = Tool {
     name: "agents_addtools",
-    listed: include_str!("../../record/tools/agents_addtools.json"),
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/agents_addtools.json")),
     call: |host, args| Box::pin(add_tools(host, args)),
 };
 

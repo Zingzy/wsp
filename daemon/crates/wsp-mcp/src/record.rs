@@ -9,10 +9,10 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-const SERVER: &str = include_str!("../record/server.json");
-const WORDS: &str = include_str!("../record/words.json");
-const EXIT: &str = include_str!("../record/exit.json");
-const HOST: &str = include_str!("../record/host.json");
+const SERVER: &str = include_str!(concat!(env!("OUT_DIR"), "/record/server.json"));
+const WORDS: &str = include_str!(concat!(env!("OUT_DIR"), "/record/words.json"));
+const EXIT: &str = include_str!(concat!(env!("OUT_DIR"), "/record/exit.json"));
+const HOST: &str = include_str!(concat!(env!("OUT_DIR"), "/record/host.json"));
 
 /// A record this build carries and cannot read is a build that never passed its own tests.
 fn read<T: for<'de> Deserialize<'de>>(name: &str, text: &str) -> T {

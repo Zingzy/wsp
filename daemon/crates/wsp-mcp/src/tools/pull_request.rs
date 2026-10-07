@@ -92,12 +92,21 @@ const FIX_NAME: &str = "fix";
 const MERGE_NAME: &str = "merge";
 const UPDATE_NAME: &str = "update";
 
-pub const FIX: Tool =
-    Tool { name: FIX_NAME, listed: include_str!("../../record/tools/fix.json"), call: |host, args| Box::pin(fix(host, args)) };
-pub const MERGE: Tool =
-    Tool { name: MERGE_NAME, listed: include_str!("../../record/tools/merge.json"), call: |host, args| Box::pin(merge(host, args)) };
-pub const UPDATE: Tool =
-    Tool { name: UPDATE_NAME, listed: include_str!("../../record/tools/update.json"), call: |host, args| Box::pin(update(host, args)) };
+pub const FIX: Tool = Tool {
+    name: FIX_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/fix.json")),
+    call: |host, args| Box::pin(fix(host, args)),
+};
+pub const MERGE: Tool = Tool {
+    name: MERGE_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/merge.json")),
+    call: |host, args| Box::pin(merge(host, args)),
+};
+pub const UPDATE: Tool = Tool {
+    name: UPDATE_NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/update.json")),
+    call: |host, args| Box::pin(update(host, args)),
+};
 
 /// A named check is read off the pull request as it stands, so the copy is not woken for it; without one the host
 /// updates the copy from its base first, which needs its machine.

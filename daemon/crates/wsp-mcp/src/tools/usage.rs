@@ -11,8 +11,11 @@ use crate::host::Host;
 
 const NAME: &str = "usage";
 
-pub const TOOL: Tool =
-    Tool { name: NAME, listed: include_str!("../../record/tools/usage.json"), call: |host, args| Box::pin(call(host, args)) };
+pub const TOOL: Tool = Tool {
+    name: NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/usage.json")),
+    call: |host, args| Box::pin(call(host, args)),
+};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]

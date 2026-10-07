@@ -15,8 +15,11 @@ use crate::record;
 
 const NAME: &str = "computers";
 
-pub const TOOL: Tool =
-    Tool { name: NAME, listed: include_str!("../../record/tools/computers.json"), call: |host, args| Box::pin(call(host, args)) };
+pub const TOOL: Tool = Tool {
+    name: NAME,
+    listed: include_str!(concat!(env!("OUT_DIR"), "/record/tools/computers.json")),
+    call: |host, args| Box::pin(call(host, args)),
+};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -51,7 +54,7 @@ async fn call(host: std::sync::Arc<Host>, arguments: serde_json::Value) -> Resul
 
 const SET_NAME: &str = "computers_set";
 
-const SET_LISTED: &str = include_str!("../../record/tools/computers_set.json");
+const SET_LISTED: &str = include_str!(concat!(env!("OUT_DIR"), "/record/tools/computers_set.json"));
 
 pub const SET: Tool = Tool { name: SET_NAME, listed: SET_LISTED, call: |host, args| Box::pin(set(host, args)) };
 
