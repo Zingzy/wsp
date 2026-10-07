@@ -358,7 +358,8 @@ function Identity({ mark, title, line, under }: { mark: ReactNode; title: string
 const agentGlyph = (agent: string): ReactNode => <HarnessMark harness={agent} label={agentName(agent)} className="size-4" />;
 
 const RANGES = USAGE_RANGES.map(value => ({ value, label: W.ranges[value] }));
-const SPLITS = USAGE_SPLITS.map(value => ({ value, label: W.splits[value] }));
+// The split by source is the command line's and the tool's; the page leaves it out.
+const SPLITS = USAGE_SPLITS.filter(value => value !== "source").map(value => ({ value, label: W.splits[value] }));
 
 /** The words a step of the chart goes by: its hour in a day's range, its day otherwise. */
 const stepWord = (used: UsedAnswer): Intl.DateTimeFormat =>

@@ -367,10 +367,11 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
           if (result.tokens !== undefined || result.costUsd !== undefined) {
             const account = ctx.usageAccountOf(entry, view.harness, turnAccount);
             const model = result.model ?? view.model;
-            // An agent that names each model a turn used files a row for each; the turn counts once, under its own model.
+            // An agent that names each model a turn used files a row for each; the turn counts once, on the first entry
+            // of its own model, since a model whose tokens came part with a cost and part without has two.
             const uses = result.models !== undefined && result.models.length > 0 ? result.models : [{ model, tokens: result.tokens, costUsd: result.costUsd }];
-            const counted = uses.some(u => u.model === model) ? model : uses[0]!.model;
-            for (const use of uses)
+            const counted = Math.max(0, uses.findIndex(u => u.model === model));
+            for (const [at, use] of uses.entries())
               void ctx.ledger
                 .add({
                   at: clock.now(),
@@ -379,7 +380,7 @@ export function turnsArea(ctx: RuntimeContext): TurnsArea {
                   accountLabel: account.label,
                   computer: ctx.usageComputerOf(entry.record),
                   project: entry.record.project,
-                  turns: use.model === counted ? 1 : 0,
+                  turns: at === counted ? 1 : 0,
                   ...(use.model !== undefined ? { model: use.model } : {}),
                   ...(use.tokens !== undefined ? { tokens: use.tokens } : {}),
                   ...(use.costUsd !== undefined ? { costUsd: use.costUsd } : {}),

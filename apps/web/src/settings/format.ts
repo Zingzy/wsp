@@ -407,7 +407,7 @@ export const USAGE_PAGE_WORDS = {
   noPlanLimit: "No plan limit",
   noLimit: (agents: readonly string[]): string => `${listWords(agents)} ${agents.length === 1 ? "reports" : "report"} no plan limit.`,
   ranges: { day: "Today", week: "7 days", month: "30 days" },
-  splits: { agent: "Agent", account: "Account", computer: "Computer", project: "Project", model: "Model" },
+  splits: { agent: "Agent", account: "Account", computer: "Computer", project: "Project", model: "Model", source: "Source" },
   estimate: "API estimate",
   atListPrice: "at list price",
   turns: "Turns",
@@ -420,7 +420,7 @@ export const USAGE_PAGE_WORDS = {
   by: (split: string): string => `By ${split.toLowerCase()}`,
   mix: "Where the tokens went",
   agentAndModel: "Agent and model",
-  allOf: { agent: "All agents together", account: "All accounts together", computer: "All computers together", project: "All projects together", model: "All models together" },
+  allOf: { agent: "All agents together", account: "All accounts together", computer: "All computers together", project: "All projects together", model: "All models together", source: "All sources together" },
 } as const;
 
 /** Settings > Projects: the list, a project's own page and its one act. */

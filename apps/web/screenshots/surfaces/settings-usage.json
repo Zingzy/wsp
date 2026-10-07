@@ -7,7 +7,7 @@
     "k=settings-row",
     "k=settings-usage"
   ],
-  "wait": "k=used-headline",
+  "wait": "k=usage-split",
   "settleMs": 700,
   "height": 1100,
   "widths": [

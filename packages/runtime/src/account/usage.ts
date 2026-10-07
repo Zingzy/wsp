@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomUUID } from "node:crypto";
 import { CATALOG_AGENTS, type ThreadAgent, loginHomeIn, sharedOn } from "@wsp/catalog";
-import { type DaemonFrame, THIS_COMPUTER, underProject, absentComputer, HERE_PLACE_ID, isJoinedComputer, workspacePlace, RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, resetNoLoginsLine, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type AgentSignInState, type ResetAnswer, type UsageSplit } from "@wsp/protocol";
+import { type DaemonFrame, THIS_COMPUTER, underProject, absentComputer, HERE_PLACE_ID, isJoinedComputer, workspacePlace, RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, resetNoLoginsLine, USAGE_WORDS, outsideWspLine, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type AgentSignInState, type ResetAnswer, type UsageSplit } from "@wsp/protocol";
 import { NO_PLACE_DOOR } from "../places.js";
 import { harnessCatalog, modelLabel } from "../harness-catalog.js";
 import { PLAN_RESETS } from "../adapters.js";
@@ -50,6 +50,8 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
         return accounts.get(value) ?? value;
       case "model":
         return modelLabel(value);
+      case "source":
+        return value === "log" ? outsideWspLine(usageComputerName(places, HERE_PLACE_ID)) : USAGE_WORDS.wspThreads;
       default: {
         const _exhaustive: never = split;
         return value;
@@ -198,7 +200,8 @@ export function usageArea(ctx: RuntimeContext): UsageArea {
   const usage: UsageDoor = {
     reset,
     used: async q => {
-      const outside = q.outside === true && (await ctx.preferences.get()).usageLogs;
+      // The split by source is the one that sets the logs beside wsp's threads, so it reads them whatever the door asked.
+      const outside = (q.outside === true || q.split === "source") && (await ctx.preferences.get()).usageLogs;
       if (outside) await readLogs().catch((e: unknown) => console.warn(`this computer's agent logs were not read for usage: ${e instanceof Error ? e.message : String(e)}`));
       const places = (await placeDoor?.list(clock.now())) ?? [];
       return ledger.used({ range: q.range, split: q.split, label: usageLabel(places, await ledger.accountLabels()), outside, logsOn: usageComputerName(places, HERE_PLACE_ID) });

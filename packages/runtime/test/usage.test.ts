@@ -291,6 +291,35 @@ describe("work outside wsp on this computer", () => {
   });
 });
 
+describe("the split by source", () => {
+  it("sets the turns wsp's threads ran beside the other sessions this computer's agents logged, each as one row", async () => {
+    const backend = stubBackend();
+    rt = createRuntime({
+      backend,
+      store: memoryStore(),
+      adapters: { claude: turning({ status: "completed", text: "done", costUsd: 0.5, tokens: { input: 10, output: 1 } }) },
+      vault: () => OAUTH,
+      pricesFetch: async () => ({}),
+      local: fakeLocal(mkdtempSync(join(tmpdir(), "wsp-usage-local-"))),
+      logUsage: async () => [
+        { agent: "claude", session: "s-terminal", at: Date.now(), model: "claude-opus-5", folder: "/somewhere", tokens: { input: 7, output: 1, cached: 0, cacheWrite: 0, reasoning: 0 } },
+        { agent: "codex", session: "s-codex", at: Date.now(), model: "gpt-5", folder: "/elsewhere", tokens: { input: 4, output: 2, cached: 0, cacheWrite: 0, reasoning: 0 } },
+      ],
+    });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "here" });
+    await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+    // The door asks for no logs, as the command line and the binary's tool server do: the split reads them itself.
+    const used = await rt.usage.used({ range: "day", split: "source" });
+    expect(used.split).toBe("source");
+    expect(used.rows.map(r => [r.key, r.label, r.tokens.input, r.costReported, r.turns, r.agent])).toEqual([
+      ["log", expect.stringMatching(/^Outside wsp on /), 11, undefined, 0, undefined],
+      ["wsp", "wsp threads", 10, 0.5, 1, undefined],
+    ]);
+    // Every other split asked so holds wsp's threads alone.
+    expect((await rt.usage.used({ range: "day", split: "agent" })).rows.map(r => r.tokens.input)).toEqual([10]);
+  });
+});
+
 describe("a wsp thread's own transcript", () => {
   it("is never filed as outside wsp, even from a turn that reported no tokens and so filed no row", async () => {
     const backend = stubBackend();

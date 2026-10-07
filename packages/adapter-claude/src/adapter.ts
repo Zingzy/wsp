@@ -3,7 +3,7 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, claudeMemoryDir, endAfterResult, endRun, fmtDuration, keepRun, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
+import { ASIDE_WALL_MS, baseModel, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, claudeMemoryDir, endAfterResult, endRun, fmtDuration, keepRun, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, KeptAgent, KeptRun, KeptTurn, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, interruptLine, modeOptionOn, setModeLine, stopTaskLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
@@ -282,8 +282,40 @@ function modelsOf(raw: unknown): ModelUse[] {
   });
 }
 
-/** The turn's tokens off its result: the usage sums the agent's own calls of the turn, and modelUsage keeps each model's
- * running totals for the session, subagents included, with its window. */
+/** The tokens one usage counts, as a turn's tokens read. */
+function usageTokens(usage: Record<string, unknown>): TurnTokens {
+  const cached = num(usage.cache_read_input_tokens);
+  const cacheWrite = num(usage.cache_creation_input_tokens);
+  return { input: inputTokens(usage), output: num(usage.output_tokens) ?? 0, ...(cached !== undefined ? { cached } : {}), ...(cacheWrite !== undefined ? { cacheWrite } : {}) };
+}
+
+function plusTokens(a: TurnTokens | undefined, b: TurnTokens): TurnTokens {
+  if (a === undefined) return b;
+  const sum = (k: "cached" | "cacheWrite" | "reasoning"): Partial<TurnTokens> => (a[k] === undefined && b[k] === undefined ? {} : { [k]: (a[k] ?? 0) + (b[k] ?? 0) });
+  return { input: a.input + b.input, output: a.output + b.output, ...sum("cached"), ...sum("cacheWrite"), ...sum("reasoning") };
+}
+
+/** A turn's tokens as one model's entry holds them, every count present. */
+const usageOf = (t: TurnTokens): ModelUse["tokens"] => ({ input: t.input, output: t.output, cached: t.cached ?? 0, cacheWrite: t.cacheWrite ?? 0, reasoning: t.reasoning ?? 0 });
+
+/** A model's entry in running totals: by its own name, else by the model it names, since a result keys a model with
+ * its context window (`claude-opus-5-5[1m]`) where its calls and the totals they joined name it bare. */
+const startOf = (models: readonly ModelUse[], model: string): ModelUse | undefined =>
+  models.find(m => m.model === model) ?? models.find(m => baseModel(m.model) === baseModel(model));
+
+/** Running totals by model with calls added, each to the model it was made on whatever name its totals go by. */
+function withCalls(models: readonly ModelUse[], calls: readonly ModelUse[]): ModelUse[] {
+  const out = models.map(m => ({ ...m }));
+  for (const call of calls) {
+    const same = startOf(out, call.model);
+    if (same === undefined) out.push({ ...call });
+    else same.tokens = usageOf(plusTokens(same.tokens, call.tokens));
+  }
+  return out;
+}
+
+/** The turn's tokens off its result: the usage sums the agent's own calls since it last stopped, and modelUsage keeps
+ * each model's running totals for the session, subagents included, with its window. */
 function resultTokens(event: Record<string, unknown>): { tokens?: TurnTokens; models?: ModelUse[] } {
   const usage = rec(event.usage);
   const windows = Object.values(rec(event.modelUsage) ?? {}).flatMap(raw => {
@@ -291,20 +323,8 @@ function resultTokens(event: Record<string, unknown>): { tokens?: TurnTokens; mo
     return window !== undefined ? [window] : [];
   });
   const models = event.modelUsage === undefined ? undefined : modelsOf(event.modelUsage);
-  const cached = usage === undefined ? undefined : num(usage.cache_read_input_tokens);
-  const cacheWrite = usage === undefined ? undefined : num(usage.cache_creation_input_tokens);
   return {
-    ...(usage !== undefined
-      ? {
-          tokens: {
-            input: inputTokens(usage),
-            output: num(usage.output_tokens) ?? 0,
-            ...(cached !== undefined ? { cached } : {}),
-            ...(cacheWrite !== undefined ? { cacheWrite } : {}),
-            ...(windows.length > 0 ? { window: Math.max(...windows) } : {}),
-          },
-        }
-      : {}),
+    ...(usage !== undefined ? { tokens: { ...usageTokens(usage), ...(windows.length > 0 ? { window: Math.max(...windows) } : {}) } } : {}),
     ...(models !== undefined ? { models } : {}),
   };
 }
@@ -313,6 +333,9 @@ function resultTokens(event: Record<string, unknown>): { tokens?: TurnTokens; mo
 interface SavedUse {
   costUsd: number;
   models: ModelUse[];
+  /** Models whose totals took calls filed after a held reply with no cost: the cost cannot take their share, so the
+   * next turn's gain on these models still holds what those calls cost. */
+  unpriced?: string[];
 }
 
 /** A cost-state line as this session's saved totals, or nothing where it is another session's or does not read. */
@@ -338,17 +361,29 @@ function gained(now: ModelUse, before: ModelUse | undefined): ModelUse | undefin
 /** The turn's own use off the session's running totals. A new session starts them at nothing and a resume at what its
  * file saved; a resume with nothing saved read leaves the turn's cost and its split by model out, its own tokens
  * standing, so a turn never files the session's whole spend. A total under the saved one started again inside this
- * turn, so all of it is this turn's. The model is the one that did the most of it. */
-function ownUse(result: TurnResult, saved: SavedUse | undefined, fresh: boolean): TurnResult {
-  const { costUsd: total, models: running, ...rest } = result;
+ * turn, so all of it is this turn's. The turn's tokens are its split by model where that is known, else what every
+ * result of the turn counted (`spent`), and the model the one that did the most of it. */
+function ownUse(result: TurnResult, saved: SavedUse | undefined, fresh: boolean, spent: TurnTokens | undefined): TurnResult {
+  const { costUsd: total, models: running, ...given } = result;
+  const window = given.tokens?.window;
+  const rest = spent === undefined ? given : { ...given, tokens: { ...spent, ...(window !== undefined ? { window } : {}) } };
   if (!fresh && saved === undefined) return rest;
   const before = saved ?? { costUsd: 0, models: [] };
   const restarted = total !== undefined && total < before.costUsd;
-  const costUsd = total === undefined ? undefined : restarted ? total : total - before.costUsd;
-  const own = running?.map(m => (restarted ? m : gained(m, before.models.find(b => b.model === m.model))));
-  const models = own === undefined || own.some(m => m === undefined) ? undefined : (own as ModelUse[]).filter(m => spentBy(m) > 0);
+  const paid = total === undefined ? undefined : restarted ? total : total - before.costUsd;
+  const own = running?.map(m => (restarted ? m : gained(m, startOf(before.models, m.model))));
+  const counted = own === undefined || own.some(m => m === undefined) ? undefined : (own as ModelUse[]).filter(m => spentBy(m) > 0);
+  // A model whose start took calls an earlier turn filed at list price files its tokens with no cost, so the ledger
+  // prices them at list too and those calls are paid for once; a turn with no split leaves its whole cost out.
+  const unpriced = restarted ? [] : (before.unpriced ?? []).map(baseModel);
+  const withheld = (m: ModelUse): boolean => unpriced.includes(baseModel(m.model));
+  const models = counted?.map(m => (withheld(m) ? { model: m.model, tokens: m.tokens } : m));
+  const priced = models?.filter(m => m.costUsd !== undefined) ?? [];
+  const costUsd = unpriced.length === 0 || paid === undefined ? paid : priced.length === 0 ? undefined : Math.max(0, paid - counted!.reduce((sum, m) => sum + (withheld(m) ? (m.costUsd ?? 0) : 0), 0));
   const model = models?.reduce<ModelUse | undefined>((best, m) => (best === undefined || spentBy(m) > spentBy(best) ? m : best), undefined)?.model;
-  return { ...rest, ...(costUsd !== undefined ? { costUsd } : {}), ...(models !== undefined ? { models } : {}), ...(model !== undefined ? { model } : {}) };
+  const split = models === undefined || models.length === 0 ? undefined : models.reduce<TurnTokens | undefined>((sum, m) => plusTokens(sum, m.tokens), undefined);
+  const tokens = split === undefined ? rest.tokens : { ...split, ...(window !== undefined ? { window } : {}) };
+  return { ...rest, ...(tokens !== undefined ? { tokens } : {}), ...(costUsd !== undefined ? { costUsd } : {}), ...(models !== undefined ? { models } : {}), ...(model !== undefined ? { model } : {}) };
 }
 
 function normalizeResult(event: Record<string, unknown>, refusal: { road?: string; cause?: TurnRefusal } | undefined): TurnResult {
@@ -786,6 +821,33 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let totals: SavedUse | undefined;
     /** The messages whose call was already reported as drawn: every block of a message repeats the message's usage. */
     const drawn = new Set<string>();
+    /** What the turn's results counted, summed: the CLI prints one each time its agent stops, and a turn it woke for
+     * its background work has one per wake, each counting only the calls since the last. */
+    let spent: TurnTokens | undefined;
+    /** The calls this turn printed, by message: their model and usage, the output the largest any of its blocks showed,
+     * which is still short of the call's own, since a block prints before the call ends. */
+    const calls = new Map<string, ModelUse>();
+    /** A held reply with the calls printed after it, a woken agent's or a background subagent's, which no result
+     * counted. They follow the reply's own entries as entries of their own with no cost, so the list price is theirs,
+     * and join the process's totals, so its next turn's gain starts past them. */
+    const withCallsAfter = (reply: TurnResult): TurnResult => {
+      const after = drewUse(callsCounted);
+      if (after.models === undefined) return reply;
+      if (totals !== undefined) totals = { ...totals, models: withCalls(totals.models, after.models), unpriced: [...(totals.unpriced ?? []), ...after.models.map(m => m.model)] };
+      const held = { ...(reply.tokens?.window !== undefined ? { window: reply.tokens.window } : {}), ...((heldContext ?? reply.tokens?.context) !== undefined ? { context: heldContext ?? reply.tokens?.context } : {}) };
+      const own = reply.models ?? (reply.tokens === undefined ? [] : [{ model: reply.model ?? after.model!, tokens: usageOf(reply.tokens), ...(reply.costUsd !== undefined ? { costUsd: reply.costUsd } : {}) }]);
+      return { ...reply, tokens: { ...plusTokens(reply.tokens, after.tokens!), ...held }, models: [...own, ...after.models] };
+    };
+    /** How many of the printed calls the last result counted. */
+    let callsCounted = 0;
+    /** The printed calls as a turn's use, for a turn the CLI printed no result for: one cut at the wall, killed, or
+     * stopped before it answered. Its cost is left to the list price. */
+    const drewUse = (from = 0): Pick<TurnResult, "tokens" | "models" | "model"> => {
+      const models = withCalls([], [...calls.values()].slice(from));
+      if (models.length === 0) return {};
+      const model = models.reduce((best, m) => (spentBy(m) > spentBy(best) ? m : best)).model;
+      return { tokens: models.reduce<TurnTokens | undefined>((sum, m) => plusTokens(sum, m.tokens), undefined), models, model };
+    };
     /** One line per task that finished after the held reply, in the order the CLI reported them. */
     const finishedAfter: string[] = [];
     /** Running while a held reply waits out the CLI's silence: its tasks are done, and this is the window it has to
@@ -873,7 +935,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
      * ended, a server the agent started among them, which never exits and so never wakes it: the agent replied and
      * the turn went as it should, so the reply stays done and the last line names that work, the line a thread's row
      * reads. */
-    const heldWithFinished = (result: TurnResult, running = 0): TurnResult => {
+    const heldWithFinished = (reply: TurnResult, running = 0): TurnResult => {
+      const result = withCallsAfter(reply);
       const lines = [...finishedAfter, ...(running > 0 && result.status === "completed" ? [backgroundTasksLine(running)] : [])];
       return lines.length === 0 ? result : { ...result, text: [result.text ?? "", "", ...lines].join("\n") };
     };
@@ -917,6 +980,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (event.type === "result" && !drainedNotice(event)) {
             const costUsd = num(event.total_cost_usd);
             totals = costUsd === undefined ? undefined : { costUsd, models: modelsOf(event.modelUsage) };
+            const used = rec(event.usage);
+            if (used !== undefined) spent = plusTokens(spent, usageTokens(used));
+            callsCounted = calls.size;
           }
           if (event.type === "assistant" && typeof event.uuid === "string" && (event.parent_tool_use_id === undefined || event.parent_tool_use_id === null)) anchor = event.uuid;
           const control = controlLine(event);
@@ -1000,6 +1066,12 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           const call = str(event.type) === "assistant" && event.is_api_error_message !== true ? rec(event.message) : undefined;
           const callUsage = rec(call?.usage);
           const callId = str(call?.id);
+          const callModel = str(call?.model);
+          if (callUsage !== undefined && callId !== undefined && callModel !== undefined) {
+            const held = calls.get(callId);
+            const output = Math.max(held?.tokens.output ?? 0, num(callUsage.output_tokens) ?? 0);
+            calls.set(callId, { model: callModel, tokens: { input: inputTokens(callUsage), output, cached: num(callUsage.cache_read_input_tokens) ?? 0, cacheWrite: num(callUsage.cache_creation_input_tokens) ?? 0, reasoning: 0 } });
+          }
           if (callUsage !== undefined && callId !== undefined && !drawn.has(callId)) {
             drawn.add(callId);
             const at = typeof event.timestamp === "string" ? Date.parse(event.timestamp) : NaN;
@@ -1044,7 +1116,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               // their own lines.
               if (sawResult) continue;
               woken = false;
-              const result = spanned(withContext(ownUse(normalized.result, saved, o.fresh), heldContext, initModel));
+              const result = spanned(withContext(ownUse(normalized.result, saved, o.fresh, spent), heldContext, initModel));
               if (backgroundTasks > 0 && interruptRequested) {
                 // The person stopped the turn, so its result is the turn's end and the work it left in the background is
                 // stopped with it. The CLI stops that work by itself too, but only seconds after its result (5.2 s,
@@ -1085,9 +1157,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         // wall, or the process going.
         sawResult = true;
         turnResult = interruptRequested
-          ? { ...heldReply, status: "interrupted" }
+          ? { ...withCallsAfter(heldReply), status: "interrupted" }
           : woken
-            ? { ...heldReply, status: "failed", error: exitLine() }
+            ? { ...withCallsAfter(heldReply), status: "failed", error: exitLine() }
             : heldWithFinished(heldReply, backgroundTasks);
         anchorOnce(claudeSessionId);
         onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
@@ -1097,8 +1169,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           emptyResult !== undefined
             ? { ...emptyResult, status: "failed", error: noOutputError(emptyResult, stderrTail) }
             : interruptRequested
-              ? { status: "interrupted" }
-              : { status: "failed", error: exitLine() };
+              ? { status: "interrupted", ...drewUse() }
+              : { status: "failed", error: exitLine(), ...drewUse() };
         anchorOnce(claudeSessionId);
         onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }

@@ -48,6 +48,8 @@ const PRICES = "prices";
 /** The documents of the ledger kept, a day each. */
 export const USAGE_RETENTION_DAYS = 90;
 
+const TOKEN_FIELDS = ["input", "output", "cached", "cacheWrite", "reasoning"] as const;
+
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
@@ -230,8 +232,14 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
         ...(entry.costUsd !== undefined ? { costReported: entry.costUsd } : {}),
       });
     } else {
+      // A row with no reported cost prices all of its tokens at list, so unreported is kept only once a row holds both.
+      if (entry.costUsd !== undefined && found.costReported === undefined) found.unreported = { ...found.tokens };
+      else if (entry.costUsd === undefined && found.costReported !== undefined) {
+        const bare = (found.unreported ??= { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 });
+        for (const field of TOKEN_FIELDS) bare[field] += tokens[field];
+      }
       found.turns += entry.turns ?? 1;
-      for (const field of ["input", "output", "cached", "cacheWrite", "reasoning"] as const) found.tokens[field] += tokens[field];
+      for (const field of TOKEN_FIELDS) found.tokens[field] += tokens[field];
       if (entry.costUsd !== undefined) found.costReported = (found.costReported ?? 0) + entry.costUsd;
     }
     if (entry.source === "wsp" && entry.session !== undefined && !(held.sessions ?? []).includes(entry.session)) held.sessions = [...(held.sessions ?? []), entry.session];
@@ -342,8 +350,10 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
           line.saved = (line.saved ?? 0) + row.tokens.cached * (rate.input - (rate.cacheRead ?? rate.input));
         }
         if (row.costReported !== undefined) line.costReported = (line.costReported ?? 0) + row.costReported;
-        else if (listed !== undefined) line.costList = (line.costList ?? 0) + listed;
-        else if (row.tokens.input + row.tokens.output > 0) line.priced = false;
+        const bare = row.costReported === undefined ? row.tokens : row.unreported;
+        const bareListed = bare === undefined ? undefined : priceOf(row.model, bare, table);
+        if (bareListed !== undefined) line.costList = (line.costList ?? 0) + bareListed;
+        else if (bare !== undefined && bare.input + bare.output > 0) line.priced = false;
         rows.set(key, line);
         const step = count === 1 ? row.hour : at;
         if (series[step] !== undefined) {

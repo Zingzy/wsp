@@ -657,6 +657,26 @@ const ANSWERED: Answered = {
       arguments: { range: "week", by: "project" },
       replies: { "usage.accounts": reply({ accounts: [] }), "usage.used": reply({ used: { range: "week", split: "project", rows: [], series: [], since: 1_790_130_000_000, until: 1_790_650_000_000 } }) },
     },
+    {
+      case: "a day by source",
+      arguments: { by: "source" },
+      replies: {
+        "usage.accounts": reply({ accounts: [] }),
+        "usage.used": reply({
+          used: {
+            range: "day",
+            split: "source",
+            rows: [
+              { key: "log", label: "Outside wsp on spoo", tokens: { input: 11, output: 1, cached: 0 }, costList: 0.0001, priced: true, turns: 0 },
+              { key: "wsp", label: "wsp threads", tokens: { input: 10, output: 1, cached: 0 }, costReported: 0.5, priced: true, turns: 1 },
+            ],
+            series: [],
+            since: 1_790_130_000_000,
+            until: 1_790_650_000_000,
+          },
+        }),
+      },
+    },
     { case: "refused", arguments: {}, replies: { "usage.accounts": refused("usage.accounts is not a thread's to ask for", "auth"), "usage.used": reply({ used: { range: "day", split: "agent", rows: [], series: [], since: 0, until: 0 } }) } },
   ],
   ...TURN_ANSWERED,
