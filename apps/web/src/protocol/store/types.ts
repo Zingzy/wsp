@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { Attachment, AccountRow, BringBackResult, Capabilities, GoldenStageEvent, HarnessCatalog, InitJob, InitSetup, PendingComputer, PlaceDial, PlaceSettingsAsk, PlaceSettingWord, PlaceView, PortForward, Preferences, PreferencesPatch, ProjectView, ReleaseView, ReviewDraft, SessionView, ThreadMarks, WorkspaceCreateStage, WorkspaceLanding, WorkspaceLook, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { Attachment, AccountRow, BringBackResult, Capabilities, GoldenStageEvent, HarnessCatalog, InitJob, InitSetup, PendingComputer, PlaceDial, PlaceSetAlso, PlaceSettingsAsk, PlaceSettingWord, PlaceView, PortForward, Preferences, PreferencesPatch, ProjectView, ReleaseView, ReviewDraft, SessionView, ThreadMarks, WorkspaceCreateStage, WorkspaceLanding, WorkspaceLook, WorkspaceSize, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import type { Launch } from "../../adapt/view-model.js";
 import type { Api, ConnStatus, ProtocolEvent } from "../client.js";
 import type { Failure } from "../failure.js";
@@ -247,7 +247,8 @@ export interface State {
   updatePlace(placeId: string): Promise<void>;
   /** Sets a computer's own settings, or takes the ones named under `reset` back to their defaults, and puts the row
    * the host answers in place of the one held. A refusal is the host's own sentence in a notice. */
-  setPlace(placeId: string, ask: PlaceSettingsAsk, reset?: ReadonlyArray<PlaceSettingWord>): Promise<void>;
+  /** Rejects with the host's refusal, for the caller to say where the person is looking. */
+  setPlace(placeId: string, ask: PlaceSettingsAsk & PlaceSetAlso, reset?: ReadonlyArray<PlaceSettingWord>): Promise<void>;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;

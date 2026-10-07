@@ -8,10 +8,14 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { copyText } from "../actions/clipboard.js";
 import { Button } from "../components/ui/button.js";
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
+import { Input } from "../components/ui/input.js";
 import { Spinner } from "../components/ui/spinner.js";
 import { GROUP_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { noticeFailure, notCopied } from "../notices/store.js";
+import { failureOf } from "../protocol/failure.js";
+import { SETTINGS_WORDS } from "./format.js";
 import { STATE_WORD } from "./recipe/rows.js";
 
 /** How long the copy glyph stands as a check before it is a copy glyph again. */
@@ -146,5 +150,126 @@ export function RefusalSlot({ k, said, fix, waiting, note, children }: { k: stri
       {quiet === undefined ? null : <span className="text-muted-foreground">{quiet}</span>}
       {children}
     </p>
+  );
+}
+
+/** A refusal as the host said it: what happened, and what to do about it where it said that too. */
+export type Refusal = { readonly said: string; readonly fix?: string };
+/** What a write answered: nothing where the host took it, its refusal where it did not. */
+export type Written = Refusal | null;
+
+const refusalOf = (e: unknown): Refusal => {
+  const failure = failureOf(e);
+  return { said: failure.said, ...(failure.fix === undefined ? {} : { fix: failure.fix }) };
+};
+
+/** A write as a sheet waits on it: nothing where the host took it, its refusal where it did not. */
+export const sheetWrite = (write: Promise<unknown>): Promise<Written> => write.then(() => null, refusalOf);
+
+/** A sheet over the page: its title and why, what it holds, the host's refusal under that, and Cancel and Save.
+ * While the host works the slot says what it waits on; Save is held where the sheet still waits on a field. */
+export function Sheet({ k, title, line, open, onClose, onSave, saving, held = false, waiting, refusal, putBack, children }: { k: string; title: string; line: string; open: boolean; onClose: () => void; onSave: () => void; saving: boolean; held?: boolean; waiting?: string; refusal: Refusal | null; putBack?: ReactNode; children: ReactNode }) {
+  return (
+    <Dialog open={open} onOpenChange={next => (next ? undefined : onClose())}>
+      <DialogPopup data-k={k}>
+        <form
+          className="flex min-h-0 flex-col"
+          onSubmit={event => {
+            event.preventDefault();
+            if (!held && !saving) onSave();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{line}</DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="flex flex-col gap-3 pb-0">
+            {children}
+            <RefusalSlot k={`${k}-refusal`} {...(refusal ?? {})} {...(saving && waiting !== undefined ? { waiting } : {})} />
+          </DialogPanel>
+          <DialogFooter>
+            {putBack}
+            <Button type="button" variant="outline" onClick={onClose}>
+              {SETTINGS_WORDS.cancel}
+            </Button>
+            <Button type="submit" data-k={`${k}-save`} disabled={saving} held={held}>
+              {SETTINGS_WORDS.save}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+/** A field in a sheet: mono, for a path or a command a person types. */
+export const FIELD = "h-10 w-full font-mono [&_input]:h-[38px] [&_input]:text-[13px] [&_input]:leading-[38px] sm:[&_input]:h-[38px] sm:[&_input]:text-[13px] sm:[&_input]:leading-[38px]";
+/** A field in a sheet for words, a name: the input's own sans at its own size. */
+const WORDS_FIELD = cn(FIELD, "font-sans [&_input]:font-sans [&_input]:text-base sm:[&_input]:text-sm");
+
+/** One line a person types. Save hands the trimmed words to `save`, which answers a refusal or nothing; `putBack`
+ * puts the thing's own back where one is set. A sheet that cannot save a blank line holds Save until there is one,
+ * and a save the host takes a while over says what it checks in the slot while it runs. */
+export function FieldSheet({ k, title, line, initial, placeholder, save, putBack, putBackWord, mono = true, required = false, checking, onClose }: { k: string; title: string; line: string; initial: string; placeholder: string; mono?: boolean; required?: boolean; checking?: (value: string) => string; save: (value: string) => Promise<Written>; putBack?: () => Promise<Written>; putBackWord?: string; onClose: () => void }) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
+  const run = (write: () => Promise<Written>): void => {
+    setSaving(true);
+    setRefusal(null);
+    void write().then(answer => {
+      setSaving(false);
+      if (answer === null) onClose();
+      else setRefusal(answer);
+    });
+  };
+  return (
+    <Sheet
+      k={k}
+      title={title}
+      line={line}
+      open
+      onClose={onClose}
+      onSave={() => run(() => save(value.trim()))}
+      saving={saving}
+      held={required && value.trim() === ""}
+      {...(checking === undefined ? {} : { waiting: checking(value.trim()) })}
+      refusal={refusal}
+      {...(putBack === undefined
+        ? {}
+        : {
+            putBack: (
+              <Button type="button" variant="ghost" data-k={`${k}-put-back`} className="sm:me-auto" disabled={saving} onClick={() => run(putBack)}>
+                {putBackWord}
+              </Button>
+            ),
+          })}
+    >
+      <Input
+        data-k={`${k}-field`}
+        nativeInput
+        autoFocus
+        autoComplete="off"
+        spellCheck={false}
+        value={value}
+        placeholder={placeholder}
+        aria-label={title}
+        {...(refusal === null ? {} : { "aria-invalid": true })}
+        onChange={event => {
+          setValue(event.target.value);
+          setRefusal(null);
+        }}
+        className={mono ? FIELD : WORDS_FIELD}
+      />
+    </Sheet>
+  );
+}
+
+/** The outline xs button at a row's end that opens its sheet. */
+export function ChangeButton({ k, word, held, onClick }: { k: string; word: string; held: boolean; onClick: () => void }) {
+  return (
+    <Button size="xs" variant="outline" data-k={k} held={held} onClick={onClick}>
+      {word}
+    </Button>
   );
 }

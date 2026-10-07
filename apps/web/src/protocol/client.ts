@@ -93,6 +93,7 @@ import {
   PlaceView,
   PlaceEstimate,
   type PlaceSetupStep,
+  type PlaceSetAlso,
   type PlaceSettingsAsk,
   type PlaceSettingWord,
   ProjectView,
@@ -557,7 +558,7 @@ export interface Api {
   placesUpdate?(placeId: string): Promise<PlaceUpdateReply>;
   /** Sets what a person may set on one place, a word under `reset` taking that one back to its default, and answers
    * the row as it now reads. A client without it draws the settings as words with no control. */
-  placesSet?(placeId: string, ask: PlaceSettingsAsk, reset?: ReadonlyArray<PlaceSettingWord>): Promise<PlaceView>;
+  placesSet?(placeId: string, ask: PlaceSettingsAsk & PlaceSetAlso, reset?: ReadonlyArray<PlaceSettingWord>): Promise<PlaceView>;
   /** What stands on one computer or workspace for the agents: each agent, every skill, every MCP server. A read never
    * wakes a napping machine. A client without it draws no report. */
   agentsRead?(target: AgentsTarget): Promise<AgentsReport>;

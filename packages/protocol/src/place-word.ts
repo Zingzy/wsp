@@ -42,7 +42,9 @@ export function placeRenameRefusal(place: { id: string; name: string; kind?: str
  * over no login of the person's, and a login is a user at a host, the shape every road that dials one reads. */
 export function placeSshRefusal(place: { id: string; name: string; kind?: string }, ssh: string): RefusalHalves | undefined {
   if (place.id === HERE_PLACE_ID || place.kind === "provider") return { happened: `${place.name} is reached over no ssh login of yours`, fix: "Give a new login to one of the computers you added instead." };
-  return /^[\w.-]+@[\w.:\[\]-]+$/.test(ssh) ? undefined : { happened: `${ssh} is not an ssh login like root@host`, fix: "Write it as the user and the host ssh logs in with, root@hetzner for one." };
+  const fix = "Write it as the user and the host ssh logs in with, root@hetzner for one.";
+  if (ssh === "") return { happened: "an ssh login cannot be blank", fix };
+  return /^[\w.-]+@[\w.:\[\]-]+$/.test(ssh) ? undefined : { happened: `${ssh} is not an ssh login like root@host`, fix };
 }
 
 /** What a new ssh login is refused with once it was dialled: the computer that answered is not this one, or it
