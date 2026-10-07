@@ -56,6 +56,7 @@ function road(at: AgentHome, o: { root?: boolean; bytes?: boolean; before?: (cmd
         const child = execFile("/bin/bash", ["-c", cmd], { env, maxBuffer: 16 * 1024 * 1024, timeout: 30_000 }, (e, stdout, stderr) => {
           resolve({ exitCode: e === null ? 0 : typeof e.code === "number" ? e.code : 1, stdout: o.cut === undefined ? String(stdout) : o.cut(String(stdout)), stderr: String(stderr) });
         });
+        child.stdin?.on("error", () => undefined);
         child.stdin?.end(opts?.stdin === undefined ? undefined : Buffer.from(opts.stdin));
       });
     },
@@ -73,6 +74,14 @@ function memVault(into: Record<string, string>[]): ServerVault {
 const json = (path: string): Record<string, Record<string, unknown>> => JSON.parse(readFileSync(path, "utf8")) as Record<string, Record<string, unknown>>;
 const mode = (path: string): number => statSync(path).mode & 0o777;
 const box = (at: AgentHome, machine: Pick<Machine, "exec">): AgentsOn => ({ kind: "box", machine, login: { HOME: at.home, PATH: `${at.bin}:/usr/bin:/bin` } });
+
+describe("the test road", () => {
+  it("hands stdin to a line that exits without reading it and raises nothing", async () => {
+    const { machine } = road(fixture());
+    for (let i = 0; i < 10; i++) expect((await machine.exec("exit 0", { stdin: new Uint8Array(1 << 20) })).exitCode).toBe(0);
+    await new Promise(resolve => setTimeout(resolve, 50));
+  });
+});
 
 describe("adding an MCP server", () => {
   it("writes a command with its variables into Claude Code's file in place, which keeps its mode, and every other key and server as it was", async () => {
