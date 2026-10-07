@@ -339,6 +339,9 @@
                   "permissionMode": {
                     "type": "string"
                   },
+                  "effort": {
+                    "type": "string"
+                  },
                   "agent": {
                     "type": "string"
                   },
@@ -1685,6 +1688,9 @@
                     "type": "string"
                   },
                   "permissionMode": {
+                    "type": "string"
+                  },
+                  "effort": {
                     "type": "string"
                   },
                   "agent": {

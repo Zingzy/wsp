@@ -107,6 +107,10 @@ export const SessionStartEvent = z.object({
    * row so a resume past the session index cap still reads what the thread was opened at rather than falling back
    * to the adapter's unnamed default. Absent on a turn from before it was recorded. */
   permissionMode: z.string().optional(),
+  /** The effort this turn ran at, as the runtime asked for it, since the CLI never echoes it: kept for the same cap, so
+   * a send naming none into a thread whose rows fell off the index runs at the thread's own. Absent on a turn that ran
+   * at none and on one from before it was recorded. */
+  effort: z.string().optional(),
   /** The agent this turn ran on, by the id SessionView.harness carries: the thread's own record stamped on its
    * transcript, beside the access and for the same cap, so a thread whose rows fell off the index still says which
    * agent it runs on. Absent on a turn from before it was recorded. */
@@ -224,6 +228,9 @@ export const AGENT_STARTING_MS = 4_000;
 
 /** The word an agent's row takes in place of its version where its command installs it on its first run. */
 export const FIRST_RUN_WORD = "installs on first run";
+
+/** The word in its place where the command's `--version` exited non-zero, whose output is an error and not a version. */
+export const VERSION_UNREAD_WORD = "version unreadable";
 
 /** What a thread says while that start waits: short enough to stand whole on a phone's one line. */
 export const agentStartingLine = (agent: string, installs: boolean): string => (installs ? `${agent} ${FIRST_RUN_WORD}` : `Starting ${agent}`);

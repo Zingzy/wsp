@@ -34,6 +34,7 @@ Which records a person sees is decided once, in `deriveSidebarProjects()`: sideb
 - Model lists arrive shaped; shape again off `unshaped` with `shapeModels()` (#1611).
 - What an agent can do is a flag on its own `HarnessCatalog`; never carry one agent's rule to another (#1614).
 - The desktop preload reads `--titlebar-ground` and `--titlebar-ink` from `src/index.css`; keep both (#1711).
+- A history reply can land while a send is in flight (the dev build runs a fresh view's effects twice) and holds threads with no start that are older than the send; the thread a send opened is the one its `session.held` names by request id (#1780).
 
 ## One home for
 

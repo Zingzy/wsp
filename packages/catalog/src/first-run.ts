@@ -3,6 +3,7 @@
 // the computer the first time it runs, as Omarchy ships every agent:
 //   mise use -g --quiet "claude" || exit 1
 //   exec mise x "claude" -- "claude" "$@"
+// and as ASCII's cloud image ships Cursor and Hermes, through its lazy-run.
 // Its first run is a download (97 s for Claude Code on a fresh Omarchy,
 // 2026-10-05), so no reader runs it to ask a version, and a send that waits on
 // it says why. One module per installer; adding one is a row in FIRST_RUN_INSTALLERS.
@@ -53,7 +54,24 @@ const MISE: FirstRunInstaller = {
   installed: tool => `[ -n "$(ls -A "\${MISE_DATA_DIR:-\${XDG_DATA_HOME:-$HOME/.local/share}/mise}/installs/"${shellQuote(miseFolder(tool))} 2>/dev/null)" ]`,
 };
 
-export const FIRST_RUN_INSTALLERS: readonly FirstRunInstaller[] = [MISE];
+/** ASCII's shim at /usr/local/bin/<name> runs the first other <name> on PATH, else its launcher, which runs lazy-run
+ * until lazy-run's install puts the agent in the launcher's place (/usr/local/lib/ascii-harnesses/lazy-run, its
+ * adopt). The tool is the launcher's path, off the shim's last line. */
+const LAZY_RUN: FirstRunInstaller = {
+  id: "lazy-run",
+  tool: script => {
+    if (script.split("\n")[1] !== "# ascii-harness-shim") return undefined;
+    return [...script.matchAll(/^exec (\/\S+) "\$@"$/gm)].at(-1)?.[1];
+  },
+  installed: launcher => {
+    const name = shellQuote(launcher.slice(launcher.lastIndexOf("/") + 1));
+    const lazy = `case "$(sed -n 2p ${shellQuote(launcher)} 2>/dev/null)" in "# ascii-lazy-harness "*) false ;; esac`;
+    const past = `d=$(dirname "$(command -v ${name})") && PATH=$(printf %s "$PATH" | tr : "\\n" | grep -vxF "$d" | paste -sd:) command -v ${name} >/dev/null 2>&1`;
+    return `{ ${lazy} || { ${past}; }; }`;
+  },
+};
+
+export const FIRST_RUN_INSTALLERS: readonly FirstRunInstaller[] = [MISE, LAZY_RUN];
 
 /** Runs one sh script where the agents' commands are looked up, answering its stdout, or nothing when it failed. */
 export type RunScript = (script: string) => Promise<string | undefined>;

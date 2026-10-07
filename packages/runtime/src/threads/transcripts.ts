@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomBytes } from "node:crypto";
 import type { Machine } from "@wsp/engine";
-import { type SessionEvent, type Attachment, isLocalWorkspace, attachmentKey, isImage, baseModel } from "@wsp/protocol";
+import { type SessionEvent, type Attachment, type RanPicks, isLocalWorkspace, attachmentKey, isImage, modelPicks, recordedPicks } from "@wsp/protocol";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "../daemon-token.js";
 import type { EventSize, TranscriptRows } from "../sqlite-transcripts.js";
 import { eventBytes, numbered, pickNewest, readThread, type TranscriptReader } from "../transcript-reader.js";
@@ -564,16 +564,14 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
   bus.on("workspace.cost", e => {
     if (e.type === "workspace.cost") accrued.set(e.workspaceId, e.accruedUsd);
   });
-  /** The model, effort and window a thread's own turns ran with, read off its rows as the composer reads them: for
-   * each, the last turn that named one, the window split back off the model the CLI announced. */
-  const ownPicks = (workspaceId: string, threadId: string): { model?: string; effort?: string; contextWindow?: string } => {
-    const rows = ctx.rowsOn(threadId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
-    const ran = rows.filter(r => r.model !== undefined).at(-1);
-    const session = ctx.startedAs(workspaceId, threadId);
-    const model = ran?.model ?? (session === undefined ? undefined : ctx.resumedFact(workspaceId, session, "model"));
-    const effort = rows.filter(r => r.effort !== undefined).at(-1)?.effort;
-    const window = ran?.contextWindow ?? /\[([^\]]+)\]$/.exec(model ?? "")?.[1];
-    return { ...(model !== undefined ? { model: baseModel(model) } : {}), ...(effort !== undefined ? { effort } : {}), ...(window !== undefined ? { contextWindow: window } : {}) };
+  /** The model, effort and window a thread's turns ran on, read off its rows as the composer reads them, and the model
+   * and the effort past the index cap off its session's newest start. */
+  const ranOn = (workspaceId: string, threadId: string, session: string | undefined): RanPicks => {
+    const recorded = recordedPicks(ctx.rowsOn(threadId).filter(r => r.workspaceId === workspaceId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0)));
+    if (session === undefined) return recorded;
+    const model = recorded.model === undefined ? ctx.resumedFact(workspaceId, session, "model") : undefined;
+    const effort = recorded.effort === undefined ? ctx.resumedFact(workspaceId, session, "effort") : undefined;
+    return { ...(model !== undefined ? modelPicks(model) : {}), ...(effort !== undefined ? { effort } : {}), ...recorded };
   };
   /** The workspace a thread runs on where that is a machine of its own, not this computer. */
   const boxOf = (threadId: string): LiveWorkspace | undefined => {
@@ -584,6 +582,6 @@ export function transcriptsArea(ctx: RuntimeContext): TranscriptsArea {
   return {
     keptWrites, keepSentImages, dropSentImages, moveTranscript, loadIndex, moveBlobs, transcriptQueue, openTranscript,
     transcriptReader, dropFromTranscript, transcriptTimers, daemonTokens, daemonTokenOf, cancelFlush, flushTranscript,
-    viewedMarks, persistSessions, record, accrued, ownPicks, boxOf,
+    viewedMarks, persistSessions, record, accrued, ranOn, boxOf,
   };
 }

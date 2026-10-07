@@ -239,7 +239,7 @@ describe("each agent's newest version, read by this host", () => {
 });
 
 describe("wsp agents", () => {
-  it("prints the newest version beside the one that stands, and a dash where none was read", async () => {
+  it("prints the newest version beside the one that stands, a dash where none was read, and says where none could be", async () => {
     const row = { road: "own", signIn: "signed-in", signInRoad: "token", wspTools: false } as const;
     const report = {
       target: { placeId: HERE_PLACE_ID },
@@ -249,6 +249,7 @@ describe("wsp agents", () => {
       agents: [
         { ...row, id: "claude", name: "Claude Code", installed: true, version: "2.1.281", latest: "2.1.283", pinned: "2.1.280" },
         { ...row, id: "hermes", name: "Hermes", installed: true, version: "0.20.0" },
+        { ...row, id: "codex", name: "Codex", installed: true, versionUnread: true },
       ],
       skills: [],
       servers: [],
@@ -261,9 +262,10 @@ describe("wsp agents", () => {
     const io = captured();
     const agents = CLI_VERBS.find(v => v.name === "agents")!;
     expect(await runVerb(agents, [], io, () => stateIn(), { env: {}, dial: async () => client })).toBe(0);
-    const [head, claude, hermes] = io.lines.join("\n").split("\n");
+    const [head, claude, hermes, codex] = io.lines.join("\n").split("\n");
     expect(head).toMatch(/^AGENT\s+VERSION\s+LATEST\s+SIGN-IN/);
     expect(claude).toMatch(/^Claude Code\s+2\.1\.281\s+2\.1\.283\s+signed in/);
     expect(hermes).toMatch(/^Hermes\s+0\.20\.0\s+-\s+signed in/);
+    expect(codex).toMatch(/^Codex\s+version unreadable\s+-\s+signed in/);
   });
 });

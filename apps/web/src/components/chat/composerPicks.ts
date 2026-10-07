@@ -17,7 +17,7 @@
 // comes out here, a send into a thread that has run carries the model and
 // the effort and leaves the agent and the access behind, those being that
 // thread's own off its rows (sendPicks).
-import { contextWindowsFor, effortsFor, everyModel, listedPick, markedDefault, modelOf, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView, type StartPicks } from "@wsp/protocol";
+import { contextWindowsFor, effortsFor, everyModel, listedPick, markedDefault, modelOf, modelPicks, recordedPicks, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView, type StartPicks } from "@wsp/protocol";
 import { THREAD_SCOPED_PICKS, type ComposerOptions, type PickThreads } from "./composerOptionsStore";
 
 export interface ResolvedPicks {
@@ -30,46 +30,10 @@ export interface ResolvedPicks {
 /** What the composer adds to sessions.start beyond the prompt: the checked picks, plus the harness and the context window. */
 export type ComposerStart = StartPicks & Partial<Record<"harness" | "contextWindow", string>>;
 
-const ONE_M = /\[1m\]$/;
-
 /** The model the next start runs with, or null when nothing was picked and the catalog marks no default; a picked
  * slug the catalog does not list still counts, named by itself, as it is on a start. */
 export function resolveModel(catalog: HarnessCatalog, input: { picked: string | undefined; thread: string | undefined }): HarnessModel | null {
   return modelOf(catalog, input.picked ?? input.thread ?? markedDefault(catalog.models)?.value);
-}
-
-/** The model a start or a row names, with the window it runs at: the CLI announces the model with its own 1M suffix,
- * and a row that names a window of its own says it outright. The two are read together wherever either is read,
- * since on claude's wire the window rides inside the model string. */
-export function modelPicks(model: string, contextWindow?: string): ComposerOptions {
-  const window = contextWindow ?? (ONE_M.test(model) ? "1m" : undefined);
-  return { model: model.replace(ONE_M, ""), ...(window !== undefined ? { contextWindow: window } : {}) };
-}
-
-/** How each pick is read off one turn's row, one entry per pick, so a pick the thread keeps for itself is an entry
- * here rather than a rule of its own; the model and the window it ran at come from the same row, never two. */
-const ROW_READERS: ReadonlyArray<(row: SessionView) => ComposerOptions | null> = [
-  row => (row.model === undefined ? null : modelPicks(row.model, row.contextWindow)),
-  row => (row.effort === undefined ? null : { effort: row.effort }),
-  row => (row.permissionMode === undefined ? null : { permissionMode: row.permissionMode }),
-];
-
-/** What a thread has already run with, from the rows the runtime holds for its turns: for each pick, the last turn
- * that named one. A resume records only what its send carried, so an untouched picker leaves that turn's row silent
- * about it and the turn that opened the thread, where the runtime fills the catalog's marks in, is what still
- * stands. */
-export function recordedPicks(rows: ReadonlyArray<SessionView>): ComposerOptions {
-  const picks: ComposerOptions = {};
-  for (const read of ROW_READERS) {
-    for (let i = rows.length - 1; i >= 0; i--) {
-      const named = read(rows[i]!);
-      if (named !== null) {
-        Object.assign(picks, named);
-        break;
-      }
-    }
-  }
-  return picks;
 }
 
 /** The running session's values, from the runtime's row for it, read by the same rule as every other row. */

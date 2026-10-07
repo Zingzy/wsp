@@ -15,8 +15,8 @@
 ## Notes
 
 Read the note of the area you change before you change it; each lists its traps and the one home for each rule.
-A fix for a fault that came from a rule nobody knew, a regression, or knowledge only the code held adds one line
-to that area's note in the same commit.
+A fix for a fault that came from a rule nobody knew, a regression, or knowledge only the code held names one line
+for that area's note in its report; a branch never edits a note, the lines land together.
 
 - `packages/runtime/AGENTS.md`
 - `packages/host/AGENTS.md`
@@ -67,9 +67,8 @@ tree-wide laws, `scripts/heavy.sh <cmd>` heavy runs two at a time on a Mac.
 
 ## Glossary
 
-The words to use in code and to people. This list is the target; `packages/protocol/test/person-words.test.ts`
-holds the app to the subset it names (golden, vault, lineage, volatile, head, Reach, upgrade, machine, this Mac).
-Shipped exceptions: the locked Computers copy says machine for a cloud's machines, the wsp skill says coordinator
+The words to use in code and to people; `packages/protocol/test/person-words.test.ts` holds the app to the
+subset it names. Shipped exceptions: the locked Computers copy says machine for a cloud's machines, the wsp skill says coordinator
 thread, and `wsp snapshot` is a verb.
 
 - **host**: the process that holds a state file and serves the app, the command line and the tools. One per state file. Avoid: server, backend.

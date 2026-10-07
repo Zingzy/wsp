@@ -80,7 +80,7 @@ An agent writes everything in a workspace: its files, its links, its `.git`, its
 - Rulings live on the ticket. A ruling given in a private message or a pre-review is posted as its own ticket comment before the builder acts on it; a report may quote it but cannot be its only home.
 - Pre-review. Whoever lands the change runs a cold reviewer on the branch before handing it to the owner's reviewer; that reviewer posts nothing and returns findings to the builder. The owner sees a branch only after it survived one full review.
 - Deviations from plan/ticket are fine when reality wins, but MUST be reported in the ticket comment: an unreported deviation is a should-fix even when the code is right.
-- A fix round for a finding caused by an unknown rule, a regression or knowledge only the code held adds one line to that area's AGENTS.md (packages/runtime, packages/host, packages/protocol, apps/web, daemon) in the same commit; check the line is there and true, and its absence is a should-fix.
+- A fix round for a finding caused by an unknown rule, a regression or knowledge only the code held names one line for that area's AGENTS.md (packages/runtime, packages/host, packages/protocol, apps/web, daemon) in its report, and the branch edits no AGENTS.md: the lines go in together in one notes landing. Check the line is in the report and true; its absence, or a branch that edits a note, is a should-fix.
 - Comments in code state constraints code can't show, with the source (a law, a measured finding): no narration, no TODO/FIXME/HACK.
 
 ## Verdict format

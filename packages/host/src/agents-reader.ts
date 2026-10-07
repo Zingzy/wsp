@@ -41,11 +41,16 @@ function installedAt(matches: readonly string[]): { found: boolean; path?: strin
   return { found: matches.length > 0, ...(real !== undefined ? { path: real } : {}), ...(via !== undefined ? { via } : {}) };
 }
 /** Each command run side by side under its own bound, then each one's exit code and output in the order asked. */
-const EACH = [
+export const eachScript = (seconds: number): string => [
   'd=$(mktemp -d) || exit 1',
-  `T=; command -v timeout >/dev/null 2>&1 && T="timeout ${COMMAND_S}"`,
+  // macOS has no timeout command, and a probe that hung there outlived every batch until hundreds piled up
+  // (2026-10-06). perl stands in: it runs the probe in a process group of its own and kills that group at the bound,
+  // so the kill can only reach the probe and its children, and a probe that ends leaves nothing waiting.
+  `if command -v timeout >/dev/null 2>&1; then bound() { timeout ${seconds} "$@"; }`,
+  `elif command -v perl >/dev/null 2>&1; then bound() { perl -e '$t = shift; $p = fork; defined $p or exit 126; if (!$p) { setpgrp(0, 0); exec @ARGV or exit 127 } setpgrp($p, $p); $SIG{ALRM} = sub { kill 9, -$p; exit 137 }; alarm $t; waitpid($p, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' ${seconds} "$@"; }`,
+  'else bound() { "$@"; }; fi',
   "i=0",
-  'for c; do ( $T sh -c "$c" > "$d/$i" 2>&1 < /dev/null; echo $? > "$d/$i.x" ) & i=$((i+1)); done',
+  'for c; do ( bound sh -c "$c" > "$d/$i" 2>&1 < /dev/null; echo $? > "$d/$i.x" ) & i=$((i+1)); done',
   "wait",
   "i=0",
   "for c; do printf '\\036%s\\037' \"$(cat \"$d/$i.x\" 2>/dev/null)\"; head -c 16384 \"$d/$i\" 2>/dev/null; i=$((i+1)); done",
@@ -61,7 +66,7 @@ interface Said {
 /** Each command's exit code and output, run on the target side by side; nothing for any where the run failed. */
 async function each(host: Host, commands: readonly string[]): Promise<(Said | undefined)[]> {
   if (commands.length === 0) return [];
-  const out = await host.exec.run("sh", ["-c", EACH, "sh", ...commands], { timeoutMs: READ_MS + 5_000 });
+  const out = await host.exec.run("sh", ["-c", eachScript(COMMAND_S), "sh", ...commands], { timeoutMs: READ_MS + 5_000 });
   if (out === undefined) return commands.map(() => undefined);
   const records = out.split("\x1e").slice(1, commands.length + 1);
   return commands.map((_, i) => {
@@ -157,6 +162,9 @@ export function updateOf(row: Pick<AgentRow, "id" | "version">, latest: string |
   return command !== undefined && have !== undefined && to !== undefined && compareVersions(have, to) < 0 ? { to, command } : undefined;
 }
 
+/** A version read whose command exited non-zero. */
+const UNREAD = Symbol("unread");
+
 /** What a box's own report already says, which is read there once per dial and not asked again. */
 interface BoxSaid {
   signIns?: Record<string, AgentSignInState>;
@@ -187,14 +195,14 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
   const installed = onPath.filter(a => !installs.has(a.id));
   const box = o.box;
   const [versions, statuses] = await Promise.all([
-    box?.versions !== undefined ? Promise.resolve(installed.map(a => box.versions?.[a.id])) : each(host, installed.map(a => `${shellQuote(a.bin)} --version`)).then(r => r.map(s => s?.output.split("\n")[0])),
+    box?.versions !== undefined ? Promise.resolve(installed.map(a => box.versions?.[a.id])) : each(host, installed.map(a => `${shellQuote(a.bin)} --version`)).then(r => r.map(s => (s === undefined ? undefined : s.code !== 0 ? UNREAD : s.output.split("\n")[0]))),
     box !== undefined ? Promise.resolve([]) : each(host, installed.map(a => a.signIn.status?.typed ?? a.signIn.status?.command ?? "false")),
   ]);
   const rows: AgentRow[] = agents.map(a => {
     const { found, path, via } = at.get(a.id)!;
     const i = installed.indexOf(a);
     const said = i < 0 ? undefined : versions[i];
-    const version = said === undefined || said.trim() === "" ? undefined : agentVersionWord(said);
+    const version = said === undefined || said === UNREAD || said.trim() === "" ? undefined : agentVersionWord(said);
     const status = i < 0 ? undefined : statuses[i];
     const pinned = a.latest === undefined ? undefined : strictVersion(versionOf(a.installRoad) ?? "");
     const ownLogin = box === undefined && status !== undefined && a.signIn.status !== undefined && a.signIn.status.signedIn(status.output, status.code);
@@ -212,6 +220,7 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
       ...(pinned !== undefined ? { pinned } : {}),
       road: !found ? "none" : path === undefined ? "shim" : path.startsWith(`${TOOL_PREFIX}/`) ? "wsp" : "own",
       ...(installs.has(a.id) ? { installsOnFirstRun: true as const } : {}),
+      ...(said === UNREAD ? { versionUnread: true as const } : {}),
       ...(path !== undefined ? { path: tilde(host.home, path) } : {}),
       ...(via !== undefined ? { via } : {}),
       signIn: !found ? "none" : signIn,
