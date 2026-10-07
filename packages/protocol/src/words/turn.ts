@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { TitleSource, TurnRefusal, TurnResult } from "../index.js";
 import type { ThreadMessage } from "../thread-read.js";
-import { cutLine, ELLIPSIS, fmtThreads, lastLine, wordsWithin } from "./base.js";
+import { cutLine, ELLIPSIS, fmtThreads, lastLine, plural, wordsWithin } from "./base.js";
 import { fmtCost, fmtDuration, fmtTokens } from "./units.js";
 /** A spend figure with the word that says what it is, where the surface has one to give it. */
 const spendFigure = (usd: number, word: string | undefined): string => (word === undefined ? fmtCost(usd) : `${fmtCost(usd)} ${word}`);
@@ -117,11 +117,19 @@ export function planStepsLine(steps: ReadonlyArray<{ text: string; state: "pendi
   return [`Plan: ${done} of ${steps.length} steps done`, ...lines].join("\n");
 }
 
-/** What a turn changed in its folder, as a read transcript's row says it: the files and the lines added and taken. */
-export function turnChangesLine(files: ReadonlyArray<{ additions: number; deletions: number }>): string {
+/** What a turn changed in its folder, as a read transcript's row says it: the files and the lines added and taken, and
+ * in a folder other threads worked in too, what else changed there, or that the list is the folder's
+ * (SessionChangesEvent). */
+export function turnChangesLine(changes: { files: ReadonlyArray<{ additions: number; deletions: number }>; others?: ReadonlyArray<unknown>; shared?: true }): string {
+  const { files, others } = changes;
   const added = files.reduce((n, f) => n + f.additions, 0);
   const taken = files.reduce((n, f) => n + f.deletions, 0);
-  return `Changed ${files.length} file${files.length === 1 ? "" : "s"}, +${added} -${taken}`;
+  const count = `${plural(files.length, "file")}, +${added} -${taken}`;
+  if (others !== undefined) {
+    const own = files.length === 0 ? "No files from this thread's edits" : `Changed ${count}`;
+    return others.length === 0 ? own : `${own}; ${plural(others.length, "file")} also changed in this folder`;
+  }
+  return changes.shared === true ? `${plural(files.length, "file")} changed in this folder, +${added} -${taken}; other threads worked in it too` : `Changed ${count}`;
 }
 
 /** The row a turn's end leaves in a read transcript: the footer above, and why it did not complete where it did

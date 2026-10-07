@@ -12,13 +12,29 @@ export type DiffRenderMode = "stacked" | "split";
  * A thread that commits as it goes leaves nothing uncommitted, and a pane first read there showed nothing. */
 export const DEFAULT_SCOPE: GitDiffScope = "branch";
 
-/** One turn's changes: the snapshots at its launch and its end, the folder they were taken in, and the file asked for. */
+/** One turn's changes: the snapshots at its launch and its end, the folder they were taken in, and the file asked for.
+ * only narrows the range to the files of one list on the turn's card, in a folder other threads worked in too. */
 export interface TurnRange {
   readonly turnId: string;
   readonly cwd: string;
   readonly from: string;
   readonly to: string;
   readonly path?: string;
+  readonly only?: ReadonlyArray<string>;
+}
+
+/** The files a turn's range opens narrowed to, where the turn's own files are known: the others' when the row asked
+ * for is theirs or the turn has none of its own, else its own. Undefined leaves the range whole. */
+export function onlyOf(changes: { readonly files: ReadonlyArray<{ readonly path: string }>; readonly others?: ReadonlyArray<{ readonly path: string }> }, path?: string): string[] | undefined {
+  const { files, others } = changes;
+  if (others === undefined) return undefined;
+  return (others.some(f => f.path === path) || files.length === 0 ? others : files).map(f => f.path);
+}
+
+/** The same turn's range with nothing narrowed. */
+export function wholeRange(range: TurnRange): TurnRange {
+  const { only: _narrowed, ...whole } = range;
+  return whole;
 }
 
 interface DiffStoreState {

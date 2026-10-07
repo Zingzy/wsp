@@ -170,6 +170,10 @@ export interface HarnessAdapter {
   attach?(options: AdapterAttachOptions): Promise<HarnessSession | "gone">;
   /** Whether this adapter's sessions carry steer; the catalog tells the composer before a turn runs. */
   readonly steers: boolean;
+  /** Whether every file the agent's own tool calls write is named by a tool_use its row reads paths off, so a turn in
+   * a folder another thread also worked in can tell its own changes from the rest. Absent, that turn's card lists the
+   * folder's changes and says so. */
+  readonly reportsEdits?: true;
   /** Whether a rewind of this harness's thread is cut on its next resume, at the anchor the kept turn named; the
    * runtime holds that anchor on the thread and hands it to that start as resumeAt. */
   readonly resumesAt?: true;

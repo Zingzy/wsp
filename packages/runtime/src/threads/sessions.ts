@@ -389,6 +389,7 @@ export function sessionsArea(ctx: RuntimeContext): SessionsArea {
           view,
           threadId,
           turnId,
+          ...(adapter.reportsEdits === true ? { reportsEdits: true } : {}),
           ...(notify !== undefined ? { notify } : {}),
           ...(notifyBy !== undefined ? { notifyBy } : {}),
           ...(notifyRoad !== undefined ? { notifyRoad } : {}),

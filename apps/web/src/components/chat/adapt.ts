@@ -42,4 +42,8 @@ export interface TurnDiffSummary {
   readonly files: ReadonlyArray<TurnDiffFileChange>;
   /** Each HEAD move the turn did not write, as one line, no files of its own. */
   readonly moved: ReadonlyArray<string>;
+  /** What else changed in the same folder meanwhile, whoever wrote it, where the turn's own files are known. */
+  readonly others?: ReadonlyArray<TurnDiffFileChange>;
+  /** Other threads worked in the folder and the agent named none of its edits: files are the folder's. */
+  readonly folder?: true;
 }
