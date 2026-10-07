@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@wsp/protocol";
 import { CHAT_STREAM, CHAT_WS } from "../../../test/fixtures/chat-stream";
 import { deriveMessagesTimelineRows } from "./adapt";
-import { deriveChatThread, dropEvent, leaveView, reduceEvent, reloadTranscript, stabilizeEntries, startedSession, type ThreadState } from "./useChatThread";
+import { deriveChatThread, dropEvent, heldForSend, leaveView, reduceEvent, reloadTranscript, stabilizeEntries, startedSession, type ThreadState } from "./useChatThread";
 
 const T0 = "2026-09-01T02:00:00.000Z";
 const REQ = "req_own";
@@ -307,9 +307,29 @@ describe("reloadTranscript", () => {
     expect(opened.events).toEqual(Z_RUNNING);
     expect(opened.fresh).toBe(false);
     expect(opened.named).toEqual({ key: CHAT_WS, thread: "thr_z" });
-    const died = reloadTranscript(fresh, [...A, ...B_DONE, ...DEAD], T0);
+    const died = reloadTranscript({ ...fresh, sending: { after: undefined, thread: "thr_x" } }, [...A, ...B_DONE, ...DEAD], T0);
     expect(died.events).toEqual(DEAD);
     expect(died.sending).toBeNull();
+    const older = reloadTranscript(fresh, [...A, ...B_DONE, ...DEAD], T0);
+    expect(older.events).toEqual([]);
+    expect(older.sending).toEqual({ after: undefined });
+    expect(older.pendingPrompt).toEqual(send.pendingPrompt);
+    expect(older.known).toEqual(["thr_a", "thr_b", "thr_x"]);
+  });
+
+  it("the host's hold names the thread a send from a view showing none runs on, by the send's request id: its end settles the send, another thread's does not", () => {
+    const x = { workspaceId: CHAT_WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
+    const fresh = state([], { fresh: true, sending: { after: undefined }, pendingPrompt: { text: "retry", at: T0, requestId: REQ } });
+    expect(heldForSend(fresh, { type: "session.held", workspaceId: CHAT_WS, threadId: "thr_y", requestId: "req_other" })).toBe(fresh);
+    const held = heldForSend(fresh, { type: "session.held", workspaceId: CHAT_WS, threadId: "thr_x", requestId: REQ });
+    expect(held.sending).toEqual({ after: undefined, thread: "thr_x" });
+    const y = { workspaceId: CHAT_WS, sessionId: "sess_y", turnId: "turn_y1", threadId: "thr_y" };
+    const elsewhere = reduceEvent(held, { type: "session.end", ...y, exitCode: 0, sawResult: true }, T0);
+    expect(elsewhere.sending).toEqual({ after: undefined, thread: "thr_x" });
+    expect(elsewhere.events).toEqual([]);
+    const own = reduceEvent(reduceEvent(held, { type: "session.done", ...x, result: { status: "failed", error: "claude exited before init" } }, T0), { type: "session.end", ...x, exitCode: 1, sawResult: true }, T0);
+    expect(own.sending).toBeNull();
+    expect(own.events.map(e => e.threadId)).toEqual(["thr_x", "thr_x"]);
   });
 
   it("two clients sending the same text: a reply folds a view showing a dead thread to that thread whatever the request ids, a start elsewhere with the send's own id included; a view showing none follows the start carrying the send's request id, and a start with no id folds by the prompt", () => {

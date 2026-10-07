@@ -54,7 +54,9 @@ function openOn(workspaceId: string, creation: Creation & { readonly asked: stri
 
 /** A creation's page keys its draft, its waiting messages and its picks by the creation's key; the workspace takes
  * them all, so what waited goes with the agent and the model picked over it. A queued asked message goes first, and
- * only while the row stands, since every caller takes the row away straight after. */
+ * only while the row stands, since every caller takes the row away straight after. It is the person's own send, so it
+ * lifts a hold on the workspace's queue as a send typed there does: a folder project's creation lands on the folder's
+ * workspace, whose queue a reload or an earlier send that ended with no start may have left held. */
 function handOver(key: string, workspaceId: string): void {
   const drafts = useComposerDraftStore.getState();
   drafts.rekeyQueue(key, workspaceId);
@@ -64,6 +66,7 @@ function handOver(key: string, workspaceId: string): void {
       const files = useComposerFilesStore.getState().unqueue(key);
       const row = drafts.enqueue(workspaceId, creation.asked, "head");
       if (files.length > 0) useComposerFilesStore.setState(s => ({ queued: { ...s.queued, [row]: files } }));
+      drafts.release(workspaceId);
     } else openOn(workspaceId, { ...creation, asked: creation.asked, opens: creation.opens });
   }
   const draft = drafts.drafts[key];
